@@ -9,6 +9,8 @@ const (
 	MethodFilesDiff = "files.diff"
 	// MethodFilesWrite writes one file to a run checkout or workspace base.
 	MethodFilesWrite = "files.write"
+	// MethodFilesUpload adds one file of any bytes to a run checkout.
+	MethodFilesUpload = "files.upload"
 )
 
 // FilesTreeParams addresses a workspace tree, or a run checkout when RunID is
@@ -65,6 +67,16 @@ type FilesWriteParams struct {
 	Path        string `json:"path"`
 	Content     string `json:"content"`
 	Revision    string `json:"revision"`
+}
+
+// FilesUploadParams writes one new file of arbitrary bytes into a run
+// checkout. An existing file is a conflict.
+type FilesUploadParams struct {
+	Repo        string `json:"repo,omitempty"`
+	WorkspaceID string `json:"workspace_id"`
+	RunID       string `json:"run_id"`
+	Path        string `json:"path"`
+	Content     []byte `json:"content_base64"`
 }
 
 // FilesDiffParams addresses one file in a run checkout.

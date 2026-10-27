@@ -19,7 +19,7 @@ shown beside the status says why it is there.
 | A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
 | Host memory is low | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | Close or kill runs. A closed run's paused container still holds its memory; **Free container…** releases it. |
-| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced run is possibly stalled: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the run supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <run-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
+| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced run is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the run supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <run-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
 | A Standard agent exits | The run stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the run. |
 | A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the run's transcript. |
 | The agent hits its account's usage limit | `Usage limit reached on <owner>'s account; ...` when it cannot continue. | Moves the run to another account that has usage left. | [Usage limit mid-run](#usage-limit-mid-run). |
@@ -56,7 +56,7 @@ A live run carries a state that says what it is doing. The dashboard and
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
 | `waiting` | Turn ended (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
-| `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, or an Enhanced turn that waits for a reply. |
+| `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-aether-can-check). |
 | `finished` | Ready for review | An interactive run reported `success`. |
 | `failed` | Failed | The run reported `failure`, or its turn failed. |
 | `disconnected` | Disconnected | The Enhanced session failed or ended while the run is open. |
@@ -64,18 +64,51 @@ A live run carries a state that says what it is doing. The dashboard and
 When several apply, the first in this order wins: disconnected, needs-you,
 working, failed, finished, waiting-agents, waiting-ci, waiting-tools,
 answered, waiting. An answer never goes stale.
-A wait the agent reported goes stale after three times `--stall-threshold`
-(30 minutes by default) with no activity, unless the run still holds
-background tasks or, as a swarm integrator, has a live worker attempt or
-unread worker mail. Its reason becomes `no update for <duration>: <summary>`.
+A wait the agent reported with no condition goes stale after three times
+`--stall-threshold` (30 minutes by default) with no activity, unless the run
+still holds background tasks or, as a swarm integrator, has a live worker
+attempt or unread worker mail. Its reason becomes `no update for <duration>: <summary>`.
 A CI or process wait keeps its state; an agents wait shows `waiting`, or
 `waiting-agents` while a worker is live again. A wait goes stale once; the
 next turn starts it over. A wait Aether infers from a swarm or background
 tasks lasts exactly as long as they do.
 
+### Waits Aether can check
+
+A waiting report can name conditions Aether checks for the agent, such as
+a pull request's checks finishing, so it wakes the agent when one resolves.
+While the run shows such a wait, `aether runs <run-id>` prints a `wait` line, the run record carries
+`wait {kind, detail, verified_at, error}`, and the state is judged by the
+evidence:
+
+| `wait.kind` | When | What you see | Needs you |
+| --- | --- | --- | --- |
+| `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way or delivered. | The state, and `<condition>: <status> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
+| `source_unknown` | A pending condition was not read within twice its poll interval, or its reads fail. | `Waiting for CI (status unknown)` and `<condition>: status unknown (last read 12m ago): <error>`. The last status is not shown as current. | No. Aether keeps retrying. |
+| `system_fault` | A condition errored or expired, for example the pull request is gone, and the agent is being told. | `Waiting for CI (wait fault)` and the condition's error. | No. The agent decides what to do next. |
+| `system_fault` | A condition resolved, errored or expired, and its wake was not delivered within 5 minutes. | `Needs you`, reason `wait broken: <condition> resolved, but the agent was not woken`, and the delivery error. | Yes. The agent will not move on its own. Send it a message. |
+| `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`, and the last read error. | Yes. |
+| `system_fault` | Every read of the run's conditions failed for an hour, counted from the first failure or from the wait's report if later. A read that succeeds starts the hour over, and so does a server restart. Before that the wait is `source_unknown`. | `Needs you`, reason `wait broken: cannot read this run's wait conditions for over 1h, so the agent will not be woken`, and the read error. | Yes. |
+| `unverified` | The agent named no condition, or only ones that left pending before its current turn. | The state, as described above. | No. |
+
+A broken wait is the only one that needs you, because only then can nothing
+but a person move the run. While another of its conditions is still pending
+or its wake is on its way, or the run still holds background tasks or, as a
+swarm integrator, has a live worker attempt, a child run or unread worker
+mail, those can wake it: the run keeps its waiting state, marked `(wait fault)`, and needs you
+only once they end. Its reason holds no time or source status, and names
+broken conditions in a fixed order, so it is announced once. A swarm worker's broken wait is not announced to you: its
+integrator sees it in peer status and from `aether wait` (exit 5). A paused
+run is judged again when it resumes.
+
 Each `run.status` event for a live run carries a `cause` naming what chose
 its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
-`wait-expired`, `workers`, `tasks-held`, `human`, or `disconnect`. A live
+`wait-expired`, `wait-fault` (a broken wait), `workers`, `tasks-held`,
+`human`, or `disconnect`. While the run shows a reported wait the event
+carries `wait` too. A wait whose source was read again at least a minute
+later is published as a same-status event with `reread: true`;
+`aether timeline` and the dashboard's activity feed leave it out unless
+filtered to `run.status`, and `changes.list` leaves it out. A live
 run's record carries its latest `cause` too. `aether timeline <run-id>`
 prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by
@@ -102,7 +135,7 @@ Any new turn clears the review, and a later success report asks again.
 
 One rule decides whether a run needs a person. The **Needs you** list,
 `aether runs --needs-you`, `aether wait` (exit 3, except that a success ready
-for review exits 0 and a failure exits 1), the Insights count of runs that need
+for review exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of runs that need
 you, `attention.list`
 ([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), push
 notifications and the assistant's notices all use it. The run status
@@ -117,6 +150,7 @@ waiting on agents, CI or a process and a reported success.
 | `failed`, result seen | No | No. |
 | Review ready, live or `completed` | Yes | Once per success: `Agent reported success, review the result`, at normal urgency. |
 | Review marked **Not yet** or complete | No | No. |
+| A broken wait (`wait-fault`) | Yes | Once: `Wait broken, send a message to continue: <condition> ...`. |
 | `working` or any waiting state, including `turn cancelled` | No | No. |
 | Any state while the run is paused | No | Checked again on resume. |
 | A swarm worker | Only for its `blocked` report | Its other requests go to its integrator. |
@@ -474,13 +508,21 @@ stay quiet depends on where the turn is, its phase:
 | `tool-running` between turns: background tasks hold the run | three times `--stall-threshold` |
 | `awaiting-input`, `between-turns`, or the turn that asks for a missing report | `--stall-threshold` |
 
-A stall that names a phase is a possible stall: the run is **Waiting**,
-never **Needs you** or **Disconnected**. **Disconnected** needs the agent
-process or its connection to end. An agent that thinks for minutes without
-streaming a thought parks at the short limit and returns to `running` with its
-next update. A resume or a server restart starts the quiet time over. Aether
-restarts nothing on its own: press **Stop** to cancel the turn, then send a
-message.
+A stall that names a phase is a possible stall: the dashboard shows
+**Possibly stalled**, never **Needs you** or **Disconnected**. **Disconnected**
+needs the agent process or its connection to end. An agent that thinks for
+minutes without streaming a thought parks at the short limit and returns to
+`running` with its next update. A resume or a server restart starts the quiet
+time over.
+
+Aether restarts nothing on its own. The run's Session view shows the agent's
+last progress, the phase and the connection, and offers:
+
+- **Stop turn** cancels the turn. It costs nothing.
+- **Open trace** opens the turn's model calls and tool calls.
+- **Resend last prompt…** sends your last prompt again after you confirm. It
+  costs tokens, and the agent may repeat tool actions it already took. A turn
+  that is still running finishes first, so stop it to send now.
 
 Messaging a stalled run usually gets it going. The echo of your message does
 not count as agent output, so a hung agent still reads as stalled afterwards.

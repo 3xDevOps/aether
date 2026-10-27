@@ -14,7 +14,7 @@ import (
 // follow last announced; follows of ended runs are dropped with the table.
 func TestAssistantFollowsMigrateToWatches(t *testing.T) {
 	t.Parallel()
-	const previous = 89
+	previous := 89
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
 	if err != nil {

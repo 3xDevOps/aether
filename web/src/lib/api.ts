@@ -111,6 +111,8 @@ import type {
   ServerInfo,
   ServerUpdateResult,
   ServerUpdateStatus,
+  RunLimits,
+  ServerRunLimits,
   SysboxStatus,
   ServerUpdateWhen,
   SyncSessionState,
@@ -561,6 +563,8 @@ export const api = {
     extra_workspace_ids?: string[]
     /** The run's own child-run setting; absent follows the owner's. */
     children?: 'on' | 'off'
+    /** Overrides the server's run limits for this run. */
+    limits?: RunLimits
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   childSettings: (params: ChildSettingsParams = {}) => call<ChildSettings>('child.settings', params),
@@ -860,6 +864,10 @@ export const api = {
    * next idle moment, or to cancel the pending one. */
   serverUpdate: (when: ServerUpdateWhen) =>
     call<ServerUpdateResult>('server.update', { when }),
+  /** Reads the server-wide run limits; with a field set, an admin changes
+   * them. Zero clears a field. */
+  serverRunLimits: (params: { cpus?: number; memory_bytes?: number; pids?: number } = {}) =>
+    call<ServerRunLimits>('server.run_limits', params),
   /** Admin only. Whether runs can run Docker inside their containers. */
   sysboxStatus: () => call<SysboxStatus>('server.sysbox.status'),
   /** Admin only. Starts the install in the background; poll sysboxStatus. */
@@ -958,8 +966,6 @@ export const api = {
     setup_script?: string
     set?: WorkspaceVariable[]
     unset?: string[]
-    files?: { path: string; content: string }[]
-    remove_files?: string[]
     egress?: boolean
     egress_allow?: string[]
     egress_deny?: string[]
@@ -1089,6 +1095,8 @@ export const api = {
     call<FileRead>('files.read', params),
   filesWrite: (params: { workspace_id: string; run_id?: string; repo?: string; path: string; content: string; revision: string }) =>
     call<FileRead>('files.write', params),
+  filesUpload: (params: { workspace_id: string; run_id: string; repo?: string; path: string; content_base64: string }) =>
+    call<unknown>('files.upload', params),
   homeTree: (path: string) => call<FilesTreeResult>('home.tree', { path }),
   homeRead: (path: string) => call<FileRead>('home.read', { path }),
   homeWrite: (params: { path: string; content: string; revision: string }) =>

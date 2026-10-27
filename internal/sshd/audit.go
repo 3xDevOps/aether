@@ -28,8 +28,8 @@ const (
 // The names audit history gives what happens to a connector with no call
 // behind it; none is an RPC. MethodConnectorReused is its revocation for
 // presenting a rotated refresh token again, and MethodConnectorRemoved its
-// deletion along with its member or with the edge account its device
-// signed in with, which the store records.
+// deletion along with its member, or with the edge account that
+// authorized it or its device, which the store records.
 const (
 	MethodConnectorCreate  = "connector.create"
 	MethodConnectorReused  = "connector.reused"
@@ -63,8 +63,6 @@ var assistantReads = map[string]bool{
 	protocol.MethodTerminalStatus: true,
 }
 
-type assistantCallKey struct{}
-
 type auditChangeKey struct{}
 
 // noteChange marks the call behind ctx as having changed a connector, an
@@ -74,12 +72,6 @@ func noteChange(ctx context.Context) {
 	if changed, ok := ctx.Value(auditChangeKey{}).(*bool); ok {
 		*changed = true
 	}
-}
-
-// AssistantLocal is Local for member's built-in assistant: its calls are
-// the member's own, and audit history records the writes among them.
-func (s *Server) AssistantLocal(member domain.MemberID) *Local {
-	return &Local{s: s, member: member, assistant: true}
 }
 
 // auditCall records every write call by a connector or the assistant, and
@@ -95,7 +87,7 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		via, connector, client = ViaConnector, id.connector, id.connectorClient
 	case ok:
 		via = ViaCLI
-	case ctx.Value(assistantCallKey{}) == true:
+	case fromAssistant(ctx):
 		via = ViaAssistant
 	default:
 		via = ViaDashboard

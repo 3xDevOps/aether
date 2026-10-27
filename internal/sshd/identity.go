@@ -490,8 +490,9 @@ func (s *Server) memberIdentityList(ctx context.Context, member domain.MemberID,
 // memberIdentityRemove unbinds one edge identity from a member: the remedy
 // when an account was linked while someone else held it. The devices that
 // signed in with it are revoked, not deleted, so their keys stay refused
-// if the account is linked again, and their connections close. The member,
-// its role and its other credentials stay.
+// if the account is linked again, and their connections close. The
+// connectors its sign-in authorized are deleted. The member, its role and
+// its other credentials stay.
 func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	const method = protocol.MethodMemberIdentityRemove
 	ids, perr := s.rpcIdentityStore()

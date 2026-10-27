@@ -229,6 +229,8 @@ type Store interface {
 	AssistantStore
 	InsightsStore
 	LaunchReceiptStore
+	LaunchDefaultsStore
+	RunLimitStore
 
 	Close() error
 }

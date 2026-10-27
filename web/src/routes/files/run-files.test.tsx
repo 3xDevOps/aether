@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Markdown } from '@/components/ui/markdown'
 import { OutputTail } from '@/components/ui/session-blocks'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import type { FileTreeEntry } from '@/lib/types'
 import { openInFiles } from '@/routes/files/open'
 import { RunFileLinks } from '@/routes/files/path-link'
@@ -185,6 +185,27 @@ describe('a run’s Files view', () => {
     fireEvent.keyDown(editor, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true })
     expect(editor.textContent).toContain('zero')
     expect(useStore.getState().drafts[key]).toBeUndefined()
+  })
+
+  it('uploads files dropped on a live run’s tree into its checkout, never over a file it has', async () => {
+    useStore.setState({ capabilities: { gateway: 'server', methods: ['files.tree', 'files.upload'], ws: [] } })
+    const filesUpload = vi.fn(async ({ path }: { path: string }) => {
+      if (path === 'README.md') throw new ApiError(409, 'files.upload: file changed; reload before saving')
+      return {}
+    })
+    render(<RunFiles run={run()} shown client={fakeApi({ filesTree: vi.fn(filesTree), filesUpload })} />)
+    const tree = within(screen.getByRole('complementary', { name: 'Files' }))
+    expect(tree.getByRole('button', { name: 'Upload files…' })).toBeDefined()
+
+    const files = [new File(['x'], 'notes.txt'), new File(['x'], 'README.md')]
+    fireEvent.drop(tree.getByRole('button', { name: 'aether/run-1-checkout' }), {
+      dataTransfer: { types: ['Files'], items: files.map((file) => ({ kind: 'file', webkitGetAsEntry: () => null, getAsFile: () => file })) },
+    })
+    expect(within(await tree.findByRole('alert')).getByText('README.md already exists in this run; open it to edit')).toBeDefined()
+    expect(filesUpload).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', path: 'notes.txt', content_base64: 'eA==' })
+
+    act(() => useStore.setState({ info: { member: { id: 'mem_viewer', display_name: 'Viewer', role: 'viewer' } } as never }))
+    expect(tree.queryByRole('button', { name: 'Upload files…' })).toBeNull()
   })
 
   it.each([

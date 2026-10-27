@@ -115,6 +115,18 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 	return result.(protocol.AgentModelsResult), nil
 }
 
+// CachedAgentModels is the model list AgentModels last answered for agent
+// name on account, while still fresh; false without one. It never probes.
+func (s *Scheduler) CachedAgentModels(account domain.MemberID, name string) (protocol.AgentModelsResult, bool) {
+	s.agentModelsMu.Lock()
+	entry, ok := s.agentModels[agentModelsKey{account, name}]
+	s.agentModelsMu.Unlock()
+	if !ok || s.cfg.Now().Sub(entry.probed) >= entry.ttl() {
+		return protocol.AgentModelsResult{}, false
+	}
+	return entry.result, true
+}
+
 func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, executable string, passthrough []string, start bool) protocol.AgentModelsResult {
 	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
 	defer cancel()

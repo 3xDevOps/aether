@@ -1,4 +1,5 @@
 {{define "signin"}}{{template "top" .}}
 <p>Sign in to see your Aether servers or to approve a device.</p>
-<p><a class="button" href="{{.Data}}">Sign in with GitHub</a></p>
+<p><a class="button" href="{{.Data.GitHub}}">Sign in with GitHub</a></p>
+{{if .Data.Reviewer}}<p>Reviewing this connector for an app directory? <a href="{{.Data.Reviewer}}">Sign in with the reviewer account</a>.</p>{{end}}
 {{template "bottom" .}}{{end}}

@@ -19,7 +19,25 @@ export type RunStatus =
 
 /** What a live run waits on, from the scheduler; set only while `status` is `running` or `needs-attention`. */
 /** What chose a live run's state; mirrors events.RunStatusCause in internal/events/event.go. */
-export type RunStatusCause = 'turn' | 'report' | 'turn-end' | 'stall' | 'wait-expired' | 'workers' | 'tasks-held' | 'human' | 'disconnect'
+// Mirrors protocol.RunLiveness in internal/protocol/wire.go.
+export interface RunLiveness {
+  phase?: 'setup' | 'awaiting-first-event' | 'streaming' | 'tool-running' | 'awaiting-input' | 'between-turns'
+  last_progress_at?: string
+  connected_at?: string
+  transport: 'open' | 'closed' | 'unknown'
+}
+
+export type RunStatusCause =
+  | 'turn'
+  | 'report'
+  | 'turn-end'
+  | 'stall'
+  | 'wait-expired'
+  | 'wait-fault'
+  | 'workers'
+  | 'tasks-held'
+  | 'human'
+  | 'disconnect'
 
 export type RunActivity =
   | 'working'
@@ -82,6 +100,8 @@ export interface Run {
   state?: RunActivity | ''
   /** What chose `state`; absent on a run that is not live and from older servers. */
   cause?: RunStatusCause
+  /** A live Enhanced run's turn, read from its agent session when the run was fetched; not pushed. */
+  liveness?: RunLiveness
   /** Increments on every change of status, state, reason or outcome flags. */
   status_seq: number
   branch: string
@@ -408,18 +428,10 @@ export interface WorkspaceVariable {
   secret?: boolean
 }
 
-/** The server never returns a workspace file's content. */
-export interface WorkspaceFile {
-  path: string
-  size: number
-}
-
 export interface WorkspaceEnvironment {
   workspace_id: string
   setup_script: string
   variables: WorkspaceVariable[]
-  /** Absent from a server older than workspace files. */
-  files?: WorkspaceFile[]
   /** Both absent from a server older than egress control. */
   egress?: boolean
   egress_hosts?: string[]
@@ -1007,6 +1019,8 @@ export interface RunStatusPayload {
   reason?: string
   state?: RunActivity | ''
   cause?: RunStatusCause
+  /** Only a newer read of the wait's sources; history leaves it out. */
+  reread?: boolean
   status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean
@@ -2104,6 +2118,23 @@ export interface SysboxStatus {
   state: 'on' | 'off' | 'unsupported' | 'installing' | 'failed'
   reason?: string
   log?: string
+}
+
+/** Caps on a run's container. A missing field is unset: a run's own limits
+ * fall back to the server's, the server's to its automatic values. */
+export interface RunLimits {
+  cpus?: number
+  memory_bytes?: number
+  pids?: number
+}
+
+/** server.run_limits: `limits` is what an admin set, `effective` what a run
+ * with no override of its own gets. */
+export interface ServerRunLimits {
+  limits: RunLimits
+  /** What an unset field gets: the server's flag or automatic value. */
+  default: RunLimits
+  effective: RunLimits
 }
 
 /** When an update applies: immediately, at the next idle moment, or never

@@ -11,6 +11,20 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
+// UseBaseCapture attaches the base-capture service, built after the scheduler.
+func (s *Scheduler) UseBaseCapture(c BaseCapture) {
+	s.mu.Lock()
+	s.cfg.Bases = c
+	s.mu.Unlock()
+}
+
+// UseEvidence attaches the evidence service, built after the scheduler.
+func (s *Scheduler) UseEvidence(e EvidenceService) {
+	s.mu.Lock()
+	s.evidence = e
+	s.mu.Unlock()
+}
+
 type EvidenceService interface {
 	Capture(context.Context, evidence.Request) (protocol.EvidencePacket, error)
 	CaptureBeforeCleanup(context.Context, evidence.Request, func(context.Context) error) (protocol.EvidencePacket, error)
@@ -31,7 +45,6 @@ type TeamMemory interface {
 
 type GitEngine interface {
 	CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseCommit, baseBranch, task, origin string) (checkoutPath, branch string, err error)
-	WriteRunFiles(ctx context.Context, run domain.RunID, files map[string]string) error
 	WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceID, branch string) (bool, error)
 	WorkspaceBranchCommit(ctx context.Context, ws domain.WorkspaceID, branch string) (commit string, err error)
 	CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error)

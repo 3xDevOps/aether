@@ -466,6 +466,8 @@ var attentionRows = []attentionRow{
 			switch {
 			case turnCutShort(reason):
 				item.Reason = plainReason(reason) + " · reply to continue"
+			case strings.HasPrefix(reason, waitBrokenPrefix):
+				item.Reason = "Wait broken: " + strings.TrimPrefix(reason, waitBrokenPrefix) + " · reply to continue"
 			case strings.HasPrefix(reason, needsInputPrefix), strings.HasPrefix(reason, usageLimitPrefix):
 				item.Reason = plainReason(reason)
 			default:

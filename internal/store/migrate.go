@@ -2186,7 +2186,35 @@ DROP TABLE assistant_follows;
 CREATE INDEX idx_watch_deliveries_assistant ON watch_deliveries(notification_id)
 	WHERE channel = 'assistant' AND status = 'pending';
 `,
-	// v91: audit history of writes by connectors and the assistant, and of
+	// v91: the launch choices a member saved, so every device and the
+	// assistant start from them.
+	`
+CREATE TABLE launch_defaults (
+	revision          INTEGER PRIMARY KEY AUTOINCREMENT,
+	member_id         TEXT NOT NULL UNIQUE REFERENCES members(id) ON DELETE CASCADE,
+	agent             TEXT NOT NULL DEFAULT '',
+	agents            TEXT NOT NULL DEFAULT '{}',
+	account_member_id TEXT NOT NULL DEFAULT '',
+	fallback_policy   TEXT NOT NULL DEFAULT '' CHECK (fallback_policy IN ('', 'automatic', 'ordered', 'off')),
+	fallback_order    TEXT NOT NULL DEFAULT '[]',
+	source            TEXT NOT NULL CHECK (source IN ('member', 'assistant')),
+	updated_at        INTEGER NOT NULL
+);
+`,
+	// v92: server-wide run limits an admin sets from the dashboard, and a
+	// run's own override of them. Zero means unset.
+	`
+CREATE TABLE server_run_limits (
+	id           INTEGER PRIMARY KEY CHECK (id = 1),
+	cpus         REAL    NOT NULL DEFAULT 0,
+	memory_bytes INTEGER NOT NULL DEFAULT 0,
+	pids         INTEGER NOT NULL DEFAULT 0
+);
+ALTER TABLE runs ADD COLUMN cpu_limit REAL NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN memory_limit_bytes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pids_limit INTEGER NOT NULL DEFAULT 0;
+`,
+	// v93: audit history of writes by connectors and the assistant, and of
 	// connector, account-share, member and Slack link changes. Rows hold
 	// ids, never params, and outlive the members and connectors they name;
 	// security marks a change that took effect, which is kept apart from

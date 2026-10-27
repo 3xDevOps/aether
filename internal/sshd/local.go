@@ -31,6 +31,19 @@ func (s *Server) Local(member domain.MemberID) *Local {
 	return &Local{s: s, member: member}
 }
 
+// AssistantLocal is Local for member's built-in assistant, whose calls a
+// handler can tell apart with fromAssistant.
+func (s *Server) AssistantLocal(member domain.MemberID) *Local {
+	return &Local{s: s, member: member, assistant: true}
+}
+
+type assistantCallKey struct{}
+
+func fromAssistant(ctx context.Context) bool {
+	via, _ := ctx.Value(assistantCallKey{}).(bool)
+	return via
+}
+
 // ConnectorLocal is Local for connector connectorID, which client (such as
 // ChatGPT) holds under grant with scopes: its calls are judged by the
 // grant's device, as a relayed connection on that device is, each method
@@ -49,11 +62,11 @@ func (l *Local) Call(ctx context.Context, method string, params json.RawMessage)
 			Message: fmt.Sprintf("control request exceeds %d bytes", protocol.MaxLineBytes),
 		}
 	}
-	if l.id != nil {
-		ctx = domain.WithVia(context.WithValue(ctx, connIdentityKey{}, *l.id), l.id.connectorClient)
-	}
 	if l.assistant {
 		ctx = context.WithValue(ctx, assistantCallKey{}, true)
+	}
+	if l.id != nil {
+		ctx = domain.WithVia(context.WithValue(ctx, connIdentityKey{}, *l.id), l.id.connectorClient)
 	}
 	return l.s.dispatch(ctx, l.member, method, params)
 }

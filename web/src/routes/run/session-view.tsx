@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { VList, type VListHandle } from 'virtua'
-import { TerminalControlBorder } from '@/components/terminal-control-border'
 import type { Tone } from '@/components/ui/status-dot'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -21,6 +20,7 @@ import { Composer } from '@/routes/run/composer'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
+import { StallCallout } from '@/routes/run/stall-recovery'
 import { RequestDock } from '@/routes/run/request-dock'
 import { requestAnnouncement } from '@/routes/run/session-requests'
 import { EnteringRow, rowGap, sessionColumn, TimelineRow, useArrivals, useFlatRows, useRowContext, type FlatRow, type OpenPolicy } from '@/routes/run/session-rows'
@@ -351,13 +351,6 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      {run.mode === 'acp' && (
-        <TerminalControlBorder
-          appearance={agent.localControl ? 'active'
-            : agent.controlUnavailable ? 'hidden' : agent.roomControl?.loss ?? 'hidden'}
-          takeoverProgress={agent.takeover.holderProgress}
-        />
-      )}
       {session?.truncatedBefore && (
         <div className={cn(sessionColumn, 'shrink-0 pt-2')}>
           <Callout tone="needs-you" role="status">
@@ -451,6 +444,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
       {enhanced && (
         <div className={cn(sessionColumn, 'pb-2 empty:hidden')}>
           <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
+          <StallCallout run={run} agent={agent} rows={rows} nav={nav} />
         </div>
       )}
       <ChangesBar run={run} />

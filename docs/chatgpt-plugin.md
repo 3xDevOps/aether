@@ -65,7 +65,7 @@ what `edge.onaether.dev` serves.
 | Privacy policy at a public URL, from [legal/privacy-connectors.md](legal/privacy-connectors.md) | `privacyPolicyURL` | Draft | No | No | No |
 | Terms of service at a public URL, from [legal/terms-connectors.md](legal/terms-connectors.md) | `termsOfServiceURL` | Draft | No | No | No |
 | Demo server with sample data ([Reviewer setup](#reviewer-setup)) | Project edge | n/a | No | n/a | n/a |
-| Reviewer account that needs no email code | Review details | No: needs an edge sign-in other than GitHub | No | No | No |
+| Reviewer account that needs no email code ([Reviewer setup](#reviewer-setup)) | Review details | Built in Aether; not enabled on edge.onaether.dev: `aether-edge serve --reviewer-account-file` | No | No | No |
 | `aether_changes`, used by test 2 | Connector tools | No: planned (PR #585 adds `changes.list`; the tool follows) | No | No | No |
 | Walkthrough video of the five positive test cases | `review.demo_recording_url` | n/a | No | No | No |
 | Live test from chatgpt.com | n/a | n/a | Not run | n/a | n/a |
@@ -172,28 +172,67 @@ further configuration required ... do not feature MFA (including requiring
 SMS codes, login through systems that require SMS, email or other
 verification schemes)" ([app review](https://developers.openai.com/plugins/deploy/app-review)).
 
-**Blocker.** The edge signs in with GitHub only. GitHub asks a password-only
-account for a code sent by email on each new browser, and skips it only with
-2FA or a passkey
+A GitHub account cannot pass: GitHub asks a password-only account for a
+code sent by email on each new browser, and skips it only with 2FA or a
+passkey
 ([GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/verifying-new-devices-when-signing-in)).
-Reviewers use new browsers, so a GitHub reviewer account fails either way.
-A pre-authorized demo path with no sign-in would give anyone on the internet
-a member that launches agents. The proposed fix is a reviewer sign-in on the
-edge: off unless `aether-edge` is given a reviewer account file, a separate
-identity provider that can never match a GitHub account, offered only the
-one demo server, accepted only by a server that opts in, rate-limited,
-logged and revocable. It is not built; until it is, review cannot pass.
+The reviewer signs in with the edge's **reviewer account** instead: a login
+and password in a file the edge's operator writes, offered on the edge's
+sign-in page only for a connector sign-in. It is off unless `aether-edge
+serve` gets `--reviewer-account-file`, and it is never a GitHub account
+(provider `reviewer`). It reaches one server, the one its file names, and
+only one that turned on `edge-reviewer` and whose admin bound it to a
+member who is no admin. It starts no edge session, so it cannot sign in a
+device, claim a server or open an invitation. Ten wrong passwords in a row
+for its login lock it for 15 minutes, besides the sign-in rate limit per
+address. Each attempt writes one line, with the client address, to the
+edge's log (`edge: reviewer signed in` or `edge: reviewer sign-in
+refused`). Only the right login counts toward the lock, so a `429` tells a
+guesser the login was right: pick one nobody would guess and share it only
+with the review, like the password. Turning it on for `edge.onaether.dev` is the owner's step; this
+repository does not do it.
+
+Set it up, with the demo server's id from `aether-server edge status` or
+`aether-edge servers list`:
+
+1. On the edge host, write the file, mode 0600, and note the password it
+   prints, the only copy. `<random-login>` is a login nobody would guess,
+   such as `review-` and eight random letters:
+   `sudo -u aether-edge aether-edge reviewer --login <random-login> --server-id <server id> /var/lib/aether-edge/reviewer.json`.
+2. Set `AETHER_EDGE_REVIEWER_ACCOUNT_FILE=/var/lib/aether-edge/reviewer.json`
+   in `/etc/aether-edge/aether-edge.env` (or pass
+   `--reviewer-account-file`) and restart the edge. Its log says
+   `aether-edge: reviewer account on`.
+3. On the demo server: `sudo aether-server config set edge-reviewer true`,
+   then `sudo systemctl restart aether-server`. It needs
+   `edge-access account`; under `approved-devices` the consent page asks
+   the reviewer for a pairing code as it asks anyone.
+4. As an admin of the demo server, bind the login to the reviewer's member,
+   a collaborator: `aether member link --reviewer <random-login> <member-id>`.
+   An admin member is refused, and a member made admin later is cut off.
+
+Revoke it with `aether member unlink <member-id> reviewer:<random-login>`,
+which deletes the connectors it authorized, or by turning `edge-reviewer`
+off on the demo server and restarting it, which cuts them off at their next
+call. Removing the flag from the edge, or a new password, only stops new
+sign-ins; connectors already authorized keep working. After each review,
+unlink the login, run step 1 again for a new password, restart the edge and
+bind the login again (step 4): connectors from the last review stay
+deleted.
 
 The rest of the setup:
 
 - **Demo server.** An `aether-server` linked to the project edge with
-  `--edge-access account`, so the reviewer's devices work without an admin
-  approving each one ([edge.md](edge.md), [connectors.md](connectors.md)).
+  `--edge-access account` and `edge-reviewer` on
+  ([edge.md](edge.md), [connectors.md](connectors.md)).
   Install and sign in Claude Code on it so test 1 can launch, and give it
-  GitHub access to the sample repository only.
-- **Reviewer member.** Invite the reviewer identity as a collaborator. Enter
-  its login, password and these steps in **Review details**, never in the
-  ZIP. Rotate the password after each review.
+  GitHub access to the sample repository only. Every member reads every
+  workspace on a server, so keep the demo server for the review.
+- **Reviewer member.** A collaborator, bound as in step 4. Enter the login,
+  password and these steps in **Review details**, never in the ZIP: open
+  the connector, choose **Sign in with the reviewer account** on the edge's
+  sign-in page, enter the login and password, choose the demo server, and
+  allow on its consent page.
 - **Sample data.** A workspace `aether-demo` from a public sample repository
   with: two active runs that both edit `README.md`; a run with an open pull
   request whose checks have finished and that has one review comment; a run
@@ -292,7 +331,7 @@ plaintext in memory while relaying.
 | Server, tokens | Access token valid 1 hour; refresh token 30 days, rotated on each use; reusing a rotated token revokes the connector | Hashes only |
 | Server log | One line per write call: connector, member, method, target id, result. Lines when a connector is authorized, created or revoked. Read calls are not logged | Server operator's log retention |
 | Server records | Runs and messages created through a connector record `via ChatGPT` or `via Claude` | With the run |
-| Server, audit history | Each write call through a connector or the assistant, refused ones included; connectors created, revoked or removed with their member or device; and, from any client including the dashboard and CLI, account shares and revocations, member approvals, removals and role changes, device and edge sign-in removals, member merges, and Slack link codes and unlinks ([connectors.md](connectors.md#audit-history)). Each entry: time, member, how the call arrived, method, workspace, target id and outcome; no tokens, parameters or message bodies | Per member, the newest 10,000 call entries and, separately, the newest 10,000 changes that took effect |
+| Server, audit history | Each write call through a connector or the assistant, refused ones included; connectors created, revoked, or removed with their member, device or edge sign-in; and, from any client including the dashboard and CLI, account shares and revocations, member approvals, removals and role changes, device and edge sign-in removals, member merges, and Slack link codes and unlinks ([connectors.md](connectors.md#audit-history)). Each entry: time, member, how the call arrived, method, workspace, target id and outcome; no tokens, parameters or message bodies | Per member, the newest 10,000 call entries and, separately, the newest 10,000 changes that took effect |
 
 **Controls.** `aether mcp` lists a member's connectors and `aether mcp revoke
 <id>` revokes one; the consent page grants `write` and `control` separately
