@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -15,6 +17,11 @@ import (
 // reversible one changes something without asking, and a confirmed one
 // asks.
 func TestOpsMethodsAreTiered(t *testing.T) {
+	for method, tier := range tiers {
+		if tier == tierConfirmed && !slices.Contains(coordtransport.ConfirmedMethods, method) {
+			t.Errorf("%s is confirmed, but a call of it gives up before the member decides its card: add it to coordtransport.ConfirmedMethods", method)
+		}
+	}
 	for _, o := range ops.Ops {
 		if o.Tier == ops.TierNone {
 			continue
@@ -53,7 +60,8 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 			{"kind":"permission","run_id":"run-1","workspace_id":"ws-1","request":{"id":"req-1","title":"Run git push","options":[{"id":"once","label":"Allow once","kind":"allow_once"},{"id":"no","label":"Reject","kind":"reject_once"}]}},
 			{"kind":"swarm-question","run_id":"run-1","mission_id":"mis-1","workspace_id":"ws-1","message":{"id":"q-1","body":"Which branch?"}}]}`), nil
 	case protocol.MethodMissionShow:
-		switch p, _ := protocol.DecodeParams[protocol.MissionShowParams](params); p.QuestionID {
+		p, _ := protocol.DecodeParams[protocol.MissionShowParams](params)
+		switch p.QuestionID {
 		case "q-1":
 			return json.RawMessage(`{"mission":{"id":"mis-1","objective":"Ship the billing page","accountable_human_id":"m2"},
 				"questions":[{"id":"q-1","mission_id":"mis-1","body":"Which branch?"}]}`), nil
@@ -61,7 +69,20 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 			return json.RawMessage(`{"mission":{"id":"mis-2","objective":"Port the API","accountable_human_id":"m1"},
 				"questions":[{"id":"q-2","mission_id":"mis-2","body":"Which version?","answer":"v2","answered_at":"2026-10-26T10:00:00Z"}]}`), nil
 		}
+		if p.MissionID == "mis-1" {
+			return json.RawMessage(`{"mission":{"id":"mis-1","objective":"Ship the billing page","accountable_human_id":"m2","current_integrator_run_id":"run-9"},
+				"attempts":[{"run_id":"run-1","takeover_active":true,"takeover_member_id":"m2","takeover_generation":2}]}`), nil
+		}
 		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "mission question not found"}
+	case protocol.MethodIntegrationShow:
+		return json.RawMessage(`{"candidate":{"candidate_id":"cand-1","mission_id":"mis-1","target_ref":"refs/heads/main"}}`), nil
+	case protocol.MethodMemoryShow:
+		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","scope":"member","title":"CI needs Docker","pinned_by":"m2","pinned_by_name":"Grace","pinned_at":"2026-10-26T10:00:00Z"}}`), nil
+	case protocol.MethodRunGet:
+		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t","member_id":"m2","mission_id":"mis-1"}}`), nil
+	case protocol.MethodRunPRFeedback:
+		return json.RawMessage(`{"pull_request":{"number":7},"checks":[{"name":"test","conclusion":"FAILURE"},{"name":"e2e"},{"name":"lint","conclusion":"SUCCESS"}],
+			"reviews":[{"author":"grace","state":"CHANGES_REQUESTED"},{"author":"ada","state":"CHANGES_REQUESTED"},{"author":"ada","state":"APPROVED"}]}`), nil
 	}
 	return c.fakeCaller.Call(ctx, method, params)
 }
@@ -78,23 +99,60 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			"idempotency_key":   "k", "reason": "the member asked for codex workers"},
 		protocol.MethodRunInject:             protocol.RunInjectParams{RunID: "run-1", Message: "hi", Attachments: []string{"shot.png"}, IdempotencyKey: "k"},
 		protocol.MethodRunKill:               protocol.RunIDParams{RunID: "run-1"},
+		protocol.MethodRunClose:              protocol.RunCloseParams{RunID: "run-1", Outcome: "abandoned"},
 		protocol.MethodEnvSave:               nil,
 		protocol.MethodRunInputRespond:       protocol.RunInputRespondParams{RunID: "run-1", RequestID: "req-1", OptionID: "once"},
 		protocol.MethodMissionQuestionAnswer: protocol.MissionQuestionAnswerParams{QuestionID: "q-1", Answer: "main", IdempotencyKey: "k"},
 		protocol.MethodRunRoomPost: protocol.RunRoomPostParams{WorkspaceID: "ws-1", RunID: "run-1", Kind: protocol.RoomMessageReply, Body: "yes",
 			Anchor: &protocol.RoomMessageAnchor{Kind: "file", Path: "main.go", StartLine: 3, EndLine: 9}, IdempotencyKey: "k"},
+		protocol.MethodRunRelaunch:          protocol.RunIDParams{RunID: "run-1"},
+		protocol.MethodRunModeSwitch:        protocol.RunModeSwitchParams{RunID: "run-1", Mode: "acp"},
+		protocol.MethodRunProtect:           protocol.RunProtectParams{RunID: "run-1", Protected: true},
+		protocol.MethodRunArchive:           protocol.RunArchiveParams{RunID: "run-1"},
+		protocol.MethodRunHandoff:           protocol.RunHandoffParams{RunID: "run-1", ToMemberID: "m1"},
+		protocol.MethodMissionWorkerRelease: protocol.MissionWorkerReleaseParams{RunID: "run-1", ExpectedTakeoverGeneration: 2},
+		protocol.MethodMissionArchive:       protocol.MissionIDParams{MissionID: "mis-1"},
+		protocol.MethodMissionUnarchive:     protocol.MissionIDParams{MissionID: "mis-1"},
+		protocol.MethodMissionReplaceIntegrator: protocol.MissionReplaceIntegratorParams{MissionID: "mis-1", ExpectedGeneration: 1, IdempotencyKey: "k",
+			Integrator: protocol.MissionIntegrator{AccountMemberID: "m2", Harness: "codex", Mode: "acp"}},
+		protocol.MethodIntegrationDecide:  protocol.IntegrationDecideParams{WorkspaceID: "ws-1", CandidateID: "cand-1", RequestID: "req-1", RequestVersion: 1, Approve: true},
+		protocol.MethodIntegrationDeliver: protocol.IntegrationDeliverParams{WorkspaceID: "ws-1", CandidateID: "cand-1", RequestID: "req-1", RequestVersion: 2},
+		protocol.MethodRunPRCreate: protocol.RunPRCreateParams{RunID: "run-1", Expected: protocol.RunGitExpected{Branch: "fix-login", Head: "0123456789abcdef"},
+			Title: "Fix login", Draft: true},
+		protocol.MethodRunPRMerge: protocol.RunPRMergeParams{RunID: "run-1", Method: "squash", ExpectedHead: "fedcba9876543210", Repository: "acme/shop", Number: 7,
+			ExpectedBase: "main"},
+		protocol.MethodMemoryAdd:   protocol.MemoryAddParams{WorkspaceID: "ws-1", Kind: "gotcha", Text: "CI needs Docker.", Supersedes: "mem-0"},
+		protocol.MethodMemoryPin:   protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1", Scope: protocol.MemoryScopeMember},
+		protocol.MethodMemoryUnpin: protocol.MemoryUnpinParams{WorkspaceID: "ws-1", ID: "mem-1"},
 	}
 	want := map[string]string{
 		protocol.MethodRunLaunch:      `Launch claude (default mode) in shop on "Grace"'s account, falling back to your account in order, with repositories "web": "fix it"`,
 		protocol.MethodTemplateLaunch: `Launch template "triage" in shop: claude (acp, opus) on your account with "{\"issue\":\"42\"}": "triage issue {{issue}}"`,
 		protocol.MethodMissionCreate: `Start a swarm in shop with integrator claude (acp) on your account, agents claude (acp) on your account, codex (tui) on "Grace"'s account: "ship it". ` +
 			`The assistant's reason: "the member asked for codex workers"`,
-		protocol.MethodRunInject:             `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
-		protocol.MethodRunKill:               `Stop run run-1 ("Fix login"), owned by Grace`,
-		protocol.MethodEnvSave:               `Save your environment as a new image; new runs and terminals start from it`,
-		protocol.MethodRunInputRespond:       `Allow once run run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
-		protocol.MethodMissionQuestionAnswer: `Answer swarm mis-1 ("Ship the billing page"), owned by Grace, which asked "Which branch?": "main"`,
-		protocol.MethodRunRoomPost:           `Reply on run run-1 ("Fix login"), owned by Grace: "yes", anchored at "main.go:3-9"`,
+		protocol.MethodRunInject:                `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
+		protocol.MethodRunKill:                  `Stop run run-1 ("Fix login"), owned by Grace`,
+		protocol.MethodRunClose:                 `Close run run-1 ("Fix login") as abandoned, owned by Grace`,
+		protocol.MethodEnvSave:                  `Save your environment as a new image; new runs and terminals start from it`,
+		protocol.MethodRunInputRespond:          `Allow once run run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
+		protocol.MethodMissionQuestionAnswer:    `Answer swarm mis-1 ("Ship the billing page"), owned by Grace, which asked "Which branch?": "main"`,
+		protocol.MethodRunRoomPost:              `Reply on run run-1 ("Fix login"), owned by Grace: "yes", anchored at "main.go:3-9"`,
+		protocol.MethodRunRelaunch:              `Relaunch run run-1 ("Fix login"), owned by Grace`,
+		protocol.MethodRunModeSwitch:            `Switch run run-1 ("Fix login") to Enhanced mode, owned by Grace`,
+		protocol.MethodRunProtect:               `Protect run run-1 ("Fix login") from cleanup, owned by Grace`,
+		protocol.MethodRunArchive:               `Restore run run-1 ("Fix login") from the archive, owned by Grace`,
+		protocol.MethodRunHandoff:               `Hand run run-1 ("Fix login"), owned by Grace, to Ada (m1), who then owns it`,
+		protocol.MethodMissionWorkerRelease:     `Release control of worker run run-1 ("Fix login") of swarm mis-1 ("Ship the billing page"), held by Grace, so its integrator steers it again`,
+		protocol.MethodMissionArchive:           `Archive, closing its completed runs, swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodMissionUnarchive:         `Unarchive swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodMissionReplaceIntegrator: `Replace integrator run run-9 of swarm mis-1 ("Ship the billing page"), owned by Grace, with codex (acp) on Grace's (m2) account`,
+		protocol.MethodIntegrationDecide:        `Approve delivering candidate cand-1, moving refs/heads/main, for swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodIntegrationDeliver:       `Deliver candidate cand-1, moving refs/heads/main, for swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodRunPRCreate:              `Open a draft pull request from run run-1 ("Fix login"), owned by Grace, branch fix-login at 0123456, into the workspace's base branch: "Fix login"`,
+		protocol.MethodRunPRMerge:               `Merge (squash) acme/shop#7 of run run-1 ("Fix login"), owned by Grace, at fedcba9 into main; GitHub reports 1 failing checks, 1 pending checks and 1 reviewers requesting changes`,
+		protocol.MethodMemoryAdd:                `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0 ("CI needs Docker") and moving its pin`,
+		protocol.MethodMemoryPin:                `Pin, into new runs' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
+		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha), taking it out of Grace's briefs: "CI needs Docker"`,
 	}
 	var got protocol.AssistantConfirmation
 	caller := &attentionCaller{}
@@ -117,7 +175,8 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			t.Errorf("%s: %v", method, perr)
 			continue
 		}
-		if got.Summary != want[method] || got.OtherMember != (strings.Contains(want[method], "owned by") || strings.Contains(want[method], `"Grace"'s account`)) {
+		if got.Summary != want[method] || got.OtherMember != (strings.Contains(want[method], "owned by") || strings.Contains(want[method], "held by") ||
+			strings.Contains(want[method], `"Grace"'s account`)) {
 			t.Errorf("%s summary = %q (other member %t), want %q", method, got.Summary, got.OtherMember, want[method])
 		}
 	}

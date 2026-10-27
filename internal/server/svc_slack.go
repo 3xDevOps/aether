@@ -36,7 +36,7 @@ func init() {
 				if checkErr := srv.CheckConnectorGrant(ctx, grant); checkErr != nil {
 					return nil, checkErr
 				}
-				return srv.ConnectorLocal(grant, id, slack.Client), nil
+				return srv.ConnectorLocal(grant, id, slack.Client, slack.Scopes), nil
 			},
 		})
 		if err != nil {

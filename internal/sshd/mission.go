@@ -252,7 +252,11 @@ func (s *Server) missionReplaceIntegrator(ctx context.Context, member domain.Mem
 	}
 	out, callErr := svc.ReplaceIntegrator(ctx, member, p)
 	if callErr != nil {
-		return nil, rpcError(callErr)
+		perr := rpcError(callErr)
+		if errors.Is(callErr, store.ErrMissionStale) {
+			perr.Data, _ = json.Marshal(map[string]string{"reason": protocol.ErrorReasonStaleGeneration})
+		}
+		return nil, perr
 	}
 	return out, nil
 }

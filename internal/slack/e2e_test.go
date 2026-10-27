@@ -117,7 +117,7 @@ func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 			if checkErr := srv.CheckConnectorGrant(ctx, grant); checkErr != nil {
 				return nil, checkErr
 			}
-			return srv.ConnectorLocal(grant, id, Client), nil
+			return srv.ConnectorLocal(grant, id, Client, Scopes), nil
 		}})
 	if err != nil {
 		t.Fatalf("New: %v", err)

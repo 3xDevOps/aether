@@ -213,7 +213,7 @@ func grantOf(c *store.Connector) sshd.ConnectorGrant {
 // scopes its connector was granted, which call as the connector.
 func (h *handler) server(r *http.Request) *mcp.Server {
 	c := auth.TokenInfoFromContext(r.Context()).Extra["connector"].(*store.Connector)
-	local := h.ssh.ConnectorLocal(grantOf(c), c.ID, c.ClientName)
+	local := h.ssh.ConnectorLocal(grantOf(c), c.ID, c.ClientName, c.Scopes)
 	srv := mcp.NewServer(&mcp.Implementation{Name: mcpbridge.ServerName, Title: "Aether", Version: version.String()},
 		&mcp.ServerOptions{Instructions: instructions})
 	ops.RegisterConnector(srv, func(ctx context.Context, method string, params, out any) error {

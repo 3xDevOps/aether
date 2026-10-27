@@ -90,12 +90,11 @@ func rpcCode(t *testing.T, err error) int {
 
 func TestAllowlistAndMemberID(t *testing.T) {
 	sock, fc := start(t, nil)
-	err := coordtransport.Call(t.Context(), sock, "member.list", nil, nil)
+	err := coordtransport.Call(t.Context(), sock, protocol.MethodMemberInvitationCreate, nil, nil)
 	if rpcCode(t, err) != protocol.CodeMethodNotFound || !strings.Contains(err.Error(), "run.launch") {
-		t.Fatalf("member.list: %v", err)
+		t.Fatalf("member.invitation.create: %v", err)
 	}
-	for _, method := range []string{protocol.MethodAssistantSettings, protocol.MethodAssistantConfirm,
-		protocol.MethodMemoryAdd, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin, protocol.MethodMemoryRm} {
+	for _, method := range []string{protocol.MethodAssistantSettings, protocol.MethodAssistantConfirm, protocol.MethodMemoryRm} {
 		err = coordtransport.Call(t.Context(), sock, method, map[string]any{"auto_approve": true, "confirmation_id": "c", "approve": true}, nil)
 		if rpcCode(t, err) != protocol.CodeMethodNotFound {
 			t.Fatalf("%s on the tool socket: %v", method, err)
@@ -388,7 +387,7 @@ func TestPrepareAccountFields(t *testing.T) {
 		{protocol.MethodRunGet, `{"account_member_id":"m2"}`, false},
 		{protocol.MethodRunList, `{"account_member_id":"m2"}`, false},
 		{protocol.MethodTemplateLaunch, `{"account_member_id":"m2"}`, false},
-		{protocol.MethodRunHandoff, `{"run_id":"r","to_member_id":"m2"}`, false},
+		{protocol.MethodRunLaunch, `{"to_member_id":"m2"}`, false},
 		{protocol.MethodMissionCreate, `{"accountable_human_id":"m2"}`, false},
 	} {
 		_, err := Prepare("m1", c.method, json.RawMessage(c.params))

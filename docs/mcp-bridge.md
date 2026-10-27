@@ -251,15 +251,16 @@ acts: the socket rejects any param containing `member_id` except the agent
 accounts a call launches on or reads (`account_member_id` and
 `fallback_account_member_ids` on `run.launch`, `fallback_account_member_ids`
 and each agent's `account_member_id` on `mission.create`, and
-`account_member_id` on `agent.list`, `agent.models` and `account.usage`) and
-the `run.list` read filter. The server refuses an account not shared with the
-member. `aether_list_runs` with `mine` filters to the socket's member.
+`account_member_id` on `agent.list`, `agent.models` and `account.usage`), the
+`run.list` read filter and the teammate `run.handoff` gives a run to. The
+server refuses an account not shared with the member. `aether_list_runs`
+with `mine` filters to the socket's member.
 
 | Tier | Tools |
 | --- | --- |
-| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_list_swarms`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_list_workspaces`, `aether_get_workspace`, `aether_list_agents`, `aether_launch_options`, `aether_changes`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
+| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_integration`, `aether_list_workspaces`, `aether_get_workspace`, `aether_launch_options`, `aether_changes`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
 | Reversible | `aether_pause_run`, `aether_resume_run` |
-| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment` |
+| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin` |
 
 A confirmed call blocks until the member approves it in the dashboard, or
 runs at once when the member turned on
@@ -270,13 +271,19 @@ shared account or with one in its fallback order always do: the card's
 `other_member` and `other_owner` name the account's owner. The card names what the call acts on: the run's title
 and owner, the request and the option chosen, a message's attachments and
 anchor, a launch's account when it is a teammate's, its fallback and extra
-repositories, a swarm launch's integrator and agents with their accounts, a
-template's name and parameters, or the swarm's goal, its accountable human
-when that is someone else, and its question, saying so when the question was
-already answered. `aether_launch_run` and `aether_launch_swarm` take an
-optional `reason`, one line from the assistant on why, which the card shows
-as `The assistant's reason: "..."` (cut to 200 characters); the socket takes
-it off before the call reaches the server, and a connector does not offer it. A decline, timeout or closed session fails the call with the reason.
+repositories, a swarm launch's integrator and agents with their accounts, or
+a template's name, agent and parameters; the swarm's goal, its accountable
+human when that is someone else, and its question, saying so when the
+question was already answered; the teammate a run is handed to; the agent and
+account a replacement integrator uses; a delivery's candidate and target
+branch; a pull request's branch, head and title or repository, number, head
+and base; a memory note's workspace, text, who it is for and the note it
+replaces; that archiving a swarm closes its completed runs.
+`aether_launch_run` and `aether_launch_swarm` take an optional `reason`, one
+line from the assistant on why, which the card shows as `The assistant's
+reason: "..."` (cut to 200 characters); the socket takes it off before the
+call reaches the server, and a connector does not offer it. A decline,
+timeout or closed session fails the call with the reason.
 `aether_docs` reads the guides in `docs/`, which the server binary embeds.
 Without `--assistant` the bridge serves the coordination tools above,
 unchanged.
@@ -301,7 +308,7 @@ only the member's runs by default on a connector and every run they can see on
 the assistant. A connector call is cut off after 40 seconds and a launch keeps
 starting past it; an assistant call waits, since its member may still be
 deciding a card. The assistant does not offer `search`, `fetch`,
-`aether_mark_reviewed`, `aether_close_run` or `aether_cancel_swarm`; the connector does not offer the environment, usage,
+`aether_mark_reviewed` or `aether_cancel_swarm`; the connector does not offer the environment, usage,
 docs, view context and workspace tools. Messages and launches dedupe the same
 way on both: an `idempotency_key` repeats a call safely, and a keyless message
 reuses the key of the same message to the same run still being sent or sent in

@@ -297,6 +297,9 @@ func (s *Server) dispatch(ctx context.Context, member domain.MemberID, method st
 			Message: "membership pending admin approval; ask an admin to run: aether member approve " + string(member),
 		}
 	}
+	if perr := connectorScopeRefusal(ctx, method); perr != nil {
+		return nil, perr
+	}
 	result, rpcErr := handler(s, ctx, member, params)
 	if rpcErr != nil {
 		return nil, rpcErr

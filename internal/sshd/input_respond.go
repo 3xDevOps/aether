@@ -39,6 +39,9 @@ func (s *Server) runInputRespond(ctx context.Context, member domain.MemberID, ra
 	if perr != nil {
 		return nil, perr
 	}
+	if perr := s.connectorAnswerRefusal(ctx, run, p.RequestID); perr != nil {
+		return nil, perr
+	}
 	answer := func() error {
 		if err := checkSteer(ctx, s.cfg.Store, member, run); err != nil {
 			return err

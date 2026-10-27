@@ -9,6 +9,11 @@ const (
 	MethodMissionReplaceIntegrator = "mission.replace-integrator"
 	MethodMissionWorkerRelease     = "mission.worker.release"
 
+	// ErrorReasonStaleGeneration is the data.reason of the CodeConflict
+	// mission.replace-integrator returns when the integrator changed since
+	// expected_generation.
+	ErrorReasonStaleGeneration = "stale_generation"
+
 	MethodMissionQuestionAsk    = "mission.question.ask"
 	MethodMissionQuestionAnswer = "mission.question.answer"
 	MethodMissionPlanShow       = "mission.plan.show"
