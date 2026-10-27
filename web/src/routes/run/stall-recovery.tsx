@@ -85,7 +85,9 @@ export function StallCallout({ run, agent, lastPrompt, nav }: {
     const send = () => void attempt('Resend', async () => {
       const result = await api.runInject(run.id, text, crypto.randomUUID(), { lease: sessionLease(useStore, run.id) })
       useStore.getState().upsertRoomMessage(result.message)
-      if (result.message.failure) throw new Error(result.message.failure.message)
+      const delivery = result.receipt === 'not_sent' || result.receipt === 'uncertain' ? result.receipt : result.message.state
+      if (delivery === 'uncertain') throw new Error(result.message.failure?.message ?? 'Delivery is uncertain; check the conversation before resending')
+      if (delivery === 'not_sent') throw new Error(result.message.failure?.message ?? 'The prompt was not sent')
     })
     if (control.canAct) control.withControl(send)
     else send()
