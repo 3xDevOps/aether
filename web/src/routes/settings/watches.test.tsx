@@ -342,6 +342,16 @@ describe('watch notification preferences', () => {
     expect(alert.closest('#quiet-hours')).not.toBeNull()
   })
 
+  it('re-reads the device count when this device subscribes', async () => {
+    const notifyPrefsGet = vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } }))
+    const client = fakeApi({ notifyPrefsGet })
+    const view = render(<WatchNotifySection client={client} subscriptions={0} />)
+    expect(await screen.findByText(/No push device subscribed/)).toBeDefined()
+    notifyPrefsGet.mockResolvedValue({ push: true, destinations: { push_devices: 1 } })
+    view.rerender(<WatchNotifySection client={client} subscriptions={1} />)
+    expect(await screen.findByText(/Push to 1 device ·/)).toBeDefined()
+  })
+
   it('does not claim the server lacks Web Push when push.status fails for another reason', async () => {
     const client = fakeApi({
       notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 2 } })),

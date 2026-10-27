@@ -111,7 +111,18 @@ export function SlackSection({ client }: { client: Api }) {
   )
 }
 
-export function PushSection({ client }: { client: Api }) {
+export function NotificationSections({ client }: { client: Api }) {
+  const [subscriptions, setSubscriptions] = useState(0)
+  return (
+    <>
+      <PushSection client={client} onSubscriptionChange={() => setSubscriptions((n) => n + 1)} />
+      <WatchNotifySection client={client} subscriptions={subscriptions} />
+      <SlackSection client={client} />
+    </>
+  )
+}
+
+export function PushSection({ client, onSubscriptionChange }: { client: Api; onSubscriptionChange?: () => void }) {
   const gateway = useStore((s) => s.capabilities?.gateway)
   const [state, setState] = useState<PushState | null>(null)
   const [busy, setBusy] = useState(false)
@@ -168,7 +179,7 @@ export function PushSection({ client }: { client: Api }) {
             id="settings-push"
             checked={on}
             disabled={busy || (state?.kind !== 'on' && state?.kind !== 'off')}
-            onCheckedChange={(checked) => act(checked === true ? enablePush(client) : disablePush(client))}
+            onCheckedChange={(checked) => act((checked === true ? enablePush(client) : disablePush(client)).finally(() => onSubscriptionChange?.()))}
           />
         )}
       >
@@ -202,7 +213,8 @@ function destinations(prefs: NotifyPrefs, unavailable: string | null): string {
 }
 
 /** Watch notices: whether they push, and the hours they wait. */
-export function WatchNotifySection({ client }: { client: Api }) {
+/** subscriptions changes whenever this device subscribes or unsubscribes, so the device count is re-read. */
+export function WatchNotifySection({ client, subscriptions = 0 }: { client: Api; subscriptions?: number }) {
   const cap = useStore((s) => s.capabilities)
   const [prefs, setPrefs] = useState<NotifyPrefs | null>(null)
   const [quiet, setQuiet] = useState(quietDefault)
@@ -230,7 +242,7 @@ export function WatchNotifySection({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client, attempt, supported])
+  }, [client, attempt, supported, subscriptions])
 
   if (!supported) return null
 

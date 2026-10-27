@@ -6112,7 +6112,7 @@ Categories:
   where notices go now (`Push to 2 devices`, `Push is off`, `No push
   device subscribed, so in-app only`, or `No push (<push.status error>), so
   in-app only` when the server has no Web Push, then the desktop app and
-  in-app), and **Quiet hours**: turning it on saves 22:00 to 07:00 in the browser's time
+  in-app; it is re-read when this device subscribes or unsubscribes above), and **Quiet hours**: turning it on saves 22:00 to 07:00 in the browser's time
   zone; **From**, **Until** and **Time zone** change it, with **Save**; a
   quiet-hours save leaves `push` out so the server keeps its value; a
   refused change shows its error on that row. See
