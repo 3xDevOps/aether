@@ -15,7 +15,7 @@ import { useStore } from '@/store'
 import { useChildRunFacts, useNeedsYouRuns, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import { noAgents } from '@/store/subagents'
-import { deriveRunWorkflow, runFacts, shareTree, workflowLabel, workflowTone, type WorkflowNode } from '@/store/workflow'
+import { deriveRunWorkflow, runFacts, shareTree, type WorkflowNode } from '@/store/workflow'
 
 export const workflowPanelID = 'run-workflow'
 
@@ -38,8 +38,7 @@ export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: bo
   const shown = useRunPresentation(run)
   const checks = usePullRequest(run, false).feedback?.checks
   const { state } = tree
-  const own = state === shown.state
-  const label = own ? stateName(shown) : workflowLabel[state]
+  const label = stateName(shown)
   const running = tree.counts?.running ?? 0
   const busy = state === 'waiting-ci' && checks && checks.length > 0
     ? `${countChecks(checks).passing} of ${checks.length} checks`
@@ -56,7 +55,7 @@ export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: bo
       className="ml-1 shrink-0"
       onClick={(event) => onToggle(event.currentTarget)}
     >
-      <StatusDot tone={own ? toneOf(shown) : workflowTone[state]} pulse={state === 'working'} />
+      <StatusDot tone={toneOf(shown)} pulse={state === 'working'} />
       <span>{label}</span>
       {busy && <span className="hidden @min-[480px]/views:inline">· {busy}</span>}
     </Button>
