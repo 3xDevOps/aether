@@ -50,6 +50,7 @@ var actSummaries = map[string]summarizer{
 	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
 	protocol.MethodMemoryPin:                (*Server).summarizeMemoryPin,
 	protocol.MethodMemoryUnpin:              (*Server).summarizeMemoryUnpin,
+	protocol.MethodAssistantForget:          (*Server).summarizeForget,
 }
 
 type runParams interface {
@@ -359,4 +360,21 @@ func forWhom(scope string) string {
 		return " for you only"
 	}
 	return " for everyone"
+}
+
+// summarizeForget shows the exact text the member would forget.
+func (s *Server) summarizeForget(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.PreferenceIDParams](req.Params)
+	if err != nil || p.ID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": id is required"}
+	}
+	var res protocol.AssistantPreferencesResult
+	if rpcErr := s.call(ctx, protocol.MethodAssistantPreferences, protocol.AssistantPreferencesParams{ID: p.ID}, &res); rpcErr != nil {
+		return rpcErr
+	}
+	if len(res.Preferences) != 1 {
+		return &protocol.Error{Code: protocol.CodeNotFound, Message: "preference " + p.ID + " not found"}
+	}
+	c.Summary = fmt.Sprintf("Forget your preference %s: %q", p.ID, res.Preferences[0].Text)
+	return nil
 }

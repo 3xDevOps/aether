@@ -148,7 +148,8 @@ func autoApprovable(c protocol.AssistantConfirmation) bool {
 }
 
 func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
-	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest, ShareView: st.ShareView}
+	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest, ShareView: st.ShareView,
+		PreferencesEnabled: st.PreferencesEnabled}
 }
 
 // approver passes a confirmed call at once when the member turned
@@ -246,7 +247,7 @@ func (s *Service) autoApprove(ctx, conv context.Context, m *member, c protocol.A
 	if err != nil {
 		return false, fmt.Errorf("read the auto-approval setting: %w", err)
 	}
-	if !st.AutoApprove || !autoApprovable(c) {
+	if !st.AutoApprove || !autoApprovable(c) || s.carriesPreference(ctx, m.id, c) {
 		return false, nil
 	}
 	if err = ctx.Err(); err != nil {
@@ -267,7 +268,7 @@ func (s *Service) Settings(ctx context.Context, id domain.MemberID) (protocol.As
 	if err != nil {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
-	return settingsOf(st), nil
+	return s.withTemporary(ctx, id, settingsOf(st))
 }
 
 // SetSettings applies p and notes a change of auto-approval in the member's
@@ -301,6 +302,12 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		st.Approvals = 0
 		st.NoSuggest = true
 	}
+	if p.PreferencesEnabled != nil {
+		st.PreferencesEnabled = *p.PreferencesEnabled
+	}
+	if err = s.setTemporary(ctx, id, p.Temporary); err != nil {
+		return protocol.AssistantSettings{}, err
+	}
 	if p.AutoApprove != nil {
 		st.AutoApprove = *p.AutoApprove
 		if st.AutoApprove {
@@ -313,7 +320,7 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
 	if was == st.AutoApprove {
-		return settingsOf(st), nil
+		return s.withTemporary(ctx, id, settingsOf(st))
 	}
 	slog.Info("assistant auto-approval changed", "member", id, "auto", st.AutoApprove)
 	severity, title, body := "info", "Auto-approval turned off", "Launching, messaging and stopping runs and saving the environment wait for your approval again."
@@ -323,7 +330,7 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 	if err = s.note(ctx, m, acphost.Notice{Severity: severity, Title: title, Description: body}); err != nil && !errors.Is(err, ErrRemoving) {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %s, but noting it in the transcript failed: %w", strings.ToLower(title), err)
 	}
-	return settingsOf(st), nil
+	return s.withTemporary(ctx, id, settingsOf(st))
 }
 
 func newAction(c protocol.AssistantConfirmation) protocol.AssistantAction {

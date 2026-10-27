@@ -250,6 +250,39 @@ starts it again. **New conversation** asks **Start a new conversation?** and
 discards the transcript and the agent's session. What the assistant already did
 stays done.
 
+## Preferences
+
+A **preference** is a short instruction about how you work that you ask the
+assistant to remember, such as "remember that I prefer table output". Only
+you can read, change or forget your preferences; teammates, admins, your runs
+and connected apps such as ChatGPT cannot reach them.
+
+- **Save one:** say "remember", "from now on" or "always". The assistant
+  saves your own words from that message without a card, and the transcript
+  shows **Saved** or **Updated** with the text. It saves at most 3 per
+  message, at most 500 characters each, and 200 in total. It refuses text you
+  quoted (lines starting with `>`), code blocks, paraphrases and anything
+  gitleaks flags as a secret.
+- **See, edit and forget:** **Settings → Memory** lists them. The assistant
+  can also forget one after you approve its card. Forgetting deletes the
+  preference; the assistant's next prompt tells it not to use the old text.
+- **Turn off:** switch off preferences in **Settings → Memory**
+  (`assistant.settings` with `preferences_enabled: false`). The assistant
+  then neither reads nor saves them. A **temporary** conversation
+  (`assistant.settings` with `temporary: true`) does the same until **New
+  conversation**.
+- **Precedence:** your current message overrides a saved preference. A
+  preference never changes a setting and never chooses an account, a
+  fallback, a merge, a push or auto-approval. With auto-approval on, a launch
+  or message whose text contains a saved preference still shows its card.
+- **Scope:** a preference applies in all workspaces, or in one. It belongs
+  to you on this server and is not synced to other servers.
+
+The assistant never saves anything you did not ask it to, never imports your
+agent's own memory files or past conversations, and never stores pull
+request, CI or run state. What forgetting does not remove is listed in
+[Privacy](privacy.md#assistant-preferences).
+
 ## Limits
 
 - One assistant per member, acting only for that member.

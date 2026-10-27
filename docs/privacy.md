@@ -426,6 +426,37 @@ now** copy the database to `<data-dir>/aether.db.pre-update` and delete
 that copy once the new release has started. A note deleted while the copy
 exists is still in it, and a rollback restores it.
 
+## Assistant preferences
+
+Preferences you ask the assistant to remember are kept in
+`<data-dir>/aether.db` (table `member_preferences`): the text, the
+workspace it applies to, whether it is on, where it came from (the assistant
+or Settings) with the id of the message it was quoted from, and when it was
+created, changed and last read.
+
+Only you can read, change or delete your preferences. Teammates and admins
+cannot through Aether, nor can your runs or connected apps. Server operators
+with access to the database file can read it.
+
+Forgetting a preference deletes its row. SQLite overwrites the deleted text
+(`secure_delete`) and the server checkpoints and truncates the write-ahead
+log. The server also appends the preference's id, never its text, to
+`<data-dir>/preference-tombstones` and, when it starts, deletes again every
+preference recorded there, and every copy older than its last recorded edit,
+so restoring an older database does not bring it back. Forgetting does not
+remove:
+
+- the `aether.db.pre-update` copy an update keeps until the new release
+  starts;
+- backups an operator made of the data directory;
+- runs already launched with the text in their task;
+- the assistant transcript (`<data-dir>/assistant/<member>/items.jsonl`) and
+  the agent's own session until you start a **New conversation**;
+- copies a connected app or an agent made elsewhere.
+
+Removing a member deletes their preferences. Merging two members moves
+them to the member that remains.
+
 ## Permissions
 
 `INTERNET` lets the app reach your server, or in Edge mode the edge.

@@ -27,6 +27,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -65,6 +66,9 @@ type Config struct {
 	Caller  func(domain.MemberID) tools.Caller
 	Bus     events.Bus
 	Follows FollowStore
+	// Preferences are the members' private preferences the assistant reads
+	// and saves.
+	Preferences *preference.Service
 }
 
 type Service struct {
@@ -294,6 +298,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	status := protocol.AssistantStatus{
 		Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(),
 		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove, ShareView: settings.ShareView,
+		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary,
 	}
 	switch {
 	case live != nil:
@@ -458,7 +463,7 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		cancel()
 		return nil, err
 	}
-	srv := &tools.Server{Caller: actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}, Confirm: s.approver(m), Member: string(m.id),
+	srv := &tools.Server{Caller: &preferenceCaller{Caller: actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}, s: s, m: m}, Confirm: s.approver(m), Member: string(m.id),
 		View: func() protocol.AssistantViewContextResult { return s.View(m.id, time.Now()) }}
 	if s.follower != nil {
 		srv.Follow = func(ctx context.Context, run string) { s.follow(ctx, m.id, domain.RunID(run)) }
@@ -809,7 +814,13 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if err != nil {
 		return false, err
 	}
-	started, err := promptLive(ctx, live, text, view)
+	notes, restore := s.preferenceNotes(m.id)
+	defer func() {
+		if !dispatched {
+			restore()
+		}
+	}()
+	started, err := promptLive(ctx, live, text, view, notes)
 	if errors.Is(err, acphost.ErrPromptUnsent) {
 		// The adapter died after ensure saw it alive and before the prompt
 		// left: once its session has ended, start a new one and send there.
@@ -821,7 +832,7 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
 			return false, err
 		}
-		started, err = promptLive(ctx, live, text, view)
+		started, err = promptLive(ctx, live, text, view, notes)
 	}
 	switch {
 	case err == nil && !started:
@@ -840,12 +851,12 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	return true, err
 }
 
-func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext) (bool, error) {
+func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext, notes []acp.ContentBlock) (bool, error) {
 	blocks, err := promptBlocks(text, view, live.acp.Info().PromptEmbedded)
 	if err != nil {
 		return false, err
 	}
-	return live.acp.PromptIdle(ctx, blocks, nil)
+	return live.acp.PromptIdle(ctx, append(blocks, notes...), nil)
 }
 
 func (m *member) begin(key string) (*attempt, bool) {

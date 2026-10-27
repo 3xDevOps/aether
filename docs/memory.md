@@ -11,6 +11,11 @@ search. Nothing leaves your server. Every note records who wrote it and from
 which run and commit, and agents are told to treat a note as data, not as an
 instruction.
 
+Team memory is shared with everyone on the server. To keep something to
+yourself, ask the assistant to remember it as a
+[preference](assistant.md#preferences); preferences are private and live
+in **Settings → Memory**.
+
 ## What a note holds
 
 | Field | Limit |

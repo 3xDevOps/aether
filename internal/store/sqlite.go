@@ -36,6 +36,9 @@ var _ Store = (*DB)(nil)
 // and then writes fails its lock upgrade with SQLITE_BUSY without waiting
 // on busy_timeout whenever another connection writes in between.
 //
+// Deletes overwrite the freed content (secure_delete), so a forgotten
+// preference does not linger in free pages.
+//
 // Commits do not fsync (synchronous NORMAL): the store and the event log
 // share one write lock, so a commit must not hold it across an fsync.
 func Open(path string) (*DB, error) {
@@ -47,7 +50,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("store: create %s: %w", path, closeErr)
 	}
 	dsn := "file:" + url.PathEscape(path) +
-		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
+		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=secure_delete(1)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)

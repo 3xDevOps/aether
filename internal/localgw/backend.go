@@ -345,6 +345,7 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 // run.git.* and run.pr.*.
 var noReplay = map[string]bool{
 	protocol.MethodRunLaunch:      true,
+	protocol.MethodPreferenceAdd:  true,
 	protocol.MethodRunDelete:      true,
 	protocol.MethodRunPause:       true,
 	protocol.MethodRunResume:      true,

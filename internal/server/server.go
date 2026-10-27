@@ -32,6 +32,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/quota"
@@ -288,6 +289,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if s.db, err = store.Open(StorePath(cfg.DataDir)); err != nil {
 		return nil, err
 	}
+	preferences := preference.New(s.db, filepath.Join(cfg.DataDir, "preference-tombstones"))
+	if _, err = preferences.Restore(ctx); err != nil {
+		return nil, err
+	}
 	if s.log, err = events.OpenSQLiteLog(StorePath(cfg.DataDir)); err != nil {
 		return nil, err
 	}
@@ -472,15 +477,17 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	s.assistant = assistant.New(assistant.Config{
-		Dir:     filepath.Join(cfg.DataDir, "assistant"),
-		Store:   s.db,
-		Homes:   homes,
-		Runs:    s.sched,
-		Caller:  func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
-		Bus:     s.bus,
-		Follows: s.db,
+		Dir:         filepath.Join(cfg.DataDir, "assistant"),
+		Store:       s.db,
+		Homes:       homes,
+		Runs:        s.sched,
+		Caller:      func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
+		Bus:         s.bus,
+		Follows:     s.db,
+		Preferences: preferences,
 	})
 	sshCfg.Services.Assistant = s.assistant
+	sshCfg.Services.Preferences = preferences
 	sshCfg.EdgeAccess = cfg.EdgeAccess
 	sshCfg.Services.Usage = cfg.Usage
 	if sshCfg.Services.Usage == nil {
