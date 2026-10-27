@@ -7,6 +7,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 )
@@ -86,7 +87,8 @@ func TestPossibleStallHoldsAgainstItsTurnsLateStartNotice(t *testing.T) {
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
-	e.sched.acp.turnState(entry, false, acphost.TurnState{Working: true})
+	turnAt := e.sched.acp.session(run.ID).State().TurnStartedAt
+	e.sched.acp.turnState(entry, false, acphost.TurnState{Working: true, TurnStartedAt: turnAt})
 	time.Sleep(10 * 20 * time.Millisecond)
 	r, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil {
@@ -94,6 +96,37 @@ func TestPossibleStallHoldsAgainstItsTurnsLateStartNotice(t *testing.T) {
 	}
 	if r.Status != domain.RunNeedsAttention || r.StatusSeq != parked.StatusSeq {
 		t.Fatalf("the turn's late start notice released its possible stall: %+v", r)
+	}
+}
+
+// A new turn is judged from its own start, not by the silence before it,
+// even while its start notice is still queued.
+func TestPossibleStallJudgesANewTurnFromItsStart(t *testing.T) {
+	t.Parallel()
+	const grace = 2 * time.Second
+	e, _ := newACPEnv(t, func(cfg *Config) {
+		cfg.StallThreshold = time.Hour
+		cfg.FirstEventGrace = grace
+	})
+	run := e.launchACP(t, "hello")
+	working := func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID].agentReport.State == agentstatus.Working
+	}
+	waitFor(t, "the first turn to end", func() bool { return !working() })
+	time.Sleep(grace + grace/4)
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptWait}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the second turn to start", working)
+	// Undo what the start notice did, as if it were still queued.
+	e.sched.mu.Lock()
+	e.sched.runs[run.ID].lastWorking = time.Time{}
+	e.sched.mu.Unlock()
+	e.sched.checkStalls(t.Context())
+	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunRunning {
+		t.Fatalf("run = %+v, %v; want running within the new turn's first-event grace", r, err)
 	}
 }
 

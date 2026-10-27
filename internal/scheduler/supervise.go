@@ -617,14 +617,19 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		}
 		liveness, enhanced := s.Liveness(e.runID)
 		reminder := enhanced && s.acp.reminding(e.runID)
-		var turn int64
+		var turnAt time.Time
 		if enhanced {
 			if sess := s.acp.session(e.runID); sess != nil {
-				turn = sess.Log().TurnStartSeq()
+				turnAt = sess.State().TurnStartedAt
 			}
 		}
 		if liveness.Since.After(started) {
 			started = liveness.Since
+		}
+		// A turn starts the clock over, also before its start notice, which
+		// the session queues behind its other callbacks, arrives.
+		if turnAt.After(started) {
+			started = turnAt
 		}
 		activity, observed := started, false
 		if t := s.driver(acp).LastActivity(e.runID); t.After(activity) {
@@ -664,7 +669,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				if showsIdle {
 					err = s.parkIdleReportLocked(ctx, e)
 				} else {
-					e.stallTurn = turn
+					e.stallTurnAt = turnAt
 					err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
 				}
 			case e.status == domain.RunNeedsAttention && e.waitExpires() && idle > waitedFactor*s.cfg.StallThreshold:

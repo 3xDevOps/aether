@@ -317,7 +317,7 @@ type supervised struct {
 	cause         events.RunStatusCause
 	startedAt     time.Time
 	quietFrom     time.Time // a resume or restart; the stall clock starts no earlier
-	stallTurn     int64     // the Enhanced turn the last stall parked, by its start's log seq
+	stallTurnAt   time.Time // when the Enhanced turn the last stall parked started
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
