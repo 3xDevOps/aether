@@ -21,9 +21,9 @@ takes the target's defaults, marked *.
 | Target | Condition | Notified when |
 | --- | --- | --- |
 | `run` | `needs_you`* | The run waits on a person: a permission request, a question, a blocked report, a usage limit, a disconnected agent, a turn cut short, or a live failure nobody has seen. This is the rule the **Needs you** list uses (`domain.Run.NeedsAttention`). A run waiting on workers, on CI, on tools or on nothing, an answered run, and a turn that ended without a report never notify. One notice per distinct need, and each open permission request or question is a need of its own; an unchanged question is never repeated. |
-| `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the run ended completed without a success report, because the agent exited with its results committed or a member or the swarm's integrator closed it as completed; a member accepting or closing a reported success is not announced again, but a success reported after the run went back to work is. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
+| `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the run ended completed without a success report, because the agent exited with its results committed or a member or the swarm's integrator closed it as completed. A retained run that is relaunched and completes again is announced again. A member accepting or closing a reported success is not announced again, but a success reported after the run went back to work is. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
 | `run` | `pr_merged`, `ci` | Every pull request the run recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
-| `mission` | `needs_you`* | The swarm needs its accountable human: the integrator asks a question, or the integrator stopped or failed to launch, with the launch error. Each open question is its own notice, in any order they are answered. Workers never notify on their own; the integrator handles them. |
+| `mission` | `needs_you`* | The swarm needs its accountable human: the integrator asks a question, or the integrator stopped or failed to launch, with the launch error. Each open question is its own notice, in any order they are answered. A completed or cancelled swarm needs nothing: a question it left open is moot, and its delivered push is withdrawn. Workers never notify on their own; the integrator handles them. |
 | `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. A completed swarm can be reopened or still deliver, so its watch stays `active`, and a swarm that completes again is announced again. |
 | `mission` | `delivered` | An integration delivery receipt landed after the watch began: `Delivered to <ref>` when the ref moved, `Proposed <ref>` when a proposal was opened. |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | See [Pull requests and CI](#pull-requests-and-ci). |
@@ -99,7 +99,7 @@ the run, so every surface that shows the run's pull request sees it.
 | --- | --- |
 | `active` | Evaluated on every event about the target. |
 | `paused` | You paused it. Nothing is evaluated or sent until you resume it. |
-| `error` | Evaluation failed; `error` holds the real error. It retries with backoff from 30 seconds, doubling to at most 15 minutes, and returns to `active` once an evaluation succeeds. `access revoked: ...` means you no longer exist, await approval, or cannot see the workspace; it is not retried on a timer, only on the target's next event. |
+| `error` | Evaluation failed, including the check every live watch gets when the server starts; `error` holds the real error. It retries with backoff from 30 seconds, doubling to at most 15 minutes, and returns to `active` once an evaluation succeeds. A startup check whose retry cannot be saved either is retried every tick until one is. A watch created, changed or resumed while the server is still recovering its runs is first checked once recovery ends, so a request not yet restored never reads as a need. `access revoked: ...` means you no longer exist, await approval, or cannot see the workspace; it is not retried on a timer, only on the target's next event. |
 | `done` | The target reached its final state (a run merged, abandoned, failed or stopped; a swarm cancelled) and its last notice is recorded. |
 | `expired` | It passed `expires_at`. Give it a new `expires_at` to watch again. |
 
@@ -122,8 +122,8 @@ the notice is recorded and updated in place as the push resolves:
 | `push` | `disabled` | Push is off in your notification preferences, or Web Push is not configured on this server; `detail` says which. |
 | `push` | `held_quiet_hours` | Quiet hours hold it; `detail` says until when. |
 | `push` | `failed` | No device took it after 5 attempts with backoff; `detail` is the push service's error. Each attempt is counted before it is sent, so a server that stops mid-send retries it rather than sending it more than 5 times. |
-| `push` | `cleared` | Dropped unsent: a `needs_you` push whose need was resolved (answered, dismissed, granted) first, or a push of a watch paused until it expired. |
-| `push` | `withdrawn` | A delivered `needs_you` push whose target then needed nothing more from you. Your devices got a silent replacement reading `No longer needs you` under the same notification, the way a run's own need notification is cleared; it is sent through quiet hours and while you use a dashboard. When a newer need of the same target is open by then, no replacement is sent, since that need's push shares the notification, and `detail` reads `Replaced by a newer need`. A push sent inside a quiet-hours summary (`detail` starts `Sent in one push with other notices`) has no notification of its own and is not withdrawn. If no device takes the replacement after 5 attempts, the row is `failed` and `detail` says the push was delivered and why withdrawing it failed. |
+| `push` | `cleared` | Dropped unsent: a `needs_you` push whose need was resolved (answered, dismissed, granted) first, or that `watch.update` stopped watching for (`detail` reads `You stopped watching for needs you`), or a push of a watch paused until it expired. |
+| `push` | `withdrawn` | A delivered `needs_you` push whose target then needed nothing more from you. Your devices got a silent replacement reading `No longer needs you` under the same notification, the way a run's own need notification is cleared; it is sent through quiet hours and while you use a dashboard. A watch's needs have a notification of their own, apart from the run's, so the run's own clears never replace them. Removing `needs_you` with `watch.update` withdraws its delivered pushes the same way, with `detail` `Withdrawn: You stopped watching for needs you`; every `watch.update` that leaves `needs_you` out does this, so retrying one whose cleanup failed finishes it. When a newer need of the same target is open by then, no replacement is sent, since that need's push shares the notification, and `detail` reads `Replaced by a newer need`. A push sent inside a quiet-hours summary (`detail` starts `Sent in one push with other notices`) has no notification of its own and is not withdrawn. If no device takes the replacement after 5 attempts, the row is `failed` and `detail` says the push was delivered and why withdrawing it failed. |
 
 A paused watch's pending pushes wait until you resume it, and are dropped if
 it expires first. A `needs_you` push about a run the server paused waits
@@ -134,6 +134,13 @@ every other notification.
 
 While you are using a dashboard, pushes wait until you have been away from
 every dashboard for a minute, the same hold run notifications use.
+
+The desktop app shows a native notification for each new notice while it is
+open. A run's `needs_you` notice closes when the need ends, and its `finished`
+notice closes when you see or put off the outcome. A notice whose need or
+outcome ended before it could be shown is not shown. If the app loses its
+connection to the server, it closes these notices, because it can no longer
+tell when they end.
 
 ## Notification preferences
 

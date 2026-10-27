@@ -405,3 +405,15 @@ func (s *Scheduler) refreshCoAuthorsErr(ctx context.Context, run domain.RunID) e
 	}
 	return nil
 }
+
+// taskLine reduces a task to its commit-message form: first line only,
+// truncated to 72 characters.
+func taskLine(task string) string {
+	if i := strings.IndexAny(task, "\r\n"); i >= 0 {
+		task = task[:i]
+	}
+	if r := []rune(task); len(r) > 72 {
+		task = string(r[:72])
+	}
+	return task
+}

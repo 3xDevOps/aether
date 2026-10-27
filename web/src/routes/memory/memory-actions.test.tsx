@@ -5,7 +5,8 @@ import { api, ApiError, type Api } from '@/lib/api'
 import type { MemoryAddResult, MemoryItem, MemorySearchParams } from '@/lib/types'
 import { MemoryRoute } from '@/routes/memory'
 import { undoMs } from '@/routes/memory/use-removal'
-import { alice, fakeApi, memoryItem, workspace } from '@/test/fixtures'
+import { useStore } from '@/store'
+import { alice, bob, fakeApi, memoryItem, workspace } from '@/test/fixtures'
 import { agentNote, footer, liveNotes, myPin, outcome, replaced, rowOf, search, seedMemory as seed, showFilter, titles, workspacePin } from '@/test/memory'
 
 function composer(name = 'Add a note') {
@@ -53,9 +54,9 @@ describe('memory page writes', () => {
     expect(dock.getByRole('radio', { name: 'Decision' }).getAttribute('aria-checked')).toBe('true')
     fireEvent.click(within(dock.getByRole('radiogroup', { name: 'Kind' })).getByRole('radio', { name: 'Gotcha' }))
     fireEvent.change(dock.getByLabelText('Note'), { target: { value: 'Run make lint before pushing.' } })
-    fireEvent.click(dock.getByRole('checkbox', { name: 'Only me' }))
+    fireEvent.click(dock.getByRole('checkbox', { name: "Only for my runs' briefs" }))
     fireEvent.click(dock.getByRole('checkbox', { name: 'Pin' }))
-    expect(dock.getByText('Your new runs get its title in the brief.')).toBeDefined()
+    expect(dock.getByText('Your new runs get its title in the brief. Everyone in the workspace can still read it.')).toBeDefined()
     const reads = memorySearch.mock.calls.length
     fireEvent.click(dock.getByRole('button', { name: 'Add note' }))
 
@@ -374,7 +375,7 @@ describe('memory page writes', () => {
     expect(dock.getByRole('radio', { name: 'Gotcha' }).getAttribute('aria-checked')).toBe('true')
     expect((dock.getByLabelText('Note') as HTMLTextAreaElement).value).toBe(note.body)
     expect((dock.getByLabelText('Files') as HTMLTextAreaElement).value).toBe('internal/scheduler/reattach.go\ninternal/scheduler/lease.go')
-    expect(dock.getByRole('checkbox', { name: 'Only me' }).getAttribute('aria-checked')).toBe('true')
+    expect(dock.getByRole('checkbox', { name: "Only for my runs' briefs" }).getAttribute('aria-checked')).toBe('true')
 
     fireEvent.change(dock.getByLabelText('Note'), { target: { value: text } })
     fireEvent.change(dock.getByLabelText('Files'), { target: { value: ' internal/scheduler/reattach.go \n\n internal/scheduler/sweep.go\n' } })
@@ -425,7 +426,7 @@ describe('memory page writes', () => {
     const dock = composer(`Replace ${pinned.id}`)
     expect(dock.getByRole('radio', { name: 'Decision' }).getAttribute('aria-checked')).toBe('true')
     expect(dock.queryByRole('checkbox', { name: 'Pin' })).toBeNull()
-    const onlyMe = dock.getByRole('checkbox', { name: 'Only me' }) as HTMLButtonElement
+    const onlyMe = dock.getByRole('checkbox', { name: "Only for my runs' briefs" }) as HTMLButtonElement
     expect(onlyMe.getAttribute('aria-checked')).toBe('true')
     expect(onlyMe.disabled).toBe(true)
     expect(dock.getByText("The pin moves to the replacement, at the note's scope.")).toBeDefined()
@@ -437,6 +438,46 @@ describe('memory page writes', () => {
     expect((await dock.findByRole('alert')).textContent).toBe(refusal)
     expect(memoryAdd).toHaveBeenCalledWith({ workspace_id: workspace.id, kind: 'decision', text: pinned.body, files: [long], supersedes: pinned.id, scope: 'member' })
     expect((dock.getByLabelText('Files') as HTMLTextAreaElement).value).toBe(long)
+  })
+
+  it("offers a collaborator no action on another member's member note, and every action on a workspace note", async () => {
+    seed(bob)
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [myPin, workspacePin] })), memoryShow: vi.fn(async () => ({ item: myPin })) })} />)
+    const theirs = within(rowOf((await screen.findByRole('button', { name: myPin.title })).textContent!))
+    expect(theirs.queryByRole('button', { name: /^(Pin|Unpin|Replace|Remove)/ })).toBeNull()
+    const shared = within(rowOf(workspacePin.title))
+    for (const name of ['Unpin', 'Replace', 'Remove']) expect(shared.getByRole('button', { name })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: myPin.title }))
+    const dialog = await screen.findByRole('dialog', { name: myPin.title })
+    expect(await within(dialog).findByText(`Preference · Member note · ${myPin.id}`)).toBeDefined()
+    expect(within(dialog).queryByRole('button', { name: /^(Pin|Unpin|Replace|Remove)/ })).toBeNull()
+  })
+
+  it("offers a collaborator every action on a member note written by the account merged into theirs", async () => {
+    seed(bob)
+    useStore.setState({ mergedInto: { mem_bob_old: bob.id } })
+    const merged = memoryItem({ id: 'note-merged0001', scope: 'member', author_id: 'mem_bob_old', author_name: 'Bob (laptop)' })
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [merged] })) })} />)
+    const row = within(rowOf((await screen.findByRole('button', { name: merged.title })).textContent!))
+    for (const name of ['Pin for your new runs', 'Replace', 'Remove']) expect(row.getByRole('button', { name })).toBeDefined()
+  })
+
+  it("names the pinner when an admin replaces another member's pinned member note", async () => {
+    seed()
+    const bobs = { ...myPin, pinned_by: bob.id, pinned_by_name: 'Bob', author_id: bob.id, author_name: 'Bob' }
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [bobs] })) })} />)
+    fireEvent.click(within(await screen.findByRole('article')).getByRole('button', { name: 'Replace' }))
+    expect(composer(`Replace ${bobs.id}`).getByRole('checkbox', { name: "Only for Bob's runs' briefs" }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it("offers a collaborator Pin but not Pin for me only on a teammate's workspace note", async () => {
+    seed(bob)
+    const theirs = memoryItem({ id: 'note-shared0001', author_id: alice.id, author_name: 'Alice' })
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [theirs] })), memoryShow: vi.fn(async () => ({ item: theirs })) })} />)
+    fireEvent.click(await screen.findByRole('button', { name: theirs.title }))
+    const dialog = await screen.findByRole('dialog', { name: theirs.title })
+    expect(await within(dialog).findByRole('button', { name: 'Pin' })).toBeDefined()
+    expect(within(dialog).queryByRole('button', { name: 'Pin for me only' })).toBeNull()
   })
 
   it('offers neither pin nor replace on a superseded note', async () => {

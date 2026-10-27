@@ -390,7 +390,7 @@ func TestInteractiveReportPublishesItsOutcomeNote(t *testing.T) {
 	if err != nil || len(notes) != 1 {
 		t.Fatalf("outcome notes = %v, %v", notes, err)
 	}
-	if _, err = h.db.PinMemory(ctx, h.workspace, notes[0].ID, owner.MemberID, ""); err != nil {
+	if _, err = h.db.PinMemory(ctx, h.workspace, notes[0].ID, owner.MemberID, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	report(t, h, owner.ID, protocol.CoordOutcomeSuccess, "Rewritten summary", "task-2")

@@ -43,7 +43,7 @@ What each agent can do:
 
 - **Standard status** is what a Standard run reports of its turns
   ([Status reporting](#status-reporting)). With none, a run that goes quiet for
-  `--stall-threshold` parks as **Needs you** with a reason starting `stalled:`
+  `--stall-threshold` parks as **Waiting** with a reason starting `stalled:`
   ([failure-handling.md](failure-handling.md)).
 - **Standard mail** is how a Standard run learns that mail, a message from a
   person or another run, is waiting in its inbox: hooks at turn boundaries,

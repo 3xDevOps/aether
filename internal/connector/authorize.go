@@ -43,6 +43,11 @@ const (
 // trusts: ChatGPT's and Claude's.
 var clientHosts = []string{"chatgpt.com", "claude.ai"}
 
+// loopbackClients are the client ids that may return to a loopback
+// redirect URI: Claude Code's, which listens on a port it picks on
+// localhost.
+var loopbackClients = []string{"https://claude.ai/oauth/claude-code-client-metadata"}
+
 // clientDoc is what the server reads of a client_id metadata document.
 type clientDoc struct {
 	ClientID     string   `json:"client_id"`
@@ -155,8 +160,18 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 		return
 	}
 	ru, err := url.Parse(redirect)
-	if err != nil || ru.Scheme != "https" || ru.Host != u.Host || !slices.Contains(doc.RedirectURIs, redirect) {
-		h.renderError(w, fmt.Sprintf("The redirect_uri %q is not an https URL on %s that %s lists.", redirect, u.Host, clientID))
+	listed := redirect
+	loopback := err == nil && ru.Scheme == "http" && slices.Contains(h.loopbackClients, clientID) &&
+		(ru.Hostname() == "localhost" || ru.Hostname() == "127.0.0.1")
+	if loopback {
+		// A loopback redirect's port is ignored (RFC 8252 section 7.3).
+		portless := *ru
+		portless.Host = ru.Hostname()
+		listed = portless.String()
+	}
+	if err != nil || ru.User != nil || ru.Fragment != "" || (!loopback && (ru.Scheme != "https" || ru.Host != u.Host)) ||
+		!slices.Contains(doc.RedirectURIs, listed) {
+		h.renderError(w, fmt.Sprintf("The redirect_uri %q is not an https URL on %s, or for Claude Code a loopback URL, that %s lists.", redirect, u.Host, clientID))
 		return
 	}
 	req := authRequest{ClientID: clientID, ClientName: doc.ClientName, RedirectURI: redirect, State: q.Get("state"),

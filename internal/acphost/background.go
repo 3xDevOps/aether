@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
@@ -83,8 +84,9 @@ type sdkMessage struct {
 }
 
 type updateHead struct {
-	Kind string `json:"sessionUpdate"`
-	Meta struct {
+	Kind   string `json:"sessionUpdate"`
+	Status string `json:"status"`
+	Meta   struct {
 		Origin *struct {
 			Kind string `json:"kind"`
 		} `json:"_claude/origin"`
@@ -108,6 +110,17 @@ func (h updateHead) opensTurn() bool {
 	return false
 }
 
+// progress reports whether an update is the agent doing work, as opposed to
+// echoing the prompt or announcing modes, commands, options or usage.
+func (h updateHead) progress() bool {
+	switch h.Kind {
+	case "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan",
+		"subagent_spawned", "subagent_state_update", "subagent_update", "compaction_update", "compaction_summary_chunk":
+		return true
+	}
+	return false
+}
+
 func (s *Session) sdkMessage(raw json.RawMessage) {
 	var m sdkMessage
 	if json.Unmarshal(raw, &m) != nil || m.Type != "system" {
@@ -115,6 +128,10 @@ func (s *Session) sdkMessage(raw json.RawMessage) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.HasPrefix(m.Subtype, "task_") {
+		// A background task reports its tool use, not the work between.
+		s.progressAt = time.Now()
+	}
 	held := s.heldLocked()
 	switch m.Subtype {
 	case "task_notification":
@@ -324,6 +341,7 @@ func (s *Session) openAutonomousLocked() {
 	s.proj.closeText()
 	s.turn++
 	s.autonomous, s.resulted, s.origin, s.holdIdle = true, false, "", false
+	s.turnAt = time.Now()
 	s.lastUpdate, s.owedUntil = time.Now(), time.Time{}
 	s.emitLocked(Item{Kind: KindTurnStart, Autonomous: true})
 	s.relogTasksLocked()
@@ -397,7 +415,7 @@ func (s *Session) quietCheck() {
 func (s *Session) endAutonomousLocked(stop string) {
 	s.proj.endTurn()
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: stop, Autonomous: true, Origin: s.origin})
-	s.autonomous, s.resulted, s.origin = false, false, ""
+	s.autonomous, s.resulted, s.origin, s.compacting = false, false, "", false
 	// A prompt that stopped short before its background wait keeps its
 	// reason through the follow-ups.
 	if s.idleStop == "" || s.idleStop == "end_turn" {

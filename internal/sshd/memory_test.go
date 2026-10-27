@@ -24,28 +24,8 @@ import (
 func TestMemoryMembersCurateAndViewersRead(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "events.db"))
-	if err != nil {
-		t.Fatalf("event log: %v", err)
-	}
-	t.Cleanup(func() { _ = log.Close() })
-	bus, err := events.NewInProc(ctx, log)
-	if err != nil {
-		t.Fatalf("bus: %v", err)
-	}
-	t.Cleanup(func() { _ = bus.Close() })
-	var svc *memory.Service
-	e := newTestEnv(t, func(c *Config) {
-		c.Bus = bus
-		db, ok := c.Store.(*store.DB)
-		if !ok {
-			t.Fatalf("store is %T, want *store.DB", c.Store)
-		}
-		if svc, err = memory.New(memory.Config{Store: db, Bus: bus, Log: log}); err != nil {
-			t.Fatalf("memory: %v", err)
-		}
-		c.Services.Memory = svc
-	})
+	e, svc, log := newMemoryEnv(t)
+	var err error
 	ws := string(e.ws.ID)
 	danaKey, dana := addMember(t, e, "Dana", domain.RoleCollaborator, false)
 	vicKey, _ := addMember(t, e, "Vic", domain.RoleViewer, false)
@@ -166,6 +146,207 @@ func TestMemoryMembersCurateAndViewersRead(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("memory.change events = %+v, want %+v", got, want)
+	}
+}
+
+// newMemoryEnv serves team memory over a test server whose own member is an
+// admin.
+func newMemoryEnv(t *testing.T) (*testEnv, *memory.Service, *events.SQLiteLog) {
+	t.Helper()
+	ctx := context.Background()
+	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatalf("event log: %v", err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	bus, err := events.NewInProc(ctx, log)
+	if err != nil {
+		t.Fatalf("bus: %v", err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	var svc *memory.Service
+	e := newTestEnv(t, func(c *Config) {
+		c.Bus = bus
+		db, ok := c.Store.(*store.DB)
+		if !ok {
+			t.Fatalf("store is %T, want *store.DB", c.Store)
+		}
+		if svc, err = memory.New(memory.Config{Store: db, Bus: bus, Log: log}); err != nil {
+			t.Fatalf("memory: %v", err)
+		}
+		c.Services.Memory = svc
+	})
+	return e, svc, log
+}
+
+// TestMemoryMemberNotesStayTheirOwners checks that every member reads a
+// member note but only its owner or an admin reads the owner's brief or
+// pins, unpins, removes or replaces the note, from a member or an agent,
+// while workspace notes stay everyone's to change and undo but not to take
+// for oneself.
+func TestMemoryMemberNotesStayTheirOwners(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, svc, _ := newMemoryEnv(t)
+	ws := string(e.ws.ID)
+	aliceKey, alice := addMember(t, e, "Alice", domain.RoleCollaborator, false)
+	bobKey, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	vicKey, _ := addMember(t, e, "Vic", domain.RoleViewer, false)
+	aliceC, bobC, vicC, adminC := controlAs(t, e, aliceKey), controlAs(t, e, bobKey), controlAs(t, e, vicKey), controlClient(t, e)
+	denied := func(who string, err error, want string) {
+		t.Helper()
+		var pe *protocol.Error
+		if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied || pe.Message != want {
+			t.Fatalf("%s = %v, want CodeDenied %q", who, err, want)
+		}
+	}
+
+	var mine protocol.MemoryAddResult
+	if err := aliceC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Scope: protocol.MemoryScopeMember, Text: "Prefer table output.", Pin: true}, &mine); err != nil {
+		t.Fatalf("alice memory.add --me --pin: %v", err)
+	}
+	note := mine.Item.ID
+	line := "- " + note + " preference (yours): Prefer table output.\n"
+
+	const briefDenied = "memory.brief: another member's brief: permission denied: workspace administration requires the admin role"
+	others := protocol.MemoryBriefParams{WorkspaceID: ws, MemberID: string(alice.ID)}
+	denied("bob memory.brief --member alice", bobC.Call(protocol.MethodMemoryBrief, others, nil), briefDenied)
+	denied("viewer memory.brief --member alice", vicC.Call(protocol.MethodMemoryBrief, others, nil), briefDenied)
+	for who, c := range map[string]*protocol.Client{"alice": aliceC, "admin": adminC} {
+		var brief protocol.MemoryBriefResult
+		if err := c.Call(protocol.MethodMemoryBrief, others, &brief); err != nil || !strings.Contains(brief.Text, line) {
+			t.Fatalf("%s memory.brief --member alice = %q, %v; want %q", who, brief.Text, err, line)
+		}
+	}
+
+	var found protocol.MemoryShowResult
+	if err := bobC.Call(protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: ws, ID: note}, &found); err != nil || found.Item.Body != "Prefer table output." {
+		t.Fatalf("bob memory.show of alice's member note = %+v, %v; want it readable", found.Item, err)
+	}
+	rule := func(method, verb string) string {
+		return method + ": permission denied: " + note + " is a member note of Alice; only they or an admin may " + verb + " it"
+	}
+	denied("bob memory.pin", bobC.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws, ID: note, Scope: protocol.MemoryScopeWorkspace}, nil),
+		rule(protocol.MethodMemoryPin, "pin"))
+	denied("bob memory.unpin", bobC.Call(protocol.MethodMemoryUnpin, protocol.MemoryUnpinParams{WorkspaceID: ws, ID: note}, nil),
+		rule(protocol.MethodMemoryUnpin, "unpin"))
+	denied("bob memory.rm", bobC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, ID: note}, nil),
+		rule(protocol.MethodMemoryRm, "remove"))
+	denied("bob memory.add --supersedes", bobC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws,
+		Kind: protocol.MemoryKindPreference, Text: "Prefer JSON output.", Supersedes: note}, nil), rule(protocol.MethodMemoryAdd, "replace"))
+	if err := bobC.Call(protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: ws, ID: note}, &found); err != nil ||
+		found.Item.PinnedBy != string(alice.ID) || found.Item.Scope != protocol.MemoryScopeMember || found.Item.SupersededBy != "" {
+		t.Fatalf("alice's note after bob's refused changes = %+v, %v; want it live and pinned for alice", found.Item, err)
+	}
+
+	var replaced protocol.MemoryAddResult
+	if err := aliceC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Scope: protocol.MemoryScopeMember, Text: "Prefer table output with headers.", Supersedes: note}, &replaced); err != nil {
+		t.Fatalf("alice memory.add --supersedes: %v", err)
+	}
+	if replaced.Item.PinnedBy != string(alice.ID) || replaced.Item.Scope != protocol.MemoryScopeMember {
+		t.Fatalf("alice's replacement = %+v, want it pinned for alice", replaced.Item)
+	}
+	note = replaced.Item.ID
+	var unpinned protocol.MemoryUnpinResult
+	if err := adminC.Call(protocol.MethodMemoryUnpin, protocol.MemoryUnpinParams{WorkspaceID: ws, ID: note}, &unpinned); err != nil || unpinned.Item.PinnedAt != nil {
+		t.Fatalf("admin memory.unpin = %+v, %v", unpinned.Item, err)
+	}
+	denied("bob memory.pin of alice's unpinned note", bobC.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws, ID: note}, nil),
+		rule(protocol.MethodMemoryPin, "pin"))
+	if err := aliceC.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws, ID: note}, nil); err != nil {
+		t.Fatalf("alice memory.pin: %v", err)
+	}
+	for _, scope := range []string{"", protocol.MemoryScopeMember} {
+		denied("admin memory.pin --me of alice's member note", adminC.Call(protocol.MethodMemoryPin,
+			protocol.MemoryPinParams{WorkspaceID: ws, ID: note, Scope: scope}, nil), rule(protocol.MethodMemoryPin, "pin"))
+	}
+	if err := adminC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, ID: note}, nil); err != nil {
+		t.Fatalf("admin memory.rm: %v", err)
+	}
+
+	aliceRun := &domain.Run{WorkspaceID: e.ws.ID, MemberID: alice.ID, Task: "tables", Harness: "claude",
+		Mode: domain.LaunchTUI, Status: domain.RunRunning, Branch: "aether/run-a-tables"}
+	bobRun := &domain.Run{WorkspaceID: e.ws.ID, MemberID: bob.ID, Task: "json", Harness: "codex",
+		Mode: domain.LaunchTUI, Status: domain.RunRunning, Branch: "aether/run-b-json"}
+	for _, r := range []*domain.Run{aliceRun, bobRun} {
+		if err := e.store.CreateRun(ctx, r); err != nil {
+			t.Fatalf("create run: %v", err)
+		}
+	}
+	agentAdd := func(run domain.RunID, p protocol.MemoryAddParams) (protocol.MemoryAddResult, error) {
+		raw, _ := json.Marshal(p)
+		out, err := svc.HandleAgent(ctx, run, protocol.MethodMemoryAdd, raw)
+		if err != nil {
+			return protocol.MemoryAddResult{}, err
+		}
+		return out.(protocol.MemoryAddResult), nil
+	}
+	agents, err := agentAdd(aliceRun.ID, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Scope: protocol.MemoryScopeMember, Text: "The table writer pads to 80 columns."})
+	if err != nil {
+		t.Fatalf("alice's agent memory.add --me: %v", err)
+	}
+	_, err = agentAdd(bobRun.ID, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "The table writer pads to 120 columns.", Supersedes: agents.Item.ID})
+	denied("bob's agent memory.add --supersedes", err, "memory.add: "+agents.Item.ID+" is a member note of Alice from run "+string(aliceRun.ID)+
+		"; ask a member to replace it (aether memory add --supersedes "+agents.Item.ID+")")
+	denied("bob memory.rm --run alice's run", bobC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, RunID: string(aliceRun.ID)}, nil),
+		"memory.rm: permission denied: "+agents.Item.ID+" is a member note of Alice; only they or an admin may remove it")
+	if _, err = agentAdd(aliceRun.ID, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Scope: protocol.MemoryScopeMember,
+		Text: "The table writer pads to 100 columns.", Supersedes: agents.Item.ID}); err != nil {
+		t.Fatalf("alice's agent replacing its own member note: %v", err)
+	}
+
+	var shared, edited protocol.MemoryAddResult
+	if err = aliceC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindConvention,
+		Text: "Use bun in web/.", Pin: true}, &shared); err != nil {
+		t.Fatalf("alice memory.add --pin: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindConvention,
+		Text: "Use bun in web/ and docs/.", Supersedes: shared.Item.ID}, &edited); err != nil {
+		t.Fatalf("bob replacing alice's workspace note: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, ID: edited.Item.ID}, nil); err != nil {
+		t.Fatalf("bob removing his replacement: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: ws, ID: shared.Item.ID}, &found); err != nil ||
+		found.Item.SupersededBy != "" || found.Item.InvalidAt != nil {
+		t.Fatalf("alice's workspace note after bob removed its replacement = %+v, %v; want it live again", found.Item, err)
+	}
+	denied("bob memory.pin --me of alice's workspace note", bobC.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws,
+		ID: shared.Item.ID, Scope: protocol.MemoryScopeMember}, nil),
+		"memory.pin: permission denied: "+shared.Item.ID+" is a workspace note by Alice; only they or an admin may pin it for themselves")
+	if err = bobC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, ID: shared.Item.ID}, nil); err != nil {
+		t.Fatalf("bob removing alice's workspace note: %v", err)
+	}
+
+	var hers, his protocol.MemoryAddResult
+	if err = aliceC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Scope: protocol.MemoryScopeMember, Text: "Prefer short commit subjects."}, &hers); err != nil {
+		t.Fatalf("alice memory.add --me: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Scope: protocol.MemoryScopeMember, Text: "Prefer long commit subjects.", Pin: true}, &his); err != nil {
+		t.Fatalf("bob memory.add --me --pin: %v", err)
+	}
+	denied("bob moving his pin onto alice's note by its text", bobC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws,
+		Kind: protocol.MemoryKindPreference, Scope: protocol.MemoryScopeMember, Text: "Prefer short commit subjects.", Supersedes: his.Item.ID}, nil),
+		"memory.add: permission denied: "+hers.Item.ID+" is a member note of Alice; only they or an admin may replace it")
+
+	var bobs protocol.MemoryAddResult
+	if err = bobC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Text: "Prefer squash merges."}, &bobs); err != nil {
+		t.Fatalf("bob memory.add: %v", err)
+	}
+	if err = aliceC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Scope: protocol.MemoryScopeMember, Text: "Prefer squash merges.", Supersedes: hers.Item.ID}, nil); err != nil {
+		t.Fatalf("alice replacing her note with bob's text: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, ID: bobs.Item.ID}, nil); err != nil {
+		t.Fatalf("bob removing his note: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: ws, ID: hers.Item.ID}, &found); err != nil || found.Item.InvalidAt == nil {
+		t.Fatalf("alice's note after bob removed its replacement = %+v, %v; want it still replaced", found.Item, err)
 	}
 }
 

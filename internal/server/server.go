@@ -155,7 +155,9 @@ type Config struct {
 	//
 	// StallThreshold is how long a run may go with no agent output and no
 	// file changes before it parks at needs-attention; PollInterval is how
-	// often that is checked. CheckoutTTL is how long a finished run's
+	// often that is checked. FirstEventGrace and StreamQuietGrace shorten
+	// StallThreshold for an Enhanced turn with no first update yet, or quiet
+	// with no tool running. CheckoutTTL is how long a finished run's
 	// checkout is kept before the GC reclaims it (negative disables GC).
 	// RunContainerTTL retains exact containers after TUI Close, an agent-finished
 	// TUI run, or mission-run completion (negative disables retention).
@@ -163,6 +165,8 @@ type Config struct {
 	// MinFreeDiskBytes overrides the automatic data/runtime filesystem
 	// reserve. Negative disables disk admission, not host memory checks.
 	StallThreshold   time.Duration
+	FirstEventGrace  time.Duration
+	StreamQuietGrace time.Duration
 	PollInterval     time.Duration
 	CheckoutTTL      time.Duration
 	RunContainerTTL  time.Duration
@@ -403,6 +407,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DefaultStandardImage: DefaultStandardImage,
 		Harnesses:            cfg.Harnesses,
 		StallThreshold:       cfg.StallThreshold,
+		FirstEventGrace:      cfg.FirstEventGrace,
+		StreamQuietGrace:     cfg.StreamQuietGrace,
 		PollInterval:         cfg.PollInterval,
 		CheckoutTTL:          cfg.CheckoutTTL,
 		RunContainerTTL:      cfg.RunContainerTTL,
