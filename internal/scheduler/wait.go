@@ -159,24 +159,34 @@ func fresh(c WaitCondition, now time.Time) bool {
 		interval > 0 && now.Sub(c.SourceCheckedAt) <= 2*interval
 }
 
-// conditionsUnread strands a wait whose condition store could not be read
+// conditionsUnread strands a wait whose condition store failed every read
 // for unreadBound since the wait was reported.
 var conditionsUnread = "cannot read this run's wait conditions for over " + strings.TrimSuffix(unreadBound.String(), "0m0s") + ", so the agent will not be woken"
 
 // runWaitLocked judges the reported wait of a run that is not paused. A
 // condition store that cannot be read leaves the wait unknown, never
-// unverified, so it does not go stale, until unreadBound after the wait was
-// reported, when it is stranded like an unread source. Caller holds s.mu.
+// unverified, so it does not go stale. Once its reads have failed for
+// unreadBound since the later of the first failure and the wait's report,
+// the wait is stranded like an unread source. Caller holds s.mu.
 func (s *Scheduler) runWaitLocked(ctx context.Context, entry *supervised) (domain.RunWait, string) {
 	if s.cfg.WaitConditions == nil {
 		return domain.RunWait{Kind: domain.WaitUnverified}, ""
 	}
 	now := time.Now().UTC()
 	conditions, err := s.cfg.WaitConditions.RunWaits(ctx, entry.runID)
-	if err != nil {
+	if err == nil {
+		entry.waitsFailingSince = time.Time{}
+	} else {
+		if entry.waitsFailingSince.IsZero() {
+			entry.waitsFailingSince = now
+		}
 		wait := domain.RunWait{Kind: domain.WaitSourceUnknown, Detail: "conditions unreadable",
 			Error: fmt.Sprintf("scheduler: read the run's wait conditions: %v", err)}
-		if !entry.idleReportAt.IsZero() && now.Sub(entry.idleReportAt) > unreadBound {
+		since := entry.waitsFailingSince
+		if entry.idleReportAt.After(since) {
+			since = entry.idleReportAt
+		}
+		if now.Sub(since) > unreadBound {
 			wait.Kind, wait.Detail = domain.WaitFault, conditionsUnread
 			return wait, conditionsUnread
 		}

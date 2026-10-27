@@ -315,9 +315,10 @@ func TestALiveSwarmKeepsAStrandedWaitQuiet(t *testing.T) {
 	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
 }
 
-// A condition store that cannot be read strands the wait an hour after it
-// was reported, like a source that cannot be read, with the store's error.
-func TestAnUnreadableConditionStoreBreaksTheWaitAfterAnHour(t *testing.T) {
+// One failed read of the condition store long after the wait was reported
+// does not break it: the hour runs from the first failure of a streak, and
+// a read that succeeds starts it over.
+func TestAConditionStoreBreaksTheWaitOnlyAfterAnHourOfFailures(t *testing.T) {
 	t.Parallel()
 	waits := &fakeWaits{}
 	e := newReportingEnv(t, func(cfg *Config) {
@@ -327,14 +328,47 @@ func TestAnUnreadableConditionStoreBreaksTheWaitAfterAnHour(t *testing.T) {
 	ctx := t.Context()
 	run, _ := e.launchReporting(t)
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
-	waits.set(errors.New("database is locked"))
-	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on #582", time.Now().Add(-61*time.Minute)); err != nil {
+	waits.set(nil, checking(time.Now()))
+	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on #582", time.Now().Add(-2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
+	// age moves the start of the failing streak back by d.
+	age := func(d time.Duration) {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		entry := e.sched.runs[run.ID]
+		entry.waitsFailingSince = entry.waitsFailingSince.Add(-d)
+	}
+	judged := func(what string, kind domain.WaitEvidence, broken bool) {
+		t.Helper()
+		e.sched.refreshActivities(ctx)
+		if broken {
+			waitFor(t, what, func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
+			return
+		}
+		if got := e.sched.Wait(run.ID, domain.ActivityWaitingCI); got == nil || got.Kind != kind {
+			t.Fatalf("%s: Wait = %+v, want %s and quiet", what, got, kind)
+		}
+	}
+	judged("a checked wait", domain.WaitCondition, false)
+
+	waits.set(errors.New("database is locked"))
+	judged("the first failed read, two hours after the report", domain.WaitSourceUnknown, false)
+	age(59 * time.Minute)
+	judged("59 minutes of failures", domain.WaitSourceUnknown, false)
+
+	waits.set(nil, checking(time.Now()))
+	judged("a read that succeeds", domain.WaitCondition, false)
+	waits.set(errors.New("database is locked"))
+	judged("a new failure", domain.WaitSourceUnknown, false)
+	age(2 * time.Minute)
+	judged("two minutes into the new streak", domain.WaitSourceUnknown, false)
+
+	age(time.Hour)
+	judged("an hour of failures", domain.WaitFault, true)
 	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if want := waitBrokenReasonPrefix + "cannot read this run's wait conditions for over 1h, so the agent will not be woken"; row.Reason != want {
 		t.Fatalf("reason = %q, want %q", row.Reason, want)
