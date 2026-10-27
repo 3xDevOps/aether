@@ -325,6 +325,20 @@ test('a watched need and the same run.status need show once', async () => {
   assert.equal(shown.length, 1)
 })
 
+test('a live failure and its watched need show once, in either order', async () => {
+  const first = lead('r17')
+  watchWith('wat-7', { kind: 'run', run_id: 'r17' }, { condition: 'needs_you', title: 'run r17 failed', link: '/?run=r17' })
+  await status(first, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
+  await watchChanged({ watch_id: 'wat-7', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 1)
+
+  const second = lead('r18')
+  watchWith('wat-8', { kind: 'run', run_id: 'r18' }, { condition: 'needs_you', title: 'run r18 failed', link: '/?run=r18' })
+  await watchChanged({ watch_id: 'wat-8', member_id: 'me', notification_id: 'not-1' })
+  await status(second, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
+  assert.equal(shown.length, 2)
+})
+
 test('a success ready for review and its watched finish show once, in either order', async () => {
   const first = lead('r13')
   watchWith('wat-3', { kind: 'run', run_id: 'r13' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r13' })

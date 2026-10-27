@@ -305,8 +305,8 @@ function announce(runId, run) {
   }
   if (announced.get(runId) === key) return
   announced.set(runId, key)
-  // A success ready for review or an unseen failure is the watch's finished notice too.
-  if (attention && recentlyShown(run.review === 'ready' || run.state === 'failed' ? `${runId} done` : runId)) return
+  // A success ready for review is the watch's finished notice too; a live failure is its needs_you notice.
+  if (attention && recentlyShown(run.review === 'ready' ? `${runId} done` : runId)) return
   if (!Notification.isSupported()) return
   const notification = new Notification({
     title: titleOf(run),
