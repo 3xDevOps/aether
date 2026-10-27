@@ -3,12 +3,16 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/watch"
@@ -17,7 +21,8 @@ import (
 // Run waits: the conditions a run registers with coord.report until are
 // watches the watch service svc_watch.go builds evaluates, and their wakes
 // go to the run's inbox through the coordination service svc_coord.go
-// builds. Both are built first.
+// builds. Both are built first. The scheduler judges a reported wait by
+// the same conditions, read again on every run.wait.changed.
 func init() {
 	registerService("watch-run", func(d Deps) (Service, error) {
 		watches, ok := d.SSH.Services.Watches.(*watch.Service)
@@ -30,8 +35,92 @@ func init() {
 			}
 		}
 		d.Runs.UseRunWaits(watches)
-		return nil, nil
+		if d.Config.WaitConditions != nil {
+			return nil, nil
+		}
+		d.Runs.UseWaitConditions(waitConditions{watches})
+		return &waitRefresher{bus: d.Bus, runs: d.Runs}, nil
 	})
+}
+
+// waitConditions is the scheduler's view of a run's wait conditions.
+type waitConditions struct{ watches *watch.Service }
+
+func (w waitConditions) RunWaits(ctx context.Context, run domain.RunID) ([]scheduler.WaitCondition, error) {
+	waits, err := w.watches.RunWaits(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]scheduler.WaitCondition, 0, len(waits))
+	for _, c := range waits {
+		sc := scheduler.WaitCondition{
+			Spec: c.Spec, State: c.State, Summary: c.Summary, ConsecutiveFailures: c.ConsecutiveFailures,
+			LastError: c.LastError, LastDeliveryError: c.LastDeliveryError,
+		}
+		for _, f := range []struct {
+			to   *time.Time
+			from string
+		}{
+			{&sc.CreatedAt, c.CreatedAt}, {&sc.LastCheckedAt, c.LastCheckedAt}, {&sc.SourceCheckedAt, c.SourceCheckedAt},
+			{&sc.NextCheckAt, c.NextCheckAt}, {&sc.ResolvedAt, c.ResolvedAt}, {&sc.DeliveredAt, c.DeliveredAt},
+		} {
+			if f.from == "" {
+				continue
+			}
+			if *f.to, err = time.Parse(time.RFC3339Nano, f.from); err != nil {
+				return nil, fmt.Errorf("wait %s: %w", c.ID, err)
+			}
+		}
+		out = append(out, sc)
+	}
+	return out, nil
+}
+
+// waitRefresher has the scheduler judge a run's wait again whenever one of
+// its conditions changes.
+type waitRefresher struct {
+	bus  events.Bus
+	runs *scheduler.Scheduler
+	stop context.CancelFunc
+	done chan struct{}
+}
+
+func (r *waitRefresher) Start(ctx context.Context) error {
+	sub, err := r.bus.Subscribe(ctx, events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypeRunWaitChanged}}, Buffer: 256,
+	})
+	if err != nil {
+		return fmt.Errorf("watch-run: follow run.wait.changed: %w", err)
+	}
+	loop, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	r.stop, r.done = cancel, make(chan struct{})
+	go func() {
+		defer close(r.done)
+		defer sub.Close() //nolint:errcheck // shutdown
+		for {
+			select {
+			case <-loop.Done():
+				return
+			case e, ok := <-sub.Events():
+				if !ok {
+					return
+				}
+				p, _ := e.Payload.(events.RunWaitChangedPayload)
+				if err := r.runs.WaitChanged(loop, p.RunID); err != nil && loop.Err() == nil {
+					slog.Warn("watch-run: judge the run's wait again", "run", p.RunID, "error", err)
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+func (r *waitRefresher) Close() error {
+	if r.stop != nil {
+		r.stop()
+		<-r.done
+	}
+	return nil
 }
 
 // lazyWaits reads the watch service at call time: it is built after the

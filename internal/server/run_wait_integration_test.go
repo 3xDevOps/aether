@@ -82,6 +82,17 @@ func TestIntegrationRunWaitWakesTheAgent(t *testing.T) {
 	if w := get(waiter).WaitConditions; len(w) != 1 || w[0].State != protocol.WaitPending {
 		t.Fatalf("waiter wait_conditions = %+v, want one pending", w)
 	}
+	// The scheduler judges the reported wait by its condition, not as one
+	// it cannot verify.
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(250 * time.Millisecond) {
+		r := get(waiter)
+		if r.Wait != nil && r.Wait.Kind == domain.WaitCondition && strings.HasPrefix(r.Wait.Detail, "run:"+string(target)+":finished") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waiter %s %s wait = %+v, want judged by its pending condition", r.Status, r.Activity, r.Wait)
+		}
+	}
 
 	if err := env.srv.sched.Kill(ctx, target, ada.ID); err != nil {
 		t.Fatalf("kill %s: %v", target, err)

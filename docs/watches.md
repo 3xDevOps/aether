@@ -319,4 +319,6 @@ other members see the condition, its state, its outcome and a member's
 cancel. `run.wait.cancel`'s result is redacted the same way. Every change publishes `run.wait.changed`
 `{run_id, workspace_id, wait_id, state}` on the run's workspace.
 `run.wait.cancel` `{run_id, wait_id}` cancels one condition and returns
-`{wait}`; it needs the permission `run.pause` needs.
+`{wait}`; it needs the permission `run.pause` needs. The scheduler judges
+the run's reported wait by these conditions, again on every
+`run.wait.changed`: see [run activity](failure-handling.md#run-activity).
