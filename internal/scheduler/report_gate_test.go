@@ -268,9 +268,11 @@ func TestEnhancedTurnReportedBeforeItsStartIsNotReminded(t *testing.T) {
 		return e.sched.Wake(ctx, r, prompt)
 	}
 	var mail sync.Once
+	recorded := make(chan struct{})
 	coord.mu.Lock()
 	coord.onWake = func(r domain.RunID) {
 		mail.Do(func() {
+			defer close(recorded)
 			if err := e.sched.WakeEnhanced(context.Background(), r, "say pong"); err != nil {
 				t.Error(err)
 				return
@@ -284,6 +286,7 @@ func TestEnhancedTurnReportedBeforeItsStartIsNotReminded(t *testing.T) {
 	coord.mu.Unlock()
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the mail turn", turnEnded("end_turn", 3))
+	<-recorded
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
 		t.Fatal(err)
