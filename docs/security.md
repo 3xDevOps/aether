@@ -289,8 +289,10 @@ permissions, and it uses the account you signed it in to.
   sign-in writes, and refuses the start if it removed any. Then the server
   refreshes the sign-in with the vendor itself and asks the vendor which
   account it belongs to, and refuses the start unless it is the account you
-  signed in with. A sign-in the agent swapped for another account's, in any
-  field, is caught at the next start.
+  signed in with. The account is recorded at the first start of either
+  agent after you sign in, before any agent session runs, so neither agent's
+  session can rewrite the other's sign-in first. A sign-in the agent swapped
+  for another account's, in any field, is caught at the next start.
 - What a steered agent can still do, within the one session it runs in:
   change what that session reads again (Claude Code rereads
   `.credentials.json` and `~/.claude/settings.json`) and so point the rest of

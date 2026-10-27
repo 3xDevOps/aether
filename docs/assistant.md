@@ -50,9 +50,10 @@ the container starts. It refreshes the token at the vendor's sign-in service
 new tokens back into the home, and asks which account they belong to: Claude
 Code's profile endpoint at `api.anthropic.com` names the account and
 organization, and Codex's new tokens name the ChatGPT account. A Codex API-key
-sign-in is not refreshed; its key is the identity. The first start after you
-sign in records that account outside the home; every later start must find the
-same one, or fails with `the assistant's sign-in changed since you signed in.
+sign-in is not refreshed; its key is the identity. The first start of either
+agent after you sign in records that account outside the home, before any
+agent runs; one that cannot be verified then leaves that agent not signed in.
+Every later start must find the same account, or fails with `the assistant's sign-in changed since you signed in.
 Sign in again`.
 
 So the assistant cannot start without reaching the vendor: when it is
@@ -340,7 +341,7 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | --- | --- |
 | `assistant: no agent is ready; sign in to Claude Code or Codex for the assistant` | [Sign in for the assistant](#first-use) |
 | `scheduler: couldn't verify the assistant's sign-in with Anthropic: ...` (or `OpenAI`) | The server could not reach the vendor's sign-in service, or it answered with an error; the detail follows. Check the server's network access, then **Retry** |
-| `scheduler: Anthropic answered 400 Bad Request: ...: the sign-in service refused the assistant's sign-in. Sign in again` | The vendor refused the refresh token. [Sign in again](#first-use) |
+| `scheduler: Anthropic answered 400 Bad Request: the sign-in service refused the assistant's sign-in. Sign in again` | The vendor refused the refresh token. [Sign in again](#first-use) |
 | `scheduler: not signed in for the assistant. Sign in for the assistant first` | No sign-in was recorded, or the sign-in wrote no usable file. [Sign in](#first-use) |
 | `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
 | `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
