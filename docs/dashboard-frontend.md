@@ -583,9 +583,10 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   takes its verb and the method its card waits on from its `action` input),
   a state
   (`Running`, `Done`, `Failed`, `You declined`, `No answer in 10 minutes`,
-  `Withdrawn: the turn ended before you answered`, or `Did not finish: the
+  `Withdrawn: the turn ended before you answered`, `Did not finish: the
   turn ended first` for a call still open when its turn ended, approved or
-  not) with `approved by you` or `auto-approved`, and its time. A call
+  not, or `Not confirmed: check status before retrying` for an
+  `aether_pr_create` whose result says `write: "pending"`) with `approved by you` or `auto-approved`, and its time. A call
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the

@@ -5,7 +5,7 @@ import type { SessionRow, Turn } from '@/store/session-rows'
 import { asRow, stepsBlock, workKinds, type Step, type WorkItem } from '@/store/session-steps'
 import type { Route } from '@/store/ui'
 
-export type ActionState = 'approval' | 'running' | 'done' | 'failed' | 'declined' | 'expired' | 'withdrawn' | 'unfinished'
+export type ActionState = 'approval' | 'running' | 'done' | 'unconfirmed' | 'failed' | 'declined' | 'expired' | 'withdrawn' | 'unfinished'
 
 export type Approval = 'approved' | 'auto-approved'
 
@@ -197,10 +197,11 @@ function target(tool: string, input: Record<string, unknown>, result: Record<str
   const ids = record(result.ids)
   const run = text(saved?.result?.run_id) ?? text(result.run_id) ?? text(record(result.run).id) ?? text(ids.run_id)
   const swarm = text(result.swarm_id) ?? text(record(result.mission).id) ?? text(record(result.swarm).id) ?? text(ids.mission_id) ?? text(ids.swarm_id)
+  const runID = run ?? text(input.run_id)
+  if (tool === 'aether_swarm_manage' && input.action === 'release_worker' && runID) return runTarget(runID)
   if (tool === 'aether_save_environment') return { kind: 'environment', id: 'environment', route: { name: 'environment', params: {} } }
   const named = text(input.mission_id) ?? text(input.swarm_id)?.replace(/^swarm:/, '')
   if (swarm || ((tool.endsWith('_swarm') || tool === 'aether_swarm_manage' || tool === 'aether_replace_integrator') && named)) return swarmTarget(swarm ?? named!)
-  const runID = run ?? text(input.run_id)
   if (runID) return runTarget(runID)
   const workspace = text(input.workspace_id)
   if (workspace) return { kind: 'workspace', id: workspace, route: { name: 'workspace', params: { workspaceId: workspace } } }
@@ -450,6 +451,8 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     Object.assign(action, cut && open
       ? { state: 'unfinished', approval: saved ? recordApproval(saved) : noted }
       : actionOutcome(entry, error, methods.some((method) => waitingMethods.has(method)), noted, saved))
+    // GitHub's reply to the create was lost and no pull request was found after: it may exist or not.
+    if (action.state === 'done' && action.tool === 'aether_pr_create' && record(action.result).write === 'pending') action.state = 'unconfirmed'
     action.error = saved?.error ?? error
     action.target = target(action.tool, action.input, record(action.result), saved)
   }

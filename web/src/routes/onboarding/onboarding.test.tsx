@@ -24,6 +24,7 @@ import {
   alice,
   fakeApi,
   otherWorkspace,
+  run,
   serverInfo,
   workspace,
 } from '@/test/fixtures'
@@ -1654,6 +1655,24 @@ describe('onboarding wizard', () => {
     await waitFor(() => {
       expect(client.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp' })
     })
+  })
+
+  it('saves no launch choice for a member who signed in while the first run was launching', async () => {
+    let land!: () => void
+    const client = fakeApi()
+    vi.mocked(client.runLaunch).mockImplementationOnce(() => new Promise((resolve) => { land = () => resolve(run()) }))
+    seed({ runs: {}, launchDefaults: {}, savedLaunchDefaults: {} })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+    fireEvent.click(await screen.findByRole('radio', { name: /^Claude Code/ }))
+    fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'write a result file' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+    await waitFor(() => expect(client.runLaunch).toHaveBeenCalledTimes(1))
+    act(() => useStore.getState().setIdentityKey('origin\u0000\u0000mem_other'))
+    await act(async () => land())
+    expect(useStore.getState().launchDefaults).toEqual({})
+    expect(useStore.getState().savedLaunchDefaults).toEqual({})
+    useStore.setState({ identityKey: null })
   })
 
   it('finishes onboarding by going to the board', async () => {

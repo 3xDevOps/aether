@@ -198,6 +198,16 @@ describe('the lifecycle, swarm, pull request and memory tools', () => {
     expect(actionSummary(finished!, names)).toBe(done)
   })
 
+  it('says a pull request GitHub may not have opened is unconfirmed, never done', () => {
+    const [created] = assistantView([block({ id: '1:t0', name: 'aether_pr_create', input: { run_id: 'r1' }, result: { run_id: 'r1', write: 'pending', url: '?run=r1' } })], []).actions
+    expect([created!.state, actionSummary(created!, names)]).toEqual(['unconfirmed', 'Open a pull request for run r1'])
+  })
+
+  it('links a released worker to its run, not its swarm', () => {
+    const [released] = assistantView([block({ id: '1:t0', name: 'aether_swarm_manage', input: { swarm_id: 'swarm:mis-1', action: 'release_worker', run_id: 'r7' }, result: { swarm_id: 'mis-1', run_id: 'r7' } })], []).actions
+    expect([released!.target?.kind, released!.target?.id]).toEqual(['run', 'r7'])
+  })
+
   it('links a swarm tool to its swarm and a created pull request to GitHub', () => {
     const view = assistantView([block(
       { id: '1:t0', name: 'aether_swarm_manage', input: { swarm_id: 'swarm:mis-1', action: 'archive' }, result: {} },
