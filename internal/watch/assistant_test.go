@@ -96,7 +96,7 @@ func TestAssistantWatchWritesNewsToTheConversationAndPushesOnlyWhatTheRunDoesNot
 	if _, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: w.ID, Paused: &resumed}); err != nil {
 		t.Fatal(err)
 	}
-	settle()
+	h.settle()
 	if got := h.notices(w.ID); len(got) != 0 {
 		t.Fatalf("notices for the standing question = %q, want none", bodies(got))
 	}
@@ -107,7 +107,7 @@ func TestAssistantWatchWritesNewsToTheConversationAndPushesOnlyWhatTheRunDoesNot
 		n := h.notices(w.ID)
 		return len(n) == 1 && deliveryOf(n[0], protocol.WatchChannelAssistant).Status == protocol.WatchStatusDelivered
 	})
-	settle()
+	h.settle()
 	written := talk.written()
 	if len(written) != 1 || written[0].Condition != protocol.WatchNeedsYou || written[0].Body != "Question: Deploy to staging first?" ||
 		written[0].RunID != run.ID || written[0].WatchLink != WatchLink(w.ID) || written[0].Title != "Fix the login redirect" {
@@ -157,7 +157,7 @@ func TestAssistantNoticeCutShortByAStopIsWrittenAfterTheRestart(t *testing.T) {
 
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: no credentials")
 	h.eventually("the notice", func() bool { return len(h.notices(w.ID)) == 1 })
-	settle()
+	h.settle()
 	_ = h.svc.Close()
 	if d := deliveryOf(h.notices(w.ID)[0], protocol.WatchChannelAssistant); d.Status != protocol.WatchStatusPending {
 		t.Fatalf("assistant delivery after the stop = %+v, want pending", d)
@@ -169,7 +169,7 @@ func TestAssistantNoticeCutShortByAStopIsWrittenAfterTheRestart(t *testing.T) {
 	h.eventually("the delivery after the restart", func() bool {
 		return deliveryOf(h.notices(w.ID)[0], protocol.WatchChannelAssistant).Status == protocol.WatchStatusDelivered
 	})
-	settle()
+	h.settle()
 	if got := talk.written(); len(got) != 1 || got[0].Body != "Blocked: no credentials" {
 		t.Fatalf("written after the restart = %+v, want the need once", got)
 	}
@@ -189,7 +189,7 @@ func TestOnlyAssistantWatchesWriteToTheConversation(t *testing.T) {
 	w := h.watch(h.ada, runTarget(run)).Watch
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: x")
 	h.eventually("the notice", func() bool { return len(h.notices(w.ID)) == 1 })
-	settle()
+	h.settle()
 	if d := deliveryOf(h.notices(w.ID)[0], protocol.WatchChannelAssistant); d.Channel != "" {
 		t.Fatalf("dashboard watch has an assistant delivery %+v", d)
 	}
@@ -213,7 +213,7 @@ func TestAssistantWatchIsItsOwnBesideADashboardWatch(t *testing.T) {
 	h.status(run, domain.RunCompleted, "", "")
 	h.eventually("the end in the conversation", func() bool { return len(h.assistant.(*conversation).written()) == 1 })
 	h.eventually("the dashboard watch's end", func() bool { return len(h.notices(dashboard.ID)) == 1 })
-	settle()
+	h.settle()
 	if got := h.notices(w.ID); len(got) != 1 || got[0].Body != "Completed" {
 		t.Fatalf("assistant watch notices = %q, want the end", bodies(got))
 	}
@@ -284,7 +284,7 @@ func TestRenewedAssistantWatchTakesTheStandingNeedAsSeen(t *testing.T) {
 	if again := h.follow(h.ada, run); again.ID != w.ID || again.State != protocol.WatchActive {
 		t.Fatalf("following an expired watch = %+v, want %s renewed", again, w.ID)
 	}
-	settle()
+	h.settle()
 	if got := h.notices(w.ID); len(got) != 0 {
 		t.Fatalf("notices after the renewal = %q, want none", bodies(got))
 	}
@@ -316,7 +316,7 @@ func TestPausedAssistantWatchHoldsItsConversationNotices(t *testing.T) {
 	h.assistant = talk
 	h.start()
 	h.clock.advance(time.Minute)
-	settle()
+	h.settle()
 	if got := talk.written(); len(got) != 0 {
 		t.Fatalf("written while paused = %+v, want nothing", got)
 	}
@@ -402,7 +402,7 @@ func TestAssistantNoticeWithoutItsToastIsDeliveredWithTheReason(t *testing.T) {
 	if d.Status != protocol.WatchStatusDelivered || d.Detail != "written to the conversation, but its toast was not raised: event log full" {
 		t.Fatalf("assistant delivery = %+v, want delivered with the toast's error", d)
 	}
-	settle()
+	h.settle()
 	if got := talk.written(); len(got) != 1 {
 		t.Fatalf("written = %d notices, want the one, not retried", len(got))
 	}
