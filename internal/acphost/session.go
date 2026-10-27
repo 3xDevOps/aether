@@ -1013,11 +1013,13 @@ func (s *Session) update(parent string, raw json.RawMessage) {
 	if main && head.opensTurn() {
 		s.openAutonomousLocked()
 	}
-	if !s.conn.replaying.Load() && head.progress() {
-		s.progressAt = time.Now()
-	}
-	if head.Kind == "compaction_update" {
-		s.compacting = head.Status == "in_progress"
+	if !s.conn.replaying.Load() {
+		if head.progress() {
+			s.progressAt = time.Now()
+		}
+		if head.Kind == "compaction_update" {
+			s.compacting = head.Status == "in_progress"
+		}
 	}
 	s.proj.update(parent, raw)
 	s.trackLocked(head)

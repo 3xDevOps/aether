@@ -10,10 +10,15 @@ import (
 
 // TestProgressCountsOnlyAgentWork: a session/load replay, Aether's own calls
 // and usage or command updates leave LastProgress alone; a thought, a tool
-// call or a compaction moves it, and the open tool and compaction show.
+// call or a compaction moves it, and the open tool and compaction show. A
+// compaction left open in the replayed history is not open now.
 func TestProgressCountsOnlyAgentWork(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "codex"))
 	m.resume = func() *acp.RequestError { return &acp.RequestError{Code: -32603, Message: "Internal error"} }
+	m.load = func() *acp.RequestError {
+		m.update(map[string]any{"sessionUpdate": "compaction_update", "compactionId": "c0", "status": "in_progress"})
+		return nil
+	}
 	steps := make(chan any)
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
 		for u := range steps {
@@ -27,8 +32,8 @@ func TestProgressCountsOnlyAgentWork(t *testing.T) {
 	}
 	rec.waitIdle(t)
 	st := s.State()
-	if !st.LastProgress.IsZero() || st.OpenedAt.IsZero() {
-		t.Fatalf("after the replay LastProgress = %v, OpenedAt = %v; want none since the open", st.LastProgress, st.OpenedAt)
+	if !st.LastProgress.IsZero() || st.OpenedAt.IsZero() || st.Compacting {
+		t.Fatalf("after the replay LastProgress = %v, OpenedAt = %v, Compacting = %v; want none since the open", st.LastProgress, st.OpenedAt, st.Compacting)
 	}
 
 	if _, err := s.Prompt(context.Background(), textPrompt("work"), false, nil); err != nil {
