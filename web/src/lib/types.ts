@@ -1009,6 +1009,8 @@ export interface RunStatusPayload {
   reason?: string
   state?: RunActivity | ''
   cause?: RunStatusCause
+  /** Only a newer read of the wait's sources; history leaves it out. */
+  reread?: boolean
   status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean

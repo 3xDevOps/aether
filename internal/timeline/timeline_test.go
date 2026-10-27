@@ -147,6 +147,17 @@ func TestDetailEventsAreExcludedFromDefaultFeed(t *testing.T) {
 	}
 }
 
+func TestARereadStatusIsLeftOutUnlessAskedForByType(t *testing.T) {
+	reread := events.Event{Type: events.TypeRunStatus, Payload: events.RunStatusPayload{To: domain.RunNeedsAttention, Reread: true}}
+	changed := events.Event{Type: events.TypeRunStatus, Payload: events.RunStatusPayload{To: domain.RunNeedsAttention}}
+	if (Filter{}).keeps(reread) || !(Filter{}).keeps(changed) {
+		t.Fatal("the default feed should keep a status change and leave out a reread")
+	}
+	if !(Filter{Types: []events.Type{events.TypeRunStatus}}).keeps(reread) {
+		t.Fatal("asking for run.status by type should return a reread")
+	}
+}
+
 // A read without a workspace has no index to bound it, so a page covers at
 // most scanWindows windows of seqs and resumes from where it stopped.
 func TestMemberWidePagesStepThroughSparseHistory(t *testing.T) {

@@ -240,5 +240,11 @@ func (f Filter) keeps(e events.Event) bool {
 	if p, ok := e.Payload.(events.TimelinePayload); ok && len(f.TimelineKinds) > 0 && !slices.Contains(f.TimelineKinds, p.Kind) {
 		return false
 	}
-	return len(f.Types) > 0 || !detailTypes[e.Type]
+	if len(f.Types) > 0 {
+		return true
+	}
+	if p, ok := e.Payload.(events.RunStatusPayload); ok && p.Reread {
+		return false
+	}
+	return !detailTypes[e.Type]
 }

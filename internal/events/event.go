@@ -146,6 +146,9 @@ type RunStatusPayload struct {
 	// Wait is the evidence behind the reported wait the run shows, nil when
 	// it shows none.
 	Wait *domain.RunWait `json:"wait,omitempty"`
+	// Reread marks a same-status event whose only news is a newer read of
+	// the wait's sources; history leaves it out unless asked for by type.
+	Reread bool `json:"reread,omitempty"`
 	// Review and ReviewChangedAt are the run's after this transition.
 	Review          domain.RunReview `json:"review,omitempty"`
 	ReviewChangedAt *time.Time       `json:"review_changed_at,omitempty"`

@@ -451,8 +451,8 @@ func TestANewerSourceReadIsPublished(t *testing.T) {
 	waits.set(nil, checking(start))
 	e.sched.refreshActivities(ctx)
 	p := nextActivity(t, sub, run.ID, &seq)
-	if p.Wait == nil || p.Wait.VerifiedAt == nil || !p.Wait.VerifiedAt.Equal(start) || p.Reason != "CI on #582" {
-		t.Fatalf("published %q wait %+v, want the read at %s", p.Reason, p.Wait, start)
+	if p.Wait == nil || p.Wait.VerifiedAt == nil || !p.Wait.VerifiedAt.Equal(start) || p.Reason != "CI on #582" || !p.Reread {
+		t.Fatalf("published %q wait %+v reread %t, want a reread at %s", p.Reason, p.Wait, p.Reread, start)
 	}
 	after := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if after.NeedKey() != before.NeedKey() {

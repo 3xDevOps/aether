@@ -104,7 +104,10 @@ Each `run.status` event for a live run carries a `cause` naming what chose
 its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
 `wait-expired`, `wait-fault` (a broken wait), `workers`, `tasks-held`,
 `human`, or `disconnect`. While the run shows a reported wait the event
-carries `wait` too. A live
+carries `wait` too. A wait whose source was read again at least a minute
+later is published as a same-status event with `reread: true`;
+`aether timeline` and the dashboard's activity feed leave it out unless
+filtered to `run.status`, and `changes.list` leaves it out. A live
 run's record carries its latest `cause` too. `aether timeline <run-id>`
 prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by

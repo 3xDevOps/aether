@@ -275,6 +275,9 @@ func changeOf(ev events.Event, mission domain.MissionID) (protocol.Change, bool)
 	}
 	switch v := ev.Payload.(type) {
 	case events.RunStatusPayload:
+		if v.Reread {
+			return protocol.Change{}, false
+		}
 		c.Kind = protocol.ChangeKindStatus
 		c.Status = &protocol.ChangeStatus{From: string(v.From), To: string(v.To), State: string(v.Activity), Cause: string(v.Cause)}
 		if v.Wait != nil {

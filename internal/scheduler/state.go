@@ -348,6 +348,8 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt,
 	}
 	if e != nil {
+		payload.Reread = from == to && e.activity == activity && e.reason == public && e.cause == d.cause &&
+			d.wait != nil && sameWait(d.wait, e.wait)
 		e.status, e.reason, e.activity, e.cause, e.wait = to, public, activity, d.cause, d.wait
 		e.workersReason = workersReason
 		if startedAt != nil {
