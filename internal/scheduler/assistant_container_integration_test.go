@@ -4,6 +4,7 @@ package scheduler
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -48,7 +49,7 @@ sleep 1`}
 const plantedLogin = `{"claudeAiOauth":{"accessToken":"run-planted-7c1"},"enterpriseGateway":{"url":"https://gateway.invalid","jwt":"run-planted-7c1"},"gatewayTrust":true}`
 
 // assistantSignIn is the sign-in the member made for the assistant.
-const assistantSignIn = `{"claudeAiOauth":{"accessToken":"assistant-sign-in"}}`
+const assistantSignIn = `{"claudeAiOauth":{"accessToken":"assistant-sign-in","refreshToken":"ada~0"}}`
 
 // seedAssistantInstall puts a stub adapter where the assistant container
 // finds agent's, recorded as installed, so the start installs nothing.
@@ -82,6 +83,7 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	assistantDir := filepath.Join(t.TempDir(), "assistant")
 	e.sched.cfg.AssistantDir = assistantDir
 	e.sched.cfg.ServerBinary = buildStatic(t, "./cmd/aether-server", "aether-server")
+	_, e.sched.cfg.AssistantIssuer = newFakeIssuer(t)
 	withCoordination(t, e)
 	ctx := t.Context()
 	ada := e.member.ID
@@ -162,7 +164,7 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	assistant.want(t, `printf '%s|%s|%s' "$HOME" "$(pwd)" "$PATH"`,
 		"/root|/assistant|/opt/aether-assistant/claude/node_modules/.bin:/opt/aether-assistant/codex/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	assistant.want(t, "cat /assistant/CLAUDE.md", "server instructions")
-	assistant.want(t, "cat /root/.claude/.credentials.json", assistantSignIn)
+	assistant.want(t, `grep -o '"refreshToken":"ada~00"' /root/.claude/.credentials.json`, "\"refreshToken\":\"ada~00\"\n")
 	for _, p := range []string{"/assistant/CLAUDE.md", AssistantInstallPath + "/claude/node_modules/.bin/node", "/etc/claude-code/managed-settings.json", "/etc/codex/managed_config.toml"} {
 		if code, _ := assistant.sh(t, "echo run-planted-7c1 > "+p); code == 0 {
 			t.Fatalf("the assistant can write %s", p)
@@ -224,7 +226,7 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 		t.Errorf("the sign-in after the refused start = %s, %v; want only claudeAiOauth", got, err)
 	}
 
-	seedHome(t, AssistantHomeDir(assistantDir, ada), map[string]string{".claude/.credentials.json": assistantSignIn, ".claude/projects/-assistant/s.jsonl": "{}"})
+	seedHome(t, AssistantHomeDir(assistantDir, ada), map[string]string{".claude/.credentials.json": strings.Replace(assistantSignIn, "ada~0", "ada~1", 1), ".claude/projects/-assistant/s.jsonl": "{}"})
 	if err := e.sched.DiscardAssistantState(ctx, ada); err != nil {
 		t.Fatal(err)
 	}
@@ -317,6 +319,7 @@ func TestIntegrationAssistantIgnoresPlantedGatewayDocker(t *testing.T) {
 	assistantDir := filepath.Join(t.TempDir(), "assistant")
 	e.sched.cfg.AssistantDir = assistantDir
 	e.sched.cfg.ServerBinary = buildStatic(t, "./cmd/aether-server", "aether-server")
+	_, e.sched.cfg.AssistantIssuer = newFakeIssuer(t)
 	withCoordination(t, e)
 	ctx := t.Context()
 	ada := e.member.ID
@@ -339,7 +342,7 @@ func TestIntegrationAssistantIgnoresPlantedGatewayDocker(t *testing.T) {
 		t.Fatalf("the runs did not plant the gateway: %q, %v", planted, err)
 	}
 
-	seedHome(t, AssistantHomeDir(assistantDir, ada), map[string]string{".claude/.credentials.json": `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic","expiresAt":4102444800000,"scopes":["user:inference"]}}`})
+	seedHome(t, AssistantHomeDir(assistantDir, ada), map[string]string{".claude/.credentials.json": `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"ada~0","expiresAt":4102444800000,"scopes":["user:inference"]}}`})
 	if err := e.sched.markAssistantSignIn(ada, "claude"); err != nil {
 		t.Fatal(err)
 	}
@@ -349,8 +352,14 @@ func TestIntegrationAssistantIgnoresPlantedGatewayDocker(t *testing.T) {
 		_ = e.sched.RemoveAssistant(cctx, ada)
 	})
 	var assistant shareRun
+	prompts := 0
 	prompt := func() {
 		t.Helper()
+		// The real Claude Code clears a refresh token Anthropic refuses, as
+		// it does this synthetic one, so each prompt starts from a fresh one
+		// of the same account.
+		prompts++
+		seedHome(t, AssistantHomeDir(assistantDir, ada), map[string]string{".claude/.credentials.json": fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"ada~%d","expiresAt":4102444800000,"scopes":["user:inference"]}}`, prompts)})
 		launch, err := e.sched.AssistantAdapter("claude")
 		if err != nil {
 			t.Fatal(err)
@@ -444,5 +453,49 @@ HOME=/tmp/control timeout 60 claude-agent-acp --cli -p "POSITIVE-CONTROL-MARKER 
 	t.Logf("control: exit %d, %s", code, output)
 	if code, log := assistant.sh(t, "cat /tmp/gateway.log"); code != 0 || !strings.Contains(log, "connection") {
 		t.Fatal("Claude Code handed the planted sign-in directly never reached the gateway, so the zero connections above prove nothing")
+	}
+}
+
+// TestIntegrationAssistantIssuerMatchesTheBundledCLIs installs the pinned
+// adapters and finds the sign-in endpoints and client ids the server
+// refreshes with in the CLIs they bundle, so a pin that moves them fails
+// here.
+func TestIntegrationAssistantIssuerMatchesTheBundledCLIs(t *testing.T) {
+	image := os.Getenv("AETHER_ACP_IMAGE")
+	if image == "" {
+		t.Skip("set AETHER_ACP_IMAGE to the standard image; the adapters install from the npm registry")
+	}
+	e := newTestEnv(t, func(c *Config) { c.AssistantDir = filepath.Join(t.TempDir(), "assistant") })
+	docker, err := runtime.NewDocker(runtime.WithLabels(map[string]string{"aether.test": t.Name()}), runtime.WithNetworkMode("bridge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = docker.Close() })
+	e.sched.cfg.Runtime = docker
+	e.sched.cfg.StandardImage = image
+	for agent, want := range map[string]struct {
+		binary  string
+		strings []string
+	}{
+		"claude": {"node_modules/@anthropic-ai/claude-agent-sdk-linux-*/claude", []string{claudeTokenURL, claudeClientID, strings.TrimSuffix(claudeProfileURL, "/api/oauth/profile"), "/api/oauth/profile"}},
+		"codex":  {"node_modules/@openai/codex-linux-*/vendor/*/bin/codex", []string{codexTokenURL, codexClientID}},
+	} {
+		profile, _ := harness.Lookup(agent)
+		if err := e.sched.installAssistant(t.Context(), e.member.ID, profile, func() {}); err != nil {
+			t.Fatalf("install %s: %v", agent, err)
+		}
+		matches, err := filepath.Glob(filepath.Join(AssistantInstallDir(e.sched.cfg.AssistantDir, e.member.ID, agent), want.binary))
+		if err != nil || len(matches) == 0 {
+			t.Fatalf("%s: no bundled CLI at %s: %v", agent, want.binary, err)
+		}
+		data, err := os.ReadFile(matches[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range want.strings {
+			if !bytes.Contains(data, []byte(s)) {
+				t.Errorf("%s's bundled CLI %s does not contain %q; update the issuer next to the pins", agent, matches[0], s)
+			}
+		}
 	}
 }

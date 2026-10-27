@@ -226,9 +226,9 @@ func sanitizeAssistantLogin(root *os.Root, rel string, allow map[string][]string
 }
 
 // AssistantLoginFound reports whether agent is signed in for the assistant:
-// a non-empty sign-in file in the assistant home that matches the sign-in
-// the member made. A sign-in in the member's own home does not count; their
-// runs can write it.
+// a non-empty sign-in file in the assistant home from a sign-in the member
+// made. Whose account it holds is checked at the next start. A sign-in in
+// the member's own home does not count; their runs can write it.
 func (s *Scheduler) AssistantLoginFound(member domain.MemberID, agent string) (bool, error) {
 	profile, ok := harness.Lookup(agent)
 	if !ok {
@@ -255,11 +255,7 @@ func (s *Scheduler) AssistantLoginFound(member domain.MemberID, agent string) (b
 			return false, fmt.Errorf("scheduler: inspect the assistant's %s: %w", rel, err)
 		}
 		if info.Mode().IsRegular() && info.Size() > 0 {
-			err = s.checkAssistantSignIn(member, agent)
-			if errors.Is(err, ErrAssistantSignInChanged) || errors.Is(err, ErrAssistantNotSignedIn) {
-				return false, nil
-			}
-			return err == nil, err
+			return s.assistantSignedIn(member, agent)
 		}
 	}
 	return false, nil

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -199,7 +201,7 @@ func startAssistantServer(t *testing.T, ctx context.Context, prior *assistantEnv
 		env.data = filepath.Join(t.TempDir(), "d")
 	}
 	srv, err := New(ctx, Config{
-		DataDir: env.data, Addr: "127.0.0.1:0", Runtime: env.rt, StandardImage: "e2e/fake",
+		DataDir: env.data, Addr: "127.0.0.1:0", Runtime: env.rt, StandardImage: "e2e/fake", AssistantIssuer: fakeAssistantIssuer(t),
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -539,6 +541,21 @@ func TestIntegrationAssistant(t *testing.T) {
 	}
 }
 
+// fakeAssistantIssuer is a Claude Code sign-in service that refreshes any
+// sign-in and names the same account each time.
+func fakeAssistantIssuer(t *testing.T) scheduler.AssistantIssuer {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/profile" {
+			_, _ = w.Write([]byte(`{"account":{"uuid":"account-ada"},"organization":{"uuid":"org-ada"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"access_token":"synthetic","refresh_token":"synthetic","expires_in":3600}`))
+	}))
+	t.Cleanup(srv.Close)
+	return scheduler.AssistantIssuer{ClaudeToken: srv.URL + "/token", ClaudeProfile: srv.URL + "/profile", CodexToken: srv.URL + "/token", Client: srv.Client()}
+}
+
 // seedAssistantMember adds a member signed in to Claude Code for the
 // assistant.
 func seedAssistantMember(t *testing.T, ctx context.Context, srv *Server, data string, role domain.Role) *domain.Member {
@@ -552,7 +569,7 @@ func seedAssistantMember(t *testing.T, ctx context.Context, srv *Server, data st
 	if err := os.MkdirAll(filepath.Dir(login), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(login, []byte(`{"claudeAiOauth":{"accessToken":"synthetic"}}`), 0o600); err != nil {
+	if err := os.WriteFile(login, []byte(`{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// As a finished sign-in leaves it: the next start records the sign-in.

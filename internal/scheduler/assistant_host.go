@@ -169,9 +169,6 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 	if err = s.removeAssistantLoginTranscripts(ctx, member); err != nil {
 		return "", err
 	}
-	if err = s.pinAssistantSignIns(member); err != nil {
-		return "", err
-	}
 	if signIn != "" {
 		// What the sign-in writes is what gets recorded, never a file the
 		// agent left.
@@ -186,8 +183,8 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 	if len(removed) > 0 {
 		return "", fmt.Errorf("scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: %s. Retry starts with the rest; if the agent then reports no sign-in, sign in for the assistant again", strings.Join(removed, "; "))
 	}
-	if err = s.checkAssistantSignIn(member, agent); err != nil {
-		return "", fmt.Errorf("scheduler: %w", err)
+	if err = s.verifyAssistantSignIn(ctx, member, agent); err != nil {
+		return "", err
 	}
 	return s.createAssistantContainer(ctx, member)
 }

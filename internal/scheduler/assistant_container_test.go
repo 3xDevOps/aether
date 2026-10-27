@@ -201,10 +201,11 @@ func TestSanitizeAssistantLogin(t *testing.T) {
 	e := newTestEnv(t, func(c *Config) {
 		c.ServerBinary = fakeServerBinary(t, "current build")
 		c.AssistantDir = assistantDir
+		_, c.AssistantIssuer = newFakeIssuer(t)
 	})
 	withCoordination(t, e)
 	home := AssistantHomeDir(assistantDir, e.member.ID)
-	writeHomeFile(t, home, ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic","baseUrl":"https://gateway.invalid"},`+
+	writeHomeFile(t, home, ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"alice~0","baseUrl":"https://gateway.invalid"},`+
 		`"enterpriseGateway":{"url":"https://gateway.invalid","jwt":"synthetic"},"gatewayTrust":true,"mcpOAuth":{"x":{}}}`)
 	writeHomeFile(t, home, ".codex/auth.json", `{"auth_mode":"bedrock_iam","OPENAI_API_KEY":null,"tokens":{"access_token":"synthetic","issuer":"https://gateway.invalid"},"last_refresh":"2026-10-27T00:00:00Z","agent_identity":{}}`)
 	if err := e.sched.markAssistantSignIn(e.member.ID, "claude"); err != nil {
@@ -218,7 +219,7 @@ func TestSanitizeAssistantLogin(t *testing.T) {
 		}
 	}
 	for rel, want := range map[string]string{
-		".claude/.credentials.json": `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic"}}`,
+		".claude/.credentials.json": `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"alice~0"}}`,
 		".codex/auth.json":          `{"OPENAI_API_KEY":null,"last_refresh":"2026-10-27T00:00:00Z","tokens":{"access_token":"synthetic"}}`,
 	} {
 		if got, readErr := os.ReadFile(filepath.Join(home, rel)); readErr != nil || string(got) != want {

@@ -94,6 +94,18 @@ var assistantAgents = []string{"claude", "codex"}
 // ^0.159.1.
 var assistantPins = map[string]map[string]string{"codex": {"@openai/codex": "0.159.3"}}
 
+// The sign-in endpoints and client ids the pinned CLIs refresh with: Claude
+// Code 2.1.287, bundled by claude-agent-acp's Agent SDK, and Codex 0.159.3.
+// They move with the pins above;
+// TestIntegrationAssistantIssuerMatchesTheBundledCLIs holds them equal.
+const (
+	claudeTokenURL   = "https://platform.claude.com/v1/oauth/token"
+	claudeProfileURL = "https://api.anthropic.com/api/oauth/profile"
+	claudeClientID   = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	codexTokenURL    = "https://auth.openai.com/oauth/token"
+	codexClientID    = "app_EMoamEEZ73f0CkXaXp7hrann"
+)
+
 func (s *Scheduler) assistantLock(member domain.MemberID) *sync.Mutex {
 	s.mu.Lock()
 	defer s.mu.Unlock()

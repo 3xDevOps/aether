@@ -136,6 +136,9 @@ type Config struct {
 	// instructions and tool socket of their assistant container. Empty
 	// leaves the assistant unable to start.
 	AssistantDir string
+	// AssistantIssuer is where assistant sign-ins are checked; the zero
+	// value is the vendors' own sign-in services.
+	AssistantIssuer AssistantIssuer
 	// HarnessUpdateDisabled stops pre-launch updates of shipped harnesses
 	// installed in the member home.
 	HarnessUpdateDisabled bool

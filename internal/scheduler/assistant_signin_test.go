@@ -2,31 +2,97 @@ package scheduler
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
-// codexToken is a Codex access token whose claims name account.
+// codexToken is a Codex token whose claims name account.
 func codexToken(account string) string {
 	enc := base64.RawURLEncoding.EncodeToString
 	return enc([]byte(`{"alg":"none"}`)) + "." + enc([]byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"`+account+`"}}`)) + ".c2lnbmF0dXJl"
 }
 
-// TestAssistantSignInPinRefusesAnotherAccount pins each sign-in the member
-// made and refuses a start once the assistant's own agent swapped it for
-// another account's, while a token refresh still starts.
-func TestAssistantSignInPinRefusesAnotherAccount(t *testing.T) {
+// fakeIssuer is the Claude and Codex sign-in services. A refresh token is
+// "<account>~<n>"; each is good once, as the vendors' are, and its refresh
+// returns "<account>~<n+1>".
+type fakeIssuer struct {
+	mu   sync.Mutex
+	used map[string]bool
+	down bool
+}
+
+func newFakeIssuer(t *testing.T) (*fakeIssuer, AssistantIssuer) {
+	t.Helper()
+	f := &fakeIssuer{used: map[string]bool{}}
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	return f, AssistantIssuer{ClaudeToken: srv.URL + "/claude/token", ClaudeProfile: srv.URL + "/claude/profile", CodexToken: srv.URL + "/codex/token", Client: srv.Client()}
+}
+
+func (f *fakeIssuer) setDown(down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.down = down
+}
+
+func (f *fakeIssuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.down {
+		http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if r.URL.Path == "/claude/profile" {
+		account, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer access-")
+		if !ok {
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"account": map[string]string{"uuid": account}, "organization": map[string]string{"uuid": "org-" + account}})
+		return
+	}
+	var req map[string]string
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	client := map[string]string{"/claude/token": claudeClientID, "/codex/token": codexClientID}[r.URL.Path]
+	account, n, ok := strings.Cut(req["refresh_token"], "~")
+	if req["grant_type"] != "refresh_token" || req["client_id"] != client || !ok || f.used[req["refresh_token"]] {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+		return
+	}
+	f.used[req["refresh_token"]] = true
+	next := fmt.Sprintf("%s~%s0", account, n)
+	if r.URL.Path == "/claude/token" {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access-" + account, "refresh_token": next, "expires_in": 3600, "scope": "user:inference"})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"id_token": codexToken(account), "access_token": codexToken(account), "refresh_token": next})
+}
+
+// TestAssistantSignInVerifiedWithTheIssuer records the account the issuer
+// names when the member signs in and refuses a start once the assistant's
+// own agent swapped in another account's sign-in, while the server's own
+// refreshes keep starting it.
+func TestAssistantSignInVerifiedWithTheIssuer(t *testing.T) {
 	t.Parallel()
 	assistantDir := filepath.Join(t.TempDir(), "assistant")
+	issuer, fake := &fakeIssuer{}, AssistantIssuer{}
 	e := newTestEnv(t, func(c *Config) {
 		c.ServerBinary = fakeServerBinary(t, "current build")
 		c.AssistantDir = assistantDir
+		issuer, fake = newFakeIssuer(t)
+		c.AssistantIssuer = fake
 	})
 	withCoordination(t, e)
 	home := AssistantHomeDir(assistantDir, e.member.ID)
@@ -44,34 +110,61 @@ func TestAssistantSignInPinRefusesAnotherAccount(t *testing.T) {
 			t.Fatalf("the start after the %s sign-in: %v", agent, err)
 		}
 	}
-	signIn("codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"access_token":"`+codexToken("acct-alice")+`","refresh_token":"r1"}}`)
-	signIn("claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a1","refreshToken":"r1","expiresAt":1,"scopes":["user:inference"],"subscriptionType":"max"}}`)
+	read := func(rel string) string {
+		data, err := os.ReadFile(filepath.Join(home, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	signIn("claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a","refreshToken":"alice~0","scopes":["user:inference"],"subscriptionType":"max"}}`)
+	signIn("codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"access_token":"`+codexToken("acct-alice")+`","refresh_token":"acct-alice~0"}}`)
+	if record, err := os.ReadFile(filepath.Join(assistantSignInDir(assistantDir, e.member.ID), "claude.json")); err != nil || string(record) != "account=alice;organization=org-alice" {
+		t.Fatalf("Claude record = %q, %v; want the account the profile names", record, err)
+	}
+	for range 3 {
+		for _, agent := range []string{"claude", "codex"} {
+			if err := start(agent); err != nil {
+				t.Fatalf("a %s start after the server's own refresh: %v", agent, err)
+			}
+		}
+	}
+	if got := read(".claude/.credentials.json"); !strings.Contains(got, `"refreshToken":"alice~00000"`) || !strings.Contains(got, `"subscriptionType":"max"`) {
+		t.Fatalf("the rotated Claude sign-in = %s", got)
+	}
 
 	for _, tc := range []struct {
 		name, agent, rel, content string
-		changed                   bool
+		want                      error
 	}{
-		{"codex refresh", "codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"access_token":"` + codexToken("acct-alice") + `","refresh_token":"r2"}}`, false},
-		{"codex foreign account", "codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"access_token":"` + codexToken("acct-mallory") + `","refresh_token":"r3","account_id":"acct-alice"}}`, true},
-		{"codex foreign API key", "codex", ".codex/auth.json", `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-synthetic-mallory"}`, true},
-		// Codex picks auth_mode, else an API key over tokens.
-		{"codex API key mode over Alice's tokens", "codex", ".codex/auth.json", `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"access_token":"` + codexToken("acct-alice") + `"}}`, true},
-		{"codex API key beside Alice's tokens", "codex", ".codex/auth.json", `{"OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"access_token":"` + codexToken("acct-alice") + `"}}`, true},
-		{"codex API key added in ChatGPT mode", "codex", ".codex/auth.json", `{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"access_token":"` + codexToken("acct-alice") + `"}}`, true},
-		// The pinned CLI's refresh adds clientId and a null rateLimitTier.
-		{"claude refresh", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a2","refreshToken":"r2","expiresAt":2,"scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":null,"clientId":"c1"}}`, false},
-		{"claude other plan", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a3","refreshToken":"r3","expiresAt":3,"scopes":["user:inference"],"subscriptionType":"pro"}}`, true},
-		{"claude other scopes", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a3","refreshToken":"r3","expiresAt":3,"scopes":["user:profile"],"subscriptionType":"max"}}`, true},
+		{"claude account on the same plan", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a","refreshToken":"mallory~0","scopes":["user:inference"],"subscriptionType":"max"}}`, ErrAssistantSignInChanged},
+		{"codex refresh token of another account", "codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"access_token":"` + codexToken("acct-alice") + `","refresh_token":"acct-mallory~0"}}`, ErrAssistantSignInChanged},
+		{"codex API key mode over Alice's tokens", "codex", ".codex/auth.json", `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"refresh_token":"acct-alice~1"}}`, ErrAssistantSignInChanged},
+		{"codex API key beside Alice's tokens", "codex", ".codex/auth.json", `{"OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"refresh_token":"acct-alice~2"}}`, ErrAssistantSignInChanged},
+		{"codex API key added in ChatGPT mode", "codex", ".codex/auth.json", `{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"refresh_token":"acct-alice~3"}}`, ErrAssistantSignInChanged},
+		{"claude refresh token the issuer refuses", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a","refreshToken":"alice~0","scopes":["user:inference"]}}`, ErrAssistantSignInRefused},
 	} {
 		writeHomeFile(t, home, tc.rel, tc.content)
-		err := start(tc.agent)
-		found, foundErr := e.sched.AssistantLoginFound(e.member.ID, tc.agent)
-		if foundErr != nil {
-			t.Fatal(foundErr)
+		if err := start(tc.agent); !errors.Is(err, tc.want) {
+			t.Errorf("%s: start = %v, want %v", tc.name, err, tc.want)
 		}
-		if tc.changed != errors.Is(err, ErrAssistantSignInChanged) || found == tc.changed {
-			t.Errorf("%s: start = %v, ready %v; want refused %v", tc.name, err, found, tc.changed)
-		}
+	}
+	if found, err := e.sched.AssistantLoginFound(e.member.ID, "claude"); err != nil || found {
+		t.Errorf("after the issuer refused the Claude sign-in: ready %v, %v; want not signed in", found, err)
+	}
+
+	signIn("codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"refresh_token":"acct-alice~9"}}`)
+	issuer.setDown(true)
+	err := start("codex")
+	if err == nil || !strings.Contains(err.Error(), "couldn't verify the assistant's sign-in with OpenAI: 503") {
+		t.Fatalf("a start with the issuer down = %v, want its real error", err)
+	}
+	if found, foundErr := e.sched.AssistantLoginFound(e.member.ID, "codex"); foundErr != nil || !found {
+		t.Fatalf("the issuer being down dropped the sign-in: %v, %v", found, foundErr)
+	}
+	issuer.setDown(false)
+	if err := start("codex"); err != nil {
+		t.Fatalf("the start once the issuer is back: %v", err)
 	}
 
 	if _, err := e.sched.StartAssistantLogin(t.Context(), e.member.ID, "codex", 80, 24); err != nil {

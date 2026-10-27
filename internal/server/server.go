@@ -94,6 +94,9 @@ type Config struct {
 	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
+	// AssistantIssuer is where assistant sign-ins are checked; the zero
+	// value is the vendors' own sign-in services.
+	AssistantIssuer scheduler.AssistantIssuer
 	// Usage overrides the vendor quota reader, primarily for tests.
 	Usage fallback.QuotaReader
 	// IntegrationAdmission is the server-controlled policy seam for
@@ -415,6 +418,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		RunPidsLimit:         cfg.RunPidsLimit,
 		ServerBinary:         cfg.ServerBinary,
 		AssistantDir:         filepath.Join(cfg.DataDir, "assistant"),
+		AssistantIssuer:      cfg.AssistantIssuer,
 
 		HarnessUpdateDisabled: cfg.HarnessUpdateDisabled,
 	}); err != nil {
