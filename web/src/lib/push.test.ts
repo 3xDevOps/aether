@@ -195,6 +195,25 @@ describe('watchPush', () => {
     stop()
   })
 
+  it('opens the page a tapped notification names without reloading it', async () => {
+    const env = browser('granted')
+    const store = createRootStore()
+    const stop = watchPush(store, fakeApi())
+    const url = '/?page=settings&id=watches&watch=wat-3m8q2k7v4c'
+    const { port1, port2 } = new MessageChannel()
+    const acknowledged = new Promise((resolve) => {
+      port1.onmessage = (event) => resolve(event.data)
+    })
+    env.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'aether:open-url', url }, ports: [port2] }))
+    await expect(acknowledged).resolves.toBe(true)
+    port1.close()
+    expect(store.getState().route).toEqual({ name: 'settings', params: { section: 'watches', watch: 'wat-3m8q2k7v4c' } })
+    expect(window.location.search).toBe('?page=settings&id=watches&watch=wat-3m8q2k7v4c')
+    env.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'aether:open-url', url: 'https://elsewhere.example/?page=missions' } }))
+    expect(store.getState().route.name).toBe('settings')
+    stop()
+  })
+
   it('tells the server a person is here, at most once every 20 seconds', () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 })
     const store = createRootStore()

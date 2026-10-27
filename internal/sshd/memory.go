@@ -64,7 +64,8 @@ func (s *Server) memory(method string) (MemoryService, *protocol.Error) {
 }
 
 // memoryBrief builds the brief a new run of the member would get: the
-// caller's, or member_id's.
+// caller's, or for an admin member_id's, since it holds that member's own
+// pins.
 func (s *Server) memoryBrief(ctx context.Context, caller domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.memory(protocol.MethodMemoryBrief)
 	if perr != nil {
@@ -75,7 +76,15 @@ func (s *Server) memoryBrief(ctx context.Context, caller domain.MemberID, raw js
 		return nil, perr
 	}
 	member := caller
-	if p.MemberID != "" {
+	if p.MemberID != "" && domain.MemberID(p.MemberID) != caller {
+		actor, err := resolveActor(ctx, s.cfg.Store, caller)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		if cerr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{Workspace: domain.WorkspaceID(p.WorkspaceID)}); cerr != nil {
+			return nil, &protocol.Error{Code: protocol.CodeDenied,
+				Message: protocol.MethodMemoryBrief + ": another member's brief: " + cerr.Error()}
+		}
 		m, err := s.cfg.Store.GetMember(ctx, domain.MemberID(p.MemberID))
 		if err != nil {
 			return nil, rpcError(err)

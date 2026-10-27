@@ -432,7 +432,9 @@ ran "aether-server setup"
 not_ran "aether gui build"
 printed "This machine is your Aether server"
 printed "$quickstart"
-ends_with "  aether link <this-host>:2222   # from your own machine; the first link becomes admin"
+printed "  aether login                   # from your own machine, sign in to the edge"
+printed "  aether link --claim <code>     # code from server setup or \`sudo aether-server edge claim-code\`"
+ends_with "  aether link <this-host>:2222   # instead, on a tailnet or without the edge"
 printed "  sudo aether-server setup       # config, systemd unit, and how to start it"
 plain
 
@@ -455,7 +457,7 @@ touch -t 200001010000 "$AETHER_UNIT_PATH"
 SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
 [ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
-ends_with "  aether link <this-host>:2222   # from your own machine; the first link becomes admin"
+ends_with "  aether link <this-host>:2222   # instead, on a tailnet or without the edge"
 
 reset "--role server as root, declined but a unit is already installed"
 touch -t 200001010000 "$AETHER_UNIT_PATH"
@@ -488,7 +490,9 @@ ran "aether gui build"
 not_ran "aether-server setup"
 printed "This machine is a client"
 printed "$quickstart"
-ends_with "  aether link <server-host>:2222 # the first link on a fresh server becomes admin"
+printed "  aether login                   # sign in to the edge"
+printed "  aether link --claim <code>     # code from server setup or \`sudo aether-server edge claim-code\`"
+ends_with "  aether link <server-host>:2222 # instead, on a tailnet or without the edge"
 plain
 
 reset "--role client, gui build fails"
@@ -504,7 +508,8 @@ not_ran "aether gui build"
 not_ran "aether-server setup"
 printed "Nothing else was set up on this machine"
 printed "$quickstart"
-ends_with "  aether link <server>:2222      # from a client; the first link becomes admin"
+printed "  aether login                   # from a client, sign in to the edge"
+ends_with "  aether link <server>:2222      # instead, on a tailnet or without the edge"
 plain
 
 reset "--role none, unit already installed"
@@ -730,11 +735,24 @@ reset "role none keeps /usr/local/bin"
 [ ! -e "$home/.local/bin/aether" ] || fail "role none used ~/.local/bin"
 not_printed "would shadow"
 
-reset "role none without a usable sudo points at the no-sudo client install"
+# The no-sudo install carries no aether-server, so only a CLI-only install
+# may offer it.
+reset "role none without a usable sudo says aether-server needs root"
 status=0
 (
 	unset AETHER_BIN_DIR
 	STUB_SUDO_FAILS=1 sh "$script" --role none
+) >"$out" 2>&1 || status=$?
+[ "$status" != 0 ] || fail "installer exited 0 though sudo failed"
+printed "a terminal is required to read the password"
+printed "Installing aether-server needs root, passwordless sudo, or a terminal where sudo can ask for the password: rerun as root, or over \`ssh -t\`"
+not_printed "sh -s -- --client"
+
+reset "macOS role none without a usable sudo points at the no-sudo client install"
+status=0
+(
+	unset AETHER_BIN_DIR
+	STUB_OS=Darwin STUB_SUDO_FAILS=1 sh "$script" --role none
 ) >"$out" 2>&1 || status=$?
 [ "$status" != 0 ] || fail "installer exited 0 though sudo failed"
 printed "sh -s -- --client --role none --bin-dir \"\$HOME/.local/bin\""

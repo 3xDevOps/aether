@@ -18,7 +18,7 @@ func (s *Service) Capabilities(ctx context.Context, id domain.RunID) ([]string, 
 		return nil, err
 	}
 	capabilities := []string{protocol.MethodMemorySearch, protocol.MethodMemoryShow, protocol.MethodMemoryBrief}
-	if err := s.authorize(ctx, run.MemberID, run.WorkspaceID); err == nil {
+	if _, err := s.authorize(ctx, run.MemberID, run.WorkspaceID); err == nil {
 		capabilities = append([]string{protocol.MethodMemoryAdd}, capabilities...)
 	} else if !errors.Is(err, permissions.ErrDenied) {
 		return nil, err
