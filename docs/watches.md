@@ -142,7 +142,8 @@ every dashboard for a minute, the same hold run notifications use.
 Your own run already pushes you when it needs you
 ([push notifications](networking.md#notifications)). A watch on a run you own
 that is not part of a swarm therefore records push `skipped` instead of
-pushing:
+pushing, when you have a device to push to (with none it is
+`no_destination`):
 
 - every `needs_you` notice;
 - `Agent reported done` while the result waits for your review, which the

@@ -563,8 +563,6 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 			d.Status, d.Detail = protocol.WatchStatusDisabled, "Push is off in your notification settings"
 		case s.push == nil:
 			d.Status, d.Detail = protocol.WatchStatusDisabled, "Push is not configured on this server"
-		case ownerPushed(w, run, n, s.startedAt()):
-			d.Status, d.Detail = protocol.WatchStatusSkipped, "The run notification already sent it"
 		default:
 			if devices < 0 {
 				count, err := s.push.Devices(ctx, w.MemberID)
@@ -575,6 +573,10 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 			}
 			if devices == 0 {
 				d.Status, d.Detail = protocol.WatchStatusNoDestination, "No device has notifications turned on"
+				break
+			}
+			if ownerPushed(w, run, n, s.startedAt()) {
+				d.Status, d.Detail = protocol.WatchStatusSkipped, "The run notification already sent it"
 				break
 			}
 			rec.PushState, rec.PushNextAt = store.WatchPushPending, &now

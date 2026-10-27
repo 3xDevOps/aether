@@ -132,6 +132,19 @@ func TestAssistantWatchWritesNewsToTheConversationAndPushesOnlyWhatTheRunDoesNot
 	h.eventually("the watch to be done", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
 }
 
+func TestAnOwnersNeedWithNoDeviceHasNoDestination(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Fix the login redirect")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Deploy to staging first?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the need", func() bool { return len(h.notices(w.ID)) == 1 })
+	if d := pushOf(h.notices(w.ID)[0]); d.Status != protocol.WatchStatusNoDestination {
+		t.Fatalf("push = %+v, want no_destination: Ada has no device, so nothing pushed her", d)
+	}
+}
+
 func TestAssistantNoticeCutShortByAStopIsWrittenAfterTheRestart(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
