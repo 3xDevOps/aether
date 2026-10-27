@@ -458,10 +458,11 @@ func (s *Server) call(ctx context.Context, method string, params, out any) *prot
 }
 
 // launchNames names the accounts and repositories a launch's card
-// mentions.
+// mentions; shared are the teammates' accounts shared with the member.
 type launchNames struct {
 	member               string
 	accounts, workspaces map[string]string
+	shared               []string
 }
 
 func (s *Server) launchNames(ctx context.Context) (launchNames, *protocol.Error) {
@@ -476,6 +477,9 @@ func (s *Server) launchNames(ctx context.Context) (launchNames, *protocol.Error)
 	n := launchNames{member: s.Member, accounts: map[string]string{}, workspaces: map[string]string{}}
 	for _, m := range accounts.Accounts {
 		n.accounts[m.ID] = cmp.Or(m.DisplayName, m.ID)
+		if m.ID != s.Member {
+			n.shared = append(n.shared, m.ID)
+		}
 	}
 	for _, w := range workspaces.Workspaces {
 		n.workspaces[w.ID] = w.Name
@@ -510,15 +514,23 @@ func named(items []string) string {
 	return strings.Join(shown, ", ")
 }
 
-// options names a launch's fallback order and extra repositories; a
-// teammate's account in the order marks c as its owner's.
+// options names a launch's fallback order and extra repositories. A
+// teammate's account the launch may fall back to, in the order or, with
+// none, any shared with the member, marks c as its owner's.
 func (n launchNames) options(order []string, off bool, extras []string, c *protocol.AssistantConfirmation) string {
 	var out string
 	switch {
 	case off:
 		out = ", no fallback"
-	case len(order) == 0 && len(n.accounts) > 1:
+	case len(order) == 0 && len(n.shared) > 0:
 		out = ", may fall back to accounts shared with you"
+		if !c.OtherMember {
+			owners := make([]string, len(n.shared))
+			for i, id := range n.shared {
+				owners[i] = n.owner(id)
+			}
+			c.OtherMember, c.OtherOwner = true, named(owners)
+		}
 	case len(order) > 0:
 		accounts := make([]string, len(order))
 		for i, id := range order {

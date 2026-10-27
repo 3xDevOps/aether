@@ -221,6 +221,20 @@ func TestFallbackToATeammateAlwaysAsks(t *testing.T) {
 	if !got.OtherMember || got.OtherOwner != "Grace" || !strings.Contains(got.Summary, `falling back to "Grace"'s account in order`) {
 		t.Fatalf("confirmation = %+v, want it marked as Grace's", got)
 	}
+	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it"})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if !got.OtherMember || got.OtherOwner != "Grace" || !strings.Contains(got.Summary, "may fall back to accounts shared with you") {
+		t.Fatalf("automatic fallback confirmation = %+v, want it marked as Grace's", got)
+	}
+	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", NoFallback: true})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if got.OtherMember {
+		t.Fatalf("no-fallback confirmation = %+v, want it the member's own", got)
+	}
 }
 
 // A launch card says when the run may start child runs.

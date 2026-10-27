@@ -272,32 +272,31 @@ with `mine` filters to the socket's member.
 | Reversible | `aether_pause_run`, `aether_resume_run` |
 | Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin` |
 
-A confirmed call blocks until the member approves it in the dashboard, or
-runs at once when the member turned on
-[auto-approval](assistant.md#auto-approval), except that a message to or stop
-of another member's run always waits for a click, and an answer, an approval
-decision, a swarm launch, a template launch, and a launch on a teammate's
-shared account or with one in its fallback order always do: the card's
-`other_member` and `other_owner` name the account's owner. The card names what the call acts on: the run's title
-and owner, the request and the option chosen, a message's attachments and
-anchor, a launch's account when it is a teammate's, its fallback (saying
-when it may fall back to accounts shared with the member), extra repositories
-and child-run setting, a swarm launch's integrator and agents with their accounts, or
-a template's name, agent and parameters; the swarm's goal, its accountable
-human when that is someone else, and its question, saying so when the
-question was already answered; the teammate a run is handed to; the agent and
-account a replacement integrator uses; a delivery's candidate and target
-branch; a pull request's branch, head and title or repository, number, head
-and base; a memory note's workspace, text, who it is for and the note it
-replaces; that archiving a swarm closes its completed runs.
-`aether_launch_run` and `aether_launch_swarm` take an optional `reason`, one
-line from the assistant on why, which the card shows as `The assistant's
-reason: "..."` (cut to 200 characters); the socket takes it off before the
-call reaches the server, and a connector does not offer it. A decline,
-timeout or closed session fails the call with the reason.
+A confirmed call blocks until the member approves it in the dashboard, or runs
+at once when the member turned on [auto-approval](assistant.md#auto-approval),
+except that a message to or stop of another member's run always waits for a
+click, and an answer, an approval decision, a swarm launch, a template launch,
+and a launch on a teammate's shared account or one that may fall back to it (in
+its fallback order, or by automatic fallback while any account is shared with
+the member) always do: the card's `other_member` and `other_owner` name the
+account's owner. The card names what the call acts on: the run's title and
+owner, the request and the option chosen, a message's attachments and anchor, a
+launch's account when it is a teammate's, its fallback (saying when it may fall
+back to accounts shared with the member), extra repositories and child-run
+setting, a swarm launch's integrator and agents with their accounts, or a
+template's name, agent and parameters; the swarm's goal, its accountable human
+when that is someone else, and its question, saying so when the question was
+already answered; the teammate a run is handed to; the agent and account a
+replacement integrator uses; a delivery's candidate and target branch; a pull
+request's branch, head and title or repository, number, head and base; a memory
+note's workspace, text, who it is for and the note it replaces; that archiving a
+swarm closes its completed runs. `aether_launch_run` and `aether_launch_swarm`
+take an optional `reason`, one line from the assistant on why, which the card
+shows as `The assistant's reason: "..."` (cut to 200 characters); the socket
+takes it off before the call reaches the server, and a connector does not offer
+it. A decline, timeout or closed session fails the call with the reason.
 `aether_docs` reads the guides in `docs/`, which the server binary embeds.
-Without `--assistant` the bridge serves the coordination tools above,
-unchanged.
+Without `--assistant` the bridge serves the coordination tools above, unchanged.
 
 The tools are one registry, `internal/ops`, shared with the
 [ChatGPT and Claude connector](connectors.md). Each op declares its name,
@@ -311,16 +310,17 @@ and text agents, teammates or GitHub users wrote under `untrusted`
 returns the server's message and error code, with the tool that resolves it
 for an unknown id or a bad argument.
 
-The two surfaces differ only where they must. A connector's descriptions
-leave out the tier wording, because ChatGPT and Claude ask before each write
+The two surfaces differ only where they must. A connector's descriptions leave
+out the tier wording, because ChatGPT and Claude ask before each write
 themselves, and each tool has a title and the hints in
-[chatgpt-plugin.md](chatgpt-plugin.md#tool-hints). `aether_list_runs` lists
-only the member's runs by default on a connector and every run they can see on
-the assistant. A connector call is cut off after 40 seconds and a launch keeps
+[chatgpt-plugin.md](chatgpt-plugin.md#tool-hints). `aether_list_runs` lists only
+the member's runs by default on a connector and every run they can see on the
+assistant. A connector call is cut off after 40 seconds and a launch keeps
 starting past it; an assistant call waits, since its member may still be
 deciding a card. The assistant does not offer `search`, `fetch`,
-`aether_mark_reviewed` or `aether_cancel_swarm`; the connector does not offer the environment, usage,
-docs, view context and workspace tools. Messages and launches dedupe the same
-way on both: an `idempotency_key` repeats a call safely, and a keyless message
-reuses the key of the same message to the same run still being sent or sent in
-the last 60 seconds, returning that message with `duplicate: true`.
+`aether_mark_reviewed` or `aether_cancel_swarm`; the connector does not offer
+the environment, usage, docs, view context and workspace tools. Messages and
+launches dedupe the same way on both: an `idempotency_key` repeats a call
+safely, and a keyless message reuses the key of the same message to the same run
+still being sent or sent in the last 60 seconds, returning that message with
+`duplicate: true`.
