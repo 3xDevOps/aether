@@ -853,15 +853,19 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 		case diff.Error != "":
 			out["diff_error"] = diff.Error
 		default:
+			// An unresolved conflict's file starts with a combined-diff
+			// header instead of diff --git.
 			var files []string
-			for part := range strings.SplitSeq(diff.Output.Stdout, "\ndiff --git ") {
-				if part == "" {
-					continue
+			var file strings.Builder
+			for line := range strings.Lines(diff.Output.Stdout) {
+				if file.Len() > 0 && (strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "diff --cc ") || strings.HasPrefix(line, "diff --combined ")) {
+					files = append(files, strings.TrimSuffix(file.String(), "\n"))
+					file.Reset()
 				}
-				if len(files) > 0 {
-					part = "diff --git " + part
-				}
-				files = append(files, part)
+				file.WriteString(line)
+			}
+			if file.Len() > 0 {
+				files = append(files, strings.TrimSuffix(file.String(), "\n"))
 			}
 			if in.DiffFile < 0 || (in.DiffFile > 0 && in.DiffFile >= len(files)) {
 				return "", nil, invalid("diff_file %d is past the diff's %d files", in.DiffFile, len(files))

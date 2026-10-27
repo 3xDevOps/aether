@@ -551,4 +551,13 @@ func TestConnectorRunChangesPages(t *testing.T) {
 	if size > diffPageText || len(page) != 2 || fmt.Sprint(out["diff_clipped_files"]) != "[0 1]" || out["next_diff_file"] != float64(2) {
 		t.Fatalf("wide page = %d bytes, %d files, clipped %v, next %v", size, len(page), out["diff_clipped_files"], out["next_diff_file"])
 	}
+
+	// Unresolved conflicts' combined diffs page as files of their own.
+	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{Output: protocol.RunRepoCommandOutput{
+		Stdout: "diff --git a/x b/x\n+x\ndiff --cc a\n++<<<<<<< ours\ndiff --combined b\n++b"}})
+	_, out = run(t, cs, "aether_run_changes", map[string]any{"run_id": "run-1", "include_diff": true})
+	if got := fmt.Sprint(out["untrusted"].(map[string]any)["diff"]); out["diff_files"] != float64(3) ||
+		got != "[diff --git a/x b/x\n+x diff --cc a\n++<<<<<<< ours diff --combined b\n++b]" {
+		t.Fatalf("conflict diff = %v files %s", out["diff_files"], got)
+	}
 }
