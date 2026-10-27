@@ -50,15 +50,16 @@ func AssistantInstructionsDir(root string, member domain.MemberID) string {
 	return filepath.Join(root, string(member), "instructions")
 }
 
-// AssistantInstallDir is the host directory mounted at AssistantInstallPath.
-func AssistantInstallDir(root string, member domain.MemberID) string {
-	return filepath.Join(root, string(member), "install")
+// AssistantInstallDir is the host directory mounted at AssistantInstallPath
+// for agent. Each agent has its own, so switching agents keeps both installs.
+func AssistantInstallDir(root string, member domain.MemberID, agent string) string {
+	return filepath.Join(root, string(member), "install", agent)
 }
 
 // assistantInstalled records the adapter in AssistantInstallDir once its
-// install succeeded. Only the server writes it.
-func assistantInstalled(root string, member domain.MemberID) string {
-	return filepath.Join(root, string(member), "installed")
+// install succeeded. Only the server writes it, and no container mounts it.
+func assistantInstalled(root string, member domain.MemberID, agent string) string {
+	return filepath.Join(root, string(member), "install", agent+".installed")
 }
 
 func assistantCreationKey(member domain.MemberID) string {
@@ -95,7 +96,7 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	hostHome := AssistantHomeDir(s.cfg.AssistantDir, member)
 	instructions := AssistantInstructionsDir(s.cfg.AssistantDir, member)
 	sock := AssistantSocketDir(s.cfg.AssistantDir, member)
-	install := AssistantInstallDir(s.cfg.AssistantDir, member)
+	install := AssistantInstallDir(s.cfg.AssistantDir, member, profile.Name)
 	for _, dir := range []string{hostHome, instructions, sock, install} {
 		if err = os.MkdirAll(dir, 0o755); err != nil {
 			return runtime.Spec{}, fmt.Errorf("scheduler: create the assistant's directories: %w", err)
@@ -303,15 +304,19 @@ func (s *Scheduler) ensureAssistantContainer(ctx context.Context, member domain.
 }
 
 func (s *Scheduler) removeAssistantContainer(ctx context.Context, member domain.MemberID) error {
-	cid, err := s.cfg.Runtime.FindByCreationKey(ctx, assistantCreationKey(member))
+	return s.removeByCreationKey(ctx, assistantCreationKey(member))
+}
+
+func (s *Scheduler) removeByCreationKey(ctx context.Context, key string) error {
+	cid, err := s.cfg.Runtime.FindByCreationKey(ctx, key)
 	if errors.Is(err, runtime.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("scheduler: find the assistant container: %w", err)
+		return fmt.Errorf("scheduler: find container %s: %w", key, err)
 	}
 	if err := s.destroyTerminalContainer(ctx, cid); err != nil {
-		return fmt.Errorf("scheduler: destroy the assistant container: %w", err)
+		return fmt.Errorf("scheduler: destroy container %s: %w", key, err)
 	}
 	return nil
 }
@@ -348,11 +353,11 @@ func (s *Scheduler) AssistantLoginFound(member domain.MemberID, agent string) (b
 	return len(logins) > 0, err
 }
 
-// RemoveAssistant destroys the member's assistant container and deletes
-// their whole assistant directory. Callers serialize per member with starting
-// it.
+// RemoveAssistant destroys the member's assistant and install containers and
+// deletes their whole assistant directory. Callers serialize per member with
+// starting it.
 func (s *Scheduler) RemoveAssistant(ctx context.Context, member domain.MemberID) error {
-	if err := s.removeAssistantContainer(ctx, member); err != nil {
+	if err := errors.Join(s.removeAssistantContainer(ctx, member), s.removeByCreationKey(ctx, assistantInstallCreationKey(member))); err != nil {
 		return err
 	}
 	if err := s.cfg.RemoveAll(ctx, filepath.Join(s.cfg.AssistantDir, string(member))); err != nil {
@@ -369,7 +374,7 @@ func (s *Scheduler) RemoveAssistant(ctx context.Context, member domain.MemberID)
 // too.
 func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID, profile harness.Profile, installing func()) error {
 	pkg := profile.ACPInstall.Package + "@" + profile.ACPInstall.Version
-	stamp := assistantInstalled(s.cfg.AssistantDir, member)
+	stamp := assistantInstalled(s.cfg.AssistantDir, member, profile.Name)
 	got, err := os.ReadFile(stamp)
 	if err == nil && string(got) == pkg {
 		return nil
@@ -378,10 +383,16 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 		return fmt.Errorf("scheduler: read the assistant's install record: %w", err)
 	}
 	installing()
+	// An install a crashed server left running would write into the
+	// directory while it is cleared.
+	key := assistantInstallCreationKey(member)
+	if err = s.removeByCreationKey(ctx, key); err != nil {
+		return fmt.Errorf("scheduler: remove an earlier assistant install: %w", err)
+	}
 	if err = os.Remove(stamp); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("scheduler: clear the assistant's install record: %w", err)
 	}
-	dir := AssistantInstallDir(s.cfg.AssistantDir, member)
+	dir := AssistantInstallDir(s.cfg.AssistantDir, member, profile.Name)
 	if err = s.cfg.RemoveAll(ctx, dir); err != nil {
 		return fmt.Errorf("scheduler: clear the assistant's install: %w", err)
 	}
@@ -395,14 +406,6 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 	mounts := []runtime.Mount{{HostPath: dir, ContainerPath: AssistantInstallPath}}
 	if err = s.applyRunOwnership(nil, &domain.Run{}, member, mounts, user); err != nil {
 		return fmt.Errorf("scheduler: hand the assistant's install to its user: %w", err)
-	}
-	key := assistantInstallCreationKey(member)
-	if left, findErr := s.cfg.Runtime.FindByCreationKey(ctx, key); findErr == nil {
-		if err = s.destroyTerminalContainer(ctx, left); err != nil {
-			return fmt.Errorf("scheduler: remove an earlier assistant install: %w", err)
-		}
-	} else if !errors.Is(findErr, runtime.ErrNotFound) {
-		return fmt.Errorf("scheduler: find an earlier assistant install: %w", findErr)
 	}
 	cid, err := s.cfg.Runtime.Create(ctx, runtime.Spec{
 		Name:             "aether-assistant-install-" + string(member),

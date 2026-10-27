@@ -73,7 +73,7 @@ func TestAssistantContainerMountsOnlyTheLogin(t *testing.T) {
 	want := map[string]runtime.Mount{
 		home:                                {HostPath: AssistantHomeDir(assistantDir, e.member.ID), ContainerPath: home},
 		AssistantCwd:                        {HostPath: AssistantInstructionsDir(assistantDir, e.member.ID), ContainerPath: AssistantCwd, ReadOnly: true},
-		AssistantInstallPath:                {HostPath: AssistantInstallDir(assistantDir, e.member.ID), ContainerPath: AssistantInstallPath, ReadOnly: true},
+		AssistantInstallPath:                {HostPath: AssistantInstallDir(assistantDir, e.member.ID, "claude"), ContainerPath: AssistantInstallPath, ReadOnly: true},
 		home + "/.claude/.credentials.json": {HostPath: memberHome, Subpath: ".claude/.credentials.json", ContainerPath: home + "/.claude/.credentials.json"},
 		coordtransport.AssistantMountDir:    {HostPath: AssistantSocketDir(assistantDir, e.member.ID), ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true},
 	}
@@ -181,6 +181,9 @@ func TestDiscardAssistantStateRemovesTheHomeWhole(t *testing.T) {
 	if _, err = os.Lstat(home); !os.IsNotExist(err) {
 		t.Fatalf("the assistant home survived: %v", err)
 	}
+	if !e.sched.hasAssistantDir(e.member.ID) {
+		t.Error("after a reset the member's containers would stop pinning their logins")
+	}
 	if _, err = os.Stat(filepath.Join(outside, "keep.txt")); err != nil {
 		t.Fatalf("discarding followed a symlink out of the home: %v", err)
 	}
@@ -223,18 +226,30 @@ func TestAssistantLoginFoundMatchesTheMounts(t *testing.T) {
 }
 
 // TestAssistantInstallsOnlyWhenMissing installs the pinned adapter in a
-// container of its own that mounts the install writable, records it, and
-// installs again only when the pin changes.
+// container of its own that mounts the install writable, records it, keeps
+// each agent's install across a switch, and installs again only when the pin
+// changes, after removing an install a crashed server left running.
 func TestAssistantInstallsOnlyWhenMissing(t *testing.T) {
 	t.Parallel()
 	assistantDir := filepath.Join(t.TempDir(), "assistant")
-	e := newTestEnv(t, func(c *Config) {
+	var e *testEnv
+	var left runtime.ID
+	e = newTestEnv(t, func(c *Config) {
 		c.ServerBinary = fakeServerBinary(t, "current build")
 		c.AssistantDir = assistantDir
+		c.RemoveAll = func(_ context.Context, p string) error {
+			if left != "" {
+				if _, err := e.rt.get(left); err == nil {
+					t.Errorf("cleared %s while the leftover install container ran", p)
+				}
+			}
+			return os.RemoveAll(p)
+		}
 	})
 	withCoordination(t, e)
 	codex, _ := harness.Lookup("codex")
-	install := AssistantInstallDir(assistantDir, e.member.ID)
+	claude, _ := harness.Lookup("claude")
+	install := AssistantInstallDir(assistantDir, e.member.ID, "codex")
 	writeHomeFile(t, install, "bin/stale", "x")
 	var installer runtime.Spec
 	e.rt.execHandler = func(id runtime.ID, _ []string) (int, string, error) {
@@ -246,17 +261,17 @@ func TestAssistantInstallsOnlyWhenMissing(t *testing.T) {
 		return 0, "", nil
 	}
 	calls := 0
-	for range 2 {
-		if err := e.sched.installAssistant(t.Context(), e.member.ID, codex, func() { calls++ }); err != nil {
+	for _, profile := range []harness.Profile{codex, codex, claude, codex} {
+		if err := e.sched.installAssistant(t.Context(), e.member.ID, profile, func() { calls++ }); err != nil {
 			t.Fatal(err)
 		}
 	}
 	pkg := codex.ACPInstall.Package + "@" + codex.ACPInstall.Version
 	runs := e.rt.execRuns()
-	if calls != 1 || len(runs) != 1 || !slices.Equal(runs[0].argv, []string{"npm", "install", "-g", "--prefix", AssistantInstallPath, pkg}) {
-		t.Fatalf("installing called %d times, execs %+v; want one install of %s", calls, runs, pkg)
+	if calls != 2 || len(runs) != 2 || !slices.Equal(runs[0].argv, []string{"npm", "install", "-g", "--prefix", AssistantInstallPath, pkg}) {
+		t.Fatalf("installing called %d times, execs %+v; want one install of %s and one of claude's", calls, runs, pkg)
 	}
-	if want := []runtime.Mount{{HostPath: install, ContainerPath: AssistantInstallPath}}; !slices.Equal(installer.Mounts, want) {
+	if want := []runtime.Mount{{HostPath: AssistantInstallDir(assistantDir, e.member.ID, "claude"), ContainerPath: AssistantInstallPath}}; !slices.Equal(installer.Mounts, want) {
 		t.Fatalf("installer mounts %+v, want only the install writable", installer.Mounts)
 	}
 	if _, err := e.rt.get(runs[0].id); err == nil {
@@ -265,11 +280,38 @@ func TestAssistantInstallsOnlyWhenMissing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(install, "bin/stale")); !os.IsNotExist(err) {
 		t.Errorf("the install did not start from an empty directory: %v", err)
 	}
-	if err := os.WriteFile(assistantInstalled(assistantDir, e.member.ID), []byte(codex.ACPInstall.Package+"@0.0.1"), 0o644); err != nil {
+
+	var err error
+	left, err = e.rt.Create(t.Context(), runtime.Spec{Name: "left", Image: "busybox", Command: assistantIdle, CreationKey: assistantInstallCreationKey(e.member.ID)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.sched.installAssistant(t.Context(), e.member.ID, codex, func() { calls++ }); err != nil || calls != 2 {
-		t.Fatalf("install after the pin moved: %v, installing called %d times", err, calls)
+	writeHomeFile(t, install, "bin/old", "x")
+	if err = os.WriteFile(assistantInstalled(assistantDir, e.member.ID, "codex"), []byte(codex.ACPInstall.Package+"@0.0.1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.sched.installAssistant(t.Context(), e.member.ID, codex, func() {}); err != nil {
+		t.Fatalf("install after the pin moved: %v", err)
+	}
+	if _, err = e.rt.get(left); err == nil {
+		t.Error("the leftover install container survived")
+	}
+	if n := len(e.rt.execRuns()); n != 3 {
+		t.Errorf("execs after the pin moved = %d, want a third install", n)
+	}
+	if _, err = os.Stat(filepath.Join(install, "bin/old")); !os.IsNotExist(err) {
+		t.Errorf("the reinstall kept the old install: %v", err)
+	}
+	left = ""
+	stray, err := e.rt.Create(t.Context(), runtime.Spec{Name: "stray", Image: "busybox", Command: assistantIdle, CreationKey: assistantInstallCreationKey(e.member.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.sched.RemoveAssistant(t.Context(), e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.rt.get(stray); err == nil {
+		t.Error("RemoveAssistant left the install container")
 	}
 }
 
@@ -291,7 +333,7 @@ func TestAssistantInstallCancelledDestroysTheContainer(t *testing.T) {
 	if _, err := e.rt.get(e.rt.execRuns()[0].id); err == nil {
 		t.Fatal("the container of a cancelled install still exists")
 	}
-	if _, err := os.Stat(assistantInstalled(assistantDir, e.member.ID)); !os.IsNotExist(err) {
+	if _, err := os.Stat(assistantInstalled(assistantDir, e.member.ID, "claude")); !os.IsNotExist(err) {
 		t.Fatalf("a cancelled install was recorded: %v", err)
 	}
 }

@@ -26,7 +26,7 @@ runs and your [environment](environments.md) (the persistent container
   single read-write file: `~/.claude/.credentials.json` for Claude Code or
   `~/.codex/auth.json` for Codex. Whichever account that file holds receives
   the assistant's prompts; see [the login file](#the-login-file).
-- Its Enhanced adapter is in `<data>/assistant/<member>/install`, mounted
+- Its Enhanced adapter is in `<data>/assistant/<member>/install/<agent>`, mounted
   read-only at `/opt/aether-assistant`, first in its `PATH`. The assistant
   cannot change it, and **New conversation** does not need to reinstall it.
 - Claude Code's auto-memory is off for it.

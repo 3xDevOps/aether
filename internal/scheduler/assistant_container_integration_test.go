@@ -129,12 +129,12 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 		}
 	}
 
-	install := AssistantInstallDir(assistantDir, member)
+	install := AssistantInstallDir(assistantDir, member, "claude")
 	seedHome(t, install, map[string]string{"bin/claude-agent-acp": "#!/bin/sh\necho \"adapter in $(pwd) as $IS_SANDBOX\"\nexec cat\n"})
 	if err := os.Chmod(filepath.Join(install, "bin", "claude-agent-acp"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(assistantInstalled(assistantDir, member), []byte(claude.ACPInstall.Package+"@"+claude.ACPInstall.Version), 0o644); err != nil {
+	if err := os.WriteFile(assistantInstalled(assistantDir, member, "claude"), []byte(claude.ACPInstall.Package+"@"+claude.ACPInstall.Version), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	exec, err := e.sched.StartAssistantExec(ctx, member, "claude", runtime.ExecSpec{

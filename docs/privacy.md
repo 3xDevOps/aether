@@ -388,7 +388,8 @@ Your [assistant](assistant.md) keeps its conversation on your server under
 - `home/` is the agent's home: the session files Claude Code keeps under
   `.claude/` (projects, history, todos, file history, shell snapshots, debug
   logs) or Codex under `.codex/` (sessions, history).
-- `install/` holds the installed adapter and `installed` its version.
+- `install/` holds each agent's installed adapter, and `install/<agent>.installed`
+  its version.
 - `instructions/` holds the instructions the server gives it, and `tools/` its
   tool socket.
 

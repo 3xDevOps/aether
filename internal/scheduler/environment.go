@@ -688,13 +688,14 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 // either, and refusing would keep the member from the terminal that fixes it.
 // A grantee still pending approval counts: approval takes effect while this
 // member's containers keep running. The member's assistant container mounts
-// the same logins, so a member who has one pins them too.
+// the same logins, so a member who has an assistant directory pins them too;
+// a reset deletes only the home inside it.
 func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, homePath, home string, planned []runtime.Mount) ([]runtime.Mount, error) {
 	grantees, err := s.cfg.Store.ListAccountGrantees(ctx, member)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: list account grantees: %w", err)
 	}
-	if len(grantees) == 0 && !s.hasAssistantHome(member) {
+	if len(grantees) == 0 && !s.hasAssistantDir(member) {
 		return nil, nil
 	}
 	var pins []runtime.Mount
@@ -717,11 +718,11 @@ func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, ho
 	return pins, nil
 }
 
-func (s *Scheduler) hasAssistantHome(member domain.MemberID) bool {
+func (s *Scheduler) hasAssistantDir(member domain.MemberID) bool {
 	if s.cfg.AssistantDir == "" {
 		return false
 	}
-	_, err := os.Stat(AssistantHomeDir(s.cfg.AssistantDir, member))
+	_, err := os.Stat(filepath.Join(s.cfg.AssistantDir, string(member)))
 	return err == nil
 }
 
