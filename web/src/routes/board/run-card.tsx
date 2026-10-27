@@ -74,7 +74,7 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
           <div className={cn('mt-2 flex min-h-4 min-w-0 flex-wrap items-center gap-2 text-ui-sm text-muted', wideIndent)}>
             <span
               className="flex min-w-0 flex-1 items-center gap-1.5"
-              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next, cause: card.cause, wait }, since, now)}
+              title={card.swarm && !wait ? undefined : stateTitle({ state, reason, next: card.next, cause: card.cause, wait }, since, now)}
             >
               <StatusDot tone={toneOf({ state, wait })} label={label} />
               <span className="min-w-0 truncate">
