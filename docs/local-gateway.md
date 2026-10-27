@@ -1033,7 +1033,9 @@ task, agent, mode, model or parameter defaults do. `template.launch` with
 `expected_version` fails with `-32003` `templates: template changed: <name>
 was saved again and is now version <new>, not <old>` instead of launching a
 template changed since it was read. A retry with the launch's `idempotency_key` replays its
-run whatever `expected_version` it names.
+run whatever `expected_version` it names. With `replay_only: true` it launches
+nothing: it returns the key's run, or fails with `-32000` when the key started
+none.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the

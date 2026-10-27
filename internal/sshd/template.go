@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -147,10 +148,17 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 		return nil, invalidParams("name is required")
 	}
 	// A retry of a launch keeps its receipt after the template changes, so
-	// the version is not part of the params it must repeat.
-	key, version := p.IdempotencyKey, p.ExpectedVersion
-	p.IdempotencyKey, p.ExpectedVersion = "", ""
+	// the version is not part of the params it must repeat, nor is
+	// replay_only.
+	key, version, replayOnly := p.IdempotencyKey, p.ExpectedVersion, p.ReplayOnly
+	p.IdempotencyKey, p.ExpectedVersion, p.ReplayOnly = "", "", false
+	if replayOnly && key == "" {
+		return nil, invalidParams("replay_only needs the idempotency_key of the launch to return")
+	}
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+		if replayOnly {
+			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: no run was launched under idempotency_key %q", protocol.MethodTemplateLaunch, key)}
+		}
 		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, version, created)
 		if err != nil {
 			return nil, templateError(err)

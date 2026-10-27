@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"slices"
@@ -469,5 +470,58 @@ func TestTemplateLaunchIsPinnedToItsCard(t *testing.T) {
 		ExpectedVersion: "v0"})
 	if perr == nil || perr.Code != protocol.CodeConflict || len(cards) != 1 || fc.params[protocol.MethodTemplateLaunch] != nil {
 		t.Fatalf("a stale template launch = %v with %d cards, want a conflict and no card", perr, len(cards))
+	}
+}
+
+// replayCaller answers a replay_only template.launch with the run key
+// "k-done" started and refuses any other key.
+type replayCaller struct {
+	fakeCaller
+	launches []string
+}
+
+func (c *replayCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if method != protocol.MethodTemplateLaunch {
+		return c.fakeCaller.Call(ctx, method, params)
+	}
+	p, _ := protocol.DecodeParams[protocol.TemplateLaunchParams](params)
+	c.launches = append(c.launches, fmt.Sprintf("%s replay=%t", p.IdempotencyKey, p.ReplayOnly))
+	switch {
+	case p.ReplayOnly && p.IdempotencyKey == "k-done":
+		return json.RawMessage(`{"run":{"id":"run-first"},"replayed":true}`), nil
+	case p.ReplayOnly:
+		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "template.launch: no run was launched under idempotency_key"}
+	}
+	return json.RawMessage(`{"run":{"id":"run-new"}}`), nil
+}
+
+// A keyed template launch whose run already started returns it without a
+// card, even once the template changed; a new key still gets the card and
+// its version check.
+func TestTemplateLaunchRetryReplaysBeforeTheCard(t *testing.T) {
+	caller := &replayCaller{}
+	var cards []string
+	var followed []string
+	s := &Server{Caller: caller, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		cards = append(cards, c.Summary)
+		return nil
+	}, Follow: func(_ context.Context, run string) { followed = append(followed, run) }}
+	launch := func(p protocol.TemplateLaunchParams) (json.RawMessage, *protocol.Error) {
+		raw, _ := json.Marshal(p)
+		return s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodTemplateLaunch, Params: raw})
+	}
+	got, perr := launch(protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}, ExpectedVersion: "v0",
+		IdempotencyKey: "k-done"})
+	if perr != nil || !strings.Contains(string(got), "run-first") || len(cards) != 0 || !slices.Equal(followed, []string{"run-first"}) {
+		t.Fatalf("retry of a stale launch = %s, %v with %d cards, followed %v; want the first run, no card", got, perr, len(cards), followed)
+	}
+	if _, perr = launch(protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}, ExpectedVersion: "v0",
+		IdempotencyKey: "k-new"}); perr == nil || perr.Code != protocol.CodeConflict || len(cards) != 0 {
+		t.Fatalf("a new launch of a changed template = %v with %d cards, want a conflict and no card", perr, len(cards))
+	}
+	got, perr = launch(protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}, IdempotencyKey: "k-new"})
+	if perr != nil || !strings.Contains(string(got), "run-new") || len(cards) != 1 ||
+		!slices.Equal(caller.launches, []string{"k-done replay=true", "k-new replay=true", "k-new replay=true", "k-new replay=false"}) {
+		t.Fatalf("a new launch = %s, %v with %d cards, launches %v; want one card, then the launch", got, perr, len(cards), caller.launches)
 	}
 }

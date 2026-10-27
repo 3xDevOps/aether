@@ -258,6 +258,9 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 	case req.Method == protocol.MethodAssistantViewContext:
 		return s.serveView()
 	case tier == tierConfirmed:
+		if result, ok := s.replayTemplateLaunch(ctx, req); ok {
+			return result, nil
+		}
 		c := protocol.AssistantConfirmation{Method: req.Method, Params: req.Params, CreatedAt: time.Now().UTC()}
 		if rpcErr := s.summarize(ctx, req, &c); rpcErr != nil {
 			return nil, rpcErr
@@ -281,6 +284,35 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 		}
 	}
 	return result, rpcErr
+}
+
+// replayTemplateLaunch returns the run a keyed template.launch already
+// started, without a card: a retry after a lost reply must get it even when
+// the template has since changed or gone, which the card would refuse. It
+// launches nothing, so a key with no run falls through to the card.
+func (s *Server) replayTemplateLaunch(ctx context.Context, req protocol.Request) (json.RawMessage, bool) {
+	if req.Method != protocol.MethodTemplateLaunch {
+		return nil, false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(req.Params, &fields) != nil || len(fields["idempotency_key"]) == 0 || string(fields["idempotency_key"]) == `""` {
+		return nil, false
+	}
+	fields["replay_only"] = json.RawMessage("true")
+	params, err := json.Marshal(fields)
+	if err != nil {
+		return nil, false
+	}
+	result, rpcErr := s.Caller.Call(ctx, req.Method, params)
+	if rpcErr != nil {
+		return nil, false
+	}
+	if s.Follow != nil {
+		if id := s.followed(req, result); id != "" {
+			s.Follow(context.WithoutCancel(ctx), id)
+		}
+	}
+	return result, true
 }
 
 func (s *Server) followed(req protocol.Request, result json.RawMessage) string {

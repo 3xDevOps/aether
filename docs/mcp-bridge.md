@@ -288,7 +288,9 @@ launch's account when it is a teammate's, its fallback (saying when it may fall
 back to accounts shared with the member), extra repositories and child-run
 setting, a swarm launch's integrator and agents with their accounts, or a
 template's name, agent and task with its parameters filled in, the launch
-pinned to that version of the template; the swarm's goal, its accountable human
+pinned to that version of the template (a template launch whose
+`idempotency_key` already started a run returns that run without a card, even
+once the template changed); the swarm's goal, its accountable human
 when that is someone else, and its question, saying so when the question was
 already answered; the teammate a run is handed to; the agent and account a
 replacement integrator uses; a delivery's candidate and target branch; a pull

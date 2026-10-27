@@ -94,6 +94,9 @@ type TemplateLaunchParams struct {
 	// ExpectedVersion, when set, refuses the launch with CodeConflict
 	// unless it is the template's current Version.
 	ExpectedVersion string `json:"expected_version,omitempty"`
+	// ReplayOnly launches nothing: it returns the run IdempotencyKey's
+	// launch started, replayed, or fails with CodeNotFound when none did.
+	ReplayOnly bool `json:"replay_only,omitempty"`
 	// IdempotencyKey is RunLaunchParams.IdempotencyKey; one key names one
 	// launch across run.launch and template.launch.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`

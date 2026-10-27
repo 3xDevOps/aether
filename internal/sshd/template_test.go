@@ -310,4 +310,18 @@ func TestTemplateLaunchReplayIgnoresTheVersion(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Code == protocol.CodeConflict || !strings.Contains(pe.Message, first.Run.ID) || len(e.runs.Calls()) != 1 {
 		t.Fatalf("retry after the template changed = %v after %v, want the key's run %s and no new launch", err, e.runs.Calls(), first.Run.ID)
 	}
+	// replay_only finds the same run, and launches nothing for a key that
+	// started none.
+	launch.ReplayOnly = true
+	if err := control.Call(protocol.MethodTemplateLaunch, launch, nil); !errors.As(err, &pe) || !strings.Contains(pe.Message, first.Run.ID) {
+		t.Fatalf("replay_only of the first key = %v, want its run %s", err, first.Run.ID)
+	}
+	launch.IdempotencyKey = "k2"
+	if err := control.Call(protocol.MethodTemplateLaunch, launch, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound || len(e.runs.Calls()) != 1 {
+		t.Fatalf("replay_only of a new key = %v after %v, want not found and no launch", err, e.runs.Calls())
+	}
+	launch.ReplayOnly, launch.ExpectedVersion = false, ""
+	if err := control.Call(protocol.MethodTemplateLaunch, launch, nil); err != nil || len(e.runs.Calls()) != 2 {
+		t.Fatalf("launch after a replay_only miss = %v after %v, want it launched", err, e.runs.Calls())
+	}
 }
