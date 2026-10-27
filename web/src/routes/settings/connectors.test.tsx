@@ -31,6 +31,7 @@ function show(over: Partial<Api> = {}, params: Record<string, string> = {}) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   localStorage.clear()
   vi.useRealTimers()
   vi.clearAllMocks()
@@ -311,4 +312,34 @@ it('says when a move or a watch saw nothing connect in 10 minutes, and keeps the
   expect((await screen.findByRole('alert')).textContent).toContain(`No new ChatGPT connection appeared at ${universal}, so ChatGPT (chatgpt.com) was kept.`)
   expect(screen.getByText(/Nothing connected in the last 10 minutes\./)).toBeTruthy()
   expect(client.connectorRevoke).not.toHaveBeenCalled()
+})
+
+it('keeps the old connector and says why when the browser cannot record the move', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const old = { ...chatgpt, resource: own }
+  const added = { ...chatgpt, id: 'con-universal01', resource: universal, last_used_at: '2026-10-25T12:00:05Z' }
+  const client = show({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [old], ...signedIn }).mockResolvedValueOnce({ connectors: [old], ...signedIn })
+      .mockResolvedValue({ connectors: [old, added], ...signedIn }),
+  })
+  await move('ChatGPT (chatgpt.com)')
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+  })
+  await vi.advanceTimersByTimeAsync(3000)
+  expect((await screen.findByRole('alert')).textContent).toContain('This browser cannot record the move (QuotaExceededError: The quota has been exceeded.), so ChatGPT (chatgpt.com) was kept.')
+  expect(screen.queryByText('Waiting for ChatGPT to connect…')).toBeNull()
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
+})
+
+it('starts a move where crypto.randomUUID is missing, as on plain HTTP', async () => {
+  vi.stubGlobal('crypto', {})
+  try {
+    show({ connectorList: vi.fn().mockResolvedValue({ connectors: [{ ...chatgpt, resource: own }], ...signedIn }) })
+    await move('ChatGPT (chatgpt.com)')
+    expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })

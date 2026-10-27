@@ -14,6 +14,7 @@ import { useCountdown } from '@/lib/hooks'
 import type { Connector, ConnectorCode, ConnectorList, ServerEdge } from '@/lib/types'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
+import { newPromptKey } from '@/store/assistant'
 import { useCapability } from '@/store/hooks'
 
 /** The section's element id and its `section` route param. */
@@ -296,7 +297,17 @@ function Connectors({ client }: { client: Api }) {
       // A replacement that called Aether wins over one whose tokens may
       // never have arrived.
       const candidates = next.filter((c) => !attempt.known.has(c.id) && c.resource === attempt.into && c.client_id === old.client_id)
-      const added = [...candidates.filter((c) => c.last_used_at), ...candidates.filter((c) => !c.last_used_at)].find((c) => claimMove(c.id, attempt.id, next))
+      let added: Connector | undefined
+      try {
+        added = [...candidates.filter((c) => c.last_used_at), ...candidates.filter((c) => !c.last_used_at)].find((c) => claimMove(c.id, attempt.id, next))
+      } catch (err) {
+        finish()
+        setPollError({
+          text: `This browser cannot record the move (${errorSentence(err)}), so ${label(old)} was kept. Revoke it once the new connection works.`,
+          fix: <Link href={`${docs}/connectors.md#move-a-connector-to-the-universal-url`}>Moving a connector</Link>,
+        })
+        return
+      }
       if (!added) {
         if (final) {
           finish()
@@ -370,7 +381,7 @@ function Connectors({ client }: { client: Api }) {
     const known = new Set((signIn && shown ? shown : fresh).map((c) => c.id))
     setApp(forApp)
     setAttempt({
-      id: crypto.randomUUID(),
+      id: newPromptKey(),
       code,
       until: code?.expires_at ?? new Date(Date.now() + watchMs).toISOString(),
       app: forApp,
