@@ -290,6 +290,13 @@ func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 			return ""
 		}
 		return launched.Run.ID
+	case protocol.MethodMissionCreate:
+		created, err := protocol.DecodeParams[protocol.MissionCreateResult](result)
+		if err != nil {
+			slog.Warn("assistant tools: read the created swarm", "error", err)
+			return ""
+		}
+		return created.Mission.CurrentIntegratorRunID
 	case protocol.MethodRunInject:
 		p, err := protocol.DecodeParams[protocol.RunInjectParams](req.Params)
 		if err != nil {

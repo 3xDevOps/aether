@@ -288,13 +288,16 @@ func (c *launchCaller) Call(ctx context.Context, method string, params json.RawM
 	if c.fail[method] {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "boom"}
 	}
-	if method == protocol.MethodRunLaunch {
+	switch method {
+	case protocol.MethodRunLaunch:
 		return json.RawMessage(`{"run":{"id":"run-9"}}`), nil
+	case protocol.MethodMissionCreate:
+		return json.RawMessage(`{"mission":{"id":"mis-1","current_integrator_run_id":"run-int"}}`), nil
 	}
 	return c.fakeCaller.Call(ctx, method, params)
 }
 
-func TestFollowIsToldOnlyOfSuccessfulLaunchesAndMessages(t *testing.T) {
+func TestFollowIsToldOnlyOfSuccessfulLaunchesSwarmsAndMessages(t *testing.T) {
 	var followed []string
 	var verdict error
 	caller := &launchCaller{fail: map[string]bool{}}
@@ -329,8 +332,13 @@ func TestFollowIsToldOnlyOfSuccessfulLaunchesAndMessages(t *testing.T) {
 	if perr := call(protocol.MethodRunInject, inject); perr != nil {
 		t.Fatal(perr)
 	}
+	swarm := protocol.MissionCreateParams{WorkspaceID: "ws-1", Objective: "o", Integrator: protocol.MissionIntegrator{Harness: "claude", Mode: "acp"},
+		ExecutionChoices: []protocol.MissionExecutionChoice{{Harness: "claude", Mode: "acp"}}}
+	if perr := call(protocol.MethodMissionCreate, swarm); perr != nil {
+		t.Fatal(perr)
+	}
 	_ = call(protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-1"})
-	if want := []string{"run-9", "run-1"}; !slices.Equal(followed, want) {
+	if want := []string{"run-9", "run-1", "run-int"}; !slices.Equal(followed, want) {
 		t.Fatalf("followed %v, want %v", followed, want)
 	}
 }
