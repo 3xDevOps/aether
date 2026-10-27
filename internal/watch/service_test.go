@@ -282,6 +282,8 @@ type harness struct {
 	swarm atomic.Pointer[protocol.AttentionItem]
 	keys  int
 	pr    PRSource
+	// recovered, when set, is the scheduler recovery the next start waits for.
+	recovered chan struct{}
 }
 
 func newHarness(t *testing.T) *harness {
@@ -334,7 +336,7 @@ func (h *harness) start() {
 	h.t.Helper()
 	svc, err := New(Config{
 		Store: h.db, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
-		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now, Recovered: h.recovered,
 	})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
@@ -769,6 +771,53 @@ func TestRestartRecoversMissedNeedsWithoutRepeatingNotifiedOnes(t *testing.T) {
 	}
 	if seq < last {
 		t.Fatalf("cursor = %d, want it past the last event applied, %d", seq, last)
+	}
+}
+
+func TestRestartWaitsForTheSchedulerToRecoverRuns(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Ship the release")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.status(run, domain.RunRunning, domain.ActivityNeedsYou, "")
+	h.runs.ask(run.ID, "q1", "Tag it?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the question", func() bool { return len(h.notices(w.ID)) == 1 })
+
+	// The server stops; the new one knows no open request until the
+	// scheduler has reconciled the run, which interrupts its turn.
+	_ = h.svc.Close()
+	h.runs.answer(run.ID)
+	h.recovered = make(chan struct{})
+	h.start()
+	settle()
+	if got := h.notices(w.ID); len(got) != 1 {
+		t.Fatalf("notices before recovery = %q, want the question only", bodies(got))
+	}
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "turn interrupted")
+	close(h.recovered)
+	h.eventually("the interrupted turn", func() bool { return len(h.notices(w.ID)) == 2 })
+	settle()
+	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[1] != "needs_you: Turn interrupted, send a message to continue" {
+		t.Fatalf("notices = %q, want the question, then the interrupted turn once", got)
+	}
+}
+
+func TestAServerThatNeverRecoversStillStops(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	_ = h.svc.Close()
+	h.recovered = make(chan struct{})
+	h.start()
+	closed := make(chan struct{})
+	go func() {
+		_ = h.svc.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return while recovery never finished")
 	}
 }
 

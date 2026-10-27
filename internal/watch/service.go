@@ -83,6 +83,11 @@ type Config struct {
 	Tick     time.Duration
 	// Now replaces time.Now, for tests.
 	Now func() time.Time
+
+	// Recovered closes once the scheduler has reconciled the runs a restart
+	// left. Until then a run's open requests are not known yet, and its
+	// standing alone would be announced as a need of its own.
+	Recovered <-chan struct{}
 }
 
 // Service evaluates watches and delivers their notices.
@@ -97,6 +102,8 @@ type Service struct {
 	tick     time.Duration
 	now      func() time.Time
 	pr       PRSource
+
+	recovered <-chan struct{}
 
 	kick chan struct{}
 	wg   sync.WaitGroup
@@ -127,7 +134,7 @@ func New(cfg Config) (*Service, error) {
 		cfg.Now = time.Now
 	}
 	return &Service{
-		store: cfg.Store, bus: cfg.Bus, runs: cfg.Runs, swarm: cfg.Swarm, push: cfg.Push, head: cfg.Head,
+		store: cfg.Store, bus: cfg.Bus, runs: cfg.Runs, swarm: cfg.Swarm, push: cfg.Push, head: cfg.Head, recovered: cfg.Recovered,
 		debounce: cfg.Debounce, tick: cfg.Tick, now: cfg.Now, kick: make(chan struct{}, 1),
 	}, nil
 }
@@ -157,11 +164,29 @@ func (s *Service) Start(ctx context.Context) error {
 	s.cursor, s.stop = cursor, cancel
 	s.mu.Unlock()
 	s.wg.Go(func() {
-		s.evaluateAll(loopCtx)
-		s.consume(loopCtx)
+		if s.awaitRecovery(loopCtx) {
+			s.evaluateAll(loopCtx)
+			s.consume(loopCtx)
+		}
 	})
-	s.wg.Go(func() { s.background(loopCtx) })
+	s.wg.Go(func() {
+		if s.awaitRecovery(loopCtx) {
+			s.background(loopCtx)
+		}
+	})
 	return nil
+}
+
+func (s *Service) awaitRecovery(ctx context.Context) bool {
+	if s.recovered == nil {
+		return true
+	}
+	select {
+	case <-s.recovered:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // Close stops the service and waits for it. Idempotent.
