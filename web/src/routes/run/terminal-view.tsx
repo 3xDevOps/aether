@@ -19,7 +19,7 @@ function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const ended = endedStatuses.includes(run.status)
   const showConnection = !agent.starting && !ended && state.connection !== 'live'
   return (
-    <div role="group" aria-label="Run presence" className="flex min-w-0 items-center gap-2">
+    <div role="group" aria-label="Run presence" className="control-matrix-clear flex min-w-0 items-center gap-2">
       {ended && <span className="shrink-0 text-ui-sm text-muted">{isRetainedRun(run) ? 'Container stopped' : 'Container removed'} · read-only</span>}
       {showConnection && <span className="shrink-0 text-ui-sm text-state-needs-you">{connectionLabel[state.connection]}</span>}
       {agent.steerable && <span className="min-w-0 truncate text-ui-sm text-muted">{summary}</span>}

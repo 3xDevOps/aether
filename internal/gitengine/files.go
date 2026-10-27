@@ -33,9 +33,6 @@ var ErrRevisionConflict = errors.New("gitengine: file revision conflict")
 // workspace. It is intentionally distinct so the RPC can reject bad input.
 var ErrWorkspaceMismatch = errors.New("gitengine: workspace and run do not match")
 
-// ErrWorkspaceFile refuses to read a workspace file out of a run checkout.
-var ErrWorkspaceFile = errors.New("a workspace file is readable only inside the run, by its agent or in its terminal")
-
 // MaxFileBytes is the maximum dashboard file response or editor write.
 const MaxFileBytes = 64 << 20
 
@@ -515,7 +512,7 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 		if meta.Workspace != workspace {
 			return FileRead{}, fmt.Errorf("%w: run belongs to another workspace", ErrWorkspaceMismatch)
 		}
-		return writeCheckoutFile(e, checkout, name, content, revision, 0o644)
+		return writeCheckoutFile(e, checkout, name, content, revision)
 	}
 	repo, err := e.existingRepoPath(workspace)
 	if err != nil {
@@ -543,7 +540,7 @@ func fileRevision(content []byte) string {
 	sum := sha256.Sum256(content)
 	return fmt.Sprintf("%x", sum[:])
 }
-func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revision string, newMode os.FileMode) (FileRead, error) {
+func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revision string) (FileRead, error) {
 	root, err := e.openCheckoutRoot(checkout)
 	if err != nil {
 		return FileRead{}, fmt.Errorf("gitengine: open checkout: %w", err)
@@ -562,7 +559,7 @@ func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revisio
 	if err != nil {
 		return FileRead{}, err
 	}
-	mode := newMode
+	mode := os.FileMode(0o644)
 	if !exists {
 		if revision != "" {
 			return FileRead{}, ErrRevisionConflict
@@ -887,9 +884,6 @@ func (e *Engine) FilesRead(ctx context.Context, workspace domain.WorkspaceID, ru
 		}
 		if meta.Workspace != workspace {
 			return FileRead{}, fmt.Errorf("%w: run belongs to another workspace", ErrWorkspaceMismatch)
-		}
-		if slices.Contains(meta.Files, path) {
-			return FileRead{}, fmt.Errorf("%s: %w", path, ErrWorkspaceFile)
 		}
 		return e.ReadFileMeta(ctx, checkout, "", path, maxBytes)
 	}

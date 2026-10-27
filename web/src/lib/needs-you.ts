@@ -226,6 +226,9 @@ const asks = (run: RunRecord) => run.reason?.startsWith(needsInputPrefix) === tr
 const usageLimited = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix) === true
 // Mirrors acpInterruptedReason and acpStoppedReason in internal/scheduler/acp_turn.go.
 const turnCutShort = (run: RunRecord) => run.reason === 'turn interrupted' || run.reason?.startsWith('turn ended: ') === true
+// Mirrors waitBrokenReasonPrefix in internal/scheduler/wait.go.
+const waitBrokenPrefix = 'wait broken: '
+const waitBroken = (run: RunRecord) => run.reason?.startsWith(waitBrokenPrefix) === true
 
 // Checked in order; the specific requests precede the agent's own `needs-you`.
 export const needsYouConditions: NeedsYouCondition[] = [
@@ -355,11 +358,12 @@ export const needsYouConditions: NeedsYouCondition[] = [
     resolvers: (run) => [run.member_id],
     reason: (run) => {
       if (turnCutShort(run)) return `${plainReason(run.reason!)} · reply to continue`
+      if (waitBroken(run)) return `Wait broken: ${run.reason!.slice(waitBrokenPrefix.length)} · reply to continue`
       return asks(run) || usageLimited(run) ? plainReason(run.reason!) : 'Open the run to see its request'
     },
     // A Background run takes no input.
     action: (run) =>
-      (asks(run) || turnCutShort(run)) && run.mode !== 'headless' ? { kind: 'reply', label: 'Reply' } : openAction,
+      (asks(run) || turnCutShort(run) || waitBroken(run)) && run.mode !== 'headless' ? { kind: 'reply', label: 'Reply' } : openAction,
   }),
   condition({
     id: 'ready',

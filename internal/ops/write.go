@@ -23,7 +23,7 @@ const duplicateWindow = 60 * time.Second
 
 type connectorLaunchInput struct {
 	WorkspaceID    string `json:"workspace_id"`
-	Task           string `json:"task" jsonschema:"a complete brief"`
+	Task           string `json:"task" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
 	Harness        string `json:"harness" jsonschema:"an agent from aether_list_workspaces"`
 	Mode           string `json:"mode,omitempty" jsonschema:"acp is enhanced; default acp if installed"`
 	Model          string `json:"model,omitempty"`
@@ -38,7 +38,7 @@ type swarmWorker struct {
 
 type launchSwarmInput struct {
 	WorkspaceID    string        `json:"workspace_id"`
-	Objective      string        `json:"objective" jsonschema:"the goal, as a complete brief"`
+	Objective      string        `json:"objective" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
 	Harness        string        `json:"harness" jsonschema:"the integrator's agent"`
 	Mode           string        `json:"mode,omitempty"`
 	Model          string        `json:"model,omitempty"`
