@@ -271,14 +271,14 @@ job runs it. Claude Code must be on `PATH` and signed in:
 
 ```sh
 AETHER_ASSISTANT_EVAL_LABEL=main \
-  go test -tags assistanteval -run TestAssistantEval -timeout 40m ./internal/assistant/eval
+  go test -count=1 -tags assistanteval -run TestAssistantEval -timeout 40m ./internal/assistant/eval
 ```
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `AETHER_ASSISTANT_EVAL_LABEL` | `unlabeled` | Names the output files; use the commit or branch under test |
 | `AETHER_ASSISTANT_EVAL_RUNS` | `3` | Runs per scenario |
-| `AETHER_ASSISTANT_EVAL_MODEL` | `sonnet` | Passed to `claude --model` |
+| `AETHER_ASSISTANT_EVAL_MODEL` | Claude Code's default | Passed to `claude --model`; the report names the model the harness reports |
 | `AETHER_ASSISTANT_EVAL_ONLY` | all | Comma-separated scenario ids |
 | `AETHER_ASSISTANT_EVAL_PARALLEL` | `4` | Concurrent agent runs |
 | `AETHER_ASSISTANT_EVAL_OUT` | `$TMPDIR/assistant-eval` | Where `<label>.md` and `<label>.json` go |

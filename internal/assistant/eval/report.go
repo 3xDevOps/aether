@@ -35,7 +35,7 @@ func Summary(label string, scenarios []Scenario, results []Result) string {
 			if r.Pass {
 				p++
 			}
-			calls += len(r.Tools)
+			calls += len(r.Calls)
 			lat += r.Latency
 			f.UnnecessaryQuestions += r.Flags.UnnecessaryQuestions
 			f.UnwantedLaunches += r.Flags.UnwantedLaunches

@@ -3,10 +3,12 @@
 package eval
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,18 +39,22 @@ func TestAssistantEval(t *testing.T) {
 	if err != nil || parallel < 1 {
 		t.Fatalf("AETHER_ASSISTANT_EVAL_PARALLEL must be a positive number")
 	}
-	model := envOr("AETHER_ASSISTANT_EVAL_MODEL", "sonnet")
-	label := envOr("AETHER_ASSISTANT_EVAL_LABEL", "unlabeled")
-	only := strings.Split(os.Getenv("AETHER_ASSISTANT_EVAL_ONLY"), ",")
+	model := os.Getenv("AETHER_ASSISTANT_EVAL_MODEL")
+	label := strings.NewReplacer("/", "-", " ", "-").Replace(envOr("AETHER_ASSISTANT_EVAL_LABEL", "unlabeled"))
 	out := envOr("AETHER_ASSISTANT_EVAL_OUT", filepath.Join(os.TempDir(), "assistant-eval"))
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	var picked []Scenario
-	for _, s := range scenarios {
-		if os.Getenv("AETHER_ASSISTANT_EVAL_ONLY") == "" || contains(only, s.ID) {
-			picked = append(picked, s)
+	picked := scenarios
+	if only := os.Getenv("AETHER_ASSISTANT_EVAL_ONLY"); only != "" {
+		picked = nil
+		for id := range strings.SplitSeq(only, ",") {
+			i := slices.IndexFunc(scenarios, func(s Scenario) bool { return s.ID == strings.TrimSpace(id) })
+			if i < 0 {
+				t.Fatalf("AETHER_ASSISTANT_EVAL_ONLY: unknown scenario %q", id)
+			}
+			picked = append(picked, scenarios[i])
 		}
 	}
 	agent := Claude(model)
@@ -76,7 +82,7 @@ func TestAssistantEval(t *testing.T) {
 	}
 	wg.Wait()
 
-	md := Summary("real Claude Code ("+model+"), "+label+", "+strconv.Itoa(runs)+" runs per scenario", picked, results)
+	md := Summary("real Claude Code (model "+modelName(results, model)+"), "+label+", "+strconv.Itoa(runs)+" runs per scenario", picked, results)
 	raw, _ := json.MarshalIndent(results, "", " ")
 	if err := os.WriteFile(filepath.Join(out, label+".json"), raw, 0o600); err != nil {
 		t.Fatal(err)
@@ -87,11 +93,11 @@ func TestAssistantEval(t *testing.T) {
 	t.Logf("results written to %s\n%s", out, md)
 }
 
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
+func modelName(results []Result, requested string) string {
+	for _, r := range results {
+		if r.Model != "" {
+			return r.Model
 		}
 	}
-	return false
+	return cmp.Or(requested, "default")
 }

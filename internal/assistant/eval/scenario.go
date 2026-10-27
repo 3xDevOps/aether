@@ -56,8 +56,8 @@ type Checks struct {
 	// Launches is the number of aether_launch_run and aether_launch_swarm
 	// calls expected; nil does not check it.
 	Launches *int `json:"launches,omitempty"`
-	// Saves is the number of calls to a stub whose name starts with
-	// aether_save_.
+	// Saves is the number of successful aether_save_* or aether_remember
+	// calls.
 	Saves *int `json:"saves,omitempty"`
 	// Params are the fields the launch call must carry.
 	Params map[string]string `json:"params,omitempty"`
@@ -142,10 +142,12 @@ func (l launch) brief() string {
 	return ""
 }
 
-func launches(calls []ToolCall) []launch {
+// launches are the launch calls in calls; a rejected call counts only when
+// rejected is true.
+func launches(calls []ToolCall, rejected bool) []launch {
 	var out []launch
 	for _, c := range calls {
-		if c.Tool != "aether_launch_run" && c.Tool != "aether_launch_swarm" {
+		if c.Tool != "aether_launch_run" && c.Tool != "aether_launch_swarm" || c.Error && !rejected {
 			continue
 		}
 		var a map[string]any
@@ -168,17 +170,15 @@ func Score(s Scenario, o Outcome) ([]CheckResult, Flags) {
 		res = append(res, CheckResult{Name: name, Pass: pass, Detail: detail})
 	}
 	c := s.Check
-	ls := launches(o.Calls)
+	ls := launches(o.Calls, false)
 	if c.Launches != nil {
 		add("launch count", len(ls) == *c.Launches, fmt.Sprintf("want %d, got %d", *c.Launches, len(ls)))
-		if len(ls) > *c.Launches {
-			fl.UnwantedLaunches = len(ls) - *c.Launches
-		}
+		fl.UnwantedLaunches = max(0, len(launches(o.Calls, true))-*c.Launches)
 	}
 	if c.Saves != nil {
 		n := 0
 		for _, call := range o.Calls {
-			if strings.HasPrefix(call.Tool, "aether_save_") && !call.Error {
+			if (strings.HasPrefix(call.Tool, "aether_save_") || call.Tool == "aether_remember") && !call.Error {
 				n++
 			}
 		}

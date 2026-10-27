@@ -44,6 +44,14 @@
   },
   "mission.list": {
    "missions": []
+  },
+  "workspace.timeline": {
+   "events": [],
+   "next_seq": 0,
+   "more": false
+  },
+  "coord.messages.list": {
+   "messages": []
   }
  },
  "scenarios": [
@@ -196,7 +204,6 @@
     ],
     "invented": [
      "pdf",
-     "refactor",
      "migration",
      "authentication"
     ],
@@ -297,6 +304,14 @@
     "aether_save_launch_defaults": {
      "description": "Save the member's default launch choices (harness, model, mode). Use only when the member says to change their default.",
      "result": "{\"saved\":true}"
+    },
+    "aether_my_preferences": {
+     "description": "The member's saved preferences.",
+     "result": "{\"preferences\":[]}"
+    },
+    "aether_remember": {
+     "description": "Remember a preference for the member. text must be a literal span of the member's latest message; workspace_scoped limits it to one workspace; replaces names a preference to supersede.",
+     "result": "{\"remembered\":true}"
     }
    },
    "review": [
@@ -342,6 +357,14 @@
     "aether_save_launch_defaults": {
      "description": "Save the member's default launch choices (harness, model, mode). Use only when the member says to change their default.",
      "result": "{\"saved\":true}"
+    },
+    "aether_my_preferences": {
+     "description": "The member's saved preferences.",
+     "result": "{\"preferences\":[]}"
+    },
+    "aether_remember": {
+     "description": "Remember a preference for the member. text must be a literal span of the member's latest message; workspace_scoped limits it to one workspace; replaces names a preference to supersede.",
+     "result": "{\"remembered\":true}"
     }
    },
    "review": [
@@ -771,6 +794,22 @@
      "review_comments": [],
      "mergeable": "MERGEABLE",
      "merge_state_status": "CLEAN"
+    },
+    "run.pr.status": {
+     "identity": "ana",
+     "pull_request": {
+      "number": 41,
+      "url": "https://github.com/example/shop/pull/41",
+      "state": "MERGED",
+      "title": "export orders",
+      "draft": false,
+      "repository": "example/shop",
+      "base_branch": "main",
+      "head_branch": "aether/run-s1",
+      "head_oid": "a1b2c3",
+      "merged_at": "2026-10-20T10:00:00Z"
+     },
+     "output": {}
     }
    },
    "checks": {
@@ -884,6 +923,21 @@
      "review_comments": [],
      "mergeable": "MERGEABLE",
      "merge_state_status": "CLEAN"
+    },
+    "run.pr.status": {
+     "identity": "ana",
+     "pull_request": {
+      "number": 42,
+      "url": "https://github.com/example/shop/pull/42",
+      "state": "OPEN",
+      "title": "export orders",
+      "draft": false,
+      "repository": "example/shop",
+      "base_branch": "main",
+      "head_branch": "aether/run-s1",
+      "head_oid": "a1b2c3"
+     },
+     "output": {}
     }
    },
    "checks": {

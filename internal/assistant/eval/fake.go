@@ -23,7 +23,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// ToolCall is one tool call the agent made.
 type ToolCall struct {
 	Tool  string          `json:"tool"`
 	Args  json.RawMessage `json:"args"`
@@ -58,7 +57,11 @@ var confirmed = map[string]bool{
 }
 
 func call(s Scenario) ops.Call {
+	var mu sync.Mutex
+	var started []protocol.Run
 	return func(_ context.Context, method string, params, out any) error {
+		mu.Lock()
+		defer mu.Unlock()
 		var raw json.RawMessage
 		switch {
 		case method == protocol.MethodServerInfo:
@@ -79,9 +82,16 @@ func call(s Scenario) ops.Call {
 			if err := json.Unmarshal(mustMarshal(params), &p); err != nil {
 				return err
 			}
-			raw = mustMarshal(protocol.RunLaunchResult{Run: launchedRun(p)})
-		case method == protocol.MethodRunGet && idOf(params) == launchedID:
-			raw = mustMarshal(protocol.RunResult{Run: launchedRun(protocol.RunLaunchParams{})})
+			started = append(started, launchedRun(p, len(started)+1))
+			raw = mustMarshal(protocol.RunLaunchResult{Run: started[len(started)-1]})
+		case method == protocol.MethodRunGet && slices.ContainsFunc(started, func(r protocol.Run) bool { return r.ID == idOf(params) }):
+			raw = mustMarshal(protocol.RunResult{Run: started[slices.IndexFunc(started, func(r protocol.Run) bool { return r.ID == idOf(params) })]})
+		case method == protocol.MethodRunList && len(started) > 0:
+			var list protocol.RunListResult
+			if err := json.Unmarshal(s.Answers[method], &list); err != nil {
+				return fmt.Errorf("eval: run.list: %w", err)
+			}
+			raw = mustMarshal(protocol.RunListResult{Runs: append(list.Runs, started...)})
 		case s.Answers[method+":"+idOf(params)] != nil:
 			raw = s.Answers[method+":"+idOf(params)]
 		case s.Answers[method] != nil:
@@ -146,16 +156,14 @@ func Offered(tool string) bool {
 	return slices.ContainsFunc(ops.Ops, func(o ops.Op) bool { return o.Name == tool && o.Tier != ops.TierNone })
 }
 
-const launchedID = "run-eval-1"
-
 func mustMarshal(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
 }
 
 // launchedRun is the run a recorded launch pretends to have started.
-func launchedRun(p protocol.RunLaunchParams) protocol.Run {
-	return protocol.Run{ID: launchedID, WorkspaceID: p.WorkspaceID, Harness: p.Harness, Mode: p.Mode, Model: p.Model,
+func launchedRun(p protocol.RunLaunchParams, n int) protocol.Run {
+	return protocol.Run{ID: fmt.Sprintf("run-eval-%d", n), WorkspaceID: p.WorkspaceID, Harness: p.Harness, Mode: p.Mode, Model: p.Model,
 		AccountMemberID: p.AccountMemberID, Status: "running", Activity: "working", PendingInputs: []domain.RunInputRequest{}}
 }
 
