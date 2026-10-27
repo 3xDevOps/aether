@@ -237,9 +237,15 @@ func TestAssistantRequestForADashboardWatchWritesItsNoticesToTheConversation(t *
 	if w := res.Watch; w.ID != dashboard.ID || w.Source != protocol.WatchSourceAssistant {
 		t.Fatalf("assistant request = %+v, want watch %s as an assistant watch", w, dashboard.ID)
 	}
+	if w := h.follow(h.ada, run); w.ID != dashboard.ID {
+		t.Fatalf("follow = %s, want the same watch %s", w.ID, dashboard.ID)
+	}
 	h.status(run, domain.RunCompleted, "", "")
 	h.eventually("the end in the conversation", func() bool { return len(h.assistant.(*conversation).written()) == 1 })
 	h.settle()
+	if got := h.assistant.(*conversation).written(); len(got) != 1 {
+		t.Fatalf("written = %+v, want one notice", got)
+	}
 	if got := h.notices(dashboard.ID); len(got) != 1 || deliveryOf(got[0], protocol.WatchChannelAssistant).Channel == "" {
 		t.Fatalf("notices = %+v, want the end with an assistant delivery", got)
 	}

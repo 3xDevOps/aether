@@ -175,7 +175,8 @@ made again. A run relaunched after its watch was done gets a new watch. A need t
 seen, since the assistant has just acted on it. A run that already
 failed, stopped or was closed when the watch began, such as a launch that
 failed at once, has that end announced. A watch you keep on the same
-run from the dashboard is separate and notifies on its own.
+run from the dashboard is separate and notifies on its own, unless an
+`aether_watch` call made it an assistant watch: then it is the one watch.
 
 Each notice of an assistant watch is also written into your assistant
 conversation, with a link to the watch, and raises the assistant's toast and
