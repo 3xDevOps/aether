@@ -731,6 +731,36 @@ describe('the Enhanced session view', () => {
     await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'go', expect.any(String), expect.objectContaining({ steer: false, lease: expect.objectContaining({ control_generation: 5 }) })))
   })
 
+  it('never asks for write on a swarm worker you own without a click: open, reconnect, wake, freed lease', async () => {
+    const acpSockets = () => StubSocket.opened.filter((s) => s.url.includes('/ws/acp/run_1'))
+    open({ controller_member_id: '', mission_id: 'mission_1', mission_role: 'worker' })
+    acpSocket().open({ has_control: false }).close(1006)
+    await waitFor(() => expect(acpSockets()).toHaveLength(2))
+    acpSocket().open({ has_control: false })
+    act(() => {
+      window.dispatchEvent(new Event('online'))
+    })
+    await waitFor(() => expect(acpSockets()).toHaveLength(3))
+    acpSocket().open({ has_control: false })
+    act(() => {
+      useStore.getState().applyRunController('run_1', bob.id)
+      useStore.getState().applyRunController('run_1', '')
+    })
+    await act(async () => {})
+    expect(acpSockets().flatMap((socket) => socket.frames())).not.toContainEqual(expect.objectContaining({ write: true }))
+  })
+
+  it('sends from the owner of a swarm worker nobody controls without taking control', async () => {
+    vi.mocked(api.runInject).mockClear().mockResolvedValue({ message: { id: 'm', run_id: 'run_1', workspace_id: workspace.id, kind: 'steer_request', state: 'queued', actor_id: alice.id, body: 'go', created_at: new Date().toISOString() } } as never)
+    open({ controller_member_id: '', mission_id: 'mission_1', mission_role: 'worker' })
+    const session = acpSocket().open({ has_control: false }, [])
+    await userEvent.type(await screen.findByRole('combobox', { name: 'Message the agent' }), 'go')
+    expect(screen.queryByText('Delivers in 45 s unless the controller decides sooner.')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /Send/ }))
+    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'go', expect.any(String), expect.objectContaining({ lease: undefined })))
+    expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ type: 'control', write: true }))
+  })
+
   it('shows the adapter failure with its stderr and the two ways on', async () => {
     open({ status: 'needs-attention', model: 'opus' })
     acpSocket().open({ live: false }, [
