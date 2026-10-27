@@ -73,7 +73,7 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	instructions := AssistantInstructionsDir(s.cfg.AssistantDir, member)
 	sock := AssistantSocketDir(s.cfg.AssistantDir, member)
 	for _, dir := range []string{hostHome, instructions, sock} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err = os.MkdirAll(dir, 0o755); err != nil {
 			return runtime.Spec{}, fmt.Errorf("scheduler: create the assistant's directories: %w", err)
 		}
 	}
@@ -85,7 +85,7 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	if err != nil {
 		return runtime.Spec{}, err
 	}
-	if err := prepareAssistantHome(hostHome, logins, profile.BorrowedState); err != nil {
+	if err = prepareAssistantHome(hostHome, logins, profile.BorrowedState); err != nil {
 		return runtime.Spec{}, err
 	}
 	mounts := []runtime.Mount{
@@ -98,7 +98,7 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 		mounts = append(mounts, runtime.Mount{HostPath: memberHome, Subpath: rel, ContainerPath: target})
 		nestings[target] = home
 	}
-	if err := runtime.ValidateMounts(mounts, runtime.MountPolicy{
+	if err = runtime.ValidateMounts(mounts, runtime.MountPolicy{
 		OwnedRoots:      []string{s.cfg.AssistantDir, s.cfg.Homes.Root()},
 		AllowedNestings: nestings,
 	}); err != nil {
@@ -255,7 +255,7 @@ func (s *Scheduler) ensureAssistantContainer(ctx context.Context, member domain.
 				return "", fmt.Errorf("scheduler: start the assistant container: %w", startErr)
 			}
 		}
-		if err := s.destroyTerminalContainer(ctx, cid); err != nil {
+		if err = s.destroyTerminalContainer(ctx, cid); err != nil {
 			return "", fmt.Errorf("scheduler: replace the assistant container: %w", err)
 		}
 	case !errors.Is(err, runtime.ErrNotFound):

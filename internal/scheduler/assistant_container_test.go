@@ -85,7 +85,7 @@ func TestAssistantContainerMountsOnlyTheLogin(t *testing.T) {
 			t.Errorf("unexpected mount %+v", m)
 			continue
 		}
-		if resolved, err := filepath.EvalSymlinks(w.HostPath); err == nil {
+		if resolved, resolveErr := filepath.EvalSymlinks(w.HostPath); resolveErr == nil {
 			w.HostPath = resolved
 		}
 		if m != w {
@@ -107,7 +107,7 @@ func TestAssistantContainerMountsOnlyTheLogin(t *testing.T) {
 	}
 	login := filepath.Join(memberHome, ".claude/.credentials.json")
 	writeHomeFile(t, memberHome, ".claude/.credentials.json.new", `{"token":"rotated"}`)
-	if err := os.Rename(login+".new", login); err != nil {
+	if err = os.Rename(login+".new", login); err != nil {
 		t.Fatal(err)
 	}
 	replaced, err := e.sched.ensureAssistantContainer(ctx, e.member.ID, claude)
