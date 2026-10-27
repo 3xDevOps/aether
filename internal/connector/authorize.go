@@ -20,7 +20,7 @@ import (
 	"time"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/sshd"
 )
 
@@ -299,7 +299,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 	}
 	scopes := grantedScopes(r.PostForm["scope"])
 	page := consentPage{Request: signed, Client: clientLabel(req), Universal: res == h.universal,
-		Write: slices.Contains(scopes, string(mcpbridge.ScopeWrite)), Control: slices.Contains(scopes, string(mcpbridge.ScopeControl))}
+		Write: slices.Contains(scopes, string(ops.ScopeWrite)), Control: slices.Contains(scopes, string(ops.ScopeControl))}
 	now := h.now()
 	if req.Asserted != nil {
 		grant, err := h.assertedGrant(r.Context(), req.Asserted, r.Header.Get(edgeproto.HeaderBrowser), now)
@@ -371,8 +371,8 @@ func (h *handler) issueCode(w http.ResponseWriter, r *http.Request, req authRequ
 // grantedScopes is read and whichever of write and control the consent
 // form checked; anything else in it is ignored.
 func grantedScopes(checked []string) []string {
-	scopes := []string{string(mcpbridge.ScopeRead)}
-	for _, s := range []mcpbridge.Scope{mcpbridge.ScopeWrite, mcpbridge.ScopeControl} {
+	scopes := []string{string(ops.ScopeRead)}
+	for _, s := range []ops.Scope{ops.ScopeWrite, ops.ScopeControl} {
 		if slices.Contains(checked, string(s)) {
 			scopes = append(scopes, string(s))
 		}

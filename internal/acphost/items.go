@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 // Kind names what an Item records. Clients switch on it; unknown kinds must
@@ -228,6 +230,8 @@ type Notice struct {
 	Severity    string `json:"severity"`
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
+	// Action is set on a notice that records an assistant action.
+	Action *protocol.AssistantAction `json:"action,omitempty"`
 }
 
 func (it *Item) encode() ([]byte, error) {

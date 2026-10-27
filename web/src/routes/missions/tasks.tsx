@@ -15,7 +15,7 @@ import { presentRun } from '@/lib/status'
 import type { AgentInfo, MissionAttempt, MissionTask, MissionTaskScope } from '@/lib/types'
 import { missionTree } from '@/routes/missions/tree'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useChildRunFacts } from '@/store/hooks'
 import type { MissionDetail } from '@/store/missions'
 import { stateContextOf } from '@/store/selectors'
 import { integrationSeqOf } from '@/store/workflow-signals'
@@ -179,6 +179,7 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
     [mission.current_integrator_run_id, detail.attempts],
   )
   const runs = useSwarmRuns(runIDs)
+  const childRuns = useChildRunFacts(runIDs)
   const { candidates, error } = useCandidates(detail, client)
   const previous = useRef<WorkflowNode | undefined>(undefined)
   const tree = useMemo(() => {
@@ -186,12 +187,13 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
       detail,
       runs,
       candidates,
+      childRuns,
       integratorLabel: runLabel('Integrator', mission.integrator.harness, mission.integrator.mode, agents),
       workerLabel: (attempt, name) => runLabel(name, attempt.harness, attempt.mode, agents),
     }))
     previous.current = next
     return next
-  }, [detail, runs, candidates, agents, mission.integrator.harness, mission.integrator.mode])
+  }, [detail, runs, candidates, childRuns, agents, mission.integrator.harness, mission.integrator.mode])
   const tasks = useMemo(() => new Map(detail.tasks.map((task) => [`task:${task.id}`, task])), [detail.tasks])
   const held = useMemo(() => missionTree(detail).flatMap((node) => {
     const latest = node.attempts[0]

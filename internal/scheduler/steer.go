@@ -587,6 +587,17 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 	return entry != nil && entry.paused
 }
 
+// Cause is what chose activity for the live run, empty for an unknown or
+// finished run or one whose activity has since changed.
+func (s *Scheduler) Cause(run domain.RunID, activity domain.RunActivity) events.RunStatusCause {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry := s.runs[run]; entry != nil && entry.activity == activity {
+		return entry.cause
+	}
+	return ""
+}
+
 // Inject delivers a steering message to the live run's agent through its
 // driver; the tui driver ends it with the harness's submit sequence so the
 // text reaches the agent's conversation rather than sitting in its input box.

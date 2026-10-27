@@ -104,6 +104,11 @@ func New(cfg Config) *Service {
 type member struct {
 	id       domain.MemberID
 	confirms *confirmations
+	actions  heldActions
+	// conv is cancelled when a reset discards the conversation, so an
+	// action record that outlived it is dropped. Read it under mu.
+	conv    context.Context
+	endConv context.CancelFunc
 	// op serializes starting, stopping and resetting the session.
 	op sync.Mutex
 	// reset is held while a reset runs, so a viewer that sees the session
@@ -130,10 +135,11 @@ type member struct {
 	// the last maxKeys that succeeded.
 	attempts map[string]*attempt
 	done     []string
-	// view is the latest view context the member's dashboard sent, and
-	// viewAt when it arrived.
-	view   *protocol.AssistantViewContext
-	viewAt time.Time
+	// view is the held view context, viewAt when it arrived, and viewSource
+	// whether a prompt or a navigation update carried it.
+	view       *protocol.AssistantViewContext
+	viewAt     time.Time
+	viewSource string
 
 	wmu      sync.Mutex
 	watchers map[chan struct{}]struct{}
@@ -160,6 +166,7 @@ func (s *Service) member(id domain.MemberID) *member {
 	if m == nil {
 		m = &member{id: id, changed: make(chan struct{}), watchers: make(map[chan struct{}]struct{}), attempts: make(map[string]*attempt)}
 		m.confirms = newConfirmations(m.notify)
+		m.conv, m.endConv = context.WithCancel(context.Background())
 		s.members[id] = m
 	}
 	return m
@@ -451,7 +458,7 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		cancel()
 		return nil, err
 	}
-	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: s.approver(m), Member: string(m.id),
+	srv := &tools.Server{Caller: actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}, Confirm: s.approver(m), Member: string(m.id),
 		View: func() protocol.AssistantViewContextResult { return s.View(m.id, time.Now()) }}
 	if s.follower != nil {
 		srv.Follow = func(ctx context.Context, run string) { s.follow(ctx, m.id, domain.RunID(run)) }
@@ -681,6 +688,8 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 		return fmt.Errorf("assistant: remove the item log: %w", err)
 	}
 	m.mu.Lock()
+	m.endConv()
+	m.conv, m.endConv = context.WithCancel(context.Background())
 	m.err = ""
 	m.attempts, m.done = make(map[string]*attempt), nil
 	m.signalLocked()
@@ -706,7 +715,7 @@ func (m *member) fence(on bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.removing = on
-	m.view, m.viewAt = nil, time.Time{}
+	m.forgetViewLocked()
 }
 
 // Unfence lets a member whose removal failed use the assistant again.
@@ -765,11 +774,7 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 		}
 	}
 	m.share.RLock()
-	view, err := s.keepView(ctx, m, view, false)
-	dispatched := false
-	if err == nil {
-		dispatched, err = s.send(ctx, m, text, key, view)
-	}
+	dispatched, err := s.send(ctx, m, text, key, view)
 	m.share.RUnlock()
 	if err != nil && !dispatched {
 		m.finish(key, a, err)
@@ -797,6 +802,9 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if seen {
 		return true, nil
 	}
+	if view, err = s.sharedView(ctx, m, view); err != nil {
+		return false, err
+	}
 	live, err := s.ensureLocked(ctx, m, "")
 	if err != nil {
 		return false, err
@@ -821,8 +829,11 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	case err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded):
 		return false, err
 	}
-	// A caller that left while waiting for the agent's acceptance may have
-	// started the turn, so its key is saved all the same.
+	// Only a prompt dispatched now holds its view: one refused, or a retry
+	// of one sent earlier, must not replace a newer view. A caller that left
+	// while waiting for the agent's acceptance may have started the turn, so
+	// its view and key are kept all the same.
+	m.holdView(view, viewFromPrompt, time.Now())
 	if saveErr := s.cfg.Store.AddAssistantPromptKey(context.WithoutCancel(ctx), m.id, row.Generation, key); saveErr != nil {
 		return true, errors.Join(err, fmt.Errorf("assistant: %w", saveErr))
 	}

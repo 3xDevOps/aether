@@ -15,11 +15,20 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// fakeSink is the scheduler's side of run.report.
+// fakeSink is the scheduler's side of run.report. hold answers
+// HoldTurnEnd.
 type fakeSink struct {
 	mu   sync.Mutex
 	got  []agentstatus.Report
 	runs []domain.RunID
+	hold func() (string, error)
+}
+
+func (f *fakeSink) HoldTurnEnd(context.Context, domain.RunID) (string, error) {
+	if f.hold == nil {
+		return "", nil
+	}
+	return f.hold()
 }
 
 func (f *fakeSink) ReportAgentState(_ context.Context, run domain.RunID, r agentstatus.Report) error {
@@ -233,6 +242,8 @@ type reportFileSink struct {
 	errors chan error
 }
 
+func (reportFileSink) HoldTurnEnd(context.Context, domain.RunID) (string, error) { return "", nil }
+
 func (s reportFileSink) ReportAgentState(_ context.Context, _ domain.RunID, report agentstatus.Report) error {
 	data, err := json.Marshal(report)
 	if err == nil {
@@ -279,5 +290,36 @@ func TestRunReportReturnsSinkPersistenceError(t *testing.T) {
 		if !strings.Contains(perr.Message, persistenceErr.Error()) {
 			t.Fatalf("persistence failure lost its cause: %v, want %v", perr, persistenceErr)
 		}
+	}
+}
+
+// TestRunReportHoldsAStopThatOwesAReport: a stop the scheduler holds is not
+// applied and answers with the reminder; a hold that cannot be checked lets
+// the stop through.
+func TestRunReportHoldsAStopThatOwesAReport(t *testing.T) {
+	sink := &fakeSink{}
+	h := newHarness(t, 1, func(c *Config) { c.Reports = sink })
+	h.start()
+	run := h.run(0)
+	if _, err := h.svc.Provision(context.Background(), run, nil); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	client := h.dial(t, run)
+	stop := protocol.RunReportParams{State: string(agentstatus.Idle), Reason: agentstatus.ReasonIdle, Stop: true}
+	sink.hold = func() (string, error) { return "report first", nil }
+	var held protocol.RunReportResult
+	if err := client.Call(protocol.MethodRunReport, stop, &held); err != nil || held.Continue != "report first" {
+		t.Fatalf("held stop = %+v, %v; want the reminder", held, err)
+	}
+	if _, got := sink.reports(); len(got) != 0 {
+		t.Fatalf("a held stop reached the scheduler: %+v", got)
+	}
+	sink.hold = func() (string, error) { return "", errors.New("store down") }
+	var failed protocol.RunReportResult
+	if err := client.Call(protocol.MethodRunReport, stop, &failed); err != nil || failed.Continue != "" {
+		t.Fatalf("stop with a failed check = %+v, %v; want it let through", failed, err)
+	}
+	if _, got := sink.reports(); len(got) != 1 || got[0].State != agentstatus.Idle {
+		t.Fatalf("reports %+v, want the stop applied", got)
 	}
 }

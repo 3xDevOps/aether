@@ -25,7 +25,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
 
   await page.goto(`${alice.url}&run=${run.id}`)
   const log = page.getByRole('log', { name: 'Session' })
-  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
+  await expect(log.getByText('pong').first()).toBeVisible({ timeout: 60_000 })
   const box = page.getByRole('combobox', { name: 'Message the agent' })
 
   await box.fill('ask permission')
@@ -142,13 +142,14 @@ test('an Enhanced run holding background work stays working, asks while it waits
   const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
   const header = page.locator('[data-slot="pane-header"]')
   const box = page.getByRole('combobox', { name: 'Message the agent' })
-  await expect(log.getByText(/^Finished/)).toBeVisible({ timeout: 60_000 })
+  await expect(log.getByText(/^Finished/).first()).toBeVisible({ timeout: 60_000 })
 
   await box.fill('hold in background')
   await box.press('Enter')
   await expect(log.getByText('started', { exact: true })).toBeVisible()
   await expect(runs.getByRole('button', { name: /^Waiting for agents · .* · Working in background: 1 task/ })).toBeVisible()
   await expect(header.getByText('Working in background: 1 task')).toBeVisible()
+  await expect(header.locator('[title^="Waiting for agents since"]')).toHaveAttribute('title', /Why: it holds background tasks\.$/)
   // Past acpmock's 2 s BackgroundDelay, the held task still keeps the run working.
   await page.waitForTimeout(3_000)
   expect(await status()).toMatchObject({ status: 'running', reason: 'working in background: 1 task' })
@@ -168,8 +169,10 @@ test('an Enhanced run holding background work stays working, asks while it waits
   await page.waitForTimeout(3_000)
   const parked = (await statuses()).filter((event) => event.seq > released && event.payload.to === 'needs-attention')
   expect(parked.map((event) => event.payload.reason)).toEqual(['turn ended without a report'])
-  await expect(header.getByText('Turn ended without a report')).toBeVisible()
-  await expect(runs.getByRole('button', { name: /^Waiting · / })).toBeVisible()
+  // An unreported turn end is a quiet Turn ended that asks nothing, and its tooltip says why.
+  await expect(runs.getByRole('button', { name: /^Turn ended · / })).toBeVisible()
+  await expect(header.locator('[title^="Turn ended since"]')).toHaveAttribute('title', /^Turn ended since [^—]*\. Why: the turn ended\.$/)
+  await expect(page.getByText(/send a message to continue/i)).toHaveCount(0)
 
   await box.fill('hold in background')
   await box.press('Enter')
@@ -196,7 +199,7 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
 
   await page.goto(`${alice.url}&run=${run.id}`)
   const log = page.getByRole('log', { name: 'Session' })
-  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
+  await expect(log.getByText('pong').first()).toBeVisible({ timeout: 60_000 })
   const box = page.getByRole('combobox', { name: 'Message the agent' })
 
   await box.fill('subagents')
@@ -306,7 +309,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
   const bobPage = await bobContext.newPage()
   try {
     await page.goto(`${alice.url}&run=${run.id}`)
-    await expect(page.getByRole('log', { name: 'Session' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole('log', { name: 'Session' }).getByText('pong').first()).toBeVisible({ timeout: 60_000 })
     const aliceControls = page.getByRole('group', { name: 'Multiplayer controls' })
     await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     const aliceBorder = page.locator('svg[data-control-appearance]')

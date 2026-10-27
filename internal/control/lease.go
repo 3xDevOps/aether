@@ -27,6 +27,8 @@ var (
 	ErrTakeoverRequired = errors.New("control: occupied takeover requires a timed hold and review")
 	// ErrAdmissionBusy means another action owns the run's admission boundary.
 	ErrAdmissionBusy = errors.New("control: run admission is busy")
+	// ErrHeld means a member holds the run's control.
+	ErrHeld = errors.New("control: a member controls the run")
 	// ErrStale means that the lease no longer names the current authority.
 	ErrStale = errors.New("control: stale lease")
 	// ErrInvalid is returned for an empty run or member identifier.
@@ -330,6 +332,16 @@ func (s *Service) Admit(run string, fn func() error) error {
 // TryAdmit is Admit without waiting for an in-flight action. Optional actions
 // that retain cleanup resources must defer rather than block their own cleanup.
 func (s *Service) TryAdmit(run string, fn func() error) error {
+	return s.tryAdmit(run, false, fn)
+}
+
+// TryAdmitUnheld is TryAdmit that refuses with ErrHeld while a member holds
+// the run's control.
+func (s *Service) TryAdmitUnheld(run string, fn func() error) error {
+	return s.tryAdmit(run, true, fn)
+}
+
+func (s *Service) tryAdmit(run string, unheld bool, fn func() error) error {
 	if err := s.validateRun(run); err != nil {
 		return err
 	}
@@ -342,6 +354,9 @@ func (s *Service) TryAdmit(run string, fn func() error) error {
 	}
 	defer state.mu.Unlock()
 	s.expireLocked(state, s.now())
+	if unheld && state.current != nil {
+		return ErrHeld
+	}
 	return fn()
 }
 

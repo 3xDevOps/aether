@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -856,6 +857,15 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if validateErr == nil {
 		validateErr = s.validateModelChoices(ctx, domain.MemberID(p.AccountableHumanID), choices)
 	}
+	accounts := slices.Clone(policy.Order)
+	for _, c := range choices {
+		accounts = append(accounts, c.AccountMemberID)
+	}
+	for _, account := range accounts {
+		if validateErr == nil {
+			_, validateErr = fallback.ResolveLaunchAccount(ctx, s.cfg.Store, actor, string(account))
+		}
+	}
 	var extras []domain.WorkspaceID
 	for _, id := range p.ExtraWorkspaceIDs {
 		if _, getErr := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(id)); getErr != nil && validateErr == nil {
@@ -1154,7 +1164,13 @@ func (s *Service) List(ctx context.Context, p protocol.MissionListParams) (proto
 }
 
 func (s *Service) Show(ctx context.Context, p protocol.MissionShowParams) (protocol.MissionShowResult, error) {
-	m, err := s.cfg.Missions.GetMission(ctx, domain.MissionID(p.MissionID))
+	var m *domain.Mission
+	var err error
+	if p.MissionID == "" && p.QuestionID != "" {
+		m, err = s.missionForQuestion(ctx, domain.MissionQuestionID(p.QuestionID))
+	} else {
+		m, err = s.cfg.Missions.GetMission(ctx, domain.MissionID(p.MissionID))
+	}
 	if err != nil {
 		return protocol.MissionShowResult{}, err
 	}

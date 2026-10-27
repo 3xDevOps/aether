@@ -733,3 +733,25 @@ func TestHolderChangeIsReported(t *testing.T) {
 	}
 	expect("revoke", 1)
 }
+
+func TestTryAdmitUnheldRefusesAHeldRun(t *testing.T) {
+	service := New(Config{})
+	called := false
+	if err := service.TryAdmitUnheld("run", func() error { called = true; return nil }); err != nil || !called {
+		t.Fatalf("unheld run = %v, called %v", err, called)
+	}
+	controller, _, err := service.Acquire("run", "member", "session", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	called = false
+	if err := service.TryAdmitUnheld("run", func() error { called = true; return nil }); !errors.Is(err, ErrHeld) || called {
+		t.Fatalf("held run = %v, called %v; want ErrHeld", err, called)
+	}
+	if err := service.Release("run", "member", "session", controller.Generation); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.TryAdmitUnheld("run", func() error { called = true; return nil }); err != nil || !called {
+		t.Fatalf("released run = %v, called %v", err, called)
+	}
+}

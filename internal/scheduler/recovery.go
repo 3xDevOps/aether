@@ -380,7 +380,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			return nil, rollback(fmt.Errorf("scheduler: relaunch: %w", supersedeErr))
 		}
 	}
-	entry.status, entry.reason, entry.activity = domain.RunRunning, "", domain.ActivityWorking
+	entry.status, entry.reason, entry.activity, entry.cause = domain.RunRunning, "", domain.ActivityWorking, events.CauseTurn
 	entry.startedAt = now
 	entry.evidenceIdentity = relaunchIdentity
 	entry.retained = false

@@ -40,6 +40,9 @@ type connIdentity struct {
 	legacyClient    bool
 	connector       string
 	connectorClient string
+	// scopes are the connector's granted scopes, which connectorScopeRefusal
+	// checks each call against.
+	scopes []string
 	// edgeSignIn marks a connector authorized by signing in at the edge
 	// instead of a pairing code: it has no device, and is judged as an
 	// edge device no person approved.

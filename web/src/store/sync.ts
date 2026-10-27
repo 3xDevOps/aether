@@ -42,6 +42,7 @@ import { loadMergeProposals } from '@/store/members'
 import { loadEdge } from '@/store/edge'
 import { pausedFromTimeline } from '@/store/board'
 import { scheduleBudgetRead, type BudgetPayload } from '@/store/cost'
+import { touchChildren } from '@/store/child-touches'
 import { inMessageScope, loadMessagePage } from '@/store/messages'
 import { watchOutcomeSeen } from '@/store/outcome-seen'
 import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
@@ -626,7 +627,9 @@ export async function applyEvent(
       store.getState().applyRunProtected(ev.run_id, p.protected)
       break
     }
-    case 'run.mode': {
+    case 'run.mode':
+    case 'run.children': {
+      if (ev.type === 'run.children') touchChildren(ev.run_id)
       try {
         store.getState().upsertRun(await client.runGet(ev.run_id))
       } catch (err) {
@@ -675,6 +678,7 @@ export async function applyEvent(
       // Budget events fire only on thresholds and edits; spend moves with every
       // result. The read does not hold up the events behind it.
       if (ev.workspace_id) scheduleBudgetRead(store, client, ev.workspace_id)
+      touchChildren(store.getState().runs[ev.run_id]?.parent_run_id)
       break
     }
     case 'workspace.presence':

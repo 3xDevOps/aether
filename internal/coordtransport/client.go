@@ -39,7 +39,8 @@ func callTimeout(method string, params any) time.Duration {
 		}
 	case protocol.MethodCoordInbox, protocol.MethodMissionPlanShow:
 		timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
-	case protocol.MethodRunKill, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject:
+	case protocol.MethodRunKill, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
+		protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost:
 		timeout = callConfirmedTimeout
 	case protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop, protocol.MethodDevBrowserReset:
 		timeout = 30*time.Second + callMargin
@@ -173,7 +174,7 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 		return internalError(method, fmt.Errorf("decode response: %w", err))
 	}
 	if resp.Error != nil {
-		return &coordError{Code: resp.Error.Code, Message: resp.Error.Message}
+		return &coordError{Code: resp.Error.Code, Message: resp.Error.Message, Data: resp.Error.Data}
 	}
 	if result != nil {
 		if err := json.Unmarshal(resp.Result, result); err != nil {
@@ -192,6 +193,7 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 type coordError struct {
 	Code    int
 	Message string
+	Data    json.RawMessage
 }
 
 func (e *coordError) Error() string {
@@ -210,6 +212,16 @@ func internalError(method string, cause error) *coordError {
 		Code:    protocol.CodeInternal,
 		Message: fmt.Sprintf("%s: %v", method, cause),
 	}
+}
+
+// ProtocolError is err as the *protocol.Error it carries when Call returned
+// a coordination failure, else err unchanged.
+func ProtocolError(err error) error {
+	var ce *coordError
+	if errors.As(err, &ce) {
+		return &protocol.Error{Code: ce.Code, Message: ce.Message, Data: ce.Data}
+	}
+	return err
 }
 
 // ErrorCode classifies an error returned by Call. A zero result means the

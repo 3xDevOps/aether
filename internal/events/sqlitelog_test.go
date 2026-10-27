@@ -288,7 +288,7 @@ func TestSQLiteLogReadsOneRunThroughIndexes(t *testing.T) {
 	}{
 		"oldest first": {seqs(log.Read(ctx, f, 0, 0, 10)), []uint64{1, 2, 3, 7}},
 		"after cursor": {seqs(log.Read(ctx, f, 1, 0, 2)), []uint64{2, 3}},
-		"newest first": {seqs(log.ReadBefore(ctx, f, 8, 3)), []uint64{7, 3, 2}},
+		"newest first": {seqs(log.ReadBefore(ctx, f, 0, 8, 3)), []uint64{7, 3, 2}},
 	} {
 		if !slices.Equal(tc.got, tc.want) {
 			t.Errorf("%s: seqs = %v, want %v", name, tc.got, tc.want)

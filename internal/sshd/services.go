@@ -41,6 +41,8 @@ type Services struct {
 	MissionControl MissionControl
 	// Missions is authenticated human mission creation and inspection.
 	Missions MissionService
+	// Children is child runs: settings, trees and limits.
+	Children ChildService
 	// Usage reads read-only Claude Code and Codex subscription quota.
 	Usage fallback.QuotaReader
 	// Integration exposes authenticated candidate preparation, review,
@@ -65,4 +67,6 @@ type Services struct {
 	Slack SlackService
 	// Memory is team memory: notes, pins and the launch brief.
 	Memory MemoryService
+	// Watches keeps each member's watches and notification preferences.
+	Watches WatchService
 }

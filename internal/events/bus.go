@@ -40,6 +40,9 @@ type Filter struct {
 	// Runs matches events carrying any of these run IDs, and agent messages
 	// addressed to one of them. Empty means all.
 	Runs []domain.RunID
+	// Mission also matches mission.changed and integration.changed events
+	// of this mission, which carry no run.
+	Mission domain.MissionID
 	// Types matches only events whose Type is listed. Empty means all.
 	Types []Type
 }
@@ -52,11 +55,8 @@ func (f Filter) Matches(e Event) bool {
 	if f.Run != "" && e.RunID != f.Run {
 		return false
 	}
-	if len(f.Runs) > 0 && !slices.Contains(f.Runs, e.RunID) {
-		p, ok := e.Payload.(CoordMessagePayload)
-		if !ok || !slices.Contains(f.Runs, p.ToRunID) {
-			return false
-		}
+	if (len(f.Runs) > 0 || f.Mission != "") && !f.matchesRuns(e) {
+		return false
 	}
 	if len(f.Types) == 0 {
 		return true
@@ -65,6 +65,21 @@ func (f Filter) Matches(e Event) bool {
 		if e.Type == t {
 			return true
 		}
+	}
+	return false
+}
+
+func (f Filter) matchesRuns(e Event) bool {
+	if slices.Contains(f.Runs, e.RunID) {
+		return true
+	}
+	switch p := e.Payload.(type) {
+	case CoordMessagePayload:
+		return slices.Contains(f.Runs, p.ToRunID)
+	case MissionChangedPayload:
+		return f.Mission != "" && p.MissionID == f.Mission
+	case IntegrationChangedPayload:
+		return f.Mission != "" && p.MissionID == f.Mission
 	}
 	return false
 }
@@ -145,8 +160,8 @@ type EventLog interface {
 	// means no upper bound.
 	Read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int) ([]Event, error)
 	// ReadBefore returns up to limit stored events matching f with
-	// Seq < beforeSeq, ordered by Seq descending.
-	ReadBefore(ctx context.Context, f Filter, beforeSeq uint64, limit int) ([]Event, error)
+	// afterSeq < Seq < beforeSeq, ordered by Seq descending.
+	ReadBefore(ctx context.Context, f Filter, afterSeq, beforeSeq uint64, limit int) ([]Event, error)
 	// LastSeq returns the highest stored sequence number, zero when empty.
 	LastSeq(ctx context.Context) (uint64, error)
 	// Close releases the log's resources.

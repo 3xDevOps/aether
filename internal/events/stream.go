@@ -45,10 +45,16 @@ func SubscribeWire(ctx context.Context, bus Bus, req protocol.SubscribeRequest) 
 	return sub, nil
 }
 
-// StreamWire pumps a subscription onto write in wire form until the
-// subscription ends (nil), the buffer dropped (ErrDropped), or a write or
-// encode fails. Framing belongs to the caller; ordering belongs here.
-func StreamWire(sub Subscription, write func(protocol.Event) error) error {
+// private is a payload only one member may be streamed.
+type private interface {
+	Recipient() domain.MemberID
+}
+
+// StreamWire pumps a subscription onto write in wire form, leaving out
+// what is private to a member other than member, until the subscription
+// ends (nil), the buffer dropped (ErrDropped), or a write or encode fails.
+// Framing belongs to the caller; ordering belongs here.
+func StreamWire(sub Subscription, member domain.MemberID, write func(protocol.Event) error) error {
 	for ev := range sub.Events() {
 		// Check for drops before writing: an event already dequeued was
 		// dequeued before any drop, so ending the stream pre-write leaves
@@ -57,6 +63,9 @@ func StreamWire(sub Subscription, write func(protocol.Event) error) error {
 		// one post-gap event advance the cursor past the loss.
 		if sub.Dropped() > 0 {
 			return ErrDropped
+		}
+		if p, ok := ev.Payload.(private); ok && p.Recipient() != member {
+			continue
 		}
 		we, err := wireEvent(ev)
 		if err != nil {

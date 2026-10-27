@@ -142,6 +142,10 @@ their own entries.
 - [Usage fallback](teams.md#usage-fallback) can move their run onto your
   account when theirs runs out, without them picking it: your share is the
   consent. It never picks an account not shared with the launcher.
+- A swarm checks every account it names, for the integrator, the workers and
+  fallback, when it is created, so a member cannot queue a swarm on an account
+  nobody shared with them:
+  `permission denied: member <member-id> has not shared their account with you`.
 
 > [!WARNING]
 > An `omp` share mounts your whole `~/.omp/agent` read-write, because omp
@@ -529,8 +533,10 @@ there is no terminal, file, settings or git-writing tool.
   default; `control` (decide permission requests, stop and close
   runs, cancel swarms) is not, because text an agent wrote could talk the
   assistant into approving or ending work. A connector serves only
-  its scopes' tools. It can make 30 write calls at once, then one every 2
-  seconds.
+  its scopes' tools, and the server checks every call's method against its
+  scopes, a permission decision against `control`, and refuses every method
+  outside its table ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
+  then one every 2 seconds.
 - A connector minted over a member SSH key or a tailnet connection has no
   device: revoking a device does not cut it off. `aether mcp revoke` does.
 - TLS ends at the edge, because ChatGPT and Claude need a public certificate.
@@ -602,7 +608,9 @@ there is no terminal, file, settings or git-writing tool.
 The [Slack bot](slack.md) acts as the member who linked a Slack account, the
 way a connector does: with that member's role checks, judged by the device
 `aether slack link` ran on, and with audit records naming
-`Slack connector <Slack user id>`.
+`Slack connector <Slack user id>`. It holds all three [scopes](connectors.md#scopes), since deciding a
+permission request takes `control`, and calls only the methods its buttons and
+replies need.
 
 - It messages runs and answers requests once. It launches, stops and closes
   nothing, posts in no channel, and never picks an "always" option. A request
