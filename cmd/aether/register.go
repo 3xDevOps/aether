@@ -39,7 +39,6 @@ var flagSubcommands = []string{
 	"schedule list", "schedule delete",
 	"workspace init", "workspace add", "workspace delete", "workspace settings", "workspace origin",
 	"workspace env list", "workspace env set", "workspace env unset", "workspace env import", "workspace env script",
-	"workspace env file put", "workspace env file rm",
 	"workspace mirror status", "workspace mirror configure", "workspace mirror refresh",
 	"workspace mirror adopt", "workspace mirror disable",
 	"swarm create", "swarm list",

@@ -287,6 +287,9 @@ Things to ask:
 - "Merge the login fix PR if CI is green."
 - "The billing swarm's integrator stopped; replace it."
 
+The connector tells ChatGPT and Claude to launch and write the task as
+Aether's assistant does: [What a launch's task holds](assistant.md#what-a-launchs-task-holds).
+
 Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
 one-line summary followed by the result as JSON. Text that agents, teammates or

@@ -959,8 +959,6 @@ export const api = {
     setup_script?: string
     set?: WorkspaceVariable[]
     unset?: string[]
-    files?: { path: string; content: string }[]
-    remove_files?: string[]
     egress?: boolean
     egress_allow?: string[]
     egress_deny?: string[]

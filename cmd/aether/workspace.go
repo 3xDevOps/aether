@@ -25,8 +25,6 @@ func init() {
 			"aether workspace env unset [--workspace <name>] <NAME>...\n" +
 			"aether workspace env import [--workspace <name>] [--plain] <file|->\n" +
 			"aether workspace env script [--workspace <name>] [--file <path|->|--clear]\n" +
-			"aether workspace env file put [--workspace <name>] <local file> [--path <repo path>]\n" +
-			"aether workspace env file rm [--workspace <name>] <repo path>\n" +
 			"aether workspace mirror status [--workspace <name>]\n" +
 			"aether workspace mirror configure --source <url> [--workspace <name>] [--branch <branch>]\n" +
 			"    [--auth public|deploy-key|github] [--github-account-id <id>] [--known-hosts-file <path>]\n" +
@@ -38,9 +36,6 @@ func init() {
 			"aether workspace import https://github.com/acme/app\n" +
 			"aether workspace env set --workspace app API_URL=https://api.example.com\n" +
 			"aether workspace env set --workspace app --secret DATABASE_PASSWORD < secret.txt\n" +
-			"aether workspace env file put --workspace app .env\n" +
-			"aether workspace env file put --workspace app ~/keys/app-sa.json --path config/service-account.json\n" +
-			"aether workspace env file rm --workspace app .env\n" +
 			"aether workspace mirror status --workspace app",
 		run: runWorkspace,
 	})

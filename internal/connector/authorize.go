@@ -197,7 +197,7 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 	if signed := q.Get(edgeproto.ParamAssertion); signed != "" && res == h.universal && h.ssh.EdgeAccess() == edgeproto.PolicyAccount {
 		a, name, aerr := h.assertion(r.Context(), signed, req, h.edgeBrowser(r), bound)
 		if aerr != nil {
-			h.renderError(w, "Cannot connect as your GitHub account: "+aerr.Error()+". Start the connection again from ChatGPT or Claude.")
+			h.renderError(w, "Cannot connect with your edge sign-in: "+aerr.Error()+". Start the connection again from ChatGPT or Claude.")
 			return
 		}
 		req.Asserted, page.Member, page.Account = a, name, accountLabel(a.Account)
@@ -330,7 +330,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 	if req.Asserted != nil {
 		grant, err := h.assertedGrant(r.Context(), req.Asserted, h.edgeBrowser(r), now)
 		if err != nil {
-			h.renderError(w, "Cannot connect as your GitHub account: "+err.Error()+". Start the connection again from ChatGPT or Claude.")
+			h.renderError(w, "Cannot connect with your edge sign-in: "+err.Error()+". Start the connection again from ChatGPT or Claude.")
 			return
 		}
 		h.issueCode(w, r, req, grant, scopes, now)

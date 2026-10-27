@@ -27,7 +27,7 @@ credentials out of the report.
 | [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
-| [Workspace secrets](#workspace-secrets) | Secrets and workspace files are hidden in settings and never returned by the API. Secrets are masked in setup script output; files stay out of git and out of **Files**. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
+| [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
 | [Assistant](#the-assistant) | Launching, messaging and stopping runs and saving the environment wait for your click. | Its shell runs any command in your environment without asking. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
@@ -265,23 +265,6 @@ someone who can run code in the workspace.
 - Setup script output has every exact occurrence of a secret replaced with
   `***`. An encoded or split value is not recognized, and nothing masks what
   the agent prints later.
-
-Workspace files ([environments.md](environments.md#files)) are treated the
-same way:
-
-- Their content is stored in `<data-dir>/workspace-secrets/<workspace-id>.files.json`,
-  plain text, mode `0600`, and deleted with the workspace. The API returns
-  only each path and size.
-- Every new run gets them in its checkout, mode `0600`, readable by every
-  process in the run. Anyone who can launch or message a run in the
-  workspace can make it print one.
-- `.git/info/exclude` keeps them out of the run's commits, **Changes** and
-  published branch. A launch whose repository un-ignores one fails before
-  writing any. An agent that edits that file or runs `git add -f` can still
-  commit one.
-- **Files** refuses to open them in a run checkout, so a member who can only
-  view a run cannot read them there. Setup script output does not mask a
-  file's content.
 
 ## The assistant
 
@@ -599,6 +582,17 @@ there is no terminal, file, settings or git-writing tool.
   person approved: a method that needs an approved device refuses it, and it
   cannot mint a pairing code or a Slack link code that would outlive these
   cut-offs.
+- An edge given `--reviewer-account-file` offers one password sign-in, the
+  [reviewer account](edge.md#reviewer-account), for an app directory's
+  review. Anyone holding its password authorizes a connector as the member it
+  is bound to, so a server takes it only with `edge-reviewer` on, under
+  `edge-access account`, and only for a member who is no admin; it gets no
+  edge session. Ten wrong passwords in a row for its login lock it for 15
+  minutes, which also lets anyone who knows the login keep it locked, and
+  the `429` confirms a guessed login, so keep the login as private as the
+  password. A new password stops only new sign-ins; unlinking the login
+  deletes its connectors, and binding it again does not revive them. Bind it to a member of a server kept for the review: every
+  member reads every workspace.
 - Under `edge-access account` the consent page has no code, so an
   authorization link someone started in their own ChatGPT or Claude, opened
   by a member signed in at the edge, is one **Allow** away from connecting

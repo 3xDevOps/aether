@@ -1,6 +1,5 @@
-// Package secretstore keeps workspace secret variables and workspace files on
-// the server's disk, outside aether.db: per workspace, one 0600 JSON file of
-// each in a 0700 directory.
+// Package secretstore keeps workspace secret variables on the server's disk,
+// outside aether.db: one 0600 JSON file per workspace in a 0700 directory.
 package secretstore
 
 import (
@@ -16,8 +15,8 @@ import (
 )
 
 // Store's lock orders a change to a workspace's environment, which is its
-// row in aether.db and its secret file, against a launch reading both. No
-// method takes it.
+// row in aether.db and its secret file, against a launch reading both. Get,
+// Put and Delete do not take it.
 type Store struct {
 	sync.RWMutex
 	dir string
@@ -27,44 +26,17 @@ func New(dir string) *Store {
 	return &Store{dir: dir}
 }
 
-type kind struct{ name, suffix string }
-
-var (
-	secretsKind = kind{"secrets", ".json"}
-	filesKind   = kind{"files", ".files.json"}
-)
-
-func (s *Store) path(id domain.WorkspaceID, k kind) (string, error) {
+func (s *Store) path(id domain.WorkspaceID) (string, error) {
 	name := string(id)
 	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
 		return "", fmt.Errorf("secretstore: invalid workspace id %q", id)
 	}
-	return filepath.Join(s.dir, name+k.suffix), nil
+	return filepath.Join(s.dir, name+".json"), nil
 }
 
 // Get returns an empty map for a workspace with no secrets.
 func (s *Store) Get(id domain.WorkspaceID) (map[string]string, error) {
-	return s.read(id, secretsKind)
-}
-
-// Files maps each workspace file's path to its content, empty for a
-// workspace with none.
-func (s *Store) Files(id domain.WorkspaceID) (map[string]string, error) {
-	return s.read(id, filesKind)
-}
-
-// Put removes the file when secrets is empty.
-func (s *Store) Put(id domain.WorkspaceID, secrets map[string]string) error {
-	return s.write(id, secretsKind, secrets)
-}
-
-// PutFiles removes the file when files is empty.
-func (s *Store) PutFiles(id domain.WorkspaceID, files map[string]string) error {
-	return s.write(id, filesKind, files)
-}
-
-func (s *Store) read(id domain.WorkspaceID, k kind) (map[string]string, error) {
-	path, err := s.path(id, k)
+	path, err := s.path(id)
 	if err != nil {
 		return nil, err
 	}
@@ -73,26 +45,27 @@ func (s *Store) read(id domain.WorkspaceID, k kind) (map[string]string, error) {
 		return map[string]string{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("secretstore: read workspace %s %s: %w", id, k.name, err)
+		return nil, fmt.Errorf("secretstore: read workspace %s: %w", id, err)
 	}
-	values := map[string]string{}
-	if err := json.Unmarshal(data, &values); err != nil {
-		return nil, fmt.Errorf("secretstore: decode workspace %s %s: %w", id, k.name, err)
+	secrets := map[string]string{}
+	if err := json.Unmarshal(data, &secrets); err != nil {
+		return nil, fmt.Errorf("secretstore: decode workspace %s: %w", id, err)
 	}
-	return values, nil
+	return secrets, nil
 }
 
-func (s *Store) write(id domain.WorkspaceID, k kind, values map[string]string) error {
-	if len(values) == 0 {
-		return s.remove(id, k)
+// Put removes the file when secrets is empty.
+func (s *Store) Put(id domain.WorkspaceID, secrets map[string]string) error {
+	if len(secrets) == 0 {
+		return s.Delete(id)
 	}
-	path, err := s.path(id, k)
+	path, err := s.path(id)
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(values)
+	data, err := json.Marshal(secrets)
 	if err != nil {
-		return fmt.Errorf("secretstore: encode workspace %s %s: %w", id, k.name, err)
+		return fmt.Errorf("secretstore: encode workspace %s: %w", id, err)
 	}
 	if err = os.MkdirAll(s.dir, 0o700); err != nil {
 		return fmt.Errorf("secretstore: create directory: %w", err)
@@ -104,7 +77,7 @@ func (s *Store) write(id domain.WorkspaceID, k kind, values map[string]string) e
 	// another user, not even before the rename.
 	tmp, err := os.CreateTemp(s.dir, ".write-*")
 	if err != nil {
-		return fmt.Errorf("secretstore: write workspace %s %s: %w", id, k.name, err)
+		return fmt.Errorf("secretstore: write workspace %s: %w", id, err)
 	}
 	_, err = tmp.Write(data)
 	if err == nil {
@@ -118,7 +91,7 @@ func (s *Store) write(id domain.WorkspaceID, k kind, values map[string]string) e
 	}
 	if err != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("secretstore: write workspace %s %s: %w", id, k.name, err)
+		return fmt.Errorf("secretstore: write workspace %s: %w", id, err)
 	}
 	return s.syncDir()
 }
@@ -135,17 +108,9 @@ func (s *Store) syncDir() error {
 	return nil
 }
 
-// Delete removes a workspace's secrets and files. It does not fail for a
-// workspace with neither.
+// Delete does not fail for a workspace with no secrets.
 func (s *Store) Delete(id domain.WorkspaceID) error {
-	if err := s.remove(id, secretsKind); err != nil {
-		return err
-	}
-	return s.remove(id, filesKind)
-}
-
-func (s *Store) remove(id domain.WorkspaceID, k kind) error {
-	path, err := s.path(id, k)
+	path, err := s.path(id)
 	if err != nil {
 		return err
 	}
@@ -154,7 +119,7 @@ func (s *Store) remove(id domain.WorkspaceID, k kind) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("secretstore: remove workspace %s %s: %w", id, k.name, err)
+		return fmt.Errorf("secretstore: remove workspace %s: %w", id, err)
 	}
 	return s.syncDir()
 }
