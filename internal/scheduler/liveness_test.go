@@ -96,6 +96,19 @@ func TestReportReminderTurnKeepsTheStallThreshold(t *testing.T) {
 	}
 }
 
+// TestEnhancedFailedFirstPromptShowsItsError: the task prompt the agent
+// refuses at launch fails the run's turn with the agent's own error.
+func TestEnhancedFailedFirstPromptShowsItsError(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, acpmock.PromptRefuse)
+	waitFor(t, "the refused task to fail the turn", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Activity == domain.ActivityFailed &&
+			strings.HasPrefix(r.Reason, acpTurnFailedReason) && strings.Contains(r.Reason, "Authentication required")
+	})
+}
+
 // TestEnhancedAdapterExitIsDisconnected: losing the agent process is the
 // one thing that reads disconnected.
 func TestEnhancedAdapterExitIsDisconnected(t *testing.T) {
