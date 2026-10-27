@@ -295,6 +295,16 @@ export function handoffCommands({ run, members, self }: RunCommandContext): Comm
   }))
 }
 
+const stuckStates = new Set(['needs-you', 'waiting', 'waiting-agents', 'waiting-ci', 'waiting-tools'])
+
+/** What a failed or stuck run asks the assistant; a run doing fine asks nothing. */
+export function assistantAsk(run: RunRecord): { label: string; draft: string } | null {
+  if (run.status === 'failed') return { label: 'Ask the assistant to fix this run', draft: 'Fix this' }
+  const live = run.status === 'running' || run.status === 'needs-attention'
+  if (live && (run.status === 'needs-attention' || stuckStates.has(run.state ?? ''))) return { label: 'Ask the assistant why this is stuck', draft: 'Why is this stuck?' }
+  return null
+}
+
 /** In display order, handoffs last; a surface with its own handoff menu calls `handoffCommands`. */
 export function runCommands(ctx: RunCommandContext): Command[] {
   const { run, paused, cap, self, steerOthers } = ctx
@@ -535,6 +545,18 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
 
+  const ask = assistantAsk(run)
+  if (ask && cap.hasMethod('assistant.status') && canLaunch({ cap, role: self.role })) {
+    list.push({
+      id: 'ask-assistant',
+      label: ask.label,
+      short: ask.draft,
+      Icon: Sparkles,
+      value: 'assistant ask fix stuck why',
+      perform: () => useStore.getState().askAssistant({ draft: ask.draft, attachments: [{ kind: 'run', workspace_id: run.workspace_id, run_id: id, label: id }] }),
+    })
+  }
+
   // A verb offered from a pending prediction's state could re-read the run and erase that prediction.
   return ctx.predicting ? list.filter((command) => !command.predict) : list
 }
@@ -630,6 +652,12 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       Icon: Sparkles,
       value: 'assistant ask question help',
       perform: () => useStore.getState().setAssistantOpen(true),
+    }, {
+      id: 'assistant-page',
+      label: 'Ask about this page',
+      Icon: Sparkles,
+      value: 'assistant ask this page context',
+      perform: () => useStore.getState().askAssistant({ draft: '', page: true }),
     })
   }
   if (canLaunch({ cap: ctx.cap, role })) {

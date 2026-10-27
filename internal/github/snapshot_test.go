@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -78,13 +79,14 @@ func checkRunsBody(runs ...string) string {
 }
 
 const (
-	pullPath     = "/repos/acme/app/pulls/7"
-	commitPath   = "/repos/acme/app/commits/" + headSHA
-	checksPage1  = commitPath + "/check-runs?per_page=100&page=1"
-	checksPage2  = commitPath + "/check-runs?per_page=100&page=2"
-	suitesPage1  = commitPath + "/check-suites?per_page=100&page=1"
-	statusPage1  = commitPath + "/status?per_page=100&page=1"
-	reviewsPage1 = pullPath + "/reviews?per_page=100&page=1"
+	pullPath       = "/repos/acme/app/pulls/7"
+	commitPath     = "/repos/acme/app/commits/" + headSHA
+	checksPage1    = commitPath + "/check-runs?per_page=100&page=1"
+	checksPage2    = commitPath + "/check-runs?per_page=100&page=2"
+	suitesPage1    = commitPath + "/check-suites?per_page=100&page=1"
+	statusPage1    = commitPath + "/status?per_page=100&page=1"
+	reviewsPage1   = pullPath + "/reviews?per_page=100&page=1"
+	workflowsPage1 = "/repos/acme/app/actions/runs?head_sha=" + headSHA + "&per_page=100&page=1"
 )
 
 func checkSuite(id int64, status, slug string, runs int) string {
@@ -348,13 +350,75 @@ func TestPullRequestSnapshotDropsSupersededRuns(t *testing.T) {
 	}
 
 	f.bodies[checksPage1] = checkRunsBody(checkRun(1, "build", "completed", "success"), checkRun(2, "test", "completed", "cancelled"), inSuite(checkRun(4, "test", "completed", "success"), 10))
+	f.bodies[workflowsPage1] = workflowRunsBody(workflowRun(50, 100, 9), workflowRun(51, 100, 10))
 	if c := checks(); !c.Final || c.Passed != 2 || c.Failed != 0 {
 		t.Fatalf("run cancelled by concurrency counted: %+v", c)
 	}
+	f.bodies[workflowsPage1] = workflowRunsBody(workflowRun(50, 100, 9), workflowRun(51, 200, 10))
+	if c := checks(); c.Failed != 1 || c.Passed != 2 {
+		t.Fatalf("another workflow's job with the same name hid a cancelled run: %+v", c)
+	}
+
+	f.requests = nil
 	f.bodies[checksPage1] = checkRunsBody(checkRun(2, "test", "completed", "failure"), inSuite(checkRun(4, "test", "completed", "success"), 10))
 	if c := checks(); c.Failed != 1 || c.Passed != 1 {
 		t.Fatalf("another workflow's job with the same name hid a failure: %+v", c)
 	}
+	if slices.Contains(f.requests, workflowsPage1) {
+		t.Fatal("workflow runs read without a cancelled run to resolve")
+	}
+}
+
+func TestPullRequestSnapshotKeepsCancelledRunWhenActionsRunsAreRefused(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	f.bodies[checksPage1] = checkRunsBody(checkRun(2, "test", "completed", "cancelled"), inSuite(checkRun(4, "test", "completed", "success"), 10))
+	refuse := func(status int, message string, limited bool) func(*http.Request) (*http.Response, error) {
+		return func(r *http.Request) (*http.Response, error) {
+			if r.URL.RequestURI() != workflowsPage1 {
+				return f.serve(r)
+			}
+			response := jsonResponse(status, `{"message":"`+message+`"}`)
+			if limited {
+				response.Header.Set("X-RateLimit-Remaining", "0")
+			}
+			return response, nil
+		}
+	}
+	for _, tc := range []struct {
+		status  int
+		message string
+	}{
+		{http.StatusForbidden, "Resource not accessible by personal access token"},
+		{http.StatusNotFound, "Not Found"},
+	} {
+		s, _ := newTestService(t, nativeCredentials(), refuse(tc.status, tc.message, false))
+		snap, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+		if err != nil {
+			t.Fatalf("HTTP %d on workflow runs failed the snapshot: %v", tc.status, err)
+		}
+		if !strings.Contains(snap.WorkflowsUnreadable, tc.message) {
+			t.Fatalf("HTTP %d: workflows unreadable = %q", tc.status, snap.WorkflowsUnreadable)
+		}
+		if c := snap.Checks(); c.Failed != 1 || c.Passed != 1 {
+			t.Fatalf("HTTP %d: cancelled run not counted: %+v", tc.status, c)
+		}
+	}
+
+	s, _ := newTestService(t, nativeCredentials(), refuse(http.StatusForbidden, "API rate limit exceeded", true))
+	_, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	var limited *RateLimitError
+	if !errors.As(err, &limited) {
+		t.Fatalf("rate limit on workflow runs = %v, want a RateLimitError", err)
+	}
+}
+
+func workflowRun(id, workflow, suite int64) string {
+	return fmt.Sprintf(`{"id":%d,"workflow_id":%d,"check_suite_id":%d}`, id, workflow, suite)
+}
+
+func workflowRunsBody(runs ...string) string {
+	return `{"total_count":` + strconv.Itoa(len(runs)) + `,"workflow_runs":[` + strings.Join(runs, ",") + `]}`
 }
 
 func TestPullRequestSnapshotWaitsForIncompleteSuites(t *testing.T) {

@@ -712,6 +712,46 @@ func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	waitItems(t, e.sched, run.ID, "a turn after reopen", turnEnded("end_turn", 2))
 }
 
+func TestEnhancedRunReopensASessionTheAgentLost(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	lost := e.sched.acp.session(run.ID)
+	if err := e.sched.WakeEnhanced(t.Context(), run.ID, acpmock.PromptLoseSession); !errors.Is(err, domain.ErrPromptRefused) {
+		t.Fatalf("wake of a lost session: %v, want domain.ErrPromptRefused", err)
+	}
+	waitFor(t, "the session restored in a fresh ACP server", func() bool {
+		execs := rt.all()
+		sess := e.sched.acp.session(run.ID)
+		return len(execs) == 2 && execs[0].exited() && sess != nil && sess != lost && e.sched.IdleEnhanced(run.ID)
+	})
+	if !slices.Contains(rt.all()[1].agent.Methods(), acp.AgentMethodSessionResume) {
+		t.Fatal("the reopen did not resume the lost session")
+	}
+	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "unread mail"); err != nil {
+		t.Fatalf("wake of the restored session: %v", err)
+	}
+	items := waitItems(t, e.sched, run.ID, "the wake's turn", turnEnded("end_turn", 2))
+	if !slices.ContainsFunc(items, func(it acphost.Item) bool {
+		return it.Kind == acphost.KindNotice && it.Notice.Title == "Agent session lost"
+	}) {
+		t.Fatal("the reopen left no notice")
+	}
+
+	if err := e.sched.WakeEnhanced(t.Context(), run.ID, acpmock.PromptLoseSession); !errors.Is(err, domain.ErrPromptRefused) {
+		t.Fatalf("wake of a session lost again: %v, want domain.ErrPromptRefused", err)
+	}
+	waitFor(t, "the session lost again stopped", func() bool {
+		row, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && strings.HasPrefix(row.Reason, acpFailedReason) && strings.Contains(row.Reason, "Session not found") &&
+			rt.all()[1].exited() && e.sched.acp.session(run.ID) == nil
+	})
+	if n := len(rt.all()); n != 2 {
+		t.Fatalf("a session lost again right after its reopen was reopened: %d ACP servers", n)
+	}
+}
+
 func TestEnhancedRunDeleteRemovesItemLog(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)

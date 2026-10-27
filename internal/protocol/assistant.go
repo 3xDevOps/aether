@@ -116,13 +116,33 @@ type AssistantViewParams struct {
 
 // AssistantViewContext is what the member's dashboard shows: ids and view
 // names only, never titles, file contents, drafts or terminal text. Its ids
-// are hints for the assistant's member-scoped tools, never permissions.
+// are hints for the assistant's member-scoped tools, never permissions. A
+// prompt with the page removed has no route; Attachments are what the member
+// pointed the message at.
 type AssistantViewContext struct {
-	Version    int                  `json:"version"`
-	CapturedAt time.Time            `json:"captured_at"`
-	Route      AssistantViewEntry   `json:"route"`
-	OpenFile   *AssistantViewFile   `json:"open_file,omitempty"`
-	Recent     []AssistantViewEntry `json:"recent,omitempty"`
+	Version     int                       `json:"version"`
+	CapturedAt  time.Time                 `json:"captured_at"`
+	Route       AssistantViewEntry        `json:"route,omitzero"`
+	OpenFile    *AssistantViewFile        `json:"open_file,omitempty"`
+	Recent      []AssistantViewEntry      `json:"recent,omitempty"`
+	Attachments []AssistantViewAttachment `json:"attachments,omitempty"`
+}
+
+// AssistantViewAttachment names one thing a prompt is about. Kind is
+// workspace, run, mission, pr, check, failure or task; the other fields say
+// which.
+type AssistantViewAttachment struct {
+	Kind        string `json:"kind"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	RunID       string `json:"run_id,omitempty"`
+	MissionID   string `json:"mission_id,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
+	AttemptID   string `json:"attempt_id,omitempty"`
+	PR          int    `json:"pr,omitempty"`
+	Repository  string `json:"repository,omitempty"`
+	Check       string `json:"check,omitempty"`
+	Failure     string `json:"failure,omitempty"`
+	Seq         int64  `json:"seq,omitempty"`
 }
 
 type AssistantViewEntry struct {
