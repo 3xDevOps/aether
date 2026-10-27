@@ -1713,7 +1713,7 @@ describe('onboarding wizard', () => {
 
     await screen.findByRole('radiogroup', { name: 'Agent' })
     expect(screen.getByRole('radio', { name: /^Claude Code/ })).toHaveProperty('disabled', false)
-    expect(screen.getByRole('radio', { name: /^Codex/ })).toHaveProperty('disabled', true)
+    expect(screen.queryByRole('radio', { name: /^Codex/ })).toBeNull()
   })
 
   it('sends the reader back to Agent when nothing is installed', async () => {

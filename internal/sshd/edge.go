@@ -783,8 +783,9 @@ func (s *Server) claimDevice(ctx context.Context, ids store.IdentityStore, membe
 }
 
 // EdgeAccountDeleted handles the edge's notice that the account provider,
-// subject was deleted there: it removes that identity and the devices
-// registered through it, and closes their connections. The notice is the
+// subject was deleted there: it removes that identity, the devices
+// registered through it and the connectors its sign-in authorized, and
+// closes the devices' connections. The notice is the
 // edge's assertion, so it may only take access away: it removes no
 // member, changes no role, deletes no data, and leaves the member's SSH
 // keys, tailnet identity and other identities working.

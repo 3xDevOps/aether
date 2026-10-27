@@ -752,6 +752,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       content, truncated: false, binary: false,
       size: new TextEncoder().encode(content).length, revision: 'saved', writable: true,
     })),
+    filesUpload: vi.fn(async () => ({})),
     filesDiff: vi.fn(async () => ({ patch: '', truncated: false })),
     disk: vi.fn(async () => ({
       used_bytes: 512 * 1024 * 1024,
@@ -993,6 +994,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     localUpdateStatus: vi.fn(async () => ({ phase: 'idle' as const })),
     serverUpdateStatus: vi.fn(async () => serverUpdateStatus()),
+    serverRunLimits: vi.fn<Api['serverRunLimits']>(async () => ({ limits: {}, default: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 }, effective: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 } })),
     sysboxStatus: vi.fn(async () => ({ state: 'on' as const })),
     sysboxInstall: vi.fn(async () => ({ state: 'installing' as const })),
     serverUpdate: vi.fn(async () => ({
