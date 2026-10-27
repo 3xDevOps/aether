@@ -1,3 +1,4 @@
+import { ControlMatrix } from '@/components/control-matrix'
 import { Shield, Users } from '@/components/icons'
 import { connectionLabel } from '@/components/shell/connection'
 import { Avatar } from '@/components/ui/avatar'
@@ -53,28 +54,35 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   const staleWatchers = stream !== 'live' || Boolean(presenceError)
 
   return (
-    <div role="group" aria-label="Multiplayer controls" className="@container/multiplayer shrink-0 border-b border-seam bg-chrome px-2 py-1">
+    <div role="group" aria-label="Multiplayer controls" className="@container/multiplayer relative isolate shrink-0 overflow-clip border-b border-seam bg-chrome px-2 py-1">
+      <ControlMatrix
+        appearance={agent.localControl ? 'active'
+          : agent.controlUnavailable ? 'hidden' : agent.roomControl?.loss ?? 'hidden'}
+        takeoverProgress={agent.takeover.holderProgress}
+      />
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Button size="sm" variant="ghost" className="shrink-0" hint="See people and notes for this run" onClick={onPeople}>
+        <Button size="sm" variant="ghost" className="control-matrix-clear shrink-0" hint="See people and notes for this run" onClick={onPeople}>
           <Users />
           <span className="@max-[30rem]/multiplayer:sr-only">Multiplayer</span>
         </Button>
-        <div className="flex min-w-24 flex-1 items-center gap-2 px-1 text-ui-sm">
-          <span className="shrink-0 text-muted">Watching{status && staleWatchers && ' (last known)'}</span>
-          <div role="group" aria-label="Run watchers" tabIndex={status?.watchers.length ? 0 : undefined} className="flex min-w-0 flex-1 touch-pan-x items-center gap-3 overflow-x-auto whitespace-nowrap">
-            {status ? status.watchers.length > 0 ? status.watchers.map((id) => {
-              const member = resolveMember({ members, mergedInto }, id).member
-              const name = memberName({ members, mergedInto }, id)
-              return (
-                <span key={id} className="inline-flex shrink-0 items-center gap-1.5">
-                  <Avatar name={name} color={member?.color} />
-                  <span className="@max-[34rem]/multiplayer:sr-only">{name}</span>
-                </span>
-              )
-            }) : <span className="text-muted">Nobody</span> : <span className="text-muted">{presenceError ? 'Unavailable' : 'Checking…'}</span>}
+        <div className="flex min-w-24 flex-1">
+          <div className="control-matrix-clear flex min-w-0 items-center gap-2 px-1 text-ui-sm">
+            <span className="shrink-0 text-muted">Watching{status && staleWatchers && ' (last known)'}</span>
+            <div role="group" aria-label="Run watchers" tabIndex={status?.watchers.length ? 0 : undefined} className="flex min-w-0 flex-1 touch-pan-x items-center gap-3 overflow-x-auto whitespace-nowrap">
+              {status ? status.watchers.length > 0 ? status.watchers.map((id) => {
+                const member = resolveMember({ members, mergedInto }, id).member
+                const name = memberName({ members, mergedInto }, id)
+                return (
+                  <span key={id} className="inline-flex shrink-0 items-center gap-1.5">
+                    <Avatar name={name} color={member?.color} />
+                    <span className="@max-[34rem]/multiplayer:sr-only">{name}</span>
+                  </span>
+                )
+              }) : <span className="text-muted">Nobody</span> : <span className="text-muted">{presenceError ? 'Unavailable' : 'Checking…'}</span>}
+            </div>
           </div>
         </div>
-        <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
+        <div className="control-matrix-clear ml-auto flex min-w-0 items-center justify-end gap-2">
           {run.protected && <span className="inline-flex shrink-0 items-center gap-1 text-ui-sm text-muted"><Shield />Protected</span>}
           <div role="group" aria-label="Run controller" className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
             {agent.steerable && controllerID && <Avatar name={controllerName ?? controllerID} color={controller?.color} />}
@@ -93,9 +101,9 @@ export function MultiplayerControls({ run, agent, onPeople }: {
           {agent.steerable && !maySteer && <span className="shrink-0 text-ui-sm text-muted">View only</span>}
         </div>
       </div>
-      {controlError && <p role="alert" className="px-1 py-1 text-ui-sm text-state-failed">Control request failed: {controlError}</p>}
-      {session?.streamError && <p role="status" className="px-1 py-1 text-ui-sm text-state-failed">{session.streamError}</p>}
-      {presenceError && <p role="status" className="px-1 py-1 text-ui-sm text-muted">Presence unavailable: {presenceError}</p>}
+      {controlError && <p role="alert" className="control-matrix-clear w-fit px-1 py-1 text-ui-sm text-state-failed">Control request failed: {controlError}</p>}
+      {session?.streamError && <p role="status" className="control-matrix-clear w-fit px-1 py-1 text-ui-sm text-state-failed">{session.streamError}</p>}
+      {presenceError && <p role="status" className="control-matrix-clear w-fit px-1 py-1 text-ui-sm text-muted">Presence unavailable: {presenceError}</p>}
     </div>
   )
 }
