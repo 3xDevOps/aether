@@ -56,12 +56,22 @@ func livenessOf(st acphost.State) domain.RunLiveness {
 }
 
 // reminding reports whether the run's turn is the report reminder askReport
-// sent, which the report gate already bounds.
+// sent, which the report gate already bounds. A prompt queued behind the
+// reminder starts a turn of its own.
 func (d *acpDriver) reminding(run domain.RunID) bool {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	r := d.runs[run]
-	return r != nil && r.asked != nil
+	var asked *askedTurn
+	var sess *acphost.Session
+	if r != nil {
+		asked, sess = r.asked, r.session
+	}
+	start := int64(0)
+	if asked != nil {
+		start = asked.start
+	}
+	d.mu.Unlock()
+	return asked != nil && sess != nil && (start == 0 || acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq == start)
 }
 
 // stallLimit is how long a run in phase may go with no activity before it

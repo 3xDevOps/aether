@@ -38,6 +38,9 @@ const (
 	// PromptThink runs the turn until session/cancel arrives, streaming a
 	// thought chunk every ChatterInterval.
 	PromptThink = "think"
+	// PromptGoQuiet sends one thought chunk, then waits, silent, until
+	// session/cancel arrives.
+	PromptGoQuiet = "go quiet"
 	// PromptLongTool starts a tool call and keeps it running, silent,
 	// until session/cancel arrives.
 	PromptLongTool = "run a long tool"
@@ -471,8 +474,13 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 			a.update(ctx, usage)
 			a.update(ctx, commands)
 		}
-	case PromptLongTool:
-		a.update(ctx, demoTool("long-tool", "execute", "make build", "in_progress", nil))
+	case PromptLongTool, PromptGoQuiet:
+		if text == PromptGoQuiet {
+			thought, _ := json.Marshal(map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "hm"}})
+			a.update(ctx, thought)
+		} else {
+			a.update(ctx, demoTool("long-tool", "execute", "make build", "in_progress", nil))
+		}
 		select {
 		case <-cancelled:
 		case <-ctx.Done():

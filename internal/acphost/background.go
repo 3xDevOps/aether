@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
@@ -127,6 +128,10 @@ func (s *Session) sdkMessage(raw json.RawMessage) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.HasPrefix(m.Subtype, "task_") {
+		// A background task reports its tool use, not the work between.
+		s.progressAt = time.Now()
+	}
 	held := s.heldLocked()
 	switch m.Subtype {
 	case "task_notification":

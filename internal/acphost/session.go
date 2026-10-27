@@ -142,11 +142,11 @@ type State struct {
 	Usage         *Usage          `json:"usage,omitempty"`
 	// LastProgress is when the agent last did work in this connection, zero
 	// before it did: a message, thought, tool call, plan, subagent,
-	// compaction or request. Aether's own calls, a session/load replay and
-	// mode, command and usage updates are not work.
+	// compaction, background task progress or request. Aether's own calls,
+	// a session/load replay and mode, command and usage updates are not
+	// work.
 	LastProgress time.Time `json:"last_progress,omitzero"`
-	// OpenedAt is when the agent connection opened.
-	OpenedAt time.Time `json:"opened_at"`
+	OpenedAt     time.Time `json:"opened_at"`
 	// TurnStartedAt is when the latest prompt or autonomous turn started.
 	TurnStartedAt time.Time `json:"turn_started_at,omitzero"`
 	// ToolsOpen is true while a tool call of the turn is pending or running,
@@ -247,8 +247,6 @@ type Session struct {
 	endedTasks map[string]string
 	endedOrder []string
 	lastUpdate time.Time
-	// progressAt, openedAt and turnAt are State.LastProgress, OpenedAt and
-	// TurnStartedAt.
 	progressAt time.Time
 	openedAt   time.Time
 	turnAt     time.Time

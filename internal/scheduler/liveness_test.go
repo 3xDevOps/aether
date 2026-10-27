@@ -23,6 +23,7 @@ func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 	}{
 		{acpmock.PromptWait, "awaiting first event"},
 		{acpmock.PromptChatter, "awaiting first event"},
+		{acpmock.PromptGoQuiet, "streaming"},
 		{acpmock.PromptThink, ""},
 		{acpmock.PromptLongTool, ""},
 	} {
@@ -52,16 +53,22 @@ func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 				p.Activity != domain.ActivityWaiting || p.Cause != events.CauseStall {
 				t.Fatalf("parked with %q, %q by %q; want a possible stall ending %q, waiting by stall", p.Reason, p.Activity, p.Cause, want)
 			}
+			// Nothing new arrives, so nothing releases it.
+			time.Sleep(10 * 20 * time.Millisecond)
 			r, err := e.db.GetRun(t.Context(), run.ID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if r.Status != domain.RunNeedsAttention || r.StatusSeq != ev.Payload.(events.RunStatusPayload).StatusSeq {
+				t.Fatalf("the possible stall did not hold: %+v", r)
 			}
 			if r.NeedsAttention(false) {
 				t.Fatalf("a possible stall needs you: %+v", r)
 			}
 			l, ok := e.sched.Liveness(run.ID)
-			if !ok || l.Phase != domain.PhaseFirstEvent || l.Transport != domain.TransportOpen || !l.LastProgress.IsZero() {
-				t.Fatalf("Liveness = %+v, %v; want awaiting first event, open, no progress", l, ok)
+			if !ok || string(l.Phase) != strings.ReplaceAll(tc.phase, " ", "-") || l.Transport != domain.TransportOpen ||
+				l.LastProgress.IsZero() != (tc.prompt != acpmock.PromptGoQuiet) {
+				t.Fatalf("Liveness = %+v, %v; want %s, open", l, ok, tc.phase)
 			}
 		})
 	}

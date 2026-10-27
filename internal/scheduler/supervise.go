@@ -640,12 +640,13 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			// by anything on the terminal.
 			heldForTheMember := (e.agentReport.State == agentstatus.Idle &&
 				e.reporter == harness.ReporterFull) || e.questionHeld(e.agentReport)
+			limit := s.cfg.stallLimit(liveness.Phase, heldByTasks(e.agentReport), reminder)
+			// Released only by activity newer than what parked it.
 			released := e.status == domain.RunNeedsAttention && observed &&
-				idle <= s.cfg.StallThreshold && !heldForTheMember
+				idle <= min(limit, s.cfg.StallThreshold) && !heldForTheMember
 			if released && (e.agentReport.State == agentstatus.Idle || e.idleShown) {
 				released = e.unparks(activity, s.cfg.turnTail)
 			}
-			limit := s.cfg.stallLimit(liveness.Phase, heldByTasks(e.agentReport), reminder)
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > limit:
