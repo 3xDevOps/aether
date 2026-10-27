@@ -298,6 +298,35 @@ func TestALiveSwarmKeepsAStrandedWaitQuiet(t *testing.T) {
 	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
 }
 
+// A condition store that cannot be read strands the wait an hour after it
+// was reported, like a source that cannot be read, with the store's error.
+func TestAnUnreadableConditionStoreBreaksTheWaitAfterAnHour(t *testing.T) {
+	t.Parallel()
+	waits := &fakeWaits{}
+	e := newReportingEnv(t, func(cfg *Config) {
+		cfg.WaitConditions = waits
+		cfg.StallThreshold = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	waits.set(errors.New("database is locked"))
+	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on #582", time.Now().Add(-61*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
+	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if want := waitBrokenReasonPrefix + "cannot read this run's wait conditions for over 1h, so the agent will not be woken"; row.Reason != want {
+		t.Fatalf("reason = %q, want %q", row.Reason, want)
+	}
+	if got := e.sched.Wait(run.ID, domain.ActivityNeedsYou); got == nil || got.Kind != domain.WaitFault || !strings.Contains(got.Error, "database is locked") {
+		t.Fatalf("Wait = %+v, want a fault with the store's error", got)
+	}
+}
+
 // A member's message is the remedy a broken wait asks for: the turn it
 // starts leaves the stranded condition behind, so the next wait the agent
 // reports is judged without it.
