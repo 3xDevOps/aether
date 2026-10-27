@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -363,7 +364,12 @@ func (s *Server) summarizeWatchDelete(ctx context.Context, req protocol.Request,
 	if kind == protocol.WatchTargetMission {
 		kind = "swarm"
 	}
-	c.Summary = fmt.Sprintf("Delete your watch %s on %s %q (%s) and its %d notices", w.ID, kind, truncate(w.TargetTitle), strings.Join(w.Conditions, ", "), len(got.Notifications))
+	notices := "its " + strconv.Itoa(len(got.Notifications))
+	// watch.get returns only the newest WatchNotificationsMax notices.
+	if len(got.Notifications) >= protocol.WatchNotificationsMax {
+		notices = "at least " + strconv.Itoa(len(got.Notifications))
+	}
+	c.Summary = fmt.Sprintf("Delete your watch %s on %s %q (%s) and %s notices", w.ID, kind, truncate(w.TargetTitle), strings.Join(w.Conditions, ", "), notices)
 	return nil
 }
 

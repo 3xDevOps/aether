@@ -67,6 +67,8 @@ const toolMethods: Record<string, string | string[] | ((input: Record<string, un
   aether_integration_decide: (input) => (input.action === 'deliver' ? 'integration.deliver' : 'integration.decide'),
   aether_memory_add: 'memory.add',
   aether_memory_pin: (input) => (input.pin === false ? 'memory.unpin' : 'memory.pin'),
+  aether_watch: (input) => (text(input.watch_id) ? 'watch.update' : 'watch.create'),
+  aether_unwatch: 'watch.delete',
 }
 
 function toolMethod(tool: string, input: Record<string, unknown>): string[] {
@@ -97,8 +99,7 @@ const readTools: Record<string, [string, string]> = {
   aether_changes: ['change list', 'change lists'],
   aether_launch_options: ['launch options', 'launch options'],
   aether_integration: ['integration status', 'integration statuses'],
-  aether_list_watches: ['watch list', 'watch lists'],
-  aether_get_watch: ['watch', 'watches'],
+  aether_watches: ['watch list', 'watch lists'],
 }
 
 /** The Aether tool a call's `tool_name` names: Claude Code's `mcp__aether__aether_get_run`, or a bare name. */
@@ -508,8 +509,8 @@ function prName(action: AssistantAction, names: ActionNames): string {
 function watchObject(action: AssistantAction, names: ActionNames): string {
   const pr = text(action.input.pr) ?? text(action.input.pr_number)
   if (pr) return `PR ${/^\d+$/.test(pr) ? `#${pr}` : pr}`
-  const mission = text(action.input.mission_id)
-  if (mission) return `swarm ${mission}`
+  const swarm = text(action.input.swarm_id)?.replace(/^swarm:/, '')
+  if (swarm) return `swarm ${swarm}`
   return text(action.input.run_id) ? `run ${runName(action, names)}` : text(action.input.watch_id) ?? ''
 }
 
@@ -546,8 +547,12 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
   aether_pr_create: { verb: ['Open', 'Opened', 'Opening'], object: (a, n) => `a pull request for run ${runName(a, n)}` },
   aether_memory_add: { verb: ['Add', 'Added', 'Adding'], object: (a) => (text(a.input.kind) ? `a ${text(a.input.kind)} note` : 'a note') },
   aether_memory_pin: { verb: (a) => (a.input.pin === false ? ['Unpin', 'Unpinned', 'Unpinning'] : ['Pin', 'Pinned', 'Pinning']), object: (a) => `note ${text(a.input.id) ?? ''}`.trimEnd() },
-  aether_watch_create: { verb: ['Watch', 'Started watching', 'Starting to watch'], object: watchObject },
-  aether_watch_delete: { verb: ['Stop watching', 'Stopped watching', 'Stopping watching'], object: watchObject },
+  aether_watch: {
+    verb: (a) => !text(a.input.watch_id) ? ['Watch', 'Started watching', 'Starting to watch']
+      : a.input.paused === true ? ['Pause', 'Paused', 'Pausing'] : a.input.paused === false ? ['Resume', 'Resumed', 'Resuming'] : ['Change', 'Changed', 'Changing'],
+    object: (a, n) => (text(a.input.watch_id) ? `watch ${text(a.input.watch_id)}` : watchObject(a, n)),
+  },
+  aether_unwatch: { verb: ['Delete', 'Deleted', 'Deleting'], object: (a) => `watch ${text(a.input.watch_id) ?? ''}`.trimEnd() },
 }
 
 export function actionSummary(action: AssistantAction, names: ActionNames): string {
@@ -617,7 +622,7 @@ function askedLaunch(action: AssistantAction, result: Record<string, unknown>, n
 }
 
 export function watchLine(action: AssistantAction): string | undefined {
-  if (!action.tool.startsWith('aether_watch_')) return undefined
+  if (action.tool !== 'aether_watch') return undefined
   const result = record(action.result)
   const watch = record(result.watch ?? result)
   const conditions = Array.isArray(watch.conditions) ? watch.conditions.filter((c): c is string => typeof c === 'string') : []

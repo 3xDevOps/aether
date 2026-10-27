@@ -44,8 +44,11 @@ func TestWatchCreate(t *testing.T) {
 	}
 
 	for in, want := range map[string]string{
-		"acme/shop#7":                         `{"kind":"pr","repo":"acme/shop","number":7}`,
-		"https://github.com/acme/shop/pull/7": `{"kind":"pr","repo":"acme/shop","number":7}`,
+		"acme/shop#7":                                          `{"kind":"pr","repo":"acme/shop","number":7}`,
+		"https://github.com/acme/shop/pull/7":                  `{"kind":"pr","repo":"acme/shop","number":7}`,
+		"https://github.com/acme/shop/pull/7#issuecomment-123": `{"kind":"pr","repo":"acme/shop","number":7}`,
+		"https://github.com/acme/shop/pull/7/files?w=1":        `{"kind":"pr","repo":"acme/shop","number":7}`,
+		"github.com/acme/shop/pull/7?foo":                      `{"kind":"pr","repo":"acme/shop","number":7}`,
 	} {
 		f.calls = nil
 		run(t, cs, "aether_watch", map[string]any{"pr": in})
@@ -59,10 +62,31 @@ func TestWatchCreate(t *testing.T) {
 		t.Errorf("swarm watch sent %s", got)
 	}
 
-	for _, args := range []map[string]any{{}, {"pr": "acme#7"}, {"run_id": "run-1", "paused": true}, {"watch_id": "w-1", "run_id": "run-2"}} {
+	for _, args := range []map[string]any{{}, {"pr": "acme#7"}, {"pr": "https://github.com/acme/shop/issues/7"}, {"run_id": "run-1", "paused": true},
+		{"watch_id": "w-1", "run_id": "run-2"}} {
 		if text, _, failed := try(t, cs, "aether_watch", args); !failed {
 			t.Errorf("%v = %q, want refused", args, text)
 		}
+	}
+
+	// Two targets are refused by name rather than one silently winning;
+	// run_id with pr names the run that opened it.
+	f.calls = nil
+	for refusal, args := range map[string]map[string]any{
+		"pass one target, not run_id and swarm_id":        {"run_id": "run-1", "swarm_id": "mis-1"},
+		"pass one target, not pr and swarm_id":            {"pr": "acme/shop#7", "swarm_id": "mis-1"},
+		"pass one target, not pr and run_id and swarm_id": {"pr": "acme/shop#7", "run_id": "run-1", "swarm_id": "mis-1"},
+	} {
+		if text, _, failed := try(t, cs, "aether_watch", args); !failed || !strings.HasPrefix(text, refusal) {
+			t.Errorf("%v = %q, want %q", args, text, refusal)
+		}
+	}
+	if len(called(f, protocol.MethodWatchCreate)) != 0 {
+		t.Fatalf("an ambiguous target reached the server: %+v", f.calls)
+	}
+	run(t, cs, "aether_watch", map[string]any{"pr": "acme/shop#7", "run_id": "run-1"})
+	if got := f.acted().params; !strings.Contains(got, `{"kind":"pr","run_id":"run-1","repo":"acme/shop","number":7}`) {
+		t.Errorf("pr with its run sent %s", got)
 	}
 
 	g := newFake(t)
@@ -126,7 +150,7 @@ func TestWatchesAreBounded(t *testing.T) {
 	cs := connectorSession(t, f)
 
 	text, out := run(t, cs, "aether_watches", nil)
-	if rows := out["watches"].([]any); text != "60 watches, newest first." || len(rows) != maxWatches || out["more"] != float64(10) {
+	if rows := out["watches"].([]any); text != "The newest 50 of 60 watches; the rest are listed in the dashboard at https://aether.example/?page=settings&id=watches." || len(rows) != maxWatches || out["more"] != float64(10) {
 		t.Fatalf("list = %q, %d rows, more %v", text, len(rows), out["more"])
 	}
 	if strings.Contains(trusted(t, out), injection) {
@@ -170,5 +194,20 @@ func TestUnwatch(t *testing.T) {
 	h.errs[protocol.MethodWatchDelete] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "watch service not configured"}
 	if text, _, failed := try(t, connectorSession(t, h, ScopeWrite), "aether_unwatch", map[string]any{"watch_id": "w-1"}); !failed {
 		t.Fatalf("unwatch on a failing server = %q, want the failure", text)
+	}
+}
+
+// watch.get returns at most WatchNotificationsMax notices, so a full page
+// is a lower bound, not a total.
+func TestWatchNoticesAtTheCap(t *testing.T) {
+	f := newFake(t)
+	notices := make([]protocol.WatchNotification, protocol.WatchNotificationsMax)
+	for i := range notices {
+		notices[i] = protocol.WatchNotification{ID: fmt.Sprintf("n-%d", i), Deliveries: []protocol.WatchDelivery{}}
+	}
+	f.answers[protocol.MethodWatchGet] = returns(protocol.WatchGetResult{Watch: testWatch, Notifications: notices})
+	text, out := run(t, connectorSession(t, f), "aether_watches", map[string]any{"watch_id": "w-1"})
+	if text != "Watch w-1 is active; at least 50 notices, newest first." || out["more_notifications_capped"] != true {
+		t.Fatalf("get at the cap = %q %v", text, out)
 	}
 }

@@ -190,12 +190,20 @@ describe('the lifecycle, swarm, pull request and memory tools', () => {
     ['aether_memory_pin', { id: 'mem-9', pin: false }, 'memory.unpin', 'Unpin note mem-9', 'Unpinned note mem-9'],
     ['aether_stop_run', { run_id: 'r1', outcome: 'merged' }, 'run.close', 'Close run r1 as merged', 'Closed run r1 as merged'],
     ['aether_decide_approval', { run_id: 'r1' }, 'run.input.respond', 'Decide an approval for run r1', 'Decided an approval for run r1'],
+    ['aether_watch', { swarm_id: 'swarm:mis-1' }, 'watch.create', 'Watch swarm mis-1', 'Started watching swarm mis-1'],
+    ['aether_watch', { watch_id: 'w-1', paused: true }, 'watch.update', 'Pause watch w-1', 'Paused watch w-1'],
+    ['aether_unwatch', { watch_id: 'w-1' }, 'watch.delete', 'Delete watch w-1', 'Deleted watch w-1'],
   ])('%s %j waits on %s and reads "%s", then "%s"', (tool, input, method, pending, done) => {
     const call = (status: 'running' | 'done') => block({ id: '1:t0', name: tool, status, input })
     const [waiting] = assistantView([call('running')], [confirm(method)]).actions
     expect([waiting!.state, actionSummary({ ...waiting!, state: 'failed' }, names)]).toEqual(['approval', pending])
     const [finished] = assistantView([call('done')], []).actions
     expect(actionSummary(finished!, names)).toBe(done)
+  })
+
+  it('counts aether_watches as a read, not an action', () => {
+    const view = assistantView([block({ id: '1:t0', name: 'aether_watches', input: {}, result: { watches: [] } })], [])
+    expect(view.actions).toEqual([])
   })
 
   it('says a pull request GitHub may not have opened is unconfirmed, never done', () => {

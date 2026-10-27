@@ -1,9 +1,11 @@
 package ops
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,7 +22,7 @@ type watchInput struct {
 	SwarmID    string   `json:"swarm_id,omitempty"`
 	PR         string   `json:"pr,omitempty"`
 	Conditions []string `json:"conditions,omitempty"`
-	ExpiresAt  string   `json:"expires_at,omitempty"`
+	ExpiresAt  string   `json:"expires_at,omitempty" jsonschema:"RFC 3339"`
 	Paused     *bool    `json:"paused,omitempty"`
 }
 
@@ -39,13 +41,13 @@ const (
 
 var watchOps = []Op{
 	opOf("aether_watches", "List watches", ScopeRead, true, nextWatches,
-		"Use this when the user asks about their watches, or one watch_id with its notices."+untrustedRule, listWatches).
+		"Use this when the user asks about their watches, or one watch_id's notices."+untrustedRule, listWatches).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWatchList, protocol.MethodWatchGet),
 	opOf("aether_watch", "Watch", ScopeWrite, false, nextWatches,
-		"Use this when the user asks to be notified about a run, swarm or pr (owner/name#7), or to change or pause a watch_id.", watch).
+		"Use this when the user wants notices on a run, swarm or pr (owner/name#7); with watch_id, change or pause it.", watch).
 		hints(false, false).offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodWatchCreate, protocol.MethodWatchUpdate),
 	opOf("aether_unwatch", "Delete watch", ScopeWrite, true, nextWatches,
-		"Use this when the user deletes a watch and its notices.", unwatch).
+		"Use this when the user deletes a watch.", unwatch).
 		hints(true, false).offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodWatchDelete),
 }
 
@@ -138,8 +140,13 @@ func listWatches(ctx context.Context, c calls, in watchesInput) (string, any, er
 		for _, n := range res.Notifications[:min(len(res.Notifications), maxNotices)] {
 			notices = append(notices, noticeRowOf(n, l))
 		}
-		return fmt.Sprintf("Watch %s is %s; %d notices, newest first.", row.ID, row.State, len(res.Notifications)),
-			map[string]any{"watch": row, "notifications": notices, "more_notifications": max(len(res.Notifications)-maxNotices, 0)}, nil
+		out := map[string]any{"watch": row, "notifications": notices, "more_notifications": max(len(res.Notifications)-maxNotices, 0)}
+		count := strconv.Itoa(len(res.Notifications))
+		// watch.get returns only the newest WatchNotificationsMax notices.
+		if len(res.Notifications) >= protocol.WatchNotificationsMax {
+			count, out["more_notifications_capped"] = "at least "+count, true
+		}
+		return fmt.Sprintf("Watch %s is %s; %s notices, newest first.", row.ID, row.State, count), out, nil
 	}
 	var res protocol.WatchListResult
 	if err := c.read(ctx, protocol.MethodWatchList, protocol.WatchListParams{}, &res); err != nil {
@@ -149,8 +156,12 @@ func listWatches(ctx context.Context, c calls, in watchesInput) (string, any, er
 	for _, w := range res.Watches[:min(len(res.Watches), maxWatches)] {
 		rows = append(rows, watchRowOf(w, l))
 	}
-	return fmt.Sprintf("%d watches, newest first.", len(res.Watches)),
-		map[string]any{"watches": rows, "more": max(len(res.Watches)-maxWatches, 0), "url": l.at("/?page=settings&id=watches")}, nil
+	url := l.at("/?page=settings&id=watches")
+	summary := fmt.Sprintf("%d watches, newest first.", len(res.Watches))
+	if len(res.Watches) > maxWatches {
+		summary = fmt.Sprintf("The newest %d of %d watches; the rest are listed in the dashboard at %s.", maxWatches, len(res.Watches), cmp.Or(url, "Settings → Watches"))
+	}
+	return summary, map[string]any{"watches": rows, "more": max(len(res.Watches)-maxWatches, 0), "url": url}, nil
 }
 
 func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
@@ -166,6 +177,17 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 		err = c.act(ctx, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: in.WatchID, Paused: in.Paused, Conditions: in.Conditions,
 			ExpiresAt: in.ExpiresAt}, &res)
 	} else {
+		var given []string
+		for field, v := range map[string]string{"run_id": in.RunID, "swarm_id": in.SwarmID, "pr": in.PR} {
+			if v != "" {
+				given = append(given, field)
+			}
+		}
+		slices.Sort(given)
+		// run_id may name the run that opened pr.
+		if in.SwarmID != "" && len(given) > 1 {
+			return "", nil, invalid("pass one target, not %s; run_id goes with pr only as the run that opened it", strings.Join(given, " and "))
+		}
 		var t protocol.WatchTarget
 		switch {
 		case in.Paused != nil:
@@ -206,12 +228,26 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 	return summary, out, nil
 }
 
-// prRef reads owner/name#7 or https://github.com/owner/name/pull/7.
+// prRef reads owner/name#7, or a GitHub pull request URL such as
+// https://github.com/owner/name/pull/7/files?w=1#issuecomment-1.
 func prRef(s string) (repo string, number int, ok bool) {
-	s = strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "github.com/")
-	repo, n, found := strings.Cut(strings.Replace(s, "/pull/", "#", 1), "#")
+	n := ""
+	if path, isURL := strings.CutPrefix(strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://"), "github.com/"); isURL {
+		path, _, _ = strings.Cut(path, "#")
+		path, _, _ = strings.Cut(path, "?")
+		parts := strings.Split(path, "/")
+		if len(parts) < 4 || parts[2] != "pull" {
+			return "", 0, false
+		}
+		repo, n = parts[0]+"/"+parts[1], parts[3]
+	} else {
+		var found bool
+		if repo, n, found = strings.Cut(s, "#"); !found {
+			return "", 0, false
+		}
+	}
 	number, err := strconv.Atoi(n)
-	if !found || err != nil || number <= 0 || strings.Count(repo, "/") != 1 {
+	if err != nil || number <= 0 || strings.Count(repo, "/") != 1 || strings.HasPrefix(repo, "/") || strings.HasSuffix(repo, "/") {
 		return "", 0, false
 	}
 	return repo, number, true

@@ -159,9 +159,9 @@ settles it. Anthropic notes that tool selection "degrades once you exceed
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
 tools, and each tool's name, description and compact input schema at most
-3500 bytes, 15000 for all of them together. Today that is 37 tools, 13269
-bytes and 3174 o200k tokens, the largest tool `aether_launch_swarm` at 895
-bytes; the whole `tools/list` JSON is 19692 bytes and 4683 tokens. Give each tool one "Use
+3500 bytes, 15000 for all of them together. Today that is 37 tools, 13263
+bytes and 3175 o200k tokens, the largest tool `aether_launch_swarm` at 895
+bytes; the whole `tools/list` JSON is 19686 bytes and 4684 tokens. Give each tool one "Use
 this when" sentence, describe a property only when its name does not say
 enough, and fold a read into a tool that already answers it. Merge only
 tools of the same scope and hints. There is no room for

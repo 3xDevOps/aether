@@ -196,3 +196,31 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		t.Fatalf("answering an unknown question = %v, card %q; want not found before any card", perr, got.Summary)
 	}
 }
+
+type fullWatchCaller struct{ fakeCaller }
+
+func (c *fullWatchCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if method != protocol.MethodWatchGet {
+		return c.fakeCaller.Call(ctx, method, params)
+	}
+	raw, _ := json.Marshal(protocol.WatchGetResult{Watch: protocol.Watch{ID: "w-1", Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"},
+		TargetTitle: "Fix login", Conditions: []string{protocol.WatchFinished}}, Notifications: make([]protocol.WatchNotification, protocol.WatchNotificationsMax)})
+	return raw, nil
+}
+
+// watch.get returns at most WatchNotificationsMax notices, so the delete
+// card counts a full page as a lower bound.
+func TestWatchDeleteCardCountsAFullPageAsALowerBound(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	s := &Server{Caller: &fullWatchCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	raw, _ := json.Marshal(protocol.WatchIDParams{WatchID: "w-1"})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodWatchDelete, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if want := `Delete your watch w-1 on run "Fix login" (finished) and at least 50 notices`; got.Summary != want {
+		t.Fatalf("summary = %q, want %q", got.Summary, want)
+	}
+}

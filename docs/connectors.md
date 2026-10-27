@@ -335,14 +335,30 @@ one from the swarm, that generation and the agent, so a retry returns the
 first replacement even after it moved the generation, and a replacement
 someone else made in between fails with a conflict that says to call
 `aether_get_swarm`.
+`aether_watch` takes one target: `run_id`, `swarm_id`, or `pr`, optionally
+with `run_id` for the run that opened it; any other combination is refused
+with the fields named. Its `conditions` depend on the target, the defaults
+marked *:
+
+| Target | Conditions |
+| --- | --- |
+| `run_id` | `needs_you`*, `finished`*, `pr_merged`, `ci` |
+| `swarm_id` | `needs_you`*, `finished`*, `delivered` |
+| `pr` | `ci`*, `review`*, `merged`*, `closed` |
+
+A condition the target does not take, or `deployed`, fails with the server's
+error, which names the conditions to use
+([watches.md](watches.md#targets-and-conditions)). `expires_at` is an RFC 3339
+time at most 90 days ahead; without it a watch expires after 14 days.
 `aether_watch` takes no idempotency key: creating a watch the server already
 has live, the same target and conditions, returns that watch and resumes it if
 paused. Its result holds the watch's `state` and the server's one-line
 `receipt` under `untrusted`, since it carries the target's title; only
-`active` means it is watching. A condition the target does not take, or
-`deployed`, fails with the server's error, which names the conditions to use
-([watches.md](watches.md#targets-and-conditions)). Its links open the watch
-in **Settings → Watches**. `aether_unwatch` of a watch already deleted
+`active` means it is watching. Its links open the watch in **Settings →
+Watches**. `aether_watches` lists the newest 50 watches and says how many
+more the dashboard lists there; one watch's notices come from the newest 50
+the server returns, so a full page reads `at least 50` and sets
+`more_notifications_capped`. `aether_unwatch` of a watch already deleted
 succeeds with `state: "not_found"`, so a retry is safe.
 `aether_memory_add` returns the existing note for a duplicate, and repeating
 a replacement (`supersedes`) that went through returns the note that replaced
