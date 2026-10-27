@@ -22,8 +22,8 @@ export interface AssistantConfirmation {
   /** The call acts on another member's run, owned by `other_owner`: it asks even with auto-approval on. */
   other_member?: boolean
   other_owner?: string
-  /** What the member's saved launch defaults filled into a launch, and each saved choice it skipped with the reason. */
-  defaults?: { applied?: string[]; skipped?: { field: string; reason: string }[] }
+  /** What the member's saved launch defaults filled into a launch, each saved choice it skipped and each it could not check, with the reason. */
+  defaults?: { applied?: string[]; skipped?: { field: string; reason: string }[]; unchecked?: { field: string; reason: string }[] }
 }
 
 export interface AssistantActionTarget {

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -76,8 +77,10 @@ func TestLaunchExplicitParamsBeatSavedDefaults(t *testing.T) {
 	if p.Harness != "codex" || p.Mode != "tui" || p.Model != "gpt-5" || p.AccountMemberID != "mem-me" || !p.NoFallback || p.FallbackAccountMemberIDs != nil {
 		t.Fatalf("run.launch params = %+v, want codex with its saved mode and model on the account given, fallback off", p)
 	}
-	if jsonOf(t, out["launch"].(map[string]any)["defaults_applied"]) != `["mode","model"]` {
-		t.Fatalf("receipt = %v", out["launch"])
+	receipt := out["launch"].(map[string]any)
+	if jsonOf(t, receipt["defaults_applied"]) != `["mode","model"]` ||
+		jsonOf(t, receipt["defaults_unchecked"]) != `[{"field":"model","reason":"it was saved and checked for account mem-ada, and this launch runs on mem-me"}]` {
+		t.Fatalf("receipt = %v, want the saved model applied and reported unchecked on another account", receipt)
 	}
 
 	f = savedFake(t, savedChoices)
@@ -95,26 +98,29 @@ func TestLaunchExplicitParamsBeatSavedDefaults(t *testing.T) {
 	}
 }
 
-// A saved mode the agent cannot start in on the launch's account, a saved
-// model or fallback member get reports unusable are skipped with their
-// reasons; the rest still apply.
+// A saved mode the agent cannot start in on the launch's account or a saved
+// fallback member get reports unusable is skipped with its reason; a saved
+// model get could not check is used and reported unchecked.
 func TestLaunchSkipsUnusableSavedChoices(t *testing.T) {
 	saved := savedChoices
 	saved.Defaults.AccountMemberID = ""
 	saved.Defaults.Fallback = &protocol.LaunchFallbackDefault{Policy: protocol.FallbackOrdered, Order: []string{"mem-bo"}}
 	saved.Invalid = []protocol.LaunchDefaultIssue{
-		{Field: "agents.codex.model", Value: "gpt-5", Reason: "model gpt-5 is retired"},
 		{Field: "fallback.order", Value: "mem-bo", Reason: "permission denied: member mem-bo has not shared their account with you"}}
+	saved.Unknown = []protocol.LaunchDefaultIssue{{Field: "agents.codex.model", Value: "gpt-5", Reason: "Aether has no current list of the models codex offers"}}
 	f := savedFake(t, saved)
 	cs := connectorSession(t, f, ScopeWrite)
 	_, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "codex", "mode": "", "idempotency_key": "k1"})
 	p := launchParams(t, f)
-	if p.Mode != "tui" || p.Model != "" || !p.NoFallback {
-		t.Fatalf("run.launch params = %+v, want the saved mode, no model, fallback off", p)
+	if p.Mode != "tui" || p.Model != "gpt-5" || !p.NoFallback {
+		t.Fatalf("run.launch params = %+v, want the saved mode and model, fallback off", p)
 	}
-	skipped := jsonOf(t, out["launch"].(map[string]any)["defaults_skipped"])
-	if !strings.Contains(skipped, `"field":"model","reason":"model gpt-5 is retired"`) || !strings.Contains(skipped, `mem-bo: permission denied`) {
+	receipt := out["launch"].(map[string]any)
+	if skipped := jsonOf(t, receipt["defaults_skipped"]); strings.Contains(skipped, `"model"`) || !strings.Contains(skipped, `mem-bo: permission denied`) {
 		t.Fatalf("defaults_skipped = %s", skipped)
+	}
+	if unchecked := jsonOf(t, receipt["defaults_unchecked"]); unchecked != `[{"field":"model","reason":"Aether has no current list of the models codex offers"}]` {
+		t.Fatalf("defaults_unchecked = %s", unchecked)
 	}
 
 	saved = savedChoices
@@ -172,12 +178,13 @@ func TestKeyedRetryAfterSavedDefaultsChanged(t *testing.T) {
 		Message: `run.launch: idempotency_key "k1" was used for a launch with other params; use a new key for a new launch`}
 	cs := connectorSession(t, f, ScopeWrite)
 	text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
-	if !failed || !strings.Contains(text, "use a new key for a new launch; your saved defaults changed since the first attempt; pass the fields explicitly") {
+	if !failed || !strings.Contains(text, "use a new key for a new launch; your saved defaults may have changed since the first attempt; pass the fields explicitly") {
 		t.Fatalf("keyed retry = %q", text)
 	}
 }
 
-// A template launch never reads saved defaults.
+// A template launch never reads saved defaults, and its tool's schema
+// refuses a saved_defaults that is not apply or ignore.
 func TestTemplateLaunchIgnoresSavedDefaults(t *testing.T) {
 	f := savedFake(t, savedChoices)
 	f.answers[protocol.MethodTemplateLaunch] = returns(protocol.TemplateLaunchResult{Run: testRun})
@@ -185,6 +192,35 @@ func TestTemplateLaunchIgnoresSavedDefaults(t *testing.T) {
 	run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "template": "triage", "idempotency_key": "k1"})
 	if len(called(f, protocol.MethodLaunchDefaultsGet)) != 0 {
 		t.Fatal("a template launch read the saved defaults")
+	}
+	text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "template": "triage", "saved_defaults": "skip", "idempotency_key": "k2"})
+	if !failed || !strings.Contains(text, `saved_defaults: enum: skip does not equal any of: [ apply ignore]`) {
+		t.Fatalf("template launch with saved_defaults skip = %q", text)
+	}
+}
+
+// A receipt for a launch that already happened, replayed by its key or
+// returned as a keyless duplicate, does not claim what saved defaults filled
+// this time.
+func TestRepeatedLaunchReceiptOmitsSavedDefaults(t *testing.T) {
+	f := savedFake(t, savedChoices)
+	f.answers[protocol.MethodRunLaunch] = returns(protocol.RunLaunchResult{Run: testRun, Replayed: true})
+	cs := connectorSession(t, f, ScopeWrite)
+	_, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
+	receipt := jsonOf(t, out["launch"])
+	if out["replayed"] != true || strings.Contains(receipt, "defaults_") {
+		t.Fatalf("replayed launch = %v, receipt %s", out, receipt)
+	}
+
+	f = savedFake(t, savedChoices)
+	prior := testRun
+	prior.Harness, prior.Mode, prior.Model, prior.Task, prior.AccountMemberID = "claude", "acp", "opus", "fix the cart", "mem-ada"
+	prior.FallbackAccountMemberIDs, prior.CreatedAt = []string{"mem-me"}, time.Now().UTC().Format(time.RFC3339)
+	f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{prior}})
+	cs = connectorSession(t, f, ScopeWrite)
+	_, out = run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart"})
+	if receipt = jsonOf(t, out["launch"]); out["duplicate"] != true || strings.Contains(receipt, "defaults_") {
+		t.Fatalf("duplicate launch = %v, receipt %s", out, receipt)
 	}
 }
 

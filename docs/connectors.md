@@ -412,9 +412,12 @@ A launch fills each field you leave out from your saved launch choices: what
 you pass wins, then what you saved, then the server's own defaults. `harness`
 may be left out when you saved an agent that can launch on the launch's
 account; the saved agent's mode and model apply to whichever agent the launch uses. A saved mode the agent
-cannot start in on the launch's account, or a saved model or fallback member
+cannot start in on the launch's account, or a saved fallback member
 `launch.defaults.get` reports as invalid, is skipped with its reason. A saved
-account you may no longer use fails the launch:
+model is always used: `launch.defaults.get` checks it only on the saved account
+and can only report it unknown, and the agent refuses a model it does not
+offer when the run starts. A saved account you may no longer use fails the
+launch:
 
 ```
 saved account mem-7k2m9q4xbd: permission denied: member mem-7k2m9q4xbd has not shared their account with you; pass account_member_id or clear it
@@ -426,9 +429,11 @@ fill only its integrator; its saved account fills the integrator and each
 worker that names none, and its saved fallback applies to the whole swarm. With
 no agent passed and none saved, the launch fails with `harness is required: you
 have no saved agent`. Pass `saved_defaults: "ignore"` to send exactly the given
-fields. Template launches never use saved choices. A keyed retry refused because
-its saved choices changed since the first attempt adds `your saved defaults
-changed since the first attempt; pass the fields explicitly`.
+fields. Leaving the fallback fields out cannot ask for automatic fallback while
+you saved an order or `off`: pass `saved_defaults: "ignore"` with every other
+field you want. Template launches never use saved choices. A keyed retry the
+server refuses as a different launch adds `your saved defaults may have changed
+since the first attempt; pass the fields explicitly`.
 
 Each launch's result, and `aether_get_run` and `aether_get_swarm`, has a
 `launch` receipt: `kind` (`run` or `swarm`), `id`, `workspace_id`, `harness`,
@@ -436,9 +441,12 @@ Each launch's result, and `aether_get_run` and `aether_get_swarm`, has a
 (`member_id`, `name`, `access`: `own`, `shared`, or `other` for a teammate's own
 run), `requested_account` when usage fallback moved the run, `fallback`
 (`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, the run's
-own `children` setting, `via`, and `url`. A launch's receipt adds
-`defaults_applied`, the input fields your saved choices filled, and
-`defaults_skipped`, each saved choice it did not use with `field` and `reason`.
+own `children` setting, `via`, and `url`. A new launch's receipt adds
+`defaults_applied`, the input fields your saved choices filled,
+`defaults_skipped`, each saved choice it did not use with `field` and `reason`,
+and `defaults_unchecked`, a saved model it used that nothing checked on the
+launch's account, with the reason. A duplicate or replayed launch's receipt
+has none of them.
 It adds
 `idempotency_key` and `skipped_fallback_accounts`: the fallback accounts the
 server left out because checking them failed, each with a fixed `error` reason;

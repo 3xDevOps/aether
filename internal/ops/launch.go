@@ -123,12 +123,14 @@ type launchReceipt struct {
 	// its owner's.
 	Children string `json:"children,omitempty"`
 	// DefaultsApplied are the input fields the member's saved launch
-	// defaults filled, and DefaultsSkipped the saved ones it did not use.
-	DefaultsApplied []string      `json:"defaults_applied,omitempty"`
-	DefaultsSkipped []defaultSkip `json:"defaults_skipped,omitempty"`
-	Via             string        `json:"via,omitempty"`
-	IdempotencyKey  string        `json:"idempotency_key,omitempty"`
-	URL             string        `json:"url,omitempty"`
+	// defaults filled, DefaultsSkipped the saved ones it did not use, and
+	// DefaultsUnchecked the ones it used that nothing could check.
+	DefaultsApplied   []string      `json:"defaults_applied,omitempty"`
+	DefaultsSkipped   []defaultSkip `json:"defaults_skipped,omitempty"`
+	DefaultsUnchecked []defaultSkip `json:"defaults_unchecked,omitempty"`
+	Via               string        `json:"via,omitempty"`
+	IdempotencyKey    string        `json:"idempotency_key,omitempty"`
+	URL               string        `json:"url,omitempty"`
 }
 
 func runReceipt(r protocol.Run, l links, book accountBook) *launchReceipt {

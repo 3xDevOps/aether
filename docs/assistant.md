@@ -222,22 +222,26 @@ A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
 task, and how you hear back. The assistant fills what you did not say from
 your [saved launch choices](teams.md#saved-launch-choices): **From your saved
-defaults** names each choice that came from them, and **Saved model not used**
-(or mode, agent, fallback account) gives the reason a saved one was skipped,
-such as an Enhanced mode not installed on that account. A saved account a
+defaults** names each choice that came from them, **Saved mode not used** (or
+agent, fallback account) gives the reason a saved one was skipped, such as an
+Enhanced mode not installed on that account, and **Saved model not checked**
+says why a saved model could not be checked on the launch's account. A saved account a
 teammate no longer shares with you fails the launch with the server's reason
 rather than starting it on your own. With nothing saved, the assistant
 launches on your own account with automatic [usage
 fallback](teams.md#usage-fallback): if your account is nearly out of quota, the
 run starts on an account shared with you. With [auto-approval](#auto-approval)
-on, such a launch still asks while any account is shared with you; one that
-names its account or its fallback order, sets no fallback, or uses the account
-or automatic fallback you saved, passes without a card.
+on, such a launch still asks while any account is shared with you, even when
+you saved automatic fallback: it also covers accounts shared after you saved
+it. One that names its account or its fallback order or sets no fallback, in
+the request or in your saved choices, passes without a card. For automatic
+fallback on one launch while you saved an order or no fallback, ask for it:
+the assistant launches with `saved_defaults: "ignore"` and the other choices
+spelled out.
 
 When you ask it to keep a choice for next time ("from now on use codex"), the
 assistant saves it with `aether_save_launch_defaults`, behind a card that
-spells out every saved choice; a choice for one launch is never saved. The
-launch dialog and **Settings → Launch** show the same choices.
+spells out every saved choice; a choice for one launch is never saved.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was

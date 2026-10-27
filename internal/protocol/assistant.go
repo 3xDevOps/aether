@@ -66,11 +66,13 @@ type AssistantConfirmation struct {
 	Defaults *AssistantDefaultsUse `json:"defaults,omitempty"`
 }
 
-// AssistantDefaultsUse names the launch fields saved defaults filled, and
-// each saved choice the launch skipped with the reason.
+// AssistantDefaultsUse names the launch fields saved defaults filled, each
+// saved choice the launch skipped, and each it used without being able to
+// check it on the launch's account, with the reason.
 type AssistantDefaultsUse struct {
-	Applied []string               `json:"applied,omitempty"`
-	Skipped []AssistantDefaultSkip `json:"skipped,omitempty"`
+	Applied   []string               `json:"applied,omitempty"`
+	Skipped   []AssistantDefaultSkip `json:"skipped,omitempty"`
+	Unchecked []AssistantDefaultSkip `json:"unchecked,omitempty"`
 }
 
 type AssistantDefaultSkip struct {

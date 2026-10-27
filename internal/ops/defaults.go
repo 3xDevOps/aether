@@ -23,8 +23,9 @@ type defaultSkip = protocol.AssistantDefaultSkip
 // savedFill is what the member's saved launch choices filled into a
 // launch: the input fields, and the choices it skipped.
 type savedFill struct {
-	Applied []string
-	Skipped []defaultSkip
+	Applied   []string
+	Skipped   []defaultSkip
+	Unchecked []defaultSkip
 	// Account is the saved account, for a swarm worker that names none, or
 	// AccountErr why it cannot be used.
 	Account    string
@@ -38,7 +39,7 @@ func (f *savedFill) skip(field, reason string) {
 }
 
 func (f savedFill) stamp(r *launchReceipt) {
-	r.DefaultsApplied, r.DefaultsSkipped = f.Applied, f.Skipped
+	r.DefaultsApplied, r.DefaultsSkipped, r.DefaultsUnchecked = f.Applied, f.Skipped, f.Unchecked
 }
 
 // savedDefaults reads the caller's saved launch choices for a launch that
@@ -58,16 +59,14 @@ func savedDefaults(ctx context.Context, read Call, use string) (protocol.LaunchD
 	return res, nil
 }
 
-// savedIssue is why launch.defaults.get found the saved field unusable;
-// value "" matches any of the field's.
-func savedIssue(saved protocol.LaunchDefaultsResult, field, value string) (string, bool) {
-	i := slices.IndexFunc(saved.Invalid, func(is protocol.LaunchDefaultIssue) bool {
-		return is.Field == field && (value == "" || is.Value == value)
-	})
+// savedIssue is why one of issues, launch.defaults.get's invalid or unknown
+// list, names the saved field's value.
+func savedIssue(issues []protocol.LaunchDefaultIssue, field, value string) (string, bool) {
+	i := slices.IndexFunc(issues, func(is protocol.LaunchDefaultIssue) bool { return is.Field == field && is.Value == value })
 	if i < 0 {
 		return "", false
 	}
-	return saved.Invalid[i].Reason, true
+	return issues[i].Reason, true
 }
 
 // agentLister lists, once per account, the agents a launch may use on it.
@@ -102,14 +101,17 @@ type launchSlots struct {
 // fillSaved fills each field in slots the caller left empty from saved,
 // explicit fields first, then saved, then the server's own defaults. An
 // unusable saved account fails the launch rather than starting it on
-// another; an unusable saved agent, mode, model or fallback member is
-// skipped with its reason. The agent and mode are checked on the account
-// the launch resolved to, which may not be the one get checked.
+// another; an unusable saved agent, mode or fallback member is skipped with
+// its reason. The agent and mode are checked on the account the launch
+// resolved to. get checked the model on the saved account, and only ever
+// reports it unknown, so a saved model is used and reported unchecked when
+// get could not check it or the launch uses another account; the agent
+// refuses a model it does not offer when the run starts.
 func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (savedFill, error) {
 	var fill savedFill
 	d := saved.Defaults
 	if d.AccountMemberID != "" {
-		if reason, bad := savedIssue(saved, "account_member_id", d.AccountMemberID); bad {
+		if reason, bad := savedIssue(saved.Invalid, "account_member_id", d.AccountMemberID); bad {
 			fill.AccountErr = invalid("saved account %s: %s; pass account_member_id or clear it", d.AccountMemberID, reason)
 		} else {
 			fill.Account = d.AccountMemberID
@@ -129,7 +131,7 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 			a.NoFallback = true
 		case protocol.FallbackOrdered:
 			for _, id := range f.Order {
-				if reason, bad := savedIssue(saved, "fallback.order", id); bad {
+				if reason, bad := savedIssue(saved.Invalid, "fallback.order", id); bad {
 					fill.skip("fallback_account_member_ids", id+": "+reason)
 					continue
 				}
@@ -168,11 +170,14 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 		}
 	}
 	if *slots.model == "" && choice.Model != "" {
-		if reason, bad := savedIssue(saved, "agents."+*slots.harness+".model", choice.Model); bad {
-			fill.skip("model", reason)
-		} else {
-			*slots.model = choice.Model
-			fill.apply("model")
+		*slots.model = choice.Model
+		fill.apply("model")
+		checked, launched := cmp.Or(d.AccountMemberID, book.self()), cmp.Or(a.AccountMemberID, book.self())
+		if checked != launched {
+			fill.Unchecked = append(fill.Unchecked, defaultSkip{Field: "model",
+				Reason: fmt.Sprintf("it was saved and checked for account %s, and this launch runs on %s", checked, launched)})
+		} else if reason, unknown := savedIssue(saved.Unknown, "agents."+*slots.harness+".model", choice.Model); unknown {
+			fill.Unchecked = append(fill.Unchecked, defaultSkip{Field: "model", Reason: reason})
 		}
 	}
 	return fill, nil
@@ -234,5 +239,5 @@ func savedConflict(err error, fill savedFill, keyed bool) error {
 		return err
 	}
 	return &protocol.Error{Code: perr.Code, Data: perr.Data,
-		Message: perr.Message + "; your saved defaults changed since the first attempt; pass the fields explicitly"}
+		Message: perr.Message + "; your saved defaults may have changed since the first attempt; pass the fields explicitly"}
 }

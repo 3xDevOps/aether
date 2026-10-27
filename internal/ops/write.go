@@ -346,7 +346,6 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 		}
 		if found {
 			out := launched(prior, l, book)
-			fill.stamp(out["launch"].(*launchReceipt))
 			out["duplicate"] = true
 			return fmt.Sprintf("You launched this task with %s at %s; returning run %s instead of launching it again. Pass an idempotency_key to launch another.",
 				prior.Harness, prior.CreatedAt, prior.ID), out, nil
@@ -362,7 +361,9 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	out := launched(res.Run, l, book)
 	receipt := out["launch"].(*launchReceipt)
 	receipt.IdempotencyKey, receipt.Skipped = params.IdempotencyKey, res.SkippedFallbackAccounts
-	fill.stamp(receipt)
+	if !dup && !res.Replayed {
+		fill.stamp(receipt)
+	}
 	out["idempotency_key"] = params.IdempotencyKey
 	switch {
 	case dup:
@@ -383,7 +384,7 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 // confirmation card; the assistant's socket takes both off before the call
 // reaches the server.
 func withReason(params any, reason string, s Surface, fill savedFill) any {
-	noted := s == Assistant && (len(fill.Applied) > 0 || len(fill.Skipped) > 0)
+	noted := s == Assistant && (len(fill.Applied) > 0 || len(fill.Skipped) > 0 || len(fill.Unchecked) > 0)
 	if reason == "" && !noted {
 		return params
 	}
@@ -396,7 +397,7 @@ func withReason(params any, reason string, s Surface, fill savedFill) any {
 		fields["reason"], _ = json.Marshal(reason)
 	}
 	if noted {
-		fields["saved_defaults"], _ = json.Marshal(protocol.AssistantDefaultsUse{Applied: fill.Applied, Skipped: fill.Skipped})
+		fields["saved_defaults"], _ = json.Marshal(protocol.AssistantDefaultsUse{Applied: fill.Applied, Skipped: fill.Skipped, Unchecked: fill.Unchecked})
 	}
 	return fields
 }
@@ -602,7 +603,6 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 		}
 		if found {
 			out := swarmLaunched(prior, l, book)
-			fill.stamp(out["launch"].(*launchReceipt))
 			out["duplicate"] = true
 			return fmt.Sprintf("You launched this objective at %s; returning swarm %s instead of launching it again. Pass an idempotency_key to launch another.",
 				prior.CreatedAt, prior.ID), out, nil
@@ -619,7 +619,9 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	out := swarmLaunched(m, l, book)
 	receipt := out["launch"].(*launchReceipt)
 	receipt.IdempotencyKey, receipt.Skipped = params.IdempotencyKey, res.SkippedFallbackAccounts
-	fill.stamp(receipt)
+	if !dup {
+		fill.stamp(receipt)
+	}
 	out["idempotency_key"] = params.IdempotencyKey
 	switch {
 	case dup:

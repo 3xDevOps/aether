@@ -75,6 +75,7 @@ export function launchRows(s: RootState, method: string, params: unknown, defaul
   }
   if (defaults?.applied?.length) rows.push(['From your saved defaults', defaults.applied.map((field) => savedFields[field] ?? field).join(', ')])
   for (const skip of defaults?.skipped ?? []) rows.push([`Saved ${savedFields[skip.field] ?? skip.field} not used`, skip.reason])
+  for (const note of defaults?.unchecked ?? []) rows.push([`Saved ${savedFields[note.field] ?? note.field} not checked`, note.reason])
   const brief = str(swarm ? p.objective : p.task)
   if (brief) rows.push([swarm ? 'Objective' : 'Task', brief])
   rows.push(['You hear back', swarm ? hearBack.swarm : hearBack.run])

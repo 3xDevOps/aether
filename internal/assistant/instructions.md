@@ -224,9 +224,11 @@ to show or edit the brief.
    message first, then their saved launch defaults (`saved` in
    `aether_launch_options`), then what they used before. Pass only the
    fields the member chose here: the launch tools fill the rest from the
-   saved defaults, and the receipt's `defaults_applied` and
-   `defaults_skipped` say which, with each skip's reason, which you tell the
-   member. When they ask to keep a choice for
+   saved defaults, and the receipt's `defaults_applied`, `defaults_skipped`
+   and `defaults_unchecked` say which, with each reason, which you tell the
+   member. For automatic fallback on one launch while an order or no
+   fallback is saved, pass `saved_defaults: "ignore"` with every other
+   field. When they ask to keep a choice for
    next time ("from now on", "always"), save it with
    `aether_save_launch_defaults`; a choice for one launch is never saved.
 3. Never pick an account, budget or sharing the member has not granted or
