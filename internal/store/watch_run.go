@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -102,6 +103,12 @@ type RunWaitStore interface {
 	GetRunWait(ctx context.Context, id string) (*RunWait, error)
 	// RunWaitConditions is the run's latest revision of conditions.
 	RunWaitConditions(ctx context.Context, run domain.RunID) ([]*RunWait, error)
+	// RunWaitConditionsOf is RunWaitConditions of each of runs, in one
+	// read; a run with none has no entry.
+	RunWaitConditionsOf(ctx context.Context, runs []domain.RunID) (map[domain.RunID][]*RunWait, error)
+	// PurgeRegisteredRunWaits deletes the conditions of reports never
+	// applied that were registered before cutoff.
+	PurgeRegisteredRunWaits(ctx context.Context, cutoff time.Time) error
 	// CommitRunWait writes w if w.Version is still stored, else returns
 	// ErrConflict. A w that wakes its run ends the revision's other pending
 	// conditions cancelled and records n with a pending run delivery, unless
@@ -119,6 +126,10 @@ type RunWaitStore interface {
 	// row d.
 	SetRunWaitDelivery(ctx context.Context, w *RunWait, d WatchDelivery) error
 }
+
+// RunWaitSettle is how long after a report is applied its conditions are
+// left to the report's own read before the background reads them.
+const RunWaitSettle = 10 * time.Second
 
 // MaxWaitReportsPerHour bounds the waiting reports with conditions one run
 // records in an hour.
@@ -167,7 +178,7 @@ func (d *DB) RecordWaitingReport(ctx context.Context, report *CoordStateReport, 
 }
 
 // armRunWaits makes the conditions report key registered pending as the
-// run's next revision, due at once, and supersedes the run's pending ones.
+// run's next revision, due once RunWaitSettle has passed, and supersedes the run's pending ones.
 // Only the new revision and the latest that woke the run are kept.
 func armRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, key string, now time.Time) error {
 	var registered int
@@ -185,9 +196,13 @@ func armRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, key string, 
 	if err != nil {
 		return fmt.Errorf("store: arm waits: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE watches SET state = 'active', wait_state = 'pending', next_check_at = ?1, updated_at = ?1,
+	due, err := encodeTime(now.Add(RunWaitSettle))
+	if err != nil {
+		return fmt.Errorf("store: arm waits: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE watches SET state = 'active', wait_state = 'pending', next_check_at = ?4, updated_at = ?1,
 		wait_revision = (SELECT COALESCE(MAX(wait_revision), 0) + 1 FROM watches WHERE owner_run_id = ?2), version = version + 1
-		WHERE owner_run_id = ?2 AND wait_report_key = ?3 AND wait_state = 'registered'`, at, run, key); err != nil {
+		WHERE owner_run_id = ?2 AND wait_report_key = ?3 AND wait_state = 'registered'`, at, run, key, due); err != nil {
 		return fmt.Errorf("store: arm waits: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM watches WHERE owner_run_id = ?1 AND wait_state <> 'registered'
@@ -240,14 +255,45 @@ func (d *DB) GetRunWait(ctx context.Context, id string) (*RunWait, error) {
 }
 
 func (d *DB) RunWaitConditions(ctx context.Context, run domain.RunID) ([]*RunWait, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT `+runWaitColumns+` FROM watches
-		WHERE owner_run_id = ?1 AND wait_state <> 'registered'
-		  AND wait_revision = (SELECT MAX(wait_revision) FROM watches WHERE owner_run_id = ?1 AND wait_state <> 'registered')
-		ORDER BY created_at, id`, run)
+	byRun, err := d.RunWaitConditionsOf(ctx, []domain.RunID{run})
+	return byRun[run], err
+}
+
+func (d *DB) RunWaitConditionsOf(ctx context.Context, runs []domain.RunID) (map[domain.RunID][]*RunWait, error) {
+	out := map[domain.RunID][]*RunWait{}
+	if len(runs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(runs))
+	for i, r := range runs {
+		args[i] = r
+	}
+	rows, err := d.db.QueryContext(ctx, `SELECT `+runWaitColumns+` FROM watches w
+		WHERE owner_run_id IN (?`+strings.Repeat(", ?", len(runs)-1)+`) AND wait_state <> 'registered'
+		  AND wait_revision = (SELECT MAX(wait_revision) FROM watches l WHERE l.owner_run_id = w.owner_run_id AND l.wait_state <> 'registered')
+		ORDER BY created_at, id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list waits: %w", err)
 	}
-	return collect(rows, scanRunWait)
+	waits, err := collect(rows, scanRunWait)
+	if err != nil {
+		return nil, err
+	}
+	for _, wait := range waits {
+		out[wait.OwnerRunID] = append(out[wait.OwnerRunID], wait)
+	}
+	return out, nil
+}
+
+func (d *DB) PurgeRegisteredRunWaits(ctx context.Context, cutoff time.Time) error {
+	at, err := encodeTime(cutoff)
+	if err != nil {
+		return fmt.Errorf("store: purge registered waits: %w", err)
+	}
+	if _, err := d.db.ExecContext(ctx, `DELETE FROM watches WHERE wait_state = 'registered' AND created_at < ?`, at); err != nil {
+		return fmt.Errorf("store: purge registered waits: %w", err)
+	}
+	return nil
 }
 
 func (d *DB) CommitRunWait(ctx context.Context, w *RunWait, n *WatchNotification) ([]*RunWait, error) {

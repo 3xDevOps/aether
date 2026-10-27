@@ -16,7 +16,7 @@ import (
 // RunWaitService reads and cancels the conditions runs wait on. Satisfied
 // by *watch.Service, the same value as Services.Watches.
 type RunWaitService interface {
-	RunWaits(ctx context.Context, run domain.RunID) ([]protocol.WaitCondition, error)
+	RunWaitsOf(ctx context.Context, runs []domain.RunID) (map[domain.RunID][]protocol.WaitCondition, error)
 	CancelRunWait(ctx context.Context, run domain.RunID, wait string, actor domain.MemberID) (protocol.WaitCondition, error)
 }
 
@@ -29,31 +29,52 @@ func (s *Server) runWaits() RunWaitService {
 	return w
 }
 
-// waitConditions are run's latest wait conditions. Unless full, what
-// their reads found with the owner's GitHub login is left out: the
-// observation, summary, third-party detail, read head and read errors. A
-// failed read is logged and leaves them out, as a run response never
-// fails on them.
-func (s *Server) waitConditions(run domain.RunID, full bool) []protocol.WaitCondition {
+// fillWaitConditions sets each of runs' latest wait conditions on out, the
+// snapshots of runs in the same order, in one read. Unless member owns the
+// run or is an admin, they are redacted. A failed read is logged and leaves
+// them out, as a run response never fails on them.
+func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID, runs []*domain.Run, out []protocol.Run) {
 	svc := s.runWaits()
-	if svc == nil {
-		return nil
+	if svc == nil || len(runs) == 0 {
+		return
 	}
-	waits, err := svc.RunWaits(context.Background(), run)
+	ids := make([]domain.RunID, len(runs))
+	for i, r := range runs {
+		ids[i] = r.ID
+	}
+	byRun, err := svc.RunWaitsOf(ctx, ids)
 	if err != nil {
-		slog.Warn("sshd: read the run's wait conditions", "run", run, "error", err)
-		return nil
+		slog.Warn("sshd: read the runs' wait conditions", "error", err)
+		return
 	}
-	if !full {
-		for i := range waits {
-			w := &waits[i]
-			w.Observed, w.Summary, w.Detail, w.LastError, w.LastErrorAt = protocol.WaitObserved{}, "", "", "", ""
-			if !strings.Contains(w.Spec, "@") {
-				w.HeadSHA = ""
+	admin := false
+	if m, err := s.cfg.Store.GetMember(ctx, member); err == nil {
+		admin = m.Role == domain.RoleAdmin
+	}
+	for i, r := range runs {
+		waits := byRun[r.ID]
+		if r.MemberID != member && !admin {
+			for j := range waits {
+				redactWait(&waits[j])
 			}
 		}
+		out[i].WaitConditions = waits
 	}
-	return waits
+}
+
+// redactWait leaves out of w what only the run's owner and admins read:
+// what its reads found with the owner's GitHub login and the free text of
+// how it ended and how its wake failed. Its condition, state, outcome and
+// a member's cancel stay.
+func redactWait(w *protocol.WaitCondition) {
+	w.Observed, w.Summary, w.Detail, w.LastError, w.LastErrorAt = protocol.WaitObserved{}, "", "", "", ""
+	w.LastDeliveryError = ""
+	if w.EndedCause != protocol.WaitCancelled {
+		w.EndedCause = ""
+	}
+	if !strings.Contains(w.Spec, "@") {
+		w.HeadSHA = ""
+	}
 }
 
 // seesWaitDetails reports whether member reads run's wait conditions in
@@ -81,6 +102,13 @@ func (s *Server) runWaitCancel(ctx context.Context, member domain.MemberID, para
 	}
 	if err != nil {
 		return nil, rpcError(err)
+	}
+	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if !s.seesWaitDetails(ctx, member, run) {
+		redactWait(&w)
 	}
 	return protocol.RunWaitCancelResult{Wait: w}, nil
 }

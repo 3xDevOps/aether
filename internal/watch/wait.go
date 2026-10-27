@@ -25,6 +25,9 @@ const (
 	// waitRunPoll reads a run target again when no event arrived, so a
 	// deleted run is noticed.
 	waitRunPoll = 10 * time.Minute
+	// registeredRetention keeps the conditions of a report not yet applied
+	// for its retry.
+	registeredRetention = 24 * time.Hour
 )
 
 // RunNotifier writes a server-authored message into a run's inbox and
@@ -79,8 +82,9 @@ func (s *Service) RegisterWait(ctx context.Context, owner *domain.Run, report *s
 }
 
 // SettleBound is how long SettleRunWaits reads conditions before it
-// leaves the rest to the background.
-const SettleBound = 10 * time.Second
+// leaves the rest to the background. A wake the background finds first is
+// held until it is past.
+const SettleBound = store.RunWaitSettle
 
 const returnedInReport = "Returned in the report that registered it"
 
@@ -106,7 +110,7 @@ func (s *Service) SettleRunWaits(ctx context.Context, run domain.RunID) ([]proto
 				s.wake()
 				break
 			}
-			return nil, err
+			slog.Warn("watch: read a new wait; the background reads it", "wait", w.ID, "error", err)
 		}
 	}
 	ctx = context.WithoutCancel(ctx)
@@ -191,8 +195,9 @@ type waitReading struct {
 var errWaitUnreadable = errors.New("unreadable")
 
 // evaluateWait reads wait id unless it is not due: a pull request wait in
-// backoff or between polls is left to its next check, as events about the
-// owner run say nothing about it. inline marks the read of the report
+// backoff, between polls or not yet read by the report that registered it
+// is left to its next check, as events about the owner run say nothing
+// about it. A run target is read on its every event. inline marks the read of the report
 // that registered it, which returns a resolution to the agent itself and
 // reads GitHub afresh.
 func (s *Service) evaluateWait(ctx context.Context, id string, inline bool) error {
@@ -229,7 +234,8 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 		return s.endWaits(ctx, w.OwnerRunID, "", "the run ended "+string(owner.Status), "")
 	}
 	expired := !w.ExpiresAt.After(now)
-	if !inline && !expired && w.Kind != protocol.WaitKindRunFinished && w.NextCheckAt != nil && now.Before(*w.NextCheckAt) {
+	notDue := w.NextCheckAt != nil && now.Before(*w.NextCheckAt)
+	if !inline && !expired && notDue && w.Kind != protocol.WaitKindRunFinished {
 		return nil
 	}
 	if err = s.allowed(ctx, &w.Watch); errors.Is(err, errRevoked) {
@@ -245,7 +251,7 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 		r = waitReading{done: true, state: protocol.WaitExpired, outcome: "expired", observation: "expired",
 			summary: fmt.Sprintf("nothing resolved within %s", WaitExpiry)}
 	} else {
-		r, readErr = s.readWait(ctx, w, now, inline)
+		r, readErr = s.readWait(ctx, w, now, inline || w.SourceCheckedAt == nil)
 	}
 	if readErr != nil && ctx.Err() != nil {
 		return ctx.Err()
@@ -279,22 +285,27 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 	if err != nil {
 		return err
 	}
-	w.Observed, w.Summary, w.Detail, w.Failures = observed, r.summary, r.detail, 0
+	w.Observed, w.Summary, w.Detail, w.Observation, w.Failures = observed, r.summary, r.detail, r.observation, 0
 	if r.head != "" {
 		w.HeadSHA = r.head
 	}
 	var n *store.WatchNotification
 	if r.done {
-		w.WaitState, w.Outcome, w.Observation, w.ResolvedAt = r.state, r.outcome, r.observation, &now
+		w.WaitState, w.Outcome, w.ResolvedAt = r.state, r.outcome, &now
 		w.State, w.EndedAt, w.NextCheckAt = protocol.WatchDone, &now, nil
 		if r.state == protocol.WaitExpired {
 			w.State = protocol.WatchExpired
 		}
 		d := store.WatchDelivery{Channel: protocol.WatchChannelRunInbox, Status: protocol.WatchStatusPending, Detail: "Waking the run", At: now}
-		if inline {
+		switch {
+		case inline:
 			w.DeliveredAt = &now
 			d.Status, d.Detail = protocol.WatchStatusDelivered, returnedInReport
-		} else {
+		case before.LastCheckAt == nil && notDue:
+			// Resolved before the report's own read: its wake waits out the
+			// report's window, so the report returns it instead.
+			w.DeliveryNextAt = before.NextCheckAt
+		default:
 			w.DeliveryNextAt = &now
 		}
 		n = &store.WatchNotification{
@@ -424,17 +435,25 @@ func (s *Service) CancelRunWait(ctx context.Context, run domain.RunID, wait stri
 
 // RunWaits is run's latest revision of wait conditions, live or ended.
 func (s *Service) RunWaits(ctx context.Context, run domain.RunID) ([]protocol.WaitCondition, error) {
-	waits, err := s.store.RunWaitConditions(ctx, run)
+	byRun, err := s.RunWaitsOf(ctx, []domain.RunID{run})
+	return byRun[run], err
+}
+
+// RunWaitsOf is RunWaits of each of runs, in one read.
+func (s *Service) RunWaitsOf(ctx context.Context, runs []domain.RunID) (map[domain.RunID][]protocol.WaitCondition, error) {
+	byRun, err := s.store.RunWaitConditionsOf(ctx, runs)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]protocol.WaitCondition, 0, len(waits))
-	for _, w := range waits {
-		p, err := waitProto(w)
-		if err != nil {
-			return nil, err
+	out := make(map[domain.RunID][]protocol.WaitCondition, len(byRun))
+	for run, waits := range byRun {
+		for _, w := range waits {
+			p, err := waitProto(w)
+			if err != nil {
+				return nil, err
+			}
+			out[run] = append(out[run], p)
 		}
-		out = append(out, p)
 	}
 	return out, nil
 }
@@ -508,7 +527,7 @@ func (s *Service) deliverWait(ctx context.Context, w *store.RunWait, now time.Ti
 	if len(notes) > 0 {
 		link = notes[0].Link
 	}
-	key := "wait:" + w.Spec + ":" + w.Outcome + ":" + w.Observation
+	key := "wait:" + w.ID + ":" + w.Outcome
 	written, err := s.notifier.NotifyRun(ctx, w.OwnerRunID, w.OwnerRunID, waitBody(w, link), w.ID, key)
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()

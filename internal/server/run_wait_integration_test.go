@@ -87,7 +87,9 @@ func TestIntegrationRunWaitWakesTheAgent(t *testing.T) {
 		t.Fatalf("kill %s: %v", target, err)
 	}
 	waitPrompted(ctx, t, env.srv, waiter, protocol.CoordInboxContext(1))
-	time.Sleep(10 * time.Second)
+	for _, run := range []domain.RunID{waiter, satisfied} {
+		quiesce(ctx, t, env.srv, run)
+	}
 
 	msgs := inbox(waiter)
 	if len(msgs) != 1 || msgs[0].FromRun != waiter || msgs[0].ToRun != waiter ||
@@ -159,4 +161,36 @@ func countPrompts(t *testing.T, srv *Server, run domain.RunID, instruction strin
 		}
 	}
 	return n
+}
+
+// quiesce waits until run has ended every turn it started and started no
+// other for five seconds.
+func quiesce(ctx context.Context, t *testing.T, srv *Server, run domain.RunID) {
+	t.Helper()
+	last, since := -1, time.Now()
+	for {
+		page, err := srv.sched.ACPHistory(run, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		started, ended := 0, 0
+		for _, it := range page.Items {
+			switch it.Kind {
+			case acphost.KindTurnStart:
+				started++
+			case acphost.KindTurnEnd:
+				ended++
+			}
+		}
+		if started != ended || started != last {
+			last, since = started, time.Now()
+		} else if time.Since(since) >= 5*time.Second {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("run %s never went quiet: %d turns started, %d ended", run, started, ended)
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }

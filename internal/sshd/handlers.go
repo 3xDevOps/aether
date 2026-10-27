@@ -284,6 +284,7 @@ func (s *Server) runList(ctx context.Context, member domain.MemberID, params jso
 		return nil, rpcError(err)
 	}
 	out := make([]protocol.Run, 0, len(runs))
+	listed := make([]*domain.Run, 0, len(runs))
 	for _, r := range runs {
 		if p.MemberID != "" && r.MemberID != domain.MemberID(p.MemberID) {
 			continue
@@ -291,12 +292,10 @@ func (s *Server) runList(ctx context.Context, member domain.MemberID, params jso
 		if p.ActiveOnly && r.Status.Terminal() {
 			continue
 		}
-		snap := s.runSnapshot(r)
-		if len(snap.WaitConditions) > 0 && s.seesWaitDetails(ctx, member, r) {
-			snap.WaitConditions = s.waitConditions(r.ID, true)
-		}
-		out = append(out, snap)
+		out = append(out, s.runSnapshot(r))
+		listed = append(listed, r)
 	}
+	s.fillWaitConditions(ctx, member, listed, out)
 	return protocol.RunListResult{Runs: out}, nil
 }
 
@@ -309,11 +308,9 @@ func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	snap := s.runSnapshot(run)
-	if len(snap.WaitConditions) > 0 && s.seesWaitDetails(ctx, member, run) {
-		snap.WaitConditions = s.waitConditions(run.ID, true)
-	}
-	return protocol.RunResult{Run: snap}, nil
+	out := []protocol.Run{s.runSnapshot(run)}
+	s.fillWaitConditions(ctx, member, []*domain.Run{run}, out)
+	return protocol.RunResult{Run: out[0]}, nil
 }
 
 // runSnapshot decorates every run response, including mutation results. A
@@ -328,7 +325,6 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 			out.Liveness = protocol.RunLivenessFromDomain(l)
 		}
 		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
-		out.WaitConditions = s.waitConditions(run.ID, false)
 		out.Switching = string(s.cfg.Runs.Switching(run.ID))
 		retention, err := s.cfg.Runs.Retention(run)
 		if retention.RetainedUntil != nil {

@@ -24,23 +24,39 @@ type notifyCall struct {
 	body, corr, key string
 }
 
-// fakeInbox is coord.Service.Notify: a key it already took adds nothing.
+// fakeInbox is coord.Service.NotifyRun on the real mailbox: a retry of a
+// key adds nothing, and the same key with another message is refused.
 type fakeInbox struct {
+	db    *store.DB
 	mu    sync.Mutex
 	calls []notifyCall
 	kept  map[string]notifyCall
 	fail  atomic.Bool
 }
 
-func (f *fakeInbox) NotifyRun(_ context.Context, from, to domain.RunID, body, corr, key string) (bool, error) {
+func (f *fakeInbox) NotifyRun(ctx context.Context, from, to domain.RunID, body, corr, key string) (bool, error) {
 	if f.fail.Load() {
 		return false, errors.New("inbox unavailable")
+	}
+	target, err := f.db.GetRun(ctx, to)
+	if err != nil {
+		return false, err
+	}
+	if target.Status.Terminal() {
+		return false, nil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	c := notifyCall{from: from, to: to, body: body, corr: corr, key: key}
 	f.calls = append(f.calls, c)
-	if _, ok := f.kept[key]; !ok {
+	created, err := f.db.AppendRunMessageWithPeer(ctx, &store.RunMessage{
+		WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to, Kind: store.RunMessageKindMessage,
+		Body: body, CorrelationID: corr, IdempotencyKey: key,
+	}, protocol.CoordMaxUnread, 8, false)
+	if err != nil {
+		return false, err
+	}
+	if created {
 		f.kept[key] = c
 	}
 	return true, nil
@@ -67,7 +83,8 @@ type waitHarness struct {
 
 func newWaitHarness(t *testing.T) *waitHarness {
 	t.Helper()
-	h := &waitHarness{harness: newHarness(t), inbox: &fakeInbox{kept: map[string]notifyCall{}}}
+	h := &waitHarness{harness: newHarness(t)}
+	h.inbox = &fakeInbox{db: h.db, kept: map[string]notifyCall{}}
 	_ = h.svc.Close()
 	h.restart()
 	return h
@@ -294,8 +311,8 @@ func TestAPendingWakeSurvivesARestartAndIsSentOnce(t *testing.T) {
 }
 
 // A server that stops between applying the report and the first read
-// reads the wait when it starts, and wakes the run. Waking on the same
-// observation again sends nothing new.
+// reads the wait when it starts, and wakes the run, once per report even
+// when two see the same end.
 func TestAWaitAppliedBeforeACrashIsReadOnStart(t *testing.T) {
 	t.Parallel()
 	h := newWaitHarness(t)
@@ -310,6 +327,7 @@ func TestAWaitAppliedBeforeACrashIsReadOnStart(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.restart()
+		h.clock.advance(SettleBound)
 		h.eventually(fmt.Sprintf("wait %d delivered", i), func() bool {
 			w := h.only(owner.ID)
 			return w.Revision == int64(i+1) && w.DeliveredAt != ""
@@ -318,8 +336,8 @@ func TestAWaitAppliedBeforeACrashIsReadOnStart(t *testing.T) {
 	if w := h.only(owner.ID); w.Outcome != "merged" {
 		t.Fatalf("outcome = %q, want merged", w.Outcome)
 	}
-	if n := len(h.inbox.messages(owner.ID)); n != 1 {
-		t.Fatalf("%d messages for one observation, want one", n)
+	if n := len(h.inbox.messages(owner.ID)); n != 2 {
+		t.Fatalf("%d messages for two reports, want one each", n)
 	}
 }
 
@@ -535,7 +553,7 @@ func newWaitPRHarness(t *testing.T) (*waitHarness, *fakeGitHub) {
 		t.Fatal(err)
 	}
 	p.pr = prs
-	h := &waitHarness{harness: p.harness, inbox: &fakeInbox{kept: map[string]notifyCall{}}}
+	h := &waitHarness{harness: p.harness, inbox: &fakeInbox{db: p.db, kept: map[string]notifyCall{}}}
 	h.restart()
 	return h, p.gh
 }
@@ -599,10 +617,10 @@ func TestAPullRequestGitHubCannotFindResolvesAsAnError(t *testing.T) {
 // registration and any pushed after it, never on an older head's.
 func TestChecksResolveOnlyOnTheirHeadCommit(t *testing.T) {
 	h, gh := newWaitPRHarness(t)
-	done := "2026-10-27T00:00:00Z"
+	before, later := "2026-10-27T00:00:00Z", h.clock.now().Add(time.Hour).UTC().Format(time.RFC3339)
 	gh.set(func(f *fakeGitHub) {
-		f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "test", Status: "completed", Conclusion: "failure", Completed: done}}
-		f.checks[shaTwo] = []fakeCheck{{ID: 2, Name: "test", Status: "completed", Conclusion: "success", Completed: done}}
+		f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "test", Status: "completed", Conclusion: "failure", Completed: before}}
+		f.checks[shaTwo] = []fakeCheck{{ID: 2, Name: "test", Status: "completed", Conclusion: "success", Completed: later}}
 	})
 	named := h.run(h.ada, "Pushed 2222")
 	if resolved := h.mustReport(named, "pr:acme/app#7:checks@"+shaTwo[:12]); len(resolved) != 0 {
@@ -678,4 +696,77 @@ func (h *waitHarness) waitRows(run domain.RunID) int {
 		h.t.Fatal(err)
 	}
 	return n
+}
+
+// An unnamed checks wait takes no verdict from a head whose checks
+// finished before it began, such as a force-push back to an old commit; a
+// named one whose commit a push replaced resolves as superseded.
+func TestChecksOnAnOlderOrReplacedHeadAreNoVerdict(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	gh.set(func(f *fakeGitHub) {
+		f.head = shaTwo
+		f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "test", Status: "completed", Conclusion: "failure", Completed: "2026-10-27T00:00:00Z"}}
+		f.checks[shaTwo] = []fakeCheck{{ID: 2, Name: "test", Status: "in_progress"}}
+	})
+	unnamed, named := h.run(h.ada, "Follows the head"), h.run(h.ada, "Pushed 2222")
+	h.mustReport(unnamed, "pr:acme/app#7:checks")
+	h.mustReport(named, "pr:acme/app#7:checks@"+shaTwo)
+	gh.set(func(f *fakeGitHub) { f.head = shaOne })
+	h.clock.advance(2 * PRPollIdle)
+	h.eventually("the replaced head's wake", func() bool { return len(h.inbox.messages(named.ID)) == 1 })
+	if w := h.only(named.ID); w.Outcome != "superseded" || !strings.Contains(h.inbox.messages(named.ID)[0].body, "a newer commit replaced the one you named") {
+		t.Fatalf("named wait = %+v, want superseded", w)
+	}
+	settle()
+	if w := h.only(unnamed.ID); w.State != protocol.WaitPending || w.HeadSHA != shaTwo || len(h.inbox.messages(unnamed.ID)) != 0 {
+		t.Fatalf("unnamed wait = %+v, want still pending on %s", w, shaTwo)
+	}
+}
+
+type mergedPR struct{}
+
+func (mergedPR) Validate(context.Context, domain.MemberID, protocol.WatchTarget) (string, error) {
+	return "", nil
+}
+
+func (mergedPR) Evaluate(context.Context, PRCheck) (PRResult, error) { return PRResult{}, nil }
+
+func (mergedPR) Snapshot(_ context.Context, _ domain.MemberID, repo string, number int, _ bool) (github.Snapshot, error) {
+	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	return github.Snapshot{Repo: repo, Number: number, State: "closed", MergedAt: &at, HeadSHA: shaOne, URL: "https://github.com/acme/app/pull/7"}, nil
+}
+
+// A pull request that already merged resolves in the report, however
+// often the agent reports it, and never wakes the run.
+func TestAMergedPullRequestResolvesInTheReport(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	h.pr = mergedPR{}
+	h.restart()
+	owner := h.run(h.ada, "Ship")
+	for range 3 {
+		if resolved := h.mustReport(owner, "pr:acme/app#7:merged"); len(resolved) != 1 || resolved[0].Outcome != "merged" {
+			t.Fatalf("resolved = %+v, want merged", resolved)
+		}
+	}
+	h.clock.advance(time.Minute)
+	settle()
+	if n := len(h.inbox.messages(owner.ID)); n != 0 {
+		t.Fatalf("%d wakes, want none", n)
+	}
+}
+
+// The conditions of a report that never applied are deleted after a day.
+func TestConditionsOfAReportNeverAppliedArePurged(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	owner, target := h.run(h.ada, "Integrate"), h.run(h.ada, "Build")
+	if err := h.register(owner, "lost", finished(target.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.waitRows(owner.ID); n != 1 {
+		t.Fatalf("%d rows registered, want one", n)
+	}
+	h.clock.advance(registeredRetention + time.Minute)
+	h.eventually("the purge", func() bool { return h.waitRows(owner.ID) == 0 })
 }

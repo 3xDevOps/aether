@@ -493,6 +493,9 @@ func (s *Service) housekeep(ctx context.Context) {
 	s.deliverDue(ctx)
 	s.deliverAssistant(ctx)
 	s.deliverWaits(ctx)
+	if err := s.store.PurgeRegisteredRunWaits(ctx, now.Add(-registeredRetention)); err != nil && ctx.Err() == nil {
+		slog.Warn("watch: purge waits of reports never applied", "error", err)
+	}
 	if _, err := s.store.PurgeWatches(ctx, now.Add(-Retention)); err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("watch: purge ended watches", "error", err)

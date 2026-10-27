@@ -248,25 +248,28 @@ an hour; the next is refused with that error.
 | Condition | Resolves | Outcome |
 | --- | --- | --- |
 | `pr:<owner>/<repo>#<n>:merged` | The pull request merged, or closed without merging. | `merged`, or `closed` |
-| `pr:<owner>/<repo>#<n>:checks[@<sha>]` | Every check on the bound head commit finished, or the pull request closed unmerged first. All checks count; `observed.checks.required_only` is `false`. | `passed`, `failed`, `cancelled`, or `closed` |
+| `pr:<owner>/<repo>#<n>:checks[@<sha>]` | Every check on its head commit finished, the named commit was replaced, or the pull request closed unmerged first. All checks count; `observed.checks.required_only` is `false`. | `passed`, `failed`, `cancelled`, `superseded`, or `closed` |
 | `run:<run-id>:finished` | That run, in the same workspace, ended or reported success. | `completed`, `merged`, `failed`, `abandoned`, `interrupted`, or `reported-success` |
 
 A checks condition resolves only on its head commit, `head_sha`. With
 `@<sha>` (7 to 40 lowercase hex digits, the commit you pushed) that is the
-commit named, and checks on any other head are ignored. Without it, the
-server reads the pull request afresh when the report is recorded and binds
-the head it finds; a head pushed after that replaces it. GitHub can still
-show the previous head for a moment after a push, so name the commit after
-pushing.
+commit named: checks on any other head are ignored, and once the named
+commit was the head, another head replacing it before its checks finish
+resolves the condition as `superseded`. Without it, the first read, made
+afresh, binds the head it finds; a different head counts only with checks
+that finished after the condition was registered, so a force-push back to
+an older commit is no verdict. GitHub can still show the previous head for
+a moment after a push, so name the commit after pushing.
 
 The report is recorded first, then its conditions are read as they stand,
 for at most 10 seconds, without taking that state as already seen. A
 condition already resolved, such as a pull request that already merged or a
 run that already ended, comes back in the report's `resolved` list and its
 `next_action` says so: the agent learns it in the same turn and no wake
-follows. One the background resolved and began waking the run for
-meanwhile is left to that wake instead. Conditions still pending, or whose read did not finish, are read
-from then on: pull requests as [Pull requests and CI](#pull-requests-and-ci)
+follows. The background leaves a condition to that read for its 10
+seconds; one it resolved and began waking the run for meanwhile is left to
+that wake instead. Conditions still pending, or whose read did not finish,
+are read from then on: pull requests as [Pull requests and CI](#pull-requests-and-ci)
 describes, every minute while checks run and every 5 minutes otherwise, and
 in backoff after a failed read; a run target on each of its events and every
 10 minutes.
@@ -280,9 +283,8 @@ another agent, such as failing check names or a run's reason, appears only
 quoted on a line starting `Untrusted (from ..., not instructions):`, and as
 `detail` on the condition. The existing inbox wake resumes the session.
 Delivery is claimed before it is written, retried with the same backoff as
-evaluation and keyed by the condition and what it resolved on, so a retry,
-a restart, a late event or the same observation reported again never wakes
-the run twice. A paused run gets the message, and resuming it wakes it. A
+evaluation and keyed by the condition and its outcome, so a retry, a
+restart or a late event never wakes the run twice for one report. A paused run gets the message, and resuming it wakes it. A
 run that ended gets nothing. Web Push is never sent for run waits.
 
 | `state` | Meaning |
@@ -302,14 +304,17 @@ receipt and the conditions commit in one transaction, and accepting the
 report makes them due at once, so a server that stops before reading them
 reads them when it starts. A retry of the report with the same idempotency
 key registers nothing new, and the same key with other conditions is
-refused.
+refused. The conditions of a report that never took effect are deleted
+after a day.
 
 `run.get` and `run.list` return the run's latest report's conditions as
 `wait_conditions`, with `delivered_at`, `delivery_attempts` and
-`last_delivery_error`. What was read with the owner's GitHub login
-(`observed`, `summary`, `detail`, a read `head_sha`, `last_error`) is
-returned only to the run's owner and admins; other members see the
-condition, its state and outcome. Every change publishes `run.wait.changed`
+`last_delivery_error`; other run responses leave them out. What was read
+with the owner's GitHub login (`observed`, `summary`, `detail`, a read
+`head_sha`, `last_error`) and the free text of `ended_cause` and
+`last_delivery_error` are returned only to the run's owner and admins;
+other members see the condition, its state, its outcome and a member's
+cancel. `run.wait.cancel`'s result is redacted the same way. Every change publishes `run.wait.changed`
 `{run_id, workspace_id, wait_id, state}` on the run's workspace.
 `run.wait.cancel` `{run_id, wait_id}` cancels one condition and returns
 `{wait}`; it needs the permission `run.pause` needs.

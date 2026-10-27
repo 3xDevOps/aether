@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -31,9 +32,10 @@ func (p *PRs) Snapshot(ctx context.Context, member domain.MemberID, repo string,
 // in the error state; any other failure is retried.
 //
 // A checks wait resolves only on its head commit: the one its condition
-// names, else the head at its first read, which the report that
-// registered it makes afresh. A head pushed after that first read replaces
-// it; a named one is waited for.
+// names, else the head at its first read, made afresh. An unnamed wait
+// also resolves on a later head whose checks finished after it began. A
+// named head that a push replaced before its checks finished resolves as
+// superseded; one not yet seen is waited for.
 func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, now time.Time, fresh bool) (waitReading, error) {
 	ref := fmt.Sprintf("%s#%d", w.Repo, w.Number)
 	r := waitReading{link: "https://github.com/" + w.Repo + "/pull/" + strconv.Itoa(w.Number)}
@@ -83,29 +85,40 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, now time.Tim
 		}
 	case protocol.WaitKindPRChecks:
 		named := strings.Contains(w.Spec, "@")
-		r.head = w.HeadSHA
-		if r.head == "" || !named && !strings.HasPrefix(snap.HeadSHA, r.head) {
-			r.head = snap.HeadSHA
-		}
+		r.head = cmp.Or(w.HeadSHA, snap.HeadSHA)
+		onBound := strings.HasPrefix(snap.HeadSHA, r.head)
+		// A head other than the bound one counts only with checks that
+		// finished after the wait began, so a force-push back to an old
+		// commit is no verdict.
+		final := checks.Final && (onBound || !named && after(checksDone(snap), w.CreatedAt))
 		on := " on head commit " + short(snap.HeadSHA) + " (all checks)"
 		r.observation = checks.Key
+		if named && onBound {
+			r.observation = headSeen
+		}
 		switch {
-		case snap.State == "closed" && !merged && (!checks.Final || !strings.HasPrefix(snap.HeadSHA, r.head)):
+		case named && !onBound && w.Observation == headSeen:
+			r.done, r.outcome, r.observation = true, "superseded", "superseded:"+snap.HeadSHA
+			r.summary = "head commit moved from " + short(r.head) + " to " + short(snap.HeadSHA) + " before its checks finished"
+		case snap.State == "closed" && !merged && !final:
 			r.done, r.outcome, r.observation = true, "closed", "closed"
 			r.summary = ref + " closed without merging before its checks finished"
-		case !strings.HasPrefix(snap.HeadSHA, r.head):
+		case named && !onBound:
 			r.summary = "head commit is " + short(snap.HeadSHA) + "; waiting for checks on " + short(r.head)
-		case checks.Final && checks.Failed > cancelled:
+		case final && checks.Failed > cancelled:
 			r.done, r.outcome, r.summary = true, "failed", counts+on
 			r.detail = "failing checks: " + strings.Join(failedChecks(snap), ", ")
-		case checks.Final && cancelled > 0:
+		case final && cancelled > 0:
 			r.done, r.outcome, r.summary = true, "cancelled", counts+on
-		case checks.Final:
+		case final:
 			r.done, r.outcome, r.summary = true, "passed", counts+on
 		case checks.Passed+checks.Failed+checks.Pending == 0:
 			r.summary = "no checks on head commit " + short(snap.HeadSHA) + " yet"
 		default:
 			r.summary = counts + on
+		}
+		if r.done && !named {
+			r.head = snap.HeadSHA
 		}
 	}
 	if r.done {
@@ -134,6 +147,9 @@ func checkCounts(c *protocol.WaitChecks) string {
 	}
 	return "checks " + strings.Join(parts, ", ")
 }
+
+// headSeen marks a named checks wait whose commit was the head.
+const headSeen = "head-seen"
 
 // maxUntrusted bounds the third-party text a wake quotes.
 const maxUntrusted = 300
@@ -191,6 +207,8 @@ func nextStep(w *store.RunWait) string {
 		return "the checks passed; continue"
 	case "failed":
 		return "open the link to read the failing checks, fix them and push, then wait on the checks of the new head"
+	case "superseded":
+		return "a newer commit replaced the one you named; wait on its checks if it is yours, or find out who pushed it"
 	}
 	return "the checks were cancelled; rerun them or push again, then wait on the checks again"
 }

@@ -63,7 +63,7 @@ type Run struct {
 	// Always a list, including [].
 	PendingInputs []domain.RunInputRequest `json:"pending_inputs"`
 	// WaitConditions are the run's latest coord.report until conditions,
-	// live or ended.
+	// live or ended, on run.get and run.list.
 	WaitConditions []WaitCondition `json:"wait_conditions,omitempty"`
 	Branch         string          `json:"branch"`
 	LastCommit     string          `json:"last_commit,omitempty"`
