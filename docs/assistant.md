@@ -89,9 +89,27 @@ Each message carries a short description of what your dashboard shows, so "why
 is this stuck?" works without ids: the page you are on, the workspace and run,
 the open run view, the open file's path (never its contents) and the last 8
 pages you visited. It never holds titles, file contents, drafts, terminal text
-or secrets. The line above the message box, **Sharing: run run-8x2 · Changes**,
-expands to the exact JSON the next message sends. Clear **Share the page I am on
-with the assistant** to stop. The choice is saved for you on every device.
+or secrets.
+
+The page is pinned when you start typing. If you move to another run or page
+before sending, the panel asks **You moved to Ship the docs. Ask about:** with
+both pages, and sends nothing until you pick one.
+
+To point a message at something specific, use **Fix this** on a failed session,
+the button beside a failing check or beside the pull request number in a run's
+header, **Ask the assistant** beside a swarm task's error, or the run menu's
+**Ask the assistant to fix this run** and **Ask the assistant why this is
+stuck**. Each opens the panel with that run, check, pull request, error or task
+attached and a short draft to edit; nothing is sent until you press Send. The
+attachment holds only ids and names, such as `acme/api#42 · check lint`; the
+assistant reads the details with its tools.
+
+Above the message box, a chip names each thing the message is about. Remove
+one with its **x**, or Delete or Backspace. Removing the page also stops the
+assistant reading it between messages until you send or add it back.
+**Inspect** lists every field the next message sends, and **Raw JSON** shows
+the exact payload. Clear **Share the page I am on with the assistant** there
+to stop sending the page; things you attached are still sent. The choice is saved for you on every device.
 
 The view a message carries is the one the assistant uses for that turn until
 you open another page. Before acting on a run it resolves the target from ids
@@ -204,7 +222,8 @@ is announced once, and the follow ends when the run finishes or is deleted.
 ## Conversations
 
 Send with Enter (Shift+Enter inserts a newline). **Stop** cancels the turn in
-progress. While a turn runs you cannot send another prompt.
+progress; if the agent keeps going, press it again. While a turn runs you
+cannot send another prompt.
 
 There is one conversation per member. It survives page reloads and server
 restarts. If the environment stops, the agent stops with it and the next prompt

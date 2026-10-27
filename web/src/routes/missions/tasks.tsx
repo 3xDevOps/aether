@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { AskAssistantButton } from '@/components/assistant/ask'
 import { agentLabel, modeLabel } from '@/components/launch/modes'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -62,7 +63,19 @@ function TaskDetails({ task, detail, showProposalBlocker }: { task: MissionTask;
         </p>
       ))}
       {errors.map((attempt) => (
-        <p key={attempt.id} className="text-ui-sm text-state-failed">{plainReason(attempt.last_error ?? '')}</p>
+        <p key={attempt.id} className="text-ui-sm text-state-failed">
+          {plainReason(attempt.last_error ?? '')}{' '}
+          <AskAssistantButton
+            variant="link"
+            size="sm"
+            ask={{
+              draft: 'Why did this task fail?',
+              attachments: [{ kind: 'task', workspace_id: detail.mission.workspace_id, mission_id: task.mission_id, task_id: task.id, attempt_id: attempt.id, run_id: attempt.run_id || undefined, label: revision?.title ?? task.id }],
+            }}
+          >
+            Ask the assistant
+          </AskAssistantButton>
+        </p>
       ))}
     </div>
   )

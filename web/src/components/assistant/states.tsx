@@ -9,17 +9,48 @@ import { Code } from '@/components/ui/code'
 import { StatusDot } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
 import type { AssistantStatus } from '@/lib/assistant-types'
+import { assistantAsk } from '@/lib/commands'
 import { message } from '@/lib/format'
 import { useAgentList } from '@/routes/agents/use-agents'
+import { useOpenPullRequest } from '@/routes/diff/publish-pr'
 import { useStore } from '@/store'
 import { refreshAssistant } from '@/store/assistant-stream'
+import type { AttachedTarget } from '@/store/view-context'
 
-const examplePrompts = [
-  { label: "What's the status of my runs?", text: "What's the status of my runs?" },
+interface Example {
+  label: string
+  text: string
+  /** What the prompt is about, sent even with page sharing off. */
+  attachments?: AttachedTarget[]
+}
+
+const asked = (text: string, attachments?: AttachedTarget[]): Example => ({ label: text, text, attachments })
+
+const generalPrompts = [
+  asked("What's the status of my runs?"),
   { label: 'Launch a run to …', text: 'Launch a run to ' },
-  { label: 'Install Rust in my environment', text: 'Install Rust in my environment' },
-  { label: 'How do swarms work?', text: 'How do swarms work?' },
+  asked('Install Rust in my environment'),
+  asked('How do swarms work?'),
 ]
+
+/** The page's own prompts, each attached to what it is about: a run's follow its state, and nothing offers to merge a pull request the run does not have. */
+function usePagePrompts(): Example[] {
+  const route = useStore((s) => s.route)
+  const runID = route.name === 'run' ? route.params.runId : undefined
+  const run = useStore((s) => (runID ? s.runs[runID] : undefined))
+  const pr = useOpenPullRequest(runID)
+  if (run) {
+    const target: AttachedTarget = { kind: 'run', workspace_id: run.workspace_id, run_id: run.id, label: run.id }
+    const ask = assistantAsk(run)
+    return [
+      ...(ask ? [asked(ask.draft, [target])] : []),
+      ...(pr ? [asked('Review and merge when checks pass', [{ kind: 'pr', workspace_id: run.workspace_id, run_id: run.id, pr: pr.number, repository: pr.repository, label: `PR #${pr.number}` }])] : []),
+    ]
+  }
+  if (route.name === 'board') return [asked('What needs me?')]
+  const missionID = route.name === 'missions' ? route.params.missionId : undefined
+  return missionID ? [asked('Summarize progress', [{ kind: 'mission', mission_id: missionID, label: missionID }])] : []
+}
 
 export function AssistantSetup({ status }: { status: AssistantStatus }) {
   const { agents, reload } = useAgentList(api, true)
@@ -130,14 +161,24 @@ export function AssistantFailed({ error }: { error?: string }) {
 }
 
 export function EmptyConversation({ autoApprove, onPick }: { autoApprove: boolean; onPick: (text: string) => void }) {
+  const examples = [...usePagePrompts(), ...generalPrompts].slice(0, 4)
   return (
     <section aria-label="Suggestions" className="flex min-h-0 flex-1 flex-col justify-center gap-3 overflow-y-auto p-4">
       <p className="text-ui text-muted">
         Ask in plain language. The assistant acts with your permissions and {autoApprove ? 'launches, messages and stops your runs and saves your environment without asking.' : 'asks before it launches, messages or stops a run, or saves your environment.'}
       </p>
       <div className="flex flex-col items-start gap-2">
-        {examplePrompts.map(({ label, text }) => (
-          <Button key={label} size="sm" variant="secondary" className="h-auto min-h-6 max-w-full py-1 text-left whitespace-normal" onClick={() => onPick(text)}>
+        {examples.map(({ label, text, attachments }) => (
+          <Button
+            key={label}
+            size="sm"
+            variant="secondary"
+            className="h-auto min-h-6 max-w-full py-1 text-left whitespace-normal"
+            onClick={() => {
+              onPick(text)
+              if (attachments) useStore.getState().askAssistant({ draft: text, attachments })
+            }}
+          >
             {label}
           </Button>
         ))}

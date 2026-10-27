@@ -3,6 +3,7 @@ package coord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"strings"
 	"sync"
@@ -22,6 +23,9 @@ type fakeWaker struct {
 	prompts []string
 	woken   chan string
 	budget  time.Duration
+	// refuse makes the agent fail every prompt it is handed, leaving the
+	// session idle.
+	refuse bool
 }
 
 func newFakeWaker() *fakeWaker {
@@ -62,9 +66,12 @@ func (w *fakeWaker) Wake(ctx context.Context, run domain.RunID, prompt string) e
 	if deadline, ok := ctx.Deadline(); ok {
 		w.budget = time.Until(deadline)
 	}
-	w.idle[run] = false
+	w.idle[run] = w.refuse
 	w.prompts = append(w.prompts, prompt)
 	w.woken <- prompt
+	if w.refuse {
+		return fmt.Errorf("acphost: %w: Session not found", domain.ErrPromptRefused)
+	}
 	return nil
 }
 
@@ -108,12 +115,51 @@ func TestEnhancedWakeOncePerUnreadSet(t *testing.T) {
 	if n := waker.count(); n != 1 {
 		t.Fatalf("an unchanged unread set woke the run again: %d wakes", n)
 	}
+	h.svc.EnhancedSessionOpened(ctx, b)
+	h.svc.wakeEnhanced(b)
+	if n := waker.count(); n != 1 {
+		t.Fatalf("a reconnect woke the run again for mail it took: %d wakes", n)
+	}
 
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "second")); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := waker.next(t), protocol.CoordInboxContext(2)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("a new message must re-arm the wake: prompt %q, want %q", got, want)
+	}
+}
+
+// An agent that refuses its wake, as one that lost its session does at once,
+// is not woken again for the same mail until a new session opens.
+func TestEnhancedWakeRefusedOncePerSession(t *testing.T) {
+	waker := newFakeWaker()
+	waker.refuse = true
+	h := newHarness(t, 2, func(c *Config) {
+		c.WakeAdmission = allowHookWake
+		c.Waker = waker
+	})
+	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "shared.go")
+	waker.endTurn(b)
+	ctx := context.Background()
+
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "first")); err != nil {
+		t.Fatal(err)
+	}
+	waker.next(t)
+	h.svc.wakeEnhanced(b)
+	if n := waker.count(); n != 1 {
+		t.Fatalf("a refused wake was retried for the same mail: %d wakes", n)
+	}
+
+	h.svc.EnhancedSessionOpened(ctx, b)
+	h.svc.wakeEnhanced(b)
+	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
+		t.Fatalf("a new session must be woken for the mail: prompt %q, want %q", got, want)
+	}
+	h.svc.wakeEnhanced(b)
+	if n := waker.count(); n != 2 {
+		t.Fatalf("the new session's refusal was retried: %d wakes", n)
 	}
 }
 
@@ -468,6 +514,44 @@ func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
 	h.svc.wakeEnhanced(integrator)
 	if n := waker.count(); n != 1 {
 		t.Fatalf("an unchanged mission woke the integrator again: %d wakes", n)
+	}
+}
+
+func TestEnhancedWakeOffersARefusedMissionUpdateToTheNextSession(t *testing.T) {
+	h, waker, stub, integrator := newMissionWakeHarness(t)
+	ctx := context.Background()
+	h.svc.EnhancedSessionOpened(ctx, integrator)
+	waker.mu.Lock()
+	waker.refuse = true
+	waker.mu.Unlock()
+
+	stub.change(domain.MissionWorkerEnded, false)
+	waker.endTurn(integrator)
+	h.svc.wakeEnhanced(integrator)
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded}) + protocol.CoordReportReminder
+	if got := waker.next(t); got != want {
+		t.Fatalf("mission wake prompt %q, want %q", got, want)
+	}
+	h.svc.wakeEnhanced(integrator)
+	if n := waker.count(); n != 1 {
+		t.Fatalf("a refused mission update was retried: %d wakes", n)
+	}
+
+	waker.mu.Lock()
+	waker.refuse = false
+	waker.mu.Unlock()
+	if _, err := h.svc.Send(ctx, h.run(0), sendParams(integrator, "status")); err != nil {
+		t.Fatal(err)
+	}
+	if got, mail := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != mail {
+		t.Fatalf("mail wake prompt %q, want %q", got, mail)
+	}
+
+	h.svc.EnhancedSessionOpened(ctx, integrator)
+	waker.endTurn(integrator)
+	h.svc.wakeEnhanced(integrator)
+	if got := waker.next(t); !strings.Contains(got, protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded})) {
+		t.Fatalf("the next session's wake prompt %q lacks the refused mission update", got)
 	}
 }
 
