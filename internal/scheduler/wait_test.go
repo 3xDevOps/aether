@@ -160,10 +160,10 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 	}
 
 	waits.set(nil, checking(time.Now()))
-	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on #582", time.Now()); err != nil {
+	if err = e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on #582", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+	if err = e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
 		t.Fatal(err)
 	}
 	p := expect("waiting for CI with a checked condition", domain.ActivityWaitingCI, events.CauseReport, "CI on #582", domain.WaitCondition)
@@ -181,7 +181,7 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 	stale := checking(time.Now().Add(-10 * time.Minute))
 	stale.LastError = "gh: API rate limit exceeded"
 	waits.set(nil, stale)
-	if err := e.sched.WaitChanged(ctx, run.ID); err != nil {
+	if err = e.sched.WaitChanged(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	p = expect("the source unreadable", domain.ActivityWaitingCI, events.CauseReport, "CI on #582", domain.WaitSourceUnknown)
@@ -225,7 +225,7 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 
 	stuck.DeliveredAt = time.Now()
 	waits.set(nil, stuck)
-	if err := reboot.WaitChanged(ctx, run.ID); err != nil {
+	if err = reboot.WaitChanged(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	expect("the wake delivered", domain.ActivityWaitingCI, events.CauseReport, "CI on #582", domain.WaitCondition)
@@ -250,10 +250,10 @@ func TestOnlyAnUnverifiedWaitGoesStale(t *testing.T) {
 	seq := row.StatusSeq
 	sub := e.subscribe(t)
 	waits.set(errors.New("database is locked"))
-	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-agents", "", "two workers", time.Now()); err != nil {
+	if err = e.sched.ReportWaiting(ctx, run.ID, "wait-agents", "", "two workers", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+	if err = e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
 		t.Fatal(err)
 	}
 	p := nextActivity(t, sub, run.ID, &seq)
