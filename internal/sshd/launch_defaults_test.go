@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -136,10 +139,27 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 		!strings.Contains(perr.Message, "cannot call this method") {
 		t.Fatalf("connector launch.defaults.set = %v, want it refused to every connector", perr)
 	}
-	byAssistant, _ := json.Marshal(protocol.LaunchDefaultsSetParams{Defaults: &protocol.LaunchDefaults{Agent: "codex"}, Revision: saved.Revision})
-	raw, perr := e.srv.AssistantLocal(e.member.ID).Call(ctx, protocol.MethodLaunchDefaultsSet, byAssistant)
-	if perr != nil || json.Unmarshal(raw, &got) != nil || got.Source != protocol.LaunchSourceAssistant {
-		t.Fatalf("assistant launch.defaults.set = %s, %v; want it recorded as the assistant's", raw, perr)
+	var cards []protocol.AssistantConfirmation
+	assistant := assistantTools(t, e, func(c protocol.AssistantConfirmation) error {
+		cards = append(cards, c)
+		return nil
+	})
+	unshared := protocol.LaunchDefaultsSetParams{Defaults: &protocol.LaunchDefaults{AccountMemberID: string(cy.ID)}, Revision: saved.Revision}
+	if err := assistant.Call(protocol.MethodLaunchDefaultsSet, unshared, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied ||
+		!strings.Contains(pe.Message, "account_member_id: ") || !strings.Contains(pe.Message, "has not shared their account with you") {
+		t.Fatalf("assistant launch.defaults.set on Cy's account = %v, want the server's refusal", err)
+	}
+	byAssistant := protocol.LaunchDefaultsSetParams{Defaults: &protocol.LaunchDefaults{Agent: "codex",
+		Fallback: &protocol.LaunchFallbackDefault{Policy: protocol.FallbackOff}}, Revision: saved.Revision}
+	if err := assistant.Call(protocol.MethodLaunchDefaultsSet, byAssistant, &got); err != nil || got.Source != protocol.LaunchSourceAssistant {
+		t.Fatalf("assistant launch.defaults.set = %+v, %v; want it recorded as the assistant's", got, err)
+	}
+	wantCards := []string{
+		"Replace your saved launch choices: launch on Cy's (" + string(cy.ID) + ") account",
+		"Replace your saved launch choices: launch on your own account; start with codex; never move to another account when usage runs out",
+	}
+	if len(cards) != len(wantCards) || cards[0].Summary != wantCards[0] || cards[1].Summary != wantCards[1] {
+		t.Fatalf("assistant cards = %+v, want %q", cards, wantCards)
 	}
 	clearing, _ = json.Marshal(protocol.LaunchDefaultsSetParams{Clear: true, Revision: got.Revision})
 	if err := ana.Call(protocol.MethodLaunchDefaultsSet, json.RawMessage(clearing), &got); err != nil || got.Revision != 0 {
@@ -148,6 +168,27 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 	if err := boClient.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, &bos); err != nil || bos.Revision == 0 || bos.Defaults.Agent != "codex" {
 		t.Fatalf("Bo's launch defaults after Ana cleared hers = %+v, %v", bos, err)
 	}
+}
+
+// assistantTools serves the member's built-in assistant tool socket over
+// this server, as a live assistant session does, deciding every card with
+// decide.
+func assistantTools(t *testing.T, e *testEnv, decide func(protocol.AssistantConfirmation) error) *protocol.Client {
+	t.Helper()
+	sock := filepath.Join(t.TempDir(), "a.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &tools.Server{Caller: e.srv.AssistantLocal(e.member.ID), Member: string(e.member.ID),
+		Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error { return decide(c) }}
+	go func() { _ = srv.Serve(t.Context(), ln) }()
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return protocol.NewClient(conn)
 }
 
 // Saves are refused over their shape before anything is stored, and to

@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -50,6 +52,7 @@ var actSummaries = map[string]summarizer{
 	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
 	protocol.MethodMemoryPin:                (*Server).summarizeMemoryPin,
 	protocol.MethodMemoryUnpin:              (*Server).summarizeMemoryUnpin,
+	protocol.MethodLaunchDefaultsSet:        (*Server).summarizeLaunchDefaults,
 }
 
 type runParams interface {
@@ -359,4 +362,67 @@ func forWhom(scope string) string {
 		return " for you only"
 	}
 	return " for everyone"
+}
+
+// summarizeLaunchDefaults spells out every choice the save replaces the
+// member's saved ones with, naming accounts by their owners.
+func (s *Server) summarizeLaunchDefaults(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.LaunchDefaultsSetParams](req.Params)
+	if err != nil {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
+	}
+	if p.Defaults == nil {
+		c.Summary = "Clear your saved launch choices, so launches start from Aether's own defaults"
+		return nil
+	}
+	var members protocol.MemberListResult
+	if rpcErr := s.call(ctx, protocol.MethodMemberList, nil, &members); rpcErr != nil {
+		return rpcErr
+	}
+	account := func(id string) string {
+		if id == "" || id == s.Member {
+			return "your own account"
+		}
+		name := id
+		for _, m := range members.Members {
+			if m.ID == id && m.DisplayName != "" {
+				name = m.DisplayName
+			}
+		}
+		return fmt.Sprintf("%s's (%s) account", truncate(name), truncate(id))
+	}
+	d := p.Defaults
+	choices := []string{"launch on " + account(d.AccountMemberID)}
+	if d.Agent != "" {
+		choices = append(choices, "start with "+truncate(d.Agent))
+	}
+	for _, name := range slices.Sorted(maps.Keys(d.Agents)) {
+		a := d.Agents[name]
+		mode, model := "its default mode", "its default model"
+		if a.Mode != "" {
+			mode = truncate(a.Mode) + " mode"
+		}
+		if a.Model != "" {
+			model = "model " + truncate(a.Model)
+		}
+		choices = append(choices, fmt.Sprintf("run %s in %s with %s", truncate(name), mode, model))
+	}
+	if f := d.Fallback; f != nil {
+		switch f.Policy {
+		case protocol.FallbackOff:
+			choices = append(choices, "never move to another account when usage runs out")
+		case protocol.FallbackOrdered:
+			order := make([]string, len(f.Order))
+			for i, id := range f.Order {
+				order[i] = account(id)
+			}
+			choices = append(choices, "when usage runs out, move only to "+strings.Join(order, ", then "))
+		case protocol.FallbackAutomatic:
+			choices = append(choices, "when usage runs out, move to any account you may launch on")
+		default:
+			choices = append(choices, fmt.Sprintf("fallback policy %q", truncate(f.Policy)))
+		}
+	}
+	c.Summary = "Replace your saved launch choices: " + strings.Join(choices, "; ")
+	return nil
 }

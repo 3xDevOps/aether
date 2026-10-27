@@ -513,7 +513,8 @@ why ([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
 
 The server keeps one set of saved launch choices per member, so every device
 and the built-in assistant can start from the same ones. They hold the agent
-to preselect, each agent's mode and model, the account to launch on, and the
+to preselect, each agent's mode and model (at most 32 agents, names up to 64
+bytes with no control characters), the account to launch on, and the
 fallback policy: `automatic` (every account you may launch on), `ordered` (at
 most 8 member IDs, your own allowed), or `off`. They hold no credentials and
 grant nothing. `run.launch` does not read them: a client fills a launch from
@@ -535,11 +536,12 @@ choices. Saving an account or fallback member who has not shared with you
 fails with `account_member_id: permission denied: member <id> has not shared
 their account with you`. Both methods act only on the caller, admins included.
 A save records whether the built-in assistant or the member made it
-(`source`).
+(`source`). The built-in assistant saves only after you approve a card that
+spells out every choice, naming the account and each fallback member.
 
 A [member merge](#link-or-merge-sign-ins) keeps the survivor's saved choices.
 Any account or fallback member that names the absorbed member, in anyone's
-choices, is moved to the survivor.
+choices, is moved to the survivor, and those choices get a new `revision`.
 
 ## Swarms
 
