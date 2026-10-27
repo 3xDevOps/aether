@@ -185,7 +185,7 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 			}
 			return err
 		}
-		slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", false)
+		slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", false)
 		a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
 		if err = s.noteAction(ctx, conv, m, a, c.Method+" passed after you approved its card."); err != nil {
 			return fmt.Errorf("record the approval: %w", err)
@@ -253,8 +253,8 @@ func (s *Service) autoApprove(ctx, conv context.Context, m *member, c protocol.A
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
-	slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", true)
 	a := newAction(c)
+	slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", true)
 	a.Outcome, a.Approval, a.DecidedAt = protocol.AssistantActionAutoApproved, "auto", a.CreatedAt
 	if err = s.noteAction(ctx, conv, m, a, c.Method+" passed without a card: auto-approval is on."); err != nil {
 		return false, fmt.Errorf("record the approval: %w", err)

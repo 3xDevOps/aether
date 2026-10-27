@@ -259,13 +259,19 @@ and connected apps such as ChatGPT cannot reach them.
 
 - **Save one:** say "remember", "from now on" or "always". The assistant
   saves your own words from that message without a card, and the transcript
-  shows **Saved** or **Updated** with the text. It saves at most 3 per
-  message, at most 500 characters each, and 200 in total. It refuses text you
-  quoted (lines starting with `>`), code blocks, paraphrases and anything
-  gitleaks flags as a secret.
+  shows **Saved** or **Updated** with the text. A preference is at least 3
+  words and 12 characters and at most 500 characters; the assistant saves at
+  most 3 per message and you keep at most 200.
+- **What it can quote:** only a run of whole words you typed in your latest
+  message, stored as you wrote them. It refuses paraphrases, anything
+  gitleaks flags as a secret, and text it treats as pasted: lines starting
+  with `>` and the lines after them up to a blank line, fenced code blocks
+  (up to a fence at least as long as the opening one, or to the end of the
+  message), and lines indented by a tab or four spaces.
 - **See, edit and forget:** **Settings → Memory** lists them. The assistant
-  can also forget one after you approve its card. Forgetting deletes the
-  preference; the assistant's next prompt tells it not to use the old text.
+  can also forget one after you approve its card, even while preferences are
+  off or the conversation is temporary. Forgetting deletes the preference;
+  the assistant's next prompt tells it not to use the old text.
 - **Turn off:** switch off preferences in **Settings → Memory**
   (`assistant.settings` with `preferences_enabled: false`). The assistant
   then neither reads nor saves them. A **temporary** conversation

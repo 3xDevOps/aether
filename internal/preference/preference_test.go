@@ -3,12 +3,14 @@ package preference
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -91,6 +93,8 @@ func TestAddRefusesBadText(t *testing.T) {
 	}{
 		{" \u200b ", "", protocol.CodeInvalidParams},
 		{strings.Repeat("a", MaxText+1), "", protocol.CodeInvalidParams},
+		{"Use tabs", "", protocol.CodeInvalidParams},
+		{"Use go fmt", "", protocol.CodeInvalidParams},
 		{"Prefer table output", "ws-missing", protocol.CodeInvalidParams},
 	} {
 		if _, err := f.svc.Add(ctx, f.alice, tc.text, tc.ws, protocol.PreferenceSourceSettings, ""); code(err) != tc.code {
@@ -148,10 +152,10 @@ func TestUpdateReturnsPreviousAndNotesChanges(t *testing.T) {
 	if len(listed.Preferences) != 0 || len(all.Preferences) != 1 || all.Preferences[0].WorkspaceID != "" || !listed.Enabled {
 		t.Fatalf("after disabling: enabled list %+v, all %+v", listed, all)
 	}
-	if notes := f.svc.TakeChanges(f.alice); len(notes) != 2 || notes[0] != restarted || notes[1] != "preference "+p.ID+" was changed; do not use the old text" {
+	if notes := f.svc.TakeChanges(ctx, f.alice); len(notes) != 2 || notes[0] != restarted || notes[1] != "preference "+p.ID+" was changed; do not use the old text" {
 		t.Fatalf("changes = %q", notes)
 	}
-	if notes := f.svc.TakeChanges(f.alice); len(notes) != 0 {
+	if notes := f.svc.TakeChanges(ctx, f.alice); len(notes) != 0 {
 		t.Fatalf("changes taken twice = %q", notes)
 	}
 }
@@ -273,7 +277,7 @@ func TestTombstoneAfterAPartialLine(t *testing.T) {
 	if _, err := f.svc.Delete(ctx, f.alice, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	deleted, _, err := f.svc.tombstones.read()
+	deleted, _, _, err := f.svc.tombstones.read()
 	if err != nil || len(deleted) != 1 || deleted[0] != p.ID {
 		t.Fatalf("deleted = %q, %v; want only %s", deleted, err, p.ID)
 	}
@@ -291,5 +295,184 @@ func TestCancelledDeleteStillCommits(t *testing.T) {
 	}
 	if _, err := f.svc.Get(context.Background(), f.alice, p.ID); code(err) != protocol.CodeNotFound {
 		t.Fatalf("after the delete: %v", err)
+	}
+}
+
+// failingUpdate writes the tombstone of an edit, then fails it, as an
+// UPDATE that fails or a crash before the commit does.
+type failingUpdate struct{ *store.DB }
+
+func (f failingUpdate) UpdatePreference(ctx context.Context, member domain.MemberID, id string, edit func(*store.Preference) error,
+	commit func(old, cur store.Preference) error) (store.Preference, store.Preference, error) {
+	return f.DB.UpdatePreference(ctx, member, id, edit, func(old, cur store.Preference) error {
+		if err := commit(old, cur); err != nil {
+			return err
+		}
+		return errors.New("disk I/O error")
+	})
+}
+
+// An edit that never committed deletes nothing at the next start, while one
+// that did still deletes an older copy of its row.
+func TestRestoreKeepsARowWhoseEditFailed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	p := f.add(t, "Prefer table output")
+	text := "Prefer short answers"
+	failing := New(failingUpdate{f.db}, filepath.Join(f.dir, "preference-tombstones"))
+	if _, err := failing.Update(ctx, f.alice, protocol.PreferenceUpdateParams{ID: p.ID, Text: &text}, protocol.PreferenceSourceSettings, ""); err == nil {
+		t.Fatal("the failing update succeeded")
+	}
+	if n, err := f.svc.Restore(ctx); err != nil || n != 0 {
+		t.Fatalf("Restore after a failed edit = %d, %v; want nothing deleted", n, err)
+	}
+	if got, err := f.svc.Get(ctx, f.alice, p.ID); err != nil || got.Text != "Prefer table output" {
+		t.Fatalf("after Restore: %+v, %v; want the unchanged row", got, err)
+	}
+}
+
+// An edit whose commit was not recorded, as after a crash right after it
+// committed, is found committed from the database and recorded, so a later
+// restored copy still loses its old text.
+func TestRestoreRecordsAnEditThatCommitted(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	p := f.add(t, "Prefer table output")
+	if err := f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := os.ReadFile(f.dbPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.db, err = store.Open(f.dbPath()); err != nil {
+		t.Fatal(err)
+	}
+	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
+	if err = f.svc.tombstones.edit(p.ID, p.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = f.db.UpdatePreference(ctx, f.alice, p.ID, func(row *store.Preference) error { row.Text = "Prefer short answers"; return nil },
+		func(store.Preference, store.Preference) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if n, rerr := f.svc.Restore(ctx); rerr != nil || n != 0 {
+		t.Fatalf("Restore = %d, %v; want the edited row kept", n, rerr)
+	}
+	if err = f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(f.dbPath(), snapshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if f.db, err = store.Open(f.dbPath()); err != nil {
+		t.Fatal(err)
+	}
+	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
+	if n, err := f.svc.Restore(ctx); err != nil || n != 1 {
+		t.Fatalf("Restore of the copy taken before the edit = %d, %v; want its old row deleted", n, err)
+	}
+}
+
+// Erasing a removed member's preferences records them, so restoring a copy
+// of the database taken before does not bring them back.
+func TestEraseSurvivesARestoredDatabase(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.add(t, "Prefer table output")
+	f.add(t, "Prefer short answers")
+	if err := f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := os.ReadFile(f.dbPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.db, err = store.Open(f.dbPath()); err != nil {
+		t.Fatal(err)
+	}
+	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
+	if err = f.svc.Erase(ctx, f.alice); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.db.DeleteMember(ctx, f.alice); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(f.dbPath(), snapshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if f.db, err = store.Open(f.dbPath()); err != nil {
+		t.Fatal(err)
+	}
+	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
+	if n, err := f.svc.Restore(ctx); err != nil || n != 2 {
+		t.Fatalf("Restore = %d, %v; want both of the removed member's preferences deleted", n, err)
+	}
+}
+
+// A forget succeeds while a reader holds the write-ahead log, and the log
+// loses the text once the reader is done.
+func TestForgetWhileAReaderHoldsTheLog(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.svc.retry = 10 * time.Millisecond
+	p := f.add(t, "Prefer canary-otter-forgotten output")
+	reader, err := sql.Open("sqlite", "file:"+f.dbPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reader.Close() })
+	tx, err := reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM member_preferences`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.svc.Delete(ctx, f.alice, p.ID); err != nil {
+		t.Fatalf("forget while a reader holds the log = %v; want success", err)
+	}
+	if err = tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		b, _ := os.ReadFile(f.dbPath() + "-wal")
+		if !bytes.Contains(b, []byte("canary-otter-forgotten")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the write-ahead log still holds the forgotten text")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The restart note goes only to a member who lets the assistant use
+// preferences and keeps at least one.
+func TestRestartNoteOnlyForMembersWithPreferences(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if notes := f.svc.TakeChanges(ctx, f.alice); len(notes) != 0 {
+		t.Fatalf("notes with no preferences = %q", notes)
+	}
+	f.add(t, "Prefer table output")
+	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
+	if err := f.db.PutAssistantSettings(ctx, f.alice, store.AssistantSettings{ShareView: true}); err != nil {
+		t.Fatal(err)
+	}
+	if notes := f.svc.TakeChanges(ctx, f.alice); len(notes) != 0 {
+		t.Fatalf("notes with preferences off = %q", notes)
+	}
+	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
+	if err := f.db.PutAssistantSettings(ctx, f.alice, store.AssistantSettings{ShareView: true, PreferencesEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if notes := f.svc.TakeChanges(ctx, f.alice); len(notes) != 1 || notes[0] != restarted {
+		t.Fatalf("notes with a preference = %q; want the restart note", notes)
 	}
 }

@@ -36,7 +36,7 @@ var preferenceOps = []Op{
 			"preference instead and returns the previous one. The member sees a Saved notice they can undo.", remember).
 		offer(TierReversible).calling(protocol.MethodAssistantRemember),
 	opOf("aether_forget", "Forget a preference", "", false, "call aether_my_preferences for preference ids",
-		"Delete one of the member's saved preferences for good.", forget).
+		"Delete one of the member's saved preferences for good. It works even while preferences are off or the conversation is temporary.", forget).
 		hints(true, false).offer(TierConfirmed).calling(protocol.MethodAssistantForget),
 }
 

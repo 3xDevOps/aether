@@ -78,8 +78,8 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 		return json.RawMessage(`{"candidate":{"candidate_id":"cand-1","mission_id":"mis-1","target_ref":"refs/heads/main"}}`), nil
 	case protocol.MethodMemoryShow:
 		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","scope":"member","title":"CI needs Docker","pinned_by":"m2","pinned_by_name":"Grace","pinned_at":"2026-10-26T10:00:00Z"}}`), nil
-	case protocol.MethodAssistantPreferences:
-		return json.RawMessage(`{"preferences":[{"id":"pref-1","text":"Prefer table output","scope":"all","source":"assistant"}]}`), nil
+	case protocol.MethodAssistantPreferenceShow:
+		return json.RawMessage(`{"id":"pref-1","text":"Prefer table output","scope":"all","source":"assistant"}`), nil
 	case protocol.MethodRunGet:
 		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t","member_id":"m2","mission_id":"mis-1"}}`), nil
 	case protocol.MethodRunPRFeedback:

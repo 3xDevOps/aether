@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -33,6 +35,11 @@ type Store interface {
 type Service struct {
 	store      Store
 	tombstones *tombstones
+	// scrubbing is set while a checkpoint the log refused is retried, every
+	// retry, until it succeeds or scrubTries ran out.
+	scrubbing  atomic.Bool
+	retry      time.Duration
+	scrubTries int
 
 	mu      sync.Mutex
 	changes map[domain.MemberID][]string
@@ -50,8 +57,8 @@ const restarted = "the server restarted, so your preferences may have changed si
 // New serves preferences from st. Deletions and text changes are recorded
 // in tombstonePath, which Restore reads.
 func New(st Store, tombstonePath string) *Service {
-	return &Service{store: st, tombstones: &tombstones{path: tombstonePath}, changes: make(map[domain.MemberID][]string),
-		told: make(map[domain.MemberID]bool)}
+	return &Service{store: st, tombstones: &tombstones{path: tombstonePath}, retry: 5 * time.Second, scrubTries: 120,
+		changes: make(map[domain.MemberID][]string), told: make(map[domain.MemberID]bool)}
 }
 
 // Normalize is the form preferences are stored and compared in: NFKC,
@@ -84,6 +91,8 @@ func clean(text string) (string, error) {
 		return "", invalid("text is required")
 	case n > MaxText:
 		return "", invalid("text is %d characters; the limit is %d", n, MaxText)
+	case tooShort(text):
+		return "", invalid("a preference needs at least %d words and %d characters", MinWords, MinChars)
 	}
 	if hits := secretscan.Scan("", []byte(text)); len(hits) > 0 {
 		return "", &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
@@ -196,9 +205,7 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 	if err := s.workspace(ctx, p.WorkspaceID); err != nil {
 		return protocol.PreferenceResult{}, err
 	}
-	// Once the tombstone is synced the change must commit: a cancelled
-	// caller would leave a tombstone for a change that never happened.
-	old, cur, err := s.store.UpdatePreference(context.WithoutCancel(ctx), member, p.ID, func(row *store.Preference) error {
+	old, cur, err := s.store.UpdatePreference(ctx, member, p.ID, func(row *store.Preference) error {
 		if p.Text != nil && text != row.Text {
 			row.Text, row.Source, row.SourceRef = text, source, ref
 		}
@@ -213,44 +220,93 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 		if cur.Text == old.Text {
 			return nil
 		}
-		return s.tombstones.edited(cur.ID, cur.UpdatedAt)
+		return s.tombstones.edit(cur.ID, old.UpdatedAt)
 	})
 	if errors.Is(err, store.ErrNotFound) {
 		return protocol.PreferenceResult{}, notFound(p.ID)
 	}
-	if cur.ID == "" {
+	if err != nil {
 		return protocol.PreferenceResult{}, fmt.Errorf("preference: %w", err)
+	}
+	if cur.Text != old.Text {
+		// Restore finds the change committed without this line too, as
+		// long as the database holds the new row.
+		if err = s.tombstones.edited(cur.ID, old.UpdatedAt); err != nil {
+			slog.Warn("preference: record the committed change", "preference", cur.ID, "error", err)
+		}
+		s.scrub()
 	}
 	if cur.Text != old.Text || cur.WorkspaceID != old.WorkspaceID || cur.Enabled != old.Enabled {
 		s.changed(member, cur.ID, "was changed")
 	}
 	previous := wire(old)
-	return protocol.PreferenceResult{Preference: wire(cur), Previous: &previous}, wrap(err)
+	return protocol.PreferenceResult{Preference: wire(cur), Previous: &previous}, nil
 }
 
 func (s *Service) Delete(ctx context.Context, member domain.MemberID, id string) (protocol.PreferenceDeleteResult, error) {
 	if id == "" {
 		return protocol.PreferenceDeleteResult{}, invalid("id is required")
 	}
+	// Once the tombstone is synced the delete must commit: a cancelled
+	// caller would leave a tombstone for a delete it was told failed.
 	row, err := s.store.DeletePreference(context.WithoutCancel(ctx), member, id, func(row store.Preference) error {
 		return s.tombstones.deleted(row.ID)
 	})
 	if errors.Is(err, store.ErrNotFound) {
 		return protocol.PreferenceDeleteResult{}, notFound(id)
 	}
-	if row.ID == "" {
+	if err != nil {
 		return protocol.PreferenceDeleteResult{}, fmt.Errorf("preference: %w", err)
 	}
+	s.scrub()
 	s.changed(member, id, "was forgotten")
-	return protocol.PreferenceDeleteResult{Deleted: wire(row)}, wrap(err)
+	return protocol.PreferenceDeleteResult{Deleted: wire(row)}, nil
 }
 
-// wrap is the error of a change that was made but whose cleanup failed.
-func wrap(err error) error {
-	if err == nil {
+// Erase deletes all of the member's preferences, ahead of removing the
+// member, recording each as deleted so that no restored copy of the
+// database brings them back.
+func (s *Service) Erase(ctx context.Context, member domain.MemberID) error {
+	rows, err := s.store.ListPreferences(ctx, member)
+	if err != nil {
+		return fmt.Errorf("preference: %w", err)
+	}
+	if len(rows) == 0 {
 		return nil
 	}
-	return fmt.Errorf("preference: %w", err)
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	if err = s.tombstones.deleted(ids...); err != nil {
+		return err
+	}
+	if err = s.store.DeleteMemberPreferences(context.WithoutCancel(ctx), member); err != nil {
+		return fmt.Errorf("preference: %w", err)
+	}
+	s.scrub()
+	return nil
+}
+
+// scrub clears deleted or replaced text from the write-ahead log. The
+// change is done either way: while a reader holds the log, it retries in
+// the background.
+func (s *Service) scrub() {
+	err := s.store.CheckpointWAL(context.Background())
+	if err == nil || !s.scrubbing.CompareAndSwap(false, true) {
+		return
+	}
+	slog.Warn("preference: clear the write-ahead log, retrying", "error", err)
+	go func() {
+		defer s.scrubbing.Store(false)
+		for range s.scrubTries {
+			time.Sleep(s.retry)
+			if err = s.store.CheckpointWAL(context.Background()); err == nil {
+				return
+			}
+		}
+		slog.Warn("preference: clear the write-ahead log; the next forget or edit tries again", "error", err)
+	}()
 }
 
 // Touch records that the assistant just read the member's preferences ids.
@@ -272,17 +328,33 @@ func (s *Service) changed(member domain.MemberID, id, what string) {
 
 // TakeChanges returns and forgets what changed in the member's preferences
 // since the last call, one line per preference, for the assistant's next
-// prompt.
-func (s *Service) TakeChanges(member domain.MemberID) []string {
+// prompt. The first call since the server started also says it restarted,
+// to a member who keeps preferences and lets the assistant use them.
+func (s *Service) TakeChanges(ctx context.Context, member domain.MemberID) []string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	notes := s.changes[member]
 	delete(s.changes, member)
-	if !s.told[member] {
-		s.told[member] = true
+	first := !s.told[member]
+	s.told[member] = true
+	s.mu.Unlock()
+	if first && s.keeps(ctx, member) {
 		notes = append([]string{restarted}, notes...)
 	}
 	return notes
+}
+
+// keeps reports whether member lets the assistant use preferences and has
+// one; a failed read counts as yes.
+func (s *Service) keeps(ctx context.Context, member domain.MemberID) bool {
+	enabled, err := s.Enabled(ctx, member)
+	if err != nil {
+		return true
+	}
+	if !enabled {
+		return false
+	}
+	rows, err := s.store.ListPreferences(ctx, member)
+	return err != nil || len(rows) > 0
 }
 
 // RestoreChanges puts back notes TakeChanges returned that were not

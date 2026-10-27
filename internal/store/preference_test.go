@@ -101,8 +101,8 @@ func TestPreferenceUpdateOrdersAndAborts(t *testing.T) {
 	}
 }
 
-// After a delete or a text change the old text is in neither the database
-// file nor its write-ahead log.
+// After a delete or a text change and a checkpoint the old text is in
+// neither the database file nor its write-ahead log.
 func TestForgottenPreferenceTextLeavesTheFiles(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
@@ -119,6 +119,9 @@ func TestForgottenPreferenceTextLeavesTheFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err = db.UpdatePreference(ctx, alice, edited.ID, func(p *Preference) error { p.Text = "Prefer table output"; return nil }, noCommit); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.CheckpointWAL(ctx); err != nil {
 		t.Fatal(err)
 	}
 	for _, file := range []string{path, path + "-wal"} {
@@ -143,15 +146,15 @@ func TestPreferenceTombstonesDeleteRestoredRows(t *testing.T) {
 	stale := addPreference(t, db, alice, "Prefer short answers")
 	current := addPreference(t, db, alice, "Prefer dark mode")
 	n, err := db.ApplyPreferenceTombstones(ctx, []string{gone.ID, "pref-unknown"}, map[string]time.Time{
-		stale.ID:   stale.UpdatedAt.Add(time.Millisecond),
-		current.ID: current.UpdatedAt,
+		stale.ID:   stale.UpdatedAt,
+		current.ID: current.UpdatedAt.Add(-time.Millisecond),
 	})
 	if err != nil || n != 2 {
 		t.Fatalf("apply = %d, %v; want 2 deleted", n, err)
 	}
 	list, _ := db.ListPreferences(ctx, alice)
 	if len(list) != 1 || list[0].ID != current.ID {
-		t.Fatalf("after the tombstones: %+v; want only the row as new as its edit", list)
+		t.Fatalf("after the tombstones: %+v; want only the row newer than the one its edit replaced", list)
 	}
 }
 

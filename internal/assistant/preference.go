@@ -10,11 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
-	"golang.org/x/text/cases"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
@@ -29,8 +27,6 @@ const (
 	// maxShown and maxShownBytes bound what aether_my_preferences returns.
 	maxShown      = 40
 	maxShownBytes = 4 << 10
-	minQuoteWords = 3
-	minQuoteChars = 12
 )
 
 // preferenceCaller serves the assistant's preference methods on its tool
@@ -69,6 +65,8 @@ func (c *preferenceCaller) Call(ctx context.Context, method string, params json.
 		out, err = c.remember(ctx, params)
 	case protocol.MethodAssistantForget:
 		out, err = c.forget(ctx, params)
+	case protocol.MethodAssistantPreferenceShow:
+		out, err = c.show(ctx, params)
 	default:
 		return c.Caller.Call(ctx, method, params)
 	}
@@ -86,11 +84,19 @@ func (c *preferenceCaller) Call(ctx context.Context, method string, params json.
 	return raw, nil
 }
 
-// memoryOff refuses every preference method while the member turned
-// preferences off or the conversation is temporary.
-func (c *preferenceCaller) memoryOff(ctx context.Context) error {
+func (c *preferenceCaller) configured() error {
 	if c.s.cfg.Preferences == nil {
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: "preferences are not configured on this server"}
+	}
+	return nil
+}
+
+// memoryOff refuses reading and saving preferences while the member turned
+// them off or the conversation is temporary. Forgetting one is always
+// allowed.
+func (c *preferenceCaller) memoryOff(ctx context.Context) error {
+	if err := c.configured(); err != nil {
+		return err
 	}
 	enabled, err := c.s.cfg.Preferences.Enabled(ctx, c.m.id)
 	if err != nil {
@@ -129,14 +135,6 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, err
 	}
 	out := protocol.AssistantPreferencesResult{Preferences: []protocol.AssistantPreference{}}
-	if p.ID != "" {
-		got, gerr := c.s.cfg.Preferences.Get(ctx, c.m.id, p.ID)
-		if gerr != nil {
-			return nil, gerr
-		}
-		out.Preferences = append(out.Preferences, shown(got))
-		return out, nil
-	}
 	ws := c.workspace(false)
 	listed, err := c.s.cfg.Preferences.List(ctx, c.m.id, protocol.PreferenceListParams{WorkspaceID: ws, Query: p.Query})
 	if err != nil {
@@ -157,6 +155,23 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, err
 	}
 	return out, nil
+}
+
+// show reads one preference by id for the card of aether_forget, which
+// works with memory off; the tool socket refuses the method itself.
+func (c *preferenceCaller) show(ctx context.Context, raw json.RawMessage) (any, error) {
+	p, err := protocol.DecodeParams[protocol.PreferenceIDParams](raw)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	}
+	if err = c.configured(); err != nil {
+		return nil, err
+	}
+	got, err := c.s.cfg.Preferences.Get(ctx, c.m.id, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	return shown(got), nil
 }
 
 func shown(p protocol.Preference) protocol.AssistantPreference {
@@ -182,7 +197,7 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "a preference is saved only while answering the member's own message " +
 			"that asked for it; ask them to say it again"}
 	}
-	if err = quoted(msg.Text, p.Text); err != nil {
+	if p.Text, err = quoted(msg.Text, p.Text); err != nil {
 		return nil, err
 	}
 	var ws string
@@ -225,7 +240,7 @@ func (c *preferenceCaller) forget(ctx context.Context, raw json.RawMessage) (any
 	held, ok := c.m.actions.take(protocol.MethodAssistantForget, raw)
 	p, err := protocol.DecodeParams[protocol.PreferenceIDParams](raw)
 	if err == nil {
-		err = c.memoryOff(ctx)
+		err = c.configured()
 	}
 	var res protocol.PreferenceDeleteResult
 	if err == nil {
@@ -256,48 +271,40 @@ func (c *preferenceCaller) note(method, summary, id string, held *heldAction, er
 	}
 }
 
-var fold = cases.Fold()
-
-// quoted refuses text unless it is a contiguous span of whole words of
-// message, outside quoted lines and fenced code blocks, ignoring case and
-// the punctuation around it, long enough to be a preference.
-func quoted(message, text string) error {
-	want := strings.TrimFunc(fold.String(preference.Normalize(text)), func(r rune) bool { return unicode.IsPunct(r) || unicode.IsSpace(r) })
-	if len(strings.Fields(want)) < minQuoteWords || utf8.RuneCountInString(want) < minQuoteChars {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf(
-			"a preference quotes at least %d words and %d characters of the member's message; ask them what to remember", minQuoteWords, minQuoteChars)}
+// quoted returns the span of message that text quotes: a contiguous run of
+// whole words of it, outside quoted lines and code blocks, ignoring case and
+// punctuation, long enough to be a preference. The span is the member's own
+// text, without the punctuation around it.
+func quoted(message, text string) (string, error) {
+	want := preference.Words(preference.Normalize(text))
+	tooShort := &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf(
+		"a preference quotes at least %d words and %d characters of the member's message; ask them what to remember",
+		preference.MinWords, preference.MinChars)}
+	if len(want) < preference.MinWords {
+		return "", tooShort
 	}
 	for _, seg := range typedSegments(message) {
-		seg = fold.String(preference.Normalize(seg))
-		for i := 0; i <= len(seg); {
-			j := strings.Index(seg[i:], want)
-			if j < 0 {
-				break
+		seg = preference.Normalize(seg)
+		words := preference.Words(seg)
+		if i := preference.Index(words, want); i >= 0 {
+			span := seg[words[i].Start:words[i+len(want)-1].End]
+			if utf8.RuneCountInString(span) < preference.MinChars {
+				return "", tooShort
 			}
-			start, end := i+j, i+j+len(want)
-			before, _ := utf8.DecodeLastRuneInString(seg[:start])
-			after, _ := utf8.DecodeRuneInString(seg[end:])
-			if !wordRune(before) && !wordRune(after) {
-				return nil
-			}
-			_, size := utf8.DecodeRuneInString(seg[start:])
-			i = start + size
+			return span, nil
 		}
 	}
-	return &protocol.Error{Code: protocol.CodeInvalidParams, Message: "text must quote the member's own words from their latest message, " +
+	return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "text must quote the member's own words from their latest message, " +
 		"outside quoted lines and code blocks; quote them exactly or ask what to remember"}
 }
 
-func wordRune(r rune) bool {
-	return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r))
-}
-
 // typedSegments splits message into runs of lines the member wrote
-// themselves: lines starting with '>' and fenced code blocks, which hold
-// text pasted from elsewhere, split it and are dropped.
+// themselves. Text pasted from elsewhere splits it and is dropped: quoted
+// lines starting with '>' and the lines continuing them up to a blank line,
+// fenced code blocks, and lines indented as code by a tab or four spaces.
 func typedSegments(message string) []string {
 	var out, cur []string
-	fence := ""
+	fence, quoting := "", false
 	flush := func() {
 		if len(cur) > 0 {
 			out = append(out, strings.Join(cur, "\n"))
@@ -306,15 +313,23 @@ func typedSegments(message string) []string {
 	}
 	for _, line := range strings.Split(message, "\n") {
 		trimmed := strings.TrimSpace(line)
+		run := fenceRun(trimmed)
 		switch {
 		case fence != "":
-			if strings.HasPrefix(trimmed, fence) {
+			if run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(trimmed[len(run):]) == "" {
 				fence = ""
 			}
-		case strings.HasPrefix(trimmed, "```"), strings.HasPrefix(trimmed, "~~~"):
+		case run != "":
 			flush()
-			fence = trimmed[:3]
+			fence, quoting = run, false
 		case strings.HasPrefix(trimmed, ">"):
+			flush()
+			quoting = true
+		case trimmed == "":
+			quoting = false
+			cur = append(cur, line)
+		case quoting:
+		case strings.HasPrefix(line, "\t"), strings.HasPrefix(line, "    "):
 			flush()
 		default:
 			cur = append(cur, line)
@@ -322,6 +337,19 @@ func typedSegments(message string) []string {
 	}
 	flush()
 	return out
+}
+
+// fenceRun is the run of backticks or tildes that opens or closes a code
+// fence at the start of line, or empty.
+func fenceRun(line string) string {
+	if line == "" || (line[0] != '`' && line[0] != '~') {
+		return ""
+	}
+	n := len(line) - len(strings.TrimLeft(line, line[:1]))
+	if n < 3 {
+		return ""
+	}
+	return line[:n]
 }
 
 // carriesPreference reports whether c, a launch or message auto-approval
@@ -337,13 +365,13 @@ func (s *Service) carriesPreference(ctx context.Context, member domain.MemberID,
 		Message string `json:"message"`
 	}
 	_ = json.Unmarshal(c.Params, &sent)
-	text := fold.String(preference.Normalize(sent.Task + "\n" + sent.Message))
+	words := preference.Words(preference.Normalize(sent.Task + "\n" + sent.Message))
 	listed, err := s.cfg.Preferences.List(ctx, member, protocol.PreferenceListParams{})
 	if err != nil {
 		return true
 	}
 	for _, p := range listed.Preferences {
-		if strings.Contains(text, fold.String(p.Text)) {
+		if preference.Index(words, preference.Words(p.Text)) >= 0 {
 			return true
 		}
 	}
@@ -353,11 +381,11 @@ func (s *Service) carriesPreference(ctx context.Context, member domain.MemberID,
 // preferenceNotes tells the agent, for its eyes only, which preferences
 // changed since its last prompt, so it stops using their old text. restore
 // puts the notes back for a prompt that was not sent.
-func (s *Service) preferenceNotes(member domain.MemberID) (blocks []acp.ContentBlock, restore func()) {
+func (s *Service) preferenceNotes(ctx context.Context, member domain.MemberID) (blocks []acp.ContentBlock, restore func()) {
 	if s.cfg.Preferences == nil {
 		return nil, func() {}
 	}
-	notes := s.cfg.Preferences.TakeChanges(member)
+	notes := s.cfg.Preferences.TakeChanges(ctx, member)
 	if len(notes) == 0 {
 		return nil, func() {}
 	}

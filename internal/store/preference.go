@@ -48,9 +48,19 @@ type PreferenceStore interface {
 	DeletePreference(ctx context.Context, member domain.MemberID, id string, commit func(Preference) error) (Preference, error)
 	// TouchPreferences sets the last use of the member's preferences ids.
 	TouchPreferences(ctx context.Context, member domain.MemberID, ids []string, at time.Time) error
+	// DeleteMemberPreferences removes all of the member's preferences.
+	DeleteMemberPreferences(ctx context.Context, member domain.MemberID) error
+	// PreferenceTimes returns when each of the preferences ids that exist
+	// was last updated, whoever owns it.
+	PreferenceTimes(ctx context.Context, ids []string) (map[string]time.Time, error)
 	// ApplyPreferenceTombstones deletes the preferences in deleted and
-	// those in edited last updated before the time edited holds for them.
-	ApplyPreferenceTombstones(ctx context.Context, deleted []string, edited map[string]time.Time) (int64, error)
+	// those in replaced last updated no later than the time it holds for
+	// them.
+	ApplyPreferenceTombstones(ctx context.Context, deleted []string, replaced map[string]time.Time) (int64, error)
+	// CheckpointWAL copies the write-ahead log into the database and
+	// truncates it, so text secure_delete overwrote in the database is gone
+	// from the log too. It fails while a reader holds the log.
+	CheckpointWAL(ctx context.Context) error
 }
 
 var _ PreferenceStore = (*DB)(nil)
@@ -171,11 +181,6 @@ func (d *DB) UpdatePreference(ctx context.Context, member domain.MemberID, id st
 	if err = tx.Commit(); err != nil {
 		return Preference{}, Preference{}, fmt.Errorf("store: update preference: %w", err)
 	}
-	if cur.Text != old.Text {
-		if err = d.checkpoint(ctx); err != nil {
-			return old, cur, fmt.Errorf("store: preference %s updated, but clearing its old text from the write-ahead log failed: %w", id, err)
-		}
-	}
 	return old, cur, nil
 }
 
@@ -199,23 +204,54 @@ func (d *DB) DeletePreference(ctx context.Context, member domain.MemberID, id st
 	if err = tx.Commit(); err != nil {
 		return Preference{}, fmt.Errorf("store: delete preference: %w", err)
 	}
-	if err = d.checkpoint(ctx); err != nil {
-		return p, fmt.Errorf("store: preference %s deleted, but clearing its text from the write-ahead log failed: %w", id, err)
-	}
 	return p, nil
 }
 
-// checkpoint copies the write-ahead log into the database and truncates it,
-// so text secure_delete overwrote in the database is gone from the log too.
-func (d *DB) checkpoint(ctx context.Context) error {
-	var busy, frames, done int
-	if err := d.db.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &frames, &done); err != nil {
-		return err
-	}
-	if busy != 0 {
-		return errors.New("a reader held the log; the next checkpoint clears it")
+func (d *DB) DeleteMemberPreferences(ctx context.Context, member domain.MemberID) error {
+	if _, err := d.db.ExecContext(ctx, `DELETE FROM member_preferences WHERE member_id = ?`, member); err != nil {
+		return fmt.Errorf("store: delete member preferences: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) CheckpointWAL(ctx context.Context) error {
+	var busy, frames, done int
+	if err := d.db.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &frames, &done); err != nil {
+		return fmt.Errorf("store: checkpoint: %w", err)
+	}
+	if busy != 0 {
+		return errors.New("store: checkpoint: a reader holds the write-ahead log")
+	}
+	return nil
+}
+
+func (d *DB) PreferenceTimes(ctx context.Context, ids []string) (map[string]time.Time, error) {
+	out := make(map[string]time.Time)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT id, updated_at FROM member_preferences WHERE id IN (?`+strings.Repeat(", ?", len(ids)-1)+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: preference times: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	for rows.Next() {
+		var id string
+		var ms int64
+		if err = rows.Scan(&id, &ms); err != nil {
+			return nil, fmt.Errorf("store: preference times: %w", err)
+		}
+		out[id] = time.UnixMilli(ms).UTC()
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: preference times: %w", err)
+	}
+	return out, nil
 }
 
 func (d *DB) TouchPreferences(ctx context.Context, member domain.MemberID, ids []string, at time.Time) error {
@@ -234,8 +270,8 @@ func (d *DB) TouchPreferences(ctx context.Context, member domain.MemberID, ids [
 	return nil
 }
 
-func (d *DB) ApplyPreferenceTombstones(ctx context.Context, deleted []string, edited map[string]time.Time) (int64, error) {
-	if len(deleted) == 0 && len(edited) == 0 {
+func (d *DB) ApplyPreferenceTombstones(ctx context.Context, deleted []string, replaced map[string]time.Time) (int64, error) {
+	if len(deleted) == 0 && len(replaced) == 0 {
 		return 0, nil
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
@@ -258,22 +294,17 @@ func (d *DB) ApplyPreferenceTombstones(ctx context.Context, deleted []string, ed
 			break
 		}
 	}
-	for id, at := range edited {
+	for id, at := range replaced {
 		if err != nil {
 			break
 		}
-		err = exec(`DELETE FROM member_preferences WHERE id = ? AND updated_at < ?`, id, at.UnixMilli())
+		err = exec(`DELETE FROM member_preferences WHERE id = ? AND updated_at <= ?`, id, at.UnixMilli())
 	}
 	if err != nil {
 		return 0, fmt.Errorf("store: apply preference tombstones: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
 		return 0, fmt.Errorf("store: apply preference tombstones: %w", err)
-	}
-	if removed > 0 {
-		if err = d.checkpoint(ctx); err != nil {
-			return removed, fmt.Errorf("store: apply preference tombstones: %w", err)
-		}
 	}
 	return removed, nil
 }

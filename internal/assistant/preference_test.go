@@ -3,7 +3,10 @@ package assistant
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -152,7 +155,7 @@ func TestRememberSavesQuotedWordsAtMostThreeTimesATurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := saved.Preference; p.Text != "Prefer table output." || p.Source != protocol.PreferenceSourceAssistant || p.SourceRef != "msg-1" || p.WorkspaceID != "" {
+	if p := saved.Preference; p.Text != "prefer table output" || p.Source != protocol.PreferenceSourceAssistant || p.SourceRef != "msg-1" || p.WorkspaceID != "" {
 		t.Fatalf("saved = %+v", p)
 	}
 	for _, text := range []string{"always run make lint first", "keep commit messages short"} {
@@ -167,8 +170,8 @@ func TestRememberSavesQuotedWordsAtMostThreeTimesATurn(t *testing.T) {
 	// Updated rows sort newest first by their millisecond timestamps.
 	time.Sleep(2 * time.Millisecond)
 	f.say(2, "Actually, prefer markdown lists over tables.")
-	updated, err := f.remember(protocol.AssistantRememberParams{Text: "prefer markdown lists over tables", Replaces: saved.Preference.ID})
-	if err != nil || updated.Previous == nil || updated.Previous.Text != "Prefer table output." || updated.Preference.ID != saved.Preference.ID ||
+	updated, err := f.remember(protocol.AssistantRememberParams{Text: "PREFER markdown lists, over tables!", Replaces: saved.Preference.ID})
+	if err != nil || updated.Previous == nil || updated.Previous.Text != "prefer table output" || updated.Preference.ID != saved.Preference.ID ||
 		updated.Preference.SourceRef != "msg-2" {
 		t.Fatalf("replace = %+v, %v; want the row updated and the previous text returned", updated, err)
 	}
@@ -178,6 +181,7 @@ func TestRememberSavesQuotedWordsAtMostThreeTimesATurn(t *testing.T) {
 
 	list, err := f.mine()
 	if err != nil || len(list) != 3 || list[0].Text != "prefer markdown lists over tables" || list[0].Scope != "all" {
+		// The member's own words are stored, not the agent's rendering.
 		t.Fatalf("my preferences = %+v, %v; want 3, newest first", list, err)
 	}
 	stored, _ := f.db.GetPreference(t.Context(), f.m.id, list[0].ID)
@@ -214,40 +218,64 @@ func TestRememberRefusesSecretsWithoutStoringThem(t *testing.T) {
 	}
 }
 
-func TestMemoryOffRefusesEveryPreferenceTool(t *testing.T) {
+// With memory off the assistant can neither read nor save preferences,
+// but a member can still have one forgotten.
+func TestMemoryOffRefusesReadingAndSavingButNotForgetting(t *testing.T) {
 	f := newPrefFixture(t)
-	f.say(1, "remember that I prefer table output")
-	if _, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer table output"}); err != nil {
-		t.Fatal(err)
+	var ids []string
+	for _, text := range []string{"Prefer table output", "Prefer short answers"} {
+		res, err := f.prefs.Add(t.Context(), f.m.id, text, "", protocol.PreferenceSourceSettings, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, res.Preference.ID)
 	}
-	list, _ := f.mine()
-	check := func(why string) {
+	f.say(1, "remember that I prefer dark mode always")
+	check := func(why, id string) {
 		t.Helper()
-		_, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer table output"})
+		_, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer dark mode always"})
 		if errCode(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "memory is off: "+why) {
 			t.Errorf("remember = %v, want memory is off: %s", err, why)
 		}
 		if _, err = f.mine(); errCode(err) != protocol.CodeDenied {
 			t.Errorf("my preferences = %v, want denied", err)
 		}
-		err = coordtransport.Call(t.Context(), f.sock, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: list[0].ID}, nil)
-		if errCode(err) != protocol.CodeDenied || len(f.m.confirms.snapshot()) != 0 {
-			t.Errorf("forget = %v, want denied before any card", err)
+		if err = callTool(t, f.sock, f.m, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: id}, true, true); err != nil {
+			t.Errorf("forget = %v, want it forgotten after the card", err)
+		}
+		if _, err = f.prefs.Get(t.Context(), f.m.id, id); errCode(err) != protocol.CodeNotFound && !strings.Contains(fmt.Sprint(err), "not found") {
+			t.Errorf("after forget: %v, want not found", err)
 		}
 	}
 	if err := f.db.SetAssistantTemporary(t.Context(), f.m.id, true); err != nil {
 		t.Fatal(err)
 	}
-	check("this is a temporary conversation")
+	check("this is a temporary conversation", ids[0])
 	if err := f.db.SetAssistantTemporary(t.Context(), f.m.id, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.db.PutAssistantSettings(t.Context(), f.m.id, store.AssistantSettings{ShareView: true}); err != nil {
 		t.Fatal(err)
 	}
-	check("the member turned preferences off")
+	check("the member turned preferences off", ids[1])
 }
 
+// The forget card's own read of a preference is not a tool the agent can
+// call.
+func TestSocketRefusesTheForgetCardsRead(t *testing.T) {
+	f := newPrefFixture(t)
+	res, err := f.prefs.Add(t.Context(), f.m.id, "Prefer table output", "", protocol.PreferenceSourceSettings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = coordtransport.Call(t.Context(), f.sock, protocol.MethodAssistantPreferenceShow, protocol.PreferenceIDParams{ID: res.Preference.ID}, nil)
+	if errCode(err) != protocol.CodeMethodNotFound {
+		t.Fatalf("%s on the tool socket = %v, want method not found", protocol.MethodAssistantPreferenceShow, err)
+	}
+}
+
+// Forgetting shows the text on its card and keeps it out of the server log
+// and the count toward suggesting auto-approval.
 func TestForgetShowsTheTextAndTellsTheNextPrompt(t *testing.T) {
 	f := newPrefFixture(t)
 	f.say(1, "always remember: prefer table output")
@@ -255,8 +283,23 @@ func TestForgetShowsTheTextAndTellsTheNextPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = callTool(t, f.sock, f.m, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: saved.Preference.ID}, true, true); err != nil {
+	var logs bytes.Buffer
+	var logMu sync.Mutex
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(lockedWriter{&logMu, &logs}, nil)))
+	err = callTool(t, f.sock, f.m, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: saved.Preference.ID}, true, true)
+	slog.SetDefault(prev)
+	if err != nil {
 		t.Fatal(err)
+	}
+	logMu.Lock()
+	logged := logs.String()
+	logMu.Unlock()
+	if !strings.Contains(logged, "assistant approval") || strings.Contains(logged, "table output") {
+		t.Fatalf("server log during forget = %q; want the approval without the preference text", logged)
+	}
+	if st, _ := f.db.AssistantSettings(t.Context(), f.m.id); st.Approvals != 0 {
+		t.Fatalf("approvals counted = %d; a forget is never auto-approved", st.Approvals)
 	}
 	if list, _ := f.mine(); len(list) != 0 {
 		t.Fatalf("after forget: %+v", list)
@@ -267,11 +310,11 @@ func TestForgetShowsTheTextAndTellsTheNextPrompt(t *testing.T) {
 		a.Outcome != protocol.AssistantActionSucceeded || a.Target.PreferenceID != saved.Preference.ID {
 		t.Fatalf("forget record = %+v", a)
 	}
-	blocks, _ := f.svc.preferenceNotes(f.m.id)
+	blocks, _ := f.svc.preferenceNotes(t.Context(), f.m.id)
 	if len(blocks) != 1 || !strings.Contains(blocks[0].Text.Text, "preference "+saved.Preference.ID+" was forgotten; do not use the old text") {
 		t.Fatalf("next prompt's notes = %+v", blocks)
 	}
-	if blocks, _ = f.svc.preferenceNotes(f.m.id); len(blocks) != 0 {
+	if blocks, _ = f.svc.preferenceNotes(t.Context(), f.m.id); len(blocks) != 0 {
 		t.Fatal("the note went to a second prompt")
 	}
 }
@@ -351,5 +394,66 @@ func TestWorkspacePreferencesFollowTheView(t *testing.T) {
 	saved, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true})
 	if err != nil || saved.Preference.WorkspaceID != string(ws.ID) {
 		t.Fatalf("workspace_scoped with the message's view = %+v, %v", saved, err)
+	}
+}
+
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// Only lines the member typed can be quoted: not quoted lines or their lazy
+// continuations, fenced blocks up to a fence as long as the one that opened
+// them, or indented code.
+func TestQuotedSkipsPastedText(t *testing.T) {
+	const want = "prefer table output always"
+	for name, message := range map[string]string{
+		"quoted line":       "> prefer table output always",
+		"lazy continuation": "> from the review:\nprefer table output always",
+		"long fence":        "````\n```\nprefer table output always\n````",
+		"tilde fence":       "~~~\n```\nprefer table output always\n~~~",
+		"unclosed fence":    "```go\nprefer table output always",
+		"indented code":     "see:\n    prefer table output always",
+		"tab indented code": "\tprefer table output always",
+	} {
+		if span, err := quoted(message, want); err == nil {
+			t.Errorf("%s: quoted = %q, want refused", name, span)
+		}
+	}
+	for name, message := range map[string]string{
+		"after a quote":     "> from the review\n\nPrefer table output, always.",
+		"after a fence":     "````\nx\n```\n````\nPrefer table output, always.",
+		"after indentation": "    x := 1\nPrefer table output, always.",
+	} {
+		if span, err := quoted(message, want); err != nil || span != "Prefer table output, always" {
+			t.Errorf("%s: quoted = %q, %v; want the member's own span", name, span, err)
+		}
+	}
+}
+
+// A launch carries a preference when it holds the preference's words in
+// order, whatever the punctuation and case, and not when they run into
+// other words.
+func TestCarriesPreferenceMatchesWholeWords(t *testing.T) {
+	f := newPrefFixture(t)
+	if _, err := f.prefs.Add(t.Context(), f.m.id, "Prefer table output", "", protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	for task, want := range map[string]bool{
+		"Fix it. PREFER: table, output!":   true,
+		"Fix it; prefer\ntable output":     true,
+		"Fix it and prefer table outputs":  false,
+		"Fix it and unprefer table output": false,
+	} {
+		params, _ := json.Marshal(protocol.RunLaunchParams{Task: task})
+		if got := f.svc.carriesPreference(t.Context(), f.m.id, protocol.AssistantConfirmation{Method: protocol.MethodRunLaunch, Params: params}); got != want {
+			t.Errorf("carriesPreference(%q) = %v, want %v", task, got, want)
+		}
 	}
 }

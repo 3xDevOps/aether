@@ -17,6 +17,8 @@ type PreferenceService interface {
 	Add(ctx context.Context, member domain.MemberID, text, workspaceID, source, ref string) (protocol.PreferenceResult, error)
 	Update(ctx context.Context, member domain.MemberID, p protocol.PreferenceUpdateParams, source, ref string) (protocol.PreferenceResult, error)
 	Delete(ctx context.Context, member domain.MemberID, id string) (protocol.PreferenceDeleteResult, error)
+	// Erase deletes all of the member's preferences for good.
+	Erase(ctx context.Context, member domain.MemberID) error
 }
 
 func init() {
@@ -40,7 +42,7 @@ func init() {
 func preferenceMethod[P any](call func(PreferenceService, context.Context, domain.MemberID, P) (any, error)) methodHandler {
 	return func(s *Server, ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 		if id, ok := ctx.Value(connIdentityKey{}).(connIdentity); (ok && id.connector != "") || domain.ViaFrom(ctx) != "" {
-			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "preferences are private: only you can read or change them, in the Aether app or CLI"}
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "preferences are private: only you can read or change them, in the Aether app"}
 		}
 		svc := s.cfg.Services.Preferences
 		if svc == nil {

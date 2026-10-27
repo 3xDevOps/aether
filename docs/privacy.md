@@ -440,23 +440,29 @@ with access to the database file can read it.
 
 Forgetting a preference deletes its row. SQLite overwrites the deleted text
 (`secure_delete`) and the server checkpoints and truncates the write-ahead
-log. The server also appends the preference's id, never its text, to
-`<data-dir>/preference-tombstones` and, when it starts, deletes again every
-preference recorded there, and every copy older than its last recorded edit,
-so restoring an older database does not bring it back. Forgetting does not
-remove:
+log; while another connection is reading, the forget still succeeds and the
+server retries the checkpoint in the background. The server also appends
+the preference's id, never its text, to `<data-dir>/preference-tombstones`
+before the delete commits, and does the same for an edit of its text,
+recording when the replaced row was last changed. When the server starts it
+deletes again every preference recorded as deleted, and every row no newer
+than one a committed edit replaced, so restoring an older database does not
+bring it back. The file gains one short line per forget or edit and is
+never compacted. Forgetting does not remove:
 
 - the `aether.db.pre-update` copy an update keeps until the new release
   starts;
 - backups an operator made of the data directory;
 - runs already launched with the text in their task;
-- the assistant transcript (`<data-dir>/assistant/<member>/items.jsonl`) and
-  the agent's own session until you start a **New conversation**;
+- the assistant transcript (`<data-dir>/assistant/<member>/items.jsonl`)
+  until you start a **New conversation**, and the agent's own session files,
+  which New conversation does not delete on every server version;
 - copies a connected app or an agent made elsewhere.
 
-Removing a member deletes their preferences. Merging two members moves
-all of them to the member that remains, even past the 200 limit; new saves
-are then refused until enough are forgotten.
+Removing a member deletes their preferences and records each as deleted in
+the same file. Merging two members moves all of them to the member that
+remains, even past the 200 limit; new saves are then refused until enough
+are forgotten.
 
 ## Permissions
 

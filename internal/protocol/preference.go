@@ -15,6 +15,9 @@ const (
 	MethodAssistantPreferences = "assistant.preferences"
 	MethodAssistantRemember    = "assistant.remember"
 	MethodAssistantForget      = "assistant.forget"
+	// MethodAssistantPreferenceShow reads one preference for the card of
+	// MethodAssistantForget. The tool socket refuses it.
+	MethodAssistantPreferenceShow = "assistant.preference.show"
 )
 
 // Where a preference came from; the server sets it from the path that saved
@@ -87,11 +90,9 @@ type PreferenceDeleteResult struct {
 }
 
 // AssistantPreferencesParams is the assistant's read of its member's
-// preferences: by ID one preference, else the enabled ones that apply to
-// the conversation, filtered by Query.
+// enabled preferences that apply to the conversation, filtered by Query.
 type AssistantPreferencesParams struct {
 	Query string `json:"query,omitempty"`
-	ID    string `json:"id,omitempty"`
 }
 
 type AssistantPreference struct {

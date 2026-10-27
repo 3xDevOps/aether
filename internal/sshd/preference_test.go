@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
@@ -89,5 +91,31 @@ func TestPreferencesAreOwnerOnly(t *testing.T) {
 	var listed protocol.PreferenceListResult
 	if err := aliceC.Call(protocol.MethodPreferenceList, protocol.PreferenceListParams{IncludeDisabled: true}, &listed); err != nil || len(listed.Preferences) != 0 || !listed.Enabled {
 		t.Fatalf("alice's list after the delete = %+v, %v", listed, err)
+	}
+}
+
+// Removing a member records their preferences as deleted, so restoring a
+// copy of the database taken before the removal does not bring them back.
+func TestMemberRemoveRecordsPreferencesDeleted(t *testing.T) {
+	t.Parallel()
+	tombs := filepath.Join(t.TempDir(), "preference-tombstones")
+	e := newTestEnv(t, func(c *Config) {
+		db, ok := c.Store.(*store.DB)
+		if !ok {
+			t.Fatalf("store is %T, want *store.DB", c.Store)
+		}
+		c.Services.Preferences = preference.New(db, tombs)
+	})
+	bobKey, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	var added protocol.PreferenceResult
+	if err := controlAs(t, e, bobKey).Call(protocol.MethodPreferenceAdd, protocol.PreferenceAddParams{Text: "Prefer table output"}, &added); err != nil {
+		t.Fatal(err)
+	}
+	if err := controlClient(t, e).Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(bob.ID)}, nil); err != nil {
+		t.Fatalf("member.remove: %v", err)
+	}
+	b, err := os.ReadFile(tombs)
+	if err != nil || !strings.Contains(string(b), added.Preference.ID+" deleted") {
+		t.Fatalf("tombstones = %q, %v; want %s recorded as deleted", b, err, added.Preference.ID)
 	}
 }

@@ -368,13 +368,10 @@ func (s *Server) summarizeForget(ctx context.Context, req protocol.Request, c *p
 	if err != nil || p.ID == "" {
 		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": id is required"}
 	}
-	var res protocol.AssistantPreferencesResult
-	if rpcErr := s.call(ctx, protocol.MethodAssistantPreferences, protocol.AssistantPreferencesParams{ID: p.ID}, &res); rpcErr != nil {
+	var pref protocol.AssistantPreference
+	if rpcErr := s.call(ctx, protocol.MethodAssistantPreferenceShow, p, &pref); rpcErr != nil {
 		return rpcErr
 	}
-	if len(res.Preferences) != 1 {
-		return &protocol.Error{Code: protocol.CodeNotFound, Message: "preference " + p.ID + " not found"}
-	}
-	c.Summary = fmt.Sprintf("Forget your preference %s: %q", p.ID, res.Preferences[0].Text)
+	c.Summary = fmt.Sprintf("Forget your preference %s: %q", p.ID, pref.Text)
 	return nil
 }
