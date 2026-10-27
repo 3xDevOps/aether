@@ -83,13 +83,13 @@ evidence:
 
 | `wait.kind` | When | What you see | Needs you |
 | --- | --- | --- | --- |
-| `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way or delivered. | The state, and `<condition>: <status> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
+| `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way. | The state, and `<condition>: <status> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
 | `source_unknown` | A pending condition was not read within twice its poll interval, or its reads fail. | `Waiting for CI (status unknown)` and `<condition>: status unknown (last read 12m ago): <error>`. The last status is not shown as current. | No. Aether keeps retrying. |
 | `system_fault` | A condition errored or expired, for example the pull request is gone, and the agent is being told. | `Waiting for CI (wait fault)` and the condition's error. | No. The agent decides what to do next. |
 | `system_fault` | A condition resolved, errored or expired, and its wake was not delivered within 5 minutes. | `Needs you`, reason `wait broken: <condition> resolved, but the agent was not woken`, and the delivery error. | Yes. The agent will not move on its own. Send it a message. |
 | `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`, and the last read error. | Yes. |
 | `system_fault` | Every read of the run's conditions failed for an hour, counted from the first failure or from the wait's report if later. A read that succeeds starts the hour over, and so does a server restart. Before that the wait is `source_unknown`. | `Needs you`, reason `wait broken: cannot read this run's wait conditions for over 1h, so the agent will not be woken`, and the read error. | Yes. |
-| `unverified` | The agent named no condition, or only ones that left pending before its current turn. | The state, as described above. | No. |
+| `unverified` | The agent named no condition, or only ones that left pending before its current turn or whose wake was delivered. Once delivered, including a condition that resolved inside the agent's own report, the run waits on its agent, not on the condition. | The state, as described above. It goes stale like a wait with no condition. | No. |
 
 A broken wait is the only one that needs you, because only then can nothing
 but a person move the run. While another of its conditions is still pending
