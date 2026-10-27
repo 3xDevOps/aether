@@ -629,6 +629,9 @@ func TestMissionWorkerHoldGenerationAndRestartRelease(t *testing.T) {
 	if err != nil || again.Generation != held.Generation || !again.UpdatedAt.Equal(held.UpdatedAt) {
 		t.Fatalf("same member retake = %+v, %v; want generation %d since %s", again, err, held.Generation, held.UpdatedAt)
 	}
+	if shown, getErr := db.GetAttemptByRun(ctx, attempt.RunID); getErr != nil || !shown.TakeoverSince.Equal(held.UpdatedAt) {
+		t.Fatalf("attempt while held = %+v, %v; want takeover_since %s", shown, getErr, held.UpdatedAt)
+	}
 	other := mustCreateMember(t, db)
 	taken, err := db.SetMissionWorkerTakeover(ctx, attempt.RunID, other.ID, true)
 	if err != nil || taken.Generation <= held.Generation {

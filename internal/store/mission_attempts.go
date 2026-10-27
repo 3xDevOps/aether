@@ -115,12 +115,12 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if !errors.Is(blockedErr, sql.ErrNoRows) {
 		return nil, false, blockedErr
 	}
-	var takeover int
-	if takeoverErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_worker_takeovers WHERE mission_id=? AND task_id=? AND active=1`, r.MissionID, r.TaskID).Scan(&takeover); takeoverErr != nil {
+	var holder domain.MemberID
+	var since int64
+	if takeoverErr := tx.QueryRowContext(ctx, `SELECT member_id,updated_at FROM mission_worker_takeovers WHERE mission_id=? AND task_id=? AND active=1 LIMIT 1`, r.MissionID, r.TaskID).Scan(&holder, &since); takeoverErr == nil {
+		return nil, false, TakeoverError(holder, decodeTime(since))
+	} else if !errors.Is(takeoverErr, sql.ErrNoRows) {
 		return nil, false, takeoverErr
-	}
-	if takeover > 0 {
-		return nil, false, ErrMissionTakeover
 	}
 	var number int
 	if numberErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number),0)+1 FROM mission_attempts WHERE task_id = ?`, r.TaskID).Scan(&number); numberErr != nil {

@@ -46,11 +46,10 @@ func integratorAdmitted(t *testing.T, e *testEnv, mission *domain.Mission) error
 		mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error { return nil })
 }
 
-// Cause (a): the dashboard took control of an Enhanced worker, then its
-// stream dropped without an explicit release. Once the reconnect window
-// passes nobody holds the lease, yet the durable hold still refuses the
-// integrator. docs/coordination.md currently documents this as intended.
-func TestReproACPMissionTakeoverStaysActiveAfterLeaseExpiry(t *testing.T) {
+// The dashboard took control of an Enhanced worker, then its stream dropped
+// without an explicit release. Once the reconnect window passes nobody holds
+// the lease, so the hold is released and the integrator steers again.
+func TestACPMissionHoldClearsWhenTheLeaseExpires(t *testing.T) {
 	e, db, mission, clock := missionACPWorkerTestEnv(t, 20*time.Millisecond)
 	stream, ack, err := e.srv.Local(e.member.ID).ACP(t.Context(), protocol.ACPStreamRequest{
 		RunID: string(e.run.ID), Write: true, ControlSessionID: "acp-tab",
@@ -76,9 +75,9 @@ func TestReproACPMissionTakeoverStaysActiveAfterLeaseExpiry(t *testing.T) {
 	}
 }
 
-// Cause (b), server half: opening and reopening an Enhanced worker as a
-// viewer, the dashboard's header without write, must never take the hold.
-func TestReproACPMissionViewerNeverTakesOver(t *testing.T) {
+// Opening and reopening an Enhanced worker as a viewer, the dashboard's
+// header without write, never takes the hold.
+func TestACPMissionViewerNeverTakesTheHold(t *testing.T) {
 	e, db, mission, _ := missionACPWorkerTestEnv(t, 20*time.Millisecond)
 	for i := range 3 {
 		stream, ack, err := e.srv.Local(e.member.ID).ACP(t.Context(), protocol.ACPStreamRequest{
@@ -102,11 +101,11 @@ func TestReproACPMissionViewerNeverTakesOver(t *testing.T) {
 	}
 }
 
-// Generation churn: the dashboard reconnects a held stream with write:true
-// and its lease generation (acp-stream.ts lease header). Each reconnect runs
-// acpStream.acquire again, which records a fresh takeover generation even
-// though the same session kept the same lease.
-func TestReproACPMissionReconnectBumpsTakeoverGeneration(t *testing.T) {
+// The dashboard reconnects a held stream with write:true and its lease
+// generation (acp-stream.ts lease header). Each reconnect runs
+// acpStream.acquire again; the same session keeping the same lease keeps the
+// takeover generation.
+func TestACPMissionReconnectKeepsTakeoverGeneration(t *testing.T) {
 	e, db, _, _ := missionACPWorkerTestEnv(t, time.Minute)
 	stream, ack, err := e.srv.Local(e.member.ID).ACP(t.Context(), protocol.ACPStreamRequest{
 		RunID: string(e.run.ID), Write: true, ControlSessionID: "acp-tab",

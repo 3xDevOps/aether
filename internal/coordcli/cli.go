@@ -192,7 +192,7 @@ task summary and what it is doing: activity (working, waiting-agents,
 waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or
 disconnected) with its reason, then the raw run_status, where needs-attention
 only means parked. A peer you wrote to has
-last_sent: your newest message to it, sent, delivered, acked or retired. Use
+last_sent: your newest message to it, sent, held, delivered, acked or retired. Use
 a peer's run_id with send --to or ask --to. A viewer-owned run has no peers;
 it can only reply to questions it was asked. At the 8-peer cap, only swarm
 peers and existing conversations are listed.
@@ -209,8 +209,8 @@ discovery; no tools or authority are implied.
 
 Send one durable message to a peer run ID from aether-internal status. A body
 file of "-" reads standard input. The receipt means queued, not read;
-recipient_status is the peer's status when the receipt is returned. A finished
-peer returns -32004. On a denial, read its reason and check status; do not retry.
+recipient_status is the peer's status when the receipt is returned, or held
+while a person controls that swarm worker. A finished peer returns -32004. On a denial, read its reason and check status; do not retry.
 `,
 	"inbox": `usage: aether-internal inbox [--wait <seconds>] [--ack <token>]
 
@@ -502,7 +502,7 @@ matching peer in status; message only listed peers.
 ` + coordhooks.PeerRule + `
   aether-internal ask --help
 ` + coordhooks.ReceiptRule + ` recipient_status is the peer's status when the
-receipt is returned.
+receipt is returned, or held while a person controls that swarm worker.
 ` + coordhooks.UntrustedRule + `
 Hooks announce pending inbox items at harness lifecycle boundaries; managed
 Claude Code launches and loaded native omp/pi/OpenCode integrations can also

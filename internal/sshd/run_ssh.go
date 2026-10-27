@@ -160,7 +160,7 @@ func (s *Server) serveRunSSH(ctx context.Context, member domain.MemberID, ch sub
 
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	c := &runSSHConn{s: s, svc: svc, run: run.ID, principal: principal, authorize: authorize, done: connCtx.Done()}
+	c := &runSSHConn{s: s, svc: svc, run: run.ID, principal: principal, authorize: authorize, record: run, done: connCtx.Done()}
 	defer c.close()
 	s.spawn(func() { c.revalidate(connCtx, nested) })
 	// Every global request is refused, tcpip-forward included: no reverse
@@ -226,8 +226,10 @@ type runSSHConn struct {
 	run       domain.RunID
 	principal control.Principal
 	authorize func() error
-	// done closes when the connection ends.
-	done <-chan struct{}
+	// record is the run as the connection found it; done closes when the
+	// connection ends.
+	record *domain.Run
+	done   <-chan struct{}
 
 	mu       sync.Mutex
 	sessions int
@@ -458,7 +460,7 @@ func (c *runSSHConn) takeover(ctx context.Context) error {
 	if err := c.svc.CheckRunExec(ctx, c.run, c.principal, c.authorize); err != nil {
 		return err
 	}
-	c.s.holdUntil(c.run, c.done)
+	c.s.holdUntil(c.record, c.done)
 	return mission.Takeover(ctx, c.run, c.principal.MemberID)
 }
 

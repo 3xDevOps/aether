@@ -237,29 +237,40 @@ func (a *acpStream) fillAck(ack *protocol.ACPStreamResponse) {
 }
 
 // acquire takes the run's control lease for this stream, through the timed
-// takeover protocol when p is set.
+// takeover protocol when p is set. A swarm worker's hold is committed in the
+// same admission as the lease, so a revocation cannot slip between them.
 func (a *acpStream) acquire(force bool, generation uint64, p *pendingTakeover) error {
 	s, run := a.s, string(a.run.ID)
+	hold := func() error {
+		if mission := s.cfg.Services.MissionControl; mission != nil {
+			return mission.Takeover(a.ctx, a.run.ID, a.member)
+		}
+		return nil
+	}
 	var acquired control.Snapshot
 	var displaced *control.Snapshot
 	var err error
 	if p != nil {
 		acquired, displaced, err = s.cfg.Control.AcquireTakeoverAuthorized(run, string(a.member), a.session, &p.lease,
-			func() error { return s.authorizeTakeover(a.endpoint) })
+			func() error {
+				if authErr := s.authorizeTakeover(a.endpoint); authErr != nil {
+					return authErr
+				}
+				return hold()
+			})
 	} else {
 		acquired, displaced, err = s.cfg.Control.AcquireInteractiveAuthorized(run, string(a.member), a.session, force, generation,
-			func() error { return checkSteer(a.ctx, s.cfg.Store, a.member, a.run.ID) })
+			func() error {
+				if steerErr := checkSteer(a.ctx, s.cfg.Store, a.member, a.run.ID); steerErr != nil {
+					return steerErr
+				}
+				return hold()
+			})
 	}
 	if err != nil {
 		return err
 	}
-	if mission := s.cfg.Services.MissionControl; mission != nil {
-		s.holdUntil(a.run.ID, acquired.Revoked)
-		if err = mission.Takeover(a.ctx, a.run.ID, a.member); err != nil {
-			_ = s.cfg.Control.Release(run, a.member, acquired.SessionID, acquired.Generation)
-			return err
-		}
-	}
+	s.holdUntil(a.run, acquired.Revoked)
 	lease := acquired
 	id, err := s.registerControlAttach(run, a.session, acquired.Generation, a.revoke, func() { a.fence(&lease) })
 	if err != nil {

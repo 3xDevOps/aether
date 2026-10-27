@@ -44,11 +44,12 @@ const holdRetry = 5 * time.Second
 // without a control lease must call it before it takes the hold. Once the
 // last session ends with no control lease left, nobody controls the worker,
 // so the hold is released.
-func (s *Server) holdUntil(run domain.RunID, done <-chan struct{}) {
+func (s *Server) holdUntil(worker *domain.Run, done <-chan struct{}) {
 	mission := s.cfg.Services.MissionControl
-	if mission == nil || s.cfg.Control == nil {
+	if mission == nil || s.cfg.Control == nil || worker.MissionRole != "worker" {
 		return
 	}
+	run := worker.ID
 	s.holdsMu.Lock()
 	if _, ok := s.holds[run][done]; ok {
 		s.holdsMu.Unlock()

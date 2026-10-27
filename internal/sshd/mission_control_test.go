@@ -170,6 +170,9 @@ func waitMissionHold(t *testing.T, db *store.DB, run domain.RunID, active bool) 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		assignment, err := db.GetMissionWorkerAssignment(context.Background(), run)
+		if errors.Is(err, store.ErrNotFound) {
+			assignment, err = &domain.MissionWorkerAssignment{}, nil
+		}
 		if err != nil {
 			t.Fatalf("read hold: %v", err)
 		}

@@ -432,7 +432,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				return controlCommitErr
 			}
 			var admissionErr error
-			s.holdUntil(run.ID, lease.Revoked)
+			s.holdUntil(run, lease.Revoked)
 			err := s.cfg.Control.AdmitMember(
 				req.RunID, member, lease.SessionID, lease.Generation,
 				func() error {
@@ -616,7 +616,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				leaseMu.Unlock()
 				return err
 			}
-			s.holdUntil(run.ID, acquired.Revoked)
+			s.holdUntil(run, acquired.Revoked)
 			lease := &attachControlLease{Snapshot: acquired, unacknowledged: true}
 			fence := makeInteractiveFence(lease)
 			controlLease = lease

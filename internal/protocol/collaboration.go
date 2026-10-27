@@ -210,12 +210,12 @@ type RunRoomDecideParams struct {
 
 type RoomController struct {
 	MemberID string `json:"member_id"`
-	// SessionID is the holder's control_session_id, so a client can tell
-	// its own session from the same member's others.
-	SessionID  string `json:"session_id"`
-	Connected  bool   `json:"connected"`
-	AcquiredAt string `json:"acquired_at"`
-	ExpiresAt  string `json:"expires_at,omitempty"`
+	// ControlSessionID tells a client its own session from the same
+	// member's others.
+	ControlSessionID string `json:"control_session_id"`
+	Connected        bool   `json:"connected"`
+	AcquiredAt       string `json:"acquired_at"`
+	ExpiresAt        string `json:"expires_at,omitempty"`
 }
 
 type RunRoomStatusResult struct {

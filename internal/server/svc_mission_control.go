@@ -75,16 +75,20 @@ func (m missionControlService) admitInput(ctx context.Context, integratorRun, wo
 	if m.control == nil {
 		return errors.New("mission control: shared control service is unavailable")
 	}
-	check := func() error {
-		if err := m.store.CheckIntegratorInput(ctx, integratorRun, workerRun, generation); err != nil {
+	check := func(lease control.Snapshot, held bool) error {
+		err := m.store.CheckIntegratorInput(ctx, integratorRun, workerRun, generation)
+		if held && errors.Is(err, store.ErrMissionTakeover) {
+			return fmt.Errorf("%w, in control session %s", err, lease.SessionID)
+		}
+		if err != nil {
 			return err
 		}
 		return fn()
 	}
 	if try {
-		return m.control.TryAdmit(string(workerRun), check)
+		return m.control.TryAdmit(string(workerRun), func() error { return check(control.Snapshot{}, false) })
 	}
-	return m.control.Admit(string(workerRun), check)
+	return m.control.AdmitSnapshot(string(workerRun), check)
 }
 
 var _ sshd.MissionControl = missionControlService{}
