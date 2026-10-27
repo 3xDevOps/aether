@@ -105,6 +105,19 @@ each record to its call by that key.
 | `waiting` | Its turn ended; the reason `turn ended without a report` means it never reported |
 | `disconnected` | Lost its agent process |
 
+A waiting session may also list `wait_conditions`: what the agent reported
+it waits until, each with `spec` (`pr:<owner>/<repo>#<n>:merged`,
+`pr:<owner>/<repo>#<n>:checks` or `run:<id>:finished`), `state` (`pending`,
+`resolved`, `cancelled`, `superseded`, `expired`, `error`), `outcome`,
+`observed`, `last_checked_at`, `next_check_at`, `consecutive_failures` and
+`delivered_at`; `summary`, `detail` and `last_error` sit under
+`untrusted.wait_conditions`. The server checks each one and wakes the session
+when one resolves; nobody needs to message it then. A pending condition whose
+`next_check_at` has long passed or with `consecutive_failures` above zero is
+not being verified: say so, with its `last_error`. A resolved condition with
+no `delivered_at` has not reached the agent yet. On another member's session
+only its owner and admins see `observed`, `summary`, `detail` and errors.
+
 A session needs the member when it has `needs_you`, its activity is
 `needs-you` or `disconnected`, or `review` is `ready`. A paused session never
 does.
@@ -243,9 +256,11 @@ to show or edit the brief.
 Read the session, then classify it as one of: needs a decision by you, failed,
 waiting on CI, waiting on subsessions, waiting on a process, out of credentials
 or quota, no report (the turn ended without one), or disconnected. Cite the
-`run.state`, `run.activity` and reason you read, then offer the matching
-recovery: answer it, read the failure, wait or check CI, message it, sign in
-again, or resume it.
+`run.state`, `run.activity`, the reason and any `wait_conditions` you read,
+then offer the matching recovery: answer it, read the failure, wait or check
+CI, message it, sign in again, or resume it. A session waiting on CI or a
+process with no pending wait condition wakes only on a message or when one of
+its subsessions finishes.
 
 A `waiting-agents` session whose reason reads `waiting for N subsessions` waits on
 subsessions it started. Say what `aether_get_session` shows of them; no tool lists
