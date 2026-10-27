@@ -9,14 +9,7 @@ import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { AgentInfo, LaunchDefaultsResult, LaunchMode } from '@/lib/types'
 import { useStore } from '@/store'
-import type { LaunchDefaultsRead } from '@/store/launch-defaults'
-
-/** The mode and model last chosen for `name`: saved on the server when it keeps them, else on this browser. */
-function remembered(name: string, saved: LaunchDefaultsResult | null): { mode?: LaunchMode; model?: string } {
-  if (!saved) return useStore.getState().launchDefaults[name] ?? {}
-  const choice = saved.defaults.agents?.[name]
-  return { ...(choice?.mode ? { mode: choice.mode } : {}), ...(choice?.model ? { model: choice.model } : {}) }
-}
+import { type LaunchDefaultsRead, rememberedChoice } from '@/store/launch-defaults'
 
 function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, preferred?: string): string {
   const { launchDefaults, runs } = useStore.getState()
@@ -62,7 +55,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   const choose = useCallback((name: string, list: AgentInfo[]) => {
     setHarness(name)
     const info = list.find((item) => item.name === name)
-    const last = remembered(name, choice.current.saved)
+    const last = rememberedChoice(name, choice.current.saved)
     setMode(initialMode(info, name, last.mode))
     setModel(last.model ?? '')
   }, [])

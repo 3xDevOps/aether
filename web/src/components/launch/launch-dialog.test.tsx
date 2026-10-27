@@ -881,6 +881,22 @@ describe('saved launch defaults', () => {
     expect(screen.queryByText('Your saved launch choices could not be read.')).toBeNull()
   })
 
+  it('goes back to your own account when a retry finds the cached saved account cleared', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    useLaunchDefaults.setState({ result: { revision: 2, defaults: { agent: 'claude', account_member_id: bob.id, fallback: { policy: 'off' } } }, error: null })
+    vi.mocked(api.launchDefaultsGet).mockRejectedValue(new Error('connection refused'))
+    render(<LaunchDialog />)
+    const alert = (await screen.findByText('Your saved launch choices could not be read.')).closest<HTMLElement>('[role="alert"]')!
+    await waitFor(() => expect(api.agentList).toHaveBeenCalledWith(bob.id))
+
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 3, defaults: {} })
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(vi.mocked(api.agentList).mock.lastCall).toEqual([undefined]))
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp' }))
+  })
+
   it('reads the saved choices once per open', async () => {
     await open()
     expect(api.launchDefaultsGet).toHaveBeenCalledTimes(1)

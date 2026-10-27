@@ -139,9 +139,10 @@ export function LaunchDialog() {
     if (!saved) return
     const { account_member_id: savedAccount, fallback: savedFallback } = saved.defaults
     const refused = saved.invalid?.some((issue) => issue.field === 'account_member_id')
-    if (savedAccount && !refused && accounts.some((member) => member.id === savedAccount)) setAccount(savedAccount)
-    if (savedFallback) setFallback(fallbackFromSaved(savedFallback, accounts))
-  }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead])
+    const usable = savedAccount && !refused && accounts.some((member) => member.id === savedAccount)
+    setAccount((current) => usable ? savedAccount : ownAccountID || current)
+    setFallback(fallbackFromSaved(savedFallback, accounts))
+  }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead, ownAccountID])
 
   useEffect(() => {
     if (kind !== 'swarm' || !accounts.length) return

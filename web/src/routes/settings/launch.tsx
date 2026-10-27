@@ -22,6 +22,11 @@ const fallbackWords: Record<FallbackPolicy, string> = {
 const ownAccount = 'own'
 
 export function LaunchDefaultsSection({ client }: { client: Api }) {
+  const identity = useStore((s) => s.identityKey)
+  return <SavedLaunchDefaults key={identity ?? ''} client={client} />
+}
+
+function SavedLaunchDefaults({ client }: { client: Api }) {
   const cap = useCapability()
   const self = useStore((s) => s.info?.member.id ?? '')
   const [attempt, setAttempt] = useState(0)
@@ -57,6 +62,15 @@ export function LaunchDefaultsSection({ client }: { client: Api }) {
   const saved = result !== null && result.revision > 0
   const disabled = !editable || result === null || busy
   const fallback = defaults.fallback
+  const unusable = new Set((result?.invalid ?? []).filter((issue) => issue.field === 'account_member_id' || issue.field === 'fallback.order').map((issue) => issue.value))
+  const removeUnusable = () => change((current) => {
+    const order = (current.fallback?.order ?? []).filter((id) => !unusable.has(id))
+    return {
+      ...current,
+      account_member_id: unusable.has(current.account_member_id ?? '') ? '' : current.account_member_id,
+      ...(current.fallback?.policy === 'ordered' ? { fallback: order.length ? { policy: 'ordered' as const, order } : { policy: 'off' as const } } : {}),
+    }
+  })
   const accountChoices = accounts.some((member) => member.id === defaults.account_member_id) || !defaults.account_member_id
     ? accounts
     : [...accounts, { id: defaults.account_member_id, display_name: defaults.account_member_id } as Member]
@@ -77,6 +91,12 @@ export function LaunchDefaultsSection({ client }: { client: Api }) {
           <TryAgain onClick={() => { useLaunchDefaults.setState({ error: null }); setAttempt((n) => n + 1) }} />
         )}
         {result && <SavedIssues title="Not usable now" issues={result.invalid ?? []} />}
+        {editable && unusable.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="secondary" disabled={disabled} onClick={removeUnusable}>Remove unusable accounts</Button>
+            <span className="text-ui-sm text-muted">Starts on your own account and drops them from the fallback order, or turns fallback off when none are left.</span>
+          </div>
+        )}
         {result?.unknown?.length ? (
           <ul aria-label="Not checked" className="flex flex-col gap-1 text-ui-sm text-muted">
             {result.unknown.map((issue) => <li key={`${issue.field}:${issue.value}`}>Not checked: {issue.reason}</li>)}

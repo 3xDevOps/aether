@@ -1,7 +1,8 @@
-import { waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import type { LaunchDefaultsResult } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
-import { rememberChoice, saveLaunchDefaults, useLaunchDefaults } from '@/store/launch-defaults'
+import { rememberChoice, saveLaunchDefaults, useLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -31,6 +32,20 @@ describe('saved launch defaults', () => {
     ])
     expect(vi.mocked(api.launchDefaultsSet).mock.calls.map(([p]) => p.revision)).toEqual([3, 4])
     expect(useLaunchDefaults.getState().result?.defaults).toMatchObject({ agent: 'codex', account_member_id: 'mem_bo' })
+  })
+
+  it('keeps a save\'s answer over a read that started while it was saving', async () => {
+    let read: (result: LaunchDefaultsResult) => void = () => {}
+    let stored: (result: LaunchDefaultsResult) => void = () => {}
+    vi.mocked(api.launchDefaultsGet).mockReturnValueOnce(new Promise((resolve) => { read = resolve }))
+    vi.mocked(api.launchDefaultsSet).mockReturnValueOnce(new Promise((resolve) => { stored = resolve }))
+    const save = saveLaunchDefaults((d) => ({ ...d, agent: 'codex' }))
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalled())
+    const { result } = renderHook(() => useLaunchDefaultsRead())
+    await act(async () => { stored({ revision: 4, defaults: { agent: 'codex' } }); await save })
+    await act(async () => read({ revision: 3, defaults: { agent: 'claude' } }))
+    await waitFor(() => expect(result.current.fresh).toBe(true))
+    expect(useLaunchDefaults.getState().result?.defaults.agent).toBe('codex')
   })
 
   it('does not save once another member signed in', async () => {

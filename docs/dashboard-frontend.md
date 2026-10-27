@@ -2320,10 +2320,13 @@ fallback; **Save as my default** under **Options** does, and says "Saved
 for every device." until the account or fallback changes again. On the Run tab it saves the fallback list as the run sends
 it, without the selected account. **Run**, **Default mode** and **Set up** on
 Agents, and the onboarding wizard, save their agent and mode the same way
-(`rememberChoice`); **Default mode** leaves the preselected agent alone. Saves
+(`rememberChoice`); **Default mode** leaves the preselected agent alone.
+Agents reads the saved choices too, and its **Default mode** and **Run** use
+the saved mode, else this browser's. Saves
 run one at a time, each from the last one's answer; a save after the
 signed-in member changes is refused, and a failed save reads the choices
-again. A **Saved defaults not used** note lists each saved
+again. A read's answer is dropped when another read or a save started or
+stored its answer after the read began. A **Saved defaults not used** note lists each saved
 account, fallback member, agent, and the chosen agent's mode or model that
 `get` reports in `invalid`, with the server's reason.
 
@@ -6281,11 +6284,14 @@ Categories:
   "Nothing saved yet". It lists each agent's saved mode and model with
   **Forget**, a **Not usable now** list of `invalid` choices with the
   server's reason, and the `unknown` ones as "Not checked: " and the
-  reason. **Account** and **Fallback** (any account, off, or the saved
+  reason. When the saved account or a fallback member is invalid, **Remove
+  unusable accounts** saves both repaired at once: your own account, and
+  the order without them, or fallback off when none are left. **Account** and **Fallback** (any account, off, or the saved
   ordered list) save on change; the order itself is set in the launch
   dialog with **Save as my default**. **Clear** asks first, then clears
   them. Each change uses `launch.defaults.set` with the revision read and
-  retries once on a conflict, as the launch dialog does. Child runs keep
+  retries once on a conflict, as the launch dialog does. The section starts
+  over, closing **Clear**'s confirmation, when a different member signs in. Child runs keep
   their own choices in **Child runs**.
 - **Child runs**, where the server offers `child.settings`: **Let my runs
   start child runs** (`enabled`), with a **What child runs cover** list

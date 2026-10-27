@@ -16,24 +16,28 @@ useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) useLaunchDefaults.setState({ result: null, error: null }, true)
 })
 
-// Every save bumps writes, so a read that started before it never replaces
-// what the save stored.
-let writes = 0
+// Every read, and every save as it starts and as it stores its answer,
+// bumps changes, so the answer to a read that overlapped a later read or a
+// save never replaces what that one stored.
+let changes = 0
 // Saves run one at a time, each from the choices the one before stored, so
 // an older answer never replaces a newer one.
 let saving: Promise<unknown> = Promise.resolve()
 
-export function useLaunchDefaultsSupported(): boolean {
-  return useCapability().hasMethod('launch.defaults.get')
-}
-
 function read(client: Api): Promise<void> {
   const same = sameIdentity()
-  const before = writes
+  const mine = ++changes
   return client.launchDefaultsGet().then(
-    (result) => { if (same() && writes === before) useLaunchDefaults.setState({ result, error: null }) },
-    (err: unknown) => { if (same()) useLaunchDefaults.setState({ error: errorSentence(err) }) },
+    (result) => { if (same() && changes === mine) useLaunchDefaults.setState({ result, error: null }) },
+    (err: unknown) => { if (same() && changes === mine) useLaunchDefaults.setState({ error: errorSentence(err) }) },
   )
+}
+
+/** The mode and model last chosen for `name`: saved on the server when it keeps them, else on this browser. */
+export function rememberedChoice(name: string, saved: LaunchDefaultsResult | null): { mode?: LaunchMode; model?: string } {
+  if (!saved) return useStore.getState().launchDefaults[name] ?? {}
+  const choice = saved.defaults.agents?.[name]
+  return { ...(choice?.mode ? { mode: choice.mode } : {}), ...(choice?.model ? { model: choice.model } : {}) }
 }
 
 export interface LaunchDefaultsRead { result: LaunchDefaultsResult | null; error: string | null; fresh: boolean }
@@ -45,7 +49,7 @@ export interface LaunchDefaultsRead { result: LaunchDefaultsResult | null; error
  * cached copy was read.
  */
 export function useLaunchDefaultsRead(client: Api = api, attempt = 0): LaunchDefaultsRead {
-  const readable = useLaunchDefaultsSupported()
+  const readable = useCapability().hasMethod('launch.defaults.get')
   const identity = useStore((s) => s.identityKey)
   const result = useLaunchDefaults((s) => s.result)
   const error = useLaunchDefaults((s) => s.error)
@@ -69,7 +73,7 @@ export function useLaunchDefaultsRead(client: Api = api, attempt = 0): LaunchDef
 export function saveLaunchDefaults(change: (current: SavedLaunchDefaults) => SavedLaunchDefaults | null, client: Api = api): Promise<LaunchDefaultsResult> {
   const same = sameIdentity()
   const run = async () => {
-    writes++
+    changes++
     const save = (base: LaunchDefaultsResult) => {
       if (!same()) throw new Error('Launch choices not saved: the signed-in member changed.')
       const next = change(base.defaults)
@@ -85,6 +89,7 @@ export function saveLaunchDefaults(change: (current: SavedLaunchDefaults) => Sav
         if (!(err instanceof ApiError && err.code === codeConflict && err.data)) throw err
         result = await save(err.data as unknown as LaunchDefaultsResult)
       }
+      changes++
       if (same()) useLaunchDefaults.setState({ result, error: null })
       return result
     } catch (err) {

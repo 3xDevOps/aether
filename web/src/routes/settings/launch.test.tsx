@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { LaunchDefaultsResult } from '@/lib/types'
 import { LaunchDefaultsSection } from '@/routes/settings/launch'
@@ -58,6 +58,31 @@ describe('saved launch defaults settings', () => {
     await user.click(screen.getByRole('button', { name: 'Clear' }))
     await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Clear' }))
     await waitFor(() => expect(client.launchDefaultsSet).toHaveBeenLastCalledWith({ clear: true, revision: 6 }))
+  })
+
+  it('removes a revoked account from both the account and the fallback order in one save', async () => {
+    const user = userEvent.setup()
+    const reason = `permission denied: member ${bob.id} has not shared their account with you`
+    const client = show(['*'], {
+      revision: 5,
+      defaults: { agent: 'claude', account_member_id: bob.id, fallback: { policy: 'ordered', order: [bob.id] } },
+      invalid: [{ field: 'account_member_id', value: bob.id, reason }, { field: 'fallback.order', value: bob.id, reason }],
+    })
+    await user.click(await screen.findByRole('button', { name: 'Remove unusable accounts' }))
+    await waitFor(() => expect(client.launchDefaultsSet).toHaveBeenCalledWith({
+      defaults: { agent: 'claude', account_member_id: '', fallback: { policy: 'off' } },
+      revision: 5,
+    }))
+  })
+
+  it('starts over when a different member signs in', async () => {
+    const user = userEvent.setup()
+    const client = show()
+    await user.click(await screen.findByRole('button', { name: 'Clear' }))
+    expect(await screen.findByRole('alertdialog')).toBeDefined()
+    act(() => useStore.setState({ identityKey: 'identity-b' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(client.launchDefaultsSet).not.toHaveBeenCalled()
   })
 
   it('says nothing is saved yet', async () => {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { vi } from 'vitest'
 import { splitArgv } from '@/components/agents/add-agent'
@@ -8,6 +8,7 @@ import { configPrompt } from '@/lib/config-prompt'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/agents'
 import { useStore } from '@/store'
+import { useLaunchDefaults } from '@/store/launch-defaults'
 import { agentInfo } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 
@@ -125,6 +126,18 @@ describe('agents page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Run Claude Code' }))
     expect(useStore.getState().paletteDialog).toBe('launch')
     expect(useStore.getState().launchDefaults.claude?.mode).toBe('tui')
+  })
+
+  it('runs an agent in the mode saved on the server, not this browser\'s', async () => {
+    useLaunchDefaults.setState({ result: null, error: null })
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 2, defaults: { agents: { claude: { mode: 'acp' } } } })
+    useStore.setState({ launchDefaults: { claude: { mode: 'tui', at: 42 } } })
+    mount()
+    await flush()
+    expect(screen.getByRole('combobox', { name: 'Default mode for Claude Code' }).textContent).toContain('Enhanced')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Claude Code' }))
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({ defaults: { agent: 'claude', agents: { claude: { mode: 'acp' } } }, revision: 2 }))
   })
 
   it('opens the setup with the comparison, and comes back from it', async () => {
