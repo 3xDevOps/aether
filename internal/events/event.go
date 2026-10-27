@@ -143,6 +143,9 @@ type RunStatusPayload struct {
 	StatusSeq int64              `json:"status_seq"`
 	// Cause is what chose Activity; empty on a run that is not live.
 	Cause RunStatusCause `json:"cause,omitempty"`
+	// Wait is the evidence behind the reported wait the run shows, nil when
+	// it shows none.
+	Wait *domain.RunWait `json:"wait,omitempty"`
 	// Review and ReviewChangedAt are the run's after this transition.
 	Review          domain.RunReview `json:"review,omitempty"`
 	ReviewChangedAt *time.Time       `json:"review_changed_at,omitempty"`
@@ -157,10 +160,13 @@ const (
 	CauseTurnEnd     RunStatusCause = "turn-end"
 	CauseStall       RunStatusCause = "stall"
 	CauseWaitExpired RunStatusCause = "wait-expired"
-	CauseWorkers     RunStatusCause = "workers"
-	CauseTasksHeld   RunStatusCause = "tasks-held"
-	CauseHuman       RunStatusCause = "human"
-	CauseDisconnect  RunStatusCause = "disconnect"
+	// CauseWaitFault: a condition the agent waits on left pending and its
+	// wake was not delivered.
+	CauseWaitFault  RunStatusCause = "wait-fault"
+	CauseWorkers    RunStatusCause = "workers"
+	CauseTasksHeld  RunStatusCause = "tasks-held"
+	CauseHuman      RunStatusCause = "human"
+	CauseDisconnect RunStatusCause = "disconnect"
 )
 
 // RunRetentionPayload replaces the runtime retention metadata. Omitted fields

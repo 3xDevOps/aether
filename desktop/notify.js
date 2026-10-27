@@ -319,6 +319,7 @@ function statusBody(run) {
     if (reason.startsWith('Usage limit reached on ')) return reason
     if (reason === 'turn interrupted') return 'Turn interrupted, send a message to continue'
     if (reason.startsWith('turn ended: ')) return `Turn ended (${reason.slice('turn ended: '.length)}), send a message to continue`
+    if (reason.startsWith('wait broken: ')) return `Wait broken, send a message to continue: ${reason.slice('wait broken: '.length)}`
     return 'Waiting for your reply'
   }
   if (run.state === 'disconnected') {

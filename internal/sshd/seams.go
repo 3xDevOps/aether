@@ -92,6 +92,9 @@ type RunController interface {
 	// Cause is what chose activity for the live run; empty when unknown or
 	// when the run's activity has since changed.
 	Cause(run domain.RunID, activity domain.RunActivity) events.RunStatusCause
+	// Wait is the evidence behind the reported wait the live, unpaused run
+	// shows with activity; nil when it shows none.
+	Wait(run domain.RunID, activity domain.RunActivity) *domain.RunWait
 	// Retention reads current runtime ownership without probing or mutating it.
 	Retention(run *domain.Run) (scheduler.RetentionInfo, error)
 	// PendingInputs returns an independent snapshot of unresolved requests;

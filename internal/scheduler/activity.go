@@ -158,12 +158,13 @@ func (e *supervised) asksMember() bool {
 
 // derived is a live run's activity, the public reason it shows, and what
 // chose the activity. workers marks reason as the workers reason Aether
-// wrote.
+// wrote. wait is the evidence behind a reported wait the run shows.
 type derived struct {
 	activity domain.RunActivity
 	reason   string
 	cause    events.RunStatusCause
 	workers  bool
+	wait     *domain.RunWait
 }
 
 // activityLocked derives the activity of run moving to status to with
@@ -177,7 +178,8 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 	// A waiting summary is the agent's free text: none of it is read as a
 	// reason Aether wrote.
 	waiting, stale, _ := cutWaiting(strings.TrimSpace(reason))
-	if waiting == "" && entry != nil && entry.waits() && public == publicRunStatusReason(entry.idleReason) {
+	if waiting == "" && entry != nil && entry.waits() &&
+		(public == publicRunStatusReason(entry.idleReason) || strings.HasPrefix(public, waitBrokenReasonPrefix)) {
 		waiting, stale, _ = cutWaiting(entry.idleReason)
 	}
 	written := public
@@ -275,6 +277,13 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 			d.cause = events.CauseTurnEnd
 		}
 	}
+	if entry != nil && !entry.paused && waiting != domain.ActivityAnswered && waiting == d.activity {
+		wait, stranded := s.runWaitLocked(ctx, run)
+		d.wait = &wait
+		if stranded != "" && parked {
+			d.activity, d.cause, d.reason = domain.ActivityNeedsYou, events.CauseWaitFault, waitBrokenReasonPrefix+stranded
+		}
+	}
 	return d, nil
 }
 
@@ -287,16 +296,17 @@ func (s *Scheduler) refreshActivityLocked(ctx context.Context, entry *supervised
 	// A shown wait's public reason is the agent's summary alone; deriving
 	// from it would read the summary as a reason.
 	reason := entry.reason
-	if entry.waits() && publicRunStatusReason(entry.idleReason) == reason {
+	if entry.waits() && (publicRunStatusReason(entry.idleReason) == reason || strings.HasPrefix(reason, waitBrokenReasonPrefix)) {
 		reason = entry.idleReason
 	}
 	d, err := s.activityLocked(ctx, entry.runID, entry, entry.status, reason)
 	if err != nil {
 		return err
 	}
-	if d.activity == entry.activity && d.reason == entry.reason {
+	if d.activity == entry.activity && d.reason == entry.reason && sameWait(d.wait, entry.wait) {
 		// Recovery restores the activity from the row but not its cause.
-		entry.cause = d.cause
+		// A newer source read moves only the verified time.
+		entry.cause, entry.wait = d.cause, d.wait
 		return nil
 	}
 	return s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status, reason, "")
@@ -331,6 +341,9 @@ func (e *supervised) waitExpires() bool {
 // Caller holds s.mu.
 func (s *Scheduler) expireWaitLocked(ctx context.Context, entry *supervised, quiet time.Duration) error {
 	if heldByTasks(entry.agentReport) {
+		return nil
+	}
+	if wait, _ := s.runWaitLocked(ctx, entry.runID); wait.Kind != domain.WaitUnverified {
 		return nil
 	}
 	swarm, err := s.cfg.Store.IntegratorWaiting(ctx, entry.runID, entry.turnStartedAt)

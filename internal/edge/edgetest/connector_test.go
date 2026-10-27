@@ -86,6 +86,7 @@ func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, s
 }
 func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
 func (launcher) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
+func (launcher) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
 func (launcher) Switching(domain.RunID) domain.LaunchMode                     { return "" }
 func (launcher) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
 	return scheduler.RetentionInfo{}, nil

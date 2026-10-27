@@ -69,6 +69,9 @@ type Config struct {
 	Store   store.Store
 	Runtime runtime.Runtime
 	Bus     events.Bus
+	// WaitConditions reads the conditions agents' waiting reports name; nil
+	// leaves every reported wait unverified.
+	WaitConditions WaitConditions
 	// EventSeq reads the newest sequence of the log behind Bus, nil when Bus
 	// keeps none. A usage-limit stream that drops events replays from it.
 	EventSeq func(context.Context) (uint64, error)
@@ -304,11 +307,13 @@ type supervised struct {
 	// account move keeps it, since turning it off applies to new runs only.
 	egress bool
 	// Mutated only under Scheduler.mu. reason and activity are the row's
-	// since its last transition; cause is what chose activity.
+	// since its last transition; cause is what chose activity and wait is
+	// the evidence behind the reported wait it shows.
 	status        domain.RunStatus
 	reason        string
 	activity      domain.RunActivity
 	cause         events.RunStatusCause
+	wait          *domain.RunWait
 	startedAt     time.Time
 	paused        bool
 	killRequested bool

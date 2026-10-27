@@ -122,6 +122,12 @@ type MemoryService interface {
 	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
 }
 
+// RunWaits is the evidence behind the reported wait a live run shows with
+// activity, nil when it shows none.
+type RunWaits interface {
+	Wait(run domain.RunID, activity domain.RunActivity) *domain.RunWait
+}
+
 // Peers is the conflict radar's read side. Mission authorization, when
 // configured, is evaluated by MissionService before radar fallback.
 type Peers interface {
@@ -170,6 +176,8 @@ type Config struct {
 	// refuses a run a member controls: the next prompt is theirs. Nil sends
 	// no reminders.
 	ReminderAdmission WakeAdmission
+	// Waits judges a peer's reported wait (the scheduler); nil shows none.
+	Waits RunWaits
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.

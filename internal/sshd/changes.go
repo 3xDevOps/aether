@@ -277,6 +277,9 @@ func changeOf(ev events.Event, mission domain.MissionID) (protocol.Change, bool)
 	case events.RunStatusPayload:
 		c.Kind = protocol.ChangeKindStatus
 		c.Status = &protocol.ChangeStatus{From: string(v.From), To: string(v.To), State: string(v.Activity), Cause: string(v.Cause)}
+		if v.Wait != nil {
+			c.Status.Wait = string(v.Wait.Kind)
+		}
 		if v.Reason != "" {
 			c.Untrusted = &protocol.ChangeUntrusted{Reason: clipUntrusted(v.Reason)}
 		}
