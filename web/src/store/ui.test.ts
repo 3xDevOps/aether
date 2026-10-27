@@ -241,6 +241,19 @@ describe('launch defaults', () => {
     expect(useStore.getState().launchDefaults.claude).not.toHaveProperty('model')
     useStore.setState({ launchDefaults: {} })
   })
+
+  it('keeps each signed-in member\'s choices apart on one browser', () => {
+    const state = useStore.getState()
+    state.setIdentityKey('origin\u0000\u0000mem_alice')
+    state.rememberLaunch('claude', 'acp', 'opus')
+    state.setIdentityKey('origin\u0000\u0000mem_bob')
+    expect(useStore.getState().launchDefaults).toEqual({})
+    state.rememberLaunch('codex', 'tui')
+    state.setIdentityKey('origin\u0000\u0000mem_alice')
+    expect(Object.keys(useStore.getState().launchDefaults)).toEqual(['claude'])
+    expect(useStore.getState().launchDefaults.claude).toMatchObject({ mode: 'acp', model: 'opus' })
+    useStore.setState({ identityKey: null, launchDefaults: {}, savedLaunchDefaults: {} })
+  })
 })
 
 // The resume point is persisted by name because a wizard grows steps.

@@ -434,6 +434,7 @@ func (s *Session) stateLocked(st TurnState) {
 	s.reported = st
 	s.reported.Failed = nil
 	if s.cfg.OnState != nil {
+		st.TurnStartedAt = s.turnAt.UTC()
 		s.callback(func() { s.cfg.OnState(st) })
 	}
 }

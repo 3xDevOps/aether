@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -38,6 +41,8 @@ type runMeta struct {
 	// created before it was recorded.
 	BaseBranch string             `json:"base_branch,omitempty"`
 	Workspace  domain.WorkspaceID `json:"workspace"`
+	// Files are the paths WriteRunFiles wrote, which FilesRead refuses.
+	Files []string `json:"files,omitempty"`
 }
 
 func (e *Engine) runMetaPath(run domain.RunID) (string, error) {
@@ -194,6 +199,91 @@ func (e *Engine) CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID,
 		return "", "", err
 	}
 	return checkoutPath, branch, nil
+}
+
+// excludeGlobs escapes the characters an exclude line reads as a glob, so
+// each line matches exactly one path.
+var excludeGlobs = strings.NewReplacer("*", `\*`, "?", `\?`, "[", `\[`)
+
+// WriteRunFiles writes files, path to content, into run's new checkout,
+// each 0600 and listed in .git/info/exclude so no commit, diff or publish of
+// the run carries it. No content is written when a path is tracked at the
+// run's base commit, since the run would then commit a change to it, or when
+// git would still not ignore it: the repository's own ignore files outrank
+// info/exclude, so a negation such as !.env there un-ignores it.
+func (e *Engine) WriteRunFiles(ctx context.Context, run domain.RunID, files map[string]string) error {
+	if len(files) == 0 {
+		return nil
+	}
+	checkout, err := e.existingCheckoutPath(run)
+	if err != nil {
+		return err
+	}
+	meta, err := e.readRunMeta(run)
+	if err != nil {
+		return err
+	}
+	repo, err := e.existingRepoPath(meta.Workspace)
+	if err != nil {
+		return err
+	}
+	paths := slices.Sorted(maps.Keys(files))
+	var query, exclude strings.Builder
+	exclude.WriteString("\n# Aether workspace files\n")
+	for _, name := range paths {
+		query.WriteString(meta.Base + ":" + name + "\n")
+		exclude.WriteString("/" + excludeGlobs.Replace(name) + "\n")
+	}
+	found, err := e.gitInput(ctx, repo, gitEnv(), []byte(query.String()), "cat-file", "--batch-check")
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(found, "\n")
+	if len(lines) != len(paths) {
+		return errors.New("gitengine: malformed cat-file output")
+	}
+	for i, line := range lines {
+		if !strings.HasSuffix(line, " missing") {
+			return fmt.Errorf("gitengine: workspace file %s is tracked in the repository; remove it from the repository, or run aether workspace env file rm --workspace %s %s", paths[i], meta.Workspace, paths[i])
+		}
+	}
+	meta.Files = paths
+	if err = e.writeRunMeta(run, meta); err != nil {
+		return err
+	}
+	root, err := e.openCheckoutRoot(checkout)
+	if err != nil {
+		return fmt.Errorf("gitengine: open checkout: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	if err = root.MkdirAll(".git/info", 0o755); err != nil {
+		return fmt.Errorf("gitengine: exclude workspace files: %w", err)
+	}
+	excludes, err := root.OpenFile(".git/info/exclude", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return fmt.Errorf("gitengine: exclude workspace files: %w", err)
+	}
+	_, err = excludes.WriteString(exclude.String())
+	if err = errors.Join(err, excludes.Close()); err != nil {
+		return fmt.Errorf("gitengine: exclude workspace files: %w", err)
+	}
+	for _, name := range paths {
+		_, _, err = e.gitCheckoutBounded(ctx, run, checkout, 0, "check-ignore", "-q", "--", name)
+		// check-ignore exits 1 for a path it does not ignore.
+		var notIgnored *exec.ExitError
+		if errors.As(err, &notIgnored) && notIgnored.ExitCode() == 1 {
+			return fmt.Errorf("gitengine: workspace file %s would not be ignored by git: the repository's ignore rules un-ignore it; remove the negation or rename the file", name)
+		}
+		if err != nil {
+			return fmt.Errorf("gitengine: check workspace file %s is ignored: %w", name, err)
+		}
+	}
+	for _, name := range paths {
+		if _, err = writeCheckoutFile(e, checkout, name, []byte(files[name]), "", 0o600); err != nil {
+			return fmt.Errorf("gitengine: write workspace file %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // uniqueRunBranch picks and reserves the run's branch name: the readable

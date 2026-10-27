@@ -140,6 +140,10 @@ func (s *Scheduler) applyAgentReportIf(ctx context.Context, run domain.RunID, re
 		entry.idleShown && entry.asks() && entry.launchMode == domain.LaunchACP
 	now := time.Now().UTC()
 	turnStarts := execution.State == agentstatus.Working && (report.TurnStart || entry.agentReport.State != agentstatus.Working)
+	turnAt := now
+	if !report.StartedAt.IsZero() && report.StartedAt.Before(now) {
+		turnAt = report.StartedAt.UTC()
+	}
 	var oldSidecar sidecar
 	persist := inputsChanged || reportChanged || showsIdle || clearsIdle || unshows || turnStarts
 	if persist {
@@ -148,7 +152,7 @@ func (s *Scheduler) applyAgentReportIf(ctx context.Context, run domain.RunID, re
 		next.AgentState, next.AgentReason = execution.State, execution.Reason
 		next.AgentTools, next.AgentUsageLimit = execution.Tools, execution.UsageLimit
 		if turnStarts {
-			next.TurnStartedAt = &now
+			next.TurnStartedAt = &turnAt
 		}
 		next.PendingInputs = pending
 		next.InputPublishPending = entry.inputPublishPending || inputsChanged
@@ -176,7 +180,7 @@ func (s *Scheduler) applyAgentReportIf(ctx context.Context, run domain.RunID, re
 	priorIdle, priorShown := entry.idleReason, entry.idleShown
 	entry.agentReport, entry.pendingInputs = execution, pending
 	if turnStarts {
-		entry.turnStartedAt = now
+		entry.turnStartedAt = turnAt
 	}
 	switch {
 	case showsIdle:

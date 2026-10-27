@@ -48,6 +48,9 @@ const (
 const (
 	WatchChannelPush  = "push"
 	WatchChannelInApp = "in_app"
+	// WatchChannelAssistant writes the notices of a watch the assistant
+	// created into the owner's assistant conversation.
+	WatchChannelAssistant = "assistant"
 
 	// WatchStatusPending is a push still to be sent: being sent, waiting
 	// for the member to leave a dashboard, or waiting for a retry.
@@ -63,6 +66,9 @@ const (
 	// WatchStatusWithdrawn is a needs_you push that was delivered and then
 	// replaced quietly on the devices because its need ended.
 	WatchStatusWithdrawn = "withdrawn"
+	// WatchStatusSkipped is a push not sent because the run's own
+	// notification already pushes the same need to the same member.
+	WatchStatusSkipped = "skipped"
 )
 
 type WatchTarget struct {

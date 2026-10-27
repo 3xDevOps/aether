@@ -331,6 +331,11 @@ func newAction(c protocol.AssistantConfirmation) protocol.AssistantAction {
 	// The socket validated the params, and every action method names its
 	// target with these fields; env.save has none.
 	_ = json.Unmarshal(c.Params, &a.Target)
+	var keyed struct {
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	_ = json.Unmarshal(c.Params, &keyed)
+	a.IdempotencyKey = keyed.IdempotencyKey
 	return a
 }
 
@@ -451,10 +456,22 @@ func (c actionCaller) Call(ctx context.Context, method string, params json.RawMe
 	if !ok {
 		conv = c.m.conversation()
 		a = newAction(protocol.AssistantConfirmation{Method: method, Params: params, CreatedAt: time.Now()})
-		a.OtherOwner = c.otherOwner(ctx, a.Target.RunID)
-		a.Summary = reversibleSummary(method, a.Target.RunID, a.OtherOwner)
+		owner, rpcErr := tools.OwnerName(ctx, c.Caller, string(c.m.id), a.Target.RunID)
+		a.OtherOwner = owner
+		a.Summary = reversibleSummary(method, a.Target.RunID, owner)
+		if rpcErr != nil {
+			rpcErr = &protocol.Error{Code: rpcErr.Code, Message: "look up the owner of run " + a.Target.RunID + ": " + rpcErr.Message}
+			c.record(conv, method, a, nil, rpcErr)
+			return nil, rpcErr
+		}
 	}
 	result, rpcErr := c.Caller.Call(ctx, method, params)
+	c.record(conv, method, a, result, rpcErr)
+	return result, rpcErr
+}
+
+// record notes the outcome of a's call in conv.
+func (c actionCaller) record(conv context.Context, method string, a protocol.AssistantAction, result json.RawMessage, rpcErr *protocol.Error) {
 	a.FinishedAt = time.Now().UTC()
 	body := ""
 	if rpcErr != nil {
@@ -465,35 +482,10 @@ func (c actionCaller) Call(ctx context.Context, method string, params json.RawMe
 			body = "Run " + a.Result.RunID
 		}
 	}
-	// The call already ran, so a record that cannot be written must not
-	// turn its result into an error.
+	// A record that cannot be written must not change the call's result.
 	if err := c.s.noteOutcome(conv, c.m, a, body); err != nil {
 		slog.Warn("assistant: record the action's outcome", "member", c.m.id, "method", method, "action", a.ID, "error", err)
 	}
-	return result, rpcErr
-}
-
-// otherOwner names the member who owns run when it is not c's member: their
-// display name, else their id. A lookup that fails leaves the owner unnamed;
-// the call itself then reports the run's error.
-func (c actionCaller) otherOwner(ctx context.Context, run string) string {
-	params, _ := json.Marshal(protocol.RunIDParams{RunID: run})
-	raw, rpcErr := c.Caller.Call(ctx, protocol.MethodRunGet, params)
-	var got protocol.RunResult
-	if rpcErr != nil || json.Unmarshal(raw, &got) != nil || got.Run.MemberID == string(c.m.id) {
-		return ""
-	}
-	owner := got.Run.MemberID
-	raw, rpcErr = c.Caller.Call(ctx, protocol.MethodMemberList, nil)
-	var members protocol.MemberListResult
-	if rpcErr == nil && json.Unmarshal(raw, &members) == nil {
-		for _, m := range members.Members {
-			if m.ID == owner && m.DisplayName != "" {
-				owner = m.DisplayName
-			}
-		}
-	}
-	return owner
 }
 
 // created names the run a call's result holds that its target does not:
