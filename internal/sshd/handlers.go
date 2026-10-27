@@ -311,7 +311,16 @@ func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawM
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	prs, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	out := protocol.RunResult{Run: s.runSnapshot(run)}
+	for _, pr := range prs {
+		out.PullRequests = append(out.PullRequests, protocol.RecordedPullRequest{Repo: string(pr.RepoWorkspace), Repository: pr.Repository,
+			Number: pr.Number, URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, CheckedAt: pr.ObservedAt})
+	}
+	return out, nil
 }
 
 // runSnapshot decorates every run response, including mutation results. A
