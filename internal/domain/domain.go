@@ -224,6 +224,7 @@ func ValidModel(model string) error {
 // returned by a prior base-capture failure. AssignedRunID is reserved by
 // durable mission state and is never exposed through generic run.launch.
 type LaunchOptions struct {
+	Limits        RunLimits
 	Model         string
 	CachedBase    string
 	AssignedRunID RunID
@@ -247,6 +248,15 @@ type LaunchOptions struct {
 	// recorded with FromBranch, instead of capturing the workspace base.
 	FromCommit string
 	FromBranch string
+}
+
+// RunLimits caps one run's container. A zero field is unset: the run
+// follows the next level down, a per-run override then the server limit
+// then the server's automatic value.
+type RunLimits struct {
+	CPUs        float64
+	MemoryBytes int64
+	Pids        int64
 }
 
 // AccountFallback is where a launch may move when the requested account's
@@ -787,6 +797,9 @@ type Run struct {
 	// ChildrenSetBy still owns the run.
 	Children      string
 	ChildrenSetBy MemberID
+	// Limits override the server's run limits for this run; a zero field
+	// follows them.
+	Limits RunLimits
 	// ChildRefused records that the agent tried to start a child run while
 	// child runs were off.
 	ChildRefused bool

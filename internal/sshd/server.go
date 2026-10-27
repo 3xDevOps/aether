@@ -62,9 +62,12 @@ const (
 )
 
 type Config struct {
-	Addr            string // default ":2222"
-	HostKeyPath     string // <data>/ssh/host_ed25519_key; generated on first start if absent
-	Store           store.Store
+	Addr        string // default ":2222"
+	HostKeyPath string // <data>/ssh/host_ed25519_key; generated on first start if absent
+	Store       store.Store
+	// RunLimits are the server's flags with the automatic values filled in,
+	// what a run gets when neither an admin nor the launch sets a limit.
+	RunLimits       domain.RunLimits
 	Bus             events.Bus
 	Git             GitTransport
 	PTY             PTYAttacher

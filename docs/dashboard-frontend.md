@@ -2253,13 +2253,13 @@ caller. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Login found" or "No login found" for a
 shipped agent (`login_found` checks the launch home for login files, not for a
 working session; a server that does not report it shows nothing). An agent
-that is not installed stays listed, disabled, with **Set up**, which closes
-the dialog and opens Agents. The last row is `custom`, the escape hatch that
+that is not installed is not listed. **Install more agents...** below the
+list closes the dialog and opens Agents. The last row is `custom`, the escape hatch that
 `agent.list` never returns and that only launches where the deployment pinned
 an agent definition with `--agent-definitions`. With nothing installed,
 nothing is preselected, Launch stays disabled, and the form says "No agent is
 installed in your environment." with a **Set up an agent** button in place of
-the per-row links. The list is read each time the dialog opens; a failed read
+**Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
 **Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
@@ -6293,6 +6293,11 @@ Categories:
   board's Finished menu for the active workspace. It prevents reopening those
   runs but does not delete all run data: checkouts, homes, repositories and
   history retain their existing lifecycle.
+- **Run limits**, a row in **Server › Admin**, for admins when the server
+  answers `server.run_limits`: CPUs, memory in GiB and processes, empty
+  meaning the flag or automatic value shown in grey, and **Save**. The launch
+  dialog's **Run** tab reads the same method for the grey values and sends a
+  run's own `limits` under **Resource limits**.
 - **Docker inside runs**, a row in **Server › Admin**, for admins when the
   server answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States:
   **On**, **Off** with **Install**, `Unavailable on this host` plus the

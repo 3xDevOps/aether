@@ -203,6 +203,12 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		s.releaseTerminalReservation(terminalReservation)
 		return nil, fmt.Errorf("scheduler: apply terminal ownership: %w", ownershipErr)
 	}
+	limits, err := s.runLimits(ctx, domain.RunLimits{})
+	if err != nil {
+		s.releaseTerminalCoordination(member)
+		s.releaseTerminalReservation(terminalReservation)
+		return nil, err
+	}
 	startedAt := time.Now().UTC()
 	spec := runtime.Spec{
 		Name:       terminalContainerName(member),
@@ -215,9 +221,9 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		Mounts:           plan.Mounts,
 		User:             plan.User,
 		CreationKey:      key,
-		CPULimit:         s.cfg.RunCPULimit,
-		MemoryLimitBytes: s.cfg.RunMemoryBytes,
-		PidsLimit:        s.cfg.RunPidsLimit,
+		CPULimit:         limits.CPUs,
+		MemoryLimitBytes: limits.MemoryBytes,
+		PidsLimit:        limits.Pids,
 		NestedDocker:     true,
 	}
 	spec.Fingerprint = terminalFingerprint(spec, s.cfg.StandardImage)

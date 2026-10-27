@@ -17,12 +17,10 @@ export function launchable(agent: AgentInfo): boolean {
 export const customAgent = 'custom'
 
 function rank(agent: AgentInfo): number {
-  if (launchable(agent)) return 0
-  return agent.installed ? 1 : 2
+  return launchable(agent) ? 0 : 1
 }
 
 function status(agent: AgentInfo): string {
-  if (!agent.installed) return 'Not installed'
   if (agent.login_missing) return 'Not logged in'
   if (agent.own_account_only) return 'Your account only'
   if (agent.unavailable) return 'Unavailable'
@@ -47,10 +45,10 @@ export function AgentPicker({
 }) {
   const phone = useMediaQuery(phoneScreen)
   const [browsing, setBrowsing] = useState(false)
-  const sorted = [...agents].sort((a, b) => rank(a) - rank(b))
+  const sorted = agents.filter((agent) => agent.installed).sort((a, b) => rank(a) - rank(b))
   const rows = [
-    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent), enabled: launchable(agent), setUp: !agent.installed && onSetUp !== undefined })),
-    { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', enabled: true, setUp: false },
+    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent), enabled: launchable(agent) })),
+    { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', enabled: true },
   ]
   const chosen = rows.find((row) => row.name === value)
   const collapsed = phone && !browsing && chosen !== undefined
@@ -92,15 +90,15 @@ export function AgentPicker({
                 <span className={cn('min-w-0 truncate text-ui', row.enabled ? 'text-text' : 'text-muted')}>{row.label}</span>
                 <span className={cn('ml-auto shrink-0 text-ui-sm', selected ? 'text-text' : 'text-muted')}>{row.status}</span>
               </RadioGroupPrimitive.Item>
-              {row.setUp && (
-                <Button type="button" variant="link" size="sm" className="mr-2 ml-1" onClick={onSetUp} aria-label={`Set up ${row.label}`}>
-                  Set up
-                </Button>
-              )}
             </div>
           )
         })}
       </RadioGroupPrimitive.Root>
+      {onSetUp && (
+        <Button type="button" variant="link" size="sm" className="self-start" disabled={disabled} onClick={onSetUp}>
+          Install more agents...
+        </Button>
+      )}
     </div>
   )
 }

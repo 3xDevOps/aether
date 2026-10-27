@@ -166,6 +166,11 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Children != "" && p.Children != domain.ChildrenOn && p.Children != domain.ChildrenOff {
 		return nil, invalidParams(`children must be "on", "off" or empty`)
 	}
+	if p.Limits != nil {
+		if err := scheduler.ValidateRunBudgets(p.Limits.CPUs, p.Limits.MemoryBytes, p.Limits.Pids); err != nil {
+			return nil, invalidParams(err.Error())
+		}
+	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
 	// Cancelling a launch mid-provisioning fails the run it is creating, so
@@ -228,7 +233,12 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	if excluded != nil {
 		slog.Warn("sshd: fallback accounts left out of a launch", "member", member, "error", excluded)
 	}
+	var limits domain.RunLimits
+	if p.Limits != nil {
+		limits = domain.RunLimits{CPUs: p.Limits.CPUs, MemoryBytes: p.Limits.MemoryBytes, Pids: p.Limits.Pids}
+	}
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
+		Limits:     limits,
 		CachedBase: p.CachedBase, Model: p.Model, RequestedAccount: requested, Fallback: policy,
 		Admitted: unlockAuthorization, Created: created,
 		ExtraWorkspaces: workspaceIDs(p.ExtraWorkspaceIDs),
