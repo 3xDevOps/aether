@@ -378,6 +378,49 @@ func TestAConditionStoreBreaksTheWaitOnlyAfterAnHourOfFailures(t *testing.T) {
 	}
 }
 
+// Background tasks the run holds can still wake the agent, so a stranded
+// wait stays quiet while they run and needs a member once they end.
+func TestHeldTasksKeepAStrandedWaitQuiet(t *testing.T) {
+	t.Parallel()
+	waits := &fakeWaits{}
+	e := newReportingEnv(t, func(cfg *Config) {
+		cfg.WaitConditions = waits
+		cfg.StallThreshold = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-agents", "", "two subagents", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+		t.Fatal(err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	// hold sets the background tasks the parked run holds, as an Enhanced
+	// session between turns reports them.
+	hold := func(report agentstatus.Report) {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		e.sched.runs[run.ID].agentReport = report
+	}
+	hold(agentstatus.Report{State: agentstatus.Working, Reason: agentstatus.BackgroundReason(2)})
+	stuck := checking(time.Now().Add(-time.Hour))
+	stuck.State, stuck.ResolvedAt = waitResolved, time.Now().Add(-time.Hour)
+	waits.set(nil, stuck)
+	e.sched.refreshActivities(ctx)
+	if got := e.sched.Wait(run.ID, domain.ActivityWaitingAgents); got == nil || got.Kind != domain.WaitFault {
+		t.Fatalf("Wait = %+v while tasks are held, want a quiet fault", got)
+	}
+	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.NeedsAttention(false) {
+		t.Fatalf("a stranded wait with held tasks shows %s %q", row.Activity, row.Reason)
+	}
+
+	hold(agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
+	e.sched.refreshActivities(ctx)
+	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
+}
+
 // A member's message is the remedy a broken wait asks for: the turn it
 // starts leaves the stranded condition behind, so the next wait the agent
 // reports is judged without it.
