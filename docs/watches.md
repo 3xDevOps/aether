@@ -137,6 +137,13 @@ every other notification.
 While you are using a dashboard, pushes wait until you have been away from
 every dashboard for a minute, the same hold run notifications use.
 
+The desktop app shows a native notification for each new notice while it is
+open. A run's `needs_you` notice closes when the need ends, and its `finished`
+notice closes when you see or put off the outcome. A notice whose need or
+outcome ended before it could be shown is not shown. If the app loses its
+connection to the server, it closes these notices, because it can no longer
+tell when they end.
+
 ### No double pushes
 
 Your own run already pushes you when it needs you

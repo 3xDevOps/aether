@@ -18,7 +18,9 @@ import (
 
 const memoryUsage = `usage: aether memory <command> [--workspace <name-or-id>] [options]
 
-Put -- before text that starts with a dash. Guide: docs/memory.md
+Every member reads every note. Only a member note's owner or an admin may
+pin, unpin, remove or replace it. Put -- before text that starts with a
+dash. Guide: docs/memory.md
 
 commands:
   ls      [--kind K] [--file P] [--all] [--limit N]        list the newest notes, 100 by default
@@ -30,7 +32,8 @@ commands:
                                                            note, puts it in yours only
   unpin   ID                                               take a note out of briefs
   rm      ID | --run RUN                                   delete a note, or every note a run wrote
-  brief   [--member M]                                     print the brief a new run gets, byte for byte`
+  brief   [--member M]                                     print the brief a new run gets, byte for byte; --member is
+                                                           admin only`
 
 // memoryCall is a parsed memory command, run once connected.
 type memoryCall func(c *protocol.Client, w io.Writer) error
@@ -241,7 +244,7 @@ func parseMemory(args []string) (memoryCall, error) {
 			return nil
 		}, nil
 	case "brief":
-		member := fs.String("member", "", "whose brief: member ID or display name (default: yours)")
+		member := fs.String("member", "", "whose brief: member ID or display name (default: yours; another member's needs the admin role)")
 		if words, err := memoryArgs(fs, args[1:]); err != nil || len(words) > 0 {
 			return nil, usage(cmp.Or(err, errors.New("brief takes no arguments")))
 		}

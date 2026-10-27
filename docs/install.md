@@ -37,9 +37,10 @@ flowchart LR
 - Linux; a headless server is fine. Windows and macOS run only clients.
 - Docker Engine, running
   ([install Docker Engine](https://docs.docker.com/engine/install/)). Every run
-  and member environment is a container. Sharing an agent account between
-  members ([teams.md](teams.md#agent-accounts)) needs Docker Engine 26.0 or
-  newer; `docker version --format '{{.Server.Version}}'` prints yours.
+  and member environment is a container. The snap package does not work: the
+  `aether-server` unit requires `docker.service`. Sharing an agent account
+  between members ([teams.md](teams.md#agent-accounts)) needs Docker Engine
+  26.0 or newer; `docker version --format '{{.Server.Version}}'` prints yours.
 - git, and `ssh-keygen` (package `openssh-client` on Debian and Ubuntu), which
   git uses to sign the commits Aether makes for members who connected GitHub.
 - At least 2.5 GiB of available memory and 6 GiB of free disk, plus disk for
@@ -86,11 +87,16 @@ in `/usr/local/bin` that would run first.
   ([First boot](#first-boot)):
   `sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>`.
 - When `sudo` fails, for example because it needs a password and there is no
-  terminal, the script exits 1 and names the install that needs no `sudo`:
+  terminal, the script exits 1. If it was installing `aether` alone, as on
+  macOS or with `--client`, it names the install that needs no `sudo`:
 
   ```sh
   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
   ```
+
+  Otherwise it says that installing `aether-server` needs root, passwordless
+  `sudo`, or a terminal where `sudo` can ask for the password, such as
+  `ssh -t <user>@<host> '<install command>'`.
 
 - When setup does not run on a host whose `aether-server` unit already exists,
   `next:` says `sudo aether-server update`, which restarts the running server

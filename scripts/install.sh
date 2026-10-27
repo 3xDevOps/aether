@@ -285,11 +285,12 @@ else
 	fi
 fi
 if ! $sudo mkdir -p "$BIN_DIR"; then
-	if [ -n "$sudo" ] && [ "$ROLE" != server ]; then
+	[ -n "$sudo" ] || die "cannot create ${BIN_DIR}"
+	if [ "$COMPONENTS" = client ]; then
 		die "cannot create ${BIN_DIR} with sudo. To install only the aether CLI, without sudo, run:
   curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh -s -- --client --role none --bin-dir \"\$HOME/.local/bin\""
 	fi
-	die "cannot create ${BIN_DIR}"
+	die "cannot create ${BIN_DIR} with sudo. Installing aether-server needs root, passwordless sudo, or a terminal where sudo can ask for the password: rerun as root, or over \`ssh -t\`"
 fi
 
 # --- download and verify -----------------------------------------------
@@ -858,6 +859,12 @@ next_step() {
 	fi
 }
 
+link_steps() {
+	next_step "aether login" "$1"
+	next_step "aether link --claim <code>" "code from server setup or \`sudo aether-server edge claim-code\`"
+	next_step "aether link $2:2222" "instead, on a tailnet or without the edge"
+}
+
 echo
 case "$ROLE" in
 server) echo "This machine is your Aether server: agents run here." ;;
@@ -887,10 +894,10 @@ server)
 	else
 		next_step "sudo aether-server setup" "config, systemd unit, and how to start it"
 	fi
-	next_step "aether link <this-host>:2222" "from your own machine; the first link becomes admin"
+	link_steps "from your own machine, sign in to the edge" "<this-host>"
 	;;
 client)
-	next_step "aether link <server-host>:2222" "the first link on a fresh server becomes admin"
+	link_steps "sign in to the edge" "<server-host>"
 	if [ "$gui_built" != yes ]; then
 		next_step "aether gui build" "the desktop app, or run \`aether gui\` for a browser tab"
 	fi
@@ -905,6 +912,6 @@ client)
 	elif [ "$COMPONENTS" != "client" ]; then
 		next_step "sudo aether-server setup" "on the server box: config, systemd unit, activation line"
 	fi
-	next_step "aether link <server>:2222" "from a client; the first link becomes admin"
+	link_steps "from a client, sign in to the edge" "<server>"
 	;;
 esac
