@@ -476,8 +476,8 @@ path `/callback`), never to a server's own `/mcp/<server id>` pages, which
 have no form limit. Anything else becomes `502 the server sent the browser to
 "<url>"; on https://<relay host>/mcp the edge sends it only to ...`. The edge
 also adds `form-action https://<relay host> https://chatgpt.com
-https://claude.ai http://localhost:* http://127.0.0.1:*` to the sandbox
-policy, so no server's page can post a form elsewhere.
+https://claude.ai http://localhost:*/callback http://127.0.0.1:*/callback` to
+the sandbox policy, so no server's page can post a form elsewhere.
 
 Edge protocol 4 brings the binding. Mixed versions behave as follows:
 

@@ -278,11 +278,11 @@ func TestUniversalSignInAcrossVersions(t *testing.T) {
 // document lists http://127.0.0.1/callback, through the universal URL:
 // it returns to the loopback port it picked with a code, which redeems
 // with PKCE. The same redirect is refused for a client not listed as a
-// loopback client.
+// loopback client, though its document lists it.
 func TestUniversalLoopbackClient(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	client := newLoopbackClient(t)
+	client := newClient(t, true)
 	s := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{})
 	h.claimServer(h.login(alice)[0], s)
 	b, err := h.signIn(alice)
@@ -301,7 +301,8 @@ func TestUniversalLoopbackClient(t *testing.T) {
 		t.Fatalf("token exchange for the loopback client: %s %s", resp.Status, body)
 	}
 
-	other := newConnectorClient(t)
+	other := newClient(t, true)
+	other.loopback = nil
 	s2 := h.newConnectorServer(edgeproto.PolicyAccount, other, sshd.Services{})
 	h.claimServer(h.login(alice)[0], s2)
 	request.Set("client_id", other.id)

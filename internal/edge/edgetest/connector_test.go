@@ -46,13 +46,9 @@ func newConnectorClient(t *testing.T) *connectorClient {
 	return newClient(t, false)
 }
 
-// newLoopbackClient is a client like Claude Code: its document lists
-// http://127.0.0.1/callback, and it returns there on a port it picked.
-func newLoopbackClient(t *testing.T) *connectorClient {
-	t.Helper()
-	return newClient(t, true)
-}
-
+// newClient is a test client; with loopback it is like Claude Code: its
+// document lists http://127.0.0.1/callback, it returns there on a port
+// it picked, and the server lists it as a loopback client.
 func newClient(t *testing.T, loopback bool) *connectorClient {
 	t.Helper()
 	mux := http.NewServeMux()

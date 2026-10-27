@@ -568,8 +568,9 @@ there is no terminal, file, settings or git-writing tool.
   one. Behind an edge at protocol 3 the assertion still arrives in
   the URL and is bound to no browser
   ([edge.md](edge.md#mcp-connectors)). On the universal paths the edge
-  forwards a server's redirects and forms only to itself, `chatgpt.com` and
-  `claude.ai`. Under
+  forwards a server's redirects and forms only to itself, `chatgpt.com`,
+  `claude.ai` and Claude Code's loopback callback, `/callback` on
+  `http://localhost` or `http://127.0.0.1` at any port. Under
   `edge-access account` it replaces the pairing code: the trust is the same as
   a GitHub sign-in admitting a new device, so a taken-over GitHub account or a
   compromised edge (or its key) can authorize a connector as that member.

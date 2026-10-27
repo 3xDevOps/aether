@@ -222,13 +222,14 @@ func (g *universalGuard) Write(p []byte) (int, error) {
 func (g *universalGuard) Unwrap() http.ResponseWriter { return g.ResponseWriter }
 
 // clientSources is the connector clients' origins as CSP sources, each
-// after a space, with Claude Code's loopback callback on any port.
+// after a space, with Claude Code's loopback callback on any port: only
+// its path, so no form reaches another local service.
 func (s *Service) clientSources() string {
 	var out string
 	for _, host := range s.clientHosts {
 		out += " https://" + host
 	}
-	return out + " http://localhost:* http://127.0.0.1:*"
+	return out + " http://localhost:*/callback http://127.0.0.1:*/callback"
 }
 
 // allowedLocation reports whether loc is the universal authorization
