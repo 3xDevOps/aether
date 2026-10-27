@@ -117,6 +117,9 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 	if err := s.cfg.Mail.MarkCoordStateReportApplied(ctx, run, p.IdempotencyKey); err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
+	if p.Outcome == protocol.CoordOutcomeNeedsInput && s.cfg.Children != nil {
+		s.cfg.Children.NeedsInput(ctx, run, summary)
+	}
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
 		ID: "coord-state-report:" + id, Time: receipt.CreatedAt, WorkspaceID: self.WorkspaceID, RunID: run,
 		Payload: events.TimelinePayload{

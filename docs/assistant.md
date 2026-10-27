@@ -77,6 +77,7 @@ run.
 | Team memory | Add a note, pin or unpin one; it cannot remove notes | Yes |
 
 Pausing and resuming run at once. The run's events name you as the actor.
+After each action the assistant says what it did, to which run, and the result.
 
 An approved message reaches the agent at once when you control the run, or
 when it is your own run and no one controls it. Otherwise it waits about 45
@@ -96,6 +97,12 @@ or secrets. The line above the message box, **Sharing: run run-8x2 · Changes**,
 expands to the exact JSON the next message sends. Clear **Share the page I am on
 with the assistant** to stop. The choice is saved for you on every device.
 
+The view a message carries is the one the assistant uses for that turn until
+you open another page. Before acting on a run it resolves the target from ids
+you wrote, then the page, then recent pages, and asks when more than one fits
+or you moved away from the run it last discussed. Only this assistant sees your
+page; assistants connected from outside Aether, such as ChatGPT, do not.
+
 ## Approve an action
 
 An action that asks waits for you. The panel shows a card, **Approve this
@@ -109,10 +116,27 @@ Save your environment as a new image; new runs and terminals start from it
 ```
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
-session fails the action with the reason, for example `run.kill was not
-approved: the member declined this action`. The assistant is told to report the
-failure and not retry. The assistant cannot approve for you. Each approval is
-recorded in the transcript before the action runs.
+turn or session fails the action with the reason, for example `run.kill was
+not approved: the member declined this action`. The assistant is told to report
+the failure and not retry. The assistant cannot approve for you.
+
+Every action is recorded in the transcript. The approval is written before the
+action runs; if it cannot be written, the action does not run. The outcome
+follows when the call returns:
+
+| Record | When |
+| --- | --- |
+| `Approved: <summary>` | You approved the card |
+| `Auto-approved: <summary>` | [Auto-approval](#auto-approval) passed it |
+| `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer in 10 minutes, or the turn ended first. Nothing ran |
+| `Done: <summary>` | It succeeded, with the run it launched |
+| `Failed: <summary>` | The server refused it, or the approval could not be read or counted, with the exact error. In the second case nothing ran |
+
+Pausing and resuming are recorded as `Done` or `Failed` without an approval.
+Each record carries the target's run and workspace id, and the owner when the
+run is another member's; the [protocol reference](local-gateway.md) gives the
+fields. Resetting the conversation drops the records of actions still in
+flight instead of writing them into the new one.
 
 ## Auto-approval
 

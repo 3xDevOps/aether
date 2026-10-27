@@ -773,12 +773,17 @@ func (s *Session) Answer(requestID, optionID string, content map[string]any) err
 // Notice records a notice item. It returns ErrClosed once the session is
 // closed, and the log's error when the item was not recorded.
 func (s *Session) Notice(severity, title, description string) error {
+	return s.Record(Notice{Severity: severity, Title: title, Description: description})
+}
+
+// Record writes n as a notice item of the current turn.
+func (s *Session) Record(n Notice) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return ErrClosed
 	}
-	it := Item{Kind: KindNotice, Notice: &Notice{Severity: severity, Title: title, Description: description}, Turn: s.turn}
+	it := Item{Kind: KindNotice, Notice: &n, Turn: s.turn}
 	if err := s.log.Append(&it); err != nil {
 		return fmt.Errorf("acphost: record notice: %w", err)
 	}

@@ -67,6 +67,8 @@ func Run(ctx context.Context, cfg Config) error {
 		registerAssistantTools(srv, cfg.Socket)
 	} else if err := registerTools(srv, cfg.Socket, g); err != nil {
 		return err
+	} else {
+		registerChildTools(ctx, srv, cfg.Socket)
 	}
 	if err := srv.Run(ctx, &mcp.IOTransport{
 		Reader: g.reader(cfg.In),

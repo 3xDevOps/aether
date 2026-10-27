@@ -33,6 +33,8 @@ type Guide struct {
 	// pi/omp/OpenCode integrations.
 	Wake  bool
 	Repos string
+	// Parent is the run that started this child run.
+	Parent string
 }
 
 // SubagentRule is the one rule a subagent needs about Aether.
@@ -97,7 +99,7 @@ func Brief(g Guide) string {
 // StatusGuide is the guide of the run behind status, read inside its
 // container.
 func StatusGuide(status protocol.CoordStatusResult) Guide {
-	g := Guide{RunID: status.RunID, Background: os.Getenv(coordtransport.BackgroundEnv) == "1"}
+	g := Guide{RunID: status.RunID, Parent: status.ParentRunID, Background: os.Getenv(coordtransport.BackgroundEnv) == "1"}
 	g.Wake = !g.Background && !status.Protected && (os.Getenv(coordtransport.EnhancedEnv) == "1" || os.Getenv(coordtransport.WakeEnv) == "1")
 	switch {
 	case !slices.Contains(status.Capabilities, protocol.MethodCoordReport):
@@ -218,6 +220,10 @@ func RoleCard(g Guide) string {
 		if g.Role == RoleIntegrator {
 			b.WriteString("Integration candidates combine only the working-directory repository: a worker's commits in an extra repository stay on that worker's run branch there, so name those worker runs in your final report.\n")
 		}
+	}
+	if g.Parent != "" {
+		fmt.Fprintf(&b, "Run %s started you as its child run: do the task yourself and start no child runs unless it says to. "+
+			"Ask it with `aether-internal ask --to %s` before asking the user; your final report reaches it.\n", g.Parent, g.Parent)
 	}
 	if g.Role != "" {
 		b.WriteString(ReportGuide(g))

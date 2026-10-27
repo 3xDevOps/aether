@@ -19,6 +19,7 @@ import { stateTone } from '@/lib/status'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { ChildRuns } from '@/routes/run/child-runs'
 import { usePrimaryAction, type RunNavigation } from '@/routes/run/header'
 import { NoteComposer } from '@/routes/run/note-composer'
 import { NoteThread } from '@/routes/run/note-thread'
@@ -210,6 +211,7 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
           ? <NeedsYouCards run={run} agent={agent} room={room} nav={nav} docked={view === 'session'} />
           : <ConditionCard run={run} view={view} agent={agent} nav={nav} />}
       </Section>
+      <ChildRuns run={run} inset={inset} />
       <AgentMessages run={run} inset={inset} />
       <Notes run={run} room={room} nav={nav} inset={inset} focus={noteFocus} />
       <Facts run={run} agent={agent} agentName={agentName} inset={inset} />

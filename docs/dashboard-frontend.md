@@ -386,7 +386,9 @@ attached to it, the viewer included: the `watching` lists of
 `presence.roster`, which covers every workspace (`runWatchers` and
 `runPeople` in `src/store/presence.ts`). Their avatars stack at the row's
 right edge and the age, the glyph and a swarm's button move left to make
-room; a run nobody is on reserves none. The first avatar sits whole at the
+room; a run nobody is on reserves none. A root with child runs shows a
+`Network` glyph and their count before the agent glyph, and its name adds
+"2 child runs · 1 working"; only its children that need you list under it. The first avatar sits whole at the
 edge and each one after shows from behind it, to its left. First is the
 run's controller. While nobody holds control it is the last controller, if
 they are still on the run. The rest follow by name. A row draws three
@@ -397,7 +399,7 @@ title keeps its room.
 **Run details.** Resting a mouse on a row for 400ms opens a box docked to
 the row's right edge (`run-details.tsx`): the whole title, the state's
 reason, the workspace, the agent and mode, the branch, a swarm parent's
-worker counts, when the run started, when it last changed if that is later,
+worker counts or a root's child-run counts, when the run started, when it last changed if that is later,
 its owner, and the people on it with the controller marked **Controlling**.
 A live run nobody controls says so above them and names who had control
 last, when the server knows. Moving to another row swaps the box without
@@ -1053,7 +1055,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   skips an unknown run, whose snapshot carries the holder. `run.account`
   likewise skips an unknown run, and on a known one replaces
   `account_member_id` and `requested_account_member_id` with the payload's, so
-  the header names the new account at once.
+  the header names the new account at once. `run.children` re-reads its run,
+  which carries the run's own child-run setting, `child_refused` and
+  `detached`.
   `run.retention` also fetches an unknown run, then replaces only its runtime
   deadline and cleanup metadata. It does not re-fetch known runs or change
   `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or
@@ -1218,6 +1222,12 @@ columns do not fit, **Board** renders the list layout and the **List** tab
 is hidden. A group of more than 60 cards renders only the cards its scroll
 shows (`card-list.tsx`, virtua).
 
+In a flat run list (`run-list.tsx`) a root lists its workers and child runs
+at any depth under it with a toggle naming the count (**Show 2 child
+runs**). A swarm's workers start shown; child runs start folded, and a
+folded child that needs you still shows. Nested rows add the model to the
+agent.
+
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
 
 1. the head: the agent's coloured `AgentGlyph` and the title (`runLabel`),
@@ -1248,6 +1258,20 @@ renders `card:meta` for its root run. Workers never appear as separate
 listed is rooted at its oldest worker. `useBoard` reuses a
 card's previous object while it is unchanged (`dequal`), so the memoized
 `RunCard` skips it.
+
+A **child run** is a run that another run's agent started with
+`aether-internal child start` ([child runs](plans/2026-10-26-child-runs.md));
+its parent is that run and its root the top of the tree. Every surface reads
+one hierarchy: `runParents` in `map-layout.ts` takes a swarm worker's parent
+from `integrator_run_id` and every other run's from `parent_run_id`, and
+`runTrees` in `src/store/selectors.ts` folds each tree under its root. Child
+runs of a swarm's runs fold into the swarm; other child runs fold into their
+root's card, which adds "N child runs" and a `StatusDot` count per state.
+Children never appear as separate cards. One that needs you puts its root
+in Needs you, as a swarm worker does, and the card's description names it:
+"`<purpose>`: `<reason>`". A child whose parent is not loaded is its own
+card. A child's label (`runLabel`) is its `child_purpose`, so the palette,
+which searches every run, finds it by purpose.
 
 A Needs you card shows its primary action on hover, on keyboard focus and
 always on a touch screen (`card-action.tsx`). Each condition in
@@ -1368,7 +1392,9 @@ establishes one. Up to four workers hang in one row from a bus; five or more
 fill four fixed columns row by row, each on a rail, so a new worker is
 appended without moving the others. Workers whose integrator is filtered,
 archived or not listed share one unit captioned "Integrator not visible". A
-swarm's caption is its objective and phase.
+swarm's caption is its objective and phase. A run with child runs is a
+`family` unit laid out the same way: every descendant hangs under the root,
+captioned "N child runs", with the same fold button.
 
 Units are placed newest first by the root run's `created_at`: each takes the
 highest free spot in a band of one common width, leftmost on a tie, so the
@@ -2143,6 +2169,14 @@ heading reads "Neither you nor <owner> has an agent installed." and the note
 says the run uses the owner's login and the caller's installation, or the
 owner's when the caller has none.
 
+Where the server offers `run.children.allow`, the Run tab has a **Child
+runs** select: **Use my setting** (naming it, "(off)"), **Allow for this
+run** and **Off for this run**, sent as `run.launch` `children: "on"` or
+`"off"`; the first sends nothing. Under it, while two or more listed agents
+can launch, the member setting is off and its nudge is `show`, one line
+points to **Settings → Child runs** with **Not now** and **Don't show
+again**.
+
 Below the select, **Options** holds the [usage
 fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
 **Fall back to another account** checkbox and the **Fallback accounts** list,
@@ -2257,7 +2291,9 @@ Standard · opus"), "On `<name>`'s account (fallback)" when the run carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
 a `run.account` event updates it live when the run moves), the reason, and
 the owner. The state's dot and label are the Workflow chip's, on the row
-below. The reason takes only the room left over, so a long command never
+below. A child run adds a `nav "Run lineage"` row under the header: its
+root and parent as links, then "This child run", and **Detached** once it
+no longer counts toward its parent. The reason takes only the room left over, so a long command never
 moves or hides the branch; the owner goes below 32rem, and the mode word
 truncates before the branch does. The full task and the run record are in
 Details.
@@ -2280,7 +2316,25 @@ The actions, in order:
    which the composer replaces, then **Hand off…**, the mode switch,
    **Open in editor…**, **Captures…** and **Raw events…**, then **Close
    run…**, **Kill run** and **Delete run** after a separator. Kill, Delete
-   and **Free container…** confirm first.
+   and **Free container…** confirm first. Where the server offers
+   `run.children.allow`, the owner of a live run outside a swarm also gets
+   **Allow child runs** (`run.children.allow` `on`), and the owner or an
+   admin **Turn off child runs** on a run that allowed them.
+
+Kill and Delete of a run with unfinished child runs (live, not detached; the
+store's runs whose `parent_run_id` is this run) say "Its 2 unfinished child
+runs stop too, with any runs they started." and offer **Detach them and keep
+them running**. Ticked, the dashboard calls `run.child.detach` for each and
+then the verb; a refused detach stops there with a toast and nothing is
+killed.
+
+When the run's agent tried to start a child run while child runs were off
+(`child_refused`), the owner's member setting is off and its nudge is
+`show`, a callout under the header offers **Allow for this run**
+(`run.children.allow` `on`), **Open settings**, **Not now** and **Don't show
+again** (`child.settings` `nudge: "later"` or `"never"`; the server snoozes
+7 days, then 30, and stops after the third). No answer turns on the member
+setting.
 
 **Open in editor…** (`open-in-editor.tsx`) is offered for a live run the
 member may steer, by the same `allowed('steer', …)` question the run verbs
@@ -4115,6 +4169,20 @@ whatever opened it. Sections (`details.tsx`):
   decision or reply locks only its own card ([Actions](#actions)). With none of
   these, one card with the needs-you reason and the header's action as a
   secondary button, or "Nothing is waiting on you."
+- **Child runs**, where the server offers `run.children` and the run has
+  any: every descendant, nearest first and indented by depth, with its
+  purpose, state, agent and model, "On `<name>`'s account" plus "(fallback
+  from `<name>`)" when the store's run carries `requested_account_member_id`,
+  its cost or "Cost not reported", its latest report and error, and
+  **Detached** and **Stale review** (the parent's branch moved past the
+  child's start) badges. **Open** opens a started child; **Detach**
+  (`run.child.detach`, for whoever may kill the parent) keeps an unfinished
+  one running on its own. Under the list: the cost of this run and all its
+  descendants, "At least $X: N runs report no cost" when some are unmetered
+  and "Cost not reported" when none are metered, never $0; the split by
+  paying account; tokens; and on a root "1 of 8 busy, 1 queued, 2 of 100
+  started" against the workspace limits. The list rereads whenever a
+  descendant the store holds changes.
 - **Agent messages**: the run-scoped agent mail, which the Session view also
   shows inline, with **Show older** and **Show all**.
 - **Notes**: a comment thread (`note-thread.tsx`) of `comment` room messages,
@@ -4191,7 +4259,10 @@ the run; a run that needs you leads with a Needs you row naming the
 request; under it every subagent and nested workflow nests under the agent
 that launched it (one whose launch the loaded history lacks sits under the
 run, `Not checked yet`), with its label, state and a summary of its tool calls
-("Read 3 files and ran 2 commands"), never its prose. Node ids are server
+("Read 3 files and ran 2 commands"), never its prose. Child runs follow the
+agents, each under the run that started it, at any depth; selecting one
+opens it. On the swarm page a worker's child runs nest under its attempt
+and the integrator's under the root. Node ids are server
 ids (`run:<id>`, `agent:<tool call id>`), and a re-derivation keeps every
 unchanged subtree's object, so only rows that changed re-render.
 
@@ -5804,7 +5875,11 @@ forked from it; **Source and clone**, the shared
 server-fetched source with its mirror status and deploy key, the checkout
 Origin) with its Advanced part open; **Environment**, below; and **Team**,
 the budget with **Set budget…** (`budget.set`) and who may message others'
-runs with **Change…** (`workspace.settings`). Each button is gated by its
+runs with **Change…** (`workspace.settings`), and, where the server offers
+`workspace.child_limits`, the child-run limits ("8 busy at once, 3 levels
+deep, 100 per run tree"). The admin's **Change…** dialog edits them as
+**Busy at once**, **Levels deep** and **Per run tree**, saving only the
+changed ones with `workspace.child_limits`. Each button is gated by its
 server-side permission; a member without it reads the same facts. The page
 lists no runs: the board does.
 
@@ -5886,6 +5961,7 @@ while one of its entries is visible, so the nav and search never disagree.
 | You | Connections (`connections`) | ChatGPT and Claude (`connectors`); GitHub (`github`) |
 | You | Notifications (`notifications`) | Push notifications (`push`); Slack (`slack`) |
 | You | Assistant (`assistant`) | Approvals (`auto-approve`) |
+| You | Child runs (`children`) | Child runs (`child-runs`): Allow automatic fallback (`child-fallback`), Use subscriptions shared with me (`child-shared`), Limits (`child-limits`) |
 | You | Usage (`usage`) | Subscription usage (`subscription-usage`) |
 | This computer | This computer (`this-computer`) | Link (`link`); Syncing: Sync daemon (`sync-daemon`), Mirror run files (`mirror`); Danger zone (`danger-zone`) |
 | Server | Server (`server`) | Status: Version (`version`), Tailnet dashboard, Disk and performance (`disk`); Admin: Docker inside runs (`docker`), Retained containers (`retained-containers`) |
@@ -5977,6 +6053,18 @@ Categories:
   row. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
+- **Child runs**, where the server offers `child.settings`: **Let my runs
+  start child runs** (`enabled`), with a **What child runs cover** list
+  (what it allows, that swarms use their own choices, that budgets and
+  limits apply, how to override it for one run). The first time it is
+  turned on (`configured` false), **Let your runs start child runs?** asks
+  **Allow automatic fallback** (`fallback`, on by default) and **Use
+  subscriptions shared with me when I don't have my own**
+  (`shared_when_missing`, off) and saves all three together; afterwards each
+  is its own row and saves on change. A refused change rereads the setting
+  and keeps the error under the row. Where the server offers
+  `workspace.child_limits`, a read-only row gives the active workspace's
+  limits.
 - **Usage**: the subscription usage of your account, or of an account
   shared with you. A provider that reports `unauthenticated` keeps the
   server's error and adds **Sign in on Agents**.
