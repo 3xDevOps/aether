@@ -386,9 +386,11 @@ Your [assistant](assistant.md) keeps its conversation on your server under
 - `items.jsonl` is the transcript the panel shows: your prompts, the agent's
   replies, its tool calls and their results, and the action cards.
 - `home/` is the agent's home: the sign-in you made for the assistant
-  (`.claude/.credentials.json` or `.codex/auth.json`) and the session files
-  Claude Code keeps under `.claude/` (projects, history, todos, file history,
-  shell snapshots, debug logs) or Codex under `.codex/` (sessions, history).
+  (`.claude/.credentials.json` or `.codex/auth.json`) and the conversation's
+  session files (`.claude/projects/` or `.codex/sessions/`). History, todos,
+  file history, shell snapshots and debug logs exist only while a session
+  runs; each start deletes them.
+- `signin/` records which sign-in you made, to check the file against.
 - `install/` holds each agent's installed adapter, and `install/<agent>.installed`
   its version.
 - `instructions/` holds the instructions the server gives it, and `tools/` its
@@ -403,8 +405,10 @@ account you signed the assistant in to.
 
 **New conversation** deletes `items.jsonl` and everything in `home/` but the
 sign-in. The output of a sign-in terminal, which shows the sign-in URL and,
-for Codex, a one-time code, is kept with other terminal transcripts in
-`<data-dir>/transcripts/assistant-login-<member>-<agent>.cast`. Removing a member deletes the whole directory. Assistant state
+for Codex, a one-time code, is recorded like any terminal in
+`<data-dir>/transcripts/assistant-login-<member>-<agent>.cast` and deleted
+when the sign-in exits; if the dashboard was not attached then, at the next
+start or sign-in. Removing a member deletes the whole directory. Assistant state
 from before the assistant had its own container is in your home;
 [assistant.md](assistant.md#earlier-assistant-state-in-your-home) says how to
 delete it.

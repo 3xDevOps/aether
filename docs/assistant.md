@@ -42,7 +42,15 @@ The sign-in file must hold only what a sign-in writes. Claude Code's
 `auth_mode` (`chatgpt` or `apikey`), `OPENAI_API_KEY`, `tokens` and
 `last_refresh`. Anything else, such as a gateway URL that would receive your
 prompts, is removed, and that start fails with the keys it removed. **Retry**
-starts with the rest.
+starts with the rest. A sign-in file over 64 KiB is deleted.
+
+The server also records, outside the home, which sign-in you made, and every
+start checks the file against it. For Codex that is the ChatGPT account the
+access token names, or the API key. For Claude Code, whose file names no
+account, it is the set of keys and the `scopes`, `subscriptionType` and
+`rateLimitTier` values; a refresh changes only the tokens and their expiry. A
+file that no longer matches makes the agent not ready, and a start fails with
+`the assistant's sign-in changed since you signed in. Sign in again`.
 
 On the first start, and after a server upgrade that pins a newer adapter, the
 panel shows **Installing** while a short-lived container,
@@ -76,7 +84,9 @@ is not ready says `Not signed in for the assistant` and has **Sign in**.
 container: `claude-agent-acp --cli auth login` for Claude Code, which prints a
 URL and asks for the code the page shows, or `codex login --device-auth` for
 Codex, which prints a URL and a code to enter there. It installs the adapter
-first if needed. The sign-in is written to the assistant's home only. Starting
+first if needed. Starting a sign-in deletes that agent's earlier sign-in, so
+what the server records is what the sign-in writes. The sign-in is written to
+the assistant's home only. Starting
 it stops a running assistant session; the next prompt starts it again, and a
 prompt sent while the sign-in runs fails until it exits. Select **Done** when
 it exits.
@@ -292,10 +302,12 @@ already did stays done.
 Before the assistant had its own container it ran in your environment, in
 `~/.aether/assistant`, and kept its sessions in your home. That state, and the
 login it borrowed from your home, are not moved, because any run could have
-changed them. Delete the old state from `aether terminal`:
+changed them. Delete the old state from `aether terminal`; the session
+directory is named after your home's path, `-root--aether-assistant` when it
+is `/root`:
 
 ```sh
-rm -rf ~/.aether/assistant ~/.claude/projects/-root--aether-assistant
+rm -rf ~/.aether/assistant ~/.claude/projects/*--aether-assistant
 ```
 
 Codex sessions from that time are in `~/.codex/sessions` together with your
@@ -317,6 +329,7 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | Message | Fix |
 | --- | --- |
 | `assistant: no agent is ready; sign in to Claude Code or Codex for the assistant` | [Sign in for the assistant](#first-use) |
+| `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
 | `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
 | `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
