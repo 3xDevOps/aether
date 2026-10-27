@@ -383,3 +383,47 @@ it('holds off another move or reconnect while one is in progress, until it is st
   expect(screen.queryByText('Waiting for ChatGPT to connect…')).toBeNull()
   expect(screen.getByRole('button', { name: 'Move Claude (claude.ai) to the universal URL' }).hasAttribute('disabled')).toBe(false)
 })
+
+it('does not resume a move stopped while its retry waits for the server', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const old = { ...chatgpt, resource: own }
+  const added = { ...chatgpt, id: 'con-universal01', resource: universal, last_used_at: '2026-10-25T12:11:00Z' }
+  const list = vi.fn().mockResolvedValue({ connectors: [old], ...signedIn })
+  const client = show({ connectorList: list })
+  await move('ChatGPT (chatgpt.com)')
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(600_000)
+  await screen.findByRole('alert')
+  let release = () => {}
+  list.mockImplementationOnce(() => new Promise((resolve) => {
+    release = () => resolve({ connectors: [old], ...signedIn })
+  })).mockResolvedValue({ connectors: [old, added], ...signedIn })
+  fireEvent.click(screen.getByRole('button', { name: 'Watch for the connection' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+  await act(async () => release())
+  await vi.advanceTimersByTimeAsync(6000)
+  expect(screen.queryByText('Waiting for ChatGPT to connect…')).toBeNull()
+  expect(screen.queryByText(/^Moving /)).toBeNull()
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
+})
+
+it('retries a move for its own app and still takes a replacement that appeared before the retry', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const old = { ...chatgpt, resource: own }
+  const added = { ...chatgpt, id: 'con-universal01', resource: universal }
+  let connectors = [old]
+  const client = show({ connectorList: vi.fn(async () => ({ connectors, ...signedIn })) })
+  await move('ChatGPT (chatgpt.com)')
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  connectors = [old, added]
+  await vi.advanceTimersByTimeAsync(600_000)
+  expect((await screen.findByRole('alert')).textContent).toContain('ChatGPT (chatgpt.com) has not called Aether yet')
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Claude' }))
+  expect(screen.getByRole('tab', { name: 'Claude' }).getAttribute('aria-selected')).toBe('true')
+  fireEvent.click(screen.getByRole('button', { name: 'Watch for the connection' }))
+  expect(await screen.findByText(/^Waiting for ChatGPT/)).toBeTruthy()
+  expect(screen.getByRole('tab', { name: 'ChatGPT' }).getAttribute('aria-selected')).toBe('true')
+  connectors = [old, { ...added, last_used_at: '2026-10-25T12:11:00Z' }]
+  await vi.advanceTimersByTimeAsync(3000)
+  await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-7k2m9q4xbd'))
+})

@@ -199,7 +199,7 @@ function Setup({
 
 const watchMs = 10 * 60_000
 
-type Target = { kind: 'move' | 'reconnect'; replaces: Connector; at?: string }
+type Target = { kind: 'move' | 'reconnect'; replaces: Connector; at?: string; id?: string; known?: Set<string> }
 
 // Keyed by identity: a code and the connector list belong to the member who
 // was signed in when they were read.
@@ -231,7 +231,9 @@ function Connectors({ client }: { client: Api }) {
   } | null>(null)
   // The move or reconnect in progress, kept past an attempt's expiry until
   // its replacement calls Aether or the member stops it, so a new code
-  // or watch continues it. `at` is its URL when not the one shown.
+  // or watch continues it. `at` is its URL when not the one shown; `id`
+  // and `known` are its claim and baseline, kept so a retry still takes a
+  // replacement that appeared before it.
   const [target, setTarget] = useState<Target | null>(null)
   const [pollError, setPollError] = useState<Failure | null>(null)
   const [expired, setExpired] = useState(false)
@@ -240,6 +242,8 @@ function Connectors({ client }: { client: Api }) {
   const [mintError, setMintError] = useState<Failure | null>(null)
   const [confirming, setConfirming] = useState<{ connector: Connector; action: 'reconnect' | 'move' | 'revoke' } | null>(null)
   const done = useRef<HTMLButtonElement>(null)
+  // Bumped by Stop so a start still awaiting the server does not resume.
+  const starts = useRef(0)
 
   const read = useCallback(() => client.connectorList().then((r) => {
     const { connectors: list, ...rest } = r
@@ -373,8 +377,10 @@ function Connectors({ client }: { client: Api }) {
     setPollError(null)
     setConnected(null)
     setExpired(false)
+    const run = ++starts.current
     const shown = connectors
     const { connectors: fresh, ...rest } = await client.connectorList()
+    if (run !== starts.current) return
     setInfo(rest)
     setConnectors(fresh)
     setListError(null)
@@ -385,13 +391,15 @@ function Connectors({ client }: { client: Api }) {
     const at = into && into !== rest.url ? into : undefined
     const signIn = rest.sign_in && !at
     const code = signIn ? null : await client.connectorCode()
+    if (run !== starts.current) return
     // Signing in needs nothing from here, so it may be done already: what
     // the page showed before is what counts as already there.
-    const known = new Set((signIn && shown ? shown : fresh).map((c) => c.id))
+    const known = next?.known ?? new Set((signIn && shown ? shown : fresh).map((c) => c.id))
+    const id = next?.id ?? randomID('connector-move')
     setApp(forApp)
-    setTarget(next && { ...next, at })
+    setTarget(next && { ...next, at, id, known })
     setAttempt({
-      id: randomID('connector-move'),
+      id,
       code,
       until: code?.expires_at ?? new Date(Date.now() + watchMs).toISOString(),
       app: forApp,
@@ -404,7 +412,7 @@ function Connectors({ client }: { client: Api }) {
   const mint = async () => {
     setBusy(true)
     try {
-      await start(app, target)
+      await start(target ? appOf(target.replaces) : app, target)
     } catch (err) {
       setMintError(failure(err))
     } finally {
@@ -413,6 +421,7 @@ function Connectors({ client }: { client: Api }) {
   }
 
   const stop = () => {
+    starts.current++
     setAttempt(null)
     setTarget(null)
     setExpired(false)
