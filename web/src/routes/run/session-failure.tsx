@@ -61,8 +61,9 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
         nav.go('terminal')
         return
       }
-      // The run's owner keeps the account they chose and its fallback; a
-      // teammate's launch runs on their own, as any launch of theirs does.
+      // The run's owner keeps the account they chose, its fallback and its
+      // child-run setting; a teammate's launch runs on their own, as any
+      // launch of theirs does.
       const own = run.member_id === useStore.getState().info?.member.id
       const account = run.requested_account_member_id ?? run.account_member_id
       const extras = run.repos?.filter((repo) => !repo.primary).map((repo) => repo.workspace_id) ?? []
@@ -75,6 +76,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
         ...(run.model ? { model: run.model } : {}),
         ...(own && account && account !== run.member_id ? { account_member_id: account } : {}),
         ...(own ? fallback : {}),
+        ...(own && run.children ? { children: run.children } : {}),
         ...(extras.length ? { extra_workspace_ids: extras } : {}),
       })
       useStore.getState().upsertRun(next)
