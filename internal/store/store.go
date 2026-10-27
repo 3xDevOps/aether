@@ -230,6 +230,7 @@ type Store interface {
 	AssistantFollowStore
 	InsightsStore
 	LaunchReceiptStore
+	LaunchDefaultsStore
 
 	Close() error
 }

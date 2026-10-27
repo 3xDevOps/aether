@@ -176,6 +176,15 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if err := db.PutNotifyPrefs(ctx, b.ID, NotifyPrefs{Push: false}); err != nil {
 		t.Fatal(err)
 	}
+	for m, l := range map[domain.MemberID]LaunchDefaults{
+		a.ID: {Agent: "claude", Account: b.ID, FallbackPolicy: "ordered", FallbackOrder: []domain.MemberID{b.ID, c.ID}, Source: "member"},
+		b.ID: {Agent: "codex", Source: "member"},
+		c.ID: {Account: b.ID, Source: "assistant"},
+	} {
+		if err := db.PutLaunchDefaults(ctx, m, l, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
 	watchB := &Watch{MemberID: b.ID, WorkspaceID: w.ID, TargetKind: "run", RunID: runB.ID, Conditions: []string{"finished"},
 		State: "active", Source: "dashboard", CreatedAt: time.Now(), UpdatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
 	if err := db.CreateWatch(ctx, watchB); err != nil {
@@ -280,6 +289,13 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	}
 	if p, gerr := db.GetNotifyPrefs(ctx, a.ID); gerr != nil || p.Push {
 		t.Fatalf("survivor's notification settings = %+v, %v; want the absorbed member's, push off", p, gerr)
+	}
+	if l, gerr := db.LaunchDefaults(ctx, a.ID); gerr != nil || l.Agent != "claude" || l.Account != a.ID ||
+		!slices.Equal(l.FallbackOrder, []domain.MemberID{a.ID, c.ID}) {
+		t.Fatalf("survivor's launch defaults = %+v, %v; want its own, naming the survivor for the absorbed member", l, gerr)
+	}
+	if l, gerr := db.LaunchDefaults(ctx, c.ID); gerr != nil || l.Account != a.ID {
+		t.Fatalf("Cy's launch defaults = %+v, %v; want the account moved to the survivor", l, gerr)
 	}
 	if got, gerr := db.GetWatch(ctx, watchB.ID); gerr != nil || got.MemberID != a.ID || got.Version == watchB.Version {
 		t.Fatalf("absorbed member's watch = %+v, %v; want it moved with a new version", got, gerr)

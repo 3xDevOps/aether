@@ -97,6 +97,7 @@ var tiers = map[string]string{
 	protocol.MethodRunPRMerge:               tierConfirmed,
 	protocol.MethodMemoryPin:                tierConfirmed,
 	protocol.MethodMemoryUnpin:              tierConfirmed,
+	protocol.MethodLaunchDefaultsGet:        tierRead,
 }
 
 // Reversible reports whether the assistant may call method without a card
