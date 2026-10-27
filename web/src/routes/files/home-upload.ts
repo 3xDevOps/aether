@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { ApiError, readFileBase64, type Api } from '@/lib/api'
+import { ApiError, readFileBase64 } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import { childPath } from '@/routes/files/sources'
-import { sameIdentity, useStore } from '@/store'
+import { sameIdentity } from '@/store'
 
 /** The server's per-file ceiling, checked here so a larger file is never read. */
 const maxUploadBytes = 64 << 20
@@ -57,9 +57,10 @@ export async function droppedUploads(data: DataTransfer): Promise<Upload[]> {
   return out
 }
 
-/** Sends files one at a time, one batch at a time. A file the server already
- * has is not replaced: it is collected, and asked about once the rest are sent. */
-export function useHomeUpload(client: Api) {
+/** Sends files one at a time, one batch at a time, through `put`. A file the
+ * server already has is not replaced: a 409 is collected, and asked about once
+ * the rest are sent. */
+export function useUpload(put: (path: string, content: string, overwrite: boolean) => Promise<unknown>, refresh: () => void) {
   const [state, setState] = useState<UploadState>({ progress: null, conflicts: null, failures: [] })
 
   const send = async (dir: string, pending: Upload[] | Promise<Upload[]>, overwrite: boolean) => {
@@ -87,7 +88,7 @@ export function useHomeUpload(client: Api) {
         // Safari reads an empty file as a data URL with no payload separator.
         const content = upload.file.size === 0 ? '' : await readFileBase64(upload.file)
         if (!same()) return
-        await client.homeUpload(path, content, overwrite)
+        await put(path, content, overwrite)
       } catch (err) {
         const reason = errorSentence(err)
         if (!overwrite && err instanceof ApiError && err.status === 409) conflicts.push(upload)
@@ -95,7 +96,7 @@ export function useHomeUpload(client: Api) {
       }
       if (!same()) return
     }
-    if (uploads.length > 0) useStore.getState().refreshHome()
+    if (uploads.length > 0) refresh()
     setState((s) => ({
       progress: null,
       conflicts: conflicts.length > 0 ? { dir, uploads: conflicts } : null,

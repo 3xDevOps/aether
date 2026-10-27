@@ -355,7 +355,7 @@ Open a run to see its views:
 | **Session** | An Enhanced run's messages, tool calls and approvals, with a message box |
 | **Terminal** | A Standard run's agent terminal, and extra shells in its container |
 | **Changes** | The diff against the base branch |
-| **Files** | The run's checkout; **Save** writes your edit into it |
+| **Files** | The run's checkout; **Save** writes your edit into it, and **Upload files…** or dropping files adds files to it |
 | **Browser** | A Chromium on the server beside the run, where `localhost` is the run's own app |
 
 `aether message <run-id> "also update the README"` messages the agent and

@@ -1087,6 +1087,8 @@ export const api = {
     call<FileRead>('files.read', params),
   filesWrite: (params: { workspace_id: string; run_id?: string; repo?: string; path: string; content: string; revision: string }) =>
     call<FileRead>('files.write', params),
+  filesUpload: (params: { workspace_id: string; run_id: string; repo?: string; path: string; content_base64: string }) =>
+    call<unknown>('files.upload', params),
   homeTree: (path: string) => call<FilesTreeResult>('home.tree', { path }),
   homeRead: (path: string) => call<FileRead>('home.read', { path }),
   homeWrite: (params: { path: string; content: string; revision: string }) =>

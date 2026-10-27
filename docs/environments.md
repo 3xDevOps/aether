@@ -322,6 +322,17 @@ aether workspace env import .env
 aether workspace env import --plain .env
 ```
 
+A project that needs the `.env` file, not just the variables, can import them
+as secrets and have the [setup script](#setup-script) write the file:
+
+```sh
+printf 'DATABASE_URL=%s\nSTRIPE_KEY=%s\n' "$DATABASE_URL" "$STRIPE_KEY" > .env
+```
+
+Keep `.env` in the repository's `.gitignore` so the run never commits it. The
+file is readable by anyone who can view the run, in its **Files**. For a
+one-off file in one run, upload it in that run's **Files**.
+
 > [!WARNING]
 > A secret is hidden from the settings, not from a run. Inside the container it
 > is an ordinary environment variable, so the agent can read it, and so can
