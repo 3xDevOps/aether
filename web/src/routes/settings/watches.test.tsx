@@ -365,6 +365,25 @@ describe('watch answers that arrive late', () => {
     expect(useStore.getState().watchNotices['wat-1']).toEqual([notice])
   })
 
+  it("keeps a read's notices when a change answers first, and a deleted watch gone when a change answers after", async () => {
+    const got = held<{ watch: Watch; notifications: WatchNotification[] }>()
+    const client = fakeApi({ watchGet: vi.fn(() => got.promise), watchUpdate: vi.fn(async () => ({ watch: watch({ state: 'paused' }), receipt: 'Paused.' })) })
+    const read = readWatch(useStore, client, 'wat-1')
+    await updateWatch(useStore, client, { watch_id: 'wat-1', paused: true })
+    got.release({ watch: watch(), notifications: [notice] })
+    await read
+    expect(useStore.getState().watches['wat-1']?.state).toBe('paused')
+    expect(useStore.getState().watchNotices['wat-1']).toEqual([notice])
+
+    const updated = held<{ watch: Watch; receipt: string }>()
+    const racing = fakeApi({ watchUpdate: vi.fn(() => updated.promise), watchDelete: vi.fn(async () => ({})) })
+    const update = updateWatch(useStore, racing, { watch_id: 'wat-1', label: 'login' })
+    await deleteWatch(useStore, racing, 'wat-1')
+    updated.release({ watch: watch({ label: 'login' }), receipt: 'Watching run login.' })
+    await update
+    expect(useStore.getState().watches['wat-1']).toBeUndefined()
+  })
+
   it('keeps a deleted watch gone when an older read or list answers after the delete', async () => {
     const got = held<{ watch: Watch; notifications: WatchNotification[] }>()
     const listed = held<Watch[]>()

@@ -40,15 +40,15 @@ export const createWatchesSlice: SliceCreator<WatchesSlice> = (set) => ({
     }),
 })
 
-// A read takes its ticket when it is sent, a change when its answer arrives:
-// an answer only lands over what landed for that watch, or as a list, before
-// its ticket.
-interface Order { next: number; list: number; cleared: number; watch: Map<string, number> }
+// A read or change takes its ticket when it is sent, a delete when its answer
+// arrives. A watch's fields land only over older fields and lists, its
+// notices only over older notices.
+interface Order { next: number; list: number; cleared: number; watch: Map<string, number>; notices: Map<string, number> }
 const orders = new WeakMap<RootStore, Order>()
 
 function order(store: RootStore): Order {
   let o = orders.get(store)
-  if (!o) orders.set(store, (o = { next: 0, list: 0, cleared: 0, watch: new Map() }))
+  if (!o) orders.set(store, (o = { next: 0, list: 0, cleared: 0, watch: new Map(), notices: new Map() }))
   return o
 }
 
@@ -57,14 +57,17 @@ const ticket = (store: RootStore) => ++order(store).next
 function land(store: RootStore, viewer: string | null, at: number, watchID: string, watch: Watch | null, notices?: WatchNotification[]) {
   const s = store.getState()
   const o = order(store)
-  if (s.identityKey !== viewer || at < (o.watch.get(watchID) ?? 0)) return
-  o.watch.set(watchID, at)
-  // A newer list has the watch, or its absence; it carries no notices.
-  if (at < o.list) {
-    const kept = s.watches[watchID]
-    if (watch && notices && kept) s.putWatch(kept, notices)
-  } else if (watch) s.putWatch(watch, notices)
-  else s.dropWatch(watchID)
+  if (s.identityKey !== viewer) return
+  const fields = at > Math.max(o.watch.get(watchID) ?? 0, o.list)
+  if (fields) o.watch.set(watchID, at)
+  if (!watch) {
+    if (fields) s.dropWatch(watchID)
+    return
+  }
+  const kept = fields ? watch : s.watches[watchID]
+  const fresh = notices !== undefined && kept !== undefined && at > (o.notices.get(watchID) ?? 0)
+  if (fresh) o.notices.set(watchID, at)
+  if (kept && (fields || fresh)) s.putWatch(kept, fresh ? notices : undefined)
 }
 
 export const listsWatches = (s: RootState) => s.info !== null && capability(s.capabilities).hasMethod('watch.list')
@@ -118,9 +121,10 @@ export async function readWatch(store: RootStore, client: Api, watchID: string):
 /** Null when the viewer changed before the server answered: the answer is the previous viewer's. */
 async function changeWatch(store: RootStore, send: () => Promise<WatchResult>): Promise<WatchResult | null> {
   const viewer = store.getState().identityKey
+  const at = ticket(store)
   const result = await send()
   if (store.getState().identityKey !== viewer) return null
-  land(store, viewer, ticket(store), result.watch.id, result.watch)
+  land(store, viewer, at, result.watch.id, result.watch)
   return result
 }
 
