@@ -451,8 +451,12 @@ func (s *Service) missionFinish(ctx context.Context, m *domain.Mission) (string,
 // you table its current integrator carries otherwise, such as the
 // integrator down. An integrator that failed to launch before its run row
 // existed carries none, so its launch error is read from the swarm. Each
-// is a need of its own.
+// is a need of its own. A swarm that ended needs nothing: whatever it
+// still asked is moot.
 func (s *Service) missionNeeds(ctx context.Context, m *domain.Mission) ([]need, error) {
+	if m.Phase.Terminal() {
+		return nil, nil
+	}
 	var out []need
 	if m.OpenQuestions > 0 {
 		questions, err := s.store.ListMissionQuestions(ctx, m.ID)

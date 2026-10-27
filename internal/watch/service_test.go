@@ -1075,6 +1075,41 @@ func TestSwarmWatchSaysSwarmTransitionsOnly(t *testing.T) {
 	h.eventually("the watch to end", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
 }
 
+func TestACancelledSwarmNoLongerNeedsYou(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.subscribe(h.ada)
+	m := &domain.Mission{WorkspaceID: h.ws.ID, Objective: "Ship watches", AccountableHumanID: h.ada.ID,
+		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchTUI}, IdempotencyKey: "swarm"}
+	if err := h.db.CreateMission(h.ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "integrate",
+		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning, MissionID: m.ID, MissionRole: "integrator"}
+	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
+		t.Fatal(err)
+	}
+	w := h.watch(h.ada, protocol.WatchTarget{Kind: protocol.WatchTargetMission, MissionID: string(m.ID)}).Watch
+	if _, err := h.db.InsertMissionQuestion(h.ctx, m.ID, integrator.ID, "merge now?", "q-1"); err != nil {
+		t.Fatal(err)
+	}
+	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
+	h.eventually("the question's push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	// Its question stays unanswered, but nobody can act on it any more.
+	h.setPhase(m.ID, domain.MissionPhaseCancelled)
+	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
+	h.eventually("the watch to end", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
+	h.eventually("the withdrawal", func() bool { return pushOf(h.notices(w.ID)[0]).Status == protocol.WatchStatusWithdrawn })
+	var observed protocol.WatchObserved
+	if err := json.Unmarshal(h.watchState(w.ID).Observed, &observed); err != nil || observed.Need != "" || observed.Summary != "Swarm cancelled" {
+		t.Fatalf("observed = %+v, %v; want no need and Swarm cancelled", observed, err)
+	}
+	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[1] != "finished: Swarm cancelled" {
+		t.Fatalf("notices = %q, want the question and the finish", got)
+	}
+}
+
 func TestAnIntegratorThatNeverLaunchedNeedsYou(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
