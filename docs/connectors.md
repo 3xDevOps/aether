@@ -153,12 +153,20 @@ pairing code works on every edge from protocol 2 and under either policy.
 
 ### Claude Code
 
-Claude Code is not a supported client. The consent page trusts only client
-metadata documents on `chatgpt.com` and `claude.ai` whose redirect URI is an
-HTTPS URL on the same host. A loopback redirect such as
-`http://localhost:<port>/callback` proves nothing about who receives the code,
-and the edge forwards a browser only to those two hosts. From Claude Code, run
-the `aether` CLI instead.
+Claude Code connects at the same URLs:
+
+```sh
+claude mcp add --transport http aether https://edge.onaether.dev/mcp
+```
+
+Then run `/mcp` in Claude Code and authenticate. Its client metadata document,
+`https://claude.ai/oauth/claude-code-client-metadata`, lists
+`http://localhost/callback` and `http://127.0.0.1/callback`, and Claude Code
+listens on a port it picks. For that client id alone, the consent page accepts
+those redirect URIs on any port (RFC 8252); every other client must return to
+an HTTPS URL on its own host. PKCE is required as for every client. Any program
+on your machine that can listen on a local port could receive the code, but it
+cannot redeem it without the PKCE verifier Claude Code holds.
 
 ## Scopes
 

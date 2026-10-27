@@ -222,28 +222,35 @@ func (g *universalGuard) Write(p []byte) (int, error) {
 func (g *universalGuard) Unwrap() http.ResponseWriter { return g.ResponseWriter }
 
 // clientSources is the connector clients' origins as CSP sources, each
-// after a space.
+// after a space, with Claude Code's loopback callback on any port: only
+// its path, so no form reaches another local service.
 func (s *Service) clientSources() string {
 	var out string
 	for _, host := range s.clientHosts {
 		out += " https://" + host
 	}
-	return out
+	return out + " http://localhost:*/callback http://127.0.0.1:*/callback"
 }
 
 // allowedLocation reports whether loc is the universal authorization
-// path on the relay origin or an https URL on a connector client's host
-// name. A server's own paths on the relay origin get no form-action
-// limit, so a universal page may not send the browser there.
+// path on the relay origin, an https URL on a connector client's host
+// name, or Claude Code's loopback callback, http://localhost or
+// 127.0.0.1 on any port at /callback. A server's own paths on the relay
+// origin get no form-action limit, so a universal page may not send the
+// browser there.
 func (s *Service) allowedLocation(loc string) bool {
 	u, err := url.Parse(loc)
 	switch {
 	case err != nil || strings.ContainsAny(loc, "\\\r\n\t"):
 		return false
+	case u.User != nil:
+		return false
 	case u.Scheme == "" && u.Host == "" && !strings.HasPrefix(loc, "//"), u.Scheme+"://"+u.Host == s.relayOrigin:
-		return u.User == nil && u.Path == edgeproto.PathUniversalMCPAuthorize
+		return u.Path == edgeproto.PathUniversalMCPAuthorize
+	case u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"):
+		return u.Path == "/callback"
 	}
-	return u.Scheme == "https" && u.User == nil && slices.Contains(s.clientHosts, u.Hostname())
+	return u.Scheme == "https" && slices.Contains(s.clientHosts, u.Hostname())
 }
 
 func writeNoStoreJSON(w http.ResponseWriter, status int, v any) {

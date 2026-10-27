@@ -639,6 +639,16 @@ working, and a `needs-attention` run need not have any. The dashboard's
 **Needs you** state is derived from both and is not a new execution status
 or answer transport.
 
+A live or provisioning Enhanced run's `run.get` and `run.list` entries carry
+`liveness`, read from the agent session when asked, not pushed:
+`{"phase":"streaming","last_progress_at":"...","connected_at":"...","transport":"open"}`.
+`phase` is `setup` (provisioning), `awaiting-first-event`, `streaming`,
+`tool-running`, `awaiting-input` or `between-turns`. `last_progress_at` is the agent's last
+message, thought, tool call, plan, subagent, compaction or request since
+`connected_at`, and is absent until there is one. `transport` is `open`,
+`closed` (the session ended or failed to open) or `unknown` (no session
+yet). Other runs omit `liveness`.
+
 Native reporters send `run.report` through their run-scoped coordination
 socket, not the member's gateway control endpoint. The socket supplies the run
 identity. The report accepts the existing `state` (`working` or `waiting`),

@@ -197,7 +197,7 @@ func (d *acpDriver) Stop(ctx context.Context, run domain.RunID) error {
 
 func (d *acpDriver) LastActivity(run domain.RunID) time.Time {
 	if sess := d.session(run); sess != nil {
-		return sess.State().LastActivity
+		return sess.State().LastProgress
 	}
 	return time.Time{}
 }
