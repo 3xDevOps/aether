@@ -98,7 +98,7 @@ test.each(['fine', 'coarse'] as const)('every verb is labeled and keyboard reach
   await userEvent.keyboard('{Enter}')
   const menu = within(await screen.findByRole('menu'))
   expect(names(menu)).toEqual([
-    'Pause run', 'Forward a port…', 'Protect run', 'Pull branch', 'Hand off…', 'Captures…', 'Close run…', 'Kill run', 'Delete run',
+    'Pause run', 'Forward a port…', 'Watch…', 'Protect run', 'Pull branch', 'Hand off…', 'Captures…', 'Close run…', 'Kill run', 'Delete run',
   ])
   fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
   await waitFor(() => expect(api.runPause).toHaveBeenCalledWith(record.id))
@@ -297,10 +297,10 @@ test('the pull toast copies the switch command and switches to the pulled branch
   await waitFor(() => expect(useStore.getState().pulls[record.id]?.current).toBe(true))
 })
 
-test('a viewer gets no mutating actions, but can use eligible local Pull', async () => {
+test('a viewer gets no mutating actions, but can watch and use eligible local Pull', async () => {
   render(<RunActions run={seed({ paused: false, members: [alice, vera], self: vera, local: ['pull'] })} />)
   const menu = await openMore()
-  expect(names(menu)).toEqual(['Pull branch'])
+  expect(names(menu)).toEqual(['Watch…', 'Pull branch'])
 })
 
 test('a collaborator can steer and kill another member run, but cannot protect or hand it off', async () => {

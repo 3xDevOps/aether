@@ -194,7 +194,7 @@ function main() {
       gatewayURL = msg.url
       gatewayOrigin = new URL(msg.url).origin
       respawns = 0 // a healthy start resets the backoff budget
-      notify.start(msg.addr, msg.url, showRun)
+      notify.start(msg.addr, msg.url, showRun, showLink)
       openWindow()
     })
 
@@ -579,18 +579,28 @@ function main() {
   // the user has typed and not sent. A page that is not the dashboard, such
   // as a load that failed, is loaded at the run instead.
   function showRun(id) {
+    showQuery(new URLSearchParams({ run: id }).toString())
+  }
+
+  function showQuery(query) {
     if (!win || win.isDestroyed()) {
-      pendingSuffix = '&run=' + encodeURIComponent(id)
+      pendingSuffix = '&' + query
       openWindow()
       return
     }
-    const address = JSON.stringify('?run=' + encodeURIComponent(id))
+    const address = JSON.stringify('?' + query)
     win.webContents
       .executeJavaScript(`history.pushState(null, '', ${address}); dispatchEvent(new PopStateEvent('popstate'))`)
       .catch(() => {
-        if (win && !win.isDestroyed()) win.loadURL(gatewayURL + '&run=' + encodeURIComponent(id))
+        if (win && !win.isDestroyed()) win.loadURL(gatewayURL + '&' + query)
       })
     focusWindow()
+  }
+
+  // A watch notice links to a dashboard page (/?...) or to a pull request on GitHub.
+  function showLink(link) {
+    if (link.startsWith('/?')) showQuery(new URLSearchParams(link.slice(2)).toString())
+    else if (/^https:\/\//.test(link)) shell.openExternal(link)
   }
 
   app.setAsDefaultProtocolClient('aether')
