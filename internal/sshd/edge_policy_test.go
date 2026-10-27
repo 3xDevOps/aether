@@ -462,8 +462,9 @@ func TestNoControlMethodChangesEdgeAccess(t *testing.T) {
 }
 
 // The edge's account-deleted notice only takes access away: the identity
-// and its devices go, with the connectors minted on them on the record,
-// their connections close, and the member, its role and its SSH key stay.
+// and its devices go, with the connectors minted on them on the record even
+// after the identity was unlinked, their connections close, and the member,
+// its role and its SSH key stay.
 func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
@@ -480,6 +481,9 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 		Resource: "https://aether.test/mcp", Scopes: []string{ConnectorScopeRead}, CreatedAt: now}
 	if err = e.store.(store.ConnectorStore).CreateConnector(context.Background(), conn, store.ConnectorTokens{Access: "a",
 		AccessExpiresAt: now.Add(time.Hour), Refresh: "r", RefreshExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = identities(t, e).UnlinkIdentity(context.Background(), domain.MemberID(m.ID), octo.Provider, octo.Subject); err != nil {
 		t.Fatal(err)
 	}
 

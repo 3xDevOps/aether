@@ -2,9 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -17,14 +16,12 @@ import (
 // past it quickly.
 var auditKeep = 10_000
 
-// securityPrefixes are the methods whose entries, once they took effect,
-// are security entries: connector, account-share, member and Slack link
-// changes.
-var securityPrefixes = []string{"connector.", "account.", "member.", "slack."}
-
-func securityEntry(e *AuditEntry) bool {
-	return e.Code == 0 && slices.ContainsFunc(securityPrefixes, func(p string) bool { return strings.HasPrefix(e.Method, p) })
-}
+// The via and method of the entry recording a connector's deletion along
+// with its member or its device, which the deletion's transaction writes.
+const (
+	AuditViaConnector     = "connector"
+	AuditConnectorRemoved = "connector.removed"
+)
 
 // AuditEntry is one durable record of who changed what and how. Via is
 // how the call arrived (dashboard, cli, connector or assistant);
@@ -32,7 +29,9 @@ func securityEntry(e *AuditEntry) bool {
 // an event that befell a connector. Target is the run, swarm, connector,
 // member, device, Slack user or merge proposal the call acted on. Code
 // is 0 for a call that succeeded and its protocol error code otherwise.
-// Entries never hold tokens, message bodies or other params.
+// Security marks a connector, account-share, member or Slack link change
+// that took effect, whatever Code says; such entries are kept apart from
+// the rest. Entries never hold tokens, message bodies or other params.
 type AuditEntry struct {
 	Seq         int64
 	At          time.Time
@@ -44,6 +43,7 @@ type AuditEntry struct {
 	WorkspaceID string
 	Target      string
 	Code        int
+	Security    bool
 }
 
 // AuditQuery selects audit entries, newest first: Member's alone unless
@@ -64,29 +64,13 @@ type AuditStore interface {
 var _ AuditStore = (*DB)(nil)
 
 func (d *DB) AddAudit(ctx context.Context, e *AuditEntry) error {
-	at, err := encodeTime(e.At)
-	if err != nil {
-		return fmt.Errorf("store: add audit: %w", err)
-	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin add audit: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
-	security := securityEntry(e)
-	res, err := tx.ExecContext(ctx, `INSERT INTO audit (ts, member_id, via, connector_id, client, method, workspace_id, target, code, security)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		at, e.Member, e.Via, e.ConnectorID, e.Client, e.Method, e.WorkspaceID, e.Target, e.Code, security)
-	if err != nil {
-		return fmt.Errorf("store: add audit: %w", err)
-	}
-	if e.Seq, err = res.LastInsertId(); err != nil {
-		return fmt.Errorf("store: add audit: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM audit WHERE member_id = ? AND security = ? AND seq <= (
-		SELECT seq FROM audit WHERE member_id = ? AND security = ? ORDER BY seq DESC LIMIT 1 OFFSET ?)`,
-		e.Member, security, e.Member, security, auditKeep); err != nil {
-		return fmt.Errorf("store: trim audit: %w", err)
+	if err = addAudit(ctx, tx, e); err != nil {
+		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("store: commit add audit: %w", err)
@@ -94,8 +78,61 @@ func (d *DB) AddAudit(ctx context.Context, e *AuditEntry) error {
 	return nil
 }
 
+func addAudit(ctx context.Context, q execer, e *AuditEntry) error {
+	at, err := encodeTime(e.At)
+	if err != nil {
+		return fmt.Errorf("store: add audit: %w", err)
+	}
+	res, err := q.ExecContext(ctx, `INSERT INTO audit (ts, member_id, via, connector_id, client, method, workspace_id, target, code, security)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		at, e.Member, e.Via, e.ConnectorID, e.Client, e.Method, e.WorkspaceID, e.Target, e.Code, e.Security)
+	if err != nil {
+		return fmt.Errorf("store: add audit: %w", err)
+	}
+	if e.Seq, err = res.LastInsertId(); err != nil {
+		return fmt.Errorf("store: add audit: %w", err)
+	}
+	if _, err = q.ExecContext(ctx, `DELETE FROM audit WHERE member_id = ? AND security = ? AND seq <= (
+		SELECT seq FROM audit WHERE member_id = ? AND security = ? ORDER BY seq DESC LIMIT 1 OFFSET ?)`,
+		e.Member, e.Security, e.Member, e.Security, auditKeep); err != nil {
+		return fmt.Errorf("store: trim audit: %w", err)
+	}
+	return nil
+}
+
+// removeConnectors deletes the connectors where selects and records each
+// deletion in tx, so none created concurrently goes unrecorded.
+func removeConnectors(ctx context.Context, tx *sql.Tx, where string, args ...any) error {
+	rows, err := tx.QueryContext(ctx, `DELETE FROM connectors WHERE `+where+` RETURNING id, member_id, client_name`, args...)
+	if err != nil {
+		return fmt.Errorf("store: remove connectors: %w", err)
+	}
+	var removed []*AuditEntry
+	for rows.Next() {
+		e := &AuditEntry{At: time.Now(), Via: AuditViaConnector, Method: AuditConnectorRemoved, Security: true}
+		if err = rows.Scan(&e.ConnectorID, &e.Member, &e.Client); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("store: remove connectors: %w", err)
+		}
+		e.Target = e.ConnectorID
+		removed = append(removed, e)
+	}
+	if err = rows.Close(); err != nil {
+		return fmt.Errorf("store: remove connectors: %w", err)
+	}
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("store: remove connectors: %w", err)
+	}
+	for _, e := range removed {
+		if err = addAudit(ctx, tx, e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *DB) ListAudit(ctx context.Context, q AuditQuery) ([]*AuditEntry, error) {
-	query, args := `SELECT seq, ts, member_id, via, connector_id, client, method, workspace_id, target, code FROM audit WHERE 1 = 1`, []any{}
+	query, args := `SELECT seq, ts, member_id, via, connector_id, client, method, workspace_id, target, code, security FROM audit WHERE 1 = 1`, []any{}
 	if q.Member != "" {
 		query += ` AND member_id = ?`
 		args = append(args, q.Member)
@@ -119,7 +156,7 @@ func (d *DB) ListAudit(ctx context.Context, q AuditQuery) ([]*AuditEntry, error)
 			e  AuditEntry
 			at int64
 		)
-		if err := rows.Scan(&e.Seq, &at, &e.Member, &e.Via, &e.ConnectorID, &e.Client, &e.Method, &e.WorkspaceID, &e.Target, &e.Code); err != nil {
+		if err := rows.Scan(&e.Seq, &at, &e.Member, &e.Via, &e.ConnectorID, &e.Client, &e.Method, &e.WorkspaceID, &e.Target, &e.Code, &e.Security); err != nil {
 			return nil, fmt.Errorf("store: scan audit: %w", err)
 		}
 		e.At = decodeTime(at)

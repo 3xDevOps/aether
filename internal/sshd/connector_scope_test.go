@@ -303,3 +303,55 @@ func TestConnectorReviewLimitReachesTheScheduler(t *testing.T) {
 		}
 	}
 }
+
+// An entry names the object a write returned and the workspace of the run
+// it acted on, and only a call that changed something is a security entry.
+func TestAuditNamesTargetsAndKeepsOnlyChangesSecure(t *testing.T) {
+	t.Parallel()
+	e, _, _ := newMemoryEnv(t)
+	ctx := context.Background()
+	_, cy := addMember(t, e, "Cy", domain.RoleCollaborator, false)
+	ada := e.srv.Local(e.member.ID)
+	assistant := e.srv.AssistantLocal(e.member.ID)
+	if _, perr := assistant.Call(ctx, protocol.MethodRunPause, json.RawMessage(`{"run_id":"`+string(e.run.ID)+`"}`)); perr != nil {
+		t.Fatalf("run.pause: %v", perr)
+	}
+	raw, perr := assistant.Call(ctx, protocol.MethodMemoryAdd, json.RawMessage(`{"workspace_id":"`+string(e.ws.ID)+`","kind":"gotcha","text":"Flaky on CI."}`))
+	if perr != nil {
+		t.Fatalf("memory.add: %v", perr)
+	}
+	var added protocol.MemoryAddResult
+	if err := json.Unmarshal(raw, &added); err != nil {
+		t.Fatal(err)
+	}
+	if _, perr = assistant.Call(ctx, protocol.MethodMemoryPin, json.RawMessage(`{"workspace_id":"`+string(e.ws.ID)+`","id":"`+added.Item.ID+`"}`)); perr != nil {
+		t.Fatalf("memory.pin: %v", perr)
+	}
+	share := json.RawMessage(`{"member_id":"` + string(cy.ID) + `"}`)
+	for _, method := range []string{protocol.MethodAccountRevoke, protocol.MethodAccountShare, protocol.MethodAccountShare, protocol.MethodAccountRevoke} {
+		if _, perr = ada.Call(ctx, method, share); perr != nil {
+			t.Fatalf("%s: %v", method, perr)
+		}
+	}
+	entries, err := e.store.(store.AuditStore).ListAudit(ctx, store.AuditQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, a := range entries {
+		got = append(got, strings.Join([]string{a.Method, a.Target, a.WorkspaceID, strconv.FormatBool(a.Security)}, " "))
+	}
+	ws, cyID := string(e.ws.ID), string(cy.ID)
+	want := []string{
+		protocol.MethodAccountRevoke + " " + cyID + "  true",
+		protocol.MethodAccountShare + " " + cyID + "  false",
+		protocol.MethodAccountShare + " " + cyID + "  true",
+		protocol.MethodAccountRevoke + " " + cyID + "  false",
+		protocol.MethodMemoryPin + " " + added.Item.ID + " " + ws + " false",
+		protocol.MethodMemoryAdd + " " + added.Item.ID + " " + ws + " false",
+		protocol.MethodRunPause + " " + string(e.run.ID) + " " + ws + " false",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("audit = %q, want %q", got, want)
+	}
+}

@@ -360,6 +360,7 @@ func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID,
 	if err = ids.RevokeDevice(ctx, dev.ID); err != nil {
 		return nil, rpcError(err)
 	}
+	noteChange(ctx)
 	s.closeConns(func(id connIdentity) bool { return id.device == dev.ID })
 	if dev, err = ids.GetDevice(ctx, dev.ID); err != nil {
 		return nil, rpcError(err)
@@ -515,6 +516,7 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	noteChange(ctx)
 	s.closeConns(func(id connIdentity) bool { return slices.Contains(revoked, id.device) })
 	s.notifyDirectory()
 	out := protocol.MemberIdentityRemoveResult{Revoked: []protocol.Device{}}

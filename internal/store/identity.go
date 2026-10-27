@@ -210,6 +210,9 @@ func (d *DB) RemoveIdentity(ctx context.Context, provider, subject string) (doma
 	if member == "" && len(devices) == 0 {
 		return "", nil, ErrNotFound
 	}
+	if err := removeConnectors(ctx, tx, `device_id IN (SELECT id FROM member_devices WHERE provider = ? AND subject = ?)`, provider, subject); err != nil {
+		return "", nil, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM member_devices WHERE provider = ? AND subject = ?`, provider, subject); err != nil {
 		return "", nil, fmt.Errorf("store: remove identity: %w", err)

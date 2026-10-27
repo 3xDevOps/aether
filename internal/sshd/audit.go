@@ -21,7 +21,7 @@ func init() {
 const (
 	ViaDashboard = "dashboard"
 	ViaCLI       = "cli"
-	ViaConnector = "connector"
+	ViaConnector = store.AuditViaConnector
 	ViaAssistant = "assistant"
 )
 
@@ -29,11 +29,11 @@ const (
 // behind it; none is an RPC. MethodConnectorReused is its revocation for
 // presenting a rotated refresh token again, and MethodConnectorRemoved its
 // deletion along with its member or with the edge account its device
-// signed in with.
+// signed in with, which the store records.
 const (
 	MethodConnectorCreate  = "connector.create"
 	MethodConnectorReused  = "connector.reused"
-	MethodConnectorRemoved = "connector.removed"
+	MethodConnectorRemoved = store.AuditConnectorRemoved
 )
 
 const (
@@ -65,6 +65,17 @@ var assistantReads = map[string]bool{
 
 type assistantCallKey struct{}
 
+type auditChangeKey struct{}
+
+// noteChange marks the call behind ctx as having changed a connector, an
+// account share, a member or a Slack link, so its audit entry is kept
+// among the security entries.
+func noteChange(ctx context.Context) {
+	if changed, ok := ctx.Value(auditChangeKey{}).(*bool); ok {
+		*changed = true
+	}
+}
+
 // AssistantLocal is Local for member's built-in assistant: its calls are
 // the member's own, and audit history records the writes among them.
 func (s *Server) AssistantLocal(member domain.MemberID) *Local {
@@ -72,11 +83,12 @@ func (s *Server) AssistantLocal(member domain.MemberID) *Local {
 }
 
 // auditCall records every write call by a connector or the assistant, and
-// every call of auditedMethods. The entry holds the ids the params and
-// result name, never the params themselves. Recording happens after the
-// call took effect, so a store failure is logged rather than turned into
-// the call's error.
-func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method string, params, result json.RawMessage, perr *protocol.Error) {
+// every call of auditedMethods; changed is whether the call noted a
+// change. The entry holds the ids the params and result name, never the
+// params themselves, and the workspace of the run or swarm it acted on.
+// Recording happens after the call took effect, so a store failure is
+// logged rather than turned into the call's error.
+func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method string, params, result json.RawMessage, perr *protocol.Error, changed bool) {
 	var via, connector, client string
 	switch id, ok := ctx.Value(connIdentityKey{}).(connIdentity); {
 	case ok && id.connector != "":
@@ -97,6 +109,8 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		RunID       string `json:"run_id"`
 		MissionID   string `json:"mission_id"`
 		QuestionID  string `json:"question_id"`
+		CandidateID string `json:"candidate_id"`
+		ID          string `json:"id"`
 		ConnectorID string `json:"connector_id"`
 		MemberID    string `json:"member_id"`
 		DeviceID    string `json:"device_id"`
@@ -104,18 +118,28 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		WorkspaceID string `json:"workspace_id"`
 	}
 	_ = json.Unmarshal(params, &ids)
-	var made struct {
-		Run     struct{ ID string } `json:"run"`
-		Mission struct{ ID string } `json:"mission"`
-		Merge   struct {
+	type made struct {
+		ID          string `json:"id"`
+		WorkspaceID string `json:"workspace_id"`
+	}
+	var res struct {
+		Run       made `json:"run"`
+		Mission   made `json:"mission"`
+		Item      made `json:"item"`
+		Candidate struct {
+			ID          string `json:"candidate_id"`
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"candidate"`
+		Merge struct {
 			AbsorbedID string `json:"absorbed_id"`
 		} `json:"merge"`
 		Link struct {
 			UserID string `json:"user_id"`
 		} `json:"link"`
 	}
-	_ = json.Unmarshal(result, &made)
-	target := cmp.Or(made.Run.ID, made.Mission.ID, ids.RunID, ids.MissionID, ids.QuestionID)
+	_ = json.Unmarshal(result, &res)
+	target := cmp.Or(res.Run.ID, res.Mission.ID, res.Item.ID, res.Candidate.ID, ids.RunID, ids.MissionID, ids.QuestionID, ids.CandidateID, ids.ID)
+	workspace := cmp.Or(res.Run.WorkspaceID, res.Mission.WorkspaceID, res.Item.WorkspaceID, res.Candidate.WorkspaceID, ids.WorkspaceID)
 	switch method {
 	case protocol.MethodConnectorRevoke:
 		target = ids.ConnectorID
@@ -125,12 +149,22 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 	case protocol.MethodMemberDeviceRevoke:
 		target = ids.DeviceID
 	case protocol.MethodMemberMergeAccept:
-		target = cmp.Or(made.Merge.AbsorbedID, ids.ProposalID)
+		target = cmp.Or(res.Merge.AbsorbedID, ids.ProposalID)
 	case protocol.MethodSlackUnlink:
-		target = made.Link.UserID
+		target = res.Link.UserID
+	}
+	if workspace == "" && ids.RunID != "" {
+		if r, err := s.cfg.Store.GetRun(ctx, domain.RunID(ids.RunID)); err == nil {
+			workspace = string(r.WorkspaceID)
+		}
+	}
+	if ms, ok := s.cfg.Store.(store.MissionStore); ok && workspace == "" && ids.MissionID != "" {
+		if m, err := ms.GetMission(ctx, domain.MissionID(ids.MissionID)); err == nil {
+			workspace = string(m.WorkspaceID)
+		}
 	}
 	e := &store.AuditEntry{At: time.Now(), Member: member, Via: via, ConnectorID: connector, Client: client, Method: method,
-		WorkspaceID: clipID(ids.WorkspaceID), Target: clipID(target)}
+		WorkspaceID: clipID(workspace), Target: clipID(target), Security: changed}
 	if perr != nil {
 		e.Code = perr.Code
 	}
@@ -141,24 +175,7 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 // happening to member's connector id of client.
 func (s *Server) RecordConnectorEvent(ctx context.Context, method string, member domain.MemberID, id, client string) {
 	s.recordAudit(ctx, &store.AuditEntry{At: time.Now(), Member: member, Via: ViaConnector, ConnectorID: id, Client: client,
-		Method: method, Target: id})
-}
-
-// connectorsOf lists member's connectors so that removing the member or
-// a device deletes them on the record; a store without connectors has none.
-func (s *Server) connectorsOf(ctx context.Context, member domain.MemberID) ([]*store.Connector, error) {
-	cs, ok := s.cfg.Store.(store.ConnectorStore)
-	if !ok {
-		return nil, nil
-	}
-	return cs.ListConnectors(ctx, member, time.Now())
-}
-
-// recordConnectorsRemoved records the deletion of each of conns.
-func (s *Server) recordConnectorsRemoved(ctx context.Context, conns []*store.Connector) {
-	for _, c := range conns {
-		s.RecordConnectorEvent(ctx, MethodConnectorRemoved, c.Member, c.ID, c.ClientName)
-	}
+		Method: method, Target: id, Security: true})
 }
 
 func (s *Server) recordAudit(ctx context.Context, e *store.AuditEntry) {

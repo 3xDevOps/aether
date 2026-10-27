@@ -413,10 +413,10 @@ The server also keeps a durable audit history of:
 A connector whose refresh token lapsed after 30 days unused is deleted without
 an entry.
 
-An entry names the member, how the call arrived, the method, the run, swarm,
-question, connector, member, device or Slack user it acted on (for an accepted
-merge, the absorbed member; for a refused one, the proposal), and `ok` or
-`error` with the error code. It never holds tokens, messages or other parameters. How a call arrived
+An entry names the member, how the call arrived, the method, the workspace,
+the run, swarm, note, integration candidate, question, connector, member,
+device or Slack user it acted on (for an accepted merge, the absorbed member;
+for a refused one, the proposal), and `ok` or `error` with the error code. It never holds tokens, messages or other parameters. How a call arrived
 is `connector` with the client and connector id, `assistant`, `dashboard` for
 the server-hosted dashboard, or `cli` for any SSH client, including the
 desktop app and `aether gui`.
@@ -437,7 +437,8 @@ You see your own entries; an admin sees everyone's. The `audit.list` RPC
 returns the same entries, at most 200 a page. The server keeps each member's
 newest 10,000 call entries and, apart from them, their newest 10,000 connector,
 account, member and Slack changes that took effect, so a flood of calls cannot
-push a security change out of the history. After a member merge, the absorbed member's entries
+push a security change out of the history. A call that changed nothing, such
+as revoking a share that does not exist, is a call entry. After a member merge, the absorbed member's entries
 keep their id, so only admins see them.
 
 ## Revoke a connector

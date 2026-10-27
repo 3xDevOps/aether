@@ -297,19 +297,21 @@ func (s *Server) dispatch(ctx context.Context, member domain.MemberID, method st
 		}
 	}
 	if perr := connectorScopeRefusal(ctx, method); perr != nil {
-		s.auditCall(ctx, member, method, params, nil, perr)
+		s.auditCall(ctx, member, method, params, nil, perr, false)
 		return nil, perr
 	}
+	changed := new(bool)
+	ctx = context.WithValue(ctx, auditChangeKey{}, changed)
 	result, rpcErr := handler(s, ctx, member, params)
 	if rpcErr != nil {
-		s.auditCall(ctx, member, method, params, nil, rpcErr)
+		s.auditCall(ctx, member, method, params, nil, rpcErr, *changed)
 		return nil, rpcErr
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "marshal result: " + err.Error()}
 	}
-	s.auditCall(ctx, member, method, params, raw, nil)
+	s.auditCall(ctx, member, method, params, raw, nil, *changed)
 	return raw, nil
 }
 

@@ -80,8 +80,15 @@ func (s *Server) accountShare(ctx context.Context, member domain.MemberID, raw j
 	if target.Pending {
 		return nil, invalidParams("cannot share an account with a member pending admin approval")
 	}
+	shared, err := s.cfg.Store.AccountSharedWith(ctx, member, grantee)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	if err := s.cfg.Store.ShareAccount(ctx, member, grantee); err != nil {
 		return nil, rpcError(err)
+	}
+	if !shared {
+		noteChange(ctx)
 	}
 	return struct{}{}, nil
 }
@@ -101,7 +108,19 @@ func (s *Server) accountRevoke(ctx context.Context, member domain.MemberID, raw 
 			return nil, rpcError(err)
 		}
 	}
-	revoke := func() error { return s.cfg.Store.RevokeAccountShare(ctx, member, grantee) }
+	shared, err := s.cfg.Store.AccountSharedWith(ctx, member, grantee)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	revoke := func() error {
+		if err := s.cfg.Store.RevokeAccountShare(ctx, member, grantee); err != nil {
+			return err
+		}
+		if shared {
+			noteChange(ctx)
+		}
+		return nil
+	}
 	if len(activeRuns) == 0 || s.cfg.Control == nil {
 		if err := revoke(); err != nil {
 			return nil, rpcError(err)
