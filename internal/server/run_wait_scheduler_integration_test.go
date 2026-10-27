@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,18 +17,25 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/watch"
 )
 
-// The scheduler judges a reported wait by the conditions the watch service
-// keeps, read from the store from its first judgement: a pending, freshly
-// read condition keeps the wait past any stall; cancelled conditions back
-// nothing; and a resolved one whose wake stays undelivered breaks it.
+// An agent reports waiting --until through its coordination socket, and the
+// scheduler judges the wait by the conditions the watch service keeps, as
+// run.wait.changed tells it: a pending pull request checks condition keeps
+// the wait past any stall, a newer report's conditions replace it, another
+// report cancels them so they back nothing, and a resolved one whose wake
+// cannot be written breaks the wait. When one condition resolves the
+// report's others are cancelled, so no second one is left to wake the run. The server's pull request source and
+// run inboxes are stand-ins, set before it starts.
 func TestIntegrationTheSchedulerJudgesWaitsByTheirConditions(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	const stall = 200 * time.Millisecond
+	// Long enough for the report to arrive before the run stalls: the fake
+	// agent never ends its turn, and a report takes effect in its turn.
+	const stall = 5 * time.Second
 	dataDir, err := os.MkdirTemp("", "ac")
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +47,13 @@ func TestIntegrationTheSchedulerJudgesWaitsByTheirConditions(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
+	}
+	pr := &pullRequest{}
+	for _, n := range srv.services {
+		if w, ok := n.svc.(*watch.Service); ok {
+			w.UsePRSource(pr)
+			w.UseRunNotifier(fullInbox{})
+		}
 	}
 	keyPath, signer := writeClientKey(t)
 	member := &domain.Member{DisplayName: "Ada", PublicKey: string(ssh.MarshalAuthorizedKey(signer.PublicKey())), Color: "#e6194b", Role: domain.RoleAdmin}
@@ -105,63 +120,70 @@ func TestIntegrationTheSchedulerJudgesWaitsByTheirConditions(t *testing.T) {
 		}
 	}
 	db := srv.Store().(*store.DB)
-	register := func(key string) {
+	socket := waitMissionSocket(t, filepath.Join(dataDir, "coord", string(owner.ID)))
+	report := func(key, outcome string, until ...string) {
 		t.Helper()
-		spec := "run:" + string(target.ID) + ":finished"
-		now := time.Now()
-		w := &store.RunWait{
-			Watch: store.Watch{MemberID: owner.MemberID, WorkspaceID: owner.WorkspaceID, TargetKind: protocol.WatchTargetRun,
-				TargetTitle: spec, Conditions: []string{protocol.WaitKindRunFinished}, Source: protocol.WatchSourceAgent,
-				CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour), NextCheckAt: &now},
-			Spec: spec, Kind: protocol.WaitKindRunFinished, TargetRun: target.ID,
-		}
-		if _, regErr := db.RecordWaitingReport(ctx, &store.CoordStateReport{RunID: owner.ID, IdempotencyKey: key,
-			Outcome: protocol.CoordOutcomeWaiting, WaitingFor: protocol.CoordWaitingForAgents, Summary: "the build", Until: []string{spec}}, []*store.RunWait{w}); regErr != nil {
-			t.Fatal(regErr)
-		}
-		if regErr := srv.sched.ReportWaiting(ctx, owner.ID, key, protocol.CoordWaitingForAgents, "the build", time.Now()); regErr != nil {
-			t.Fatal(regErr)
-		}
-		if regErr := db.MarkCoordStateReportApplied(ctx, owner.ID, key); regErr != nil {
-			t.Fatal(regErr)
+		if callErr := pacedCall(ctx, socket, protocol.MethodCoordReport, protocol.CoordReportParams{
+			Outcome: outcome, WaitingFor: map[bool]string{true: protocol.CoordWaitingForCI}[outcome == protocol.CoordOutcomeWaiting],
+			Summary: "the build", IdempotencyKey: key, Until: until,
+		}, nil); callErr != nil {
+			t.Fatalf("coord.report %s %v: %v", outcome, until, callErr)
 		}
 	}
+	const checks = "pr:acme/app#7:checks"
 
-	register("wait-1")
-	run := until("the wait judged by its condition", func(r protocol.Run) bool {
-		return r.Activity == string(domain.ActivityWaitingAgents) && r.Wait != nil && r.Wait.Kind == domain.WaitCondition
+	report("wait-1", protocol.CoordOutcomeWaiting, checks)
+	until("the wait judged by its pending checks", func(r protocol.Run) bool {
+		return r.Activity == string(domain.ActivityWaitingCI) && r.Wait != nil && r.Wait.Kind == domain.WaitCondition &&
+			strings.HasPrefix(r.Wait.Detail, checks)
 	})
-	// Ten stall thresholds: a wait nothing checks goes stale after three.
-	time.Sleep(10 * stall)
-	run = until("the wait still checked", func(r protocol.Run) bool { return true })
-	if run.Activity != string(domain.ActivityWaitingAgents) || run.Cause != string(events.CauseReport) || run.Wait == nil || run.Wait.Kind != domain.WaitCondition {
+	// A wait nothing checks goes stale after three stall thresholds.
+	time.Sleep(4 * stall)
+	run := until("the wait still checked", func(protocol.Run) bool { return true })
+	if run.Activity != string(domain.ActivityWaitingCI) || run.Cause != string(events.CauseReport) || run.Wait == nil || run.Wait.Kind != domain.WaitCondition {
 		t.Fatalf("checked wait after the quiet spell = %s by %s wait %+v", run.Activity, run.Cause, run.Wait)
 	}
 
-	if _, err = db.EndRunWaits(ctx, owner.ID, "", protocol.WaitCancelled, "the run reported answered", "", time.Time{}, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err = srv.sched.WaitChanged(ctx, owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	until("the cancelled condition backing nothing", func(r protocol.Run) bool {
-		return r.Wait == nil || r.Wait.Kind == domain.WaitUnverified
+	runSpec := "run:" + string(target.ID) + ":finished"
+	report("wait-2", protocol.CoordOutcomeWaiting, runSpec)
+	until("the newer report's condition in place of the checks", func(r protocol.Run) bool {
+		return r.Wait != nil && r.Wait.Kind == domain.WaitCondition && strings.HasPrefix(r.Wait.Detail, runSpec) &&
+			len(r.WaitConditions) == 1 && r.WaitConditions[0].Spec == runSpec
 	})
 
-	register("wait-2")
-	until("the new wait judged by its condition", func(r protocol.Run) bool { return r.Wait != nil && r.Wait.Kind == domain.WaitCondition })
-	waits, err := db.RunWaitConditions(ctx, owner.ID)
-	if err != nil || len(waits) != 1 {
-		t.Fatalf("waits = %+v, %v", waits, err)
+	report("answered-1", protocol.CoordOutcomeAnswered)
+	until("the cancelled condition backing nothing", func(r protocol.Run) bool {
+		return (r.Wait == nil || r.Wait.Kind == domain.WaitUnverified) && len(r.WaitConditions) == 1 && r.WaitConditions[0].State == protocol.WaitCancelled
+	})
+
+	report("wait-3", protocol.CoordOutcomeWaiting, runSpec)
+	until("the run wait again", func(r protocol.Run) bool { return r.Wait != nil && r.Wait.Kind == domain.WaitCondition })
+	if err = srv.sched.Kill(ctx, target.ID, member.ID); err != nil {
+		t.Fatalf("kill %s: %v", target.ID, err)
 	}
-	w := waits[0]
+	var w *store.RunWait
+	for deadline := time.Now().Add(45 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		waits, listErr := db.RunWaitConditions(ctx, owner.ID)
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		if len(waits) == 1 && waits[0].WaitState == protocol.WaitResolved && waits[0].DeliveryError != "" {
+			w = waits[0]
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waits = %+v, want the run wait resolved with its wake failing", waits)
+		}
+	}
+	// #604 calls a wake broken once it is 5 minutes late; the resolution is
+	// moved back rather than waited out, and announced as the service would.
 	resolved, later := time.Now().Add(-10*time.Minute), time.Now().Add(time.Hour)
-	w.WaitState, w.State, w.ResolvedAt, w.EndedAt, w.NextCheckAt = protocol.WaitResolved, protocol.WatchDone, &resolved, &resolved, nil
-	w.DeliveredAt, w.DeliveryNextAt, w.DeliveryError, w.DeliveryAttempts = nil, &later, "coord: inbox write: disk full", 3
+	w.ResolvedAt, w.DeliveryNextAt = &resolved, &later
 	if err = db.SetRunWaitDelivery(ctx, w, store.WatchDelivery{Channel: protocol.WatchChannelRunInbox, Status: protocol.WatchStatusPending, At: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err = srv.sched.WaitChanged(ctx, owner.ID); err != nil {
+	if _, err = srv.bus.Publish(ctx, events.Event{WorkspaceID: owner.WorkspaceID, RunID: owner.ID,
+		Payload: events.RunWaitChangedPayload{RunID: owner.ID, WorkspaceID: owner.WorkspaceID, WaitID: w.ID, State: w.WaitState}}); err != nil {
 		t.Fatal(err)
 	}
 	run = until("the broken wait", func(r protocol.Run) bool { return r.Activity == string(domain.ActivityNeedsYou) })
