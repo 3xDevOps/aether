@@ -170,9 +170,9 @@ test('quiet hours hold a push and release it, and a removed member hears nothing
   await expect(page.getByRole('dialog').getByRole('list', { name: 'Delivery' })).toContainText('quiet hours')
   await testInfo.attach('push held for quiet hours', { body: await page.screenshot(), contentType: 'image/png' })
 
-  await expect.poll(async () => (await push()).status, { timeout: 4 * 60_000, intervals: [5_000], message: 'quiet hours end and the push is tried' }).not.toBe('held_quiet_hours')
+  await expect.poll(async () => (await push()).detail ?? '', { timeout: 4 * 60_000, intervals: [5_000], message: 'quiet hours end and the push is tried' }).toContain('push.invalid')
   const released = await push()
-  expect(released.status).not.toBe('delivered')
+  expect(['pending', 'failed']).toContain(released.status)
   testInfo.annotations.push({ type: 'released push', description: JSON.stringify(released) })
   await page.reload()
   await testInfo.attach('push released after quiet hours', { body: await page.screenshot(), contentType: 'image/png' })
