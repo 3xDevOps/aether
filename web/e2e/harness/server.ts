@@ -68,6 +68,8 @@ export interface ServerOptions {
   standardImage?: string
   /** Test-only GitHub HTTP/Git provider; the server remains real. */
   githubProvider?: boolean
+  /** More `aether-server serve` flags, such as a shorter `--first-event-grace`. */
+  args?: string[]
 }
 
 
@@ -116,6 +118,7 @@ export async function startServer(dir: string, options: ServerOptions = {}): Pro
       configPath,
       '--standard-image',
       options.standardImage ?? standardImage,
+      ...(options.args ?? []),
     ],
     {
       ...process.env,
