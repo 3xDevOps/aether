@@ -540,6 +540,10 @@ Each test gets its own stack:
   `AETHER_CONFIG_DIR`, so nothing touches your own keys or links.
 - Real git repositories on disk.
 
+`aether.server.restart()` kills the server with `SIGKILL` and starts it
+again on the same port and data directory, for specs about what survives a
+crash.
+
 Specs that open a real run need Docker and skip without it.
 `onboarding-github`, `mission-candidate-review`,
 `remote-development-git/native.spec.ts` and `swarm.mobile.spec.ts` fail

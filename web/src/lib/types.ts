@@ -19,6 +19,14 @@ export type RunStatus =
 
 /** What a live run waits on, from the scheduler; set only while `status` is `running` or `needs-attention`. */
 /** What chose a live run's state; mirrors events.RunStatusCause in internal/events/event.go. */
+// Mirrors protocol.RunLiveness in internal/protocol/wire.go.
+export interface RunLiveness {
+  phase?: 'setup' | 'awaiting-first-event' | 'streaming' | 'tool-running' | 'awaiting-input' | 'between-turns'
+  last_progress_at?: string
+  connected_at?: string
+  transport: 'open' | 'closed' | 'unknown'
+}
+
 export type RunStatusCause = 'turn' | 'report' | 'turn-end' | 'stall' | 'wait-expired' | 'workers' | 'tasks-held' | 'human' | 'disconnect'
 
 export type RunActivity =
@@ -82,6 +90,8 @@ export interface Run {
   state?: RunActivity | ''
   /** What chose `state`; absent on a run that is not live and from older servers. */
   cause?: RunStatusCause
+  /** A live Enhanced run's turn, read from its agent session when the run was fetched; not pushed. */
+  liveness?: RunLiveness
   /** Increments on every change of status, state, reason or outcome flags. */
   status_seq: number
   branch: string
@@ -2163,6 +2173,7 @@ export interface EnvAgentsResult {
 export interface AssistantNoticePayload {
   member_id: string
   run_id: string
+  watch_id?: string
   kind: 'finished' | 'needs_input' | 'needs_approval' | 'needs_attention'
   title: string
   body: string

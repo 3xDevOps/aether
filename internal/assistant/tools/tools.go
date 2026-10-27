@@ -101,6 +101,8 @@ var tiers = map[string]string{
 	protocol.MethodAssistantPreferences: tierRead,
 	protocol.MethodAssistantRemember:    tierReversible,
 	protocol.MethodAssistantForget:      tierConfirmed,
+	protocol.MethodLaunchDefaultsGet:    tierRead,
+	protocol.MethodLaunchDefaultsSet:    tierConfirmed,
 }
 
 // Reversible reports whether the assistant may call method without a card

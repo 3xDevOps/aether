@@ -19,7 +19,7 @@ shown beside the status says why it is there.
 | A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
 | Host memory is low | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | Close or kill runs. A closed run's paused container still holds its memory; **Free container…** releases it. |
-| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced run is possibly stalled: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the run supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <run-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
+| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced run is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the run supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <run-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
 | A Standard agent exits | The run stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the run. |
 | A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the run's transcript. |
 | The agent hits its account's usage limit | `Usage limit reached on <owner>'s account; ...` when it cannot continue. | Moves the run to another account that has usage left. | [Usage limit mid-run](#usage-limit-mid-run). |
@@ -474,13 +474,21 @@ stay quiet depends on where the turn is, its phase:
 | `tool-running` between turns: background tasks hold the run | three times `--stall-threshold` |
 | `awaiting-input`, `between-turns`, or the turn that asks for a missing report | `--stall-threshold` |
 
-A stall that names a phase is a possible stall: the run is **Waiting**,
-never **Needs you** or **Disconnected**. **Disconnected** needs the agent
-process or its connection to end. An agent that thinks for minutes without
-streaming a thought parks at the short limit and returns to `running` with its
-next update. A resume or a server restart starts the quiet time over. Aether
-restarts nothing on its own: press **Stop** to cancel the turn, then send a
-message.
+A stall that names a phase is a possible stall: the dashboard shows
+**Possibly stalled**, never **Needs you** or **Disconnected**. **Disconnected**
+needs the agent process or its connection to end. An agent that thinks for
+minutes without streaming a thought parks at the short limit and returns to
+`running` with its next update. A resume or a server restart starts the quiet
+time over.
+
+Aether restarts nothing on its own. The run's Session view shows the agent's
+last progress, the phase and the connection, and offers:
+
+- **Stop turn** cancels the turn. It costs nothing.
+- **Open trace** opens the turn's model calls and tool calls.
+- **Resend last prompt…** sends your last prompt again after you confirm. It
+  costs tokens, and the agent may repeat tool actions it already took. A turn
+  that is still running finishes first, so stop it to send now.
 
 Messaging a stalled run usually gets it going. The echo of your message does
 not count as agent output, so a hung agent still reads as stalled afterwards.

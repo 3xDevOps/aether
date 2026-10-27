@@ -481,9 +481,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Store:       s.db,
 		Homes:       homes,
 		Runs:        s.sched,
-		Caller:      func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
+		Caller:      func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
 		Bus:         s.bus,
-		Follows:     s.db,
 		Preferences: preferences,
 	})
 	sshCfg.Services.Assistant = s.assistant
@@ -682,9 +681,6 @@ func (s *Server) Run(ctx context.Context) error {
 		return errors.Join(fmt.Errorf("server: adapter manager: %w", err), s.Close())
 	}
 	if err := s.startServices(ctx); err != nil {
-		return errors.Join(err, s.Close())
-	}
-	if err := s.assistant.StartFollowing(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
 	if s.egress != nil {

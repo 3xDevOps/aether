@@ -122,6 +122,9 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMemoryPin:       protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1", Scope: protocol.MemoryScopeMember},
 		protocol.MethodMemoryUnpin:     protocol.MemoryUnpinParams{WorkspaceID: "ws-1", ID: "mem-1"},
 		protocol.MethodAssistantForget: protocol.PreferenceIDParams{ID: "pref-1"},
+		protocol.MethodLaunchDefaultsSet: protocol.LaunchDefaultsSetParams{Revision: 3, Defaults: &protocol.LaunchDefaults{AccountMemberID: "m2",
+			Agents:   map[string]protocol.AgentLaunchDefault{"claude": {Mode: "acp", Model: "opus"}, "codex": {}},
+			Fallback: &protocol.LaunchFallbackDefault{Policy: protocol.FallbackOrdered, Order: []string{"m1", "m3"}}}},
 	}
 	want := map[string]string{
 		protocol.MethodRunLaunch:                `Launch claude (default mode) in shop: "fix it"`,
@@ -149,6 +152,8 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMemoryPin:                `Pin, into new runs' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
 		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha), taking it out of Grace's briefs: "CI needs Docker"`,
 		protocol.MethodAssistantForget:          `Forget your preference pref-1: "Prefer table output"`,
+		protocol.MethodLaunchDefaultsSet: `Replace your saved launch choices: launch on Grace's (m2) account; run claude in acp mode with model opus; ` +
+			`run codex in its default mode with its default model; when usage runs out, move only to your own account, then m3's (m3) account`,
 	}
 	var got protocol.AssistantConfirmation
 	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
