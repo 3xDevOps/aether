@@ -28,7 +28,7 @@ credentials out of the report.
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
-| [Assistant](#the-assistant) | Its own container and home, which your runs cannot see. Launching, messaging and stopping runs and saving the environment wait for your click. | It holds your agent login, which your runs can replace. Auto-approve removes the click. |
+| [Assistant](#the-assistant) | Its own container and home, which your runs cannot see. Launching, messaging and stopping runs and saving the environment wait for your click. | Your runs and account share recipients can swap its login file for another account's, which then receives your prompts. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Candidate delivery](#candidate-verification-and-delivery) | Permission to push is checked again at delivery. A mirrored target gets a proposal branch, never an upstream push. | Verification runs with the member's home credentials. An agent can still push on its own outside Aether. |
@@ -278,8 +278,14 @@ permissions, and it always uses your own agent account.
   mounts only the login file of the agent it runs, so a run that changes your
   `CLAUDE.md`, `~/.claude` settings and hooks, `~/.codex/config.toml`,
   `.bashrc` or `~/.local/bin` does not change the assistant.
-- A run can still replace that login file, for example with another
-  account's login, and the assistant then signs in with it.
+- A run can still replace that login file with another account's login, and
+  the assistant then sends your prompts, and what it reads for you, to that
+  account. So can the runs of anyone you share your account with. Aether
+  cannot tell: the token file names no account. Claude Code keeps the account
+  in `~/.claude.json`, which the assistant does not mount, and
+  `claude auth status` shows no email or organization without it. The account
+  fields in Codex's `auth.json` sit in the same writable file, so a writer can
+  copy yours next to its own tokens.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a run and saving your environment wait for you to
   approve a card. An unanswered card fails after 10 minutes.

@@ -387,8 +387,8 @@ Your [assistant](assistant.md) keeps its conversation on your server under
   replies, its tool calls and their results, and the action cards.
 - `home/` is the agent's home: the session files Claude Code keeps under
   `.claude/` (projects, history, todos, file history, shell snapshots, debug
-  logs) or Codex under `.codex/` (sessions, history), plus the installed
-  agent in `.local/`.
+  logs) or Codex under `.codex/` (sessions, history).
+- `install/` holds the installed adapter and `installed` its version.
 - `instructions/` holds the instructions the server gives it, and `tools/` its
   tool socket.
 
@@ -396,10 +396,12 @@ Only the server process and your assistant's container read them; no run,
 environment or other member can. Anyone with access to the server's data
 directory, such as its administrator, can read them. Your prompts and the
 files the agent reads go to the agent's vendor under your own account, as in
-any run.
+any run: to whichever account your login file holds. Your runs, and the runs
+of anyone you [share your account](security.md#account-sharing) with, can
+replace that file with another account's login, and the assistant then sends
+your prompts to that account.
 
-**New conversation** deletes `items.jsonl` and everything in `home/` except
-`.local/`. Removing a member deletes the whole directory. Assistant state
+**New conversation** deletes `items.jsonl` and `home/`. Removing a member deletes the whole directory. Assistant state
 from before the assistant had its own container is in your home;
 [assistant.md](assistant.md#earlier-assistant-state-in-your-home) says how to
 delete it.

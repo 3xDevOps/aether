@@ -22,16 +22,38 @@ runs and your [environment](environments.md) (the persistent container
   `~/.claude/settings.json`, `~/.codex/config.toml` or `~/.local/bin`.
 - Its working directory is `/assistant`, which holds the server's
   instructions and is read-only.
-- From your home it mounts only the login file of the agent it runs:
-  `~/.claude/.credentials.json` for Claude Code or `~/.codex/auth.json` for
-  Codex. A token refresh on either side reaches the other. A login file
-  replaced in your home, by signing in again or by a CLI that replaces it
-  instead of rewriting it, takes effect at the assistant's next start.
+- From your home it mounts only the login file of the agent it runs, as a
+  single read-write file: `~/.claude/.credentials.json` for Claude Code or
+  `~/.codex/auth.json` for Codex. Whichever account that file holds receives
+  the assistant's prompts; see [the login file](#the-login-file).
+- Its Enhanced adapter is in `<data>/assistant/<member>/install`, mounted
+  read-only at `/opt/aether-assistant`, first in its `PATH`. The assistant
+  cannot change it, and **New conversation** does not need to reinstall it.
 - Claude Code's auto-memory is off for it.
 
 On the first start, and after a server upgrade that pins a newer adapter, the
-panel shows **Installing** while the agent and its Enhanced adapter install into
-the assistant's home. This downloads the agent and takes a minute or more.
+panel shows **Installing** while a short-lived container,
+`aether-assistant-install-<member>`, runs `npm install -g` of the pinned
+adapter into that directory. It needs network access to the npm registry. The
+adapter carries the agent itself: the Claude Code binary of its Agent SDK, or
+the Codex version its package depends on. Neither updates on its own; both move
+when a server upgrade pins a newer adapter.
+
+### The login file
+
+The login file is bound into the assistant container when the container is
+created, at the assistant's start. What reaches the other side:
+
+- A file rewritten in place reaches both sides at once. Codex rewrites
+  `auth.json` in place. Claude Code in the assistant rewrites its file in
+  place, because the file is a mountpoint there.
+- A file replaced by rename, as Claude Code does in your runs and environment,
+  is a new file. The running assistant keeps the old one until its next start.
+  Your containers created after your first assistant start, or while you share
+  your account, mount the login the same way, so Claude Code rewrites it in
+  place there too; older ones replace it.
+- Signing in again replaces the file; the assistant uses the new login from
+  its next start.
 
 ## Open it
 
@@ -258,9 +280,9 @@ cannot send another prompt.
 There is one conversation per member. It survives page reloads and server
 restarts. If the agent stops, the next prompt starts it again. **New
 conversation** asks **Start a new conversation?**, then deletes the transcript,
-removes the assistant's container and deletes everything in its home except the
-installed agent (`.local`): sessions, history, todos, file history, shell
-snapshots and logs. What the assistant already did stays done.
+removes the assistant's container and deletes its whole home: sessions,
+history, todos, file history, shell snapshots and logs. The installed adapter
+is outside the home and stays. What the assistant already did stays done.
 
 ### Earlier assistant state in your home
 
@@ -291,7 +313,7 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | Message | Fix |
 | --- | --- |
 | `assistant: no agent is ready; sign in to Claude Code or Codex in your environment terminal` | [Set up an agent](#first-use) |
-| `scheduler: install Claude Code for the assistant exited 1: ...` | The install in the assistant's container failed; the output follows the colon. Fix the cause (often network access), then **Retry** |
+| `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
 | `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |
 | `the member did not answer within 10m0s` | The card timed out. Ask again |
