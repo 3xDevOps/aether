@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
+import type { AssistantSettings } from '@/lib/assistant-types'
 import type { Preference } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
 import { forgetWarning } from '@/routes/settings/memory-row'
@@ -253,5 +254,48 @@ describe('memory in settings', () => {
     await user.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(client.preferenceUpdate).toHaveBeenCalledTimes(2))
     expect(client.preferenceAdd).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables the switch while it saves', async () => {
+    const user = userEvent.setup()
+    let finish: (value: AssistantSettings) => void = () => {}
+    show([pref()], { assistantSettings: vi.fn(() => new Promise<AssistantSettings>((resolve) => { finish = resolve })) })
+    const toggle = await screen.findByRole('checkbox', { name: preferencesLabel })
+    await waitFor(() => expect(toggle).toHaveProperty('disabled', false))
+    await user.click(toggle)
+    await waitFor(() => expect(toggle).toHaveProperty('disabled', true))
+    act(() => finish({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, preferences_enabled: false }))
+    await waitFor(() => expect(toggle).toHaveProperty('disabled', false))
+  })
+
+  it("drops a settings reply that arrives after another member signed in", async () => {
+    const user = userEvent.setup()
+    let finish: (value: AssistantSettings) => void = () => {}
+    useStore.getState().setAssistantStatus({ state: 'idle', agents: [], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true })
+    show([pref()], { assistantSettings: vi.fn(() => new Promise<AssistantSettings>((resolve) => { finish = resolve })) })
+    const toggle = await screen.findByRole('checkbox', { name: preferencesLabel })
+    await waitFor(() => expect(toggle).toHaveProperty('disabled', false))
+    await user.click(toggle)
+    act(() => useStore.setState({ identityKey: 'someone-else' }))
+    act(() => finish({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, preferences_enabled: false }))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(useStore.getState().assistantStatus).not.toHaveProperty('preferences_enabled', false)
+  })
+
+  it('clears the entry from the address after highlighting it, and when it is forgotten', async () => {
+    const user = userEvent.setup()
+    seed('pref-1')
+    show([pref()], { preferenceDelete: vi.fn(async () => ({ deleted: pref() })) })
+    await waitFor(() => expect(document.getElementById('preference-pref-1')?.hasAttribute('data-highlight')).toBe(true))
+    await waitFor(() => expect(useStore.getState().route.params).toEqual({ section: 'memory' }), { timeout: 4000 })
+
+    seed('pref-1')
+    document.body.innerHTML = ''
+    render(<MemorySection client={fakeApi({ preferenceList: vi.fn(async () => ({ preferences: [pref()], enabled: true })), preferenceDelete: vi.fn(async () => ({ deleted: pref() })) })} />)
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    await screen.findByRole('status')
+    expect(useStore.getState().route.params).toEqual({ section: 'memory' })
+    expect(screen.queryByText(/That preference no longer exists/)).toBeNull()
   })
 })
