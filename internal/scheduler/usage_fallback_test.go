@@ -165,6 +165,31 @@ func TestEnhancedRunContinuesOnAFallbackAccount(t *testing.T) {
 	})
 }
 
+// unreadableUsage fails every quota read, as a vendor read that timed out
+// does.
+type unreadableUsage struct{}
+
+func (unreadableUsage) Read(context.Context, domain.MemberID, bool) ([]quota.Provider, error) {
+	return nil, context.DeadlineExceeded
+}
+
+// An Enhanced run that hits Ada's usage limit continues on Grace's shared
+// account even when Grace's quota cannot be read: unknown usage is not
+// exhausted usage.
+func TestEnhancedRunContinuesOnAnAccountWithUnknownUsage(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, enhancedClaude)
+	e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	e.share(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+	e.assertMovedToOwner(t, run.ID, notes)
+}
+
 // When the run does not move, the Enhanced run waits for its owner in the
 // container it had, with the real reason: no account qualifies, fallback is
 // off for the run, the replacement would not be admitted for capacity, or
@@ -176,7 +201,7 @@ func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 		setup        func(*shareEnv)
 		opts         domain.LaunchOptions
 	}{
-		{"no account qualifies", "Usage limit reached on Ada's account; no fallback has usage left", nil, domain.LaunchOptions{}},
+		{"no account qualifies", "Usage limit reached on Ada's account; no other account is shared to fall back on", nil, domain.LaunchOptions{}},
 		{"fallback off", "Usage limit reached on Ada's account; fallback is off for this run", nil,
 			domain.LaunchOptions{Fallback: domain.AccountFallback{Disabled: true}}},
 		{"no capacity for the replacement", "Usage limit reached on Ada's account; cannot continue on another account: ", func(e *shareEnv) {
@@ -245,7 +270,7 @@ func TestHandedOffRunMovesOnlyToAccountsSharedWithItsHome(t *testing.T) {
 	}
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if got.Reason != "Usage limit reached on Ada's account; no fallback has usage left" || len(notes.all()) != 0 {
+	if got.Reason != "Usage limit reached on Ada's account; no account that may have usage left can run claude here" || len(notes.all()) != 0 {
 		t.Fatalf("handed-off run = reason %q, notes %v; want it kept off Grace's account", got.Reason, notes.all())
 	}
 }
@@ -429,7 +454,7 @@ func TestHeadlessRunContinuesOnAFallbackAccount(t *testing.T) {
 				}
 				e.rt.byName(string(run.ID)).exitNow(1)
 				got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-				if got.Reason != "Usage limit reached on Ada's account; no fallback has usage left" {
+				if got.Reason != "Usage limit reached on Ada's account; no other account is shared to fall back on" {
 					t.Fatalf("reason %q", got.Reason)
 				}
 				waitFor(t, "the acted-on usage limit cleared", func() bool {

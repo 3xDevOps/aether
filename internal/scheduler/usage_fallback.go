@@ -79,8 +79,26 @@ type accountSwap struct {
 	Continuation string `json:"continuation,omitempty"`
 }
 
-func noFallbackReason(owner string) string {
-	return usageLimitReason + owner + "'s account; no fallback has usage left"
+// noFallbackReason says why no account took over from the one the run is on:
+// none other was shared, every one is exhausted or already used by the run,
+// or the ones that may have usage left cannot run harness.
+func noFallbackReason(owner, harness string, measured fallback.Measured, from domain.MemberID) string {
+	others, exhausted := 0, true
+	for account, share := range measured {
+		if account == from {
+			continue
+		}
+		others++
+		exhausted = exhausted && share >= fallback.ExhaustedPercent
+	}
+	reason := usageLimitReason + owner + "'s account; "
+	switch {
+	case others == 0:
+		return reason + "no other account is shared to fall back on"
+	case exhausted:
+		return reason + "no fallback has usage left"
+	}
+	return reason + "no account that may have usage left can run " + harness + " here"
 }
 
 func cannotContinueReason(owner, cause string) string {
@@ -629,7 +647,7 @@ func (s *Scheduler) tryMove(ctx context.Context, entry *supervised) (usageOutcom
 	case to == "" && excluded != nil:
 		return stop(excluded.Error())
 	case to == "":
-		return usageNoFallback, noFallbackReason(fromName)
+		return usageNoFallback, noFallbackReason(fromName, run.Harness, measured, from)
 	case excluded != nil:
 		slog.Warn("scheduler: fallback accounts left out of a move", "run", run.ID, "error", excluded)
 	}
