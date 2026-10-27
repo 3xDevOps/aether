@@ -83,8 +83,9 @@ type sdkMessage struct {
 }
 
 type updateHead struct {
-	Kind string `json:"sessionUpdate"`
-	Meta struct {
+	Kind   string `json:"sessionUpdate"`
+	Status string `json:"status"`
+	Meta   struct {
 		Origin *struct {
 			Kind string `json:"kind"`
 		} `json:"_claude/origin"`
@@ -103,6 +104,17 @@ func (h updateHead) opensTurn() bool {
 	}
 	switch h.Kind {
 	case "agent_message_chunk", "agent_thought_chunk", "tool_call", "plan":
+		return true
+	}
+	return false
+}
+
+// progress reports whether an update is the agent doing work, as opposed to
+// echoing the prompt or announcing modes, commands, options or usage.
+func (h updateHead) progress() bool {
+	switch h.Kind {
+	case "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan",
+		"subagent_spawned", "subagent_state_update", "subagent_update", "compaction_update", "compaction_summary_chunk":
 		return true
 	}
 	return false
@@ -324,6 +336,7 @@ func (s *Session) openAutonomousLocked() {
 	s.proj.closeText()
 	s.turn++
 	s.autonomous, s.resulted, s.origin, s.holdIdle = true, false, "", false
+	s.turnAt = time.Now()
 	s.lastUpdate, s.owedUntil = time.Now(), time.Time{}
 	s.emitLocked(Item{Kind: KindTurnStart, Autonomous: true})
 	s.relogTasksLocked()
@@ -397,7 +410,7 @@ func (s *Session) quietCheck() {
 func (s *Session) endAutonomousLocked(stop string) {
 	s.proj.endTurn()
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: stop, Autonomous: true, Origin: s.origin})
-	s.autonomous, s.resulted, s.origin = false, false, ""
+	s.autonomous, s.resulted, s.origin, s.compacting = false, false, "", false
 	// A prompt that stopped short before its background wait keeps its
 	// reason through the follow-ups.
 	if s.idleStop == "" || s.idleStop == "end_turn" {

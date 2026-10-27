@@ -92,6 +92,9 @@ type RunController interface {
 	// Cause is what chose activity for the live run; empty when unknown or
 	// when the run's activity has since changed.
 	Cause(run domain.RunID, activity domain.RunActivity) events.RunStatusCause
+	// Liveness is the live Enhanced run's turn phase, last agent progress
+	// and connection state; ok is false for any other run.
+	Liveness(run domain.RunID) (domain.RunLiveness, bool)
 	// Retention reads current runtime ownership without probing or mutating it.
 	Retention(run *domain.Run) (scheduler.RetentionInfo, error)
 	// PendingInputs returns an independent snapshot of unresolved requests;
