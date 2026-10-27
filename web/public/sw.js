@@ -67,13 +67,10 @@ self.addEventListener('notificationclick', (event) => {
         await self.clients.openWindow(path)
         return
       }
+      // The page routes itself: reloading it would lose its unsent drafts.
       if (run) open.postMessage({ type: 'aether:open-run', run })
-      else if (url) {
-        await open.focus()
-        // navigate() rejects for a window this worker does not control.
-        await open.navigate(url).catch(() => self.clients.openWindow(url))
-        return
-      } else if (workspace) open.postMessage({ type: 'aether:open-workspace', workspace })
+      else if (url) open.postMessage({ type: 'aether:open-url', url })
+      else if (workspace) open.postMessage({ type: 'aether:open-workspace', workspace })
       await open.focus()
     })(),
   )

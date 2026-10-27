@@ -195,6 +195,19 @@ describe('watchPush', () => {
     stop()
   })
 
+  it('opens the page a tapped notification names without reloading it', () => {
+    const env = browser('granted')
+    const store = createRootStore()
+    const stop = watchPush(store, fakeApi())
+    const url = '/?page=settings&id=watches&watch=wat-3m8q2k7v4c'
+    env.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'aether:open-url', url } }))
+    expect(store.getState().route).toEqual({ name: 'settings', params: { section: 'watches' } })
+    expect(window.location.search).toBe('?page=settings&id=watches&watch=wat-3m8q2k7v4c')
+    env.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'aether:open-url', url: 'https://elsewhere.example/?page=missions' } }))
+    expect(store.getState().route.name).toBe('settings')
+    stop()
+  })
+
   it('tells the server a person is here, at most once every 20 seconds', () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 })
     const store = createRootStore()

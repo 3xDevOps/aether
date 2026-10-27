@@ -8,7 +8,7 @@ const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url
 
 type Handler = (event: Record<string, unknown>) => void
 
-type Window = { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void; navigate: (url: string) => Promise<unknown> }
+type Window = { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }
 
 function worker(
   windows: Window[] = [],
@@ -38,7 +38,7 @@ function worker(
   return { self, dispatch }
 }
 
-const window = (focused: boolean): Window => ({ focused, focus: vi.fn(async () => {}), postMessage: vi.fn(), navigate: vi.fn(async () => null) })
+const window = (focused: boolean): Window => ({ focused, focus: vi.fn(async () => {}), postMessage: vi.fn() })
 
 describe('service worker', () => {
   it('shows one notification per run, replacing the older one', async () => {
@@ -183,16 +183,11 @@ describe('service worker', () => {
     expect(self.clients.openWindow).toHaveBeenCalledWith(url)
 
     const front = window(true)
-    await worker([front]).dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
-    expect(front.navigate).toHaveBeenCalledWith(url)
+    const open = worker([front])
+    await open.dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
+    expect(front.postMessage).toHaveBeenCalledWith({ type: 'aether:open-url', url })
     expect(front.focus).toHaveBeenCalled()
-  })
-
-  it('opens the page in a new window when the open one is not its own', async () => {
-    const front = { ...window(true), navigate: vi.fn(async () => { throw new TypeError('not controlled') }) }
-    const { self, dispatch } = worker([front])
-    await dispatch('notificationclick', { notification: { close: vi.fn(), data: { url: '/?page=settings&id=watches' } } })
-    expect(self.clients.openWindow).toHaveBeenCalledWith('/?page=settings&id=watches')
+    expect(open.self.clients.openWindow).not.toHaveBeenCalled()
   })
 
   it('opens the dashboard itself from a test notification', async () => {

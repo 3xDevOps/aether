@@ -6232,12 +6232,13 @@ then in the browser. A failure of either, or of **Send test notification**
 (`push.test`), is shown as the error the browser or the server gave.
 
 `web/public/sw.js` is the whole worker. On `push` it shows the notification
-with the run's ID as its `tag`, `budget:<workspace>` for a budget notice, or
-the message's `url` for a notice about another page, such as a
-[watch](watches.md) notice about a swarm, so a newer one replaces the older, and it shows a fallback for a message it
+under the message's own `tag` when it has one, as every [watch](watches.md)
+notice does so the run's clears never replace it; otherwise under the run's
+ID, `budget:<workspace>` for a budget notice, or the message's `url` for a
+notice about another page. A newer one replaces the older, and it shows a fallback for a message it
 cannot read, because Safari drops a subscription whose push shows nothing.
-A message with `clear` set means the run's need ended: for the same reason it
-is not simply closed but replaced, under the same tag and keeping the shown
+A message with `clear` set means the run's need, or the watch's, ended: for
+the same reason it is not simply closed but replaced, under the same tag and keeping the shown
 title, by a `silent` notification with the server's body,
 `No longer needs you`. The server sends it only to the devices whose push
 service took the need, when the need ends or the run changes hands,
@@ -6249,12 +6250,13 @@ about the run, such as that it finished, carries `notice`; a clear that
 finds it shown shows it again, silently, as it was. An assistant's notice of
 a need carries no `notice`, so a clear replaces it like any need. On
 `notificationclick` it focuses a dashboard window that is already open and
-posts it `{type: 'aether:open-run', run}`, navigates it to `url`, or posts
-`{type: 'aether:open-workspace', workspace}`. When no window is open, or the
-open one is not the worker's to navigate, it opens `url`, `/?run=<id>` or
-`/?page=workspace&id=<id>`.
+posts it `{type: 'aether:open-run', run}`, `{type: 'aether:open-url', url}`
+or `{type: 'aether:open-workspace', workspace}`; it never reloads the page,
+which would lose its unsent drafts. When no window is open, it opens `url`,
+`/?run=<id>` or `/?page=workspace&id=<id>`.
 `watchPush`, started with the connection in `src/store/sync.ts`, navigates on
-that message. It also calls `push.active` at most every 20 seconds while the
+that message; for `url` on this origin it also puts the full `url` in the
+address bar, so query keys the route does not carry still reach the page. It also calls `push.active` at most every 20 seconds while the
 pointer, the keyboard or the wheel is in use, which is what makes the server
 hold a member's notifications while they are at a dashboard. A server that
 has no such method, or that the member is still pending on, is not asked
