@@ -53,13 +53,32 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 	if now.Sub(active) >= suitesWaitMax {
 		checks = checks.WithoutSuites(false)
 	}
+	counts := func(c github.Checks) protocol.WatchCheckCounts {
+		return protocol.WatchCheckCounts{Passed: c.Passed, Failed: c.Failed, Pending: c.Pending, Cancelled: c.Cancelled}
+	}
+	observed := &protocol.WatchChecks{WatchCheckCounts: counts(checks), RequiredOnly: checks.RequiredOnly, Missing: checks.Missing}
+	// A required pass names the checks the base branch does not require that
+	// did not pass, so it does not read as every check passing.
+	var unrequired []string
+	if all := checks.All; all != nil {
+		required := counts(checks)
+		observed.WatchCheckCounts, observed.Required = counts(*all), &required
+		for _, group := range []struct {
+			names []string
+			state string
+		}{{all.FailedNames, "failed"}, {all.CancelledNames, "cancelled"}, {all.PendingNames, "still running"}} {
+			for _, n := range slices.Compact(slices.Sorted(slices.Values(group.names))) {
+				unrequired = append(unrequired, n+", non-required, "+group.state)
+			}
+		}
+	}
 	ref := "#" + strconv.Itoa(snap.Number)
 	key := snap.Repo + ref + ":"
 	r := prReading{
 		title: fmt.Sprintf("%s%s: %s", snap.Repo, ref, snap.Title),
 		observed: protocol.WatchObserved{
 			PRState: snap.State, HeadSHA: snap.HeadSHA, ReviewState: reviewState(snap.Reviews),
-			Checks: watchChecks(checks),
+			Checks: observed,
 		},
 		busy: checks.Pending > 0 || snap.State == "open" && snap.ReviewRequested,
 	}
@@ -90,7 +109,11 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 			case checks.Cancelled > 0:
 				notice(c, checks.Key+":cancelled", fmt.Sprintf("%d %s cancelled on %s: %s", checks.Cancelled, checkWord(checks, checks.Cancelled), ref, names(checks.CancelledNames)))
 			default:
-				notice(c, checks.Key+":passed", capitalized(checkWord(checks, 2))+" passed on "+ref+unrequired(checks.All))
+				body := capitalized(checkWord(checks, 2)) + " passed on " + ref
+				if len(unrequired) > 0 {
+					body += " (" + strings.Join(unrequired, "; ") + ")"
+				}
+				notice(c, checks.Key+":passed", body)
 			}
 		case protocol.WatchReview:
 			for _, review := range snap.Reviews {
@@ -113,41 +136,6 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 
 // after compares at GitHub's one-second resolution.
 func after(t, since time.Time) bool { return !t.Before(since.Truncate(time.Second)) }
-
-func watchChecks(c github.Checks) *protocol.WatchChecks {
-	counts := func(c github.Checks) protocol.WatchCheckCounts {
-		return protocol.WatchCheckCounts{Passed: c.Passed, Failed: c.Failed, Pending: c.Pending, Cancelled: c.Cancelled}
-	}
-	out := &protocol.WatchChecks{WatchCheckCounts: counts(c), RequiredOnly: c.RequiredOnly, Missing: c.Missing}
-	if c.All != nil {
-		required := counts(c)
-		out.WatchCheckCounts, out.Required = counts(*c.All), &required
-	}
-	return out
-}
-
-// unrequired names the checks the base branch does not require that
-// failed, were cancelled or are still running, so a required pass does not
-// read as every check passing.
-func unrequired(all *github.Checks) string {
-	if all == nil {
-		return ""
-	}
-	var parts []string
-	for _, n := range slices.Compact(slices.Sorted(slices.Values(all.FailedNames))) {
-		parts = append(parts, n+", non-required, failed")
-	}
-	for _, n := range slices.Compact(slices.Sorted(slices.Values(all.CancelledNames))) {
-		parts = append(parts, n+", non-required, cancelled")
-	}
-	for _, n := range slices.Compact(slices.Sorted(slices.Values(all.PendingNames))) {
-		parts = append(parts, n+", non-required, still running")
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return " (" + strings.Join(parts, "; ") + ")"
-}
 
 func names(list []string) string {
 	sorted := slices.Sorted(slices.Values(list))
