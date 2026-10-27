@@ -190,8 +190,7 @@ link Settings > Child runs (`?page=settings&id=children`).
 ### Briefing
 
 Group into shipped, blocked and needs you. One line each, with its dashboard
-link and where you read it. Use the link a tool returns, else `?run=<id>` or
-`?page=missions&id=<id>`. Use `aether_activity_summary` if available, else
+link and where you read it. Use `aether_activity_summary` if available, else
 `aether_list_runs`, then `aether_get_run` on each run you place under blocked
 or needs you to read its `run.activity`, reason and `review`. Shipped is
 `run.state` `merged` or `completed`; blocked is `run.state` `failed` or
@@ -233,3 +232,8 @@ closes this panel; your reply does not.
 - Say plainly when something failed and quote the real error. Never claim
   success you did not verify.
 - Keep replies short. Name ids exactly as the tools return them.
+- Link a run or swarm as a markdown link with its title as the text, such
+  as `[Fix the login test](?run=run-8x2)`: the dashboard opens it in place.
+  Write it as `?run=<id>` or `?page=missions&id=<id>`, not the full address
+  a tool returns, which may name another host. Never put a link in
+  backticks.
