@@ -100,7 +100,7 @@ var readOps = []Op{
 	opOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
 		"Use this when the user asks about one run, or to poll a launched run."+untrustedRule, getRun).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline,
-		protocol.MethodRunPRStatus),
+		protocol.MethodRunPRStatus, protocol.MethodRunChildren),
 	opOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run said or did: its conversation or terminal, and reports."+untrustedRule, runHistory).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodRunACPHistory, protocol.MethodTerminalHistory),
@@ -416,7 +416,44 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	if pr.Error != "" {
 		out["pr_error"] = pr.Error
 	}
+	if r.ParentRunID != "" {
+		out["parent_run_id"], out["parent_url"] = r.ParentRunID, l.run(r.ParentRunID)
+	}
+	addChildren(ctx, c.read, l, book, r.ID, out, untrusted)
 	return summary, out, nil
+}
+
+// childRow is a child run of a run, at depth 1 for its own children.
+type childRow struct {
+	RunID string `json:"run_id"`
+	Depth int    `json:"depth"`
+	State string `json:"state"`
+	choice
+	URL string `json:"url,omitempty"`
+}
+
+// addChildren adds run id's descendants, nearest first, to out, and what
+// their parents asked of them to untrusted; a failed read is part of the
+// result.
+func addChildren(ctx context.Context, read Call, l links, book accountBook, id string, out, untrusted map[string]any) {
+	var res protocol.RunChildrenResult
+	if err := read(ctx, protocol.MethodRunChildren, protocol.RunChildrenParams{RunID: id}, &res); err != nil {
+		out["children_error"] = err.Error()
+		return
+	}
+	if len(res.Children) == 0 {
+		return
+	}
+	rows, purposes := []childRow{}, map[string]string{}
+	for _, ch := range res.Children[:min(len(res.Children), defaultRows)] {
+		rows = append(rows, childRow{RunID: ch.RunID, Depth: ch.Depth, State: ch.State, choice: choiceOf(ch.Harness, ch.Mode, ch.Model, ch.AccountMemberID, book),
+			URL: l.run(ch.RunID)})
+		purposes[ch.RunID] = clip(ch.Purpose, maxReport)
+	}
+	out["children"], untrusted["child_purposes"] = rows, purposes
+	if len(res.Children) > len(rows) {
+		out["children_total"] = len(res.Children)
+	}
 }
 
 const historyExpired = "The server no longer keeps this run's oldest history, so its start is missing."

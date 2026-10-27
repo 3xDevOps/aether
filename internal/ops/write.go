@@ -38,6 +38,7 @@ type connectorLaunchInput struct {
 	Params      map[string]string `json:"params,omitempty" jsonschema:"the template's placeholder values"`
 	Mode        string            `json:"mode,omitempty" jsonschema:"default acp if installed"`
 	Model       string            `json:"model,omitempty"`
+	Children    string            `json:"children,omitempty" jsonschema:"may the agent start child runs; default your setting"`
 	accountChoice
 	// Reason is the assistant's, for the member's confirmation card; the
 	// server never sees it.
@@ -105,7 +106,7 @@ var writeOps = []Op{
 	opOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
 		"Use this when the user asks to start an agent on a task or a saved template, one call per task; options from aether_launch_options; then poll aether_get_run."+
 			idempotencyRule+"without one, a repeat within 60s returns the first run.", launchRun).
-		enum("mode", "tui", "headless", "acp").hints(false, true).hide(Connector, "reason").
+		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunList, protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
 	opOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
 		"Use this when the user wants one goal split across agents: an integrator plans tasks for workers; then poll aether_get_swarm."+
@@ -267,7 +268,8 @@ func starting(tool, key string, replayErr error) (string, any, error) {
 }
 
 // recentLaunch is the member's run of the same task, agent, mode, model,
-// account, fallback policy and extra repositories in the workspace created
+// account, fallback policy, extra repositories and child-run setting in the
+// workspace created
 // within duplicateWindow that has not stopped, if any. An omitted mode or
 // model matches any; an omitted account is self, the member's own.
 func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self string, now time.Time) (protocol.Run, bool, error) {
@@ -282,7 +284,7 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self 
 	for _, r := range res.Runs {
 		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model) &&
 			cmp.Or(in.AccountMemberID, self) == cmp.Or(r.RequestedAccountMemberID, r.AccountMemberID) &&
-			slices.Equal(in.FallbackAccountMemberIDs, r.FallbackAccountMemberIDs) && in.NoFallback == r.NoFallback &&
+			slices.Equal(in.FallbackAccountMemberIDs, r.FallbackAccountMemberIDs) && in.NoFallback == r.NoFallback && in.Children == r.Children &&
 			sameRepos(in.ExtraWorkspaceIDs, extraRepos(r)) && !domain.RunStatus(r.Status).Final() && recent(r.CreatedAt, now) {
 			return r, true, nil
 		}
@@ -310,7 +312,7 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	l := links(info.DashboardURL)
 	params := protocol.RunLaunchParams{WorkspaceID: in.WorkspaceID, Task: in.Task, Harness: in.Harness, Mode: in.Mode, Model: in.Model,
 		AccountMemberID: in.AccountMemberID, FallbackAccountMemberIDs: in.FallbackAccountMemberIDs, NoFallback: in.NoFallback,
-		ExtraWorkspaceIDs: in.ExtraWorkspaceIDs, IdempotencyKey: in.IdempotencyKey}
+		ExtraWorkspaceIDs: in.ExtraWorkspaceIDs, Children: in.Children, IdempotencyKey: in.IdempotencyKey}
 	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		var prior protocol.Run

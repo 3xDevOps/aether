@@ -309,7 +309,9 @@ text again on purpose, pass a new `idempotency_key`.
   and results.
 
 `aether_launch_run` takes `account_member_id`, `fallback_account_member_ids`
-(an order), `no_fallback` and `extra_workspace_ids`, as `aether run` does.
+(an order), `no_fallback`, `extra_workspace_ids` and `children` (`on` or
+`off`: whether its agent may start [child runs](teams.md#child-runs); without it,
+your setting decides), as `aether run` does.
 `aether_launch_swarm` takes the integrator's `account_member_id`, each
 worker's `harness`, `mode`, `model` and `account_member_id`, and one fallback
 policy and extra repositories for the swarm. A worker given no mode starts in
@@ -325,13 +327,16 @@ Each launch's result, and `aether_get_run` and `aether_get_swarm`, has a
 `mode`, `mode_name`, `model` (absent means the agent's default), `account`
 (`member_id`, `name`, `access`: `own`, `shared`, or `other` for a teammate's
 own run), `requested_account` when usage fallback moved the run, `fallback`
-(`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, `via`, and
-`url`. A launch's receipt adds `idempotency_key` and
+(`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, the run's
+own `children` setting, `via`, and `url`. A launch's receipt adds `idempotency_key` and
 `skipped_fallback_accounts`: the fallback accounts the server left out because
 checking them failed, each with its error. A swarm's receipt has `integrator`
 and `workers` in place of the run fields, each with the account it was
 asked to run on. `aether_get_swarm`'s `workers` list each worker run with the
 account it launched on, and `requested_account` when usage fallback moved it.
+`aether_get_run` also names the run's `parent_run_id` and lists its
+`children`, nearest first, each with its state, agent and account, and what
+its parent asked of it under `untrusted`.
 
 `aether_launch_run` with `template` (a name from `aether_launch_options`
 with `workspace_id`) and `params` runs a saved template on your own account
