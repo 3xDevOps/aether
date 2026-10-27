@@ -33,7 +33,7 @@ export type DialogVariant = 'center' | 'bottom' | 'side'
 export function dialogContentClass(variant: DialogVariant = 'center', side: 'left' | 'right' = 'right') {
   return cn(
     surface,
-    'fixed z-50 shadow-dialog outline-none motion-reduce:animate-none',
+    'fixed z-50 shadow-dialog outline-none [-webkit-app-region:no-drag] motion-reduce:animate-none',
     variant !== 'side' && 'grid gap-3 overflow-y-auto p-4',
     variant === 'center' &&
       'top-1/2 left-1/2 max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 animate-dialog-in',

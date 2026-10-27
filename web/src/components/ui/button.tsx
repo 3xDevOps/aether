@@ -7,10 +7,13 @@ import { cn, focusRing } from '@/lib/utils'
 const controlMotion =
   '[--press-duration:var(--duration-release)] active:[--press-duration:var(--duration-press)] [transition:color_var(--duration-hover)_var(--ease-hover),background-color_var(--duration-hover)_var(--ease-hover),border-color_var(--duration-hover)_var(--ease-hover),box-shadow_var(--duration-hover)_var(--ease-hover),opacity_var(--duration-hover)_var(--ease-hover),scale_var(--press-duration)_var(--ease-press)] motion-reduce:transition-none'
 
+// The pseudo-element grows the click target 4px past the painted square on every side.
+const hitbox = 'relative after:absolute after:-inset-1'
+
 const buttonVariants = cva(
   // An `aria-disabled` control stays focusable and keeps its pointer, so each
   // variant suppresses hover and pressed-state paints without removing it.
-  `inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium ${controlMotion} ${focusRing} disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5`,
+  `inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium [-webkit-app-region:no-drag] ${controlMotion} ${focusRing} disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5`,
   {
     variants: {
       variant: {
@@ -24,8 +27,8 @@ const buttonVariants = cva(
       size: {
         sm: 'h-6 px-2 text-ui-sm coarse:h-11 coarse:px-3',
         md: 'h-7 px-2.5 text-ui coarse:h-11 coarse:px-3',
-        icon: "size-7 coarse:size-11 [&_svg:not([class*='size-'])]:size-4",
-        'icon-sm': 'size-6 coarse:size-11',
+        icon: `${hitbox} size-7 coarse:size-11 [&_svg:not([class*='size-'])]:size-4`,
+        'icon-sm': `${hitbox} size-6 coarse:size-11`,
         round: "size-7 rounded-full coarse:size-11 [&_svg:not([class*='size-'])]:size-4",
         pill: 'h-7 rounded-full px-3 text-ui coarse:h-11 coarse:px-4',
       },
