@@ -175,7 +175,8 @@ func TestProtectedCacheTrimsOldestGoBuildEntriesToMemberCap(t *testing.T) {
 	}
 
 	// Disk pressure removes every entry outside the in-use window, including
-	// directory entries, and never follows a symlinked shard.
+	// directory entries, never follows a symlinked shard or cache, and does
+	// not let the unreadable terminal cache stop the runs cache's trim.
 	executable := filepath.Join(runs, "go-build", "ef", "executable-d")
 	write(filepath.Join(executable, "tool"), entry, 6*time.Hour)
 	fuzz := filepath.Join(runs, "go-build", "fuzz", "svc-a")
@@ -188,13 +189,20 @@ func TestProtectedCacheTrimsOldestGoBuildEntriesToMemberCap(t *testing.T) {
 	}
 	outside := t.TempDir()
 	victim := write(filepath.Join(outside, "victim-d"), 0, 6*time.Hour)
+	shardVictim := write(filepath.Join(outside, "ab", "victim-d"), 0, 6*time.Hour)
 	if err := os.Symlink(outside, filepath.Join(runs, "go-build", "12")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(terminal, "go-build")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(terminal, "go-build")); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.sweepCaches(t.Context(), true)
 	requireCacheExists(t, newer, false)
 	requireCacheExists(t, executable, false)
-	for _, kept := range []string{inUse, other, fuzz, victim, filepath.Join(runs, "packages"), filepath.Join(terminal, "packages")} {
+	for _, kept := range []string{inUse, other, fuzz, victim, shardVictim, filepath.Join(runs, "packages"), filepath.Join(terminal, "packages")} {
 		requireCacheExists(t, kept, true)
 	}
 }

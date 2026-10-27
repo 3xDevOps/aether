@@ -322,7 +322,8 @@ func (m *Manager) RemoveCache(ctx context.Context, member domain.MemberID, pool 
 // that were last used before cutoff, oldest first, until it has freed at least
 // excess bytes. It walks the same 256 shard directories as Go's own trim. The
 // caller keeps cutoff more than an hour before the start of the longest
-// running go command; see goBuildCacheInUseAge.
+// running go command; see goBuildCacheInUseAge. A pool that cannot be read is
+// left alone and reported; the others are still trimmed.
 func (m *Manager) TrimGoBuildCache(ctx context.Context, member domain.MemberID, pools []string, cutoff time.Time, excess uint64) error {
 	type entry struct {
 		cache *os.Root
@@ -331,21 +332,8 @@ func (m *Manager) TrimGoBuildCache(ctx context.Context, member domain.MemberID, 
 		used  time.Time
 	}
 	var entries []entry
-	for _, pool := range pools {
-		root, err := m.openCachePool(member, pool, false)
-		if err == nil {
-			var cache *os.Root
-			cache, err = rootfs.OpenRoot(root, "data/go-build")
-			_ = root.Close()
-			root = cache
-		}
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		defer func() { _ = root.Close() }()
+	var errs []error
+	collect := func(root *os.Root) error {
 		shards, err := cacheDirectoryEntries(root)
 		if err != nil {
 			return err
@@ -392,6 +380,26 @@ func (m *Manager) TrimGoBuildCache(ctx context.Context, member domain.MemberID, 
 				entries = append(entries, entry{root, name, size, info.ModTime()})
 			}
 		}
+		return nil
+	}
+	for _, pool := range pools {
+		root, err := m.openCachePool(member, pool, false)
+		if err == nil {
+			var cache *os.Root
+			cache, err = rootfs.OpenRoot(root, "data/go-build")
+			_ = root.Close()
+			root = cache
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err == nil {
+			defer func() { _ = root.Close() }()
+			err = collect(root)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("memberhome: trim %s Go build cache: %w", pool, err))
+		}
 	}
 	slices.SortFunc(entries, func(a, b entry) int { return a.used.Compare(b.used) })
 	var freed uint64
@@ -400,14 +408,22 @@ func (m *Manager) TrimGoBuildCache(ctx context.Context, member domain.MemberID, 
 			break
 		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return errors.Join(append(errs, err)...)
 		}
-		if err := e.cache.RemoveAll(e.name); err != nil {
-			return err
+		// A go command may have used the entry, refreshing it, since the walk.
+		info, err := e.cache.Lstat(e.name)
+		if errors.Is(err, fs.ErrNotExist) || err == nil && !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if err == nil {
+			err = e.cache.RemoveAll(e.name)
+		}
+		if err != nil {
+			return errors.Join(append(errs, err)...)
 		}
 		freed += e.size
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (m *Manager) updateCacheMetadata(member domain.MemberID, pool string, create bool, update func(*cacheMetadata) error) error {
