@@ -46,6 +46,9 @@ type closeSpec struct {
 	// reported marks the close an agent's report causes, which leaves the
 	// outcome unseen by the run's owner.
 	reported bool
+	// reportedOnly closes only a live run whose reported success awaits
+	// review, checked under the locks Relaunch and setReview take.
+	reportedOnly bool
 }
 
 func (c closeSpec) cause() finishCause {
