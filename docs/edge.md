@@ -353,8 +353,9 @@ expire, and stay on every server until revoked.
    file in the server's invites directory until redeemed or expired, and no
    command lists it.
 4. If the account was linked to a member while someone else held it, remove the
-   account without removing the member. Its devices are revoked and the member,
-   role, SSH keys and tailnet identity stay:
+   account without removing the member. Its devices are revoked, the
+   connectors its sign-in authorized are deleted, and the member, role, SSH
+   keys and tailnet identity stay:
 
    ```sh
    aether member identities <member-id>
@@ -501,7 +502,7 @@ offers **Sign in with the reviewer account**, at
 bcrypt password hash and one server id:
 
 ```json
-{"login": "openai-review", "password_hash": "$2a$10$...", "server_id": "<server id>"}
+{"login": "<random-login>", "password_hash": "$2a$10$...", "server_id": "<server id>"}
 ```
 
 The right login and password show **Choose a server** with that server
@@ -512,9 +513,15 @@ cannot sign in a device, claim a server or open an invitation. The sign-in
 rate limit per address applies, and 10 wrong passwords in a row for its
 login, from any address, lock it for 15 minutes:
 `429 the reviewer sign-in is locked after 10 wrong passwords in a row; try
-again after <time>`. A wrong login does not count. The lock lives in memory, so a restart lifts
-it. Each attempt logs `edge: reviewer signed in` or `edge: reviewer sign-in
-refused`, with `client_ip`.
+again after <time>`. Attempts at once count before their check ends, so
+parallel guesses cannot pass 10. A wrong login does not count, so a `429`
+tells a guesser the login was right: pick a login nobody would guess and
+share it only with the review. The lock lives in memory, so a restart lifts
+it. The edge checks at most 4 reviewer passwords at once, from any address,
+and answers `429 4 reviewer sign-ins are being checked already` beyond
+that. Each attempt logs `edge: reviewer signed in` or `edge: reviewer
+sign-in refused: <reason>`, with `client_ip`, including rate-limited and
+malformed ones.
 
 The server decides the rest. It takes the assertion only under
 `edge-access account`, with `edge-reviewer` on (off by default; set it on
@@ -524,10 +531,11 @@ with `aether member link --reviewer <login> <member-id>`. Otherwise the
 consent page refuses with the reason; under `approved-devices` it asks for a
 pairing code as for anyone. A connector the reviewer authorized acts as that
 member, and every call checks again: `aether member unlink <member-id>
-reviewer:<login>`, turning `edge-reviewer` off or making the member an admin
-cuts it off at its next call. A new password, written by `aether-edge
-reviewer` and read at the edge's next start, only stops new sign-ins; unlink
-the login too to cut off connectors already authorized.
+reviewer:<login>` deletes the connectors it authorized, so binding the
+login again does not revive them; turning `edge-reviewer` off or making the
+member an admin cuts them off at their next call. A new password, written
+by `aether-edge reviewer` and read at the edge's next start, only stops new
+sign-ins; unlink the login too to cut off connectors already authorized.
 
 Edge protocol 5 brings the reviewer account. A server before protocol 5
 refuses its assertion as malformed, so **Choose a server** lists such a

@@ -25,10 +25,12 @@ const PathReviewerSignin = "/connectors/reviewer"
 // The reviewer sign-in locks for reviewerLockout after
 // reviewerMaxFailures wrong passwords in a row for its login, from any
 // address. A wrong login does not count, so only someone who holds the
-// login can lock it.
+// login can lock it. At most reviewerMaxChecks password checks run at
+// once, from any address, so bcrypt cannot take the edge's CPU.
 const (
 	reviewerMaxFailures = 10
 	reviewerLockout     = 15 * time.Minute
+	reviewerMaxChecks   = 4
 )
 
 // ReviewerAccount is the reviewer account file: the one login and
@@ -82,11 +84,14 @@ func HashReviewerPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// reviewerLock counts the reviewer sign-in's failures in a row and when
-// it is locked until.
+// reviewerLock counts the reviewer sign-in's failures in a row, the
+// password checks for its login under way, and when it is locked until.
+// A check reserves its failure before it runs, so checks at once cannot
+// pass reviewerMaxFailures.
 type reviewerLock struct {
 	mu       sync.Mutex
 	failures int
+	checking int
 	until    time.Time
 }
 
@@ -100,23 +105,36 @@ func (l *reviewerLock) locked(now time.Time) time.Time {
 	return time.Time{}
 }
 
-// fail counts a failure and returns the failures in a row, the lock
-// starting once there are reviewerMaxFailures.
-func (l *reviewerLock) fail(now time.Time) int {
+// reserve starts a password check for the login, unless the sign-in is
+// locked at now or the failures in a row and the checks under way
+// already reach reviewerMaxFailures.
+func (l *reviewerLock) reserve(now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if now.Before(l.until) || l.failures+l.checking >= reviewerMaxFailures {
+		return false
+	}
+	l.checking++
+	return true
+}
+
+// finish ends a reserved check. A failure is counted and returns the
+// failures in a row, the lock starting once there are
+// reviewerMaxFailures; a success clears them.
+func (l *reviewerLock) finish(now time.Time, ok bool) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.checking--
+	if ok {
+		l.failures = 0
+		return 0
+	}
 	l.failures++
 	n := l.failures
 	if n >= reviewerMaxFailures {
 		l.failures, l.until = 0, now.Add(reviewerLockout)
 	}
 	return n
-}
-
-func (l *reviewerLock) succeed() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.failures = 0
 }
 
 // reviewerData is the reviewer sign-in page: the authorization request it
@@ -143,17 +161,19 @@ func (s *Service) reviewerPage(w http.ResponseWriter, r *http.Request) {
 // shows the choose page for the one server the account file names. It
 // starts no session: the reviewer account reaches no other edge page.
 func (s *Service) reviewerSignin(w http.ResponseWriter, r *http.Request) {
+	ip := clientAddr(r).String()
 	r.Body = http.MaxBytesReader(w, r.Body, edgeproto.MaxRequestBodySize)
 	if err := r.ParseForm(); err != nil {
+		slog.Warn("edge: reviewer sign-in refused: malformed form", "client_ip", ip, "err", err)
 		s.fail(w, r, nil, pageErr(http.StatusBadRequest, "read form: %v", err))
 		return
 	}
 	if !s.signinLimit.allow(addrKeys(r)...) {
+		slog.Warn("edge: reviewer sign-in refused: rate limited", "client_ip", ip)
 		s.fail(w, r, nil, edgeproto.RefusalTooMany)
 		return
 	}
 	now := s.now()
-	ip := clientAddr(r).String()
 	if until := s.reviewerLock.locked(now); !until.IsZero() {
 		slog.Warn("edge: reviewer sign-in refused: locked", "client_ip", ip, "until", until)
 		s.fail(w, r, nil, pageErr(http.StatusTooManyRequests,
@@ -167,23 +187,39 @@ func (s *Service) reviewerSignin(w http.ResponseWriter, r *http.Request) {
 	form.Del("password")
 	q, err := chooseRequest(form)
 	if err != nil {
+		slog.Warn("edge: reviewer sign-in refused: malformed authorization request", "client_ip", ip, "err", err)
 		s.fail(w, r, nil, err)
+		return
+	}
+	select {
+	case s.reviewerChecks <- struct{}{}:
+	default:
+		slog.Warn("edge: reviewer sign-in refused: too many password checks at once", "client_ip", ip)
+		s.fail(w, r, nil, pageErr(http.StatusTooManyRequests,
+			"%d reviewer sign-ins are being checked already; try again in a few seconds", reviewerMaxChecks))
+		return
+	}
+	loginOK := subtle.ConstantTimeCompare([]byte(login), []byte(s.reviewer.Login)) == 1
+	if loginOK && !s.reviewerLock.reserve(now) {
+		<-s.reviewerChecks
+		slog.Warn("edge: reviewer sign-in refused: too many wrong or unfinished passwords", "client_ip", ip)
+		s.fail(w, r, nil, pageErr(http.StatusTooManyRequests,
+			"the reviewer sign-in is locked, or has %d wrong or unfinished passwords in a row; try again in a few seconds", reviewerMaxFailures))
 		return
 	}
 	// The hash is checked whatever the login, so a wrong login takes as
 	// long as a wrong password.
-	loginOK := subtle.ConstantTimeCompare([]byte(login), []byte(s.reviewer.Login)) == 1
 	passwordOK := bcrypt.CompareHashAndPassword([]byte(s.reviewer.PasswordHash), []byte(password)) == nil
+	<-s.reviewerChecks
+	failures := 0
+	if loginOK {
+		failures = s.reviewerLock.finish(now, passwordOK)
+	}
 	if !loginOK || !passwordOK {
-		failures := 0
-		if loginOK {
-			failures = s.reviewerLock.fail(now)
-		}
 		slog.Warn("edge: reviewer sign-in refused: wrong login or password", "client_ip", ip, "failures", failures)
 		s.fail(w, r, nil, pageErr(http.StatusForbidden, "wrong reviewer login or password"))
 		return
 	}
-	s.reviewerLock.succeed()
 	slog.Info("edge: reviewer signed in", "login", s.reviewer.Login, "server", s.reviewer.ServerID, "client_ip", ip)
 	c := choice{ServerInfo: edgeproto.ServerInfo{ID: s.reviewer.ServerID, Name: s.reviewer.ServerID, Role: "reviewer"}}
 	srv, err := s.store.Server(r.Context(), s.reviewer.ServerID)

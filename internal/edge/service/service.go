@@ -139,6 +139,9 @@ type Service struct {
 
 	reviewer     *ReviewerAccount
 	reviewerLock reviewerLock
+	// reviewerChecks holds a token for each reviewer password check under
+	// way, reviewerMaxChecks at most.
+	reviewerChecks chan struct{}
 }
 
 // New opens the edge's store and signing key in cfg.DataDir, creating both
@@ -184,6 +187,7 @@ func New(cfg Config) (*Service, error) {
 		openAIChallenge:   cfg.OpenAIChallenge,
 		clientHosts:       cfg.ConnectorClientHosts,
 		reviewer:          cfg.Reviewer,
+		reviewerChecks:    make(chan struct{}, reviewerMaxChecks),
 	}
 	s.tokenLimit.scale = func(k serverBlock) int { return edgeproto.RateLimitScale(k.block) }
 	if s.clientHosts == nil {

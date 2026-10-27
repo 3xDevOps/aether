@@ -248,7 +248,7 @@ what `edge.onaether.dev` serves.
 | Privacy policy hosted at a public URL | Draft in [legal/](legal/privacy-connectors.md) | No | No | No |
 | Terms hosted at a public URL | Draft in [legal/](legal/terms-connectors.md) | No | No | No |
 | Demo server with sample data | n/a | No | n/a | n/a |
-| Reviewer account that needs no email code | This change: `aether-edge serve --reviewer-account-file` | No | No | No |
+| Reviewer account that needs no email code | Built in Aether; not enabled on edge.onaether.dev: `aether-edge serve --reviewer-account-file` | No | No | No |
 | Claude Code loopback redirects | No | No | n/a | n/a |
 | Live test from claude.ai through Anthropic's egress `160.79.104.0/21` | n/a | Not run | n/a | n/a |
 | Owner accepts the seven acknowledgments | n/a | n/a | No | No |

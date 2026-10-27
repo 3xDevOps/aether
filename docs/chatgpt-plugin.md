@@ -65,7 +65,7 @@ what `edge.onaether.dev` serves.
 | Privacy policy at a public URL, from [legal/privacy-connectors.md](legal/privacy-connectors.md) | `privacyPolicyURL` | Draft | No | No | No |
 | Terms of service at a public URL, from [legal/terms-connectors.md](legal/terms-connectors.md) | `termsOfServiceURL` | Draft | No | No | No |
 | Demo server with sample data ([Reviewer setup](#reviewer-setup)) | Project edge | n/a | No | n/a | n/a |
-| Reviewer account that needs no email code ([Reviewer setup](#reviewer-setup)) | Review details | This change: `aether-edge serve --reviewer-account-file` | No | No | No |
+| Reviewer account that needs no email code ([Reviewer setup](#reviewer-setup)) | Review details | Built in Aether; not enabled on edge.onaether.dev: `aether-edge serve --reviewer-account-file` | No | No | No |
 | `aether_changes`, used by test 2 | Connector tools | No: planned (PR #585 adds `changes.list`; the tool follows) | No | No | No |
 | Walkthrough video of the five positive test cases | `review.demo_recording_url` | n/a | No | No | No |
 | Live test from chatgpt.com | n/a | n/a | Not run | n/a | n/a |
@@ -187,15 +187,18 @@ device, claim a server or open an invitation. Ten wrong passwords in a row
 for its login lock it for 15 minutes, besides the sign-in rate limit per
 address. Each attempt writes one line, with the client address, to the
 edge's log (`edge: reviewer signed in` or `edge: reviewer sign-in
-refused`). Turning it on for `edge.onaether.dev` is the owner's step; this
+refused`). Only the right login counts toward the lock, so a `429` tells a
+guesser the login was right: pick one nobody would guess and share it only
+with the review, like the password. Turning it on for `edge.onaether.dev` is the owner's step; this
 repository does not do it.
 
 Set it up, with the demo server's id from `aether-server edge status` or
 `aether-edge servers list`:
 
 1. On the edge host, write the file, mode 0600, and note the password it
-   prints, the only copy:
-   `sudo -u aether-edge aether-edge reviewer --login openai-review --server-id <server id> /var/lib/aether-edge/reviewer.json`.
+   prints, the only copy. `<random-login>` is a login nobody would guess,
+   such as `review-` and eight random letters:
+   `sudo -u aether-edge aether-edge reviewer --login <random-login> --server-id <server id> /var/lib/aether-edge/reviewer.json`.
 2. Set `AETHER_EDGE_REVIEWER_ACCOUNT_FILE=/var/lib/aether-edge/reviewer.json`
    in `/etc/aether-edge/aether-edge.env` (or pass
    `--reviewer-account-file`) and restart the edge. Its log says
@@ -205,16 +208,17 @@ Set it up, with the demo server's id from `aether-server edge status` or
    `edge-access account`; under `approved-devices` the consent page asks
    the reviewer for a pairing code as it asks anyone.
 4. As an admin of the demo server, bind the login to the reviewer's member,
-   a collaborator: `aether member link --reviewer openai-review <member-id>`.
+   a collaborator: `aether member link --reviewer <random-login> <member-id>`.
    An admin member is refused, and a member made admin later is cut off.
 
-Revoke it with `aether member unlink <member-id> reviewer:openai-review`,
-or by turning `edge-reviewer` off on the demo server and restarting it:
-either cuts off its connectors at their next call. Removing the flag from
-the edge, or a new password, only stops new sign-ins; connectors already
-authorized keep working. After each review, unlink the login, run step 1
-again for a new password, restart the edge and bind the login again
-(step 4).
+Revoke it with `aether member unlink <member-id> reviewer:<random-login>`,
+which deletes the connectors it authorized, or by turning `edge-reviewer`
+off on the demo server and restarting it, which cuts them off at their next
+call. Removing the flag from the edge, or a new password, only stops new
+sign-ins; connectors already authorized keep working. After each review,
+unlink the login, run step 1 again for a new password, restart the edge and
+bind the login again (step 4): connectors from the last review stay
+deleted.
 
 The rest of the setup:
 
