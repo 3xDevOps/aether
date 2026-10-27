@@ -18,7 +18,9 @@ import (
 
 const memoryUsage = `usage: aether memory <command> [--workspace <name-or-id>] [options]
 
-Put -- before text that starts with a dash. Guide: docs/memory.md
+Every member reads every note. Only a member note's owner or an admin may
+pin, unpin, remove or replace it. Put -- before text that starts with a
+dash. Guide: docs/memory.md
 
 commands:
   ls      [--kind K] [--file P] [--all] [--limit N]        list the newest notes, 100 by default
@@ -31,10 +33,7 @@ commands:
   unpin   ID                                               take a note out of briefs
   rm      ID | --run RUN                                   delete a note, or every note a run wrote
   brief   [--member M]                                     print the brief a new run gets, byte for byte; --member is
-                                                           admin only
-
-Every member reads every note. Only a member note's owner or an admin may
-pin, unpin, remove or replace it.`
+                                                           admin only`
 
 // memoryCall is a parsed memory command, run once connected.
 type memoryCall func(c *protocol.Client, w io.Writer) error
