@@ -5,11 +5,13 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
+import { randomID } from '@/lib/random'
 import { useReturnFocus } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import type { WatchCondition, WatchTarget } from '@/lib/types'
 import { conditionChoices, defaultConditions, defaultExpiryDays, watchRoute } from '@/lib/watches'
 import { useStore } from '@/store'
+import { createWatch } from '@/store/watches'
 
 function useTargetTitle(target: WatchTarget | null): string {
   return useStore((s) => {
@@ -40,7 +42,7 @@ export function WatchDialog({ client = api }: { client?: Api }) {
   const title = useTargetTitle(target)
   const [chosen, setChosen] = useState<WatchCondition[]>(() => (target ? defaultConditions(target.kind) : []))
   // One key per request: a retry after a lost answer cannot make a second watch, and changed conditions are a new request.
-  const [key, setKey] = useState(() => crypto.randomUUID())
+  const [key, setKey] = useState(() => randomID('watch'))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const id = useId()
@@ -48,17 +50,16 @@ export function WatchDialog({ client = api }: { client?: Api }) {
 
   const toggle = (condition: WatchCondition, on: boolean) => {
     setChosen((list) => (on ? [...list, condition] : list.filter((c) => c !== condition)))
-    setKey(crypto.randomUUID())
+    setKey(randomID('watch'))
   }
 
   const submit = async () => {
     setBusy(true)
     setError(null)
     try {
-      const result = await client.watchCreate({ target, conditions: chosen, source: 'dashboard', idempotency_key: key })
-      useStore.getState().putWatch(result.watch)
+      const result = await createWatch(useStore, client, { target, conditions: chosen, source: 'dashboard', idempotency_key: key })
       close()
-      toast.success(result.receipt, {
+      if (result) toast.success(result.receipt, {
         action: {
           label: 'View watch',
           onClick: () => {
