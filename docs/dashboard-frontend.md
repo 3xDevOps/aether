@@ -3059,7 +3059,10 @@ controller approval. `useImplicitControl`
 (`agent-terminal.ts`) lets the owner of a run nobody controls act in one step
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10
-seconds). Pending requests dock above it
+seconds). On a swarm worker it never takes the lease: Send goes without it,
+which the server delivers at once while nobody controls the run, and a
+request's options wait for **Take control to answer**, so no action sets the
+worker's hold. Pending requests dock above it
 one at a time, oldest first, with "1 of N" and **Previous request** / **Next
 request** in the card header (`routes/run/request-dock.tsx`). The dock holds
 the card on screen by request id, so arrivals and other answers never swap
@@ -3810,7 +3813,8 @@ both what it renders and the overlap set the conflict chips read.
   sent again is delivered once, whatever went to the run in between.
   `useAgentSend` (`agent-send.ts`) wraps it for the review bar and the pull
   request panel: it passes the lease and, for the owner of a run nobody
-  controls, takes it first (`useImplicitControl`); anyone else's message
+  controls, takes it first (`useImplicitControl`), except on a swarm worker,
+  where it sends without the lease; anyone else's message
   waits 45 seconds for the controller, and both surfaces say so. **Send to
   agent** is disabled, with the composer's own sentence beside it, for a
   finished, starting or switching run, a Background run, a protected run and
