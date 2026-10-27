@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type * as React from 'react'
-import { GitPullRequest } from '@/components/icons'
+import { AskAssistantButton } from '@/components/assistant/ask'
+import { GitPullRequest, Sparkles } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
 import { PRFeedback } from '@/routes/diff/publish-feedback'
@@ -28,6 +29,7 @@ export function useRunPullRequest(run: RunRecord, agent: AgentTerminal, agentNam
   const pr = feedback?.pull_request
   if (!feedback || !pr) return { status: null, panel: null }
   const { tone, text, short } = summarizePR(pr, feedback)
+  const failing = tone === 'failed'
   return {
     status: (
       <div role="group" aria-label="Pull request" className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-ui-sm">
@@ -41,6 +43,20 @@ export function useRunPullRequest(run: RunRecord, agent: AgentTerminal, agentNam
           <GitPullRequest aria-hidden className="size-3.5" />
           <span className="tabular-nums">#{pr.number}</span>
         </a>
+        {pr.state !== 'merged' && pr.state !== 'closed' && (
+          <AskAssistantButton
+            variant="ghost"
+            size="icon-sm"
+            label={`Ask the assistant about pull request #${pr.number}`}
+            hint={failing ? 'Fix this pull request' : 'Review and merge when checks pass'}
+            ask={{
+              draft: failing ? 'Fix this pull request' : 'Review and merge when checks pass',
+              attachments: [{ kind: 'pr', workspace_id: run.workspace_id, run_id: run.id, pr: pr.number, repository: pr.repository, label: `PR #${pr.number}` }],
+            }}
+          >
+            <Sparkles />
+          </AskAssistantButton>
+        )}
         {watch && (
           <Button variant="ghost" size="sm" hint="Checks and review comments" aria-haspopup="dialog" onClick={() => setOpen(true)}>
             <StatusDot tone={tone} pulse={tone === 'working'} />

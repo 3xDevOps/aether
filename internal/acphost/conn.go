@@ -480,6 +480,25 @@ func (c *Conn) prompt(ctx context.Context, blocks []acp.ContentBlock) (string, S
 	}, err
 }
 
+// SessionLost reports whether err, as returned for a failed session/prompt,
+// says the agent no longer has the session. Claude's adapter drops a session
+// whose Claude Code process died but keeps running, and answers every later
+// prompt to it so.
+func SessionLost(err error) bool {
+	var re *acp.RequestError
+	if !errors.As(err, &re) || re.Data == nil {
+		return false
+	}
+	raw, err := json.Marshal(re.Data)
+	if err != nil {
+		return false
+	}
+	var data struct {
+		Details string `json:"details"`
+	}
+	return json.Unmarshal(raw, &data) == nil && data.Details == "Session not found"
+}
+
 // steer adds input to the running turn. idleBehavior promptRequired makes
 // the agent refuse rather than start a turn the host did not open.
 func (c *Conn) steer(ctx context.Context, blocks []acp.ContentBlock) (string, error) {

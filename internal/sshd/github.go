@@ -94,7 +94,7 @@ func snapshotFeedback(snap githubservice.Snapshot, limit int) (checks []protocol
 		return true
 	}
 	var all []protocol.RunPRCheck
-	for _, run := range snap.CurrentCheckRuns() {
+	for _, run := range snap.CurrentRuns() {
 		all = append(all, protocol.RunPRCheck{Name: run.Name, Status: strings.ToUpper(run.Status), Conclusion: strings.ToUpper(run.Conclusion), URL: run.URL})
 	}
 	for _, suite := range snap.WaitingSuites() {

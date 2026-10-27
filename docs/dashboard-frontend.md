@@ -543,8 +543,15 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   the run Session's `TimelineRow` and `useFlatRows`, with the Session's
   open blocks, and the constant row context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
   newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
-  runs). An empty conversation offers four example prompts that fill the
-  composer. Harness permission and question prompts render as the Session
+  runs and reads **Stopping…** while `assistant.cancel` is in flight, so a
+  double click cancels once and an agent that ignores it can be stopped
+  again). An empty conversation offers four example prompts that fill the
+  composer, led by the page's own: a failed run offers **Fix this**, one that
+  needs you or waits **Why is this stuck?**, one with an open pull request
+  (`useOpenPullRequest`) **Review and merge when checks pass**; the board
+  **What needs me?**, a swarm **Summarize progress**. A run, pull request or
+  swarm prompt attaches its target through `askAssistant`, so it reaches the
+  agent with page sharing off. Harness permission and question prompts render as the Session
   view's request cards, answered with `assistant.answer`; each pending
   confirmation renders as a card titled with the summary, the method as its
   source line, a **Details** section with the exact params (three, then
@@ -607,22 +614,79 @@ the bottom instead of at a stale offset. A transcript pinned to the bottom stays
 pinned, so it follows output that arrived while the panel was closed. A
 different conversation starts at the bottom.
 
-`store/view-context.ts` builds the view context each prompt carries (see
+`store/view-context.ts` builds the view context (see
 [assistant.md](assistant.md#what-it-sees)): the route's ids, the run view
 `RunFrame` reports through `setShownRunView`, the active file only on the
 Files page or its own run's Files view, and `viewHistory`, the last 8 pages,
-recorded only while sharing is on and never persisted. The prompt's context is kept in the retry attempt with its
-key. While the panel is open and sharing is on, `syncViewContext` sends
-`assistant.view` at most once a second when the context changed, one call at a
-time, retrying a failed one with backoff and sending it again after each
-prompt. `ContextChip` (`components/assistant/context-chip.tsx`)
-above the composer shows it and turns sharing off with
-`assistant.settings {share_view}`; `assistantShareChoice` holds the choice
-until the server saves it, sending one save at a time so an older choice
-never lands after a newer one, retrying with backoff from 3 seconds up to a
-minute, stopping on `-32004` or `-32602`, or once another member signs in
-(`resetAssistant` drops the choice). `status.share_view` carries it to other
-tabs and devices.
+recorded only while sharing is on and never persisted. While the panel is
+open and sharing is on, `syncViewContext` sends `syncedViewContext`, the
+page the chips show, as `assistant.view` at most once a second when it
+changed, one call at a time, retrying a failed one with backoff and sending
+it again after each prompt. While the draft's page is removed it sends a
+context without `route`, which makes the server forget the page; while a
+navigation conflict is unanswered it sends nothing; after **where you
+started** it keeps the pinned page until the prompt is sent.
+
+A prompt carries `draftViewContext` instead. The first character of a draft,
+or an entry point, sets `assistantPin` to the page then shown; while
+`trackViewContext` runs it follows the member's later views and open file on
+the same run or page. Once they move to another,
+`draftConflict` names it and `ContextChips`
+(`components/assistant/context-chips.tsx`) shows **You moved to X. Ask
+about:** with the new page and **Y (where you started)**; Send with that
+unanswered focuses the first choice and sends nothing. Emptying the draft,
+with nothing attached, drops the pin. `assistantAttachments` (at most 6) are
+what an entry point pointed the draft at; navigation never changes them,
+and sharing does not gate them. Past the cap the oldest go and
+`assistantError` names them. The chips above the composer are built from
+`nextViewContext`, so they show exactly what is sent: the page (unless
+removed or unshared, and folded into a run or swarm attachment that names
+the same page, whose remove button then removes both) and each attachment,
+labelled from the store
+(`components/assistant/labels.ts`); each chip's remove button is its tab stop
+and also takes Delete or Backspace. **Add this page** undoes a removed page.
+**Inspect** opens a popover with the **Share the page I am on with the
+assistant** checkbox, a list of every field the next message sends, and
+**Raw JSON**, the exact payload (`nextViewContext`).
+
+`assistantAttempt` holds the prompt's text, key and context; changing the
+text, any chip or the share choice drops it, and a retry of the same text
+reuses both. A new key comes from `promptKey`: while another tab's send of
+the same text and context under the same member is still in flight (at
+most 10 seconds), it reuses that tab's key, so the server runs the prompt
+once; `settlePromptKey` clears the record when a send settles, so a second
+"yes" after the agent asks again is a new message. Only a SHA-256 of the
+draft is stored, in `localStorage` under `aether.assistant.sent`. Over plain
+HTTP, where `crypto.subtle` and `crypto.randomUUID` are missing, keys fall
+back to a timestamp and random suffix and tabs do not share them. Client
+`fit` and `sendableAttachment` trim as the server does (recent pages, then
+the open file, then the last attachments, counting bytes as Go's
+`json.Marshal` writes them; a check name over 128 bytes or with a control or
+format character is dropped), so **Inspect** never shows what the server
+drops. A draft or chip changed while the key is being made cancels that
+send. The send guard and **Stop** read `assistantSending`
+and `assistantStopping` from `getState`, so two presses before a render send
+one call. `assistantError` keeps the last failure across closing the panel
+until the draft changes, the next send or a new conversation.
+
+`askAssistant({draft, attachments, page})` in `store/assistant.ts` opens the
+panel, adds the attachments, fills the draft unless the member has one,
+sets `assistantFocus` so the composer takes focus once, and never sends. `AskAssistantButton`
+(`components/assistant/ask.tsx`) calls it and renders nothing for a member
+who cannot use the assistant. It backs **Fix this** and **Ask the
+assistant** on the session failure callout, the button beside each failing
+check pill, the button beside an open pull request's number in the run
+header, and **Ask the assistant** beside a swarm task's error. The run menu
+and palette offer **Ask the assistant to fix this run** for a failed run and
+**Ask the assistant why this is stuck** for one that needs you or waits;
+the palette's **Ask about this page** pins the current page.
+
+The share setting itself is `assistant.settings {share_view}`;
+`assistantShareChoice` holds the choice until the server saves it, sending
+one save at a time so an older choice never lands after a newer one,
+retrying with backoff from 3 seconds up to a minute, stopping on `-32004` or
+`-32602`, or once another member signs in (`resetAssistant` drops the
+choice). `status.share_view` carries it to other tabs and devices.
 
 When the assistant launches or messages a run for the member, the server
 follows it and publishes `assistant.notice` on `/ws/events` as the run
@@ -6168,8 +6232,9 @@ then in the browser. A failure of either, or of **Send test notification**
 (`push.test`), is shown as the error the browser or the server gave.
 
 `web/public/sw.js` is the whole worker. On `push` it shows the notification
-with the run's ID as its `tag`, or `budget:<workspace>` for a budget notice,
-so a newer one replaces the older, and it shows a fallback for a message it
+with the run's ID as its `tag`, `budget:<workspace>` for a budget notice, or
+the message's `url` for a notice about another page, such as a
+[watch](watches.md) notice about a swarm, so a newer one replaces the older, and it shows a fallback for a message it
 cannot read, because Safari drops a subscription whose push shows nothing.
 A message with `clear` set means the run's need ended: for the same reason it
 is not simply closed but replaced, under the same tag and keeping the shown
@@ -6184,9 +6249,10 @@ about the run, such as that it finished, carries `notice`; a clear that
 finds it shown shows it again, silently, as it was. An assistant's notice of
 a need carries no `notice`, so a clear replaces it like any need. On
 `notificationclick` it focuses a dashboard window that is already open and
-posts it `{type: 'aether:open-run', run}` or
-`{type: 'aether:open-workspace', workspace}`, or opens `/?run=<id>` or
-`/?page=workspace&id=<id>` when none is.
+posts it `{type: 'aether:open-run', run}`, navigates it to `url`, or posts
+`{type: 'aether:open-workspace', workspace}`. When no window is open, or the
+open one is not the worker's to navigate, it opens `url`, `/?run=<id>` or
+`/?page=workspace&id=<id>`.
 `watchPush`, started with the connection in `src/store/sync.ts`, navigates on
 that message. It also calls `push.active` at most every 20 seconds while the
 pointer, the keyboard or the wheel is in use, which is what makes the server

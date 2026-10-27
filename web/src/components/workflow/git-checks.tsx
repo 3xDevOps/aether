@@ -1,3 +1,5 @@
+import { AskAssistantButton } from '@/components/assistant/ask'
+import { Sparkles } from '@/components/icons'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
@@ -10,7 +12,13 @@ import { checkPills, reviewVerdicts, type CheckPill, type PillState, type Readin
 const pillTone: Record<PillState, Tone> = { failing: 'failed', running: 'working', passing: 'done' }
 const pill = 'inline-flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-seam px-2 text-ui-sm'
 
-function Pill({ entry }: { entry: CheckPill }) {
+/** The run and pull request a failed check is asked about. */
+export interface CheckTarget {
+  runId: string
+  workspaceId: string
+}
+
+function Pill({ entry, feedback, target }: { entry: CheckPill; feedback: RunPRFeedbackResult; target?: CheckTarget }) {
   const { check } = entry
   const body = (
     <>
@@ -26,8 +34,9 @@ function Pill({ entry }: { entry: CheckPill }) {
       {check.url && <span className="text-muted">Opens the check on GitHub</span>}
     </span>
   )
+  const pr = feedback.pull_request
   return (
-    <li className="min-w-0">
+    <li className="flex min-w-0 items-center gap-0.5">
       <Tooltip content={tip}>
         {check.url ? (
           <a className={cn(focusRing, pill, 'hover:bg-hover-chrome')} href={check.url} target="_blank" rel="noreferrer">{body}</a>
@@ -35,16 +44,30 @@ function Pill({ entry }: { entry: CheckPill }) {
           <span tabIndex={0} className={cn(focusRing, pill)}>{body}</span>
         )}
       </Tooltip>
+      {target && entry.state === 'failing' && (
+        <AskAssistantButton
+          variant="ghost"
+          size="icon-sm"
+          label={`Fix ${check.name} with the assistant`}
+          hint="Fix this failed check"
+          ask={{
+            draft: 'Fix this failed check',
+            attachments: [{ kind: 'check', workspace_id: target.workspaceId, run_id: target.runId, pr: pr?.number, repository: pr?.repository, check: check.name, label: check.name }],
+          }}
+        >
+          <Sparkles />
+        </AskAssistantButton>
+      )}
     </li>
   )
 }
 
-export function CheckPills({ feedback }: { feedback: RunPRFeedbackResult }) {
+export function CheckPills({ feedback, target }: { feedback: RunPRFeedbackResult; target?: CheckTarget }) {
   const pills = checkPills(feedback.checks ?? [])
   if (!pills.length) return null
   return (
     <ul aria-label="Checks" className="flex min-w-0 flex-wrap gap-1.5">
-      {pills.map((entry) => <Pill key={entry.key} entry={entry} />)}
+      {pills.map((entry) => <Pill key={entry.key} entry={entry} feedback={feedback} target={target} />)}
     </ul>
   )
 }

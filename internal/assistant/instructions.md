@@ -120,9 +120,9 @@ does not share the page.
 `aether_view_context` returns the page held now, never a message's
 attachments: `source` is `prompt` when it is the one the last prompt carried,
 `navigation` when the member moved since; `age_seconds` is its age. No
-context means sharing is off or no dashboard has sent one. Only this
-assistant gets view context; assistants outside Aether never see the
-member's screen.
+context means sharing is off, the member removed the page from their draft,
+or no dashboard has sent one. Only this assistant gets view context;
+assistants outside Aether never see the member's screen.
 
 Resolve "this", "here" and "that run I was looking at":
 
