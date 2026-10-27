@@ -131,6 +131,8 @@ describe('deriveTrace', () => {
       { from: t0, to: t0 + 30_000, tone: 'working', label: 'Working' },
       { from: t0 + 30_000, to: null, tone: 'needs-you', label: 'Needs you' },
     ])
+    const rereads = [60, 120].map((seconds) => ({ ...event(seconds, 'needs-attention', 'waiting-ci'), payload: { to: 'needs-attention', state: 'waiting-ci', status_seq: seconds, reread: true } }))
+    expect(trace([], { statusEvents: rereads }).lane).toEqual([{ from: t0 + 60_000, to: null, tone: 'waiting', label: 'Waiting for CI' }])
     expect(trace([], { statusEvents: null, statusError: 'permission denied' })).toMatchObject({ lane: undefined, laneError: 'permission denied' })
   })
 })
