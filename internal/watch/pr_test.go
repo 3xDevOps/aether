@@ -203,26 +203,18 @@ func newPRHarness(t *testing.T) *prHarness {
 	return p
 }
 
-// startPR runs a new Service with a new PRs source, as a server start does.
+// startPR runs a new Service with a new PRs source, as a server start does,
+// and waits for its startup evaluation, which would otherwise count a
+// failure of its own on a watch the test creates meanwhile.
 func (p *prHarness) startPR() {
 	p.t.Helper()
-	svc, err := New(Config{
-		Store: p.db, Bus: p.bus, Runs: p.runs, Swarm: p.swarmOf, Push: p.push, Head: p.log.LastSeq,
-		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: p.clock.now,
-	})
-	if err != nil {
-		p.t.Fatalf("New: %v", err)
-	}
 	prs, err := NewPRs(PRConfig{GitHub: github.New(p.homes), Store: p.db, Bus: p.bus, Now: p.clock.now})
 	if err != nil {
 		p.t.Fatalf("NewPRs: %v", err)
 	}
-	svc.UsePRSource(prs)
-	if err = svc.Start(p.ctx); err != nil {
-		p.t.Fatalf("Start: %v", err)
-	}
-	p.t.Cleanup(func() { _ = svc.Close() })
-	p.svc = svc
+	p.pr = prs
+	p.start()
+	p.settle()
 }
 
 func (p *prHarness) login(m *domain.Member) {
@@ -250,7 +242,7 @@ func (p *prHarness) poll(id string) {
 		after := p.watchState(id).LastCheckAt
 		return after != nil && (before == nil || after.After(*before))
 	})
-	settle()
+	p.settle()
 }
 
 func (p *prHarness) watchOn(member *domain.Member, target protocol.WatchTarget, conditions ...string) protocol.WatchResult {
@@ -384,7 +376,7 @@ func TestPRTwoWatchesOnOnePullRequestShareOneRead(t *testing.T) {
 	p.eventually("both read", func() bool {
 		return p.watchState(w1.ID).LastCheckAt != nil && p.watchState(w2.ID).LastCheckAt != nil
 	})
-	settle()
+	p.settle()
 	if reads, _, _ := p.gh.reads(); reads != 1 {
 		t.Fatalf("GitHub reads for two new watches = %d, want 1", reads)
 	}
@@ -413,9 +405,9 @@ func TestPRRateLimitWaitsForTheReset(t *testing.T) {
 	}
 	_, before, _ := p.gh.reads()
 	p.clock.advance(10 * time.Minute)
-	settle()
+	p.settle()
 	p.clock.advance(10 * time.Minute)
-	settle()
+	p.settle()
 	if _, after, _ := p.gh.reads(); after != before {
 		t.Fatalf("%d requests sent before the reset", after-before)
 	}

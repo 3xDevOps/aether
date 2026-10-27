@@ -412,3 +412,71 @@ test("an assistant-made watch's notice is left to its assistant.notice", async (
   await watchChanged({ watch_id: 'wat-9', member_id: 'me', notification_id: 'not-1' })
   assert.equal(shown.length, 0)
 })
+
+test('a lost connection or a stop closes the watch notices it can no longer end', async () => {
+  watchWith('wat-10', { kind: 'run', run_id: 'r20' }, { condition: 'needs_you', title: 'run r20 needs you', link: '/?run=r20' })
+  await watchChanged({ watch_id: 'wat-10', member_id: 'me', notification_id: 'not-1' })
+  watchWith('wat-11', { kind: 'run', run_id: 'r21' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r21' })
+  await watchChanged({ watch_id: 'wat-11', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 2)
+  socket.onclose()
+  assert.ok(shown.every((n) => n.closed))
+
+  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {}, () => {})
+  watchWith('wat-12', { kind: 'run', run_id: 'r22' }, { condition: 'needs_you', title: 'run r22 needs you', link: '/?run=r22' })
+  await watchChanged({ watch_id: 'wat-12', member_id: 'me', notification_id: 'not-1' })
+  notify.stop()
+  assert.ok(shown[2].closed)
+})
+
+test('a watched need or finish that ends while its watch is read never shows', async () => {
+  const fetched = globalThis.fetch
+  let release
+  const held = new Promise((resolve) => { release = resolve })
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/watch.get')) await held
+    return fetched(url, init)
+  }
+  try {
+    const run = lead('r23')
+    await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+    watchWith('wat-13', { kind: 'run', run_id: 'r23' }, { condition: 'needs_you', title: 'run r23 needs you', link: '/?run=r23' })
+    watchWith('wat-14', { kind: 'run', run_id: 'r24' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r24' })
+    const now = Date.now()
+    mock.method(Date, 'now', () => now + 6000)
+    const pending = Promise.all([
+      watchChanged({ watch_id: 'wat-13', member_id: 'me', notification_id: 'not-1' }),
+      watchChanged({ watch_id: 'wat-14', member_id: 'me', notification_id: 'not-1' }),
+    ])
+    await status(run, { status: 'running', state: 'working', reason: '' })
+    socket.onmessage({ data: JSON.stringify({ type: 'run.outcome_seen', run_id: 'r24', payload: {} }) })
+    release()
+    await pending
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(shown.length, 1, 'only the run.status need showed')
+  } finally {
+    globalThis.fetch = fetched
+    mock.restoreAll()
+  }
+})
+
+test('a watch notice read when the connection drops never shows', async () => {
+  const fetched = globalThis.fetch
+  let release
+  const held = new Promise((resolve) => { release = resolve })
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/watch.get')) await held
+    return fetched(url, init)
+  }
+  try {
+    watchWith('wat-15', { kind: 'pr', repo: 'acme/app', number: 12 }, { condition: 'merged' })
+    const pending = watchChanged({ watch_id: 'wat-15', member_id: 'me', notification_id: 'not-1' })
+    socket.onclose()
+    release()
+    await pending
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(shown.length, 0)
+  } finally {
+    globalThis.fetch = fetched
+  }
+})
