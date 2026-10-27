@@ -39,9 +39,6 @@ func init() {
 			return nil, err
 		}
 		d.SSH.Services.Push = svc
-		if d.Assistant != nil {
-			d.Assistant.UseNotifier(svc.Notify)
-		}
 		return svc, nil
 	})
 }

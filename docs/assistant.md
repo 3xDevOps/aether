@@ -91,9 +91,11 @@ environment.
 
 Each message carries a short description of what your dashboard shows, so "why
 is this stuck?" works without ids: the page you are on, the workspace and run,
-the open run view, the open file's path (never its contents) and the last 8
-pages you visited. It never holds titles, file contents, drafts, terminal text
-or secrets.
+the open run view, the open file's path (never its contents), the last 8
+pages you visited, and the mode and model you last launched each agent with
+from this browser while signed in as you (up to 4, newest first). It never holds titles, file
+contents, drafts, terminal text or secrets. The assistant launches with those
+choices unless your message names others.
 
 The page is pinned when you start typing. If you move to another run or page
 before sending, the panel asks **You moved to Ship the docs. Ask about:** with
@@ -109,8 +111,10 @@ attachment holds only ids and names, such as `acme/api#42 · check lint`; the
 assistant reads the details with its tools.
 
 Above the message box, a chip names each thing the message is about. Remove
-one with its **x**, or Delete or Backspace. Removing the page also stops the
-assistant reading it between messages until you send or add it back.
+one with its **x**, or Delete or Backspace. Removing the page also removes the
+launch choices, and stops the assistant reading the page between messages
+until you send or add it back; a message sent right after waits until the
+server has forgotten it.
 **Inspect** lists every field the next message sends, and **Raw JSON** shows
 the exact payload. Clear **Share the page I am on with the assistant** there
 to stop sending the page; things you attached are still sent. The choice is saved for you on every device.
@@ -132,6 +136,14 @@ Launch claude (acp) in api: "Fix the flaky login test"
 Stop run run-8x2... ("Fix flaky login test")
 Save your environment as a new image; new runs and terminals start from it
 ```
+
+A launch card instead lists what starts: the kind, workspace, agent with model
+and mode, the account, the fallback when that account's usage runs out, the
+task, and how you hear back. The assistant launches on your own account, with
+automatic [usage fallback](teams.md#usage-fallback): if your account is nearly
+out of quota, the run starts on an account shared with you. With
+[auto-approval](#auto-approval) on, a launch passes without a card, fallback
+included.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was
@@ -166,8 +178,11 @@ call waiting for your approval is one line above the approval card. It also
 says whether you approved it or auto-approval passed it, and links to the run,
 swarm, pull request or environment. A failure shows the server's error as is.
 **Retry** adds `Retry: <what it tried>` to the message box for you to edit and
-send. A run or swarm the assistant launched that is still going reads **Working
-in the background**; it keeps running after you close the panel. Reads fold
+send. A launch card adds what started, such as `run · api · Claude Code opus ·
+your account`. A run or swarm the assistant launched that is still going reads
+**Working in the background** with how you hear back; it keeps running after
+you close the panel. A launched swarm's state is read again on each change to
+it, so the card and the **Actions** list agree. Reads fold
 into one line, such as **Read 3 runs**, that expands. The **Actions** button in
 the panel header lists the conversation's actions, newest first.
 
@@ -194,6 +209,9 @@ not covered   the assistant's own shell and file tools, which never ask
 
 - Messaging or stopping another member's run always asks, with the owner named
   on the card.
+- An auto-approved launch may still use automatic
+  [usage fallback](teams.md#usage-fallback), which can pick an account shared
+  with you.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as
@@ -223,26 +241,36 @@ agent asks you still appears as a card.
 
 ## Notifications
 
-Aether follows every run the assistant launches or messages for you. You do not
-ask for updates. You are told when the run:
+Aether watches every run the assistant launches or messages for you: it
+creates a [watch](watches.md#assistant-watches) with source `assistant`,
+listed in **Settings > Watches**, where you pause it to stop the notices. If
+the watch cannot be created, the conversation says so with the error. You do
+not ask for updates. You are told when the run:
 
 | Notice | When |
 | --- | --- |
-| Finished | The run completed, merged, failed, stopped or was interrupted, or a live run's reported success is ready for review |
-| Needs input | The agent asks a question, a permission or a form |
+| Finished | The run's agent reported done, the run completed, failed or was stopped, or a member closed it as merged or abandoned |
+| Needs input | The agent asks for a permission, or asks a question or a form in a run that is not Background |
 | Needs attention | The run [needs you](failure-handling.md#needs-you) with no question pending: it reports `needs-input` or `blocked`, hit a usage limit, had its turn interrupted, disconnected, or failed and you have not seen it. Waiting on agents, CI or a process never notifies. The reason is worded as in [push notifications](networking.md#notifications) |
 
-A notice appears in the assistant's transcript, as a toast with a badge on the
-**Assistant** button, as an OS notification in the desktop app, and as a phone
-push. On the phone, a finished run always notifies you. The other three notify
-only for runs you do not own, since your own runs already notify you. Each state
-is announced once, and the follow ends when the run finishes or is deleted.
+A notice appears in the assistant's transcript with a link to its watch, as a
+toast with a badge on the **Assistant** button, as an OS notification in the
+desktop app, and as a phone push. Your own runs already push you when they need
+you, so the watch does not push those again
+([no double pushes](watches.md#no-double-pushes)). Each state is announced
+once; a need the run stood in when the assistant acted on it is not
+announced. The watch ends when the run reaches its final state, expires after
+14 days, or goes with the run when it is deleted.
 
 ## Conversations
 
 Send with Enter (Shift+Enter inserts a newline). **Stop** cancels the turn in
-progress; if the agent keeps going, press it again. While a turn runs you
-cannot send another prompt.
+progress; if the agent keeps going, press it again. If the server does not
+answer within 10 seconds, Stop shows `assistant.cancel got no answer within 10
+seconds` and can be pressed again. A message the server does not accept within
+60 seconds shows `assistant.prompt got no answer within 60 seconds` and stays
+in the box; **Send** retries it under the same idempotency key, so it runs at
+most once. While a turn runs you cannot send another prompt.
 
 There is one conversation per member. It survives page reloads and server
 restarts. If the environment stops, the agent stops with it and the next prompt

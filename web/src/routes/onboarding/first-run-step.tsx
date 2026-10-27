@@ -10,7 +10,7 @@ import { message } from '@/lib/format'
 import type { Workspace } from '@/lib/types'
 import { Step } from '@/routes/onboarding/layout'
 import { CONNECTORS_SECTION_ID } from '@/routes/settings/connectors'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useCapability, useIsAdmin, useSelfRole } from '@/store/hooks'
 
 function useSourceCheck(client: Api, workspaceID: string | undefined) {
@@ -106,6 +106,7 @@ export function FirstRunStep({
     try {
       const task = draft.task.trim()
       const chosenModel = model.trim()
+      const signedIn = sameIdentity()
       const run = await client.runLaunch({
         workspace_id: workspace.id,
         harness,
@@ -113,7 +114,7 @@ export function FirstRunStep({
         mode,
         ...(chosenModel ? { model: chosenModel } : {}),
       })
-      rememberLaunch(harness, mode, chosenModel)
+      if (signedIn()) rememberLaunch(harness, mode, chosenModel)
       upsertRun(run)
       setOnboarded(true)
       navigate('run', { runId: run.id })

@@ -475,13 +475,12 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	s.assistant = assistant.New(assistant.Config{
-		Dir:     filepath.Join(cfg.DataDir, "assistant"),
-		Store:   s.db,
-		Homes:   homes,
-		Runs:    s.sched,
-		Caller:  func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
-		Bus:     s.bus,
-		Follows: s.db,
+		Dir:    filepath.Join(cfg.DataDir, "assistant"),
+		Store:  s.db,
+		Homes:  homes,
+		Runs:   s.sched,
+		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
+		Bus:    s.bus,
 	})
 	sshCfg.Services.Assistant = s.assistant
 	sshCfg.EdgeAccess = cfg.EdgeAccess
@@ -679,9 +678,6 @@ func (s *Server) Run(ctx context.Context) error {
 		return errors.Join(fmt.Errorf("server: adapter manager: %w", err), s.Close())
 	}
 	if err := s.startServices(ctx); err != nil {
-		return errors.Join(err, s.Close())
-	}
-	if err := s.assistant.StartFollowing(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
 	if s.egress != nil {

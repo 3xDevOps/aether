@@ -310,7 +310,8 @@ show something or Safari drops the subscription. While you use a dashboard on an
 notifications wait until you have left every dashboard alone for a minute and
 the run still needs you, or the budget is still where it was. Runs the
 [assistant](assistant.md#notifications) launched for you also notify you when
-they finish.
+they finish, through the [watch](watches.md#assistant-watches) it keeps on
+them.
 
 It needs:
 

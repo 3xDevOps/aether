@@ -4,7 +4,7 @@ import { MessageRow as AgentMessage } from '@/components/messages/message-row'
 import { MessageAttachments } from '@/components/messages/message-images'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
-import { Markdown } from '@/components/ui/markdown'
+import { LinkedText, Markdown } from '@/components/ui/markdown'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { RequestCard } from '@/components/ui/request-card'
 import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
@@ -244,7 +244,7 @@ function Row({ row, open, ctx }: { row: SessionRow; open: boolean; ctx: RowConte
         />
       )
     case 'event':
-      return <EventRow tone={row.tone} detail={row.detail} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>
+      return <EventRow tone={row.tone} detail={row.detail && <span className="whitespace-pre-wrap"><LinkedText text={row.detail} /></span>} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>
     case 'finished':
       return <EventRow tone={row.tone} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>
     case 'agent-message':

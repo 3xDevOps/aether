@@ -76,7 +76,7 @@ func TestWatchAnnouncesAReportedSuccessOnceThroughItsReview(t *testing.T) {
 	}
 	waitFor(t, "the reported success announced", func() bool { return len(notices()) == 1 })
 
-	if _, err = e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete); err != nil {
+	if _, err = e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, false); err != nil {
 		t.Fatal(err)
 	}
 	closed := e.waitStoreStatus(t, run.ID, domain.RunCompleted)

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bot, Brain, FileText, Globe, ListTodo, Search, Wrench, type LucideIcon } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { Markdown } from '@/components/ui/markdown'
+import { LinkedText, Markdown } from '@/components/ui/markdown'
 import { DiffBlock, OutputTail, PlanEntries, ToolValue } from '@/components/ui/session-blocks'
 import { Spinner } from '@/components/ui/spinner'
 import { StatusDot } from '@/components/ui/status-dot'
@@ -231,7 +231,7 @@ export function StepView({ step, first, last, live, runID }: { step: Step; first
       return (
         <StepRow mark={<StatusDot tone={step.tone ?? 'neutral'} />} first={first} last={last}>
           <StepLine className={step.tone && step.tone !== 'neutral' ? 'text-text' : undefined}>{step.text}</StepLine>
-          {step.detail && <p className="line-clamp-2 pb-2 text-ui-sm break-words whitespace-pre-wrap text-muted">{step.detail}</p>}
+          {step.detail && <p className="line-clamp-2 pb-2 text-ui-sm break-words whitespace-pre-wrap text-muted"><LinkedText text={step.detail} /></p>}
         </StepRow>
       )
   }
