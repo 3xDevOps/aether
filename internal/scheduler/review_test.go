@@ -164,7 +164,14 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 	if row.Review != domain.ReviewReady || !row.NeedsAttention(false) {
 		t.Fatalf("background success = review %q, want ready and needing its owner", row.Review)
 	}
-	accepted, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, false)
+	// A reportedOnly complete that reaches the close after a concurrent one
+	// completed the run is not refused: its acceptance is setReview's.
+	spec := humanClose(domain.RunCompleted, e.member.ID)
+	spec.reportedOnly = true
+	if err = e.sched.closeRun(ctx, run.ID, spec); err != nil {
+		t.Fatalf("reportedOnly close of a completed run = %v, want nil", err)
+	}
+	accepted, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, true)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -675,10 +675,11 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 
 // closeRun shares exact-container retention between human Close and accepted
 // mission outcomes. Mission completion never makes a worker relaunchable.
-// reportedOnlyRefusalLocked refuses a reportedOnly close of a run that is no
-// longer live with its reported success awaiting review. The caller holds
-// s.mu, under which setReview moves the review, and the run's lifecycle lock
-// when it has an owner, under which Relaunch reopens it.
+// reportedOnlyRefusalLocked refuses a reportedOnly close of a run that is
+// neither live with its reported success awaiting review nor already
+// completed, as by a concurrent complete, whose acceptance setReview checks.
+// The caller holds s.mu, under which setReview moves the review, and the
+// run's lifecycle lock when it has an owner, under which Relaunch reopens it.
 func (s *Scheduler) reportedOnlyRefusalLocked(ctx context.Context, run domain.RunID, spec closeSpec) error {
 	if !spec.reportedOnly {
 		return nil
@@ -686,6 +687,9 @@ func (s *Scheduler) reportedOnlyRefusalLocked(ctx context.Context, run domain.Ru
 	current, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
 		return err
+	}
+	if current.Status == domain.RunCompleted {
+		return nil
 	}
 	if !current.Status.Live() || current.Review != domain.ReviewReady {
 		return fmt.Errorf("%w: run %s", ErrReviewNotReported, run)
