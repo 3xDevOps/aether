@@ -661,9 +661,9 @@ func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error)
 		return "", nil, err
 	}
 	if in.SwarmID == "" {
-		missions, err := allSwarms(ctx, c.read, in.WorkspaceID)
-		if err != nil {
-			return "", nil, err
+		missions, listErr := allSwarms(ctx, c.read, in.WorkspaceID)
+		if listErr != nil {
+			return "", nil, listErr
 		}
 		rows := []swarmRow{}
 		for _, m := range missions[:min(len(missions), rowLimit(in.Limit))] {
@@ -677,7 +677,7 @@ func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error)
 		return fmt.Sprintf("%d swarms.", len(rows)), out, nil
 	}
 	var res protocol.MissionShowResult
-	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &res); err != nil {
+	if err = c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &res); err != nil {
 		return "", nil, err
 	}
 	book, err := accounts(ctx, c.read)

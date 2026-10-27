@@ -283,10 +283,16 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self 
 		return protocol.Run{}, false, err
 	}
 	for _, r := range res.Runs {
+		var extras []string
+		for _, repo := range r.Repos {
+			if !repo.Primary {
+				extras = append(extras, repo.WorkspaceID)
+			}
+		}
 		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model) &&
 			cmp.Or(in.AccountMemberID, self) == cmp.Or(r.RequestedAccountMemberID, r.AccountMemberID) &&
 			slices.Equal(in.FallbackAccountMemberIDs, r.FallbackAccountMemberIDs) && in.NoFallback == r.NoFallback && in.Children == r.Children &&
-			sameRepos(in.ExtraWorkspaceIDs, extraRepos(r)) && !domain.RunStatus(r.Status).Final() && recent(r.CreatedAt, now) {
+			sameRepos(in.ExtraWorkspaceIDs, extras) && !domain.RunStatus(r.Status).Final() && recent(r.CreatedAt, now) {
 			return r, true, nil
 		}
 	}
@@ -414,28 +420,6 @@ func recentSwarm(ctx context.Context, read Call, member string, in protocol.Miss
 	return protocol.Mission{}, false, nil
 }
 
-// workerModeOf is the mode a worker of agent starts in when none is given,
-// as aether_launch_options and the launch dialog show it; an agent that
-// cannot launch gets protocol.SwarmMode's, so the server says why.
-func workerModeOf(agents []protocol.AgentInfo, agent string) (string, error) {
-	if i := slices.IndexFunc(agents, func(a protocol.AgentInfo) bool { return a.Name == agent }); i >= 0 {
-		if mode := rowOfAgent(agents[i]).Worker; mode != "" {
-			return mode, nil
-		}
-	}
-	return protocol.SwarmMode(agents, agent)
-}
-
-func extraRepos(r protocol.Run) []string {
-	var ids []string
-	for _, repo := range r.Repos {
-		if !repo.Primary {
-			ids = append(ids, repo.WorkspaceID)
-		}
-	}
-	return ids
-}
-
 // sameRepos compares two sets of extra workspace ids.
 func sameRepos(a, b []string) bool {
 	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
@@ -500,9 +484,16 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 			if listErr != nil {
 				return "", nil, listErr
 			}
-			workerMode, err = workerModeOf(agents, w.Harness)
-			if err != nil {
-				return "", nil, err
+			// As aether_launch_options and the launch dialog show it; an
+			// agent that cannot launch gets protocol.SwarmMode's, so the
+			// server says why.
+			if i := slices.IndexFunc(agents, func(a protocol.AgentInfo) bool { return a.Name == w.Harness }); i >= 0 {
+				workerMode = rowOfAgent(agents[i]).Worker
+			}
+			if workerMode == "" {
+				if workerMode, err = protocol.SwarmMode(agents, w.Harness); err != nil {
+					return "", nil, err
+				}
 			}
 		}
 		choice := protocol.MissionExecutionChoice{AccountMemberID: account, Harness: w.Harness, Mode: workerMode, Model: w.Model}

@@ -49,8 +49,16 @@ func changesFeed(ctx context.Context, c calls, in changesFeedInput) (string, any
 	var res protocol.ChangesListResult
 	err = c.read(ctx, protocol.MethodChangesList, protocol.ChangesListParams{Cursor: in.Cursor, WorkspaceID: in.WorkspaceID, RunID: in.RunID,
 		MissionID: in.SwarmID, Kinds: in.Kinds, Limit: rowLimit(in.Limit)}, &res)
+	// A cursor the server's history no longer matches, such as one from
+	// before a restore, gets how to recover.
+	var perr *protocol.Error
+	var ahead protocol.ChangesCursorAheadData
+	if errors.As(err, &perr) && json.Unmarshal(perr.Data, &ahead) == nil && ahead.Reason == protocol.ChangesCursorAhead {
+		return "", nil, &protocol.Error{Code: perr.Code, Data: perr.Data,
+			Message: perr.Message + "; call aether_changes again without cursor to restart from the newest changes"}
+	}
 	if err != nil {
-		return "", nil, cursorAhead(err)
+		return "", nil, err
 	}
 	rows := make([]changeRow, 0, len(res.Changes))
 	for _, ch := range res.Changes {
@@ -78,19 +86,4 @@ func changesFeed(ctx context.Context, c calls, in changesFeedInput) (string, any
 		summary += " More remain: call again with next_cursor."
 	}
 	return summary, out, nil
-}
-
-// cursorAhead tells the model how to recover from a cursor the server's
-// history no longer matches, such as one from before a restore.
-func cursorAhead(err error) error {
-	var perr *protocol.Error
-	if !errors.As(err, &perr) {
-		return err
-	}
-	var data protocol.ChangesCursorAheadData
-	if json.Unmarshal(perr.Data, &data) != nil || data.Reason != protocol.ChangesCursorAhead {
-		return err
-	}
-	return &protocol.Error{Code: perr.Code, Data: perr.Data,
-		Message: perr.Message + "; call aether_changes again without cursor to restart from the newest changes"}
 }
