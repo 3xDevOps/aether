@@ -34,10 +34,9 @@ import (
 
 const (
 	// EpochStride separates conversation generations in the epoch viewers see.
-	EpochStride = 1 << 20
-	socketName  = "assistant.sock"
-	// startTimeout covers installing the agent on a first start.
-	startTimeout = 10 * time.Minute
+	EpochStride  = 1 << 20
+	socketName   = "assistant.sock"
+	startTimeout = protocol.AssistantStartTimeout
 	stopGrace    = 3 * time.Second
 	stderrTail   = 4 << 10
 	maxKeys      = 128
@@ -74,7 +73,8 @@ type Host interface {
 	AssistantAdapter(agent string) (scheduler.AssistantLaunch, error)
 	StartAssistantExec(ctx context.Context, member domain.MemberID, agent string, spec runtime.ExecSpec, installing func()) (runtime.ManagedExec, error)
 	StopAssistantExec(ctx context.Context, identity runtime.ExecIdentity) error
-	RemoveAssistantContainer(ctx context.Context, member domain.MemberID) error
+	DiscardAssistantState(ctx context.Context, member domain.MemberID) error
+	RemoveAssistant(ctx context.Context, member domain.MemberID) error
 }
 
 type Service struct {
@@ -676,8 +676,8 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	if err = s.stopStale(ctx, m, row); err != nil {
 		return err
 	}
-	if err = s.discardAgentState(ctx, m.id); err != nil {
-		return err
+	if err = s.cfg.Host.DiscardAssistantState(ctx, m.id); err != nil {
+		return fmt.Errorf("assistant: %w", err)
 	}
 	if _, err := s.cfg.Store.ResetAssistantSession(ctx, m.id); err != nil {
 		return fmt.Errorf("assistant: %w", err)
@@ -731,14 +731,11 @@ func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {
 	if err := s.stop(ctx, m); err != nil {
 		return err
 	}
-	if err := s.cfg.Host.RemoveAssistantContainer(ctx, id); err != nil {
-		return fmt.Errorf("assistant: %w", err)
-	}
 	s.mu.Lock()
 	delete(s.members, id)
 	s.mu.Unlock()
-	if err := os.RemoveAll(filepath.Join(s.cfg.Dir, string(id))); err != nil {
-		return fmt.Errorf("assistant: remove the member's files: %w", err)
+	if err := s.cfg.Host.RemoveAssistant(ctx, id); err != nil {
+		return fmt.Errorf("assistant: %w", err)
 	}
 	return nil
 }

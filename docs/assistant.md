@@ -24,8 +24,9 @@ runs and your [environment](environments.md) (the persistent container
   instructions and is read-only.
 - From your home it mounts only the login file of the agent it runs:
   `~/.claude/.credentials.json` for Claude Code or `~/.codex/auth.json` for
-  Codex. A token refresh on either side reaches the other. Signing in again in
-  `aether terminal` takes effect at the assistant's next start.
+  Codex. A token refresh on either side reaches the other. A login file
+  replaced in your home, by signing in again or by a CLI that replaces it
+  instead of rewriting it, takes effect at the assistant's next start.
 - Claude Code's auto-memory is off for it.
 
 On the first start, and after a server upgrade that pins a newer adapter, the

@@ -389,7 +389,7 @@ Your [assistant](assistant.md) keeps its conversation on your server under
   `.claude/` (projects, history, todos, file history, shell snapshots, debug
   logs) or Codex under `.codex/` (sessions, history), plus the installed
   agent in `.local/`.
-- `instructions/` holds the instructions the server gives it, and `sock/` its
+- `instructions/` holds the instructions the server gives it, and `tools/` its
   tool socket.
 
 Only the server process and your assistant's container read them; no run,

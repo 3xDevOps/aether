@@ -27,9 +27,11 @@ const AssistantCwd = "/assistant"
 var assistantIdle = []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 3600 & wait $!; done"}
 
 // AssistantSocketDir is the host directory mounted read-only at
-// coordtransport.AssistantMountDir in the member's assistant container.
+// coordtransport.AssistantMountDir in the member's assistant container. It
+// is not the "sock" directory earlier releases mounted into the member's
+// terminal, which a terminal kept running across an upgrade still mounts.
 func AssistantSocketDir(root string, member domain.MemberID) string {
-	return filepath.Join(root, string(member), "sock")
+	return filepath.Join(root, string(member), "tools")
 }
 
 // AssistantHomeDir is the host directory the member's assistant container
@@ -111,6 +113,7 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 		return runtime.Spec{}, fmt.Errorf("scheduler: stage the assistant's server binary: %w", err)
 	}
 	coord := []runtime.Mount{
+		{HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true},
 		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
 		{HostPath: sock, ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true},
 	}
@@ -271,9 +274,7 @@ func (s *Scheduler) ensureAssistantContainer(ctx context.Context, member domain.
 	return cid, nil
 }
 
-// RemoveAssistantContainer destroys the member's assistant container, if
-// any. Callers serialize per member with starting it.
-func (s *Scheduler) RemoveAssistantContainer(ctx context.Context, member domain.MemberID) error {
+func (s *Scheduler) removeAssistantContainer(ctx context.Context, member domain.MemberID) error {
 	cid, err := s.cfg.Runtime.FindByCreationKey(ctx, assistantCreationKey(member))
 	if errors.Is(err, runtime.ErrNotFound) {
 		return nil
@@ -283,6 +284,53 @@ func (s *Scheduler) RemoveAssistantContainer(ctx context.Context, member domain.
 	}
 	if err := s.destroyTerminalContainer(ctx, cid); err != nil {
 		return fmt.Errorf("scheduler: destroy the assistant container: %w", err)
+	}
+	return nil
+}
+
+// keptAssistantState is what discarding the agent's state leaves in the
+// assistant home: the installed agent and adapter. The next container's plan
+// writes the onboarding state and login mountpoints again.
+var keptAssistantState = map[string]bool{".local": true}
+
+// DiscardAssistantState destroys the member's assistant container and
+// deletes everything the agent kept in its home but the installed agent:
+// sessions, transcripts, history, todos, file history, shell snapshots and
+// logs. The container goes first: deleting a login mountpoint under a running
+// container would unmount the login there. Callers serialize per member with
+// starting it.
+func (s *Scheduler) DiscardAssistantState(ctx context.Context, member domain.MemberID) error {
+	if err := s.removeAssistantContainer(ctx, member); err != nil {
+		return err
+	}
+	home := AssistantHomeDir(s.cfg.AssistantDir, member)
+	entries, err := os.ReadDir(home)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: read the assistant home: %w", err)
+	}
+	for _, e := range entries {
+		if keptAssistantState[e.Name()] {
+			continue
+		}
+		if err := s.cfg.RemoveAll(ctx, filepath.Join(home, e.Name())); err != nil {
+			return fmt.Errorf("scheduler: discard the assistant's %s: %w", e.Name(), err)
+		}
+	}
+	return nil
+}
+
+// RemoveAssistant destroys the member's assistant container and deletes
+// their whole assistant directory. Callers serialize per member with starting
+// it.
+func (s *Scheduler) RemoveAssistant(ctx context.Context, member domain.MemberID) error {
+	if err := s.removeAssistantContainer(ctx, member); err != nil {
+		return err
+	}
+	if err := s.cfg.RemoveAll(ctx, filepath.Join(s.cfg.AssistantDir, string(member))); err != nil {
+		return fmt.Errorf("scheduler: remove the member's assistant files: %w", err)
 	}
 	return nil
 }

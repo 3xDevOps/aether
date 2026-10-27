@@ -74,7 +74,7 @@ func TestAssistantContainerMountsOnlyTheLogin(t *testing.T) {
 		coordtransport.AssistantMountDir:    {HostPath: AssistantSocketDir(assistantDir, e.member.ID), ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true},
 	}
 	for _, m := range spec.Mounts {
-		if m.ContainerPath == coordtransport.BinaryPath {
+		if m.ContainerPath == coordtransport.BinaryPath || m.ContainerPath == coordtransport.CLIPath {
 			if !m.ReadOnly {
 				t.Errorf("server binary mounted writable")
 			}
@@ -114,14 +114,78 @@ func TestAssistantContainerMountsOnlyTheLogin(t *testing.T) {
 	if err != nil || replaced == cid {
 		t.Fatalf("ensure after the login was replaced = %q, %v; want a new container", replaced, err)
 	}
-	if _, err := e.rt.get(cid); err == nil {
+	if _, err = e.rt.get(cid); err == nil {
 		t.Errorf("the container with the replaced login still exists")
 	}
-	if err := e.sched.RemoveAssistantContainer(ctx, e.member.ID); err != nil {
+	if err = e.sched.RemoveAssistant(ctx, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.rt.get(replaced); err == nil {
-		t.Errorf("RemoveAssistantContainer left the container")
+	if _, err = e.rt.get(replaced); err == nil {
+		t.Errorf("RemoveAssistant left the container")
+	}
+	if _, err = os.Stat(filepath.Join(assistantDir, string(e.member.ID))); !os.IsNotExist(err) {
+		t.Errorf("RemoveAssistant left the member's assistant directory: %v", err)
+	}
+}
+
+// TestDiscardAssistantStateKeepsOnlyTheInstall discards everything the agent
+// kept in the assistant home but the installed tools, without following a
+// symlink out, and destroys the container first.
+func TestDiscardAssistantStateKeepsOnlyTheInstall(t *testing.T) {
+	t.Parallel()
+	assistantDir := filepath.Join(t.TempDir(), "assistant")
+	e := newTestEnv(t, func(c *Config) {
+		c.ServerBinary = fakeServerBinary(t, "current build")
+		c.AssistantDir = assistantDir
+	})
+	withCoordination(t, e)
+	claude, _ := harness.Lookup("claude")
+	cid, err := e.sched.ensureAssistantContainer(t.Context(), e.member.ID, claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := AssistantHomeDir(assistantDir, e.member.ID)
+	outside := filepath.Join(t.TempDir(), "keep.txt")
+	writeHomeFile(t, filepath.Dir(outside), "keep.txt", "outside")
+	for _, rel := range []string{
+		".local/bin/claude-agent-acp",
+		".local/share/claude/versions/1",
+		".claude/projects/-assistant/session.jsonl",
+		".claude/todos/a.json",
+		".claude/file-history/a",
+		".claude/shell-snapshots/a.sh",
+		".claude/debug/a.txt",
+		".claude/history.jsonl",
+		".codex/sessions/2026/a.jsonl",
+		".codex/history.jsonl",
+	} {
+		writeHomeFile(t, home, rel, "x")
+	}
+	if err = os.Symlink(filepath.Dir(outside), filepath.Join(home, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.sched.DiscardAssistantState(t.Context(), e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.rt.get(cid); err == nil {
+		t.Error("the assistant container survived discarding its state")
+	}
+	var left []string
+	err = filepath.WalkDir(home, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr == nil && !d.IsDir() {
+			rel, _ := filepath.Rel(home, p)
+			left = append(left, rel)
+		}
+		return walkErr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{".local/bin/claude-agent-acp", ".local/share/claude/versions/1"}; !slices.Equal(left, want) {
+		t.Fatalf("left %v, want %v", left, want)
+	}
+	if _, err = os.Stat(outside); err != nil {
+		t.Fatalf("discarding followed a symlink out of the home: %v", err)
 	}
 }
 

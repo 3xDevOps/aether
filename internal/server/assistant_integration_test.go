@@ -420,7 +420,7 @@ func TestIntegrationAssistant(t *testing.T) {
 		return f.Status != nil && f.Status.State == protocol.AssistantStateIdle
 	})
 
-	sock := filepath.Join(env.data, "assistant", string(env.member.ID), "sock", "assistant.sock")
+	sock := filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock")
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
 		t.Fatalf("dial the tool socket: %v", err)
@@ -664,7 +664,7 @@ func TestIntegrationAssistantCancelCards(t *testing.T) {
 	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: acpmock.PromptWait, IdempotencyKey: "w"}, nil); perr != nil {
 		t.Fatal(perr)
 	}
-	conn, err := net.Dial("unix", filepath.Join(env.data, "assistant", string(env.member.ID), "sock", "assistant.sock"))
+	conn, err := net.Dial("unix", filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}

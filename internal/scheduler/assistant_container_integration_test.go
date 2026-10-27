@@ -3,6 +3,7 @@
 package scheduler
 
 import (
+	"bufio"
 	"context"
 	"os"
 	"path/filepath"
@@ -16,18 +17,19 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 // plantFromRun is a "claude" argv that plants, in the member's home, every
 // file the assistant used to load from there, then prints the login.
 var plantFromRun = []string{"sh", "-c", `sleep 1
 mkdir -p "$HOME/.claude" "$HOME/.codex" "$HOME/.local/bin"
-echo planted > "$HOME/CLAUDE.md"
-echo planted > "$HOME/.claude/CLAUDE.md"
-echo '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo planted"}]}]}}' > "$HOME/.claude/settings.json"
-echo planted > "$HOME/.codex/AGENTS.md"
-echo 'echo planted' > "$HOME/.bashrc"
-printf '#!/bin/sh\necho planted\n' > "$HOME/.local/bin/claude-agent-acp"
+echo run-planted-7c1 > "$HOME/CLAUDE.md"
+echo run-planted-7c1 > "$HOME/.claude/CLAUDE.md"
+echo '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo run-planted-7c1"}]}]}}' > "$HOME/.claude/settings.json"
+echo run-planted-7c1 > "$HOME/.codex/AGENTS.md"
+echo 'echo run-planted-7c1' > "$HOME/.bashrc"
+printf '#!/bin/sh\necho run-planted-7c1\n' > "$HOME/.local/bin/claude-agent-acp"
 chmod +x "$HOME/.local/bin/claude-agent-acp"
 printf 'harness-login:%s\n' "$(cat "$HOME/.claude/.credentials.json")"; sleep 1`}
 
@@ -39,7 +41,7 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	e, docker, cli, _ := newShareDockerEnv(t, plantFromRun)
 	assistantDir := filepath.Join(t.TempDir(), "assistant")
 	e.sched.cfg.AssistantDir = assistantDir
-	e.sched.cfg.ServerBinary = fakeServerBinary(t, "#!/bin/sh\n")
+	e.sched.cfg.ServerBinary = buildStatic(t, "./cmd/aether-server", "aether-server")
 	withCoordination(t, e)
 	ctx := t.Context()
 	member := e.member.ID
@@ -78,13 +80,13 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	t.Cleanup(func() {
 		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_ = e.sched.RemoveAssistantContainer(cctx, member)
+		_ = e.sched.RemoveAssistant(cctx, member)
 	})
 	assistant := shareRun{docker: docker, id: cid}
 	assistant.want(t, `printf '%s|%s|%s' "$HOME" "$(pwd)" "$PATH"`,
 		"/root|/assistant|/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	assistant.want(t, "cat /assistant/CLAUDE.md", "server instructions")
-	if code, _ := assistant.sh(t, "echo planted > /assistant/CLAUDE.md"); code == 0 {
+	if code, _ := assistant.sh(t, "echo run-planted-7c1 > /assistant/CLAUDE.md"); code == 0 {
 		t.Fatal("the assistant's instructions are writable")
 	}
 	for _, p := range []string{"/root/CLAUDE.md", "/root/.claude/CLAUDE.md", "/root/.claude/settings.json", "/root/.codex", "/root/.bashrc", "/root/.local/bin/claude-agent-acp"} {
@@ -92,7 +94,7 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 			t.Errorf("%s from the member's home is visible to the assistant: %s", p, out)
 		}
 	}
-	if code, out := assistant.sh(t, "grep -rl planted /root /assistant /opt /run /tmp"); code != 1 {
+	if code, out := assistant.sh(t, "grep -rl run-planted-7c1 /root /assistant /run /tmp"); code != 1 {
 		t.Errorf("a planted file reached the assistant container: %s", out)
 	}
 	assistant.want(t, "cat /root/.claude/.credentials.json", "alice-login")
@@ -116,15 +118,50 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 		t.Fatalf("assistant mounts from the member's home: volumes %v, binds %v; want only the login", volumes, binds)
 	}
 	for _, m := range info.Container.Mounts {
-		if m.Type == mount.TypeBind && !strings.HasPrefix(m.Source, mustResolve(t, assistantDir)) && m.Destination != coordtransport.BinaryPath {
+		if m.Type == mount.TypeBind && !strings.HasPrefix(m.Source, mustResolve(t, assistantDir)) && m.Destination != coordtransport.BinaryPath && m.Destination != coordtransport.CLIPath {
 			t.Errorf("assistant bind mount from outside its directory: %s at %s", m.Source, m.Destination)
 		}
+	}
+
+	assistantHome := AssistantHomeDir(assistantDir, member)
+	seedHome(t, assistantHome, map[string]string{
+		".local/bin/claude":           "#!/bin/sh\n",
+		".local/bin/node":             "#!/bin/sh\necho " + claude.ACPInstall.Version + "\n",
+		".local/bin/claude-agent-acp": "#!/bin/sh\necho \"adapter in $(pwd) as $IS_SANDBOX\"\nexec cat\n",
+	})
+	for _, name := range []string{"claude", "node", "claude-agent-acp"} {
+		if err := os.Chmod(filepath.Join(assistantHome, ".local", "bin", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec, err := e.sched.StartAssistantExec(ctx, member, "claude", runtime.ExecSpec{
+		Argv: claude.ACPArgs, CreationKey: "assistant-integration", Env: []string{"IS_SANDBOX=1"},
+	}, func() { t.Error("the installed agent was installed again") })
+	if err != nil {
+		t.Fatalf("StartAssistantExec: %v", err)
+	}
+	line, err := bufio.NewReader(exec.Attachment().Stdout()).ReadString('\n')
+	if err != nil || line != "adapter in /assistant as 1\n" {
+		t.Fatalf("adapter said %q, %v", line, err)
+	}
+	if exec.Identity().ContainerID != cid {
+		t.Fatalf("the adapter runs in %s, want the assistant container %s", exec.Identity().ContainerID, cid)
+	}
+	stopCtx, stopCancel := context.WithTimeout(ctx, 30*time.Second)
+	_, err = exec.Stop(stopCtx, time.Second)
+	stopCancel()
+	_ = exec.Detach()
+	if err != nil {
+		t.Fatalf("stop the adapter: %v", err)
 	}
 
 	if _, err := e.sched.EnsureTerminal(ctx, member); err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
 	}
-	t.Cleanup(func() { _ = e.sched.StopTerminal(context.Background(), member) })
+	t.Cleanup(func() {
+		_ = e.sched.StopTerminal(context.Background(), member)
+		_, _ = e.sched.DestroyStoppedTerminal(context.Background(), member)
+	})
 	sup := e.sched.lookupLiveTerminal(member)
 	terminal, err := docker.Inspect(ctx, sup.containerID)
 	if err != nil {

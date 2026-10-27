@@ -61,6 +61,11 @@ func (s *Scheduler) StartAssistantExec(ctx context.Context, member domain.Member
 	if !ok {
 		return nil, fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
+	release, err := s.tryReserveCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	cid, err := s.ensureAssistantContainer(ctx, member, profile)
 	if err != nil {
 		return nil, err
