@@ -87,6 +87,27 @@ Installing a toolchain or editing a file is not an Aether action. The assistant
 does it in its own shell in your environment, then offers to save the
 environment.
 
+## What a launch's task holds
+
+A question, an idea or pasted text never launches anything; the assistant
+answers or discusses it and offers a launch. When you ask for work, the
+run's task is your request in your meaning: the goal, every constraint and
+must-not you gave ("do not touch billing", "research only"), the names, ids
+and numbers you used, the workspace, branch, run, pull request or error you
+pointed at, and your saved launch preferences. It adds no features, tests,
+docs, merges or pushes you did not ask for; it suggests them in chat
+instead. Each guess it had to make, such as which branch you meant, appears
+in the task as a line starting `Assumption:`, and its reply lists them and
+offers to show or edit the task.
+
+The assistant launches a clear request without asking "shall I?" first; the
+approval card, or the transcript under auto-approval, shows the task. It asks one short
+question only when the goal, the workspace or a must-not is unclear. What
+you say in the message beats launch picks, which beat saved defaults, which
+beat what you used before. It uses the account you chose or saved while
+launch options still show it as usable, and says which account the run used
+and any fallback it took.
+
 ## What it sees
 
 Each message carries a short description of what your dashboard shows, so "why

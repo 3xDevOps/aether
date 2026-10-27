@@ -94,7 +94,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if len(got) > 512 {
 		t.Errorf("the instructions are %d characters, over 512: %q", len(got), got)
 	}
-	for _, want := range []string{"aether_list_workspaces", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted"} {
+	for _, want := range []string{"aether_list_workspaces", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted", "not questions", "every must-not", "no added scope", "assumptions labelled"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions lack %q: %q", want, got)
 		}
