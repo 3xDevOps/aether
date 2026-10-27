@@ -197,14 +197,11 @@ export function WorkspaceLine({ workspace }: { workspace: Workspace | undefined 
 }
 
 /** The run's own limits, collapsed until opened; an empty field follows the server's limit. */
-export function RunLimitsOption({ value, onChange, effective, error, onRetry, disabled }: {
+export function RunLimitsOption({ value, onChange, effective, disabled }: {
   value: LimitsDraft
   onChange: (value: LimitsDraft) => void
   /** What a run with no override gets, unknown until read. */
   effective: RunLimits | undefined
-  /** Why the server limits could not be read. */
-  error: string | null
-  onRetry: () => void
   disabled?: boolean
 }) {
   const parsed = parseLimits(value)
@@ -220,12 +217,6 @@ export function RunLimitsOption({ value, onChange, effective, error, onRetry, di
         <p className={parsed.error ? 'text-ui-sm text-state-failed' : 'text-ui-sm text-muted'} role={parsed.error ? 'alert' : undefined}>
           {parsed.error ?? 'Caps this run only. An empty field uses the server limit, shown in grey.'}
         </p>
-        {error && (
-          <p role="alert" className="text-ui-sm text-state-failed">
-            Could not read the server limits: {error}{' '}
-            <Button type="button" variant="link" size="sm" onClick={onRetry}>Try again</Button>
-          </p>
-        )}
       </CollapsibleContent>
     </Collapsible>
   )

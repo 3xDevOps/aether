@@ -69,8 +69,9 @@ export function LaunchDialog() {
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
   const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
-  const limitsOffered = cap.hasMethod('server.run_limits')
-  const serverLimits = useServerRunLimits(api, limitsOffered)
+  const serverLimits = useServerRunLimits(api, cap.hasMethod('server.run_limits'))
+  // Only a server that answered server.run_limits keeps a limits override; an older one drops it and reports success.
+  const limitsOffered = serverLimits.limits !== null
   const [limits, setLimits] = useState(emptyLimits)
   const choice = useAgentChoice({ account, ownAccountID })
   const { agents, agentError, agent, harness, mode, model, noAgents } = choice
@@ -300,7 +301,7 @@ export function LaunchDialog() {
           >
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
-              {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} error={serverLimits.error} onRetry={serverLimits.reload} disabled={launching} />}
+              {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
               {childRunsOffered && (
                 <>
                   <ChildRunsOption value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} disabled={launching} />
