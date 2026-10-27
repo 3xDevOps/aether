@@ -25,6 +25,9 @@ import type { RunRecord } from '@/store/runs'
 import type { SessionRow } from '@/store/session-rows'
 import { sessionLease } from '@/store/session-stream'
 
+// Mirrors coordhooks.ReportReminderLead in internal/coordhooks/guide.go: Aether's prompt, not the member's.
+const reportReminderLead = 'Report your state with aether-internal report'
+
 function useLiveness(runID: string, reason: string | undefined): { liveness?: RunLiveness; error?: string } {
   const [read, setRead] = useState<{ liveness?: RunLiveness; error?: string }>({})
   useEffect(() => {
@@ -53,10 +56,10 @@ function LastProgress({ liveness, now }: { liveness: RunLiveness; now: number })
  * turn and opening its trace cost nothing; resending the last prompt costs tokens and may repeat tool actions,
  * so it asks first.
  */
-export function StallCallout({ run, agent, lastPrompt, nav }: {
+export function StallCallout({ run, agent, rows, nav }: {
   run: RunRecord
   agent: AgentTerminal
-  lastPrompt: Extract<SessionRow, { kind: 'user' }> | undefined
+  rows: SessionRow[]
   nav: RunNavigation
 }) {
   const now = useClock()
@@ -69,6 +72,8 @@ export function StallCallout({ run, agent, lastPrompt, nav }: {
     if (!stalled) setConfirm(false)
   }, [stalled])
   if (!stalled) return null
+  const lastPrompt = [...rows].reverse().find((row): row is Extract<SessionRow, { kind: 'user' }> =>
+    row.kind === 'user' && (row.delivery === undefined || row.delivery === 'Sent') && !row.body.startsWith(reportReminderLead))
 
   const attempt = async (what: string, act: () => Promise<unknown>) => {
     setBusy(true)

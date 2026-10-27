@@ -159,14 +159,6 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   return { rows, session, missingRoomImages }
 }
 
-function lastPrompt(rows: SessionRow[]): Extract<SessionRow, { kind: 'user' }> | undefined {
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i]!
-    if (row.kind === 'user') return row
-  }
-  return undefined
-}
-
 function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession | undefined, agentName: string): string {
   const [text, setText] = useState('')
   const ended = [...rows].reverse().find((row) => row.kind === 'finished' || (row.kind === 'assistant' && row.outcome !== undefined))
@@ -460,7 +452,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
       {enhanced && (
         <div className={cn(sessionColumn, 'pb-2 empty:hidden')}>
           <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
-          <StallCallout run={run} agent={agent} lastPrompt={lastPrompt(rows)} nav={nav} />
+          <StallCallout run={run} agent={agent} rows={rows} nav={nav} />
         </div>
       )}
       <ChangesBar run={run} />
