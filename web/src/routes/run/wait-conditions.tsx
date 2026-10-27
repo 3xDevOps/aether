@@ -13,7 +13,7 @@ import { allowed } from '@/lib/permissions'
 import { runLabel } from '@/lib/status'
 import type { WaitCondition } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { checkOverdue, countsText, deliveryOf, noChecks, orderWaits, prURL, waitStateLabel, waitTone, waitVerb } from '@/lib/waits'
+import { checkOverdue, countsText, deliveryOf, noChecks, orderWaits, prURL, waitBadge, waitStateLabel, waitTone, waitVerb } from '@/lib/waits'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -23,12 +23,12 @@ function Target({ wait }: { wait: WaitCondition }) {
   const run = useStore((s) => (wait.run_id ? s.runs[wait.run_id] : undefined))
   const url = prURL(wait)
   if (url) {
-    return <a href={url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-accent underline-offset-2 hover:underline">{wait.repo}#{wait.number}</a>
+    return <a href={url} target="_blank" rel="noreferrer" className="break-all text-accent underline-offset-2 hover:underline">{wait.repo}#{wait.number}</a>
   }
   if (wait.run_id) {
     return (
-      <Button variant="link" size="sm" className="h-auto min-w-0 p-0 text-ui" onClick={() => navigate('run', { runId: wait.run_id! })}>
-        <span className="truncate">{run ? runLabel(run) : wait.run_id}</span>
+      <Button variant="link" size="sm" className="inline h-auto shrink p-0 text-left text-ui whitespace-normal" onClick={() => navigate('run', { runId: wait.run_id! })}>
+        {run ? runLabel(run) : wait.run_id}
       </Button>
     )
   }
@@ -64,17 +64,14 @@ function WaitRow({ wait, runID, mayCancel, client }: { wait: WaitCondition; runI
   }
   return (
     <li className="flex min-w-0 flex-col gap-1.5 py-2 first:pt-0 last:pb-0" aria-label={wait.spec}>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <StatusDot tone={waitTone(wait)} label={waitStateLabel[wait.state]} />
-        <span className="flex min-w-0 flex-1 items-baseline gap-1 text-ui font-medium">
-          <Target wait={wait} />
-          <span className="shrink-0">{waitVerb[wait.kind]}</span>
-        </span>
-        <Badge tone={waitTone(wait)}>
-          {waitStateLabel[wait.state]}{wait.outcome && `: ${wait.outcome}`}
-        </Badge>
+      <div className="flex min-w-0 items-start gap-2">
+        <StatusDot tone={waitTone(wait)} label={waitStateLabel[wait.state]} className="mt-1.5" />
+        <p className="line-clamp-2 min-w-0 flex-1 text-ui font-medium break-words">
+          <Target wait={wait} /> {waitVerb[wait.kind]}
+        </p>
+        <Badge tone={waitTone(wait)} className="shrink-0">{waitBadge(wait)}</Badge>
       </div>
-      {wait.summary && <p className="text-ui-sm break-words">{wait.summary}</p>}
+      {wait.summary && wait.summary !== wait.last_error && <p className="text-ui-sm break-words">{wait.summary}</p>}
       <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-ui-sm">
         {wait.observed.pr_state && <Fact term="Pull request">{wait.observed.pr_state}</Fact>}
         {wait.observed.run_status && <Fact term="Run status">{wait.observed.run_status}</Fact>}

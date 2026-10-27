@@ -4173,9 +4173,10 @@ whatever opened it. Sections (`details.tsx`):
   reported waiting `--until` ([wait conditions](coordination.md#report-an-outcome)),
   pending first, then the last resolved list. Each row has the pull request
   link (`<owner>/<repo>#<n>`, to GitHub) or the run link, "merged",
-  "checks final" or "finished", and a badge with the state (Pending,
-  Resolved, Cancelled, Replaced, Expired, Unreadable) and outcome. Under it:
-  the condition's summary; the pull request state, head commit and checks
+  "checks final" or "finished", and a badge: how a resolved condition
+  resolved ("Passed", "Merged", "Abandoned", "Reported success"), or the
+  state (Pending, Cancelled, Replaced, Expired, Unreadable). Under it: the
+  condition's summary unless it repeats the error; the pull request state, head commit, run status and checks
   the server last read: **Required checks** when only they decide, **Not
   reported** for required checks that never reported, every check ("14
   passed, 0 failed, 3 running"), or "None reported yet"; **Last verified**; **Next check**, red with "Overdue since" once a

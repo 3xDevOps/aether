@@ -25,6 +25,13 @@ export function waitTone(w: WaitCondition): Tone {
   }
 }
 
+/** A resolved condition shows how it resolved, "Passed" or "Reported success"; any other shows its state. */
+export function waitBadge(w: WaitCondition): string {
+  if (w.state !== 'resolved' || !w.outcome) return waitStateLabel[w.state]
+  const words = w.outcome.replaceAll('-', ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 /** The word after the target: "o/r#7 merged", "o/r#7 checks", "<run> finished". */
 export const waitVerb: Record<WaitCondition['kind'], string> = {
   pr_merged: 'merged',
