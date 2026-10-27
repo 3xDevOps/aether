@@ -55,7 +55,7 @@ A live run carries a state that says what it is doing. The dashboard and
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
-| `waiting` | Turn ended (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
+| `waiting` | Turn ended, or Stale wait for a stale wait (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-aether-can-check). |
 | `finished` | Ready for review | An interactive run reported `success`. |
 | `failed` | Failed | The run reported `failure`, or its turn failed. |
@@ -90,6 +90,11 @@ evidence:
 | `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`, and the last read error. | Yes. |
 | `system_fault` | Every read of the run's conditions failed for an hour, counted from the first failure or from the wait's report if later. A read that succeeds starts the hour over, and so does a server restart. Before that the wait is `source_unknown`. | `Needs you`, reason `wait broken: cannot read this run's wait conditions for over 1h, so the agent will not be woken`, and the read error. | Yes. |
 | `unverified` | The agent named no condition, or only ones that left pending before its current turn. | The state, as described above. | No. |
+
+The dashboard words the same evidence as "Waiting on <condition>: <status>
+· checked 2m ago", "Waiting on <condition>: status unknown since 01:10 —
+<error>" or "Wait fault: <condition> — <error>"
+([dashboard-frontend.md](dashboard-frontend.md#run-state)).
 
 A broken wait is the only one that needs you, because only then can nothing
 but a person move the run. While another of its conditions is still pending
