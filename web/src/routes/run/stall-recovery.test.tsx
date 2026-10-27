@@ -42,6 +42,22 @@ describe('resend last prompt', () => {
     })))
   })
 
+  it('retries a resend whose reply was lost under the same key, so the server queues it once', async () => {
+    vi.spyOn(api, 'runGet').mockResolvedValue(run({ id: 'run_1' }))
+    const inject = vi.spyOn(api, 'runInject')
+      .mockRejectedValueOnce(new Error('connection reset'))
+      .mockResolvedValue({ message: { state: 'sent' } } as unknown as RoomPostResult)
+    vi.spyOn(useStore.getState(), 'upsertRoomMessage').mockImplementation(() => {})
+    renderCallout([{ kind: 'user', id: 'a', at, body: 'fix the login bug', delivery: 'Sent' }])
+    for (let i = 1; i <= 2; i++) {
+      fireEvent.click(await screen.findByRole('button', { name: 'Resend last prompt…' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Resend and spend tokens' }))
+      await waitFor(() => expect(inject).toHaveBeenCalledTimes(i))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Resend last prompt…' }).hasAttribute('disabled')).toBe(false))
+    }
+    expect(inject.mock.calls[1]![2]).toBe(inject.mock.calls[0]![2])
+  })
+
   it('offers no resend for a prompt with images, which the composer must send', async () => {
     vi.spyOn(api, 'runGet').mockResolvedValue(run({ id: 'run_1' }))
     renderCallout([{ kind: 'user', id: 'a', at, body: 'match this layout', images: [{ messageID: 'm1', index: 0 }], delivery: 'Sent' }])

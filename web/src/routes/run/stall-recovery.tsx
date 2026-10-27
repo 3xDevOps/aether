@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -51,11 +51,6 @@ function LastProgress({ liveness, now }: { liveness: RunLiveness; now: number })
   return <>none</>
 }
 
-/**
- * A parked Enhanced run whose stall named its turn's phase. It offers only what is safe to press: stopping the
- * turn and opening its trace cost nothing; resending the last prompt costs tokens and may repeat tool actions,
- * so it asks first.
- */
 export function StallCallout({ run, agent, rows, nav }: {
   run: RunRecord
   agent: AgentTerminal
@@ -68,6 +63,8 @@ export function StallCallout({ run, agent, rows, nav }: {
   const control = useImplicitControl(run, agent)
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState(false)
+  // Kept until the server answers for the prompt, so a retry after a lost reply cannot queue it twice.
+  const resendKey = useRef<{ prompt: string; key: string }>(undefined)
   useEffect(() => {
     if (!stalled) setConfirm(false)
   }, [stalled])
@@ -90,11 +87,14 @@ export function StallCallout({ run, agent, rows, nav }: {
     if (lease) void attempt('Stop turn', () => api.runACPCancel(run.id, lease))
   })
   const resend = () => {
-    const { body, files } = lastPrompt!
+    const { id, body, files } = lastPrompt!
+    if (resendKey.current?.prompt !== id) resendKey.current = { prompt: id, key: crypto.randomUUID() }
+    const { key } = resendKey.current
     const send = () => void attempt('Resend', async () => {
-      const result = await api.runInject(run.id, body, crypto.randomUUID(), { lease: sessionLease(useStore, run.id), attachments: files })
+      const result = await api.runInject(run.id, body, key, { lease: sessionLease(useStore, run.id), attachments: files })
       useStore.getState().upsertRoomMessage(result.message)
       const delivery = result.receipt === 'not_sent' || result.receipt === 'uncertain' ? result.receipt : result.message.state
+      if (delivery !== 'uncertain') resendKey.current = undefined
       if (delivery === 'uncertain') throw new Error(result.message.failure?.message ?? 'Delivery is uncertain; check the conversation before resending')
       if (delivery === 'not_sent') throw new Error(result.message.failure?.message ?? 'The prompt was not sent')
     })
