@@ -478,7 +478,9 @@ A stall that names a phase is a possible stall: the run is **Waiting**,
 never **Needs you** or **Disconnected**. **Disconnected** needs the agent
 process or its connection to end. An agent that thinks for minutes without
 streaming a thought parks at the short limit and returns to `running` with its
-next update. A resume or a server restart starts the quiet time over.
+next update. A resume or a server restart starts the quiet time over. Aether
+restarts nothing on its own: press **Stop** to cancel the turn, then send a
+message.
 
 Messaging a stalled run usually gets it going. The echo of your message does
 not count as agent output, so a hung agent still reads as stalled afterwards.
