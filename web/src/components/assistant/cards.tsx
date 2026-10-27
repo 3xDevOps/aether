@@ -70,7 +70,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const { busy, error, run } = useAction()
   const { harness } = useAssistantAgent()
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
-  const launch = useLaunchRows(confirmation.method, confirmation.params)
+  const launch = useLaunchRows(confirmation.method, confirmation.params, confirmation.defaults)
   const params = paramRows(confirmation.params)
   const autoApprove = useStore((s) => s.assistantStatus?.auto_approve ?? false)
   const remaining = useSecondsUntil(confirmation.expires_at)

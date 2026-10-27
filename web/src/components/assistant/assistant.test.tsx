@@ -428,6 +428,22 @@ describe('confirmations', () => {
     expect(within(inject).getByText('Please stop and summarise')).toBeDefined()
   })
 
+  it('says which launch choices came from saved defaults and which saved ones were skipped, and why', async () => {
+    useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [
+      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in api on "Bob"\'s account (your saved default), no fallback: "Add the export"',
+        params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', account_member_id: 'mem_bob', no_fallback: true, task: 'Add the export' },
+        defaults: { applied: ['harness', 'mode', 'account_member_id', 'fallback'], skipped: [{ field: 'model', reason: 'model opus is retired' }] } },
+    ] }) })
+    const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude/ })
+    const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
+    expect(rows['From your saved defaults']).toBe('agent, mode, account, fallback')
+    expect(rows['Saved model not used']).toBe('model opus is retired')
+    expect(rows.Account).toBe("Bob's account, shared with you")
+  })
+
   it('approves and declines through assistant.confirm and clears on a status frame', async () => {
     vi.mocked(api.assistantConfirm).mockResolvedValue({})
     const aside = await openPanel()

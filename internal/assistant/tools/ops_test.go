@@ -266,3 +266,68 @@ func TestLaunchCardNamesChildRuns(t *testing.T) {
 		t.Fatalf("summary = %q, want %q", got.Summary, want)
 	}
 }
+
+type savedCaller struct {
+	attentionCaller
+	saved string
+}
+
+func (c *savedCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if method == protocol.MethodLaunchDefaultsGet {
+		return json.RawMessage(c.saved), nil
+	}
+	return c.attentionCaller.Call(ctx, method, params)
+}
+
+// A shared account or automatic fallback the member saved as a default
+// counts as chosen, so auto-approval may pass the launch, and the card says
+// it is the saved default; automatic fallback the member never saved still
+// marks the card as the teammates'.
+func TestSavedSharedAccountAndFallbackCountAsChosen(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	caller := &savedCaller{saved: `{"revision":2,"defaults":{"account_member_id":"m2","fallback":{"policy":"automatic"}}}`}
+	s := &Server{Caller: caller, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	launch := func(p protocol.RunLaunchParams) {
+		t.Helper()
+		raw, _ := json.Marshal(p)
+		if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+			t.Fatal(perr)
+		}
+	}
+	launch(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", AccountMemberID: "m2"})
+	if got.OtherMember || !strings.Contains(got.Summary, `on "Grace"'s account (your saved default), may fall back to accounts shared with you (your saved default)`) {
+		t.Fatalf("saved account and fallback confirmation = %+v, want both named as saved and the card the member's own", got)
+	}
+
+	caller.saved = `{"revision":3,"defaults":{"account_member_id":"m2"}}`
+	launch(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", AccountMemberID: "m2"})
+	if !got.OtherMember || got.OtherOwner != "Grace" {
+		t.Fatalf("unsaved automatic fallback confirmation = %+v, want it marked as Grace's", got)
+	}
+}
+
+// What saved defaults filled into a launch shows on its card and never
+// reaches the server.
+func TestLaunchCardNamesSavedDefaults(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	caller := &savedCaller{saved: `{}`}
+	s := &Server{Caller: caller, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	raw := json.RawMessage(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","no_fallback":true,
+		"saved_defaults":{"applied":["harness","mode"],"skipped":[{"field":"model","reason":"model opus is retired"}]}}`)
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if !strings.HasSuffix(got.Summary, `. From your saved defaults: harness, mode. Saved model not used: model opus is retired`) ||
+		got.Defaults == nil || len(got.Defaults.Skipped) != 1 {
+		t.Fatalf("confirmation = %+v", got)
+	}
+	if sent := string(caller.params[protocol.MethodRunLaunch]); strings.Contains(sent, "saved_defaults") || strings.Contains(string(got.Params), "saved_defaults") {
+		t.Fatalf("run.launch params = %s, card params %s, want saved_defaults taken off", sent, got.Params)
+	}
+}

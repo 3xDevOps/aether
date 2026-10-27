@@ -543,7 +543,9 @@ bytes with no control characters), the account to launch on, and the
 fallback policy: `automatic` (every account you may launch on), `ordered` (at
 most 8 member IDs, your own allowed), or `off`. They hold no credentials and
 grant nothing. `run.launch` does not read them: a client fills a launch from
-them, and the launch is authorized as if nothing were saved.
+them, and the launch is authorized as if nothing were saved. The built-in
+assistant's and the connectors' launch tools fill each field a launch leaves
+out from them ([Launch options](connectors.md#launch-options)).
 
 The dashboard's launch dialog opens on them and saves the agent, mode and
 model of each launch. It saves the account and fallback only when you select

@@ -192,8 +192,8 @@ attachment holds only ids and names, such as `acme/api#42 · check lint`; the
 assistant reads the details with its tools.
 
 Above the message box, a chip names each thing the message is about. Remove
-one with its **x**, or Delete or Backspace. Removing the page also removes the
-launch choices, and stops the assistant reading the page between messages
+one with its **x**, or Delete or Backspace. Removing the page stops the
+assistant reading the page between messages
 until you send or add it back; a message sent right after waits until the
 server has forgotten it.
 **Inspect** lists every field the next message sends, and **Raw JSON** shows
@@ -220,12 +220,24 @@ Save your environment as a new image; new runs and terminals start from it
 
 A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
-task, and how you hear back. Unless told otherwise, the assistant launches on
-your own account with automatic [usage fallback](teams.md#usage-fallback): if
-your account is nearly out of quota, the run starts on an account shared with
-you. With [auto-approval](#auto-approval) on, such a launch still asks while
-any account is shared with you; one that names its account or its fallback
-order, or sets no fallback, passes without a card.
+task, and how you hear back. The assistant fills what you did not say from
+your [saved launch choices](teams.md#saved-launch-choices): **From your saved
+defaults** names each choice that came from them, and **Saved model not used**
+(or mode, agent, fallback account) gives the reason a saved one was skipped,
+such as an Enhanced mode not installed on that account. A saved account a
+teammate no longer shares with you fails the launch with the server's reason
+rather than starting it on your own. With nothing saved, the assistant
+launches on your own account with automatic [usage
+fallback](teams.md#usage-fallback): if your account is nearly out of quota, the
+run starts on an account shared with you. With [auto-approval](#auto-approval)
+on, such a launch still asks while any account is shared with you; one that
+names its account or its fallback order, sets no fallback, or uses the account
+or automatic fallback you saved, passes without a card.
+
+When you ask it to keep a choice for next time ("from now on use codex"), the
+assistant saves it with `aether_save_launch_defaults`, behind a card that
+spells out every saved choice; a choice for one launch is never saved. The
+launch dialog and **Settings → Launch** show the same choices.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was
@@ -292,11 +304,11 @@ not covered   the assistant's own shell and file tools, which never ask
 - Messaging or stopping another member's run always asks, with the owner named
   on the card.
 - A launch that names a teammate's shared account itself, to run on or in its
-  fallback order, passes without a card; the transcript note names the account
-  and its owner.
+  fallback order, or uses the shared account you saved as your default, passes
+  without a card; the transcript note names the account and its owner.
 - A launch with automatic [usage fallback](teams.md#usage-fallback) while any
   account is shared with you always asks, since it may move to an account
-  nobody chose.
+  nobody chose, unless automatic is the fallback you saved.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as

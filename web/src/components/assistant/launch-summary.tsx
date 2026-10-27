@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import type { AssistantConfirmation } from '@/lib/assistant-types'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore, type RootState } from '@/store'
 
@@ -40,8 +41,17 @@ function fallbackLine(s: RootState, params: Params): string {
   return `Then ${order.map((id) => s.members[id]?.display_name || id).join(', ')}`
 }
 
+const savedFields: Record<string, string> = {
+  harness: 'agent',
+  mode: 'mode',
+  model: 'model',
+  account_member_id: 'account',
+  fallback: 'fallback',
+  fallback_account_member_ids: 'fallback account',
+}
+
 /** The rows a launch card shows, or undefined when `method` launches nothing. */
-export function launchRows(s: RootState, method: string, params: unknown): [string, string][] | undefined {
+export function launchRows(s: RootState, method: string, params: unknown, defaults?: AssistantConfirmation['defaults']): [string, string][] | undefined {
   if (!launchMethods.has(method) || params === null || typeof params !== 'object') return undefined
   const p = params as Params
   const swarm = method === 'mission.create'
@@ -63,14 +73,16 @@ export function launchRows(s: RootState, method: string, params: unknown): [stri
     })
     rows.push(['Workers', workers.join('; ')])
   }
+  if (defaults?.applied?.length) rows.push(['From your saved defaults', defaults.applied.map((field) => savedFields[field] ?? field).join(', ')])
+  for (const skip of defaults?.skipped ?? []) rows.push([`Saved ${savedFields[skip.field] ?? skip.field} not used`, skip.reason])
   const brief = str(swarm ? p.objective : p.task)
   if (brief) rows.push([swarm ? 'Objective' : 'Task', brief])
   rows.push(['You hear back', swarm ? hearBack.swarm : hearBack.run])
   return rows.filter(([, value]) => value !== '')
 }
 
-export function useLaunchRows(method: string, params: unknown): [string, string][] | undefined {
-  const key = useStore((s) => JSON.stringify(launchRows(s, method, params) ?? null))
+export function useLaunchRows(method: string, params: unknown, defaults?: AssistantConfirmation['defaults']): [string, string][] | undefined {
+  const key = useStore((s) => JSON.stringify(launchRows(s, method, params, defaults) ?? null))
   return useMemo(() => (JSON.parse(key) as [string, string][] | null) ?? undefined, [key])
 }
 

@@ -22,6 +22,8 @@ export interface AssistantConfirmation {
   /** The call acts on another member's run, owned by `other_owner`: it asks even with auto-approval on. */
   other_member?: boolean
   other_owner?: string
+  /** What the member's saved launch defaults filled into a launch, and each saved choice it skipped with the reason. */
+  defaults?: { applied?: string[]; skipped?: { field: string; reason: string }[] }
 }
 
 export interface AssistantActionTarget {
@@ -128,13 +130,5 @@ export interface ViewContext {
   route?: ViewEntry
   open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
   recent?: ViewEntry[]
-  /** The modes and models the member's launches remembered, newest first. They travel with the page. */
-  launch_defaults?: LaunchDefault[]
   attachments?: ViewAttachment[]
-}
-
-export interface LaunchDefault {
-  agent: string
-  mode: 'tui' | 'acp' | 'headless'
-  model?: string
 }

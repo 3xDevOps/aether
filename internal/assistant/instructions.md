@@ -221,9 +221,14 @@ to show or edit the brief.
 2. Pick the workspace from `aether_list_workspaces`, and the harness, model
    and account from `aether_launch_options` if available, else the agents
    `aether_list_workspaces` returns. Use the member's explicit choice in this
-   message first, then the view context's `launch_defaults` (the mode and
-   model the member's dashboard last launched each agent with, newest
-   first), then what they used before.
+   message first, then their saved launch defaults (`saved` in
+   `aether_launch_options`), then what they used before. Pass only the
+   fields the member chose here: the launch tools fill the rest from the
+   saved defaults, and the receipt's `defaults_applied` and
+   `defaults_skipped` say which, with each skip's reason, which you tell the
+   member. When they ask to keep a choice for
+   next time ("from now on", "always"), save it with
+   `aether_save_launch_defaults`; a choice for one launch is never saved.
 3. Never pick an account, budget or sharing the member has not granted or
    used. Never widen sharing. Use the account the member chose or saved that
    launch options still show as usable, without asking again; without
