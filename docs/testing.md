@@ -228,13 +228,20 @@ the run: every Enhanced run, and a Standard run whose agent sets `IdleWake` in
 its capabilities (`internal/harness/capabilities.go`). The other runs report
 that step as skipped.
 
+`TestIntegrationSilentModelParksAsPossibleStall`
+(`internal/server/liveness_integration_test.go`) launches an Enhanced Claude
+Code run against a model that accepts every request and never answers. It
+requires the run to park as a possible stall awaiting its first event, and
+never to read disconnected.
+
 Runs reach the mock the way they reach a [model
 gateway](harnesses.md#per-agent-setup): `ANTHROPIC_BASE_URL` for Claude Code,
 `openai_base_url` in `~/.codex/config.toml` for Codex. The test seeds the
 member home with what a member's first runs leave there: onboarding, an
 approved API key and a trusted checkout.
 
-CI's `agents` job runs it as root. Run it the same way, with Docker and git:
+CI's `agents` job runs both as root. Run them the same way, with Docker and
+git:
 
 ```sh
 make agents-image   # images/agents/Dockerfile on the published standard image

@@ -308,7 +308,7 @@ plaintext in memory while relaying.
   the server binds it to the browser that brought it. A leaked authorization
   or consent link connects nobody.
 - The project edge forwards a server's redirects and forms on `/mcp` only to
-  itself, `chatgpt.com` and `claude.ai`.
+  itself, `chatgpt.com`, `claude.ai` and Claude Code's loopback `/callback`.
 - [edge.md](edge.md#mcp-connectors) and
   [security.md](security.md#chatgpt-and-claude-connectors) give the details.
 

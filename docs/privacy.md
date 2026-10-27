@@ -431,7 +431,9 @@ Every member of the server, viewers included, can read every note, and
 every run in the workspace can search them. The first line of each pinned
 note also goes into the brief each new run in the workspace receives at
 launch; a note a member pinned for themselves goes only into their own runs'
-briefs.
+briefs. That limits whose briefs carry the note, not who reads it: team
+memory is never private. Only the note's owner or an admin may change a
+member note, and only an admin may read another member's brief.
 
 Team memory never reads transcripts, terminal recordings, messages between
 runs, run-room chat, the files in a checkout, or an agent's own memory

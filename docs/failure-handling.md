@@ -19,7 +19,7 @@ shown beside the status says why it is there.
 | A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
 | Host memory is low | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | Close or kill runs. A closed run's paused container still holds its memory; **Free container…** releases it. |
-| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. | Keeps the run supervised. It returns to `running` as soon as the agent writes output or changes a file. | Attach (`aether attach <run-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
+| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced run is possibly stalled: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the run supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <run-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
 | A Standard agent exits | The run stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the run. |
 | A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the run's transcript. |
 | The agent hits its account's usage limit | `Usage limit reached on <owner>'s account; ...` when it cannot continue. | Moves the run to another account that has usage left. | [Usage limit mid-run](#usage-limit-mid-run). |
@@ -432,6 +432,8 @@ sudo systemctl restart aether-server
 | Flag | Default | What it changes | When to change it |
 | --- | --- | --- | --- |
 | `--stall-threshold` | `10m` | How long a live run may go with no agent output, file change or working report before it parks as stalled. Waiting states fall back to `waiting` after three times this. | See below. |
+| `--first-event-grace` | `3m` | How long an Enhanced turn may wait for the agent's first update before it parks as stalled. At most `--stall-threshold`. | Raise for agents that think for minutes before they stream anything. |
+| `--stream-quiet-grace` | `5m` | How long an Enhanced turn with no tool running may go without agent progress before it parks as stalled. At most `--stall-threshold`. | As above. |
 | `--poll-interval` | `30s` | How often stalls, retention and disk are checked. Values above `1m` act as `1m`. | Keep it at a third of the threshold or less. |
 | `--checkout-ttl` | `72h` | How long a finished run's checkout is kept after the run ends. It also stays while the run's container is kept. Negative keeps every checkout, and disk cleanup leaves them alone. | Lower on a small disk. |
 | `--run-container-ttl` | `168h` | How long a closed run's container, or a finished swarm worker's, is kept for reopening. Negative removes it at once. | Lower when paused containers hold too much memory. |
@@ -457,6 +459,28 @@ and a long build or slow tool call looks the same as a hang.
 
 10 minutes suits interactive runs. Raise it for Background runs with long
 builds. Lower it to a minute or two for many short scripted runs.
+
+An Enhanced run is judged on its agent's progress: messages, thoughts, tool
+calls, plans, subagents, compaction, background task progress and permission
+requests. Aether's own calls to the agent, the history a restored session
+replays, and mode, command and usage updates are not progress. How long it may
+stay quiet depends on where the turn is, its phase:
+
+| Phase | Limit |
+| --- | --- |
+| `awaiting-first-event`: the prompt was sent, nothing came back | `--first-event-grace` |
+| `streaming`: the agent replied, no tool is running | `--stream-quiet-grace` |
+| `tool-running`: a tool call or a compaction is open | `--stall-threshold` |
+| `tool-running` between turns: background tasks hold the run | three times `--stall-threshold` |
+| `awaiting-input`, `between-turns`, or the turn that asks for a missing report | `--stall-threshold` |
+
+A stall that names a phase is a possible stall: the run is **Waiting**,
+never **Needs you** or **Disconnected**. **Disconnected** needs the agent
+process or its connection to end. An agent that thinks for minutes without
+streaming a thought parks at the short limit and returns to `running` with its
+next update. A resume or a server restart starts the quiet time over. Aether
+restarts nothing on its own: press **Stop** to cancel the turn, then send a
+message.
 
 Messaging a stalled run usually gets it going. The echo of your message does
 not count as agent output, so a hung agent still reads as stalled afterwards.
