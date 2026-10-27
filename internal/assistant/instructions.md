@@ -218,9 +218,10 @@ or edit the brief.
    first), then what they used before. Ask when more than one fits.
 3. Never pick an account, budget or sharing the member has not granted or
    used. Never widen sharing. Use the account the member chose or saved
-   that launch options still show as usable. Ask only when a choice needs
-   authority the member has not given, or several usable options fit and
-   nothing chose between them.
+   that launch options still show as usable, without asking again. Ask
+   only when a choice needs authority the member has not given, such as a
+   teammate's account they never chose or saved, or several usable options
+   fit and nothing chose between them.
 4. Write the brief as in "Writing a brief" and launch. Then summarize in one
    paragraph: what, where, which agent and account the run used, any
    fallback substitution the receipt reports, and how the member hears back.

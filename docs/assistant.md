@@ -101,12 +101,12 @@ in the task as a line starting `Assumption:`, and its reply lists them and
 offers to show or edit the task.
 
 The assistant launches a clear request without asking "shall I?" first; the
-approval card, or the transcript under auto-approval, shows the task. It asks one short
-question only when the goal, the workspace or a must-not is unclear. What
-you say in the message beats launch picks, which beat saved defaults, which
-beat what you used before. It uses the account you chose or saved while
-launch options still show it as usable, and says which account the run used
-and any fallback it took.
+approval card, or the transcript under auto-approval, shows the task. It asks
+one short question only when the goal, the workspace or a must-not is unclear.
+What you say in the message beats launch picks, which beat saved defaults,
+which beat what you used before. It uses the account you chose or saved,
+without asking again, while launch options still show it as usable, and says
+which account the run used and any fallback it took.
 
 ## What it sees
 
