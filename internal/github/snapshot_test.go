@@ -165,14 +165,14 @@ func TestPullRequestSnapshotReusesNotModifiedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 0 || len(first.Pages) != 7 {
+	if f.notMod != 0 || len(first.Pages) != 5 {
 		t.Fatalf("first poll: notModified=%d pages=%+v", f.notMod, first.Pages)
 	}
 	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 7 || second.Title != first.Title || second.HeadSHA != headSHA || len(second.CheckRuns) != 1 || second.CheckRuns[0].ID != 1 {
+	if f.notMod != 5 || second.Title != first.Title || second.HeadSHA != headSHA || len(second.CheckRuns) != 1 || second.CheckRuns[0].ID != 1 {
 		t.Fatalf("unchanged poll did not reuse 304 pages: notModified=%d %+v", f.notMod, second)
 	}
 	if !reflect.DeepEqual(second.Checks(), first.Checks()) {
@@ -184,7 +184,7 @@ func TestPullRequestSnapshotReusesNotModifiedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 13 || len(third.Reviews) != 1 || third.Reviews[0].State != "CHANGES_REQUESTED" || len(third.CheckRuns) != 1 {
+	if f.notMod != 9 || len(third.Reviews) != 1 || third.Reviews[0].State != "CHANGES_REQUESTED" || len(third.CheckRuns) != 1 {
 		t.Fatalf("changed page not refetched: notModified=%d %+v", f.notMod, third)
 	}
 

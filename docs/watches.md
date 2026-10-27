@@ -59,26 +59,35 @@ no usable GitHub login in your Aether home (github: no native gh login found; ru
 It recovers on its own once you log in. `watch.create` refuses a pull
 request your login cannot read (`... is not reachable with your GitHub
 login: github: API request: HTTP 404 Not Found; ...`) and one that is
-already merged or closed. A `pr` watch whose pull request later answers
-HTTP 404, 403 (other than a rate limit) or 301 stays in `error` with a
-message that names the cause, such as `GitHub answers 404, so the pull
-request or repository is gone or your login lost access to it`, and is not
-read again: give your login access, or connect one that has it, and create
-the watch again. A run watch keeps watching its run and retries the pull
-request with backoff.
+already merged or closed. When the pull request itself later answers HTTP
+301, or HTTP 404 or 403 (other than a rate limit) on two reads in a row, a
+`pr` watch stays in `error` with a message that names the cause, such as
+`GitHub answers 404, so the pull request or repository is gone or your
+login lost access to it`, and is not read again: give your login access, or
+connect one that has it, and create the watch again. A run watch keeps
+watching its run and retries the pull request with backoff. A 403 on the
+head commit's checks, statuses or the reviews only retries with backoff and
+shows GitHub's answer; a fine-grained token needs Checks, Commit statuses
+and Pull requests read. A 403 GitHub sends with `X-GitHub-SSO` retries too,
+and says the token needs SAML single sign-on authorization for the
+organization.
 
 When the base branch requires status checks, `ci` decides on those only:
 the required checks of its classic branch protection (`GET
 /repos/{owner}/{repo}/branches/{branch}`) and of the rulesets that apply to
 it (`GET /repos/{owner}/{repo}/rules/branches/{branch}`). Both answer any
-login that can read the repository. When the branch requires none, `ci`
-decides on every check. When GitHub refuses either read, every check counts
-and the summary says `can't read which checks main requires, so every check
-counts (<GitHub's error>)`.
+login that can read the repository, and only watches with `ci` read them.
+When the branch requires none, `ci` decides on every check. When GitHub
+refuses one read (HTTP 403 or 404), the requirements last read from that
+source stand, the summary says `can't read all of what main requires, so
+its last known required checks count (<GitHub's error>)`, and that read is
+not asked again for 10 minutes. With no requirements known, every check
+counts and the summary says `can't read which checks main requires, so
+every check counts (<GitHub's error>)`.
 
 | Condition | Notice |
 | --- | --- |
-| `ci` | When every counted check run and commit status on the head commit is final: `Checks passed on #7`, `2 checks failed on #7: build, lint`, or `1 check cancelled on #7: deploy` when nothing failed but a check was cancelled. When only required checks count, the notices say so, and a pass names the checks the branch does not require that did not pass: `Required checks passed on #7 (lint, non-required, failed)`. A failure is sent as soon as nothing is pending, even while a required check is still missing. One notice per head commit and set of check runs, so a failure, a rerun and a pass send the failure, then the pass, and a new push sends one more. A cancelled check run is not counted when a newer run of the same job replaced it in the same check suite or GitHub Actions workflow. Telling workflows apart reads the head commit's Actions runs; when GitHub refuses that read (HTTP 403 or 404, for example a fine-grained token without Actions read access), the cancelled run stays counted and the watch's summary says so. If the open pull request's head commit has no check 10 minutes after the watch first read it (or after the watch began), it sends `No checks reported on #7 in 10 minutes`; if a required check is still unreported then, `Required check not reported on #7: build`. |
+| `ci` | When every counted check run and commit status on the head commit is final: `Checks passed on #7`, `2 checks failed on #7: build, lint`, or `1 check cancelled on #7: deploy` when nothing failed but a check was cancelled. When only required checks count, the notices say so, and a pass names the checks the branch does not require that did not pass: `Required checks passed on #7 (lint, non-required, failed)`. A failure is sent as soon as nothing is pending, even while a required check is still missing. One notice per head commit and set of check runs, so a failure, a rerun and a pass send the failure, then the pass, and a new push sends one more. A cancelled check run is not counted when a newer run of the same job replaced it in the same check suite or GitHub Actions workflow. Telling workflows apart reads the head commit's Actions runs; when GitHub refuses that read (HTTP 403 or 404, for example a fine-grained token without Actions read access), the cancelled run stays counted and the watch's summary says so. If the open pull request's head commit has no check 10 minutes after the watch first read it (or after the watch began), it sends `No checks reported on #7 in 10 minutes`; if a required check is still unreported then, `Required check not reported on #7: build`. A check suite with no check run, which GitHub Actions leaves `queued` when path or branch filters skip every workflow, does not hold those notices back, and after an hour no check suite without a running check keeps `ci` pending. |
 | `review` | `mona approved #7`, `mona requested changes on #7`, `mona commented on #7` (a review with a body). One per review. |
 | `merged`, `pr_merged` | `PR #7 merged on GitHub`. Only GitHub's merged state sends it; an agent reporting success does not. |
 | `closed` | `PR #7 closed without merging on GitHub`, when it closed after the watch began. |

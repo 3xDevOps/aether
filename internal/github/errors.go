@@ -26,6 +26,10 @@ var (
 	// ErrMoved matches an APIError for HTTP 301: the repository was renamed
 	// or transferred, and retrying the old owner/name never succeeds.
 	ErrMoved = errors.New("github: repository moved")
+	// ErrSSO matches an APIError for an HTTP 403 GitHub sent with
+	// X-GitHub-SSO: the organization enforces SAML single sign-on and the
+	// token is not authorized for it.
+	ErrSSO = errors.New("github: token not authorized for SAML SSO")
 )
 
 // APIError is a non-200 GitHub response. Message is GitHub's own error text,
@@ -33,6 +37,7 @@ var (
 type APIError struct {
 	Status  int
 	Message string
+	SSO     bool
 }
 
 func (e *APIError) Error() string {
@@ -42,8 +47,16 @@ func (e *APIError) Error() string {
 func (e *APIError) Is(target error) bool {
 	return target == ErrUnauthorized && e.Status == http.StatusUnauthorized ||
 		target == ErrNotFound && e.Status == http.StatusNotFound ||
-		target == ErrMoved && e.Status == http.StatusMovedPermanently
+		target == ErrMoved && e.Status == http.StatusMovedPermanently ||
+		target == ErrSSO && e.SSO
 }
+
+// PullRequestError is a failed read of the pull request itself, as opposed
+// to its checks, statuses or reviews.
+type PullRequestError struct{ Err error }
+
+func (e *PullRequestError) Error() string { return e.Err.Error() }
+func (e *PullRequestError) Unwrap() error { return e.Err }
 
 // RateLimitError is a primary or secondary GitHub rate limit. RetryAt comes
 // from Retry-After, then X-RateLimit-Reset when X-RateLimit-Remaining is 0;
@@ -79,7 +92,11 @@ func responseError(response *http.Response, token string, now time.Time) error {
 		response.StatusCode == http.StatusForbidden && (header.Get("X-RateLimit-Remaining") == "0" ||
 			header.Get("Retry-After") != "" || strings.Contains(strings.ToLower(message), "rate limit"))
 	if !limited {
-		return &APIError{Status: response.StatusCode, Message: message}
+		sso := response.StatusCode == http.StatusForbidden && header.Get("X-GitHub-SSO") != ""
+		if sso {
+			message = strings.TrimPrefix(message+"; the organization enforces SAML single sign-on, so authorize this token for it on GitHub", "; ")
+		}
+		return &APIError{Status: response.StatusCode, Message: message, SSO: sso}
 	}
 	return &RateLimitError{Status: response.StatusCode, Message: message, RetryAt: retryAt(header, now)}
 }

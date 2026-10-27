@@ -14,9 +14,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// unreportedAfter is how long an open pull request's head commit may go
-// without a check, or without a required one, before ci says so.
-const unreportedAfter = 10 * time.Minute
+const (
+	// unreportedAfter is how long an open pull request's head commit may go
+	// without a check, or without a required one, before ci says so.
+	unreportedAfter = 10 * time.Minute
+	// suitesWaitMax is how long a check suite with no pending check run
+	// keeps ci pending.
+	suitesWaitMax = time.Hour
+)
 
 // prReading is what one pull request's snapshot means for a watch's
 // conditions. busy asks for the short poll: checks pending or a review
@@ -33,7 +38,11 @@ type prReading struct {
 // merged. Nothing that happened before since is announced. Keys carry the
 // pull request so a run's several pull requests never share one.
 func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time) prReading {
+	age := now.Sub(later(snap.HeadSince, since))
 	checks := snap.Checks()
+	if age >= suitesWaitMax {
+		checks = checks.WithoutSuites(false)
+	}
 	ref := "#" + strconv.Itoa(snap.Number)
 	key := snap.Repo + ref + ":"
 	r := prReading{
@@ -47,7 +56,8 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 	r.observed.Summary = prSummary(snap, checks, r.observed.ReviewState)
 	open := snap.State == "open"
 	ciFinal := checks.Pending == 0
-	unreported := open && checks.Pending == 0 && !checks.Final && !now.Before(later(snap.HeadSince, since).Add(unreportedAfter))
+	quiet := checks.WithoutSuites(true)
+	unreported := open && age >= unreportedAfter && quiet.Pending == 0 && !quiet.Final
 	r.final = !open
 	notice := func(condition, k, body string) {
 		r.notices = append(r.notices, Notice{Condition: condition, Key: key + k, Title: r.title, Body: body, Link: snap.URL})
@@ -208,7 +218,11 @@ func prSummary(snap github.Snapshot, checks github.Checks, review string) string
 	if snap.WorkflowsUnreadable != "" {
 		parts = append(parts, "can't read Actions runs, so a cancelled check still counts ("+snap.WorkflowsUnreadable+")")
 	}
-	if snap.RequiredUnreadable != "" {
+	switch {
+	case snap.RequiredUnreadable == "":
+	case checks.RequiredOnly:
+		parts = append(parts, "can't read all of what "+snap.BaseRef+" requires, so its last known required checks count ("+snap.RequiredUnreadable+")")
+	default:
 		parts = append(parts, "can't read which checks "+snap.BaseRef+" requires, so every check counts ("+snap.RequiredUnreadable+")")
 	}
 	return strings.Join(parts, " · ")
