@@ -1,7 +1,13 @@
 {{define "choose"}}{{template "top" .}}
-<p>Choose the Aether server to connect. The connector acts as you on it, with your role there; the server's own page asks what it may do.</p>
-{{if .Data.Ready}}<ul>
-{{range .Data.Ready}}<li><a href="{{.Link}}">{{.Name}}</a> <code>{{.ID}}</code>, {{.Role}}, {{if eq .AccessPolicy "account"}}signing in is enough{{else}}asks for a code from <code>aether mcp</code>{{end}}</li>
+<p>Choose the Aether server to connect to <strong>{{.Data.Client}}</strong>. The connector acts as you on it, with your role there; the server's own page then names you and asks what it may do.</p>
+{{if .Data.Ready}}<ul class="choices">
+{{range .Data.Ready}}<li><form method="post" action="{{$.Data.Action}}">
+{{range $.Data.Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">
+{{end}}<input type="hidden" name="server" value="{{.ID}}">
+<input type="hidden" name="edge_assertion" value="{{.Assertion}}">
+<strong>{{.Name}}</strong> <code>{{.ID}}</code>, {{.Role}}, {{if eq .AccessPolicy "account"}}signing in is enough{{else}}asks for a code from <code>aether mcp</code>{{end}}
+<button type="submit">Continue with {{.Name}}</button>
+</form></li>
 {{end}}</ul>
 {{else}}<p class="error">None of your servers can take this connection.</p>{{end}}
 {{if .Data.Other}}<p>Not available:</p>

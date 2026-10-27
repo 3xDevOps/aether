@@ -156,7 +156,7 @@ func (l *fakeLink) ReadMCPBody(_ http.ResponseWriter, r *http.Request) ([]byte, 
 	return body, err == nil
 }
 
-func (l *fakeLink) ForwardUniversal(w http.ResponseWriter, _ *http.Request, serverID string, _ []byte) {
+func (l *fakeLink) ForwardUniversal(w http.ResponseWriter, _ *http.Request, serverID string, _ []byte, _ string) {
 	io.WriteString(w, "forwarded to "+serverID) //nolint:errcheck // test server
 }
 

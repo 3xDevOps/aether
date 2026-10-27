@@ -11,7 +11,7 @@ const pageIDs: Record<string, string> = {
   templates: 'template',
 }
 
-const keys = ['run', 'view', 'agent', 'repo', 'page', 'id']
+const keys = ['run', 'view', 'agent', 'repo', 'page', 'id', 'watch']
 
 const boardRoute: Route = { name: 'board', params: {} }
 
@@ -29,6 +29,7 @@ export function routeQuery(route: Route): URLSearchParams {
   query.set('page', route.name)
   const id = route.params[pageIDs[route.name] ?? '']
   if (id) query.set('id', id)
+  if (route.name === 'settings' && route.params.watch) query.set('watch', route.params.watch)
   return query
 }
 
@@ -46,7 +47,8 @@ export function routeFromQuery(query: URLSearchParams): Route {
   if (!page) return boardRoute
   const id = query.get('id')
   const param = pageIDs[page]
-  return { name: page, params: param && id ? { [param]: id } : {} }
+  const watch = page === 'settings' ? query.get('watch') : null
+  return { name: page, params: { ...(param && id ? { [param]: id } : {}), ...(watch ? { watch } : {}) } }
 }
 
 export function hrefFor(href: string, route: Route): string {

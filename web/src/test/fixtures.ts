@@ -889,6 +889,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     slackStatus: vi.fn(async () => ({ configured: false, connected: false })),
     slackLink: vi.fn(async () => ({ code: 'K7Q2-M9XD', expires_at: '2026-10-25T12:10:00Z' })),
     slackUnlink: vi.fn(async () => ({ link: { user_id: 'U123', team_id: 'T123', linked_at: '2026-10-25T12:00:00Z' } })),
+    watchCreate: vi.fn(async () => needsOverride('watchCreate')),
+    watchList: vi.fn(async () => []),
+    watchGet: vi.fn(async () => needsOverride('watchGet')),
+    watchUpdate: vi.fn(async () => needsOverride('watchUpdate')),
+    watchDelete: vi.fn(async () => needsOverride('watchDelete')),
+    notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } })),
+    notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 0 } })),
     localWorkspaceSelection: vi.fn(async () => ({ workspace_id: '' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,

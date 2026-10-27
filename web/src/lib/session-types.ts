@@ -1,6 +1,8 @@
 // Wire types of /ws/acp/{run} and run.acp.* (internal/protocol/acp.go).
 // Clients skip item kinds they do not know.
 
+import type { AssistantActionRecord } from '@/lib/assistant-types'
+
 export type SessionItemKind =
   | 'message'
   | 'thought'
@@ -114,7 +116,7 @@ export interface SessionItem {
   usage?: SessionUsage
   auth?: AuthStatusUpdate
   title?: string
-  notice?: { severity: string; title: string; description?: string }
+  notice?: { severity: string; title: string; description?: string; action?: AssistantActionRecord }
   stop_reason?: string
   autonomous?: boolean
   origin?: string

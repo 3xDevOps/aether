@@ -29,8 +29,8 @@ var responseHeaders = map[string]bool{
 }
 
 // forwardHeaders trims h, the request headers ReverseProxy passes on: it
-// drops Cookie, any X-Forwarded-* the client sent, and HeaderClientAddr,
-// which it sets to addr. ReverseProxy drops hop-by-hop headers but puts
+// drops Cookie, any X-Forwarded-* the client sent, HeaderBrowser, and
+// HeaderClientAddr, which it sets to addr. ReverseProxy drops hop-by-hop headers but puts
 // back Connection, Upgrade and Te; those go too, so no upgrade tunnels
 // past responseFilter. Accept-Encoding goes because Content-Encoding does
 // not come back.
@@ -40,7 +40,7 @@ func forwardHeaders(h http.Header, addr netip.AddrPort) {
 			delete(h, k)
 		}
 	}
-	for _, k := range []string{"Cookie", "Connection", "Upgrade", "Te", "Accept-Encoding", edgeproto.HeaderClientAddr} {
+	for _, k := range []string{"Cookie", "Connection", "Upgrade", "Te", "Accept-Encoding", edgeproto.HeaderClientAddr, edgeproto.HeaderBrowser} {
 		h.Del(k)
 	}
 	if addr.IsValid() {
@@ -93,7 +93,7 @@ func (r *Relay) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	r.forward(w, req, serverID, body)
+	r.forward(w, req, serverID, body, "")
 }
 
 // ReadMCPBody reads a relayed request's body whole, before a connection
@@ -118,9 +118,10 @@ func (r *Relay) ReadMCPBody(w http.ResponseWriter, req *http.Request) ([]byte, b
 
 // ForwardUniversal forwards req, a request on a universal connector path
 // whose body ReadMCPBody read, to serverID, as serveHTTP forwards one on
-// the server's own path. A connected server whose protocol predates
-// edgeproto.VersionUniversalMCP is refused with 501.
-func (r *Relay) ForwardUniversal(w http.ResponseWriter, req *http.Request, serverID string, body []byte) {
+// the server's own path, with browser, when set, as HeaderBrowser. A
+// connected server whose protocol predates edgeproto.VersionUniversalMCP
+// is refused with 501.
+func (r *Relay) ForwardUniversal(w http.ResponseWriter, req *http.Request, serverID string, body []byte, browser string) {
 	r.mu.Lock()
 	reg := r.servers[serverID]
 	var old error
@@ -133,7 +134,7 @@ func (r *Relay) ForwardUniversal(w http.ResponseWriter, req *http.Request, serve
 		http.Error(w, old.Error(), http.StatusNotImplemented)
 		return
 	}
-	r.forward(w, req, serverID, body)
+	r.forward(w, req, serverID, body, browser)
 }
 
 // noUniversalEndpoint refuses a universal connector request to a server
@@ -157,7 +158,7 @@ func (r *Relay) Version(serverID string) int {
 	return reg.version
 }
 
-func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID string, body []byte) {
+func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID string, body []byte, browser string) {
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
@@ -170,6 +171,9 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID strin
 			// trailers: net/http writes them only on a chunked body.
 			pr.Out.TransferEncoding = nil
 			forwardHeaders(pr.Out.Header, addr)
+			if browser != "" {
+				pr.Out.Header.Set(edgeproto.HeaderBrowser, browser)
+			}
 		},
 		Transport:     r.http,
 		FlushInterval: -1,
