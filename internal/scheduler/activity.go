@@ -278,7 +278,7 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		}
 	}
 	if entry != nil && !entry.paused && waiting != domain.ActivityAnswered && waiting == d.activity {
-		wait, stranded := s.runWaitLocked(ctx, run)
+		wait, stranded := s.runWaitLocked(ctx, entry)
 		d.wait = &wait
 		if stranded != "" && parked {
 			d.activity, d.cause, d.reason = domain.ActivityNeedsYou, events.CauseWaitFault, waitBrokenReasonPrefix+stranded
@@ -343,7 +343,7 @@ func (s *Scheduler) expireWaitLocked(ctx context.Context, entry *supervised, qui
 	if heldByTasks(entry.agentReport) {
 		return nil
 	}
-	if wait, _ := s.runWaitLocked(ctx, entry.runID); wait.Kind != domain.WaitUnverified {
+	if wait, _ := s.runWaitLocked(ctx, entry); wait.Kind != domain.WaitUnverified {
 		return nil
 	}
 	swarm, err := s.cfg.Store.IntegratorWaiting(ctx, entry.runID, entry.turnStartedAt)

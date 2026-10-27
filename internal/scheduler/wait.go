@@ -60,16 +60,18 @@ const waitBrokenReasonPrefix = "wait broken: "
 // names the conditions the agent will not be woken by: one that left
 // pending and whose wake was not delivered within wakeGrace, or one whose
 // source went unread for unreadBound. It holds no time or source status, so
-// the reason built from it stays put while the run needs a member. Error is
-// that of the highest-ranked condition with one.
-func classifyWait(conditions []WaitCondition, now time.Time) (wait domain.RunWait, stranded string) {
+// the reason built from it stays put while the run needs a member. A
+// condition that left pending before turn started backs no wait reported
+// since: its wake, or the message a member sent in its place, started a
+// later turn. Error is that of the highest-ranked condition with one.
+func classifyWait(conditions []WaitCondition, turn, now time.Time) (wait domain.RunWait, stranded string) {
 	rank := map[domain.WaitEvidence]int{domain.WaitUnverified: 0, domain.WaitCondition: 1, domain.WaitSourceUnknown: 2, domain.WaitFault: 3}
 	wait.Kind = domain.WaitUnverified
 	var details []string
 	var oldest time.Time
 	neverRead, errRank := false, -1
 	for _, c := range conditions {
-		if c.State == waitCancelled || c.State == waitSuperseded {
+		if c.State == waitCancelled || c.State == waitSuperseded || (c.State != waitPending && c.ResolvedAt.Before(turn)) {
 			continue
 		}
 		kind, detail, errText := domain.WaitCondition, c.Spec, ""
@@ -156,16 +158,16 @@ func fresh(c WaitCondition, now time.Time) bool {
 // runWaitLocked judges the reported wait of a run that is not paused. A
 // condition store that cannot be read leaves the wait unknown, never
 // unverified, so it does not go stale. Caller holds s.mu.
-func (s *Scheduler) runWaitLocked(ctx context.Context, run domain.RunID) (domain.RunWait, string) {
+func (s *Scheduler) runWaitLocked(ctx context.Context, entry *supervised) (domain.RunWait, string) {
 	if s.cfg.WaitConditions == nil {
 		return domain.RunWait{Kind: domain.WaitUnverified}, ""
 	}
-	conditions, err := s.cfg.WaitConditions.RunWaits(ctx, run)
+	conditions, err := s.cfg.WaitConditions.RunWaits(ctx, entry.runID)
 	if err != nil {
 		return domain.RunWait{Kind: domain.WaitSourceUnknown, Detail: "conditions unreadable",
 			Error: fmt.Sprintf("scheduler: read the run's wait conditions: %v", err)}, ""
 	}
-	return classifyWait(conditions, time.Now().UTC())
+	return classifyWait(conditions, entry.turnStartedAt, time.Now().UTC())
 }
 
 // Wait is the evidence behind run's reported wait while it shows activity,

@@ -119,10 +119,33 @@ func TestClassifyWaitByItsConditions(t *testing.T) {
 			stranded: "cannot read " + checksSpec + " for over 1h, so the agent will not be woken"},
 	}
 	for _, tc := range cases {
-		wait, stranded := classifyWait(tc.conditions, now)
+		wait, stranded := classifyWait(tc.conditions, time.Time{}, now)
 		if wait.Kind != tc.kind || wait.Detail != tc.detail || wait.Error != tc.err || stranded != tc.stranded || (wait.VerifiedAt != nil) != tc.verified {
 			t.Errorf("%s: got %+v stranded %q, want %s %q error %q stranded %q verified %v", tc.name, wait, stranded, tc.kind, tc.detail, tc.err, tc.stranded, tc.verified)
 		}
+	}
+}
+
+// A condition that left pending before the current turn started was acted
+// on, by the agent or by the member who messaged it instead, so it neither
+// backs nor breaks a wait reported since.
+func TestAnEarlierTurnsConditionBacksNoWait(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 27, 2, 0, 0, 0, time.UTC)
+	turn := now.Add(-20 * time.Minute)
+	woke := checking(now.Add(-30 * time.Minute))
+	woke.State, woke.ResolvedAt, woke.DeliveredAt = waitResolved, now.Add(-25*time.Minute), now.Add(-24*time.Minute)
+	stranded := checking(now.Add(-30 * time.Minute))
+	stranded.State, stranded.ResolvedAt = waitResolved, now.Add(-25*time.Minute)
+	for name, conditions := range map[string][]WaitCondition{"woke the agent": {woke}, "never delivered": {stranded}} {
+		if wait, broken := classifyWait(conditions, turn, now); wait.Kind != domain.WaitUnverified || broken != "" {
+			t.Errorf("%s before the turn: got %+v stranded %q, want unverified", name, wait, broken)
+		}
+	}
+	pending := checking(now.Add(-30 * time.Second))
+	pending.CreatedAt = now.Add(-time.Hour)
+	if wait, _ := classifyWait([]WaitCondition{pending, stranded}, turn, now); wait.Kind != domain.WaitCondition {
+		t.Errorf("a condition still pending from an earlier turn: got %+v, want condition", wait)
 	}
 }
 
@@ -233,6 +256,44 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect("the wake delivered", domain.ActivityWaitingCI, events.CauseReport, "CI on #582", domain.WaitCondition)
+}
+
+// A member's message is the remedy a broken wait asks for: the turn it
+// starts leaves the stranded condition behind, so the next wait the agent
+// reports is judged without it.
+func TestAMessageClearsABrokenWait(t *testing.T) {
+	t.Parallel()
+	waits := &fakeWaits{}
+	e := newReportingEnv(t, func(cfg *Config) {
+		cfg.WaitConditions = waits
+		cfg.StallThreshold = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	stuck := checking(time.Now().Add(-time.Hour))
+	stuck.State, stuck.ResolvedAt = waitResolved, time.Now().Add(-time.Hour)
+	waits.set(nil, stuck)
+	wait := func() {
+		t.Helper()
+		if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci-"+time.Now().String(), protocol.CoordWaitingForCI, "CI on #582", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait()
+	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
+
+	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Working, TurnStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	wait()
+	waitFor(t, "the next wait", func() bool {
+		got := e.sched.Wait(run.ID, domain.ActivityWaitingCI)
+		return got != nil && got.Kind == domain.WaitUnverified
+	})
 }
 
 // A wait with no condition keeps today's expiry; one whose conditions
