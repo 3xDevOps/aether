@@ -19,7 +19,8 @@ function renderCallout(rows: SessionRow[]) {
   useStore.setState({ acpSessions: { run_1: { control: { has_control: true, control_session_id: 'session-1', control_generation: 2 } } } } as never)
   const agent = { localControl: true, steerable: true } as unknown as AgentTerminal
   const nav = { go: vi.fn(), reveal: vi.fn(), focusComposer: vi.fn(), focusRequest: vi.fn() }
-  render(<StallCallout run={record} agent={agent} rows={rows} nav={nav} />)
+  const { rerender } = render(<StallCallout run={record} agent={agent} rows={rows} nav={nav} />)
+  return (next: SessionRow[]) => rerender(<StallCallout run={record} agent={agent} rows={next} nav={nav} />)
 }
 
 describe('resend last prompt', () => {
@@ -56,6 +57,20 @@ describe('resend last prompt', () => {
       await waitFor(() => expect(screen.getByRole('button', { name: 'Resend last prompt…' }).hasAttribute('disabled')).toBe(false))
     }
     expect(inject.mock.calls[1]![2]).toBe(inject.mock.calls[0]![2])
+  })
+
+  it('resends the prompt the dialog showed, not one with images sent while it was open', async () => {
+    vi.spyOn(api, 'runGet').mockResolvedValue(run({ id: 'run_1' }))
+    const inject = vi.spyOn(api, 'runInject').mockResolvedValue({ message: { state: 'sent' } } as unknown as RoomPostResult)
+    vi.spyOn(useStore.getState(), 'upsertRoomMessage').mockImplementation(() => {})
+    const shown: SessionRow = { kind: 'user', id: 'a', at, body: 'fix the login bug', delivery: 'Sent' }
+    const rerender = renderCallout([shown])
+    fireEvent.click(await screen.findByRole('button', { name: 'Resend last prompt…' }))
+    rerender([shown, { kind: 'user', id: 'b', at, body: 'match this layout', images: [{ messageID: 'm1', index: 0 }], delivery: 'Sent' }])
+    expect(screen.getByText('fix the login bug')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Resend and spend tokens' }))
+    await waitFor(() => expect(inject).toHaveBeenCalledTimes(1))
+    expect(inject.mock.calls[0]![1]).toBe('fix the login bug')
   })
 
   it('offers no resend for a prompt with images, which the composer must send', async () => {

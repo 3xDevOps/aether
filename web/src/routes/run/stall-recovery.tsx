@@ -58,11 +58,12 @@ export function StallCallout({ run, agent, rows, nav }: {
   }, [run.id, stallReason])
   const control = useImplicitControl(run, agent)
   const [busy, setBusy] = useState(false)
-  const [confirm, setConfirm] = useState(false)
+  // The prompt the dialog shows, so a newer one sent while it is open is not what gets resent.
+  const [confirm, setConfirm] = useState<Extract<SessionRow, { kind: 'user' }>>()
   // Kept until the server answers for the prompt, so a retry after a lost reply cannot queue it twice.
   const resendKey = useRef<{ prompt: string; key: string }>(undefined)
   useEffect(() => {
-    if (!stalled) setConfirm(false)
+    if (!stalled) setConfirm(undefined)
   }, [stalled])
   if (!stalled) return null
   const lastPrompt = [...rows].reverse().find((row): row is Extract<SessionRow, { kind: 'user' }> =>
@@ -83,7 +84,7 @@ export function StallCallout({ run, agent, rows, nav }: {
     if (lease) void attempt('Stop turn', () => api.runACPCancel(run.id, lease))
   })
   const resend = () => {
-    const { id, body, files } = lastPrompt!
+    const { id, body, files } = confirm!
     if (resendKey.current?.prompt !== id) resendKey.current = { prompt: id, key: crypto.randomUUID() }
     const { key } = resendKey.current
     const send = () => void attempt('Resend', async () => {
@@ -117,7 +118,7 @@ export function StallCallout({ run, agent, rows, nav }: {
                 variant="ghost"
                 disabled={busy || Boolean(lastPrompt.images?.length)}
                 hint={lastPrompt.images?.length ? 'Your last prompt had images; send it again from the composer' : 'Sends your last prompt again. Costs tokens.'}
-                onClick={() => setConfirm(true)}
+                onClick={() => setConfirm(lastPrompt)}
               >
                 Resend last prompt…
               </Button>
@@ -143,7 +144,7 @@ export function StallCallout({ run, agent, rows, nav }: {
         {error && <p className="mt-1 text-ui-sm text-muted">Could not read the agent’s progress: {error}</p>}
         <p className="mt-1 text-ui-sm text-muted">Aether restarts nothing on its own. A slow model can still answer.</p>
       </Callout>
-      <AlertDialog open={confirm} onOpenChange={setConfirm}>
+      <AlertDialog open={confirm !== undefined} onOpenChange={(open) => { if (!open) setConfirm(undefined) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Resend your last prompt?</AlertDialogTitle>
@@ -153,8 +154,8 @@ export function StallCallout({ run, agent, rows, nav }: {
               stop it to send now.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <pre className="max-h-32 overflow-y-auto rounded-control bg-chrome px-2 py-1 font-code text-ui-sm break-words whitespace-pre-wrap">{lastPrompt?.body}</pre>
-          {lastPrompt?.files?.length ? <p className="text-ui-sm text-muted">With {lastPrompt.files.length === 1 ? '1 attached file' : `${lastPrompt.files.length} attached files`}.</p> : null}
+          <pre className="max-h-32 overflow-y-auto rounded-control bg-chrome px-2 py-1 font-code text-ui-sm break-words whitespace-pre-wrap">{confirm?.body}</pre>
+          {confirm?.files?.length ? <p className="text-ui-sm text-muted">With {confirm.files.length === 1 ? '1 attached file' : `${confirm.files.length} attached files`}.</p> : null}
           <AlertDialogFooter>
             <AlertDialogCancel>Keep waiting</AlertDialogCancel>
             <AlertDialogAction onClick={resend}>Resend and spend tokens</AlertDialogAction>
