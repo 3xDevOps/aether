@@ -374,7 +374,7 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				s1.restart(edgeproto.PolicyAccount)
 				eventually(t, "server 1 to refuse, after restarting, the consent form it issued before", func() error {
 					if r, page := bobBrowser.send(t, http.MethodPost, flow.action, flow.consent); r.StatusCode != http.StatusBadRequest ||
-						!strings.Contains(page, "before this server last started") {
+						!strings.Contains(page, "this server takes only sign-ins issued from") {
 						return fmt.Errorf("%s %s", r.Status, page)
 					}
 					return nil

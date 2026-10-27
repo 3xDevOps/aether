@@ -180,7 +180,7 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 		return
 	}
 	if signed := q.Get(edgeproto.ParamAssertion); signed != "" && res == h.universal && h.ssh.EdgeAccess() == edgeproto.PolicyAccount {
-		a, name, aerr := h.assertion(r.Context(), signed, req, r.Header.Get(edgeproto.HeaderBrowser), bound)
+		a, name, aerr := h.assertion(r.Context(), signed, req, h.edgeBrowser(r), bound)
 		if aerr != nil {
 			h.renderError(w, "Cannot connect as your GitHub account: "+aerr.Error()+". Start the connection again from ChatGPT or Claude.")
 			return
@@ -194,6 +194,16 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 	}
 	page.Request = h.sign("consent", payload)
 	h.renderConsent(w, http.StatusOK, page)
+}
+
+// edgeBrowser is the browser binding the edge set on r. An edge that does
+// not bind sign-ins passes a client's own header through, so its is
+// ignored.
+func (h *handler) edgeBrowser(r *http.Request) string {
+	if !h.ssh.EdgeBindsSignIn() {
+		return ""
+	}
+	return r.Header.Get(edgeproto.HeaderBrowser)
 }
 
 // assertion checks the edge's assertion for req, binds its nonce to
@@ -226,12 +236,13 @@ func (h *handler) assertion(ctx context.Context, signed string, req authRequest,
 	return &asserted{Account: a.Account, Nonce: a.Nonce, Issued: a.IssuedAt, Expires: expires}, name, nil
 }
 
-// beforeStart refuses an assertion issued before the handler started,
-// whose nonce a consent form may have spent before a restart.
+// beforeStart refuses an assertion that may have been issued before the
+// handler started, whose nonce a consent form may have spent before a
+// restart. The edge's clock may run up to ClockSkew ahead of this one.
 func (h *handler) beforeStart(issued time.Time) error {
-	if issued.Before(h.started) {
-		return fmt.Errorf("the edge's sign-in for it was issued at %s, before this server last started at %s",
-			issued.UTC().Format(time.RFC3339), h.started.UTC().Format(time.RFC3339))
+	if after := h.started.Add(edgeproto.ClockSkew); issued.Before(after) {
+		return fmt.Errorf("the edge's sign-in for it was issued at %s, and this server takes only sign-ins issued from %s, %s after it last started",
+			issued.UTC().Format(time.RFC3339), after.UTC().Format(time.RFC3339), edgeproto.ClockSkew)
 	}
 	return nil
 }
@@ -302,7 +313,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 		Write: slices.Contains(scopes, string(ops.ScopeWrite)), Control: slices.Contains(scopes, string(ops.ScopeControl))}
 	now := h.now()
 	if req.Asserted != nil {
-		grant, err := h.assertedGrant(r.Context(), req.Asserted, r.Header.Get(edgeproto.HeaderBrowser), now)
+		grant, err := h.assertedGrant(r.Context(), req.Asserted, h.edgeBrowser(r), now)
 		if err != nil {
 			h.renderError(w, "Cannot connect as your GitHub account: "+err.Error()+". Start the connection again from ChatGPT or Claude.")
 			return

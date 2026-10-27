@@ -458,14 +458,18 @@ sends each `/mcp/authorize` request to the server with `Aether-Edge-Browser`, a
 hash of that cookie and the server id; it replaces any such header a client
 sends and drops it on every other path. The server binds an assertion's nonce
 to the first browser that brings it and refuses it from any other. The consent
-form carries that binding, so only the same browser can post it, and posting
-it spends the nonce. The cookie is `SameSite=None` because the consent page's
+form's POST carries the binding in its own `Aether-Edge-Browser` header, so
+only the same browser can post it, and posting it spends the nonce. Behind an
+edge older than protocol 4, which passes a client's header through, the server
+ignores the header. The server keeps nonces in memory, so it refuses an
+assertion issued before it last started or in the 30 seconds after, the clock
+skew it allows the edge; start the connection again. The cookie is `SameSite=None` because the consent page's
 form posts from the opaque origin its sandbox gives it.
 
 The server, not the edge, renders the consent page: only the server knows its
 members, its policy and its pairing codes, and it signs the consent form, so
 the edge never decides a grant. Every server shares the relay host, so on the
-universal paths the edge forwards a server's `Location` only to
+universal paths the edge forwards a server's `Location`, every value of it, only to
 `https://<relay host>/mcp/authorize`, `chatgpt.com` or `claude.ai`, never to a
 server's own `/mcp/<server id>` pages, which have no form limit. Anything else
 becomes `502 the server sent the browser to "<url>"; on https://<relay

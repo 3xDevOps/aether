@@ -561,8 +561,9 @@ there is no terminal, file, settings or git-writing tool.
   never a URL. The server binds it to the first browser that brings it, by a
   hash of an edge cookie on the relay host, and only that browser's consent
   form can take it, once. The server remembers assertions only in memory, so
-  it refuses one issued before it last started, and with it any consent form
-  carrying one. Behind an edge at protocol 3 the assertion still arrives in
+  it refuses one issued before it last started, or within the 30 seconds of
+  clock skew it allows the edge after, and with it any consent form carrying
+  one. Behind an edge at protocol 3 the assertion still arrives in
   the URL and is bound to no browser
   ([edge.md](edge.md#mcp-connectors)). On the universal paths the edge
   forwards a server's redirects and forms only to itself, `chatgpt.com` and

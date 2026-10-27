@@ -193,7 +193,10 @@ func (g *universalGuard) WriteHeader(code int) {
 	if csp := h.Get("Content-Security-Policy"); csp != "" {
 		h.Set("Content-Security-Policy", csp+"; "+g.formAction)
 	}
-	if loc := h.Get("Location"); loc != "" && !g.s.allowedLocation(loc) {
+	for _, loc := range h.Values("Location") {
+		if g.s.allowedLocation(loc) {
+			continue
+		}
 		g.refused = true
 		h.Del("Location")
 		h.Del("Content-Length")

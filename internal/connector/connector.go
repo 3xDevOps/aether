@@ -79,6 +79,10 @@ type Config struct {
 	// them; both are for tests that serve their own client.
 	ClientHosts []string
 	Transport   http.RoundTripper
+	// Started is when the server started, time.Now when zero. Tests that
+	// sign in within edgeproto.ClockSkew of starting a server set it
+	// earlier.
+	Started time.Time
 }
 
 // resource is one connector URL the handler serves: base is the URL,
@@ -148,7 +152,7 @@ func New(cfg Config) (http.Handler, error) {
 		fetch: &http.Client{Transport: cfg.Transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}},
-		mux: http.NewServeMux(), now: time.Now, started: time.Now(), codes: map[string]authCode{}, nonces: map[string]nonceUse{}, wrong: map[netip.Prefix]wrongCodes{},
+		mux: http.NewServeMux(), now: time.Now, started: cmp.Or(cfg.Started, time.Now()), codes: map[string]authCode{}, nonces: map[string]nonceUse{}, wrong: map[netip.Prefix]wrongCodes{},
 		writes: map[string]*rate.Limiter{}}
 
 	streamable := mcp.NewStreamableHTTPHandler(h.server, &mcp.StreamableHTTPOptions{
