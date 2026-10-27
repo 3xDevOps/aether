@@ -1,5 +1,6 @@
 import type { AssistantConfirmation, AssistantStatus, ViewContext } from '@/lib/assistant-types'
 import { mobileScreen } from '@/lib/breakpoints'
+import { randomID } from '@/lib/utils'
 import type { RootState } from '@/store'
 import type { SliceCreator } from '@/store/slice'
 import { draftConflict, entityKey, maxAttachments, pinPage, sameAttachment, type AttachedTarget, type DraftPin } from '@/store/view-context'
@@ -27,6 +28,8 @@ export interface AssistantAttempt {
   text: string
   key: string
   viewContext?: ViewContext
+  /** The chips the prompt carries, so a send that lands clears only them. */
+  attachments: AttachedTarget[]
 }
 
 /** What an entry point such as **Fix this** puts in the panel. */
@@ -40,13 +43,6 @@ export interface AssistantAsk {
 /** A second tab sending the same draft while the first tab's send is in flight, for at most this long, reuses its idempotency key, so the server runs it once. */
 export const duplicateSendWindow = 10_000
 const sentKey = 'aether.assistant.sent'
-
-/** crypto.randomUUID and crypto.subtle exist only in a secure context; a phone on plain HTTP has neither. */
-export function newPromptKey(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
 
 let tab: string | undefined
 
@@ -66,12 +62,12 @@ function heldPrompt(): SentPrompt | null {
  * Without crypto.subtle there is no hash, and no reuse.
  */
 export async function promptKey(fingerprint: string, now = Date.now()): Promise<string> {
-  if (typeof crypto === 'undefined' || !crypto.subtle) return newPromptKey()
-  tab ??= newPromptKey()
+  if (typeof crypto === 'undefined' || !crypto.subtle) return randomID('assistant')
+  tab ??= randomID('assistant')
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(fingerprint))
   const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
   const held = heldPrompt()
-  const key = held?.key && held.tab !== tab && held.hash === hash && now - (held.at ?? 0) < duplicateSendWindow ? held.key : newPromptKey()
+  const key = held?.key && held.tab !== tab && held.hash === hash && now - (held.at ?? 0) < duplicateSendWindow ? held.key : randomID('assistant')
   try {
     localStorage.setItem(sentKey, JSON.stringify({ tab, hash, key, at: now }))
   } catch {
@@ -134,6 +130,8 @@ export interface AssistantSlice {
   chooseAssistantPage: (current: boolean) => void
   /** The prompt was accepted: the next one starts empty. */
   clearAssistantDraft: () => void
+  /** `attempt` was accepted: clears its text and chips, keeping chips added while it was sent. */
+  settleAssistantSend: (attempt: AssistantAttempt) => void
   restartAssistantConversation: () => void
   /** A different signed-in member must not see the previous one's assistant. */
   resetAssistant: () => void
@@ -208,6 +206,13 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
     }),
   clearAssistantDraft: () =>
     set({ assistantDraft: '', assistantAttempt: null, assistantAttachments: [], assistantPin: null, assistantPageRemoved: false, assistantError: null }),
+  settleAssistantSend: (attempt) => {
+    const s = get()
+    const draft = s.assistantDraft.trim() === attempt.text ? '' : s.assistantDraft
+    const kept = s.assistantAttachments.filter((held) => !attempt.attachments.some((sent) => sameAttachment(held, sent)))
+    if (!draft.trim() && !kept.length) return get().clearAssistantDraft()
+    set({ assistantDraft: draft, assistantAttachments: kept, assistantAttempt: null, assistantPin: pinPage(s), assistantPageRemoved: false, assistantError: null })
+  },
   restartAssistantConversation: () =>
     set((s) => {
       const { [assistantSessionID]: _dropped, ...rest } = s.acpSessions

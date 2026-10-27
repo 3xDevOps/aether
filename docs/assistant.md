@@ -91,9 +91,11 @@ environment.
 
 Each message carries a short description of what your dashboard shows, so "why
 is this stuck?" works without ids: the page you are on, the workspace and run,
-the open run view, the open file's path (never its contents) and the last 8
-pages you visited. It never holds titles, file contents, drafts, terminal text
-or secrets.
+the open run view, the open file's path (never its contents), the last 8
+pages you visited, and the mode and model you last launched each agent with
+from this browser while signed in as you (up to 4, newest first). It never holds titles, file
+contents, drafts, terminal text or secrets. The assistant launches with those
+choices unless your message names others.
 
 The page is pinned when you start typing. If you move to another run or page
 before sending, the panel asks **You moved to Ship the docs. Ask about:** with
@@ -109,8 +111,10 @@ attachment holds only ids and names, such as `acme/api#42 · check lint`; the
 assistant reads the details with its tools.
 
 Above the message box, a chip names each thing the message is about. Remove
-one with its **x**, or Delete or Backspace. Removing the page also stops the
-assistant reading it between messages until you send or add it back.
+one with its **x**, or Delete or Backspace. Removing the page also removes the
+launch choices, and stops the assistant reading the page between messages
+until you send or add it back; a message sent right after waits until the
+server has forgotten it.
 **Inspect** lists every field the next message sends, and **Raw JSON** shows
 the exact payload. Clear **Share the page I am on with the assistant** there
 to stop sending the page; things you attached are still sent. The choice is saved for you on every device.
@@ -132,6 +136,15 @@ Launch claude (acp) in api: "Fix the flaky login test"
 Stop run run-8x2... ("Fix flaky login test")
 Save your environment as a new image; new runs and terminals start from it
 ```
+
+A launch card instead lists what starts: the kind, workspace, agent with model
+and mode, the account, the fallback when that account's usage runs out, the
+task, and how you hear back. Unless told otherwise, the assistant launches on
+your own account with automatic [usage fallback](teams.md#usage-fallback): if
+your account is nearly out of quota, the run starts on an account shared with
+you. With [auto-approval](#auto-approval) on, such a launch still asks while
+any account is shared with you; one that names its account or its fallback
+order, or sets no fallback, passes without a card.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was
@@ -166,8 +179,11 @@ call waiting for your approval is one line above the approval card. It also
 says whether you approved it or auto-approval passed it, and links to the run,
 swarm, pull request or environment. A failure shows the server's error as is.
 **Retry** adds `Retry: <what it tried>` to the message box for you to edit and
-send. A run or swarm the assistant launched that is still going reads **Working
-in the background**; it keeps running after you close the panel. Reads fold
+send. A launch card adds what started, such as `run · api · Claude Code opus ·
+your account`. A run or swarm the assistant launched that is still going reads
+**Working in the background** with how you hear back; it keeps running after
+you close the panel. A launched swarm's state is read again on each change to
+it, so the card and the **Actions** list agree. Reads fold
 into one line, such as **Read 3 runs**, that expands. The **Actions** button in
 the panel header lists the conversation's actions, newest first.
 
@@ -193,11 +209,13 @@ not covered   the assistant's own shell and file tools, which never ask
 ```
 
 - Messaging or stopping another member's run always asks, with the owner named
-  on the card. So does a launch with automatic fallback while any account is
-  shared with you, since it may move to an account nobody chose. A launch that
-  names a teammate's shared account itself, to run on or in its fallback
-  order, passes without a card; the transcript note names the account and its
-  owner.
+  on the card.
+- A launch that names a teammate's shared account itself, to run on or in its
+  fallback order, passes without a card; the transcript note names the account
+  and its owner.
+- A launch with automatic [usage fallback](teams.md#usage-fallback) while any
+  account is shared with you always asks, since it may move to an account
+  nobody chose.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as
@@ -246,8 +264,12 @@ is announced once, and the follow ends when the run finishes or is deleted.
 ## Conversations
 
 Send with Enter (Shift+Enter inserts a newline). **Stop** cancels the turn in
-progress; if the agent keeps going, press it again. While a turn runs you
-cannot send another prompt.
+progress; if the agent keeps going, press it again. If the server does not
+answer within 10 seconds, Stop shows `assistant.cancel got no answer within 10
+seconds` and can be pressed again. A message the server does not accept within
+60 seconds shows `assistant.prompt got no answer within 60 seconds` and stays
+in the box; **Send** retries it under the same idempotency key, so it runs at
+most once. While a turn runs you cannot send another prompt.
 
 There is one conversation per member. It survives page reloads and server
 restarts. If the environment stops, the agent stops with it and the next prompt

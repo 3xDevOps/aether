@@ -11,7 +11,16 @@ import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { promptKey, settlePromptKey } from '@/store/assistant'
-import { assistantShareView, draftConflict, draftViewContext, unsharedPart, viewContextKey } from '@/store/view-context'
+import { assistantShareView, draftConflict, draftViewContext, flushViewSync, unsharedPart, viewContextKey } from '@/store/view-context'
+
+/** How long Stop waits on assistant.cancel before it gives the button back. */
+export const stopTimeout = 10_000
+/** How long Send waits on assistant.prompt, which may first start the assistant's agent; a retry reuses the key. */
+export const promptTimeout = 60_000
+
+function timedOut(err: unknown, method: string, ms: number): string {
+  return err instanceof DOMException && err.name === 'TimeoutError' ? `${method} got no answer within ${ms / 1000} seconds` : message(err)
+}
 
 export function AssistantComposer({ textarea, running, dock }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
@@ -56,28 +65,35 @@ export function AssistantComposer({ textarea, running, dock }: {
       if (!attempt) {
         const viewContext = draftViewContext(state)
         const fingerprint = viewContext && viewContextKey(viewContext)
-        attempt = { text, viewContext, key: await promptKey(JSON.stringify([state.identityKey, text, fingerprint])) }
+        attempt = { text, viewContext, attachments: state.assistantAttachments, key: await promptKey(JSON.stringify([state.identityKey, text, fingerprint])) }
         const now = useStore.getState()
         const next = draftViewContext(now)
         const changed = now.assistantDraft.trim() !== text || (next && viewContextKey(next)) !== fingerprint
         // The member edited the draft or a chip while the key was made: send nothing they no longer see.
-        if (now.assistantGeneration !== generation || changed) {
+        if (now.assistantGeneration !== generation || changed || draftConflict(now)) {
           settlePromptKey(attempt.key)
           return
         }
         now.setAssistantAttempt(attempt)
       }
+      // The prompt keeps the held page; only the sync forgets one the member removed.
+      if (useStore.getState().assistantPageRemoved) {
+        await flushViewSync(useStore)
+        // A chip or the text changed while it waited drops the attempt: send nothing the member no longer sees.
+        if (useStore.getState().assistantGeneration !== generation || useStore.getState().assistantAttempt !== attempt) {
+          settlePromptKey(attempt.key)
+          return
+        }
+      }
       try {
-        await api.assistantPrompt(text, attempt.key, assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext))
+        const context = assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext)
+        await api.assistantPrompt(text, attempt.key, context, AbortSignal.timeout(promptTimeout))
       } finally {
         settlePromptKey(attempt.key)
       }
-      const now = useStore.getState()
-      if (now.assistantGeneration !== generation) return
-      if (now.assistantDraft.trim() === text) now.clearAssistantDraft()
-      else now.setAssistantAttempt(null)
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().settleAssistantSend(attempt)
     } catch (err) {
-      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantError(message(err))
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantError(timedOut(err, 'assistant.prompt', promptTimeout))
     } finally {
       if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantSending(false)
     }
@@ -86,14 +102,15 @@ export function AssistantComposer({ textarea, running, dock }: {
   const stop = async () => {
     const state = useStore.getState()
     if (state.assistantStopping) return
+    const generation = state.assistantGeneration
     state.setAssistantStopping(true)
     state.setAssistantError(null)
     try {
-      await api.assistantCancel()
+      await api.assistantCancel(AbortSignal.timeout(stopTimeout))
     } catch (err) {
-      useStore.getState().setAssistantError(message(err))
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantError(timedOut(err, 'assistant.cancel', stopTimeout))
     } finally {
-      useStore.getState().setAssistantStopping(false)
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantStopping(false)
     }
   }
 

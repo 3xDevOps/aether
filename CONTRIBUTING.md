@@ -25,7 +25,7 @@ flowchart LR
 
 | Tool | Version | Used for |
 | --- | --- | --- |
-| Go | 1.26 (`go.mod` pins toolchain go1.26.9) | Server, CLI, edge |
+| Go | 1.26 (`go.mod` pins toolchain go1.26.10) | Server, CLI, edge |
 | GNU make | any recent | Builds and checks |
 | Bun | 1.3+ (`web/.bun-version`) | Dashboard dependencies and tests |
 | Node.js | 22+ (22.13+ for `make test-native-hooks`) | Dashboard build and dev server, desktop shell |
@@ -172,7 +172,7 @@ Run these before you open a pull request:
 
 `make fmt-check` uses the `gofmt` on your `PATH`, and a Go newer than the
 pinned toolchain can flag files CI accepts. Check with the pinned one:
-`"$(GOTOOLCHAIN=go1.26.9 go env GOROOT)/bin/gofmt" -l .`
+`"$(GOTOOLCHAIN=go1.26.10 go env GOROOT)/bin/gofmt" -l .`
 
 Then run the suites for what you changed: `make test-integration` (real
 Docker and git) for server work that touches containers, git or storage, and
