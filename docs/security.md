@@ -579,6 +579,14 @@ there is no terminal, file, settings or git-writing tool.
   person approved: a method that needs an approved device refuses it, and it
   cannot mint a pairing code or a Slack link code that would outlive these
   cut-offs.
+- An edge given `--reviewer-account-file` offers one password sign-in, the
+  [reviewer account](edge.md#reviewer-account), for an app directory's
+  review. Anyone holding its password authorizes a connector as the member it
+  is bound to, so a server takes it only with `edge-reviewer` on, under
+  `edge-access account`, and only for a member who is no admin; it gets no
+  edge session. Ten wrong attempts in a row lock it for 15 minutes, which
+  also lets anyone who knows the login keep it locked. Bind it to a member
+  of a server kept for the review: every member reads every workspace.
 - Under `edge-access account` the consent page has no code, so an
   authorization link someone started in their own ChatGPT or Claude, opened
   by a member signed in at the edge, is one **Allow** away from connecting

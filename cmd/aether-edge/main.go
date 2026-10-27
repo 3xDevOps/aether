@@ -42,6 +42,7 @@ var commands = map[string]func(args []string) error{
 	"schema":      func(args []string) error { return schemaCmd(args, os.Getenv, os.Stdout) },
 	"backup":      func(args []string) error { return backupCmd(args, os.Getenv, os.Stdout, os.Stderr) },
 	"restore":     func(args []string) error { return restoreCmd(args, os.Getenv, os.Stdout) },
+	"reviewer":    func(args []string) error { return reviewerCmd(args, os.Stdout) },
 	"release-check": func(args []string) error {
 		return releaseCheck(args, selfupdate.FetchManifest, os.Stdout)
 	},
@@ -89,6 +90,7 @@ commands:
   schema         print the database's schema version and compat floor [--json]
   backup         copy the database while the edge runs: backup [--with-key] <file|dir|->
   restore        replace the database of a stopped edge: restore [--key <file>] <file>
+  reviewer       write a reviewer account file with a new password: reviewer --login <login> --server-id <id> <file>
   release-check  verify a release's signed edge image; exit 3 when its upgrade must hold
   version        print the version [--json]
 `)
@@ -123,7 +125,7 @@ func serve(args []string) (err error) {
 
 	svc, err := edge.New(edge.Config{
 		DataDir: o.dataDir, SigninOrigin: o.signinOrigin, RelayOrigin: o.relayOrigin,
-		GitHub: o.github, OpenAIChallenge: o.openAIChallenge,
+		GitHub: o.github, OpenAIChallenge: o.openAIChallenge, Reviewer: o.reviewer,
 	})
 	if err != nil {
 		return err
@@ -192,6 +194,10 @@ func serve(args []string) (err error) {
 	// edge's own listener is up.
 	go func() { errc <- serveHTTP("metrics", metrics, metricsLn) }()
 	slog.Info("aether-edge: serving", "signin", o.signinOrigin, "relay", o.relayOrigin, "metrics", metricsLn.Addr())
+	if o.reviewer != nil {
+		slog.Warn("aether-edge: reviewer account on", "login", o.reviewer.Login, "server", o.reviewer.ServerID,
+			"signin", o.signinOrigin+edge.PathReviewerSignin)
+	}
 
 	select {
 	case <-ctx.Done():

@@ -198,6 +198,7 @@ type serveOptions struct {
 	tailnetRequireKey    *bool
 	edgeURL              *edgeURLValue
 	edgeAccess           *accessPolicyValue
+	edgeReviewer         *bool
 	conflictCoordination *bool
 	agentUpdate          *bool
 	stallThreshold       *time.Duration
@@ -241,6 +242,9 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	fs.Var(o.edgeAccess, "edge-access",
 		"who may reach this server through the edge: account (signing in with GitHub is enough) or approved-devices "+
 			"(each new device waits until a person approves it); changed only on this host")
+	o.edgeReviewer = fs.Bool("edge-reviewer", false,
+		"let a connector authorized by the edge's reviewer account, for an app directory's review, act as the member an admin binds it to "+
+			"with aether member link --reviewer; needs edge-access account; changed only on this host")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
 	o.agentUpdate = fs.Bool("agent-update", true, "update a shipped agent installed in the member home before launching it")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
@@ -316,8 +320,9 @@ func serve(args []string) error {
 		TailnetAutoJoin:   *o.tailnetAutoJoin,
 		TailnetRequireKey: *o.tailnetRequireKey,
 
-		EdgeURL:    string(*o.edgeURL),
-		EdgeAccess: edgeproto.AccessPolicy(*o.edgeAccess),
+		EdgeURL:      string(*o.edgeURL),
+		EdgeAccess:   edgeproto.AccessPolicy(*o.edgeAccess),
+		EdgeReviewer: *o.edgeReviewer,
 
 		CoordinationDisabled: !*o.conflictCoordination,
 

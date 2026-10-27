@@ -43,7 +43,7 @@ Recheck them before submitting; the quotes below are what they said then.
 | Result size | "~150,000 characters" on claude.ai and Desktop ([building](https://claude.com/docs/connectors/building)) | Capped well below ([connectors.md](connectors.md#what-it-can-do)) |
 | Privacy policy | The listing materials include a "privacy policy URL", entered in the Listing step ([submission](https://claude.com/docs/connectors/building/submission)) | Draft only: [legal/privacy-connectors.md](legal/privacy-connectors.md) |
 | Public docs | "required by your publish date. A blog post or help-center article is sufficient" ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | [connectors.md](connectors.md) on GitHub |
-| Test account | "Test credentials: required, and they must be for a fully populated account" ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | Not met; see [Reviewer account](#reviewer-account) |
+| Test account | "Test credentials: required, and they must be for a fully populated account" ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | Built, not deployed: the edge's reviewer account; see [Reviewer account](#reviewer-account) |
 | Try it first | "Exercise every tool through the MCP Inspector and as a custom connector in Claude before you submit." ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | See [Test before submitting](#test-before-submitting) |
 
 ## The listing
@@ -188,9 +188,11 @@ Anthropic wants "a fully populated account rather than an empty shell" and
 "step-by-step setup instructions for someone unfamiliar with your service"
 ([testing](https://claude.com/docs/connectors/building/testing)), entered in
 the portal's Test & launch step, which "only reviewers see". Use the demo
-server and sample data in [chatgpt-plugin.md](chatgpt-plugin.md#reviewer-setup);
-the same blocker applies: the edge signs in with GitHub only, and GitHub
-emails a code to a password-only account on each new browser.
+server, sample data and edge reviewer account in
+[chatgpt-plugin.md](chatgpt-plugin.md#reviewer-setup): a GitHub account
+fails, since GitHub emails a code to a password-only account on each new
+browser. An edge has one reviewer account, so a review running beside
+OpenAI's shares it; give each new review a fresh password.
 
 ## Submit in the portal
 
@@ -246,7 +248,7 @@ what `edge.onaether.dev` serves.
 | Privacy policy hosted at a public URL | Draft in [legal/](legal/privacy-connectors.md) | No | No | No |
 | Terms hosted at a public URL | Draft in [legal/](legal/terms-connectors.md) | No | No | No |
 | Demo server with sample data | n/a | No | n/a | n/a |
-| Reviewer account that needs no email code | No: needs an edge sign-in other than GitHub | No | No | No |
+| Reviewer account that needs no email code | This change: `aether-edge serve --reviewer-account-file` | No | No | No |
 | Claude Code loopback redirects | No | No | n/a | n/a |
 | Live test from claude.ai through Anthropic's egress `160.79.104.0/21` | n/a | Not run | n/a | n/a |
 | Owner accepts the seven acknowledgments | n/a | n/a | No | No |

@@ -1924,6 +1924,10 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
   (`{"member_id":"..."}`), `member.identity.remove`
   (`{"member_id":"...","provider":"github","subject":"..."}`) and
   `server.owner.transfer` (`{"member_id":"..."}`).
+- `member.reviewer.link` (`{"member_id":"...","login":"..."}`), admins only,
+  binds the edge's [reviewer account](edge.md#reviewer-account) to a member
+  who is no admin while `edge-reviewer` is on, and answers the identity
+  `{"provider":"reviewer","subject":"<login>","login":"<login>","created_at":"..."}`.
 - `member.merge.start` answers `{"code":"XXXX-XXXX-XXXX-XXXX","expires_at":"..."}`,
   shown once. `member.merge.preview` (`{"code":"..."}`), from the other
   sign-in, answers the plan: `minted` and `proposer`, each with `id`,

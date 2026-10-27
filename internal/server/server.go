@@ -118,6 +118,9 @@ type Config struct {
 	// PolicyApprovedDevices. The server enforces it and announces it to
 	// the edge for display only.
 	EdgeAccess edgeproto.AccessPolicy
+	// EdgeReviewer lets a connector authorized by the edge's reviewer
+	// account act as the member an admin bound it to.
+	EdgeReviewer bool
 	// CoordinationDisabled turns the conflict coordination kill switch off.
 	// The zero value keeps coordination enabled, which is the shipped
 	// default.
@@ -476,6 +479,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	})
 	sshCfg.Services.Assistant = s.assistant
 	sshCfg.EdgeAccess = cfg.EdgeAccess
+	sshCfg.EdgeReviewer = cfg.EdgeReviewer
 	sshCfg.Services.Usage = cfg.Usage
 	if sshCfg.Services.Usage == nil {
 		sshCfg.Services.Usage = quota.New(homes)

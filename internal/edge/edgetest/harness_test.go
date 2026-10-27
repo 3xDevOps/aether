@@ -72,6 +72,8 @@ type harness struct {
 	// proxies, when set, puts the edge behind relay.Forwarded with these
 	// trusted proxy networks, as --trusted-proxies does.
 	proxies []netip.Prefix
+	// reviewer, when set, is the edge's reviewer account.
+	reviewer *edge.ReviewerAccount
 
 	mu        sync.Mutex
 	skew      time.Duration
@@ -135,7 +137,7 @@ func (h *harness) startEdge() {
 	}
 	svc, err := edge.New(edge.Config{
 		DataDir: h.edgeDir, SigninOrigin: h.signinURL, RelayOrigin: h.relayURL,
-		GitHub: h.github.app(), Clock: h.now, ConnectorClientHosts: []string{"127.0.0.1"},
+		GitHub: h.github.app(), Clock: h.now, ConnectorClientHosts: []string{"127.0.0.1"}, Reviewer: h.reviewer,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -381,14 +383,10 @@ var csrfField = regexp.MustCompile(`name="csrf" value="([^"]+)"`)
 // signIn signs a new browser in to the edge as user. Signing in also
 // refreshes the account's identity, which deleting it requires.
 func (h *harness) signIn(user ghUser) (*browser, error) {
-	jar, err := cookiejar.New(nil)
+	b, err := h.newBrowser()
 	if err != nil {
 		return nil, err
 	}
-	b := &browser{h: h, client: &http.Client{
-		Jar: jar, Timeout: waitTimeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}
 	resp, _, err := b.do(http.MethodGet, "/signin/github?next=/device", nil)
 	if err != nil {
 		return nil, err
@@ -408,6 +406,18 @@ func (h *harness) signIn(user ghUser) (*browser, error) {
 		return nil, fmt.Errorf("sign-in callback: %s\n%s", resp.Status, body)
 	}
 	return b, nil
+}
+
+// newBrowser is a browser signed in nowhere, which follows no redirect.
+func (h *harness) newBrowser() (*browser, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	return &browser{h: h, client: &http.Client{
+		Jar: jar, Timeout: waitTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}, nil
 }
 
 func (b *browser) do(method, path string, form url.Values) (*http.Response, string, error) {
@@ -684,6 +694,8 @@ type serverNode struct {
 	client *connectorClient
 	// services are the team-feature services a connector server serves.
 	services sshd.Services
+	// reviewer is the server's edge-reviewer option.
+	reviewer bool
 	addr     string
 	db       *store.DB
 	bus      *events.InProc
@@ -742,7 +754,7 @@ func (s *serverNode) start() {
 	srv, err := sshd.New(sshd.Config{
 		Addr: s.addr, HostKeyPath: hostKeyPath, Store: db, Bus: bus,
 		Git: noGit{}, PTY: noPTY{}, Runs: runs,
-		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy, Services: services,
+		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy, EdgeReviewer: s.reviewer, Services: services,
 	})
 	if err != nil {
 		t.Fatal(err)

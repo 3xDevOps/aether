@@ -374,6 +374,7 @@ after the key and value of `config set`.
 | --- | --- | --- |
 | `web-port` | `0` (off) | Serve the dashboard over HTTPS on the tailnet at this port ([networking.md](networking.md#the-dashboard)). |
 | `edge-url`, `edge-access` | off, `approved-devices` | The edge the server enrolls with, and who may reach it through the edge: `account` or `approved-devices`. |
+| `edge-reviewer` | off | Under `edge-access account`, a connector authorized by the edge's [reviewer account](edge.md#reviewer-account) acts as the member an admin binds it to with `aether member link --reviewer <login> <member-id>`. |
 | `tailnet-auto-join` | off | Tailnet logins join as approved members instead of pending. |
 | `tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. Cannot be combined with `web-port`. |
 | `run-cpus`, `run-memory`, `run-pids` | 8 CPUs (at most the host's), 8 GiB, 4096 | Ceilings per run and member environment, not reservations. |

@@ -376,6 +376,7 @@ var noReplay = map[string]bool{
 	protocol.MethodMemberInvitationRevoke: true,
 	protocol.MethodMemberIdentityLink:     true,
 	protocol.MethodMemberIdentityRemove:   true,
+	protocol.MethodMemberReviewerLink:     true,
 	protocol.MethodMemberMergeStart:       true,
 	protocol.MethodMemberMergePropose:     true,
 	protocol.MethodMemberMergeAccept:      true,

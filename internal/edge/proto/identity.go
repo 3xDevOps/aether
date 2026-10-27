@@ -16,6 +16,26 @@ import (
 // provider any message may name.
 const ProviderGitHub = "github"
 
+// ProviderReviewer is the edge's reviewer account, which an operator
+// configures for an app directory's review. It is never a GitHub
+// account: its subject is the login in the edge's reviewer account file,
+// and only a ConnectorAssertion may name it.
+const ProviderReviewer = "reviewer"
+
+// ValidReviewerLogin reports whether login can name the reviewer
+// account: 1 to 39 lowercase letters, digits and dashes.
+func ValidReviewerLogin(login string) bool {
+	if login == "" || len(login) > 39 {
+		return false
+	}
+	for _, c := range login {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 // CheckProvider refuses a provider other than GitHub, such as one an
 // earlier version stored, with the reason.
 func CheckProvider(p string) error {
@@ -52,6 +72,10 @@ func (a Account) Validate() error {
 	if err := CheckProvider(a.Provider); err != nil {
 		return err
 	}
+	return a.validateFields()
+}
+
+func (a Account) validateFields() error {
 	switch {
 	case !validRequiredText(a.Subject, maxShortText):
 		return errors.New("edgeproto: account subject is empty, too long or has control characters")

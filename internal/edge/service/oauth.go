@@ -74,7 +74,18 @@ func (s *Service) signinPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
-	s.render(w, http.StatusOK, "signin", s.view(nil, "Sign in", signinPath+"?"+url.Values{"next": {next}}.Encode()))
+	data := signinData{GitHub: signinPath + "?" + url.Values{"next": {next}}.Encode()}
+	if u, err := url.Parse(next); err == nil && s.reviewer != nil && u.Path == edgeproto.PathMCPChoose {
+		data.Reviewer = PathReviewerSignin + "?" + u.RawQuery
+	}
+	s.render(w, http.StatusOK, "signin", s.view(nil, "Sign in", data))
+}
+
+// signinData is the sign-in page: its GitHub sign-in link and, when the
+// edge has a reviewer account and the sign-in is for a connector, the
+// reviewer sign-in link.
+type signinData struct {
+	GitHub, Reviewer string
 }
 
 func (s *Service) signinStart(w http.ResponseWriter, r *http.Request) {
