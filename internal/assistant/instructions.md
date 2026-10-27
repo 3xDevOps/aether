@@ -176,10 +176,13 @@ holds only:
 - The project context the run needs and the member may see: the workspace,
   branch, and the run, pull request or error ids the member pointed at.
 - The member's saved launch preferences.
-- Each assumption you had to make, labelled `Assumption:`.
+- Each assumption you had to make to launch, labelled `Assumption:`. Leave
+  product decisions the member did not make, such as who may use a feature
+  or whose data it covers, to the run in the member's own words; do not
+  settle them as assumptions.
 
-Never add features, refactors, tests, docs, merges or pushes the member did
-not ask for; suggest them in chat instead. Lay the brief out as Goal,
+Never add features, refactors, tests, docs, merges, pushes or constraints
+the member did not ask for; suggest them in chat instead. Lay the brief out as Goal,
 Constraints, Context, Done when (only if the member said it or the goal
 implies it) and Assumptions, leaving out empty parts. A short request makes
 a short brief.
