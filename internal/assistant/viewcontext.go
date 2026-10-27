@@ -96,10 +96,11 @@ func cleanEntry(e protocol.AssistantViewEntry) protocol.AssistantViewEntry {
 }
 
 // cleanLaunchDefault drops a malformed model, and the default when its
-// agent or mode is malformed.
+// agent or mode is malformed. A model holding both : and @ is shaped like
+// user:token@host and is dropped: no model name needs both.
 func cleanLaunchDefault(d protocol.AssistantLaunchDefault) (protocol.AssistantLaunchDefault, bool) {
 	out := protocol.AssistantLaunchDefault{Agent: cleanWord(d.Agent), Mode: d.Mode}
-	if viewModel.MatchString(d.Model) {
+	if viewModel.MatchString(d.Model) && (!strings.Contains(d.Model, ":") || !strings.Contains(d.Model, "@")) {
 		out.Model = d.Model
 	}
 	return out, out.Agent != "" && launchMode[d.Mode]

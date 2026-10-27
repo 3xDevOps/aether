@@ -11,6 +11,7 @@ import type {
   SysboxStatus,
 } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
+import type { RootState } from '@/store'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type TextSize = 'default' | 'large' | 'larger'
@@ -109,6 +110,13 @@ export const minSidebarWidth = 220
 export const maxSidebarWidth = 400
 export const defaultSidebarWidth = 260
 
+export type LaunchDefaults = Record<string, { mode: LaunchMode; model?: string; at: number }>
+
+/** `launchDefaults` set to `next`, saved under the signed-in member. */
+function savedLaunch(s: RootState, next: LaunchDefaults): Pick<UiSlice, 'launchDefaults' | 'savedLaunchDefaults'> {
+  return { launchDefaults: next, savedLaunchDefaults: s.identityKey ? { ...s.savedLaunchDefaults, [s.identityKey]: next } : s.savedLaunchDefaults }
+}
+
 export interface UiSlice {
   theme: Theme
   textSize: TextSize
@@ -145,8 +153,10 @@ export interface UiSlice {
   boardMapViewports: Record<string, BoardMapViewport>
   /** Folded swarms on the Map, keyed by the integrator's map key. */
   boardMapFolded: Record<string, true>
-  /** Keyed by agent name; the newest `at` is the agent a launch preselects. */
-  launchDefaults: Record<string, { mode: LaunchMode; model?: string; at: number }>
+  /** The signed-in member's, keyed by agent name; the newest `at` is the agent a launch preselects. */
+  launchDefaults: LaunchDefaults
+  /** Each member's `launchDefaults` on this browser, by identity key, so another member never launches with them. */
+  savedLaunchDefaults: Record<string, LaunchDefaults>
   route: Route
   /** The view each run was last shown in during this visit; never persisted. */
   runViewMemory: Record<string, RunView>
@@ -251,6 +261,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   boardMapViewports: {},
   boardMapFolded: {},
   launchDefaults: {},
+  savedLaunchDefaults: {},
   route: initialRoute(),
   runViewMemory: {},
   detailsOpen: true,
@@ -327,11 +338,11 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   rememberLaunch: (agent, mode, model) =>
     set((s) => {
       const kept = model ?? s.launchDefaults[agent]?.model
-      return { launchDefaults: { ...s.launchDefaults, [agent]: { mode, ...(kept ? { model: kept } : {}), at: Date.now() } } }
+      return savedLaunch(s, { ...s.launchDefaults, [agent]: { mode, ...(kept ? { model: kept } : {}), at: Date.now() } })
     }),
   // Keeps `at`, which ranks the agent the launch dialog preselects.
   setLaunchDefault: (agent, mode) =>
-    set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { ...s.launchDefaults[agent], mode, at: s.launchDefaults[agent]?.at ?? 0 } } })),
+    set((s) => savedLaunch(s, { ...s.launchDefaults, [agent]: { ...s.launchDefaults[agent], mode, at: s.launchDefaults[agent]?.at ?? 0 } })),
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },

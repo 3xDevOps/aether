@@ -288,7 +288,7 @@ describe('inspecting what is shared', () => {
   })
 
   it('sends the remembered launch choices with the page, newest first, and only with it', async () => {
-    useStore.setState({ launchDefaults: { codex: { mode: 'tui', at: 1 }, claude: { mode: 'acp', model: 'opus', at: 2 }, 'Bad Name': { mode: 'acp', at: 3 } } })
+    useStore.setState({ launchDefaults: { codex: { mode: 'tui', model: 'me:ghp_x@github.com', at: 1 }, claude: { mode: 'acp', model: 'opus', at: 2 }, 'Bad Name': { mode: 'acp', at: 3 } } })
     const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
     await userEvent.click(within(aside).getByRole('button', { name: 'Inspect what is shared' }))
     const shared = await screen.findByRole('dialog', { name: 'What is shared' })

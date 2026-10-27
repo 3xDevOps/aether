@@ -215,7 +215,7 @@ one file each (`server`, `agent-models`, `workspaces`, `runs`, `members`, `env-t
 may read another's data. Only view preferences and local progress (theme,
 text size, sidebar width and collapse state, dock height, Details open,
 terminal zoom, single-key shortcuts, diff wrap, `activeWorkspace`, the
-**Mine** toggle, launch defaults, dismissed update versions, onboarding
+**Mine** toggle, each member's launch defaults, dismissed update versions, onboarding
 progress) are persisted under the `aether.ui` key; `persistedUi` in
 `store/index.ts` is the list that decides. Server data is always re-fetched.
 
@@ -558,8 +558,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   source line, a **Details** section with the exact params (three, then
   **N more**), or for `run.launch` and `mission.create` a **What starts**
   list (`components/assistant/launch-summary.tsx`; the title then stops
-  before the quoted task, and the assistant's stated reason is a **Reason**
-  row) of kind, workspace,
+  before the quoted task) of kind, workspace,
   agent with model and mode, account (`Yours` or `<name>'s, shared with
   you`), fallback, task or objective, and how the member hears back, a
   relative deadline with a bar draining toward it, **Decline**
@@ -567,9 +566,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   prompts in one 40dvh scroll. A card leaves only when a
   `confirmations` frame stops listing it. While `auto_approve` is off a card
   links **Skip these cards…** to Settings > Assistant; a card with
-  `other_member` says that member (`other_owner`) owns the run, or for a
-  launch that their account pays for it, so it asks even with auto-approval
-  on.
+  `other_member` says that member (`other_owner`) owns the run, so it asks
+  even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
   `lib/assistant-actions.ts`): `assistantView` takes each Aether tool call out
   of its step block as a card: one whose `tool_name` ends in an `aether_*`
@@ -591,7 +589,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
-  error for **Details**. A launch receipt (`result.launch`: the account by
+  error for **Details**. A launch receipt, when the result has one (`result.launch`: the account by
   `access` own, shared or other, the integrator's for a swarm, `fell back
   from` its `requested_account`, `no fallback` for policy `off` or the
   `ordered` accounts) or a watch result gets one more line; a done launch without a receipt gets the same line from
@@ -705,7 +703,8 @@ page the chips show, as `assistant.view` at most once a second when it
 changed, one call at a time, retrying a failed one with backoff and sending
 it again after each prompt. While the draft's page is removed it sends a
 context without `route` at once, which makes the server forget the page, and
-Send awaits that call (`flushViewSync`) before `assistant.prompt`; while a
+Send awaits that call (`flushViewSync`, at most 10 seconds, then
+`assistant.view got no answer within 10 seconds`) before `assistant.prompt`; while a
 navigation conflict is unanswered it sends nothing; after **where you
 started** it keeps the pinned page until the prompt is sent.
 
@@ -731,9 +730,13 @@ and also takes Delete or Backspace. **Add this page** undoes a removed page.
 assistant** checkbox, a list of every field the next message sends, and
 **Raw JSON**, the exact payload (`nextViewContext`).
 
-`assistantAttempt` holds the prompt's text, key and context; changing the
-text, any chip or the share choice drops it, and a retry of the same text
-reuses both. A new key comes from `promptKey`: while another tab's send of
+`assistantAttempt` holds the prompt's text, key, context and chips; changing
+the text, any chip or the share choice drops it, and a retry of the same text
+reuses both. When `assistant.prompt` succeeds, `settleAssistantSend` clears
+the sent text and chips and keeps only chips added while it was in flight,
+so a chip edit during the send cannot leave the sent message to be sent
+again. `assistant.prompt` aborts after 60 seconds with `assistant.prompt got
+no answer within 60 seconds`, keeping the draft and its key for a retry. A new key comes from `promptKey`: while another tab's send of
 the same text and context under the same member is still in flight (at
 most 10 seconds), it reuses that tab's key, so the server runs the prompt
 once; `settlePromptKey` clears the record when a send settles, so a second
@@ -743,7 +746,11 @@ HTTP, where `crypto.subtle` and `crypto.randomUUID` are missing, keys fall
 back to a timestamp and random suffix and tabs do not share them. The page part
 also carries `launch_defaults`, `launchDefaults` from the UI slice as
 `{agent, mode, model}`, newest first, at most 4, and **Inspect** lists them
-as **Launch choices**. Client
+as **Launch choices**. `launchDefaults` is the signed-in member's:
+`savedLaunchDefaults` persists each member's by identity key, and
+`setIdentityKey` loads the incoming member's, so another member on the same
+browser never sends them. A model with both `:` and `@`, shaped like
+`user:token@host`, is dropped on both sides. Client
 `fit` and `sendableAttachment` trim as the server does (recent pages, then
 the open file, then the launch defaults, then the last attachments, counting bytes as Go's
 `json.Marshal` writes them; a check name over 128 bytes or with a control or
@@ -2289,8 +2296,10 @@ including for agents with no discovery. A saved model missing from the list
 stays selected. A model that is not a single argument is
 refused by `run.launch` and shown under "Launch failed".
 
-The form remembers a mode and a model per agent in the persisted
-`launchDefaults` slice (`{mode, model, at}` keyed by agent name). It
+The form remembers a mode and a model per agent in the `launchDefaults`
+slice (`{mode, model, at}` keyed by agent name), persisted per member in
+`savedLaunchDefaults`; defaults saved before persist version 10 had no
+owner and are dropped. It
 preselects the launchable agent launched most recently, then the agent of
 the newest run, then the first launchable one, and starts in that agent's
 remembered mode, else Enhanced, with its remembered model; an Enhanced or

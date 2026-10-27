@@ -93,7 +93,7 @@ Each message carries a short description of what your dashboard shows, so "why
 is this stuck?" works without ids: the page you are on, the workspace and run,
 the open run view, the open file's path (never its contents), the last 8
 pages you visited, and the mode and model you last launched each agent with
-from this browser (up to 4, newest first). It never holds titles, file
+from this browser while signed in as you (up to 4, newest first). It never holds titles, file
 contents, drafts, terminal text or secrets. The assistant launches with those
 choices unless your message names others.
 
@@ -137,11 +137,13 @@ Stop run run-8x2... ("Fix flaky login test")
 Save your environment as a new image; new runs and terminals start from it
 ```
 
-A launch card instead lists what starts: run or swarm, workspace, agent with
-model and mode, the account (yours, or a teammate's shared with you, by name),
-the fallback when that account's usage runs out, the task, and how you hear
-back. With [auto-approval](#auto-approval) on, a launch on your own account
-passes without a card.
+A launch card instead lists what starts: the kind, workspace, agent with model
+and mode, the account, the fallback when that account's usage runs out, the
+task, and how you hear back. The assistant launches on your own account, with
+automatic [usage fallback](teams.md#usage-fallback): if your account is nearly
+out of quota, the run starts on an account shared with you. With
+[auto-approval](#auto-approval) on, a launch passes without a card, fallback
+included.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was
@@ -207,6 +209,9 @@ not covered   the assistant's own shell and file tools, which never ask
 
 - Messaging or stopping another member's run always asks, with the owner named
   on the card.
+- An auto-approved launch may still use automatic
+  [usage fallback](teams.md#usage-fallback), which can pick an account shared
+  with you.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as
@@ -256,8 +261,10 @@ is announced once, and the follow ends when the run finishes or is deleted.
 Send with Enter (Shift+Enter inserts a newline). **Stop** cancels the turn in
 progress; if the agent keeps going, press it again. If the server does not
 answer within 10 seconds, Stop shows `assistant.cancel got no answer within 10
-seconds` and can be pressed again. While a turn runs you
-cannot send another prompt.
+seconds` and can be pressed again. A message the server does not accept within
+60 seconds shows `assistant.prompt got no answer within 60 seconds` and stays
+in the box; **Send** retries it under the same idempotency key, so it runs at
+most once. While a turn runs you cannot send another prompt.
 
 There is one conversation per member. It survives page reloads and server
 restarts. If the environment stops, the agent stops with it and the next prompt

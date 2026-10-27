@@ -250,6 +250,7 @@ func TestCleanViewContextKeepsWellFormedLaunchDefaults(t *testing.T) {
 		{Agent: "claude", Mode: "acp", Model: "opus[1m]"},
 		{Agent: "opencode", Mode: "tui", Model: "anthropic/claude-sonnet-5-5"},
 		{Agent: "codex", Mode: "acp", Model: "gpt 5\n"},
+		{Agent: "goose", Mode: "acp", Model: "user:ghp_x@github.com"},
 		{Agent: "Claude Code", Mode: "acp"},
 		{Agent: "gemini", Mode: "yolo"},
 		{Agent: "a", Mode: "tui"},
@@ -264,10 +265,10 @@ func TestCleanViewContextKeepsWellFormedLaunchDefaults(t *testing.T) {
 		{Agent: "claude", Mode: "acp", Model: "opus[1m]"},
 		{Agent: "opencode", Mode: "tui", Model: "anthropic/claude-sonnet-5-5"},
 		{Agent: "codex", Mode: "acp"},
-		{Agent: "a", Mode: "tui"},
+		{Agent: "goose", Mode: "acp"},
 	}
 	if !reflect.DeepEqual(got.LaunchDefaults, want) {
-		t.Fatalf("launch defaults = %+v, want malformed models dropped, malformed agents and modes dropped whole, and the first %d kept", got.LaunchDefaults, maxViewDefaults)
+		t.Fatalf("launch defaults = %+v, want malformed and credential-shaped models dropped, malformed agents and modes dropped whole, and the first %d kept", got.LaunchDefaults, maxViewDefaults)
 	}
 
 	in.Attachments = []protocol.AssistantViewAttachment{{Kind: "run", RunID: "run-1"}}

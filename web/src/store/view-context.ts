@@ -123,13 +123,18 @@ function pageContext(s: RootState): PageContext {
   return { route, open_file: openFile(s, route), recent: s.viewHistory.filter((entry) => !sameEntity(entry, route)) }
 }
 
+/** A model the server keeps: one with both : and @ is shaped like user:token@host. */
+function sendableModel(model: string | undefined): model is string {
+  return model !== undefined && /^[A-Za-z0-9][A-Za-z0-9_.:/@[\]-]{0,127}$/.test(model) && !(model.includes(':') && model.includes('@'))
+}
+
 /** The member's remembered launches, newest first, as the server keeps them. */
 export function launchDefaults(s: RootState): LaunchDefault[] | undefined {
   const list = Object.entries(s.launchDefaults)
     .filter(([agent, held]) => /^[a-z][a-z0-9_.-]{0,39}$/.test(agent) && ['tui', 'acp', 'headless'].includes(held.mode))
     .sort(([, a], [, b]) => b.at - a.at)
     .slice(0, maxLaunchDefaults)
-    .map(([agent, { mode, model }]): LaunchDefault => (model ? { agent, mode, model } : { agent, mode }))
+    .map(([agent, { mode, model }]): LaunchDefault => (sendableModel(model) ? { agent, mode, model } : { agent, mode }))
   return list.length ? list : undefined
 }
 
