@@ -213,8 +213,8 @@ agents-image:
 # Real Claude Code and Codex runs in AGENTS_IMAGE against a mock model. It
 # needs Docker and real git, and `make agents-image` first.
 test-agents:
-	AETHER_AGENTS_IMAGE='$(AGENTS_IMAGE)' go test -race -count=1 -timeout=12m -tags integration \
-		-run '^TestIntegrationRealAgents$$' -v ./internal/server
+	AETHER_AGENTS_IMAGE='$(AGENTS_IMAGE)' go test -race -count=1 -timeout=15m -tags integration \
+		-run '^(TestIntegrationRealAgents|TestIntegrationSilentModelParksAsPossibleStall)$$' -v ./internal/server
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
 # against a real `aether gui` gateway and a real aether-server, so it runs on
