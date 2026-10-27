@@ -119,7 +119,7 @@ func TestMemorySearchPinned(t *testing.T) {
 	w := mustCreateWorkspace(t, db)
 	ada := mustCreateMember(t, db)
 	pinned := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Take the lease before reattaching."})
-	if _, err := db.PinMemory(ctx, w.ID, pinned.ID, ada.ID, ""); err != nil {
+	if _, err := db.PinMemory(ctx, w.ID, pinned.ID, ada.ID, "", nil); err != nil {
 		t.Fatalf("PinMemory: %v", err)
 	}
 	newer := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Reattach after a restart reads the lease."})
@@ -145,7 +145,7 @@ func TestMemorySearchSourceAndReplaced(t *testing.T) {
 	agent := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Take the lease before reattaching."})
 	old := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Skip the lease when reattaching."})
 	if _, _, err := db.SupersedeMemory(ctx, old.ID, &Memory{WorkspaceID: w.ID, Kind: MemoryGotcha, Source: MemoryFromMember,
-		Body: "Hold the lease while reattaching."}, nil); err != nil {
+		Body: "Hold the lease while reattaching."}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 3 {
@@ -175,7 +175,7 @@ func TestMemorySupersede(t *testing.T) {
 	w := mustCreateWorkspace(t, db)
 	old := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Body: "Use npm in web/."})
 	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, Body: "Use bun in web/; never npm."}
-	if duplicate, moved, err := db.SupersedeMemory(ctx, old.ID, replacement, nil); err != nil || duplicate || moved {
+	if duplicate, moved, err := db.SupersedeMemory(ctx, old.ID, replacement, false, nil); err != nil || duplicate || moved {
 		t.Fatalf("SupersedeMemory = %v, %v, %v", duplicate, moved, err)
 	}
 	if got := noteIDs(t, db, MemoryQuery{Workspace: w.ID, Words: "npm"}); !slices.Equal(got, []string{replacement.ID}) {
@@ -192,7 +192,7 @@ func TestMemorySupersede(t *testing.T) {
 		t.Fatalf("show replacement chain = %v, %v; want %s", chain, err, old.ID)
 	}
 	again := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromAgent, Body: "Use pnpm."}
-	if _, _, err := db.SupersedeMemory(ctx, old.ID, again, nil); !errors.Is(err, ErrConflict) {
+	if _, _, err := db.SupersedeMemory(ctx, old.ID, again, false, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("superseding a replaced note = %v, want ErrConflict", err)
 	}
 	if _, _, err := db.GetMemory(ctx, "other-workspace", old.ID); !errors.Is(err, ErrNotFound) {
@@ -212,7 +212,7 @@ func TestMemoryChainFollowsReplacements(t *testing.T) {
 	supersede := func(old *Memory, body string) *Memory {
 		t.Helper()
 		m := note(body)
-		if _, _, err := db.SupersedeMemory(ctx, old.ID, m, nil); err != nil {
+		if _, _, err := db.SupersedeMemory(ctx, old.ID, m, false, nil); err != nil {
 			t.Fatal(err)
 		}
 		return m
@@ -246,7 +246,7 @@ func TestMemoryChainFollowsReplacements(t *testing.T) {
 	check(b, c, a)
 	check(c, b, a)
 
-	if err := db.DeleteMemory(ctx, w.ID, c.ID); err != nil {
+	if err := db.DeleteMemory(ctx, w.ID, c.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	check(a, b, d)
@@ -278,8 +278,9 @@ func TestMemoryChainEndsOnACycle(t *testing.T) {
 	}
 }
 
-// Superseding a pinned note moves the pin to the replacement, pinned by its
-// author in the old note's scope, with the old note's cost freed first. A
+// Superseding a pinned note moves the pin to the replacement in the old
+// note's scope, with the old note's cost freed first: a workspace pin is
+// pinned by the replacement's author, a member pin stays its member's. A
 // replacement past the budget leaves the old note live and pinned.
 func TestMemorySupersedeMovesPin(t *testing.T) {
 	db := openTestDB(t)
@@ -293,7 +294,7 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 	pin := func(m *Memory, scope MemoryScope) *Memory {
 		t.Helper()
 		mustAddNote(t, db, m)
-		if _, err := db.PinMemory(ctx, w.ID, m.ID, ada.ID, scope); err != nil {
+		if _, err := db.PinMemory(ctx, w.ID, m.ID, ada.ID, scope, nil); err != nil {
 			t.Fatalf("pin %s: %v", m.Body, err)
 		}
 		return m
@@ -305,7 +306,7 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 	pin(note(100, "e", ada), "")
 	old := pin(note(10, "old", ada), "")
 
-	_, _, err := db.SupersedeMemory(ctx, old.ID, note(120, "too long", bob), nil)
+	_, _, err := db.SupersedeMemory(ctx, old.ID, note(120, "too long", bob), false, nil)
 	if err == nil || err.Error() != "move the pin on "+old.ID+
 		" to its replacement: pinned workspace notes use 900 of 1024 bytes; this note needs 184; unpin one first" {
 		t.Fatalf("replacement past the budget = %v", err)
@@ -315,7 +316,7 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 	}
 	// 114 bytes fit only once the old note's 74 are freed.
 	replacement := note(50, "new", bob)
-	_, moved, err := db.SupersedeMemory(ctx, old.ID, replacement, nil)
+	_, moved, err := db.SupersedeMemory(ctx, old.ID, replacement, false, nil)
 	if err != nil || !moved {
 		t.Fatalf("SupersedeMemory moved the pin %v, %v", moved, err)
 	}
@@ -328,11 +329,11 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 
 	mine := pin(note(20, "mine", ada), MemoryScopeMember)
 	theirs := note(20, "theirs", bob)
-	if _, _, err = db.SupersedeMemory(ctx, mine.ID, theirs, nil); err != nil {
+	if _, _, err = db.SupersedeMemory(ctx, mine.ID, theirs, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if theirs.PinnedAt == nil || theirs.PinnedBy != bob.ID || theirs.Scope != MemoryScopeMember {
-		t.Fatalf("member-scope replacement = %+v, want it pinned for Bob only", theirs)
+	if theirs.PinnedAt == nil || theirs.PinnedBy != ada.ID || theirs.Scope != MemoryScopeMember {
+		t.Fatalf("member-scope replacement = %+v, want it still pinned for Ada only", theirs)
 	}
 }
 
@@ -345,11 +346,11 @@ func TestMemorySupersedeOntoDuplicatePinsAsReplacer(t *testing.T) {
 	alice, dana := mustCreateMember(t, db), mustCreateTeammate(t, db)
 	agents := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, AuthorID: alice.ID, Body: "Use pnpm"})
 	danas := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "Use npm"})
-	if _, err := db.PinMemory(ctx, w.ID, danas.ID, dana.ID, MemoryScopeMember); err != nil {
+	if _, err := db.PinMemory(ctx, w.ID, danas.ID, dana.ID, MemoryScopeMember, nil); err != nil {
 		t.Fatal(err)
 	}
 	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "use PNPM"}
-	if duplicate, moved, err := db.SupersedeMemory(ctx, danas.ID, replacement, nil); err != nil || !duplicate || !moved || replacement.ID != agents.ID {
+	if duplicate, moved, err := db.SupersedeMemory(ctx, danas.ID, replacement, false, nil); err != nil || !duplicate || !moved || replacement.ID != agents.ID {
 		t.Fatalf("SupersedeMemory = %s duplicate %v moved %v, %v; want %s", replacement.ID, duplicate, moved, err, agents.ID)
 	}
 	if replacement.PinnedBy != dana.ID || replacement.Scope != MemoryScopeMember {
@@ -394,7 +395,7 @@ func TestMemoryDeleteRunKeepsPinnedNotes(t *testing.T) {
 	if n, err := db.CountAgentNotesByRun(ctx, run.ID); err != nil || n != 2 {
 		t.Fatalf("CountAgentNotesByRun = %d, %v; want 2", n, err)
 	}
-	if _, err := db.PinMemory(ctx, w.ID, kept.ID, member.ID, ""); err != nil {
+	if _, err := db.PinMemory(ctx, w.ID, kept.ID, member.ID, "", nil); err != nil {
 		t.Fatalf("PinMemory: %v", err)
 	}
 	if err := db.DeleteRun(ctx, run.ID); err != nil {
@@ -406,13 +407,13 @@ func TestMemoryDeleteRunKeepsPinnedNotes(t *testing.T) {
 	if got := noteIDs(t, db, MemoryQuery{Workspace: w.ID, Words: "note"}); len(got) != 2 || !slices.Contains(got, kept.ID) {
 		t.Fatalf("notes after DeleteRun = %v, want the pinned one and the other run's", got)
 	}
-	if ids, err := db.DeleteMemoryByRun(ctx, w.ID, other.ID); err != nil || !slices.Equal(ids, []string{elsewhere.ID}) {
+	if ids, err := db.DeleteMemoryByRun(ctx, w.ID, other.ID, nil); err != nil || !slices.Equal(ids, []string{elsewhere.ID}) {
 		t.Fatalf("DeleteMemoryByRun = %v, %v; want [%s]", ids, err, elsewhere.ID)
 	}
-	if err := db.DeleteMemory(ctx, w.ID, kept.ID); err != nil {
+	if err := db.DeleteMemory(ctx, w.ID, kept.ID, nil); err != nil {
 		t.Fatalf("DeleteMemory: %v", err)
 	}
-	if err := db.DeleteMemory(ctx, w.ID, kept.ID); !errors.Is(err, ErrNotFound) {
+	if err := db.DeleteMemory(ctx, w.ID, kept.ID, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second DeleteMemory = %v, want ErrNotFound", err)
 	}
 }
@@ -436,7 +437,7 @@ func TestMemoryDeleteRestoresWhatItReplaced(t *testing.T) {
 		if m.Source == "" {
 			m.Source = MemoryFromAgent
 		}
-		if _, _, err := db.SupersedeMemory(ctx, old.ID, m, nil); err != nil {
+		if _, _, err := db.SupersedeMemory(ctx, old.ID, m, false, nil); err != nil {
 			t.Fatal(err)
 		}
 		return m
@@ -458,13 +459,13 @@ func TestMemoryDeleteRestoresWhatItReplaced(t *testing.T) {
 	retyped := add(good, "Use bun in web/.")
 	supersede(retyped, &Memory{RunID: bad.ID, Body: "Use npm in web/."})
 	add(good, "use BUN in web/.")
-	if _, err := db.DeleteMemoryByRun(ctx, w.ID, bad.ID); err != nil {
+	if _, err := db.DeleteMemoryByRun(ctx, w.ID, bad.ID, nil); err != nil {
 		t.Fatalf("DeleteMemoryByRun: %v", err)
 	}
 	if live, by := state(revived); !live {
 		t.Fatalf("note the removed run replaced: live %v, replaced by %q; want live", live, by)
 	}
-	if _, err := db.PinMemory(ctx, w.ID, revived.ID, member.ID, ""); err != nil {
+	if _, err := db.PinMemory(ctx, w.ID, revived.ID, member.ID, "", nil); err != nil {
 		t.Fatalf("pin the restored note: %v", err)
 	}
 	if live, by := state(chained); live || by != fixed.ID {
@@ -476,7 +477,7 @@ func TestMemoryDeleteRestoresWhatItReplaced(t *testing.T) {
 
 	single := add(good, "Retry a lost lease once.")
 	replacement := supersede(single, &Memory{Source: MemoryFromMember, Body: "Retry a lost lease twice."})
-	if err := db.DeleteMemory(ctx, w.ID, replacement.ID); err != nil {
+	if err := db.DeleteMemory(ctx, w.ID, replacement.ID, nil); err != nil {
 		t.Fatalf("DeleteMemory: %v", err)
 	}
 	if live, _ := state(single); !live {
@@ -503,7 +504,7 @@ func TestMemoryDeleteRestoresWhatItReplaced(t *testing.T) {
 		Summary: "Fixed the lease race for ACP runs too", IdempotencyKey: "success-2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeleteMemory(ctx, w.ID, correction.ID); err != nil {
+	if err := db.DeleteMemory(ctx, w.ID, correction.ID, nil); err != nil {
 		t.Fatalf("DeleteMemory beside a newer outcome note: %v", err)
 	}
 	if live, _ := state(outcome); live {
@@ -596,7 +597,7 @@ func TestMemoryReportRewriteClearsPin(t *testing.T) {
 		t.Fatal(err)
 	}
 	note := outcomeNotes(t, db, run.ID)[0]
-	if _, err := db.PinMemory(ctx, w.ID, note.ID, member.ID, ""); err != nil {
+	if _, err := db.PinMemory(ctx, w.ID, note.ID, member.ID, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	rewrite := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess,
@@ -617,7 +618,7 @@ func TestMemoryReportRewriteClearsPin(t *testing.T) {
 
 	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryDecision, Source: MemoryFromMember, AuthorID: member.ID,
 		Body: "Take the lease before reading container state."}
-	if _, _, err = db.SupersedeMemory(ctx, note.ID, replacement, nil); err != nil {
+	if _, _, err = db.SupersedeMemory(ctx, note.ID, replacement, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	later := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeFailure,
@@ -736,7 +737,7 @@ func TestMemoryPinBudgets(t *testing.T) {
 	}
 	pin := func(m *Memory, scope MemoryScope) {
 		t.Helper()
-		if _, err := db.PinMemory(ctx, w.ID, m.ID, ada.ID, scope); err != nil {
+		if _, err := db.PinMemory(ctx, w.ID, m.ID, ada.ID, scope, nil); err != nil {
 			t.Fatalf("pin %s: %v", m.Body, err)
 		}
 	}
@@ -746,7 +747,7 @@ func TestMemoryPinBudgets(t *testing.T) {
 	}
 	pin(big, "")
 	extra := note(50, "extra")
-	_, err := db.PinMemory(ctx, w.ID, extra.ID, ada.ID, "")
+	_, err := db.PinMemory(ctx, w.ID, extra.ID, ada.ID, "", nil)
 	if err == nil || err.Error() != "pinned workspace notes use 920 of 1024 bytes; this note needs 114; unpin one first" {
 		t.Fatalf("over the workspace budget = %v", err)
 	}
@@ -758,19 +759,19 @@ func TestMemoryPinBudgets(t *testing.T) {
 	pin(note(120, "mine"), MemoryScopeMember)
 	pin(note(120, "also mine"), MemoryScopeMember)
 	more := note(90, "more")
-	if _, err = db.PinMemory(ctx, w.ID, more.ID, ada.ID, MemoryScopeMember); err == nil ||
+	if _, err = db.PinMemory(ctx, w.ID, more.ID, ada.ID, MemoryScopeMember, nil); err == nil ||
 		err.Error() != "your pinned member notes use 368 of 512 bytes; this note needs 154; unpin one first" {
 		t.Fatalf("over ada's budget = %v", err)
 	}
-	pinned, err := db.PinMemory(ctx, w.ID, more.ID, bob.ID, MemoryScopeMember)
+	pinned, err := db.PinMemory(ctx, w.ID, more.ID, bob.ID, MemoryScopeMember, nil)
 	if err != nil || pinned.PinnedBy != bob.ID || pinned.PinnedByName != bob.DisplayName || pinned.Scope != MemoryScopeMember {
 		t.Fatalf("bob's own budget = %+v, %v", pinned, err)
 	}
 
-	if unpinned, err := db.UnpinMemory(ctx, w.ID, big.ID); err != nil || unpinned.PinnedAt != nil || unpinned.PinnedBy != "" {
+	if unpinned, err := db.UnpinMemory(ctx, w.ID, big.ID, nil); err != nil || unpinned.PinnedAt != nil || unpinned.PinnedBy != "" {
 		t.Fatalf("UnpinMemory = %+v, %v", unpinned, err)
 	}
-	if _, err := db.PinMemory(ctx, w.ID, extra.ID, ada.ID, ""); err != nil {
+	if _, err := db.PinMemory(ctx, w.ID, extra.ID, ada.ID, "", nil); err != nil {
 		t.Fatalf("pin after unpinning: %v", err)
 	}
 }
@@ -791,7 +792,7 @@ func TestMemoryBriefInputs(t *testing.T) {
 		by    domain.MemberID
 		scope MemoryScope
 	}{{adas, ada.ID, MemoryScopeMember}, {bobs, bob.ID, MemoryScopeMember}, {team, bob.ID, MemoryScopeWorkspace}} {
-		if _, err := db.PinMemory(ctx, w.ID, pin.note.ID, pin.by, pin.scope); err != nil {
+		if _, err := db.PinMemory(ctx, w.ID, pin.note.ID, pin.by, pin.scope, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

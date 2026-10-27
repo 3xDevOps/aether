@@ -26,13 +26,13 @@ type Store interface {
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	InsertMemory(ctx context.Context, m *store.Memory) (bool, error)
-	SupersedeMemory(ctx context.Context, old string, m *store.Memory, vet func(old *store.Memory) error) (duplicate, movedPin bool, err error)
+	SupersedeMemory(ctx context.Context, old string, m *store.Memory, agent bool, vet func(old *store.Memory) error) (duplicate, movedPin bool, err error)
 	SearchMemory(ctx context.Context, q store.MemoryQuery) ([]*store.Memory, error)
 	GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*store.Memory, []*store.Memory, error)
-	PinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, by domain.MemberID, scope store.MemoryScope) (*store.Memory, error)
-	UnpinMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*store.Memory, error)
-	DeleteMemory(ctx context.Context, workspace domain.WorkspaceID, id string) error
-	DeleteMemoryByRun(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) ([]string, error)
+	PinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, by domain.MemberID, scope store.MemoryScope, vet func(*store.Memory) error) (*store.Memory, error)
+	UnpinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, vet func(*store.Memory) error) (*store.Memory, error)
+	DeleteMemory(ctx context.Context, workspace domain.WorkspaceID, id string, vet func(*store.Memory) error) error
+	DeleteMemoryByRun(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, vet func(*store.Memory) error) ([]string, error)
 	CountAgentNotesByRun(ctx context.Context, run domain.RunID) (int, error)
 	ReadMemoryBrief(ctx context.Context, q store.MemoryBriefQuery) (*store.MemoryBrief, error)
 }
@@ -77,7 +77,8 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 	if workspace == "" {
 		return protocol.MemoryAddResult{}, invalid(method, "workspace is required")
 	}
-	if err := s.authorize(ctx, member, workspace); err != nil {
+	actor, err := s.authorize(ctx, member, workspace)
+	if err != nil {
 		return protocol.MemoryAddResult{}, fail(method, err)
 	}
 	text := strings.TrimSpace(p.Text)
@@ -118,16 +119,13 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		}
 		note.Source, note.RunID, note.Harness, note.Commit = store.MemoryFromAgent, run.ID, run.Harness, head
 	}
-	var (
-		duplicate, movedPin bool
-		err                 error
-	)
+	var duplicate, movedPin bool
 	if p.Supersedes != "" {
-		var vet func(*store.Memory) error
+		vet := mayChange(method, "replace", actor)
 		if run != nil {
-			vet = agentMayReplace
+			vet = agentMayReplace(run)
 		}
-		duplicate, movedPin, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, vet)
+		duplicate, movedPin, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, run != nil, vet)
 	} else {
 		duplicate, err = s.cfg.Store.InsertMemory(ctx, note)
 	}
@@ -207,22 +205,47 @@ func checkNote(kind, scope, text string, files []string) error {
 	return nil
 }
 
-// agentMayReplace lets an agent replace only another agent's unpinned
-// note; anything a member wrote, answered or pinned stays theirs to change.
-func agentMayReplace(old *store.Memory) error {
-	var standing string
-	switch {
-	case old.PinnedAt != nil:
-		standing = "is pinned by " + name(old.PinnedByName, string(old.PinnedBy))
-	case old.Source == store.MemoryFromAgent:
-		return nil
-	case old.Source == store.MemoryFromReport:
-		standing = "is the outcome of run " + string(old.RunID)
-	default:
-		standing = "was written by " + name(old.AuthorName, string(old.AuthorID))
+// agentMayReplace lets run's agent replace only another agent's unpinned
+// workspace note, or a member note run wrote itself; anything a member
+// wrote, answered or pinned stays theirs to change.
+func agentMayReplace(run *domain.Run) func(*store.Memory) error {
+	return func(old *store.Memory) error {
+		var standing string
+		switch {
+		case old.PinnedAt != nil:
+			standing = "is pinned by " + name(old.PinnedByName, string(old.PinnedBy))
+		case old.Source == store.MemoryFromAgent && (old.Scope != store.MemoryScopeMember || old.RunID == run.ID):
+			return nil
+		case old.Source == store.MemoryFromAgent:
+			standing = "is a member note of " + name(old.AuthorName, string(old.AuthorID)) + " from run " + string(old.RunID)
+		case old.Source == store.MemoryFromReport:
+			standing = "is the outcome of run " + string(old.RunID)
+		default:
+			standing = "was written by " + name(old.AuthorName, string(old.AuthorID))
+		}
+		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+			"memory.add: %s %s; ask a member to replace it (aether memory add --supersedes %s)", old.ID, standing, old.ID)}
 	}
-	return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
-		"memory.add: %s %s; ask a member to replace it (aether memory add --supersedes %s)", old.ID, standing, old.ID)}
+}
+
+// mayChange lets actor change a member note only when it is theirs: pinned
+// by them, or unpinned and written by them. Admins and workspace notes are
+// unrestricted.
+func mayChange(method, verb string, actor *domain.Member) func(*store.Memory) error {
+	return func(n *store.Memory) error {
+		if n.Scope != store.MemoryScopeMember || actor.Role == domain.RoleAdmin {
+			return nil
+		}
+		owner, ownerName := n.AuthorID, n.AuthorName
+		if n.PinnedAt != nil {
+			owner, ownerName = n.PinnedBy, n.PinnedByName
+		}
+		if owner == actor.ID {
+			return nil
+		}
+		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+			"%s: permission denied: %s is a member note of %s; only they or an admin may %s it", method, n.ID, name(ownerName, string(owner)), verb)}
+	}
 }
 
 func name(display, id string) string {
@@ -336,10 +359,11 @@ func (s *Service) Pin(ctx context.Context, member domain.MemberID, p protocol.Me
 		return protocol.MemoryPinResult{}, invalid(method, fmt.Sprintf("scope must be workspace or member; got %q", p.Scope))
 	}
 	workspace := domain.WorkspaceID(p.WorkspaceID)
-	if err := s.authorize(ctx, member, workspace); err != nil {
+	actor, err := s.authorize(ctx, member, workspace)
+	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
-	note, err := s.cfg.Store.PinMemory(ctx, workspace, p.ID, member, store.MemoryScope(p.Scope))
+	note, err := s.cfg.Store.PinMemory(ctx, workspace, p.ID, member, store.MemoryScope(p.Scope), mayChange(method, "pin", actor))
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
@@ -355,10 +379,11 @@ func (s *Service) Unpin(ctx context.Context, member domain.MemberID, p protocol.
 		return protocol.MemoryUnpinResult{}, invalid(method, "workspace and note ID are required")
 	}
 	workspace := domain.WorkspaceID(p.WorkspaceID)
-	if err := s.authorize(ctx, member, workspace); err != nil {
+	actor, err := s.authorize(ctx, member, workspace)
+	if err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
-	note, err := s.cfg.Store.UnpinMemory(ctx, workspace, p.ID)
+	note, err := s.cfg.Store.UnpinMemory(ctx, workspace, p.ID, mayChange(method, "unpin", actor))
 	if err != nil {
 		return protocol.MemoryUnpinResult{}, fail(method, err)
 	}
@@ -376,15 +401,15 @@ func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol
 		return protocol.MemoryRmResult{}, invalid(method, "workspace and exactly one of a note ID or a run are required")
 	}
 	workspace := domain.WorkspaceID(p.WorkspaceID)
-	if err := s.authorize(ctx, member, workspace); err != nil {
+	actor, err := s.authorize(ctx, member, workspace)
+	if err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
 	}
-	ids := []string{p.ID}
-	var err error
+	ids, vet := []string{p.ID}, mayChange(method, "remove", actor)
 	if p.RunID != "" {
-		ids, err = s.cfg.Store.DeleteMemoryByRun(ctx, workspace, domain.RunID(p.RunID))
+		ids, err = s.cfg.Store.DeleteMemoryByRun(ctx, workspace, domain.RunID(p.RunID), vet)
 	} else {
-		err = s.cfg.Store.DeleteMemory(ctx, workspace, p.ID)
+		err = s.cfg.Store.DeleteMemory(ctx, workspace, p.ID, vet)
 	}
 	if err != nil {
 		return protocol.MemoryRmResult{}, fail(method, err)
@@ -400,12 +425,12 @@ func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol
 
 // authorize re-reads member on every write, so a role change applies to
 // the next call.
-func (s *Service) authorize(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) error {
+func (s *Service) authorize(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) (*domain.Member, error) {
 	m, err := s.cfg.Store.GetMember(ctx, member)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return permissions.Check(permissions.Push, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{Workspace: workspace})
+	return m, permissions.Check(permissions.Push, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{Workspace: workspace})
 }
 
 // changed records each note's change for the activity feed. run is the
