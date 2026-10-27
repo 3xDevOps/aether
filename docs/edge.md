@@ -433,7 +433,7 @@ URLs, and the server authenticates every request:
 
 - `https://<relay host>/mcp`, the universal URL every server on the edge
   shares. `aether mcp` and `sudo aether-server edge status` print it once the
-  server and the edge both speak edge protocol 3.
+  server and the edge both speak edge protocol 3 or later.
 - `https://<relay host>/mcp/<server id>`, the server's own URL. Connectors
   added there keep working.
 
@@ -443,13 +443,54 @@ prefix and `/mcp/token` by the code's or refresh token's. It mints and stores
 no token, and serves the OAuth metadata itself: issuer, resource and
 authorization server are all `https://<relay host>/mcp`. `/mcp/authorize` sends
 the browser to `https://<sign-in host>/connectors/choose`. That page lists the
-signed-in account's servers that can take the connection, skips the list when
-only one can, and sends the browser to that server's consent page. With it goes
-an assertion that the edge signs with the key servers pin: the GitHub account,
-the server, the client and its PKCE challenge, valid 5 minutes and used once.
-Under `account` the assertion replaces the pairing code
+signed-in account's servers, each that can take the connection with its own
+form and **Continue** button, even when only one can. The form posts the
+authorization request to `https://<relay host>/mcp/authorize` with an assertion
+the edge signs with the key servers pin: the GitHub account, the server, the
+client, its PKCE challenge and redirect URI, valid 5 minutes. No URL carries
+the assertion, so no log, history or `Referer` does. Under `account` the
+assertion replaces the pairing code
 ([connectors.md](connectors.md#the-universal-url)). Under `approved-devices`
 the server ignores it and asks for the code.
+
+The edge sets the cookie `__Host-aether_edge_browser` on the relay host and
+sends each `/mcp/authorize` request to the server with `Aether-Edge-Browser`, a
+hash of that cookie and the server id; it replaces any such header a client
+sends and drops it on every other path. The server binds an assertion's nonce
+to the first browser that brings it and refuses it from any other. The consent
+form's POST carries the binding in its own `Aether-Edge-Browser` header, so
+only the same browser can post it, and posting it spends the nonce. Behind an
+edge older than protocol 4, which passes a client's header through, the server
+ignores the header. The server keeps nonces in memory, so it refuses an
+assertion issued before it last started or in the 30 seconds after, the clock
+skew it allows the edge; start the connection again. The cookie is `SameSite=None` because the consent page's
+form posts from the opaque origin its sandbox gives it.
+
+The server, not the edge, renders the consent page: only the server knows its
+members, its policy and its pairing codes, and it signs the consent form, so
+the edge never decides a grant. Every server shares the relay host, so on the
+universal paths the edge forwards a server's `Location`, every value of it, only
+to `https://<relay host>/mcp/authorize`, `chatgpt.com`, `claude.ai`, or Claude
+Code's loopback callback (`http://localhost` or `http://127.0.0.1`, any port,
+path `/callback`), never to a server's own `/mcp/<server id>` pages, which
+have no form limit. Anything else becomes `502 the server sent the browser to
+"<url>"; on https://<relay host>/mcp the edge sends it only to ...`. The edge
+also adds `form-action https://<relay host> https://chatgpt.com
+https://claude.ai http://localhost:*/callback http://127.0.0.1:*/callback` to
+the sandbox policy, so no server's page can post a form elsewhere.
+
+Edge protocol 4 brings the binding. Mixed versions behave as follows:
+
+| Edge | Server | Universal sign-in |
+| --- | --- | --- |
+| 4 | 4 | Bound to the browser, as above |
+| 3 | 4 | The edge hands off with the assertion in the URL, as protocol 3 did. The server accepts it while its edge speaks 3 and refuses it once the edge speaks 4 |
+| 4 | 3 | **Choose a server** lists it as too old: `its aether-server is too old for this URL; an admin runs sudo aether-server update`. Connectors added before keep working, and `/mcp/<server id>` with a code works |
+
+Update servers before their edge where one operator runs both. On a shared
+edge, update the edge once its servers can follow; servers still at protocol
+3 cannot take new universal connections until they update. Neither direction
+needs a manual step, and `MinVersion` stays 1.
 
 TLS ends at the edge, because ChatGPT and Claude connect only to a host with a
 public certificate. A compromised edge, while it runs, can read and alter every
@@ -534,7 +575,10 @@ has one `server` block per host name passing requests to `127.0.0.1:8443`. It
 sets `Host $host`, `X-Forwarded-For $remote_addr` (never the client's own
 header, or a client could choose its address), the WebSocket `Upgrade` and
 `Connection` headers, 7-day read and send timeouts, and no buffering on the relay
-host. [Setting up nginx](#setting-up-nginx) installs it.
+host. Its `aether_edge` log format writes `/mcp/authorize`, `/connectors/choose`
+and `/signin` paths without their query, which carries the OAuth request's
+state and PKCE challenge and GitHub's code. [Setting up nginx](#setting-up-nginx)
+installs it.
 
 A request from the proxy without the header is refused with `400`, as is a local
 `curl http://127.0.0.1:8443/healthz`:

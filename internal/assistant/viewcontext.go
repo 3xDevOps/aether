@@ -24,17 +24,21 @@ const (
 	maxViewContextBytes = 4 << 10
 	maxViewRecent       = 8
 	maxViewPath         = 512
+	maxViewAttachments  = 6
+	maxViewCheck        = 128
 )
 
 var (
-	viewID   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
-	viewWord = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,39}$`)
+	viewID         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
+	viewWord       = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,39}$`)
+	viewRepository = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
+	attachmentKind = map[string]bool{"workspace": true, "run": true, "mission": true, "pr": true, "check": true, "failure": true, "task": true}
 )
 
 // CleanViewContext checks a view context from the dashboard: an id, word or
-// path that is malformed is dropped, recent is cut to its cap, and the oldest
-// recent pages, then the open file, go until it fits in 4 KiB. An unknown
-// version is dropped whole.
+// path that is malformed is dropped, recent and attachments are cut to their
+// caps, and the oldest recent pages, then the open file, then the last
+// attachments go until it fits in 4 KiB. An unknown version is dropped whole.
 func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantViewContext, error) {
 	if v == nil || v.Version != viewContextVersion {
 		return nil, nil
@@ -49,6 +53,11 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 			out.Recent = append(out.Recent, e)
 		}
 	}
+	for _, a := range v.Attachments {
+		if clean, ok := cleanAttachment(a); ok && len(out.Attachments) < maxViewAttachments {
+			out.Attachments = append(out.Attachments, clean)
+		}
+	}
 	for {
 		b, err := json.Marshal(out)
 		if err != nil {
@@ -61,6 +70,8 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 			out.Recent = out.Recent[:len(out.Recent)-1]
 		case out.OpenFile != nil:
 			out.OpenFile = nil
+		case len(out.Attachments) > 0:
+			out.Attachments = out.Attachments[:len(out.Attachments)-1]
 		default:
 			return nil, fmt.Errorf("view_context is %d bytes with only its route; the limit is %d", len(b), maxViewContextBytes)
 		}
@@ -72,6 +83,35 @@ func cleanEntry(e protocol.AssistantViewEntry) protocol.AssistantViewEntry {
 		Name: cleanWord(e.Name), WorkspaceID: cleanID(e.WorkspaceID), RunID: cleanID(e.RunID), MissionID: cleanID(e.MissionID),
 		Subagent: cleanID(e.Subagent), View: cleanWord(e.View), At: cleanTime(e.At),
 	}
+}
+
+// cleanAttachment drops malformed fields, and the attachment when its kind
+// is unknown or it names nothing.
+func cleanAttachment(a protocol.AssistantViewAttachment) (protocol.AssistantViewAttachment, bool) {
+	out := protocol.AssistantViewAttachment{
+		Kind: a.Kind, WorkspaceID: cleanID(a.WorkspaceID), RunID: cleanID(a.RunID), MissionID: cleanID(a.MissionID),
+		TaskID: cleanID(a.TaskID), AttemptID: cleanID(a.AttemptID), Failure: cleanWord(a.Failure),
+	}
+	if a.PR > 0 {
+		out.PR = a.PR
+	}
+	if viewRepository.MatchString(a.Repository) {
+		out.Repository = a.Repository
+	}
+	if len(a.Check) <= maxViewCheck && utf8.ValidString(a.Check) && !strings.ContainsFunc(a.Check, unprintable) {
+		out.Check = strings.TrimSpace(a.Check)
+	}
+	if a.Seq > 0 {
+		out.Seq = a.Seq
+	}
+	named := out.WorkspaceID != "" || out.RunID != "" || out.MissionID != "" || out.TaskID != "" || out.PR != 0
+	return out, attachmentKind[a.Kind] && named
+}
+
+// unprintable is a control or format character, such as a bidi override or
+// a zero-width space, which would make a check name read as another.
+func unprintable(r rune) bool {
+	return unicode.In(r, unicode.Cc, unicode.Cf)
 }
 
 // cleanTime zeroes a time JSON cannot encode.
@@ -140,8 +180,10 @@ const (
 // device whose clock runs slow still moves the view.
 const viewRace = 10 * time.Second
 
-// sharedView returns v while the member shares their view and is not
-// fenced, else nil; the caller holds m.share.
+// sharedView returns what a prompt or update may carry of v while the
+// member is not fenced, else nil; the caller holds m.share. While the member
+// shares their view that is v, else only its attachments, which the member
+// picked for this message.
 func (s *Service) sharedView(ctx context.Context, m *member, v *protocol.AssistantViewContext) (*protocol.AssistantViewContext, error) {
 	if v == nil {
 		return nil, nil
@@ -152,16 +194,22 @@ func (s *Service) sharedView(ctx context.Context, m *member, v *protocol.Assista
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !st.ShareView || m.removing {
+	switch {
+	case m.removing, !st.ShareView && len(v.Attachments) == 0:
 		return nil, nil
+	case !st.ShareView:
+		return &protocol.AssistantViewContext{Version: v.Version, CapturedAt: v.CapturedAt, Attachments: v.Attachments}, nil
 	}
 	return v, nil
 }
 
-// holdView makes v, from sharedView under the same m.share, the held view.
-// A prompt's view always does. A navigation update does unless it was
+// holdView makes the page part of v, from sharedView under the same
+// m.share, the held view; attachments belong to one message and are never
+// held. A prompt's page always does. A navigation update does unless it was
 // captured before the held view, which arrived within viewRace: the update
-// was in flight when the newer view was sent.
+// was in flight when the newer view was sent. A navigation update without a
+// page forgets the held view under the same rule, since the member removed
+// the page from their draft; a prompt without one leaves it alone.
 func (m *member) holdView(v *protocol.AssistantViewContext, source string, now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -169,7 +217,16 @@ func (m *member) holdView(v *protocol.AssistantViewContext, source string, now t
 		return
 	}
 	stale := m.view != nil && v.CapturedAt.Before(m.view.CapturedAt) && now.Sub(m.viewAt) < viewRace
-	if source == viewFromPrompt || !stale {
+	switch {
+	case v.Route.Name == "" && source == viewFromNavigation && !stale:
+		m.forgetViewLocked()
+	case v.Route.Name == "":
+	case source == viewFromPrompt || !stale:
+		if len(v.Attachments) > 0 {
+			page := *v
+			page.Attachments = nil
+			v = &page
+		}
 		m.view, m.viewAt, m.viewSource = v, now, source
 	}
 }

@@ -135,7 +135,7 @@ func (h *harness) startEdge() {
 	}
 	svc, err := edge.New(edge.Config{
 		DataDir: h.edgeDir, SigninOrigin: h.signinURL, RelayOrigin: h.relayURL,
-		GitHub: h.github.app(), Clock: h.now,
+		GitHub: h.github.app(), Clock: h.now, ConnectorClientHosts: []string{"127.0.0.1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -656,6 +656,13 @@ type (
 
 func (noRuns) StopTerminal(context.Context, domain.MemberID) error { return nil }
 
+// agent.list asks about agents no run here uses.
+func (noRuns) SwarmRefusal(string, domain.LaunchMode) error { return nil }
+
+func (noRuns) AgentSwitchable(context.Context, domain.MemberID, domain.MemberID, string) (bool, error) {
+	return false, nil
+}
+
 func (noRuns) WithStoppedTerminal(_ context.Context, _ domain.MemberID, afterStop func() error) error {
 	if afterStop != nil {
 		return afterStop()
@@ -746,10 +753,17 @@ func (s *serverNode) start() {
 	}
 	mcp := s.mcp
 	if s.client != nil {
+		// A first start is backdated by ClockSkew so a test signs in right
+		// away; a restart is not, so sign-ins from before it stay refused.
+		var started time.Time
+		if s.addr == "127.0.0.1:0" {
+			started = time.Now().Add(-edgeproto.ClockSkew)
+		}
 		mcp, err = connector.New(connector.Config{
 			BaseURL: s.h.relayURL + edgeproto.MCPPath(edgeproto.ServerID(hostKey.PublicKey())),
 			Store:   db, SSH: srv, KeyPath: filepath.Join(s.dir, "connector", "hmac.key"),
-			ClientHosts: []string{s.client.host}, Transport: s.client.srv.Client().Transport,
+			ClientHosts: []string{s.client.host}, Transport: s.client.srv.Client().Transport, LoopbackClients: s.client.loopback,
+			Started: started,
 		})
 		if err != nil {
 			t.Fatal(err)

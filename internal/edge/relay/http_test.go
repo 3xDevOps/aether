@@ -97,7 +97,7 @@ func TestHTTPHeaders(t *testing.T) {
 		req.Header = passed.Clone()
 		for k, v := range map[string]string{"Cookie": "edge=1", "X-Forwarded-For": "198.51.100.1", "X-Forwarded-Port": "443",
 			"Forwarded": "for=198.51.100.1", "Accept-Encoding": "gzip", "Te": "trailers", "Connection": "Upgrade", "Upgrade": "websocket",
-			edgeproto.HeaderClientAddr: "203.0.113.9:1"} {
+			edgeproto.HeaderClientAddr: "203.0.113.9:1", edgeproto.HeaderBrowser: "forged"} {
 			req.Header.Set(k, v)
 		}
 		req.Trailer = http.Header{"X-Client-Trailer": {"1"}}
@@ -249,7 +249,7 @@ func TestUniversalRefusesAnOlderServer(t *testing.T) {
 		t.Fatalf("Version = %d, want %d", v, edgeproto.VersionHTTP)
 	}
 	w := httptest.NewRecorder()
-	e.r.ForwardUniversal(w, httptest.NewRequest(http.MethodPost, edgeproto.PathUniversalMCP, nil), old.id, nil)
+	e.r.ForwardUniversal(w, httptest.NewRequest(http.MethodPost, edgeproto.PathUniversalMCP, nil), old.id, nil, "")
 	want := "server devbox (" + old.id + ") runs aether-server test, which does not serve the connector at " + e.origin + "/mcp; " +
 		"upgrade it: sudo aether-server update, or use its own connector URL " + e.origin + edgeproto.MCPPath(old.id)
 	if w.Code != http.StatusNotImplemented || strings.TrimSpace(w.Body.String()) != want {

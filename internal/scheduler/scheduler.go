@@ -108,6 +108,8 @@ type Config struct {
 	// standard image only when StandardImage still equals it.
 	DefaultStandardImage string
 	StallThreshold       time.Duration
+	FirstEventGrace      time.Duration // default 3m; see Config.stallLimit
+	StreamQuietGrace     time.Duration // default 5m; see Config.stallLimit
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
@@ -318,6 +320,7 @@ type supervised struct {
 	// failing, zero after one succeeds. A restart forgets it.
 	waitsFailingSince time.Time
 	startedAt         time.Time
+	quietFrom         time.Time // a resume or restart; the stall clock starts no earlier
 	paused            bool
 	killRequested     bool
 	killActor         domain.MemberID
@@ -431,6 +434,8 @@ type supervised struct {
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
+	// sessionLostAt is when the agent last lost the run's Enhanced session.
+	sessionLostAt time.Time
 	// usageLimit is the agent's usage-limit message its headless output
 	// carried, and accountSwap the move to another account in progress.
 	usageLimit  string
@@ -564,6 +569,12 @@ func New(cfg Config) (*Scheduler, error) {
 	}
 	if cfg.StallThreshold <= 0 {
 		cfg.StallThreshold = 10 * time.Minute
+	}
+	if cfg.FirstEventGrace <= 0 {
+		cfg.FirstEventGrace = 3 * time.Minute
+	}
+	if cfg.StreamQuietGrace <= 0 {
+		cfg.StreamQuietGrace = 5 * time.Minute
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 30 * time.Second
@@ -983,16 +994,4 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		NestedDocker:      true,
 		Egress:            plan.Egress,
 	}
-}
-
-// taskLine reduces a task to its commit-message form: first line only,
-// truncated to 72 characters.
-func taskLine(task string) string {
-	if i := strings.IndexAny(task, "\r\n"); i >= 0 {
-		task = task[:i]
-	}
-	if r := []rune(task); len(r) > 72 {
-		task = string(r[:72])
-	}
-	return task
 }

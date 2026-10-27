@@ -95,6 +95,9 @@ type RunController interface {
 	// Wait is the evidence behind the reported wait the live, unpaused run
 	// shows with activity; nil when it shows none.
 	Wait(run domain.RunID, activity domain.RunActivity) *domain.RunWait
+	// Liveness is the live or provisioning Enhanced run's turn phase, last
+	// agent progress and connection state; ok is false for any other run.
+	Liveness(run domain.RunID) (domain.RunLiveness, bool)
 	// Retention reads current runtime ownership without probing or mutating it.
 	Retention(run *domain.Run) (scheduler.RetentionInfo, error)
 	// PendingInputs returns an independent snapshot of unresolved requests;

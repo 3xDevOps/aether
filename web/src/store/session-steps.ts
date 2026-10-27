@@ -68,7 +68,7 @@ export function workSummary(tools: string[]): string {
 const lookupKinds = new Set(['read', 'search', 'fetch'])
 
 /** Steps that make a segment worth a block; prose and notices alone stay in the conversation. */
-const workKinds = new Set<Step['kind']>(['thought', 'tool', 'lookup', 'plan', 'subagents', 'answered'])
+export const workKinds = new Set<Step['kind']>(['thought', 'tool', 'lookup', 'plan', 'subagents', 'answered'])
 
 function withLookups(steps: Step[]): Step[] {
   const out: Step[] = []
@@ -135,7 +135,7 @@ export function stepsBlock(id: string, steps: Step[], start: string, current = f
   return { kind: 'steps', id, at: grouped[0]!.at, start, steps: grouped, summary, icons: icons.slice(0, 3), failed, running, plan, agents, current }
 }
 
-function asRow(step: Step): SessionRow {
+export function asRow(step: Step): SessionRow {
   if (step.kind === 'narration') return { kind: 'assistant', id: step.id, at: step.at, text: step.text, streaming: step.streaming }
   if (step.kind === 'event') return { kind: 'event', id: step.id, at: step.at, text: step.text, detail: step.detail, tone: step.tone }
   throw new Error(`a ${step.kind} step belongs in a block`)

@@ -2291,3 +2291,132 @@ export interface SlackLinkResult {
 export interface SlackUnlinkResult {
   link: SlackLink
 }
+
+/** What a watch follows (docs/watches.md). */
+export type WatchTargetKind = 'run' | 'mission' | 'pr'
+
+export interface WatchTarget {
+  kind: WatchTargetKind
+  run_id?: string
+  mission_id?: string
+  /** owner/name */
+  repo?: string
+  number?: number
+}
+
+export type WatchCondition = 'needs_you' | 'finished' | 'pr_merged' | 'ci' | 'delivered' | 'review' | 'merged' | 'closed'
+
+export type WatchState = 'active' | 'paused' | 'error' | 'done' | 'expired'
+
+export interface WatchObserved {
+  summary: string
+  run_status?: string
+  activity?: string
+  need?: string
+  phase?: string
+  pr_state?: string
+  head_sha?: string
+  checks?: { passed: number; failed: number; pending: number }
+  review_state?: string
+}
+
+export type WatchDeliveryChannel = 'push' | 'in_app' | 'assistant'
+
+/** pending: not sent yet, with why in detail. cleared: dropped unsent because its need was resolved first or its watch stayed paused. withdrawn: delivered, then replaced on the devices because its need ended. */
+export type WatchDeliveryStatus = 'pending' | 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared' | 'withdrawn' | 'skipped'
+
+export interface WatchDelivery {
+  channel: WatchDeliveryChannel
+  status: WatchDeliveryStatus
+  detail?: string
+  at: string
+}
+
+export interface WatchNotification {
+  id: string
+  watch_id: string
+  condition: WatchCondition
+  title: string
+  body: string
+  link: string
+  created_at: string
+  deliveries: WatchDelivery[]
+}
+
+export interface Watch {
+  id: string
+  member_id: string
+  workspace_id: string
+  target: WatchTarget
+  target_title: string
+  conditions: WatchCondition[]
+  state: WatchState
+  error?: string
+  label?: string
+  source: 'dashboard' | 'assistant' | 'mcp'
+  created_at: string
+  updated_at: string
+  expires_at: string
+  last_check_at?: string
+  next_check_at?: string
+  observed: WatchObserved
+  last_notification?: WatchNotification
+  link: string
+}
+
+export interface WatchCreateParams {
+  target: WatchTarget
+  conditions?: WatchCondition[]
+  expires_at?: string
+  label?: string
+  source?: Watch['source']
+  idempotency_key?: string
+}
+
+export interface WatchUpdateParams {
+  watch_id: string
+  paused?: boolean
+  conditions?: WatchCondition[]
+  expires_at?: string
+  label?: string
+}
+
+export interface WatchListParams {
+  state?: WatchState
+  target_kind?: WatchTargetKind
+  run_id?: string
+  mission_id?: string
+}
+
+/** watch.create and watch.update: the watch and one human line saying what it now does. */
+export interface WatchResult {
+  watch: Watch
+  receipt: string
+}
+
+export interface WatchGetResult {
+  watch: Watch
+  notifications: WatchNotification[]
+}
+
+export type QuietHours = { start: string; end: string; tz: string }
+
+export interface NotifyPrefs {
+  /** Watch notices to Web Push devices. */
+  push: boolean
+  quiet_hours?: QuietHours
+  /** Read-only: where notices go now. */
+  destinations: { push_devices: number }
+}
+
+/** notify.prefs.set replaces quiet_hours and keeps push as it is when push is left out. */
+export interface NotifyPrefsSetParams {
+  push?: boolean
+  quiet_hours?: QuietHours
+}
+
+export interface WatchChangedPayload {
+  watch_id: string
+  member_id: string
+  notification_id?: string
+}

@@ -32,6 +32,20 @@ const (
 	PromptAskPermission = "ask permission"
 	// PromptWait makes the turn run until session/cancel arrives.
 	PromptWait = "wait"
+	// PromptChatter runs the turn until session/cancel arrives, sending
+	// only usage and command updates, every ChatterInterval: no progress.
+	PromptChatter = "chatter"
+	// PromptThink runs the turn until session/cancel arrives, streaming a
+	// thought chunk every ChatterInterval.
+	PromptThink = "think"
+	// PromptGoQuiet sends one thought chunk, then waits, silent, until
+	// session/cancel arrives.
+	PromptGoQuiet = "go quiet"
+	// PromptLongTool starts a tool call and keeps it running, silent,
+	// until session/cancel arrives.
+	PromptLongTool = "run a long tool"
+	// ChatterInterval paces PromptChatter and PromptThink.
+	ChatterInterval = 20 * time.Millisecond
 	// PromptAskForm makes the agent ask a form question and reply with the
 	// answer: "form: <action> <content as JSON>".
 	PromptAskForm = "ask form"
@@ -41,6 +55,9 @@ const (
 	// does when the account's usage limit is reached
 	// (acphost/testdata/claude_usage_limit.jsonl).
 	PromptUsageLimit = "hit the usage limit"
+	// PromptLoseSession makes the agent fail the prompt as Claude's adapter
+	// does for a session it dropped when its Claude Code process died.
+	PromptLoseSession = "lose the session"
 	// PromptBackground starts workflow BackgroundTaskID in the background as
 	// Claude's adapter reports one and ends the turn. BackgroundDelay later
 	// the workflow ends and the agent runs the follow-up turn Claude Code
@@ -385,6 +402,8 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	case PromptUsageLimit:
 		return nil, &acp.RequestError{Code: -32603, Message: "Internal error: You've hit your weekly limit · resets Oct 14, 9am (UTC)",
 			Data: map[string]any{"errorKind": "rate_limit"}}
+	case PromptLoseSession:
+		return nil, acp.NewInternalError(map[string]any{"details": "Session not found"})
 	case PromptAskForm:
 		res, err := acp.SendRequest[struct {
 			Action  string         `json:"action"`
@@ -429,6 +448,39 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		a.workflow(ctx)
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWait:
+		select {
+		case <-cancelled:
+		case <-ctx.Done():
+		}
+		return map[string]any{"stopReason": "cancelled"}, nil
+	case PromptChatter, PromptThink:
+		usage, _ := json.Marshal(map[string]any{"sessionUpdate": "usage_update", "used": 1, "size": 100})
+		commands, _ := json.Marshal(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{}})
+		thought, _ := json.Marshal(map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "."}})
+		tick := time.NewTicker(ChatterInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-cancelled:
+				return map[string]any{"stopReason": "cancelled"}, nil
+			case <-ctx.Done():
+				return map[string]any{"stopReason": "cancelled"}, nil
+			case <-tick.C:
+			}
+			if text == PromptThink {
+				a.update(ctx, thought)
+				continue
+			}
+			a.update(ctx, usage)
+			a.update(ctx, commands)
+		}
+	case PromptLongTool, PromptGoQuiet:
+		if text == PromptGoQuiet {
+			thought, _ := json.Marshal(map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "hm"}})
+			a.update(ctx, thought)
+		} else {
+			a.update(ctx, demoTool("long-tool", "execute", "make build", "in_progress", nil))
+		}
 		select {
 		case <-cancelled:
 		case <-ctx.Done():

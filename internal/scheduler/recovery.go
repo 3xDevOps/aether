@@ -1801,6 +1801,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		workersReason:       sc.WorkersReason,
 		activity:            r.Activity,
 		startedAt:           started,
+		quietFrom:           time.Now().UTC(),
 		relaunchedAt:        relaunched,
 		turnStartedAt:       turnStarted,
 		betweenTurns:        sc.BetweenTurns,

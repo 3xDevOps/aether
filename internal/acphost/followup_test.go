@@ -330,10 +330,13 @@ func TestSubagentOutputDoesNotAcceptAPrompt(t *testing.T) {
 func TestTaskProgressTouchesActivityOnly(t *testing.T) {
 	m := workflowAgent(t)
 	s, rec := startWorkflow(t, m)
-	before := s.State().LastActivity
+	before := s.State()
 	time.Sleep(5 * time.Millisecond)
 	m.sdk(map[string]any{"type": "system", "subtype": "task_progress", "task_id": "wf-1"})
-	waitFor(t, "activity", func() bool { return s.State().LastActivity.After(before) })
+	waitFor(t, "activity and progress", func() bool {
+		st := s.State()
+		return st.LastActivity.After(before.LastActivity) && st.LastProgress.After(before.LastProgress)
+	})
 	rec.noMoreStates(t, "working:prompt", "working:background")
 }
 

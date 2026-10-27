@@ -215,6 +215,10 @@ func (s *Service) Create(ctx context.Context, memberID domain.MemberID, p protoc
 	if err != nil {
 		return protocol.WatchResult{}, err
 	}
+	// GitHub owner and repository names are case-insensitive.
+	if p.Target.Kind == protocol.WatchTargetPR {
+		p.Target.Repo = strings.ToLower(p.Target.Repo)
+	}
 	now := s.now()
 	expires, err := s.expiry(p.ExpiresAt, now)
 	if err != nil {
@@ -340,9 +344,13 @@ func (s *Service) settled(ctx context.Context, id string) (protocol.WatchResult,
 	return s.result(ctx, w)
 }
 
+// Before scheduler recovery a run's needs are not restored yet, so the
+// check is left to the startup sweep, which evaluates every live watch.
 func (s *Service) settledWatch(ctx context.Context, id string) (*store.Watch, error) {
-	if err := s.evaluate(ctx, id); err != nil {
-		return nil, err
+	if s.ready() {
+		if err := s.evaluate(ctx, id); err != nil {
+			return nil, err
+		}
 	}
 	w, err := s.store.GetWatch(ctx, id)
 	if err != nil {
@@ -574,7 +582,18 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 		if err != nil {
 			return protocol.WatchResult{}, err
 		}
-		return s.settled(context.WithoutCancel(ctx), w.ID)
+		ctx = context.WithoutCancel(ctx)
+		// Also when needs_you was already absent: an earlier update may
+		// have saved the conditions and failed before this cleanup.
+		if !slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
+			if err := s.store.DropWatchNeedPushes(ctx, w.ID, now, stoppedNeeds); err != nil {
+				return protocol.WatchResult{}, err
+			}
+			if err := s.withdrawEnded(ctx, w); err != nil {
+				return protocol.WatchResult{}, err
+			}
+		}
+		return s.settled(ctx, w.ID)
 	}
 	return protocol.WatchResult{}, fmt.Errorf("watch %s: changed by every concurrent update", p.WatchID)
 }

@@ -627,6 +627,16 @@ working, and a `needs-attention` run need not have any. The dashboard's
 **Needs you** state is derived from both and is not a new execution status
 or answer transport.
 
+A live or provisioning Enhanced run's `run.get` and `run.list` entries carry
+`liveness`, read from the agent session when asked, not pushed:
+`{"phase":"streaming","last_progress_at":"...","connected_at":"...","transport":"open"}`.
+`phase` is `setup` (provisioning), `awaiting-first-event`, `streaming`,
+`tool-running`, `awaiting-input` or `between-turns`. `last_progress_at` is the agent's last
+message, thought, tool call, plan, subagent, compaction or request since
+`connected_at`, and is absent until there is one. `transport` is `open`,
+`closed` (the session ended or failed to open) or `unknown` (no session
+yet). Other runs omit `liveness`.
+
 Native reporters send `run.report` through their run-scoped coordination
 socket, not the member's gateway control endpoint. The socket supplies the run
 identity. The report accepts the existing `state` (`working` or `waiting`),
@@ -997,7 +1007,8 @@ dashboard proposes: the branch's upstream (else `origin`, when the
 workspace sets an origin) as the head, into the run's base branch on the
 workspace's GitHub source, or on the head repository without one. A
 checkout with no GitHub push remote answers `error` saying to pass
-`target`, and one on a detached HEAD answers `error` saying to pass both. Once a finished run's container is gone, both report the pull
+`target`, and one on a detached HEAD answers `error` saying to pass both. `run.pr.status`
+returns the `expected` and `target` it used, to pass to `run.pr.create`. Once a finished run's container is gone, both report the pull
 request the run last recorded (`number`, `url`, `state`); `run.pr.feedback`
 then has no checks or comments, and `error` says why.
 
@@ -1088,8 +1099,8 @@ unavailable owned source remains the server's protocol error.
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 | `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `needs_restart`, `idle`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the run belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `needs_restart` means the environment was created before the assistant existed and lacks its mounts |
 | `assistant.start` | `{"agent":"claude","restart_environment":false}` (both optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their own agent in their environment, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation. `restart_environment` stops and recreates the environment first |
-| `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[]}`; malformed ids and paths are dropped, `recent` is cut to 8 pages, the oldest pages and then `open_file` go until it fits 4096 bytes, and an unknown `version` is dropped. Unless `share_view` is off, it reaches the agent as an `aether://view-context` resource and becomes the caller's held view context, with `source` `prompt`. A retry of a key already accepted leaves the held view alone |
-| `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's held view context, which the assistant reads with `aether_view_context` along with its `source` (`prompt` or `navigation`) and `age_seconds`, unless `share_view` is off. An update whose `captured_at` is before the held view's is dropped while that view is under 10 seconds old, so a late update never replaces the view a prompt just carried; after that the last one received wins, whatever the device's clock. Kept in memory only |
+| `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `mission`, `pr`, `check`, `failure`, `task`) and any of `workspace_id`, `run_id`, `mission_id`, `task_id`, `attempt_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
+| `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's held view context, which the assistant reads with `aether_view_context` along with its `source` (`prompt` or `navigation`) and `age_seconds`, unless `share_view` is off. An update whose `captured_at` is before the held view's is dropped while that view is under 10 seconds old, so a late update never replaces the view a prompt just carried; after that the last one received wins, whatever the device's clock. One without `route` forgets the held view: the member removed the page from their draft. Kept in memory only |
 | `assistant.cancel` | none | empty result; cancels the turn in flight |
 | `assistant.answer` | `{"request_id":"...","option_id":"...","values":{}}` | empty result; answers one of the harness's permission prompts or questions |
 | `assistant.confirm` | `{"confirmation_id":"...","approve":true}` | empty result; answers a tool call waiting for approval. A confirmation expires after 10 minutes |

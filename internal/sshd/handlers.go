@@ -188,8 +188,14 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
+	// A run whose child-run choice was not recorded must not go on under the
+	// member setting it overrode, and must not survive to be launched again
+	// by a retry of this failed call.
 	if childrenErr != nil {
-		return nil, childrenErr
+		if killErr := s.cfg.Runs.Kill(context.WithoutCancel(ctx), run.ID, member); killErr != nil {
+			return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; stopping run %s also failed: %v", childrenErr.Message, run.ID, killErr)}
+		}
+		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; run %s was stopped, so launch again", childrenErr.Message, run.ID)}
 	}
 	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
 }
@@ -299,6 +305,9 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
 		out.Cause = string(s.cfg.Runs.Cause(run.ID, run.Activity))
 		out.Wait = s.cfg.Runs.Wait(run.ID, run.Activity)
+		if l, ok := s.cfg.Runs.Liveness(run.ID); ok {
+			out.Liveness = protocol.RunLivenessFromDomain(l)
+		}
 		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
 		out.Switching = string(s.cfg.Runs.Switching(run.ID))
 		retention, err := s.cfg.Runs.Retention(run)

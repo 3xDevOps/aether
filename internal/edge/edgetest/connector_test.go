@@ -36,15 +36,30 @@ type connectorClient struct {
 	host     string
 	id       string
 	redirect string
+	// loopback lists the client as one that may return to a loopback
+	// redirect, as Claude Code is.
+	loopback []string
 }
 
 func newConnectorClient(t *testing.T) *connectorClient {
+	t.Helper()
+	return newClient(t, false)
+}
+
+// newClient is a test client; with loopback it is like Claude Code: its
+// document lists http://127.0.0.1/callback, it returns there on a port
+// it picked, and the server lists it as a loopback client.
+func newClient(t *testing.T, loopback bool) *connectorClient {
 	t.Helper()
 	mux := http.NewServeMux()
 	srv := httptest.NewUnstartedServer(mux)
 	host := srv.Listener.Addr().String()
 	c := &connectorClient{srv: srv, host: host, id: "https://" + host + "/client.json", redirect: "https://" + host + "/callback"}
-	doc, err := json.Marshal(map[string]any{"client_id": c.id, "client_name": "Test client", "redirect_uris": []string{c.redirect}})
+	listed := c.redirect
+	if loopback {
+		listed, c.redirect, c.loopback = "http://127.0.0.1/callback", "http://127.0.0.1:54321/callback", []string{c.id}
+	}
+	doc, err := json.Marshal(map[string]any{"client_id": c.id, "client_name": "Test client", "redirect_uris": []string{listed}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +102,7 @@ func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, s
 func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
 func (launcher) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
 func (launcher) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
+func (launcher) Liveness(domain.RunID) (domain.RunLiveness, bool)             { return domain.RunLiveness{}, false }
 func (launcher) Switching(domain.RunID) domain.LaunchMode                     { return "" }
 func (launcher) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
 	return scheduler.RetentionInfo{}, nil
@@ -223,12 +239,14 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 			}
 			var prm, asm map[string]any
 			if resp, body = mcpRequest(t, http.MethodGet, metadata, nil, nil); resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &prm) != nil ||
-				prm["resource"] != base || fmt.Sprint(prm["authorization_servers"]) != "["+base+"]" {
+				prm["resource"] != base || fmt.Sprint(prm["authorization_servers"]) != "["+base+"]" ||
+				fmt.Sprint(prm["scopes_supported"]) != "[offline_access]" {
 				t.Fatalf("protected resource metadata: %s %s", resp.Status, body)
 			}
 			if resp, body = mcpRequest(t, http.MethodGet, h.relayURL+"/.well-known/oauth-authorization-server"+edgeproto.MCPPath(s.id), nil, nil); resp.StatusCode != http.StatusOK ||
 				json.Unmarshal([]byte(body), &asm) != nil || asm["issuer"] != base || asm["authorization_endpoint"] != base+"/authorize" ||
-				asm["token_endpoint"] != base+"/token" || asm["client_id_metadata_document_supported"] != true || asm["registration_endpoint"] != nil {
+				asm["token_endpoint"] != base+"/token" || asm["client_id_metadata_document_supported"] != true || asm["registration_endpoint"] != nil ||
+				fmt.Sprint(asm["scopes_supported"]) != "[offline_access]" {
 				t.Fatalf("authorization server metadata: %s %s", resp.Status, body)
 			}
 
@@ -262,8 +280,8 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 				}
 				names = append(names, tool.Name)
 			}
-			if len(names) != 26 {
-				t.Fatalf("tools = %v, want all 26", names)
+			if len(names) != 34 {
+				t.Fatalf("tools = %v, want all 34", names)
 			}
 			const task = "fix the flaky login test"
 			if out := callTool(t, session, "aether_list_runs", map[string]any{"mine": true}); strings.Contains(out, task) {

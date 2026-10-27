@@ -38,6 +38,9 @@ type Run struct {
 	// Wait comes from the scheduler too: the evidence behind a reported wait
 	// the run shows, judged from the conditions the agent named.
 	Wait *domain.RunWait `json:"wait,omitempty"`
+	// Liveness comes from the scheduler for a live or provisioning Enhanced
+	// run only.
+	Liveness *RunLiveness `json:"liveness,omitempty"`
 	// RequestedAccountMemberID is the account the launcher asked for, set
 	// only when its usage was exhausted and the run launched on
 	// AccountMemberID instead.
@@ -101,6 +104,29 @@ type Run struct {
 	BaseCheckedAt *string `json:"base_checked_at,omitempty"`
 	// Repos are checkouts; their workspace_id is what the per-run methods take as repo, and empty repo is the primary.
 	Repos []RunRepo `json:"repos,omitempty"`
+}
+
+// RunLiveness is where a live Enhanced run's turn is: its phase (see
+// domain.TurnPhase), when its agent last made progress, when its agent
+// connection opened, and whether that connection is open, closed or unknown.
+type RunLiveness struct {
+	Phase          string  `json:"phase,omitempty"`
+	LastProgressAt *string `json:"last_progress_at,omitempty"`
+	ConnectedAt    *string `json:"connected_at,omitempty"`
+	Transport      string  `json:"transport"`
+}
+
+func RunLivenessFromDomain(l domain.RunLiveness) *RunLiveness {
+	out := &RunLiveness{Phase: string(l.Phase), Transport: l.Transport}
+	if !l.LastProgress.IsZero() {
+		at := l.LastProgress.UTC().Format(time.RFC3339Nano)
+		out.LastProgressAt = &at
+	}
+	if !l.Since.IsZero() {
+		at := l.Since.UTC().Format(time.RFC3339Nano)
+		out.ConnectedAt = &at
+	}
+	return out
 }
 
 type RunRepo struct {
