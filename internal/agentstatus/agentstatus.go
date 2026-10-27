@@ -81,6 +81,9 @@ type Report struct {
 	// TurnStart marks a Working report sent as a prompt starts a turn, also
 	// one that arrives while the agent already works.
 	TurnStart bool `json:"turn_start,omitempty"`
+	// Stop marks the Idle report of a main agent's stop that a hook may
+	// hold back, once: not one already continuing for a stop hook.
+	Stop bool `json:"stop,omitempty"`
 }
 
 const ReporterCommand = coordtransport.BinaryPath
@@ -107,6 +110,7 @@ type claudeHook struct {
 	ToolUseID       string `json:"tool_use_id"`
 	ElicitationID   string `json:"elicitation_id"`
 	IsInterrupt     bool   `json:"is_interrupt"`
+	StopHookActive  bool   `json:"stop_hook_active"`
 	BackgroundTasks []struct {
 		Type string `json:"type"`
 	} `json:"background_tasks"`
@@ -195,7 +199,7 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 			return Report{State: Working, Reason: BackgroundReason(held), Tools: agents == 0}, true
 		}
 		if hook.Event == "Stop" {
-			return Report{State: Idle, Reason: ReasonIdle}, true
+			return Report{State: Idle, Reason: ReasonIdle, Stop: !hook.StopHookActive}, true
 		}
 		// "rate_limit" also covers transient 429s; only the vendor's
 		// usage-limit wording marks the account's limit.

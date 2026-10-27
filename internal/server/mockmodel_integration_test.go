@@ -10,19 +10,25 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 )
 
 // mockModel stands in for a vendor's model API: streaming Anthropic
 // Messages for Claude Code and streaming OpenAI Responses for Codex. Every
 // conversation plays one scripted turn. A request that offers a shell tool
-// gets a call running command, and the request carrying a tool's output
-// gets answer as text.
+// gets a call running command, or the report Aether's report reminder asks
+// for, and the request carrying a tool's output gets answer as text.
 type mockModel struct {
 	command string
 	answer  string
 
 	mu       sync.Mutex
 	requests []modelRequest
+	// calls numbers the tool calls: a conversation that calls twice needs
+	// distinct ids.
+	calls int
 }
 
 type modelRequest struct {
@@ -85,6 +91,7 @@ func (m *mockModel) messages(w http.ResponseWriter, body []byte) {
 	var req struct {
 		Model    string `json:"model"`
 		Messages []struct {
+			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		} `json:"messages"`
 		Tools []struct {
@@ -95,18 +102,26 @@ func (m *mockModel) messages(w http.ResponseWriter, body []byte) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Claude Code sends a Stop hook's feedback as a trailing system message,
+	// so the tool output is in the last user message.
 	var last json.RawMessage
 	answered := false
-	if n := len(req.Messages); n > 0 {
-		last = req.Messages[n-1].Content
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if last == nil {
+			last = req.Messages[i].Content
+		}
+		if req.Messages[i].Role != "user" {
+			continue
+		}
 		var blocks []struct {
 			Type string `json:"type"`
 		}
-		if json.Unmarshal(last, &blocks) == nil {
+		if json.Unmarshal(req.Messages[i].Content, &blocks) == nil {
 			for _, b := range blocks {
 				answered = answered || b.Type == "tool_result"
 			}
 		}
+		break
 	}
 	m.record(body, last)
 	tools := make([]string, len(req.Tools))
@@ -116,9 +131,9 @@ func (m *mockModel) messages(w http.ResponseWriter, body []byte) {
 	start := map[string]any{"type": "text", "text": ""}
 	delta := map[string]any{"type": "text_delta", "text": m.answer}
 	stop := "end_turn"
-	if name, args := m.call(tools, answered); name != "" {
+	if name, args := m.call(tools, answered, last, body); name != "" {
 		input, _ := json.Marshal(args)
-		start = map[string]any{"type": "tool_use", "id": "toolu_mock", "name": name, "input": map[string]any{}}
+		start = map[string]any{"type": "tool_use", "id": m.callID("toolu_mock"), "name": name, "input": map[string]any{}}
 		delta = map[string]any{"type": "input_json_delta", "partial_json": string(input)}
 		stop = "tool_use"
 	}
@@ -164,11 +179,11 @@ func (m *mockModel) responses(w http.ResponseWriter, body []byte) {
 	}
 	var item map[string]any
 	var events []map[string]any
-	if name, args := m.call(tools, answered); name != "" {
+	if name, args := m.call(tools, answered, last, body); name != "" {
 		arguments, _ := json.Marshal(args)
 		item = map[string]any{
-			"id": "fc_mock", "type": "function_call", "status": "completed",
-			"call_id": "call_mock", "name": name, "arguments": string(arguments),
+			"id": m.callID("fc_mock"), "type": "function_call", "status": "completed",
+			"call_id": m.callID("call_mock"), "name": name, "arguments": string(arguments),
 		}
 		events = []map[string]any{{"type": "response.output_item.added", "output_index": 0, "item": item}}
 	} else {
@@ -199,13 +214,26 @@ func (m *mockModel) responses(w http.ResponseWriter, body []byte) {
 	)...)
 }
 
-func (m *mockModel) call(tools []string, answered bool) (string, any) {
-	if answered {
+func (m *mockModel) callID(prefix string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	return fmt.Sprintf("%s_%d", prefix, m.calls)
+}
+
+// call answers a report reminder last carries by reporting, once per
+// conversation, and anything else without a tool's output by running command.
+func (m *mockModel) call(tools []string, answered bool, last json.RawMessage, body []byte) (string, any) {
+	command := m.command
+	switch {
+	case strings.Contains(string(last), coordhooks.ReportReminderLead) && !strings.Contains(string(body), `\"outcome\":\"answered\"`):
+		command = coordtransport.CLIPath + " report --outcome answered --summary 'ran the command'"
+	case answered:
 		return "", nil
 	}
 	for _, name := range tools {
 		if args, ok := shellTools[name]; ok {
-			return name, args(m.command)
+			return name, args(command)
 		}
 	}
 	return "", nil
