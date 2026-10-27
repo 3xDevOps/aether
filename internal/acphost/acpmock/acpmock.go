@@ -41,6 +41,9 @@ const (
 	// does when the account's usage limit is reached
 	// (acphost/testdata/claude_usage_limit.jsonl).
 	PromptUsageLimit = "hit the usage limit"
+	// PromptLoseSession makes the agent fail the prompt as Claude's adapter
+	// does for a session it dropped when its Claude Code process died.
+	PromptLoseSession = "lose the session"
 	// PromptBackground starts workflow BackgroundTaskID in the background as
 	// Claude's adapter reports one and ends the turn. BackgroundDelay later
 	// the workflow ends and the agent runs the follow-up turn Claude Code
@@ -385,6 +388,8 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	case PromptUsageLimit:
 		return nil, &acp.RequestError{Code: -32603, Message: "Internal error: You've hit your weekly limit · resets Oct 14, 9am (UTC)",
 			Data: map[string]any{"errorKind": "rate_limit"}}
+	case PromptLoseSession:
+		return nil, acp.NewInternalError(map[string]any{"details": "Session not found"})
 	case PromptAskForm:
 		res, err := acp.SendRequest[struct {
 			Action  string         `json:"action"`

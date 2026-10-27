@@ -423,6 +423,8 @@ type supervised struct {
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
+	// sessionLostAt is when the agent last lost the run's Enhanced session.
+	sessionLostAt time.Time
 	// usageLimit is the agent's usage-limit message its headless output
 	// carried, and accountSwap the move to another account in progress.
 	usageLimit  string

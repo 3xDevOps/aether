@@ -338,6 +338,7 @@ login shell stay up.
 | --- | --- | --- |
 | The session cannot start, for example because the agent is not signed in | **Disconnected**, `enhanced session failed: <error>`. Messages are refused with `scheduler: the enhanced session is not running: <error>`. | Fix the cause, then press **Retry Enhanced** in the Session view. |
 | The agent's process exits | The turn in flight shows **Turn interrupted**; **Disconnected**, `enhanced session ended: the agent's ACP server exited with code <n>`, with `; stderr: <tail>` when it printed any. | **Retry Enhanced**. |
+| The agent drops its session but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent session lost** while Aether restores the session. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its session again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
 | The server restarts mid-turn | **Needs you**, `turn interrupted`. Background tasks the agent was running are gone. | Send a message to continue. |
 | You cancel a turn or press Stop | **Waiting**, `turn cancelled`. | Send a message when you want it to go on. |
 | A Claude background task never ends | `running`, `working in background: <n> tasks`. | Press Stop. |

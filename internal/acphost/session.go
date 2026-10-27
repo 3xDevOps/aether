@@ -170,7 +170,7 @@ func (s *Session) resolveLocked(a *turnAck, err error) {
 		return
 	}
 	if err != nil && !errors.Is(err, ErrClosed) {
-		err = fmt.Errorf("acphost: the agent refused the prompt: %w", err)
+		err = fmt.Errorf("acphost: %w: %w", domain.ErrPromptRefused, err)
 	}
 	s.callback(func() { a.delivered(err) })
 }
@@ -519,8 +519,11 @@ func awaitAccept(ctx context.Context, ack *turnAck) (Receipt, error) {
 	defer grace.Stop()
 	select {
 	case <-ack.done:
+		if errors.Is(ack.err, ErrClosed) {
+			return Receipt{}, ack.err
+		}
 		if ack.err != nil {
-			return Receipt{}, fmt.Errorf("acphost: the agent refused the prompt: %w", ack.err)
+			return Receipt{}, fmt.Errorf("acphost: %w: %w", domain.ErrPromptRefused, ack.err)
 		}
 	case <-grace.C:
 	case <-ctx.Done():
