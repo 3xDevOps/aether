@@ -88,7 +88,7 @@ describe('watches in settings', () => {
   it('lists live watches with their state, the real error and the last notice, and All shows ended ones', async () => {
     const user = userEvent.setup()
     showSettings([
-      watch({ last_notification: notice }),
+      watch({ last_notification: notice, source: 'assistant' }),
       watch({ id: 'wat-2', target: { kind: 'pr', repo: 'acme/app', number: 12 }, target_title: 'Fix login', conditions: ['ci'], state: 'error', error: 'GitHub refused the token: 401 Bad credentials' }),
       watch({ id: 'wat-3', target_title: 'old run', state: 'done' }),
     ])
@@ -100,6 +100,8 @@ describe('watches in settings', () => {
     expect(rows[0]!.textContent).toContain('PR #12 · acme/app')
     expect(rows[1]!.textContent).toContain('Watching · Needs you, Finished')
     expect(rows[1]!.textContent).toContain('Last notice: fix the login redirect needs you')
+    expect(rows[1]!.textContent).toContain('Run · Kept by the assistant')
+    expect(rows[0]!.textContent).not.toContain('Kept by')
     expect(screen.queryByText('old run')).toBeNull()
 
     await user.click(screen.getByRole('radio', { name: 'All' }))
@@ -117,7 +119,7 @@ describe('watches in settings', () => {
     const user = userEvent.setup()
     const { rerender } = showSettings([watch()], {
       watchGet: vi.fn(async () => ({
-        watch: watch(),
+        watch: watch({ source: 'assistant' }),
         notifications: [
           notice,
           {
@@ -141,6 +143,7 @@ describe('watches in settings', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'fix the login redirect' })
     expect(within(dialog).getByText('Working: editing auth.go')).toBeDefined()
+    expect(within(dialog).getByText('Kept by the assistant')).toBeDefined()
     await within(dialog).findByText('Push delivered to 2 devices')
     expect(within(dialog).getByText('Held for quiet hours: Until 07:00 CET')).toBeDefined()
     expect(within(dialog).getByText('No push device - in-app only')).toBeDefined()

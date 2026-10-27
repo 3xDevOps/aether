@@ -6339,7 +6339,9 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
 - **Settings › Watches** (`src/routes/settings/watches.tsx`), shown when the
   server has `watch.list`: the member's watches from the `watches` store
   slice (`src/store/watches.ts`, read at hydration and on wake) in an
-  `InsetList`. A row holds the label or target title, the target kind, a
+  `InsetList`. A row holds the label or target title, the target kind
+  (followed by `Kept by the assistant` for a watch whose `source` is
+  `assistant`, also shown in the detail's header), a
   `StateLine` (`Watching`, `Paused`, `Cannot check`, `Done`, `Expired`) with
   the conditions, the server's error verbatim for `error`, the last notice
   and the last and next check. **Active** (the default) hides done and
