@@ -44,7 +44,7 @@ func (f *fakeCaller) Call(_ context.Context, method string, params json.RawMessa
 	case protocol.MethodWorkspaceList:
 		return json.RawMessage(`{"workspaces":[{"id":"ws-1","name":"shop"},{"id":"ws-2","name":"web"}]}`), nil
 	case protocol.MethodTemplateList:
-		return json.RawMessage(`{"templates":[{"name":"triage","harness":"claude","mode":"acp","model":"opus","task":"triage issue {{issue}}"}]}`), nil
+		return json.RawMessage(`{"templates":[{"name":"triage","harness":"claude","mode":"acp","model":"opus","task":"triage issue {{issue}}\nthen label it","version":"v1"}]}`), nil
 	}
 	return json.RawMessage(`{}`), nil
 }
@@ -428,5 +428,35 @@ func TestLaunchCardQuotesTheTaskFirstLine(t *testing.T) {
 	}
 	if want := `Launch claude (acp) in shop, no fallback: "Fix the "login" bug…"`; card != want {
 		t.Fatalf("run.launch card = %q, want %q", card, want)
+	}
+}
+
+// A template launch's card shows the task its params fill in, and the
+// approved launch is pinned to the version the card showed; a launch pinned
+// to an older version gets no card.
+func TestTemplateLaunchIsPinnedToItsCard(t *testing.T) {
+	fc := &fakeCaller{}
+	var cards []string
+	s := &Server{Caller: fc, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		cards = append(cards, c.Summary)
+		return nil
+	}}
+	launch := func(method string, params any) *protocol.Error {
+		raw, _ := json.Marshal(params)
+		_, perr := s.dispatch(t.Context(), protocol.Request{Method: method, Params: raw})
+		return perr
+	}
+	if perr := launch(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}}); perr != nil {
+		t.Fatal(perr)
+	}
+	sent, err := protocol.DecodeParams[protocol.TemplateLaunchParams](fc.params[protocol.MethodTemplateLaunch])
+	if err != nil || sent.ExpectedVersion != "v1" || sent.Params["issue"] != "42" || !strings.HasSuffix(cards[0], `: "triage issue 42…"`) {
+		t.Fatalf("template.launch sent %+v (%v) after card %q, want pinned to v1", sent, err, cards[0])
+	}
+	delete(fc.params, protocol.MethodTemplateLaunch)
+	perr := launch(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"},
+		ExpectedVersion: "v0"})
+	if perr == nil || perr.Code != protocol.CodeConflict || len(cards) != 1 || fc.params[protocol.MethodTemplateLaunch] != nil {
+		t.Fatalf("a stale template launch = %v with %d cards, want a conflict and no card", perr, len(cards))
 	}
 }

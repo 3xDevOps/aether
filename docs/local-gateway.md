@@ -1017,6 +1017,12 @@ the GitHub login of the run's home, as `gh` in the run did, and has no
 comments, `mergeable` or `merge_state_status`; `error` says why when that read
 fails.
 
+`template.list` gives each template a `version`, which changes whenever its
+task, agent, mode, model or parameter defaults do. `template.launch` with
+`expected_version` fails with `-32003` `templates: template changed: <name>
+was saved again and is now version <new>, not <old>` instead of launching a
+template changed since it was read.
+
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the
 dashboard's query state: `<dashboard_url>/?run=<run_id>` opens a run and

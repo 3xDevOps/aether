@@ -304,7 +304,9 @@ text again on purpose, pass a new `idempotency_key`.
 - `fallback`: with neither `fallback_account_member_ids` nor `no_fallback`, a
   launch whose account has used 95% of a usage window moves to the usable
   account with the most usage left.
-- With `workspace_id`, its templates; with `models` (an agent name) and
+- With `workspace_id`, its templates, each with its `version`; pass it to
+  `aether_launch_run` as `template_version` to refuse a template changed since.
+  With `models` (an agent name) and
   optionally `account_member_id`, that agent's model ids on that account, which
   the server caches. `account_member_id` without `models` is refused. When it
   lists none, launch without `model` for the agent's default.

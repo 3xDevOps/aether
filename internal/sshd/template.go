@@ -149,7 +149,7 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
-		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, created)
+		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, p.ExpectedVersion, created)
 		if err != nil {
 			return nil, templateError(err)
 		}
@@ -248,6 +248,9 @@ func templateError(err error) *protocol.Error {
 		errors.Is(err, templates.ErrInvalidDefinition) {
 		return invalidParams(err.Error())
 	}
+	if errors.Is(err, templates.ErrChanged) {
+		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}
+	}
 	return rpcError(err)
 }
 
@@ -263,6 +266,7 @@ func templateWire(t *store.Template) protocol.Template {
 		Params:      t.Params,
 		BudgetUSD:   t.BudgetUSD,
 		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),
+		Version:     templates.Version(t),
 	}
 }
 

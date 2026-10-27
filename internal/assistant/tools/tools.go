@@ -23,6 +23,7 @@ import (
 
 	"github.com/3xDevOps/Aether/docs"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/templates"
 )
 
 const (
@@ -261,6 +262,7 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 		if rpcErr := s.summarize(ctx, req, &c); rpcErr != nil {
 			return nil, rpcErr
 		}
+		req.Params = c.Params
 		if reason != "" {
 			c.Summary += fmt.Sprintf(". The assistant's reason: %q", reason)
 		}
@@ -606,8 +608,9 @@ func (s *Server) summarizeMission(ctx context.Context, req protocol.Request, c *
 	return nil
 }
 
-// summarizeTemplate names the template's agent, mode, model and task, which
-// any workspace admin may have changed since the assistant read them.
+// summarizeTemplate names the template's agent, mode, model and task as the
+// params fill it in, and pins the launch to that version of the template,
+// which any workspace admin may change while the card waits.
 func (s *Server) summarizeTemplate(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
 	p, err := protocol.DecodeParams[protocol.TemplateLaunchParams](req.Params)
 	if err != nil || p.WorkspaceID == "" || p.Name == "" {
@@ -626,16 +629,27 @@ func (s *Server) summarizeTemplate(ctx context.Context, req protocol.Request, c 
 		return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: workspace %s has no template %q", req.Method, ws, truncate(p.Name))}
 	}
 	t := list.Templates[i]
+	if p.ExpectedVersion != "" && p.ExpectedVersion != t.Version {
+		return &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("%s: template %q was saved again and is now version %s, not %s",
+			req.Method, truncate(p.Name), t.Version, truncate(p.ExpectedVersion))}
+	}
+	task, err := templates.Render(t.Task, t.Params, p.Params)
+	if err != nil {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(req.Params, &fields); err != nil {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": params must be an object"}
+	}
+	fields["expected_version"], _ = json.Marshal(t.Version)
+	if c.Params, err = json.Marshal(fields); err != nil {
+		return &protocol.Error{Code: protocol.CodeInternal, Message: req.Method + ": " + err.Error()}
+	}
 	agent := fmt.Sprintf("%s (%s)", truncate(t.Harness), cmp.Or(t.Mode, "headless"))
 	if t.Model != "" {
 		agent = fmt.Sprintf("%s (%s, %s)", truncate(t.Harness), cmp.Or(t.Mode, "headless"), truncate(t.Model))
 	}
-	c.Summary = fmt.Sprintf("Launch template %q in %s: %s on your account", truncate(p.Name), ws, agent)
-	if len(p.Params) > 0 {
-		values, _ := json.Marshal(p.Params)
-		c.Summary += fmt.Sprintf(" with %q", truncate(string(values)))
-	}
-	c.Summary += fmt.Sprintf(": \"%s\"", firstLine(t.Task))
+	c.Summary = fmt.Sprintf("Launch template %q in %s: %s on your account: \"%s\"", truncate(p.Name), ws, agent, firstLine(task))
 	return nil
 }
 

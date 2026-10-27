@@ -127,7 +127,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	}
 	want := map[string]string{
 		protocol.MethodRunLaunch:      `Launch claude (default mode) in shop on "Grace"'s account, falling back to your account in order, with repositories "web": "fix it"`,
-		protocol.MethodTemplateLaunch: `Launch template "triage" in shop: claude (acp, opus) on your account with "{\"issue\":\"42\"}": "triage issue {{issue}}"`,
+		protocol.MethodTemplateLaunch: `Launch template "triage" in shop: claude (acp, opus) on your account: "triage issue 42…"`,
 		protocol.MethodMissionCreate: `Start a swarm in shop with integrator claude (acp) on your account, agents claude (acp) on your account, codex (tui) on "Grace"'s account, may fall back to accounts shared with you: "ship it". ` +
 			`The assistant's reason: "the member asked for codex workers"`,
 		protocol.MethodRunInject:                `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,

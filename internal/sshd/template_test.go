@@ -152,6 +152,19 @@ func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T)
 		t.Fatalf("launch with an unknown parameter = %v, want CodeInvalidParams", err)
 	}
 
+	// A launch pinned to a version the template no longer has starts nothing.
+	if list.Templates[0].Version == "" {
+		t.Fatal("template.list returned no version")
+	}
+	if err := bobControl.Call(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{
+		WorkspaceID: string(e.ws.ID), Name: "nightly-deps", ExpectedVersion: "0123456789abcdef",
+	}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeConflict || !strings.Contains(pe.Message, list.Templates[0].Version) {
+		t.Fatalf("launch at a stale version = %v, want CodeConflict naming %s", err, list.Templates[0].Version)
+	}
+	if calls := e.runs.Calls(); len(calls) != 1 {
+		t.Fatalf("calls after a stale launch = %v, want only the manual launch", calls)
+	}
+
 	// Scheduling is launching: a standing order for future runs.
 	var scheduled protocol.ScheduleSaveResult
 	if err := bobControl.Call(protocol.MethodScheduleSave, protocol.ScheduleSaveParams{

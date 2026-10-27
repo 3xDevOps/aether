@@ -323,6 +323,7 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 		}
 		type template struct {
 			Name    string   `json:"name"`
+			Version string   `json:"version"`
 			Harness string   `json:"harness"`
 			Mode    string   `json:"mode"`
 			Model   string   `json:"model,omitempty"`
@@ -331,7 +332,7 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 		templates, tasks := []template{}, map[string]string{}
 		for _, t := range res.Templates[:min(len(res.Templates), maxRows)] {
 			params := slices.Sorted(maps.Keys(t.Params))
-			templates = append(templates, template{Name: t.Name, Harness: t.Harness, Mode: t.Mode, Model: t.Model, Params: params})
+			templates = append(templates, template{Name: t.Name, Version: t.Version, Harness: t.Harness, Mode: t.Mode, Model: t.Model, Params: params})
 			tasks[t.Name] = clip(t.Task, maxReport)
 		}
 		out["templates"], out["untrusted"] = templates, map[string]any{"template_tasks": tasks}
@@ -366,8 +367,9 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 }
 
 // launchTemplate runs aether_launch_run's template on the caller's own
-// account; template.launch takes nothing else a run launch does, so naming
-// it is refused rather than dropped.
+// account, refused if template_version names one it no longer is;
+// template.launch takes nothing else a run launch does, so naming it is
+// refused rather than dropped.
 func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (string, any, error) {
 	var named []string
 	for field, set := range map[string]bool{"task": in.Task != "", "harness": in.Harness != "", "mode": in.Mode != "", "model": in.Model != "",
@@ -379,7 +381,7 @@ func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (stri
 	}
 	if len(named) > 0 {
 		slices.Sort(named)
-		return "", nil, invalid("a template launch takes only workspace_id, template, params and idempotency_key: the template sets the rest and runs on your own account, so %s cannot be given",
+		return "", nil, invalid("a template launch takes only workspace_id, template, params, template_version and idempotency_key: the template sets the rest and runs on your own account, so %s cannot be given",
 			strings.Join(named, ", "))
 	}
 	info, err := serverInfo(ctx, c.read)
@@ -391,7 +393,8 @@ func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (stri
 		return "", nil, err
 	}
 	l := links(info.DashboardURL)
-	params := protocol.TemplateLaunchParams{WorkspaceID: in.WorkspaceID, Name: in.Template, Params: in.Params, IdempotencyKey: in.IdempotencyKey}
+	params := protocol.TemplateLaunchParams{WorkspaceID: in.WorkspaceID, Name: in.Template, Params: in.Params, ExpectedVersion: in.TemplateVersion,
+		IdempotencyKey: in.IdempotencyKey}
 	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		params.IdempotencyKey, dup, _, done, err = keyless(info.Member.ID, protocol.MethodTemplateLaunch, params, func() (bool, error) { return false, nil })

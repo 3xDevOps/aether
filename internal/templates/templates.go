@@ -34,6 +34,9 @@ package templates
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -62,6 +65,21 @@ var ErrMissingParam = errors.New("templates: missing parameter")
 // malformed: a missing field, a bad name or mode, an unparseable cron
 // rule.
 var ErrInvalidDefinition = errors.New("templates: invalid definition")
+
+// ErrChanged is returned when a launch expects a version of the template
+// that has since been saved over.
+var ErrChanged = errors.New("templates: template changed")
+
+// Version identifies what a launch of t runs: its task, agent, mode, model
+// and parameter defaults.
+func Version(t *store.Template) string {
+	b, _ := json.Marshal(struct {
+		Task, Harness, Mode, Model string
+		Params                     map[string]string
+	}{t.Task, t.Harness, string(t.Mode), t.Model, t.Params})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
+}
 
 // Launcher is the scheduler seam: the one entry point every run comes
 // through, hand-launched or fired by cron. The server supplies the same
@@ -245,10 +263,16 @@ func (s *Service) Delete(ctx context.Context, workspace domain.WorkspaceID, name
 // Launch renders a template and launches it as member. Permission is the
 // caller's business: this is the manually invoked path, guarded at the RPC
 // boundary like any other launch. created is domain.LaunchOptions.Created.
-func (s *Service) Launch(ctx context.Context, workspace domain.WorkspaceID, name string, member domain.MemberID, params map[string]string, created func(domain.RunID)) (*Launched, error) {
+// Launch launches the template name; a non-empty version must be its
+// current Version.
+func (s *Service) Launch(ctx context.Context, workspace domain.WorkspaceID, name string, member domain.MemberID, params map[string]string, version string,
+	created func(domain.RunID)) (*Launched, error) {
 	t, err := s.store.GetTemplate(ctx, workspace, name)
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", name, err)
+	}
+	if current := Version(t); version != "" && version != current {
+		return nil, fmt.Errorf("%w: %s was saved again and is now version %s, not %s", ErrChanged, name, current, version)
 	}
 	return s.launch(ctx, t, member, params, created)
 }

@@ -36,9 +36,11 @@ type connectorLaunchInput struct {
 	Harness     string            `json:"harness,omitempty"`
 	Template    string            `json:"template,omitempty" jsonschema:"a saved template to run instead of task"`
 	Params      map[string]string `json:"params,omitempty" jsonschema:"the template's placeholder values"`
-	Mode        string            `json:"mode,omitempty" jsonschema:"default acp if installed"`
-	Model       string            `json:"model,omitempty"`
-	Children    string            `json:"children,omitempty" jsonschema:"may the agent start child runs; default your setting"`
+	// TemplateVersion pins the template as aether_launch_options read it.
+	TemplateVersion string `json:"template_version,omitempty" jsonschema:"the template's version, refused if it changed"`
+	Mode            string `json:"mode,omitempty" jsonschema:"default acp if installed"`
+	Model           string `json:"model,omitempty"`
+	Children        string `json:"children,omitempty" jsonschema:"may the agent start child runs; default your setting"`
 	accountChoice
 	// Reason is the assistant's, for the member's confirmation card; the
 	// server never sees it.
@@ -295,8 +297,8 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	switch {
 	case in.Template != "":
 		return launchTemplate(ctx, c, in)
-	case len(in.Params) > 0:
-		return "", nil, invalid("params fill a template's placeholders; pass template too")
+	case len(in.Params) > 0 || in.TemplateVersion != "":
+		return "", nil, invalid("params and template_version are for a template; pass template too")
 	case in.Task == "" || in.Harness == "":
 		return "", nil, invalid("task and harness are required, or template to run a saved template; aether_launch_options lists the agents and, with workspace_id, the templates")
 	}
