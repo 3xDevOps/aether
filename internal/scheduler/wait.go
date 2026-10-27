@@ -60,13 +60,14 @@ const waitBrokenReasonPrefix = "wait broken: "
 // names the conditions the agent will not be woken by: one that left
 // pending and whose wake was not delivered within wakeGrace, or one whose
 // source went unread for unreadBound. It holds no time or source status, so
-// the reason built from it stays put while the run needs a member.
+// the reason built from it stays put while the run needs a member. Error is
+// that of the highest-ranked condition with one.
 func classifyWait(conditions []WaitCondition, now time.Time) (wait domain.RunWait, stranded string) {
 	rank := map[domain.WaitEvidence]int{domain.WaitUnverified: 0, domain.WaitCondition: 1, domain.WaitSourceUnknown: 2, domain.WaitFault: 3}
 	wait.Kind = domain.WaitUnverified
 	var details []string
 	var oldest time.Time
-	neverRead := false
+	neverRead, errRank := false, -1
 	for _, c := range conditions {
 		if c.State == waitCancelled || c.State == waitSuperseded {
 			continue
@@ -113,8 +114,8 @@ func classifyWait(conditions []WaitCondition, now time.Time) (wait domain.RunWai
 			detail += " (" + c.Summary + ")"
 		}
 		details = append(details, detail)
-		if wait.Error == "" {
-			wait.Error = errText
+		if errText != "" && rank[kind] > errRank {
+			wait.Error, errRank = errText, rank[kind]
 		}
 		switch {
 		case c.SourceCheckedAt.IsZero():
