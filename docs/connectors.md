@@ -254,11 +254,8 @@ Things to ask:
 - "Merge the login fix PR if CI is green."
 - "The billing swarm's integrator stopped; replace it."
 
-The connector tells ChatGPT and Claude to launch only when you ask for work
-and to write the task as Aether's assistant does
-([What a launch's task holds](assistant.md#what-a-launchs-task-holds)):
-your request in your meaning, every must-not kept, no added scope, and each
-assumption labelled `Assumption:`.
+The connector tells ChatGPT and Claude to launch and write the task as
+Aether's assistant does: [What a launch's task holds](assistant.md#what-a-launchs-task-holds).
 
 Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
