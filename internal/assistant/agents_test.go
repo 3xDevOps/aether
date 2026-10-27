@@ -25,7 +25,7 @@ func TestReadiness(t *testing.T) {
 	}
 	want := []protocol.AssistantAgent{
 		{Name: "claude", DisplayName: "claude", Ready: true},
-		{Name: "codex", DisplayName: "codex", Reason: "No sign-in found"},
+		{Name: "codex", DisplayName: "codex", Reason: "Not signed in for the assistant"},
 	}
 	if !slices.Equal(agents, want) {
 		t.Fatalf("readiness = %+v, want %+v", agents, want)

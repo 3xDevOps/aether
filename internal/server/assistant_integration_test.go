@@ -539,7 +539,8 @@ func TestIntegrationAssistant(t *testing.T) {
 	}
 }
 
-// seedAssistantMember adds a member whose claude agent is ready.
+// seedAssistantMember adds a member signed in to Claude Code for the
+// assistant.
 func seedAssistantMember(t *testing.T, ctx context.Context, srv *Server, data string, role domain.Role) *domain.Member {
 	t.Helper()
 	_, signer := writeClientKey(t)
@@ -547,15 +548,12 @@ func seedAssistantMember(t *testing.T, ctx context.Context, srv *Server, data st
 	if err := srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
-	home := filepath.Join(data, "homes", string(member.ID))
-	for _, name := range []string{".local/bin/claude", ".local/bin/claude-agent-acp", ".claude/.credentials.json"} {
-		path := filepath.Join(home, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	login := filepath.Join(scheduler.AssistantHomeDir(filepath.Join(data, "assistant"), member.ID), ".claude", ".credentials.json")
+	if err := os.MkdirAll(filepath.Dir(login), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(login, []byte(`{"claudeAiOauth":{"accessToken":"synthetic"}}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	return member
 }

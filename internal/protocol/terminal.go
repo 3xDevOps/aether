@@ -22,13 +22,16 @@ const (
 
 // TerminalRequest carries tab selection and terminal dimensions. Follow
 // means the same as it does in AttachRequest: render at the session's size
-// and impose none.
+// and impose none. AssistantLogin names an agent to sign in for the
+// assistant instead: the stream is that agent's sign-in, run in the member's
+// assistant container, and Tab is ignored.
 type TerminalRequest struct {
-	Tab    string `json:"tab,omitempty"`
-	Cols   uint   `json:"cols,omitempty"`
-	Rows   uint   `json:"rows,omitempty"`
-	Follow bool   `json:"follow,omitempty"`
-	Framed bool   `json:"framed,omitempty"`
+	Tab            string `json:"tab,omitempty"`
+	AssistantLogin string `json:"assistant_login,omitempty"`
+	Cols           uint   `json:"cols,omitempty"`
+	Rows           uint   `json:"rows,omitempty"`
+	Follow         bool   `json:"follow,omitempty"`
+	Framed         bool   `json:"framed,omitempty"`
 }
 
 // TerminalImageParams carries the base64-encoded original image bytes.

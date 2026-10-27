@@ -177,9 +177,10 @@ func (s *Server) terminalHistory(ctx context.Context, _ domain.MemberID, params 
 	}, nil
 }
 
-// serveTerminal serves one member's persistent environment terminal. The
-// member identity comes from the authenticated SSH connection, so the header
-// cannot select another member's environment.
+// serveTerminal serves one member's persistent environment terminal, or an
+// agent's sign-in for their assistant. The member identity comes from the
+// authenticated SSH connection, so the header cannot select another member's
+// environment or assistant.
 func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *sessionState, ch subsystemConn) {
 	defer func() { _ = ch.Close() }()
 
@@ -208,15 +209,20 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 		cols, rows = 80, 24
 	}
 
+	key := ptyhost.TerminalSession(member, tab)
 	s.authorizationMu.Lock()
 	admissionErr := s.checkMember(ctx, member)
-	if admissionErr == nil {
-		_, admissionErr = s.cfg.Runs.EnsureTerminal(ctx, member)
-	}
-	if admissionErr == nil {
-		admissionErr = s.cfg.Runs.EnsureTerminalTab(ctx, member, tab, cols, rows)
+	if admissionErr == nil && req.AssistantLogin == "" {
+		if _, admissionErr = s.cfg.Runs.EnsureTerminal(ctx, member); admissionErr == nil {
+			admissionErr = s.cfg.Runs.EnsureTerminalTab(ctx, member, tab, cols, rows)
+		}
 	}
 	s.authorizationMu.Unlock()
+	// A first sign-in installs the adapter, too long to hold admissions for;
+	// revokeOnPolicyChange still ends the stream if the member is removed.
+	if admissionErr == nil && req.AssistantLogin != "" {
+		key, admissionErr = s.cfg.Runs.StartAssistantLogin(ctx, member, req.AssistantLogin, cols, rows)
+	}
 	if admissionErr != nil {
 		e := rpcError(admissionErr)
 		_ = writeJSONLine(ch, protocol.TerminalResponse{Code: e.Code, Error: e.Message})
@@ -233,7 +239,7 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	conn := newAttachConn(ch, r, ack, req.Framed, nil)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.cfg.PTY.Attach(attachCtx, ptyhost.TerminalSession(member, tab), ptyhost.AttachClient{
+		errCh <- s.cfg.PTY.Attach(attachCtx, key, ptyhost.AttachClient{
 			Member:   member,
 			Cols:     cols,
 			Rows:     rows,

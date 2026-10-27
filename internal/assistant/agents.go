@@ -12,7 +12,7 @@ import (
 var agentOrder = []string{"claude", "codex"}
 
 // ErrNoAgent means none of the assistant's agents is ready.
-var ErrNoAgent = errors.New("assistant: no agent is ready; sign in to Claude Code or Codex in your environment terminal")
+var ErrNoAgent = errors.New("assistant: no agent is ready; sign in to Claude Code or Codex for the assistant")
 
 // readiness describes the assistant's agents from an agent.list result. An
 // agent is ready when found reports its login in the member's own home: the
@@ -31,7 +31,7 @@ func readiness(listed []protocol.AgentInfo, found func(agent string) (bool, erro
 		}
 		agent := protocol.AssistantAgent{Name: name, DisplayName: listed[i].DisplayName, Ready: ok}
 		if !ok {
-			agent.Reason = "No sign-in found"
+			agent.Reason = "Not signed in for the assistant"
 		}
 		out = append(out, agent)
 	}

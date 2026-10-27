@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,11 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
-	"syscall"
+	"sync"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -24,9 +26,14 @@ import (
 // directory read-only; the adapter runs there.
 const AssistantCwd = "/assistant"
 
-// AssistantInstallPath is where the assistant's adapter is installed: read-only
-// in the assistant container, writable only in the container that installs it.
+// AssistantInstallPath holds each agent's install at <agent>: read-only in the
+// assistant container, writable only in the container that installs it.
 const AssistantInstallPath = "/opt/aether-assistant"
+
+// assistantPolicyPaths are where Claude Code and Codex read system-wide
+// managed settings. The assistant container mounts an empty server directory
+// over each, read-only, so neither the image nor the agent supplies one.
+var assistantPolicyPaths = []string{"/etc/claude-code", "/etc/codex"}
 
 // assistantIdle keeps the container up for execs and exits on SIGTERM.
 var assistantIdle = []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 3600 & wait $!; done"}
@@ -51,10 +58,15 @@ func AssistantInstructionsDir(root string, member domain.MemberID) string {
 	return filepath.Join(root, string(member), "instructions")
 }
 
-// AssistantInstallDir is the host directory mounted at AssistantInstallPath
-// for agent. Each agent has its own, so switching agents keeps both installs.
+// AssistantInstallDir is agent's install under the host directory mounted at
+// AssistantInstallPath. Each agent has its own, so switching agents keeps
+// both installs.
 func AssistantInstallDir(root string, member domain.MemberID, agent string) string {
 	return filepath.Join(root, string(member), "install", agent)
+}
+
+func assistantPolicyDir(root string, member domain.MemberID) string {
+	return filepath.Join(root, string(member), "policy")
 }
 
 // assistantInstalled records the adapter in AssistantInstallDir once its
@@ -73,12 +85,35 @@ func assistantInstallCreationKey(member domain.MemberID) string {
 
 const assistantPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-// assistantContainerPlan is the member's assistant container for agent: the
-// standard image, the assistant home, the instructions, the installed adapter
-// read-only, and from the member's home only agent's login files, each
-// mounted alone so a refresh reaches the member's runs too.
-func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.MemberID, profile harness.Profile) (runtime.Spec, error) {
-	if s.cfg.AssistantDir == "" || s.cfg.Homes == nil {
+// assistantAgents are the agents the assistant runs, each with its own bin
+// directory in the assistant container's PATH.
+var assistantAgents = []string{"claude", "codex"}
+
+// assistantPins holds the dependencies an adapter declares by range to the
+// version the assistant runs: codex-acp 2.1.1 accepts any @openai/codex
+// ^0.159.1.
+var assistantPins = map[string]map[string]string{"codex": {"@openai/codex": "0.159.3"}}
+
+func (s *Scheduler) assistantLock(member domain.MemberID) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.assistantLocks == nil {
+		s.assistantLocks = make(map[domain.MemberID]*sync.Mutex)
+	}
+	lock := s.assistantLocks[member]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.assistantLocks[member] = lock
+	}
+	return lock
+}
+
+// assistantContainerPlan is the member's assistant container: the standard
+// image, the assistant home, and read-only the instructions, every agent's
+// install and empty managed-settings directories. It mounts nothing from the
+// member's home, which their runs write.
+func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.MemberID) (runtime.Spec, error) {
+	if s.cfg.AssistantDir == "" {
 		return runtime.Spec{}, errors.New("scheduler: the assistant needs the server's data directory")
 	}
 	c := s.coordinationSeam()
@@ -97,46 +132,22 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	hostHome := AssistantHomeDir(s.cfg.AssistantDir, member)
 	instructions := AssistantInstructionsDir(s.cfg.AssistantDir, member)
 	sock := AssistantSocketDir(s.cfg.AssistantDir, member)
-	install := AssistantInstallDir(s.cfg.AssistantDir, member, profile.Name)
-	for _, dir := range []string{hostHome, instructions, sock, install} {
+	install := filepath.Join(s.cfg.AssistantDir, string(member), "install")
+	policy := assistantPolicyDir(s.cfg.AssistantDir, member)
+	for _, dir := range []string{hostHome, instructions, sock, install, policy} {
 		if err = os.MkdirAll(dir, 0o755); err != nil {
 			return runtime.Spec{}, fmt.Errorf("scheduler: create the assistant's directories: %w", err)
 		}
 	}
-	memberHome, err := s.cfg.Homes.Path(member)
-	if err != nil {
-		return runtime.Spec{}, fmt.Errorf("scheduler: resolve member home: %w", err)
-	}
-	logins, identities, err := assistantLogins(memberHome, profile)
-	if err != nil {
-		return runtime.Spec{}, err
-	}
-	if err = prepareAssistantHome(hostHome, logins, profile.BorrowedState); err != nil {
-		return runtime.Spec{}, err
-	}
-	// A reinstall replaces the directory, which a kept container would still
-	// mount.
-	installInfo, err := os.Stat(install)
-	if err != nil {
-		return runtime.Spec{}, fmt.Errorf("scheduler: stat the assistant's install: %w", err)
-	}
-	installID := identityOf(installInfo)
-	identities = append(identities, fmt.Sprintf("install:%d:%d", installID.dev, installID.ino))
 	mounts := []runtime.Mount{
 		{HostPath: hostHome, ContainerPath: home},
 		{HostPath: instructions, ContainerPath: AssistantCwd, ReadOnly: true},
 		{HostPath: install, ContainerPath: AssistantInstallPath, ReadOnly: true},
 	}
-	nestings := make(map[string]string, len(logins))
-	for _, rel := range logins {
-		target := path.Join(home, rel)
-		mounts = append(mounts, runtime.Mount{HostPath: memberHome, Subpath: rel, ContainerPath: target})
-		nestings[target] = home
+	for _, p := range assistantPolicyPaths {
+		mounts = append(mounts, runtime.Mount{HostPath: policy, ContainerPath: p, ReadOnly: true})
 	}
-	if err = runtime.ValidateMounts(mounts, runtime.MountPolicy{
-		OwnedRoots:      []string{s.cfg.AssistantDir, s.cfg.Homes.Root()},
-		AllowedNestings: nestings,
-	}); err != nil {
+	if err = runtime.ValidateMounts(mounts, runtime.MountPolicy{OwnedRoots: []string{s.cfg.AssistantDir}}); err != nil {
 		return runtime.Spec{}, err
 	}
 	// The current digest is never collected, and a container mounting an
@@ -157,11 +168,14 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	if err := s.applyRunOwnership(nil, &domain.Run{}, member, mounts[:1], user); err != nil {
 		return runtime.Spec{}, fmt.Errorf("scheduler: hand the assistant home to its user: %w", err)
 	}
-	env := map[string]string{"HOME": home, "PATH": AssistantInstallPath + "/bin:" + assistantPath}
+	bins := make([]string, 0, len(assistantAgents)+1)
+	for _, agent := range assistantAgents {
+		bins = append(bins, path.Join(AssistantInstallPath, agent, "node_modules", ".bin"))
+	}
 	spec := runtime.Spec{
 		Name:             "aether-assistant-" + string(member),
 		Image:            image,
-		Env:              env,
+		Env:              map[string]string{"HOME": home, "PATH": strings.Join(append(bins, assistantPath), ":")},
 		WorkingDir:       AssistantCwd,
 		Command:          assistantIdle,
 		Mounts:           mounts,
@@ -171,91 +185,13 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 		MemoryLimitBytes: s.cfg.RunMemoryBytes,
 		PidsLimit:        s.cfg.RunPidsLimit,
 	}
-	spec.Fingerprint = assistantFingerprint(spec, identities)
+	spec.Fingerprint = assistantFingerprint(spec)
 	return spec, nil
 }
 
-// assistantLogins are profile's login paths that are non-empty regular files
-// in memberHome, and an identity of each: a login replaced since the
-// container was created must be mounted again. An empty file is a mountpoint
-// Aether created, not a login.
-func assistantLogins(memberHome string, profile harness.Profile) ([]string, []string, error) {
-	paths, err := profile.LoginPaths()
-	if err != nil {
-		return nil, nil, fmt.Errorf("scheduler: %w", err)
-	}
-	root, err := os.OpenRoot(memberHome)
-	if err != nil {
-		return nil, nil, fmt.Errorf("scheduler: open member home: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-	var logins, identities []string
-	for _, rel := range paths {
-		info, err := root.Lstat(rel)
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-			continue
-		}
-		if err != nil {
-			return nil, nil, fmt.Errorf("scheduler: inspect the login %s: %w", rel, err)
-		}
-		if !info.Mode().IsRegular() || info.Size() == 0 {
-			continue
-		}
-		id := identityOf(info)
-		logins = append(logins, rel)
-		identities = append(identities, fmt.Sprintf("%s:%d:%d", rel, id.dev, id.ino))
-	}
-	return logins, identities, nil
-}
-
-// prepareAssistantHome creates the login mountpoints and the state that lets
-// the agent start signed in. The container writes this home, so every path is
-// opened beneath it.
-func prepareAssistantHome(hostHome string, logins []string, state map[string]map[string]any) error {
-	root, err := os.OpenRoot(hostHome)
-	if err != nil {
-		return fmt.Errorf("scheduler: open the assistant home: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-	files := make(map[string][]byte, len(logins)+len(state))
-	for _, rel := range logins {
-		files[rel] = nil
-	}
-	for rel, keys := range state {
-		data, err := json.Marshal(keys)
-		if err != nil {
-			return fmt.Errorf("scheduler: encode %s: %w", rel, err)
-		}
-		files[rel] = data
-	}
-	for rel, data := range files {
-		if err := root.MkdirAll(path.Dir(rel), 0o700); err != nil {
-			return fmt.Errorf("scheduler: prepare the assistant's %s: %w", rel, err)
-		}
-		f, err := root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if errors.Is(err, fs.ErrExist) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("scheduler: prepare the assistant's %s: %w", rel, err)
-		}
-		_, err = f.Write(data)
-		if closeErr := f.Close(); err == nil {
-			err = closeErr
-		}
-		if err != nil {
-			return fmt.Errorf("scheduler: write the assistant's %s: %w", rel, err)
-		}
-	}
-	return nil
-}
-
-func assistantFingerprint(spec runtime.Spec, logins []string) string {
+func assistantFingerprint(spec runtime.Spec) string {
 	spec.Name, spec.CreationKey, spec.Fingerprint = "", "", ""
-	data, err := json.Marshal(struct {
-		Spec   runtime.Spec
-		Logins []string
-	}{spec, logins})
+	data, err := json.Marshal(spec)
 	if err != nil {
 		panic(fmt.Sprintf("scheduler: fingerprint assistant spec: %v", err))
 	}
@@ -263,11 +199,11 @@ func assistantFingerprint(spec runtime.Spec, logins []string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// ensureAssistantContainer starts the member's assistant container for
-// profile, keeping the existing one only when it was created from the same
-// plan. Callers serialize per member.
-func (s *Scheduler) ensureAssistantContainer(ctx context.Context, member domain.MemberID, profile harness.Profile) (runtime.ID, error) {
-	spec, err := s.assistantContainerPlan(ctx, member, profile)
+// ensureAssistantContainer starts the member's assistant container, keeping
+// the existing one only when it was created from the same plan. Callers hold
+// assistantLock.
+func (s *Scheduler) ensureAssistantContainer(ctx context.Context, member domain.MemberID) (runtime.ID, error) {
+	spec, err := s.assistantContainerPlan(ctx, member)
 	if err != nil {
 		return "", err
 	}
@@ -329,41 +265,24 @@ func (s *Scheduler) removeByCreationKey(ctx context.Context, key string) error {
 }
 
 // DiscardAssistantState destroys the member's assistant container and
-// deletes its home: sessions, transcripts, history, todos, file history,
-// shell snapshots and logs. The container goes first: deleting a login
-// mountpoint under a running container would unmount the login there. The
-// home is removed whole, never entry by entry, so no entry the agent made a
-// symlink reaches s.cfg.RemoveAll. Callers serialize per member with starting
-// it.
+// deletes everything in its home but the assistant's sign-ins: sessions,
+// transcripts, history, todos, file history, shell snapshots and logs.
 func (s *Scheduler) DiscardAssistantState(ctx context.Context, member domain.MemberID) error {
+	lock := s.assistantLock(member)
+	lock.Lock()
+	defer lock.Unlock()
 	if err := s.removeAssistantContainer(ctx, member); err != nil {
 		return err
 	}
-	if err := s.cfg.RemoveAll(ctx, AssistantHomeDir(s.cfg.AssistantDir, member)); err != nil {
-		return fmt.Errorf("scheduler: discard the assistant home: %w", err)
-	}
-	return nil
-}
-
-// AssistantLoginFound reports whether agent's login is in the member's own
-// home by the rule the assistant container mounts it by.
-func (s *Scheduler) AssistantLoginFound(member domain.MemberID, agent string) (bool, error) {
-	profile, ok := harness.Lookup(agent)
-	if !ok || s.cfg.Homes == nil {
-		return false, fmt.Errorf("agent %q cannot run the assistant", agent)
-	}
-	memberHome, err := s.cfg.Homes.Path(member)
-	if err != nil {
-		return false, fmt.Errorf("scheduler: resolve member home: %w", err)
-	}
-	logins, _, err := assistantLogins(memberHome, profile)
-	return len(logins) > 0, err
+	return s.sweepAssistantHome(ctx, AssistantHomeDir(s.cfg.AssistantDir, member), false)
 }
 
 // RemoveAssistant destroys the member's assistant and install containers and
-// deletes their whole assistant directory. Callers serialize per member with
-// starting it.
+// deletes their whole assistant directory.
 func (s *Scheduler) RemoveAssistant(ctx context.Context, member domain.MemberID) error {
+	lock := s.assistantLock(member)
+	lock.Lock()
+	defer lock.Unlock()
 	if err := errors.Join(s.removeAssistantContainer(ctx, member), s.removeByCreationKey(ctx, assistantInstallCreationKey(member))); err != nil {
 		return err
 	}
@@ -373,17 +292,21 @@ func (s *Scheduler) RemoveAssistant(ctx context.Context, member domain.MemberID)
 	return nil
 }
 
-// installAssistant installs profile's pinned adapter into the member's
-// AssistantInstallDir unless that version is there, calling installing first.
-// The install runs in a container of its own, the only one that mounts the
-// directory writable, and starts from an empty directory. Both adapters run
-// the agent CLI their package depends on, so the adapter pin moves the CLI
-// too.
+// installAssistant installs profile's pinned adapter, with the dependencies
+// assistantPins holds, into the member's AssistantInstallDir unless that
+// package.json is installed there, calling installing first. The install runs
+// in a container of its own, the only one that mounts the directory
+// writable, and starts from an empty directory. Callers hold assistantLock.
 func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID, profile harness.Profile, installing func()) error {
-	pkg := profile.ACPInstall.Package + "@" + profile.ACPInstall.Version
+	deps := map[string]string{profile.ACPInstall.Package: profile.ACPInstall.Version}
+	maps.Copy(deps, assistantPins[profile.Name])
+	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": deps})
+	if err != nil {
+		return fmt.Errorf("scheduler: encode the assistant's package.json: %w", err)
+	}
 	stamp := assistantInstalled(s.cfg.AssistantDir, member, profile.Name)
 	got, err := os.ReadFile(stamp)
-	if err == nil && string(got) == pkg {
+	if err == nil && bytes.Equal(got, manifest) {
 		return nil
 	}
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -406,11 +329,15 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 	if err = os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("scheduler: create the assistant's install: %w", err)
 	}
+	if err = os.WriteFile(filepath.Join(dir, "package.json"), manifest, 0o644); err != nil {
+		return fmt.Errorf("scheduler: write the assistant's package.json: %w", err)
+	}
 	user, err := s.resolveContainerUser(ctx, s.cfg.StandardImage, harness.Profile{})
 	if err != nil {
 		return fmt.Errorf("scheduler: resolve the assistant's user: %w", err)
 	}
-	mounts := []runtime.Mount{{HostPath: dir, ContainerPath: AssistantInstallPath}}
+	target := path.Join(AssistantInstallPath, profile.Name)
+	mounts := []runtime.Mount{{HostPath: dir, ContainerPath: target}}
 	if err = s.applyRunOwnership(nil, &domain.Run{}, member, mounts, user); err != nil {
 		return fmt.Errorf("scheduler: hand the assistant's install to its user: %w", err)
 	}
@@ -432,7 +359,7 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 	var code int
 	var stdout, stderr string
 	if err = s.cfg.Runtime.Start(ctx, cid); err == nil {
-		code, stdout, stderr, err = s.cfg.Runtime.Exec(ctx, cid, []string{"npm", "install", "-g", "--prefix", AssistantInstallPath, pkg}, "/tmp")
+		code, stdout, stderr, err = s.cfg.Runtime.Exec(ctx, cid, []string{"npm", "install", "--no-audit", "--no-fund", "--prefix", target}, "/tmp")
 	}
 	// Destroying the container also stops an install a cancelled Exec left
 	// running.
@@ -450,7 +377,7 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 		}
 		return fmt.Errorf("scheduler: install %s for the assistant exited %d: %s", profile.Label(), code, out)
 	}
-	if err = os.WriteFile(stamp, []byte(pkg), 0o644); err != nil {
+	if err = os.WriteFile(stamp, manifest, 0o644); err != nil {
 		return fmt.Errorf("scheduler: record the assistant's install: %w", err)
 	}
 	return nil

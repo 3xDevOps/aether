@@ -219,6 +219,7 @@ type Scheduler struct {
 	developmentMu         sync.Mutex
 	development           *developmentState
 	terminalLocks         map[domain.MemberID]*sync.Mutex
+	assistantLocks        map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
 	titleMu               sync.Mutex

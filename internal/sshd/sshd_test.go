@@ -802,6 +802,10 @@ func (f *fakeRuns) EnsureTerminalTab(_ context.Context, member domain.MemberID, 
 	return f.record(fmt.Sprintf("terminal-tab:%s:%s:%d:%d", member, tab, cols, rows))
 }
 
+func (f *fakeRuns) StartAssistantLogin(_ context.Context, member domain.MemberID, agent string, cols, rows uint) (ptyhost.SessionKey, error) {
+	return ptyhost.AssistantLoginSession(member, agent), f.record(fmt.Sprintf("assistant-login:%s:%s:%d:%d", member, agent, cols, rows))
+}
+
 func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error {
 	if err := f.record(fmt.Sprintf("terminal-stop:%s", member)); err != nil {
 		return err

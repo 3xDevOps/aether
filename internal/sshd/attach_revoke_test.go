@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,6 +223,11 @@ func rawAttachRequest(t *testing.T, e *testEnv, signer ssh.Signer, req protocol.
 }
 func rawTerminal(t *testing.T, e *testEnv, signer ssh.Signer, withPTY bool, tab string) (rawAttachConn, protocol.TerminalResponse) {
 	t.Helper()
+	return rawTerminalRequest(t, e, signer, withPTY, protocol.TerminalRequest{Tab: tab})
+}
+
+func rawTerminalRequest(t *testing.T, e *testEnv, signer ssh.Signer, withPTY bool, req protocol.TerminalRequest) (rawAttachConn, protocol.TerminalResponse) {
+	t.Helper()
 	client, err := e.dialWith(signer, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -265,7 +271,7 @@ func rawTerminal(t *testing.T, e *testEnv, signer ssh.Signer, withPTY bool, tab 
 		t.Fatalf("subsystem: ok=%v err=%v", ok, rerr)
 	}
 	r := bufio.NewReader(ch)
-	header, err := json.Marshal(protocol.TerminalRequest{Tab: tab})
+	header, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal header: %v", err)
 	}
@@ -771,6 +777,27 @@ func TestTerminalDropsOnMembershipRevocation(t *testing.T) {
 		t.Fatalf("delete member: %v", err)
 	}
 	c.expectExit(t, protocol.AttachExitMembershipRevoked)
+}
+
+// An assistant sign-in streams the member's own sign-in session and never
+// starts their environment terminal.
+func TestTerminalAssistantLoginStartsOnlyTheSignIn(t *testing.T) {
+	t.Parallel()
+	e := revocableEnv(t)
+	collab, cm := addMember(t, e, "Sign-in user", domain.RoleCollaborator, false)
+	_, ack := rawTerminalRequest(t, e, collab, true, protocol.TerminalRequest{AssistantLogin: "claude"})
+	if !ack.OK {
+		t.Fatalf("ack = %+v, want ok", ack)
+	}
+	calls := e.runs.Calls()
+	if len(calls) == 0 || calls[len(calls)-1] != "assistant-login:"+string(cm.ID)+":claude:80:24" {
+		t.Fatalf("RunController calls = %v, want the assistant sign-in", calls)
+	}
+	for _, call := range calls {
+		if strings.HasPrefix(call, "terminal") {
+			t.Fatalf("RunController calls = %v, want no environment terminal", calls)
+		}
+	}
 }
 
 // A collaborator typing into a teammate's terminal is demoted to viewer
