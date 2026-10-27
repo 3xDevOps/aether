@@ -147,8 +147,9 @@ func TestIntegrationAssistantAutoApprove(t *testing.T) {
 	if launched.Run.MemberID != string(env.member.ID) {
 		t.Fatalf("auto-approved run belongs to %q, want the member", launched.Run.MemberID)
 	}
-	if follows, err := env.srv.Store().ListAssistantFollows(ctx, runID); err != nil || len(follows) != 1 {
-		t.Fatalf("follows after an auto-approved launch = %+v, %v", follows, err)
+	var watches protocol.WatchListResult
+	if perr := env.call(protocol.MethodWatchList, protocol.WatchListParams{RunID: string(runID)}, &watches); perr != nil || len(watches.Watches) != 1 {
+		t.Fatalf("watches after an auto-approved launch = %+v, %v", watches.Watches, perr)
 	}
 	waitRunStatus(t, sub, &seen, string(runID), domain.RunRunning)
 	close(release)
