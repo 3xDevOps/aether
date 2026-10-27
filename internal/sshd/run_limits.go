@@ -38,7 +38,7 @@ func (s *Server) serverRunLimits(ctx context.Context, member domain.MemberID, ra
 		if p.Pids != nil {
 			pids = *p.Pids
 		}
-		if err := scheduler.ValidateRunBudgets(cpus, memory, pids); err != nil {
+		if err = scheduler.ValidateRunBudgets(cpus, memory, pids); err != nil {
 			return nil, invalidParams(err.Error())
 		}
 		limits, err = s.cfg.Store.UpdateServerRunLimits(ctx, p.CPUs, p.MemoryBytes, p.Pids)
