@@ -413,6 +413,15 @@ mounts. Uploading to a run needs permission to steer it and writes into its
 launcher's home. The files stay until removed or the member is deleted, every
 container that mounts the home can read them, and saved images leave them out.
 
+### Run file uploads
+
+**Upload files…** in a run's **Files** needs permission to steer the run and
+writes into its checkout. An uploaded file is part of the run's changes, and
+so of what it commits and publishes, unless the repository ignores it. Files
+lists ignored files too, and anyone who can view the run can read any file in
+its checkout, a `.env` included. Keep a value viewers must not see as a
+workspace secret and out of files.
+
 ## Agent configuration and Files
 
 `aether config push` uploads agent configuration from your computer
@@ -582,6 +591,17 @@ there is no terminal, file, settings or git-writing tool.
   person approved: a method that needs an approved device refuses it, and it
   cannot mint a pairing code or a Slack link code that would outlive these
   cut-offs.
+- An edge given `--reviewer-account-file` offers one password sign-in, the
+  [reviewer account](edge.md#reviewer-account), for an app directory's
+  review. Anyone holding its password authorizes a connector as the member it
+  is bound to, so a server takes it only with `edge-reviewer` on, under
+  `edge-access account`, and only for a member who is no admin; it gets no
+  edge session. Ten wrong passwords in a row for its login lock it for 15
+  minutes, which also lets anyone who knows the login keep it locked, and
+  the `429` confirms a guessed login, so keep the login as private as the
+  password. A new password stops only new sign-ins; unlinking the login
+  deletes its connectors, and binding it again does not revive them. Bind it to a member of a server kept for the review: every
+  member reads every workspace.
 - Under `edge-access account` the consent page has no code, so an
   authorization link someone started in their own ChatGPT or Claude, opened
   by a member signed in at the edge, is one **Allow** away from connecting

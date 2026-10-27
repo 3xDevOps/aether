@@ -2201,7 +2201,20 @@ CREATE TABLE launch_defaults (
 	updated_at        INTEGER NOT NULL
 );
 `,
-	// v92: each member's private assistant preferences, the setting that
+	// v92: server-wide run limits an admin sets from the dashboard, and a
+	// run's own override of them. Zero means unset.
+	`
+CREATE TABLE server_run_limits (
+	id           INTEGER PRIMARY KEY CHECK (id = 1),
+	cpus         REAL    NOT NULL DEFAULT 0,
+	memory_bytes INTEGER NOT NULL DEFAULT 0,
+	pids         INTEGER NOT NULL DEFAULT 0
+);
+ALTER TABLE runs ADD COLUMN cpu_limit REAL NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN memory_limit_bytes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pids_limit INTEGER NOT NULL DEFAULT 0;
+`,
+	// v93: each member's private assistant preferences, the setting that
 	// lets the assistant use them, and temporary conversations that do not.
 	`
 CREATE TABLE member_preferences (

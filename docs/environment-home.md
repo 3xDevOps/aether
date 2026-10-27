@@ -58,10 +58,18 @@ workspace or profile sets them:
 | `YARN_CACHE_FOLDER` | `/aether-cache/yarn` |
 | `npm_config_store_dir` (pnpm) | `/aether-cache/pnpm` |
 
-You do not need to clean them. Aether removes the oldest inactive caches
-hourly and before refusing work for disk pressure, aiming for 4 GiB per member
-pool, 16 GiB in total and 7 days since last use. A cache path you set
-yourself is never cleaned. Logins, CLIs and keys stay in the home.
+You do not need to clean them. Aether keeps each member's caches under
+20 GiB: every hour it deletes their least recently used Go build cache
+(`go-build`) files until the member is back under. Files used in the last 2
+hours stay, so running builds keep their files, and a member who builds more
+than 20 GiB in 2 hours stays over until those files age. When disk space runs
+low, every older Go build file goes.
+
+Caches no run or environment is using are removed whole, oldest first, hourly
+and before refusing work for disk pressure: after 7 days unused, above 4 GiB
+per pool, or once all caches together pass 16 GiB. Other tools' caches break
+when single files disappear, so they shrink only this way. A cache path you
+set yourself is never cleaned. Logins, CLIs and keys stay in the home.
 
 ## Set up an agent
 

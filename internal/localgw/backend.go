@@ -267,7 +267,7 @@ func callBound(method string) time.Duration {
 	switch method {
 	case protocol.MethodAgentInstall:
 		return protocol.AgentInstallTimeout + callTimeout
-	case protocol.MethodHomeUpload, protocol.MethodHomeDownload, protocol.MethodTerminalFile, protocol.MethodWorkspaceImport:
+	case protocol.MethodHomeUpload, protocol.MethodHomeDownload, protocol.MethodTerminalFile, protocol.MethodWorkspaceImport, protocol.MethodFilesUpload:
 		return transferTimeout
 	case protocol.MethodTerminalExec:
 		return protocol.TerminalExecTimeout + callTimeout
@@ -380,6 +380,7 @@ var noReplay = map[string]bool{
 	protocol.MethodMemberInvitationRevoke: true,
 	protocol.MethodMemberIdentityLink:     true,
 	protocol.MethodMemberIdentityRemove:   true,
+	protocol.MethodMemberReviewerLink:     true,
 	protocol.MethodMemberMergeStart:       true,
 	protocol.MethodMemberMergePropose:     true,
 	protocol.MethodMemberMergeAccept:      true,
@@ -400,6 +401,7 @@ var noReplay = map[string]bool{
 	protocol.MethodConfigWrite:  true,
 	protocol.MethodConfigImport: true,
 	protocol.MethodFilesWrite:   true,
+	protocol.MethodFilesUpload:  true,
 
 	protocol.MethodTerminalExec:  true,
 	protocol.MethodTerminalImage: true,

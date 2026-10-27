@@ -353,8 +353,9 @@ expire, and stay on every server until revoked.
    file in the server's invites directory until redeemed or expired, and no
    command lists it.
 4. If the account was linked to a member while someone else held it, remove the
-   account without removing the member. Its devices are revoked and the member,
-   role, SSH keys and tailnet identity stay:
+   account without removing the member. Its devices are revoked, the
+   connectors its sign-in authorized are deleted, and the member, role, SSH
+   keys and tailnet identity stay:
 
    ```sh
    aether member identities <member-id>
@@ -491,6 +492,56 @@ Update servers before their edge where one operator runs both. On a shared
 edge, update the edge once its servers can follow; servers still at protocol
 3 cannot take new universal connections until they update. Neither direction
 needs a manual step, and `MinVersion` stays 1.
+
+#### Reviewer account
+
+An app directory's reviewer cannot sign in with GitHub, which emails a
+password-only account a code on each new browser. With
+`--reviewer-account-file`, the sign-in page a connector sign-in reaches
+offers **Sign in with the reviewer account**, at
+`https://<sign-in host>/connectors/reviewer`; without it that path answers
+404. The file, which `aether-edge reviewer` writes, holds one login, its
+bcrypt password hash and one server id:
+
+```json
+{"login": "<random-login>", "password_hash": "$2a$10$...", "server_id": "<server id>"}
+```
+
+The right login and password show **Choose a server** with that server
+alone. Its assertion names the account `reviewer:<login>`, a provider no
+GitHub account has; no grant, directory entry or control message can carry
+it. The edge starts no session for it: it reaches no other page, so it
+cannot sign in a device, claim a server or open an invitation. The sign-in
+rate limit per address applies, and 10 wrong passwords in a row for its
+login, from any address, lock it for 15 minutes:
+`429 the reviewer sign-in is locked after 10 wrong passwords in a row; try
+again after <time>`. Attempts at once count before their check ends, so
+parallel guesses cannot pass 10. A wrong login does not count, so a `429`
+tells a guesser the login was right: pick a login nobody would guess and
+share it only with the review. The lock lives in memory, so a restart lifts
+it. The edge checks at most 4 reviewer passwords at once, from any address,
+and answers `429 4 reviewer sign-ins are being checked already` beyond
+that. Each attempt logs `edge: reviewer signed in` or `edge: reviewer
+sign-in refused: <reason>`, with `client_ip`, including rate-limited and
+malformed ones.
+
+The server decides the rest. It takes the assertion only under
+`edge-access account`, with `edge-reviewer` on (off by default; set it on
+the server's host with `sudo aether-server config set edge-reviewer true`
+and restart), and once an admin bound the login to a member who is no admin
+with `aether member link --reviewer <login> <member-id>`. Otherwise the
+consent page refuses with the reason; under `approved-devices` it asks for a
+pairing code as for anyone. A connector the reviewer authorized acts as that
+member, and every call checks again: `aether member unlink <member-id>
+reviewer:<login>` deletes the connectors it authorized, so binding the
+login again does not revive them; turning `edge-reviewer` off or making the
+member an admin cuts them off at their next call. A new password, written
+by `aether-edge reviewer` and read at the edge's next start, only stops new
+sign-ins; unlink the login too to cut off connectors already authorized.
+
+Edge protocol 5 brings the reviewer account. A server before protocol 5
+refuses its assertion as malformed, so **Choose a server** lists such a
+server as too old and signs it none.
 
 TLS ends at the edge, because ChatGPT and Claude connect only to a host with a
 public certificate. A compromised edge, while it runs, can read and alter every
@@ -755,6 +806,7 @@ and names the problem, such as `no GitHub OAuth app is configured; set
 | `--egress-budget` | `AETHER_EDGE_EGRESS_BUDGET` | `0`: bytes per UTC month, a plain integer. 0 means none |
 | `--github-client-id` | `AETHER_EDGE_GITHUB_CLIENT_ID` | Required |
 | `--github-client-secret-file` | `AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE` | None; the unit sets it |
+| `--reviewer-account-file` | `AETHER_EDGE_REVIEWER_ACCOUNT_FILE` | None. The [reviewer account](#reviewer-account) file; unset answers 404 at `/connectors/reviewer` |
 | `--openai-challenge` | `AETHER_EDGE_OPENAI_CHALLENGE` | None. OpenAI's domain verification token, served as `text/plain` at `https://<relay host>/.well-known/openai-apps-challenge`; unset answers 404 |
 | `--dev-listen` | `AETHER_EDGE_DEV_LISTEN` | None. Plain HTTP on a loopback address for local testing |
 | none | `AETHER_EDGE_GITHUB_CLIENT_SECRET` | None. The secret itself, instead of a file; setting both is refused |
@@ -1064,6 +1116,7 @@ sudo -u aether-edge aether-edge accounts list
 sudo -u aether-edge aether-edge accounts block github:<user id>
 sudo -u aether-edge aether-edge accounts unblock github:<user id>
 sudo -u aether-edge aether-edge accounts delete github:<user id>
+sudo -u aether-edge aether-edge reviewer --login <login> --server-id <server id> <file>
 ```
 
 | Command | Effect |
@@ -1072,6 +1125,7 @@ sudo -u aether-edge aether-edge accounts delete github:<user id>
 | `servers block` | Does what `remove` does, and refuses the id at enrollment with `server is blocked by this edge's operator` |
 | `accounts block` | Deletes the account's sessions, device tokens and pending sign-ins, and refuses its sign-ins with `account is blocked by this edge's operator`. Servers it owns stay claimed |
 | `accounts delete` | What the person's own deletion does, except that it closes no live connection and each server receives the deletion at its next enrollment. A block stays |
+| `reviewer` | Writes a [reviewer account](#reviewer-account) file, mode 0600, with a new random password, and prints the password once. It touches no database; the edge reads the file at start |
 
 `servers unblock` and `accounts unblock` lift a block. Connections already open
 stay up until they end or the edge restarts (`sudo systemctl restart

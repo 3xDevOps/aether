@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -42,16 +44,33 @@ func ValidateRunBudgets(cpus float64, memory, pids int64) error {
 	return nil
 }
 
+// ResolveRunLimits fills the unset fields with the automatic limits.
+func ResolveRunLimits(l domain.RunLimits) domain.RunLimits {
+	return domain.RunLimits{
+		CPUs:        cmp.Or(l.CPUs, float64(min(8, goruntime.NumCPU()))),
+		MemoryBytes: cmp.Or(l.MemoryBytes, 8<<30),
+		Pids:        cmp.Or(l.Pids, 4096),
+	}
+}
+
 func resolveRunBudgets(cfg *Config) {
-	if cfg.RunCPULimit == 0 {
-		cfg.RunCPULimit = float64(min(8, goruntime.NumCPU()))
+	resolved := ResolveRunLimits(domain.RunLimits{CPUs: cfg.RunCPULimit, MemoryBytes: cfg.RunMemoryBytes, Pids: cfg.RunPidsLimit})
+	cfg.RunCPULimit, cfg.RunMemoryBytes, cfg.RunPidsLimit = resolved.CPUs, resolved.MemoryBytes, resolved.Pids
+}
+
+// runLimits is the ceiling for a container: the run's own override, else the
+// limits an admin set from the dashboard, else the server's flags and
+// automatic values. Each field resolves on its own.
+func (s *Scheduler) runLimits(ctx context.Context, override domain.RunLimits) (domain.RunLimits, error) {
+	server, err := s.cfg.Store.ServerRunLimits(ctx)
+	if err != nil {
+		return domain.RunLimits{}, fmt.Errorf("scheduler: read server run limits: %w", err)
 	}
-	if cfg.RunMemoryBytes == 0 {
-		cfg.RunMemoryBytes = 8 << 30
-	}
-	if cfg.RunPidsLimit == 0 {
-		cfg.RunPidsLimit = 4096
-	}
+	return domain.RunLimits{
+		CPUs:        cmp.Or(override.CPUs, server.CPUs, s.cfg.RunCPULimit),
+		MemoryBytes: cmp.Or(override.MemoryBytes, server.MemoryBytes, s.cfg.RunMemoryBytes),
+		Pids:        cmp.Or(override.Pids, server.Pids, s.cfg.RunPidsLimit),
+	}, nil
 }
 
 func diskReserve(total uint64, override int64) uint64 {

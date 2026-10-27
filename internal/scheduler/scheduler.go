@@ -937,7 +937,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 
 // containerSpec converts one fully assembled environment plan into a runtime
 // spec. Callers must not assemble workspace mounts or environment fields here.
-func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, persistSupervisor bool) runtime.Spec {
+func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, limits domain.RunLimits, persistSupervisor bool) runtime.Spec {
 	env := make(map[string]string, len(plan.Env)+8)
 	maps.Copy(env, plan.Env)
 	env[coordtransport.RunIDEnv] = string(run.ID)
@@ -977,9 +977,9 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		Mounts:            plan.Mounts,
 		ExtraWorktrees:    plan.Worktrees,
 		User:              plan.User,
-		CPULimit:          s.cfg.RunCPULimit,
-		MemoryLimitBytes:  s.cfg.RunMemoryBytes,
-		PidsLimit:         s.cfg.RunPidsLimit,
+		CPULimit:          limits.CPUs,
+		MemoryLimitBytes:  limits.MemoryBytes,
+		PidsLimit:         limits.Pids,
 		CreationKey:       string(run.ID),
 		NestedDocker:      true,
 		Egress:            plan.Egress,

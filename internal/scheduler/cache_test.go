@@ -133,49 +133,76 @@ func TestCacheTerminalCreateGapDoesNotBlockSweepOrLoseData(t *testing.T) {
 	}
 }
 
-func TestProtectedCacheTrimsOnlyUnusedGoBuildEntries(t *testing.T) {
+func TestProtectedCacheTrimsOldestGoBuildEntriesToMemberCap(t *testing.T) {
 	e := newTestEnv(t, nil)
+	e.sched.cfg.Runtime = &cacheImageRuntime{fakeRuntime: e.rt}
 	run, _ := e.launchFake(t, "go builder")
-	path := writeCacheFixture(t, e, run.HomeMember(), "runs", int64(cachePoolTarget+1))
-	idle := writeCacheFixture(t, e, run.HomeMember(), "terminal", 4096)
-	outside := t.TempDir()
-	old := time.Now().Add(-2 * goBuildCacheInactiveAge)
-	write := func(name string, mtime time.Time) string {
+	member := run.HomeMember()
+	if _, err := e.sched.EnsureTerminal(t.Context(), member); err != nil {
+		t.Fatal(err)
+	}
+	const entry = 1 << 20
+	runs := writeCacheFixture(t, e, member, "runs", int64(memberCacheCap)-3*entry)
+	terminal := writeCacheFixture(t, e, member, "terminal", 4096)
+	write := func(name string, size int64, age time.Duration) string {
 		if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(name, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.Truncate(name, size); err != nil {
+			t.Fatal(err)
+		}
+		mtime := time.Now().Add(-age)
 		if err := os.Chtimes(name, mtime, mtime); err != nil {
 			t.Fatal(err)
 		}
 		return name
 	}
-	cache := filepath.Join(path, "go-build")
-	stale := write(filepath.Join(cache, "ab", "stale-d"), old)
-	fresh := write(filepath.Join(cache, "ab", "fresh-a"), time.Now())
-	other := write(filepath.Join(cache, "ab", "other"), old)
-	executable := filepath.Join(cache, "cd", "executable-d")
-	if err := os.Truncate(write(filepath.Join(executable, "tool"), old), int64(cacheTotalTarget)); err != nil {
-		t.Fatal(err)
+	// The member is one entry and 4096 bytes over the cap; the two oldest
+	// entries, one per pool, cover that.
+	oldest := write(filepath.Join(runs, "go-build", "ab", "oldest-d"), entry, 5*time.Hour)
+	older := write(filepath.Join(terminal, "go-build", "cd", "older-a"), entry, 4*time.Hour)
+	newer := write(filepath.Join(runs, "go-build", "ab", "newer-d"), entry, 3*time.Hour)
+	inUse := write(filepath.Join(runs, "go-build", "ab", "in-use-a"), entry, goBuildCacheInUseAge-time.Minute)
+	other := write(filepath.Join(runs, "go-build", "ab", "other"), 0, 6*time.Hour)
+	e.sched.sweepCaches(t.Context(), false)
+	requireCacheExists(t, oldest, false)
+	requireCacheExists(t, older, false)
+	for _, kept := range []string{newer, inUse, other} {
+		requireCacheExists(t, kept, true)
 	}
-	fuzz := filepath.Join(cache, "fuzz", "svc-a")
-	write(filepath.Join(fuzz, "corpus"), old)
+
+	// Disk pressure removes every entry outside the in-use window, including
+	// directory entries, never follows a symlinked shard or cache, and does
+	// not let the unreadable terminal cache stop the runs cache's trim.
+	executable := filepath.Join(runs, "go-build", "ef", "executable-d")
+	write(filepath.Join(executable, "tool"), entry, 6*time.Hour)
+	fuzz := filepath.Join(runs, "go-build", "fuzz", "svc-a")
+	write(filepath.Join(fuzz, "corpus"), 0, 6*time.Hour)
+	old := time.Now().Add(-6 * time.Hour)
 	for _, dir := range []string{executable, fuzz} {
 		if err := os.Chtimes(dir, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}
-	victim := write(filepath.Join(outside, "victim-d"), old)
-	if err := os.Symlink(outside, filepath.Join(cache, "ef")); err != nil {
+	outside := t.TempDir()
+	victim := write(filepath.Join(outside, "victim-d"), 0, 6*time.Hour)
+	shardVictim := write(filepath.Join(outside, "ab", "victim-d"), 0, 6*time.Hour)
+	if err := os.Symlink(outside, filepath.Join(runs, "go-build", "12")); err != nil {
 		t.Fatal(err)
 	}
-	e.sched.sweepCaches(t.Context(), false)
-	for _, gone := range []string{stale, executable} {
-		requireCacheExists(t, gone, false)
+	if err := os.RemoveAll(filepath.Join(terminal, "go-build")); err != nil {
+		t.Fatal(err)
 	}
-	for _, kept := range []string{fresh, other, fuzz, victim, filepath.Join(path, "packages"), idle} {
+	if err := os.Symlink(outside, filepath.Join(terminal, "go-build")); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.sweepCaches(t.Context(), true)
+	requireCacheExists(t, newer, false)
+	requireCacheExists(t, executable, false)
+	for _, kept := range []string{inUse, other, fuzz, victim, shardVictim, filepath.Join(runs, "packages"), filepath.Join(terminal, "packages")} {
 		requireCacheExists(t, kept, true)
 	}
 }

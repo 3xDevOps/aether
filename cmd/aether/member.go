@@ -26,6 +26,7 @@ func init() {
 			"aether member role <member-id> <viewer|collaborator|admin>\n" +
 			"aether member link --github <login>\n" +
 			"aether member link --email <address>\n" +
+			"aether member link --reviewer <login> <member-id>\n" +
 			"aether member identities <member-id>\n" +
 			"aether member unlink <member-id> <provider>:<subject>\n" +
 			"aether member merge start\n" +
@@ -141,11 +142,25 @@ func memberLink(args []string) error {
 	fs := newFlagSet("member link")
 	github := fs.String("github", "", "your GitHub login")
 	email := fs.String("email", "", "the verified primary email of your GitHub account")
+	reviewer := fs.String("reviewer", "", "the login in the edge's reviewer account file, bound to <member-id> (admins only)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if (*github == "") == (*email == "") || fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether member link --github <login> | --email <address>\nlinks a GitHub account to your own member; to join two members you already are, use aether member merge start")
+	if *reviewer != "" && *github == "" && *email == "" && fs.NArg() == 1 {
+		member := fs.Arg(0)
+		return withControl(func(c *protocol.Client) error {
+			var res protocol.Identity
+			if err := c.Call(protocol.MethodMemberReviewerLink, protocol.MemberReviewerLinkParams{MemberID: member, Login: *reviewer}, &res); err != nil {
+				return err
+			}
+			fmt.Printf("bound %s:%s to member %s; unbind it with aether member unlink %s %s:%s\n",
+				res.Provider, res.Subject, member, member, res.Provider, res.Subject)
+			return nil
+		})
+	}
+	if (*github == "") == (*email == "") || fs.NArg() != 0 || *reviewer != "" {
+		return fmt.Errorf("usage: aether member link --github <login> | --email <address>\nlinks a GitHub account to your own member; to join two members you already are, use aether member merge start\n" +
+			"usage: aether member link --reviewer <login> <member-id>\nbinds the edge's reviewer account to a member who is no admin")
 	}
 	params := protocol.MemberIdentityLinkParams{Login: *github, Email: *email}
 	return withControl(func(c *protocol.Client) error {
@@ -182,7 +197,8 @@ func memberIdentities(id string) error {
 }
 
 // memberUnlink removes one edge account from a member: its devices are
-// revoked and their connections closed. The member, its role, its other
+// revoked and their connections closed, and the connectors its sign-in
+// authorized are deleted. The member, its role, its other
 // accounts, SSH key and tailnet identity stay.
 func memberUnlink(args []string) error {
 	const usage = "usage: aether member unlink <member-id> <provider>:<subject>\n" +

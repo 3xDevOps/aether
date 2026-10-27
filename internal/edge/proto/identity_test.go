@@ -23,6 +23,7 @@ func TestAccountValidate(t *testing.T) {
 		{"newline in login", Account{Provider: ProviderGitHub, Subject: "1", Login: "a\nb"}, false},
 		{"invalid utf-8", Account{Provider: ProviderGitHub, Subject: "1", Name: "\xff"}, false},
 		{"long subject", Account{Provider: ProviderGitHub, Subject: strings.Repeat("1", maxShortText+1)}, false},
+		{"reviewer, which only an assertion names", Account{Provider: ProviderReviewer, Subject: "dir-review", Login: "dir-review"}, false},
 	}
 	for _, tt := range tests {
 		if err := tt.a.Validate(); (err == nil) != tt.ok {

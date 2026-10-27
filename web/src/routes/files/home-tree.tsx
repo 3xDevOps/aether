@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, File, FileSymlink, Folder, House, Lock, RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { Callout } from '@/components/ui/callout'
 import { ListRow } from '@/components/ui/list-row'
-import { Spinner } from '@/components/ui/spinner'
 import type { FileTreeEntry } from '@/lib/types'
 import { chevronTurn, cn } from '@/lib/utils'
 import { useHomeFiles } from '@/routes/files/home'
 import { HomeMenu, type RowKind } from '@/routes/files/home-menu'
 import { NameRow } from '@/routes/files/home-name'
 import { baseName, childPath, homeSource, type SelectFile, type Selection } from '@/routes/files/sources'
-import { indent, ListingStatus, scrollToRow, useExpanded, useListing } from '@/routes/files/tree'
+import { dropTargetClass, indent, ListingStatus, scrollToRow, UploadStatus, useExpanded, useListing } from '@/routes/files/tree'
 import { useStore } from '@/store'
 import { homeKey } from '@/store/files'
 
@@ -18,8 +16,6 @@ const lockedHint = 'Credential file. Files lists it but does not open, rename or
 const linkHint = 'Symlink. Files does not follow links; use the Environment terminal.'
 
 const fileSpacer = <span className="w-3.5 shrink-0" />
-
-const dropTargetClass = 'bg-accent-soft outline-1 -outline-offset-1 outline-accent'
 
 /** The member's whole persistent home under one root, with the file
  * operations the other trees do not have. */
@@ -189,37 +185,7 @@ function HomeRow({
   )
 }
 
-/** Transfers in progress and what could not be uploaded, pinned under the tree. */
 export function HomeStatus() {
   const { uploads, downloading, dismissFailures } = useHomeFiles()
-  const progress = uploads.progress
-    ? uploads.progress.of === 0
-      ? 'Reading dropped files…'
-      : `Uploading ${uploads.progress.at} of ${uploads.progress.of} · ${uploads.progress.name}`
-    : downloading && `Downloading ${baseName(downloading)}`
-  if (!progress && uploads.failures.length === 0) return null
-  return (
-    <div className="sticky bottom-0 flex flex-col gap-2 border-t border-seam bg-chrome p-2">
-      {uploads.failures.length > 0 && (
-        <Callout
-          tone="failed"
-          role="alert"
-          title={uploads.failures.length === 1 ? '1 file was not uploaded' : `${uploads.failures.length} files were not uploaded`}
-          actions={<Button size="sm" variant="ghost" onClick={dismissFailures}>Dismiss</Button>}
-        >
-          <ul className="max-h-32 overflow-y-auto text-ui-sm">
-            {uploads.failures.map((failure) => (
-              <li key={failure}>{failure}</li>
-            ))}
-          </ul>
-        </Callout>
-      )}
-      {progress && (
-        <p role="status" className="flex min-w-0 items-center gap-2 text-ui-sm text-muted">
-          <Spinner />
-          <span className="min-w-0 truncate">{progress}</span>
-        </p>
-      )}
-    </div>
-  )
+  return <UploadStatus uploads={uploads} downloading={downloading} dismissFailures={dismissFailures} />
 }

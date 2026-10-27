@@ -275,21 +275,13 @@ func (s *Service) mcpChoose(w http.ResponseWriter, r *http.Request, v visitor) e
 	if !s.chooseLimit.allow(addrKeys(r)...) {
 		return edgeproto.RefusalTooMany
 	}
-	q := r.URL.Query()
-	q.Del(edgeproto.ParamServer)
-	q.Del(edgeproto.ParamAssertion)
-	if q.Get("client_id") == "" || q.Get("code_challenge") == "" || q.Get("redirect_uri") == "" {
-		return pageErr(http.StatusBadRequest, "this authorization request has no client_id, code_challenge or redirect_uri; start the connection again from ChatGPT or Claude")
+	q, err := chooseRequest(r.URL.Query())
+	if err != nil {
+		return err
 	}
 	rows, err := s.servers(r.Context(), v.Account.Account)
 	if err != nil {
 		return err
-	}
-	var fields []field
-	for _, k := range slices.Sorted(maps.Keys(q)) {
-		for _, val := range q[k] {
-			fields = append(fields, field{k, val})
-		}
 	}
 	// The server checks the assertion against its own clock, as it checks
 	// grants, which the relay also signs with the wall clock.
@@ -297,35 +289,71 @@ func (s *Service) mcpChoose(w http.ResponseWriter, r *http.Request, v visitor) e
 	var ready, other []choice
 	for _, row := range rows {
 		c := choice{ServerInfo: row.ServerInfo}
-		switch version := s.link.Version(row.ID); {
-		case !row.Member && !row.Owner:
+		if !row.Member && !row.Owner {
 			c.Reason = "you are invited but have not joined; open the invitation link first"
-		case version == 0:
-			c.Reason = "not connected to this edge"
-		case version < edgeproto.VersionConnectorSignIn:
-			c.Reason = "its aether-server is too old for this URL; an admin runs sudo aether-server update"
-		default:
-			c.Assertion, err = edgeproto.SignConnectorAssertion(s.key, edgeproto.ConnectorAssertion{
-				Issuer: s.relayOrigin, ServerID: row.ID, Nonce: edgeproto.NewConnID(), Account: v.Account.Account,
-				ClientID: q.Get("client_id"), Challenge: q.Get("code_challenge"), RedirectURI: q.Get("redirect_uri"),
-				IssuedAt: now, ExpiresAt: now.Add(edgeproto.ConnectorAssertionTTL),
-			})
-			if err != nil {
-				return pageErr(http.StatusBadRequest, "%v", err)
-			}
-			ready = append(ready, c)
-			continue
+		} else if err = s.offer(&c, v.Account.Account, q, now, edgeproto.VersionConnectorSignIn); err != nil {
+			return err
 		}
-		other = append(other, c)
+		if c.Reason == "" {
+			ready = append(ready, c)
+		} else {
+			other = append(other, c)
+		}
 	}
+	s.renderChoose(w, &v, q, ready, other)
+	return nil
+}
+
+func chooseRequest(q url.Values) (url.Values, error) {
+	q = maps.Clone(q)
+	q.Del(edgeproto.ParamServer)
+	q.Del(edgeproto.ParamAssertion)
+	if q.Get("client_id") == "" || q.Get("code_challenge") == "" || q.Get("redirect_uri") == "" {
+		return nil, pageErr(http.StatusBadRequest, "this authorization request has no client_id, code_challenge or redirect_uri; start the connection again from ChatGPT or Claude")
+	}
+	return q, nil
+}
+
+func (s *Service) offer(c *choice, account edgeproto.Account, q url.Values, now time.Time, minVersion int) error {
+	switch version := s.link.Version(c.ID); {
+	case version == 0:
+		c.Reason = "not connected to this edge"
+		return nil
+	case version < minVersion:
+		c.Reason = "its aether-server is too old for this URL; an admin runs sudo aether-server update"
+		return nil
+	}
+	var err error
+	c.Assertion, err = edgeproto.SignConnectorAssertion(s.key, edgeproto.ConnectorAssertion{
+		Issuer: s.relayOrigin, ServerID: c.ID, Nonce: edgeproto.NewConnID(), Account: account,
+		ClientID: q.Get("client_id"), Challenge: q.Get("code_challenge"), RedirectURI: q.Get("redirect_uri"),
+		IssuedAt: now, ExpiresAt: now.Add(edgeproto.ConnectorAssertionTTL),
+	})
+	if err != nil {
+		return pageErr(http.StatusBadRequest, "%v", err)
+	}
+	return nil
+}
+
+// v is nil for the reviewer account, which has no session.
+func (s *Service) renderChoose(w http.ResponseWriter, v *visitor, q url.Values, ready, other []choice) {
 	// The server answers a bad request with a redirect to the client,
 	// which form-action also governs.
 	w.Header().Set("Content-Security-Policy", pageCSP+" "+s.relayOrigin+s.clientSources())
-	s.render(w, http.StatusOK, "choose", s.view(&v, "Choose a server", chooseData{
+	s.render(w, http.StatusOK, "choose", s.view(v, "Choose a server", chooseData{
 		Action: s.relayOrigin + edgeproto.PathUniversalMCPAuthorize, Client: redirectHost(q.Get("redirect_uri")),
-		Fields: fields, Ready: ready, Other: other,
+		Fields: requestFields(q), Ready: ready, Other: other,
 	}))
-	return nil
+}
+
+func requestFields(q url.Values) []field {
+	var fields []field
+	for _, k := range slices.Sorted(maps.Keys(q)) {
+		for _, val := range q[k] {
+			fields = append(fields, field{k, val})
+		}
+	}
+	return fields
 }
 
 // choice is a server on the choose page, with the assertion its form
