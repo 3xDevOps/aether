@@ -176,17 +176,19 @@ func listAgents(ctx context.Context, c calls, _ struct{}) (string, any, error) {
 // report are written by agents, so they sit under untrusted; needs_you is
 // a fixed label for the attention kind.
 type runRow struct {
-	ID          string   `json:"id"`
-	State       string   `json:"state"`
-	Activity    string   `json:"activity,omitempty"`
-	NeedsYou    string   `json:"needs_you,omitempty"`
-	WorkspaceID string   `json:"workspace_id"`
-	Workspace   string   `json:"workspace,omitempty"`
-	Harness     string   `json:"harness"`
-	MissionID   string   `json:"mission_id,omitempty"`
-	CreatedAt   string   `json:"created_at"`
-	URL         string   `json:"url,omitempty"`
-	Untrusted   *runText `json:"untrusted,omitempty"`
+	ID          string `json:"id"`
+	State       string `json:"state"`
+	Activity    string `json:"activity,omitempty"`
+	NeedsYou    string `json:"needs_you,omitempty"`
+	WorkspaceID string `json:"workspace_id"`
+	Workspace   string `json:"workspace,omitempty"`
+	Harness     string `json:"harness"`
+	MissionID   string `json:"mission_id,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	URL         string `json:"url,omitempty"`
+	// WaitingUntil holds the specs of the run's pending wait conditions.
+	WaitingUntil []string `json:"waiting_until,omitempty"`
+	Untrusted    *runText `json:"untrusted,omitempty"`
 }
 
 type runText struct {
@@ -200,9 +202,39 @@ func runTitle(r protocol.Run) string {
 }
 
 func rowOf(r protocol.Run, l links, workspaces map[string]string) runRow {
-	return runRow{ID: r.ID, State: r.Status, Activity: r.Activity, WorkspaceID: r.WorkspaceID, Workspace: workspaces[r.WorkspaceID],
+	row := runRow{ID: r.ID, State: r.Status, Activity: r.Activity, WorkspaceID: r.WorkspaceID, Workspace: workspaces[r.WorkspaceID],
 		Harness: r.Harness, MissionID: r.MissionID, CreatedAt: r.CreatedAt, URL: l.run(r.ID),
 		Untrusted: &runText{Title: runTitle(r), Reason: clip(r.Reason, maxReport)}}
+	for _, w := range r.WaitConditions {
+		if w.State == protocol.WaitPending {
+			row.WaitingUntil = append(row.WaitingUntil, w.Spec)
+		}
+	}
+	return row
+}
+
+// waitText is the part of a wait condition read from the agent's source:
+// its summary and the errors GitHub or the run inbox returned.
+type waitText struct {
+	ID                string `json:"id"`
+	Summary           string `json:"summary,omitempty"`
+	LastError         string `json:"last_error,omitempty"`
+	LastDeliveryError string `json:"last_delivery_error,omitempty"`
+}
+
+// waitsOf splits a run's wait conditions into the fields the server parsed
+// and wrote, and their text.
+func waitsOf(conditions []protocol.WaitCondition) ([]protocol.WaitCondition, []waitText) {
+	trusted := make([]protocol.WaitCondition, len(conditions))
+	var texts []waitText
+	for i, w := range conditions {
+		if w.Summary != "" || w.LastError != "" || w.LastDeliveryError != "" {
+			texts = append(texts, waitText{ID: w.ID, Summary: clip(w.Summary, maxReport), LastError: clip(w.LastError, maxReport), LastDeliveryError: clip(w.LastDeliveryError, maxReport)})
+		}
+		w.Summary, w.LastError, w.LastDeliveryError = "", "", ""
+		trusted[i] = w
+	}
+	return trusted, texts
 }
 
 func rowLimit(n int) int {
@@ -393,6 +425,16 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	out := map[string]any{"run": row, "mode": r.Mode, "model": r.Model, "branch": r.Branch,
 		"paused": r.Paused, "pending_inputs": len(r.PendingInputs), "finished_at": r.FinishedAt, "review": r.Review, "untrusted": untrusted}
 	summary := fmt.Sprintf("Run %s is %s.", r.ID, r.Status)
+	if len(r.WaitConditions) > 0 {
+		trusted, texts := waitsOf(r.WaitConditions)
+		out["wait_conditions"] = trusted
+		if len(texts) > 0 {
+			untrusted["wait_conditions"] = texts
+		}
+	}
+	if len(row.WaitingUntil) > 0 {
+		summary += " Waiting until " + strings.Join(row.WaitingUntil, " or ") + "."
+	}
 	for _, it := range items {
 		if it.RunID == r.ID {
 			out["needs_you"] = attentionRowOf(it, l)

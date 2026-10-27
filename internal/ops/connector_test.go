@@ -371,9 +371,22 @@ func TestConnectorReadTools(t *testing.T) {
 		t.Fatalf("newest run first, cut to the limit = %q %v", text, out)
 	}
 
+	waiter := testRun
+	waiter.WaitConditions = []protocol.WaitCondition{
+		{ID: "wait-1", Spec: "pr:o/r#7:checks", Kind: protocol.WaitKindPRChecks, Repo: "o/r", Number: 7, State: protocol.WaitPending,
+			Summary: injection, LastError: injection, ConsecutiveFailures: 2},
+		{ID: "wait-0", Spec: "run:run-2:finished", Kind: protocol.WaitKindRunFinished, RunID: "run-2", State: protocol.WaitSuperseded},
+	}
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: waiter})
 	text, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run:run-1"})
 	untrusted := out["untrusted"].(map[string]any)
-	if text != "Run run-1 is running. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
+	waits := out["wait_conditions"].([]any)
+	if out["run"].(map[string]any)["waiting_until"].([]any)[0] != "pr:o/r#7:checks" || len(waits) != 2 ||
+		waits[0].(map[string]any)["consecutive_failures"] != float64(2) ||
+		untrusted["wait_conditions"].([]any)[0].(map[string]any)["last_error"] != injection {
+		t.Fatalf("aether_get_run wait conditions = %v", out)
+	}
+	if text != "Run run-1 is running. Waiting until pr:o/r#7:checks. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
 		out["pr_error"] != "refresh pull request: gh: rate limited" || untrusted["latest_report"].(map[string]any)["summary"] != injection || untrusted["pr_title"] != injection ||
 		out["needs_you"].(map[string]any)["answer_with"] != "aether_answer" || strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("aether_get_run of a search id = %q %v", text, out)
