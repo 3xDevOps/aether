@@ -2070,6 +2070,80 @@ ALTER TABLE workspaces ADD COLUMN child_max_live INTEGER NOT NULL DEFAULT 8;
 ALTER TABLE workspaces ADD COLUMN child_max_depth INTEGER NOT NULL DEFAULT 3;
 ALTER TABLE workspaces ADD COLUMN child_max_total INTEGER NOT NULL DEFAULT 100;
 `,
+	// v88: watches, the durable subscriptions a member keeps on a run, a
+	// swarm or a pull request; the notifications each recorded, unique per
+	// condition and dedup key so no retry or concurrent evaluation records
+	// one twice; every delivery attempt; each member's notification
+	// preferences; and the last event sequence the watch service applied.
+	`
+CREATE TABLE watches (
+	id              TEXT PRIMARY KEY,
+	member_id       TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	workspace_id    TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+	target_kind     TEXT NOT NULL CHECK (target_kind IN ('run', 'mission', 'pr')),
+	run_id          TEXT REFERENCES runs(id) ON DELETE CASCADE,
+	mission_id      TEXT REFERENCES missions(id) ON DELETE CASCADE,
+	repo            TEXT NOT NULL DEFAULT '',
+	pr_number       INTEGER NOT NULL DEFAULT 0,
+	target_title    TEXT NOT NULL DEFAULT '',
+	conditions      TEXT NOT NULL,
+	label           TEXT NOT NULL DEFAULT '',
+	source          TEXT NOT NULL,
+	state           TEXT NOT NULL CHECK (state IN ('active', 'paused', 'error', 'done', 'expired')),
+	error           TEXT NOT NULL DEFAULT '',
+	failures        INTEGER NOT NULL DEFAULT 0,
+	observed        TEXT NOT NULL DEFAULT '{}',
+	fired           TEXT NOT NULL DEFAULT '{}',
+	idempotency_key TEXT,
+	created_at      INTEGER NOT NULL,
+	updated_at      INTEGER NOT NULL,
+	expires_at      INTEGER NOT NULL,
+	last_check_at   INTEGER,
+	next_check_at   INTEGER,
+	ended_at        INTEGER,
+	version         INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX idx_watches_member ON watches(member_id);
+CREATE INDEX idx_watches_workspace ON watches(workspace_id) WHERE workspace_id IS NOT NULL;
+CREATE INDEX idx_watches_run ON watches(run_id) WHERE run_id IS NOT NULL;
+CREATE INDEX idx_watches_mission ON watches(mission_id) WHERE mission_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_watches_idempotency ON watches(member_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE TABLE watch_notifications (
+	id            TEXT PRIMARY KEY,
+	watch_id      TEXT NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+	condition     TEXT NOT NULL,
+	dedup_key     TEXT NOT NULL,
+	title         TEXT NOT NULL,
+	body          TEXT NOT NULL,
+	link          TEXT NOT NULL,
+	created_at    INTEGER NOT NULL,
+	push_state    TEXT NOT NULL CHECK (push_state IN ('none', 'pending', 'held', 'withdraw')),
+	push_attempts INTEGER NOT NULL DEFAULT 0,
+	push_next_at  INTEGER,
+	UNIQUE (watch_id, condition, dedup_key)
+);
+CREATE INDEX idx_watch_notifications_push ON watch_notifications(push_next_at) WHERE push_state <> 'none';
+CREATE TABLE watch_deliveries (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	notification_id TEXT NOT NULL REFERENCES watch_notifications(id) ON DELETE CASCADE,
+	channel         TEXT NOT NULL,
+	status          TEXT NOT NULL,
+	detail          TEXT NOT NULL DEFAULT '',
+	at              INTEGER NOT NULL
+);
+CREATE INDEX idx_watch_deliveries_notification ON watch_deliveries(notification_id);
+CREATE TABLE notify_prefs (
+	member_id   TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+	push        INTEGER NOT NULL DEFAULT 1,
+	quiet_start TEXT NOT NULL DEFAULT '',
+	quiet_end   TEXT NOT NULL DEFAULT '',
+	quiet_tz    TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE watch_cursor (
+	id  INTEGER PRIMARY KEY CHECK (id = 1),
+	seq INTEGER NOT NULL
+);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

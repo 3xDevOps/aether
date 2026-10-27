@@ -8,8 +8,10 @@ const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url
 
 type Handler = (event: Record<string, unknown>) => void
 
+type Window = { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void; navigate: (url: string) => Promise<unknown> }
+
 function worker(
-  windows: { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }[] = [],
+  windows: Window[] = [],
   shown: { tag: string; title: string; body?: string; data?: Record<string, unknown> }[] = [],
 ) {
   const handlers: Record<string, Handler> = {}
@@ -36,7 +38,7 @@ function worker(
   return { self, dispatch }
 }
 
-const window = (focused: boolean) => ({ focused, focus: vi.fn(async () => {}), postMessage: vi.fn() })
+const window = (focused: boolean): Window => ({ focused, focus: vi.fn(async () => {}), postMessage: vi.fn(), navigate: vi.fn(async () => null) })
 
 describe('service worker', () => {
   it('shows one notification per run, replacing the older one', async () => {
@@ -64,6 +66,19 @@ describe('service worker', () => {
       silent: true,
       icon: '/icons/icon-192.png',
       data: { run: 'run-7k2m9q4xbd' },
+    })
+  })
+
+  it("quietly replaces a swarm's need, tagged by the page it opens, when it ends", async () => {
+    const url = '/?page=missions&id=mis-4c8v2n6k1p'
+    const { self, dispatch } = worker([], [{ tag: url, title: 'Swarm: login rework', data: { url } }])
+    await dispatch('push', { data: { json: () => ({ title: 'Swarm: login rework', body: 'No longer needs you', url, clear: true }) } })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Swarm: login rework', {
+      body: 'No longer needs you',
+      tag: url,
+      silent: true,
+      icon: '/icons/icon-192.png',
+      data: { url },
     })
   })
 
@@ -143,6 +158,27 @@ describe('service worker', () => {
     const front = window(true)
     await worker([front]).dispatch('notificationclick', { notification: { close: vi.fn(), data: { workspace: 'ws-b9gjv14p8h' } } })
     expect(front.postMessage).toHaveBeenCalledWith({ type: 'aether:open-workspace', workspace: 'ws-b9gjv14p8h' })
+  })
+
+  it('keeps one notification per page and opens the page it names', async () => {
+    const { self, dispatch } = worker()
+    const url = '/?page=missions&id=mis-rtgje8zxp6'
+    await dispatch('push', { data: { json: () => ({ title: 'Ship watches', body: 'Swarm completed', url }) } })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Ship watches', expect.objectContaining({ tag: url, data: { url } }))
+    await dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
+    expect(self.clients.openWindow).toHaveBeenCalledWith(url)
+
+    const front = window(true)
+    await worker([front]).dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
+    expect(front.navigate).toHaveBeenCalledWith(url)
+    expect(front.focus).toHaveBeenCalled()
+  })
+
+  it('opens the page in a new window when the open one is not its own', async () => {
+    const front = { ...window(true), navigate: vi.fn(async () => { throw new TypeError('not controlled') }) }
+    const { self, dispatch } = worker([front])
+    await dispatch('notificationclick', { notification: { close: vi.fn(), data: { url: '/?page=settings&id=watches' } } })
+    expect(self.clients.openWindow).toHaveBeenCalledWith('/?page=settings&id=watches')
   })
 
   it('opens the dashboard itself from a test notification', async () => {

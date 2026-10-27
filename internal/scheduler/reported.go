@@ -23,7 +23,7 @@ import (
 const reportFinishDeadline = 2 * time.Minute
 
 const (
-	reportedSuccessReason         = "agent reported success"
+	reportedSuccessReason         = domain.ReportedSuccessReason
 	reportedFailureReason         = "agent reported failure"
 	reportedSuccessRetainedReason = reportedSuccessReason + "; retained container"
 	reportedFailureRetainedReason = reportedFailureReason + "; retained container"

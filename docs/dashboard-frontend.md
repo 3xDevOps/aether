@@ -6168,8 +6168,9 @@ then in the browser. A failure of either, or of **Send test notification**
 (`push.test`), is shown as the error the browser or the server gave.
 
 `web/public/sw.js` is the whole worker. On `push` it shows the notification
-with the run's ID as its `tag`, or `budget:<workspace>` for a budget notice,
-so a newer one replaces the older, and it shows a fallback for a message it
+with the run's ID as its `tag`, `budget:<workspace>` for a budget notice, or
+the message's `url` for a notice about another page, such as a
+[watch](watches.md) notice about a swarm, so a newer one replaces the older, and it shows a fallback for a message it
 cannot read, because Safari drops a subscription whose push shows nothing.
 A message with `clear` set means the run's need ended: for the same reason it
 is not simply closed but replaced, under the same tag and keeping the shown
@@ -6184,9 +6185,10 @@ about the run, such as that it finished, carries `notice`; a clear that
 finds it shown shows it again, silently, as it was. An assistant's notice of
 a need carries no `notice`, so a clear replaces it like any need. On
 `notificationclick` it focuses a dashboard window that is already open and
-posts it `{type: 'aether:open-run', run}` or
-`{type: 'aether:open-workspace', workspace}`, or opens `/?run=<id>` or
-`/?page=workspace&id=<id>` when none is.
+posts it `{type: 'aether:open-run', run}`, navigates it to `url`, or posts
+`{type: 'aether:open-workspace', workspace}`. When no window is open, or the
+open one is not the worker's to navigate, it opens `url`, `/?run=<id>` or
+`/?page=workspace&id=<id>`.
 `watchPush`, started with the connection in `src/store/sync.ts`, navigates on
 that message. It also calls `push.active` at most every 20 seconds while the
 pointer, the keyboard or the wheel is in use, which is what makes the server
