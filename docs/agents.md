@@ -36,6 +36,8 @@ Rules:
    - which coding agent, and whether it signs in with a subscription or an
      API key
    - which repository: a path on this computer or a GitHub URL
+   - whether runs may use Docker inside them, which installs Sysbox and
+     changes /etc/docker/daemon.json on the server
    - CLI only, or the desktop app too
 3. Never ask me for a password, sudo password, token or key in chat.
 4. Hand every sign-in to me as "open this URL and enter this code", then wait
@@ -56,6 +58,9 @@ Rules:
   print a URL and a code, then wait until the human finishes or the code
   expires after 10 to 15 minutes. Run them in the background with output to a
   file, give the human the URL and code, and wait for the command to exit 0.
+- `aether wait` runs until the run needs something or its `--timeout`. Run it
+  in the background too, or give it a `--timeout` shorter than your shell
+  tool's limit and repeat it.
 - `aether status` prints what this computer is linked to and a `next` line with
   the command for the first missing step. `an admin runs:` or
   `a human runs in a terminal:` before it means it is not yours to run.
@@ -82,8 +87,18 @@ Check with `aether version`. On Windows, follow
 
 ### 2. Install the server over ssh
 
-The server needs Linux, Docker and git. These need a user that is root or has
-passwordless `sudo`:
+The server needs Linux, Docker Engine and git, and at least 2.5 GiB of
+available memory ([install.md](install.md#server-prerequisites)). These need a
+user that is root or has passwordless `sudo`. If `sudo` asks for a password,
+**Human:** run each command below in their own terminal as
+`ssh -t <user>@<host> '...'`.
+
+The first `ssh` to a new server fails without a terminal to confirm its host
+key. **Human:** ssh to it once and check the key. Never pass
+`StrictHostKeyChecking=no` or `accept-new`.
+
+Add `--sysbox=false` to the `aether-server install` commands below unless the
+human allowed Docker inside runs.
 
 ```sh
 ssh <user>@<host> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role none'
@@ -94,12 +109,14 @@ With the edge, pass the access policy the human chose:
 ```sh
 ssh <user>@<host> 'sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>'
 ssh <user>@<host> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
-ssh <user>@<host> 'sudo aether-server edge status'
+ssh <user>@<host> "timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'"
 ssh <user>@<host> 'sudo aether-server edge claim-code'
 ```
 
-`edge status` exits 0 when connected and 3 while still connecting; repeat it
-until it exits 0. `claim-code` prints the claim code, valid for 30 minutes.
+`edge status` exits 0 when connected and 3 otherwise, while connecting or
+when it cannot connect. If the wait times out, run
+`sudo aether-server edge status` once more and show the human its
+`connection` line. `claim-code` prints the claim code, valid for 30 minutes.
 
 With Tailscale on the server and this computer, leave the edge off:
 
@@ -108,8 +125,8 @@ ssh <user>@<host> 'sudo aether-server install'
 ssh <user>@<host> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
 ```
 
-If `install` prints a `warning:` line, such as a missing git or Docker, show it
-to the human before you go on.
+If `install` prints a `warning:` line or `Docker does not answer`, show it to
+the human before you go on.
 
 ### 3. Sign in and claim the server
 
@@ -168,7 +185,11 @@ The agent signs in inside the human's environment on the server:
   [harnesses.md](harnesses.md#use-an-api-key).
 
 Check with `aether agent list --json` (`login_found`) and
-`aether account usage`, which asks the vendor whether the login works.
+`aether account usage`, which asks the vendor whether the login works. Both
+look only for a login file. A key set with `aether workspace env set --secret`
+writes none, so `login_found` stays false, `account usage` reports the agent
+unauthenticated, and `aether status` keeps naming `aether agent login`; go on
+to step 6.
 
 ### 6. Launch the first run
 
@@ -211,9 +232,10 @@ aether servers
 aether link <server id>
 ```
 
-Under `approved-devices`, `aether link` waits for the device to be approved.
-**Human:** approve it from the dashboard's **Needs you** card, or on an
-approved device with `aether device approve <code>`, which asks `y/N`.
+Under `approved-devices`, `aether link <server id>` exits 1 and prints the
+`aether device approve` command for this device. **Human:** approve it from the
+dashboard's **Needs you** card, or run that command on an approved device; it
+asks `y/N`. Then run `aether link <server id>` again.
 
 With Tailscale: `aether link <host>:2222`.
 
@@ -271,15 +293,19 @@ task they gave you already answers it.
 ## Bring results back and publish
 
 ```sh
-aether pull <run-id>
 aether github connect
 aether publish <run-id>
 aether close <run-id> --outcome merged
+aether pull <run-id>
 ```
 
 Publish before you close: a finished run needs `aether reopen <run-id>` first.
+Publish pushes commits only; if it reports uncommitted changes, ask the agent
+to commit with `aether message <run-id> "commit your changes"`, then publish
+again.
 
 `aether pull` fetches the run's branch into the linked clone without merging.
+The branch gets the agent's work when the run closes, so pull after close.
 Ask the human before `aether github connect`: it grants `repo`, `read:org`,
 `gist` and `admin:ssh_signing_key`. **Human:** open the URL and enter the code.
 Ask before `aether publish`: it pushes the branch and opens a pull request.
