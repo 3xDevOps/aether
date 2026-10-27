@@ -42,6 +42,7 @@ const (
 // Store is the persistence the service reads and writes.
 type Store interface {
 	store.WatchStore
+	store.RunWaitStore
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
@@ -96,6 +97,7 @@ type Service struct {
 	tick     time.Duration
 	now      func() time.Time
 	pr       PRSource
+	notifier RunNotifier
 
 	kick chan struct{}
 	wg   sync.WaitGroup
@@ -109,6 +111,8 @@ type Service struct {
 	closed bool
 	// cursor is the last event sequence whose evaluations are committed.
 	cursor uint64
+	// loop bounds the background work Start began.
+	loop context.Context
 }
 
 // New builds the service; call Start to begin.
@@ -153,7 +157,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	loopCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.mu.Lock()
-	s.cursor, s.stop = cursor, cancel
+	s.cursor, s.stop, s.loop = cursor, cancel, loopCtx
 	s.mu.Unlock()
 	s.wg.Go(func() {
 		s.evaluateAll(loopCtx)
@@ -356,6 +360,7 @@ func (s *Service) housekeep(ctx context.Context) {
 		}
 	}
 	s.deliverDue(ctx)
+	s.deliverWaits(ctx)
 	if _, err := s.store.PurgeWatches(ctx, now.Add(-Retention)); err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("watch: purge ended watches", "error", err)

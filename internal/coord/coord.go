@@ -177,6 +177,9 @@ type Config struct {
 	// Outcomes is where an ordinary run's published coord.report lands: the
 	// scheduler. Nil leaves the run's status to its process and hooks.
 	Outcomes OutcomeSink
+	// Waits keeps the conditions a waiting report registers with until.
+	// Nil refuses until.
+	Waits RunWaits
 	// Evidence captures and durably retains the run state before coord.report
 	// accepts an outcome. It is required for coord.report.
 	Evidence EvidenceCapture

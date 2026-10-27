@@ -42,9 +42,13 @@ type Watch struct {
 	NextCheckAt    *time.Time
 	EndedAt        *time.Time
 	Version        int64
+	// OwnerRunID is set on a run's wait condition, which RunWait describes
+	// and only the run-wait methods change.
+	OwnerRunID domain.RunID
 }
 
-// WatchFilter narrows ListWatches; zero fields match everything.
+// WatchFilter narrows ListWatches; zero fields match everything. A run's
+// wait conditions are never listed.
 type WatchFilter struct {
 	MemberID   domain.MemberID
 	State      string
@@ -125,14 +129,16 @@ type WatchStore interface {
 	// Version as it is.
 	TouchWatchCheck(ctx context.Context, id string, at time.Time) error
 	DeleteWatch(ctx context.Context, id string) error
-	// EvaluableWatchIDs lists the active and failing watches on run or on
-	// the swarm run integrates, or on mission when run is empty.
+	// EvaluableWatchIDs lists the active and failing watches on run, on
+	// the swarm run integrates and the waits run owns or waits for, or on
+	// mission when run is empty.
 	EvaluableWatchIDs(ctx context.Context, run domain.RunID, mission domain.MissionID) ([]string, error)
 	// DueWatchIDs lists the active and failing watches whose next check is
 	// at or before now, or all of them when all is set.
 	DueWatchIDs(ctx context.Context, now time.Time, all bool) ([]string, error)
-	// ExpireWatches marks every live watch past its expiry expired and
-	// returns them. A paused watch's unsent pushes are dropped as cleared.
+	// ExpireWatches marks every live watch but a run's wait past its
+	// expiry expired and returns them. A paused watch's unsent pushes are
+	// dropped as cleared.
 	ExpireWatches(ctx context.Context, now time.Time) ([]*Watch, error)
 	// PurgeWatches deletes the done and expired watches that ended before
 	// cutoff, with their notifications.
@@ -174,7 +180,8 @@ type WatchStore interface {
 
 const watchColumns = `id, member_id, COALESCE(workspace_id, ''), target_kind, COALESCE(run_id, ''), COALESCE(mission_id, ''), repo,
 	pr_number, target_title, conditions, label, source, state, error, failures, observed, fired,
-	COALESCE(idempotency_key, ''), created_at, updated_at, expires_at, last_check_at, next_check_at, ended_at, version`
+	COALESCE(idempotency_key, ''), created_at, updated_at, expires_at, last_check_at, next_check_at, ended_at, version,
+	COALESCE(owner_run_id, '')`
 
 func scanWatch(row interface{ Scan(...any) error }) (*Watch, error) {
 	var (
@@ -185,7 +192,7 @@ func scanWatch(row interface{ Scan(...any) error }) (*Watch, error) {
 	)
 	if err := row.Scan(&w.ID, &w.MemberID, &w.WorkspaceID, &w.TargetKind, &w.RunID, &w.MissionID, &w.Repo,
 		&w.Number, &w.TargetTitle, &conditions, &w.Label, &w.Source, &w.State, &w.Error, &w.Failures,
-		&observed, &fire, &w.IdempotencyKey, &created, &updated, &expires, &last, &next, &ended, &w.Version); err != nil {
+		&observed, &fire, &w.IdempotencyKey, &created, &updated, &expires, &last, &next, &ended, &w.Version, &w.OwnerRunID); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(conditions), &w.Conditions); err != nil {
@@ -319,10 +326,8 @@ func (d *DB) ListWatches(ctx context.Context, f WatchFilter) ([]*Watch, error) {
 			args = append(args, c.value)
 		}
 	}
-	query := `SELECT ` + watchColumns + ` FROM watches`
-	if len(where) > 0 {
-		query += ` WHERE ` + strings.Join(where, " AND ")
-	}
+	where = append(where, "owner_run_id IS NULL")
+	query := `SELECT ` + watchColumns + ` FROM watches WHERE ` + strings.Join(where, " AND ")
 	rows, err := d.db.QueryContext(ctx, query+` ORDER BY created_at DESC, id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list watches: %w", err)
@@ -449,7 +454,7 @@ func (d *DB) EvaluableWatchIDs(ctx context.Context, run domain.RunID, mission do
 	query := `SELECT id FROM watches WHERE ` + evaluable + ` AND mission_id = ?`
 	args := []any{mission}
 	if run != "" {
-		query = `SELECT id FROM watches WHERE ` + evaluable + ` AND (run_id = ?1
+		query = `SELECT id FROM watches WHERE ` + evaluable + ` AND (run_id = ?1 OR owner_run_id = ?1 OR wait_target_run = ?1
 			OR mission_id IN (SELECT id FROM missions WHERE current_integrator_run_id = ?1))`
 		args = []any{run}
 	}
@@ -510,7 +515,7 @@ func (d *DB) ExpireWatches(ctx context.Context, now time.Time) ([]*Watch, error)
 	}
 	rows, err := tx.QueryContext(ctx,
 		`UPDATE watches SET state = 'expired', ended_at = ?1, updated_at = ?1, next_check_at = NULL, version = version + 1
-		 WHERE state IN ('active', 'paused', 'error') AND expires_at <= ?1
+		 WHERE state IN ('active', 'paused', 'error') AND expires_at <= ?1 AND owner_run_id IS NULL
 		 RETURNING `+watchColumns, at)
 	if err != nil {
 		return nil, fmt.Errorf("store: expire watches: %w", err)

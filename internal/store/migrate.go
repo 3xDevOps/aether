@@ -2157,6 +2157,36 @@ CREATE TABLE watch_pr_snapshots (
 );
 CREATE INDEX idx_watch_pr_snapshots_checked ON watch_pr_snapshots(checked_at);
 `,
+	// v90: the conditions a run registers with coord.report until, kept as
+	// watches its owner run owns: one row per condition, the conditions of
+	// one report sharing a revision. The wait columns hold the state the
+	// run is told about and its delivery to the run's inbox. A state
+	// report's receipt records its conditions, so a retry with other ones
+	// is refused.
+	`
+ALTER TABLE watches ADD COLUMN owner_run_id TEXT REFERENCES runs(id) ON DELETE CASCADE;
+ALTER TABLE watches ADD COLUMN wait_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE watches ADD COLUMN wait_report_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_spec TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_target_run TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_outcome TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_summary TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_cause TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_source_checked_at INTEGER;
+ALTER TABLE watches ADD COLUMN wait_error_at INTEGER;
+ALTER TABLE watches ADD COLUMN wait_resolved_at INTEGER;
+ALTER TABLE watches ADD COLUMN wait_delivered_at INTEGER;
+ALTER TABLE watches ADD COLUMN wait_delivery_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE watches ADD COLUMN wait_delivery_next_at INTEGER;
+ALTER TABLE watches ADD COLUMN wait_delivery_error TEXT NOT NULL DEFAULT '';
+CREATE INDEX idx_watches_owner_run ON watches(owner_run_id, wait_revision) WHERE owner_run_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_watches_wait_report ON watches(owner_run_id, wait_report_key, wait_spec) WHERE owner_run_id IS NOT NULL;
+CREATE INDEX idx_watches_wait_target ON watches(wait_target_run) WHERE wait_target_run <> '';
+CREATE INDEX idx_watches_wait_delivery ON watches(wait_delivery_next_at) WHERE wait_delivery_next_at IS NOT NULL;
+ALTER TABLE coord_state_reports ADD COLUMN until_conditions TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

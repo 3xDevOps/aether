@@ -299,6 +299,7 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
 		out.Cause = string(s.cfg.Runs.Cause(run.ID, run.Activity))
 		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
+		out.WaitConditions = s.waitConditions(run.ID)
 		out.Switching = string(s.cfg.Runs.Switching(run.ID))
 		retention, err := s.cfg.Runs.Retention(run)
 		if retention.RetainedUntil != nil {

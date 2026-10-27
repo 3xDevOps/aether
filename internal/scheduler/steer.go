@@ -644,6 +644,7 @@ func (s *Scheduler) injectLive(ctx context.Context, entry *supervised, workspace
 	defer cancel()
 	s.publishTimeline(recordCtx, workspace, run, actor, events.TimelineSteer, prompt.Text)
 	s.RecordSteer(recordCtx, run, actor)
+	s.endRunWaits(recordCtx, run, "a person sent a new prompt")
 	return outcome, nil
 }
 

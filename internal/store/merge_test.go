@@ -18,6 +18,7 @@ var notMemberRefs = map[string]string{
 	"member_merges.confirmed_by":         "describes the accepting connection",
 	"evidence_packets.publication_owner": "an enum, not a member",
 	"memory.superseded_by":               "a note id, not a member",
+	"watches.owner_run_id":               "a run id, not a member",
 }
 
 // TestMergeClassifiesEveryMemberColumn fails when a column that can hold a

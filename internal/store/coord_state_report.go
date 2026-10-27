@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -19,13 +21,25 @@ type CoordStateReport struct {
 	Outcome        string
 	WaitingFor     string
 	Summary        string
-	CreatedAt      time.Time
+	// Until is a waiting report's conditions, canonical.
+	Until     []string
+	CreatedAt time.Time
+}
+
+// queryExecer is a *sql.DB or a *sql.Tx.
+type queryExecer interface {
+	execer
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 // RecordCoordStateReport stores report's receipt and reports whether it is
 // new. A retry with the same inputs loads the original receipt into report;
 // the same key with other inputs fails ErrCoordReportIdempotencyConflict.
 func (d *DB) RecordCoordStateReport(ctx context.Context, report *CoordStateReport) (bool, error) {
+	return recordCoordStateReport(ctx, d.db, report)
+}
+
+func recordCoordStateReport(ctx context.Context, db queryExecer, report *CoordStateReport) (bool, error) {
 	ts := report.CreatedAt
 	if ts.IsZero() {
 		ts = time.Now().UTC()
@@ -34,11 +48,11 @@ func (d *DB) RecordCoordStateReport(ctx context.Context, report *CoordStateRepor
 	if err != nil {
 		return false, fmt.Errorf("store: record coord state report: %w", err)
 	}
-	res, err := d.db.ExecContext(ctx,
-		`INSERT INTO coord_state_reports (run_id, idempotency_key, outcome, waiting_for, summary, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
+	res, err := db.ExecContext(ctx,
+		`INSERT INTO coord_state_reports (run_id, idempotency_key, outcome, waiting_for, summary, until_conditions, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (run_id, idempotency_key) DO NOTHING`,
-		report.RunID, report.IdempotencyKey, report.Outcome, report.WaitingFor, report.Summary, createdAt)
+		report.RunID, report.IdempotencyKey, report.Outcome, report.WaitingFor, report.Summary, strings.Join(report.Until, "\n"), createdAt)
 	if err != nil {
 		return false, fmt.Errorf("store: record coord state report: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -50,11 +64,12 @@ func (d *DB) RecordCoordStateReport(ctx context.Context, report *CoordStateRepor
 		report.CreatedAt = ts
 		return true, nil
 	}
-	prior, err := d.GetCoordStateReport(ctx, report.RunID, report.IdempotencyKey)
+	prior, err := getCoordStateReport(ctx, db, report.RunID, report.IdempotencyKey)
 	if err != nil {
 		return false, err
 	}
-	if prior.Outcome != report.Outcome || prior.WaitingFor != report.WaitingFor || prior.Summary != report.Summary {
+	if prior.Outcome != report.Outcome || prior.WaitingFor != report.WaitingFor || prior.Summary != report.Summary ||
+		!slices.Equal(prior.Until, report.Until) {
 		return false, fmt.Errorf("%w: run %s", ErrCoordReportIdempotencyConflict, report.RunID)
 	}
 	*report = *prior
@@ -63,12 +78,19 @@ func (d *DB) RecordCoordStateReport(ctx context.Context, report *CoordStateRepor
 
 // GetCoordStateReport loads the receipt a run stored under key.
 func (d *DB) GetCoordStateReport(ctx context.Context, run domain.RunID, key string) (*CoordStateReport, error) {
+	return getCoordStateReport(ctx, d.db, run, key)
+}
+
+func getCoordStateReport(ctx context.Context, db queryExecer, run domain.RunID, key string) (*CoordStateReport, error) {
 	report := CoordStateReport{RunID: run, IdempotencyKey: key}
-	var createdAt int64
-	err := d.db.QueryRowContext(ctx,
-		`SELECT outcome, waiting_for, summary, created_at FROM coord_state_reports
+	var (
+		createdAt int64
+		until     string
+	)
+	err := db.QueryRowContext(ctx,
+		`SELECT outcome, waiting_for, summary, until_conditions, created_at FROM coord_state_reports
 		 WHERE run_id = ? AND idempotency_key = ?`, run, key,
-	).Scan(&report.Outcome, &report.WaitingFor, &report.Summary, &createdAt)
+	).Scan(&report.Outcome, &report.WaitingFor, &report.Summary, &until, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -76,6 +98,9 @@ func (d *DB) GetCoordStateReport(ctx context.Context, run domain.RunID, key stri
 		return nil, fmt.Errorf("store: get coord state report %s: %w", key, err)
 	}
 	report.CreatedAt = decodeTime(createdAt)
+	if until != "" {
+		report.Until = strings.Split(until, "\n")
+	}
 	return &report, nil
 }
 
@@ -91,10 +116,26 @@ func (d *DB) MarkCoordStateReportApplied(ctx context.Context, run domain.RunID, 
 }
 
 // ReleaseCoordStateReport frees the key of a refused report that never took
-// effect.
+// effect, with the conditions it registered.
 func (d *DB) ReleaseCoordStateReport(ctx context.Context, run domain.RunID, key string) error {
-	if _, err := d.db.ExecContext(ctx,
-		`DELETE FROM coord_state_reports WHERE run_id = ? AND idempotency_key = ? AND applied_at IS NULL`, run, key); err != nil {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: release coord state report %s: %w", key, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM coord_state_reports WHERE run_id = ? AND idempotency_key = ? AND applied_at IS NULL`, run, key)
+	if err != nil {
+		return fmt.Errorf("store: release coord state report %s: %w", key, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("store: release coord state report %s: %w", key, err)
+	} else if n > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM watches WHERE owner_run_id = ? AND wait_report_key = ?`, run, key); err != nil {
+			return fmt.Errorf("store: release coord state report %s: %w", key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: release coord state report %s: %w", key, err)
 	}
 	return nil

@@ -225,6 +225,8 @@ type Scheduler struct {
 	titleUpdates          map[domain.RunID]*pendingRunTitle
 	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
+	// waits is nil when runs register no wait conditions.
+	waits RunWaits
 	// evidence is nil when evidence capture is not enabled.
 	evidence EvidenceService
 	// updates is nil when a scheduled update never applies.
