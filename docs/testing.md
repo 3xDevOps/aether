@@ -252,11 +252,11 @@ The `wake` turn runs where Aether can wake the run: every Enhanced run, and a
 Standard run whose agent sets `IdleWake` in its capabilities
 (`internal/harness/capabilities.go`); the others skip it. A run must never
 need you while its subagent works. It should show `working`, or
-`waiting-agents` with cause `tasks-held` when Standard Claude Code ends the
-turn with the subagent still running in the background. Aether gets no
+`waiting-agents` when Standard Claude Code ends the turn with the subagent
+still running in the background. Aether gets no
 signal for a Codex subagent, and Standard Claude Code's Stop hook can arrive
-without the subagent among its background tasks, so such a run can read as
-idle; the test logs each idle state it sees as a known gap.
+without the subagent among its background tasks, so those runs can read as
+idle; the test logs their idle states as a known gap and fails any other.
 
 Two Background runs per agent check that a Background run is never reminded:
 one reports `success` and finishes awaiting review, the only Background state

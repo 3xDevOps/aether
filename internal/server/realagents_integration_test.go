@@ -261,7 +261,9 @@ func TestIntegrationRealAgents(t *testing.T) {
 							if want.subagent != "" {
 								// Its answer is its last request. Standard Claude Code
 								// runs it in the background, so the main turn can end
-								// waiting on it.
+								// waiting on it. Aether misses a Codex subagent, and a
+								// Standard Claude Code Stop can omit its background one.
+								gapAllowed := agent == "codex" || mode == domain.LaunchTUI
 								var gaps, wrong []string
 								a.waitFor(ctx, t, "the subagent's answer", func() bool {
 									started := len(a.subagentBodies(want.subagent))
@@ -270,9 +272,9 @@ func TestIntegrationRealAgents(t *testing.T) {
 									}
 									r := a.get(t)
 									state := fmt.Sprintf("%s/%s (%s: %q)", r.Status, r.Activity, r.Cause, r.Reason)
-									held := domain.RunActivity(r.Activity) == domain.ActivityWaitingAgents && events.RunStatusCause(r.Cause) == events.CauseTasksHeld
+									held := domain.RunActivity(r.Activity) == domain.ActivityWaitingAgents
 									switch {
-									case needsYou(r):
+									case needsYou(r), !gapAllowed && (r.Status != string(domain.RunRunning) || domain.RunActivity(r.Activity) != domain.ActivityWorking && !held):
 										wrong = append(wrong, state)
 									case r.Status == string(domain.RunRunning) && (domain.RunActivity(r.Activity) == domain.ActivityWorking || held):
 									default:
@@ -284,7 +286,7 @@ func TestIntegrationRealAgents(t *testing.T) {
 									t.Logf("known gap: Aether misses this agent's subagent, so the run showed %s while it worked", strings.Join(slices.Compact(gaps), ", "))
 								}
 								if len(wrong) > 0 {
-									t.Errorf("while the subagent ran the run needed you: %s", strings.Join(slices.Compact(wrong), ", "))
+									t.Errorf("while the subagent ran the run was %s, want running and working, or waiting on its task, and never needing you", strings.Join(slices.Compact(wrong), ", "))
 								}
 							}
 							a.check(ctx, t, turn, seq, want)
@@ -524,7 +526,6 @@ func (a *realAgentRun) turnBodies(turn string) []string {
 	return out
 }
 
-// subagentBodies are the requests of the subagent playing script.
 func (a *realAgentRun) subagentBodies(script string) []string {
 	var out []string
 	for _, body := range a.model.bodies(subagentTagged(script)) {
@@ -549,7 +550,6 @@ func (a *realAgentRun) reminders(turn string) int {
 	return n
 }
 
-// receipts are the run's report timeline entries with summary.
 func (a *realAgentRun) receipts(t *testing.T, summary string) []events.TimelinePayload {
 	t.Helper()
 	var out []events.TimelinePayload
