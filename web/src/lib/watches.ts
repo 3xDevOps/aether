@@ -137,6 +137,18 @@ export const defaultExpiryDays = 14
 export const maxExpiryDays = 90
 
 /** A dashboard link opens in place; anything else, such as a pull request on GitHub, is a page of its own. */
+/** Where a watch's target lives: a run or swarm in the dashboard, a pull request on GitHub. watch.link is the watch's own page. */
+export function targetLink(target: WatchTarget): string {
+  switch (target.kind) {
+    case 'run':
+      return `/?run=${encodeURIComponent(target.run_id ?? '')}`
+    case 'mission':
+      return `/?page=missions&id=${encodeURIComponent(target.mission_id ?? '')}`
+    case 'pr':
+      return `https://github.com/${target.repo ?? ''}/pull/${target.number ?? ''}`
+  }
+}
+
 export function linkTarget(link: string): { route: Route } | { href: string } {
   if (link.startsWith('/?') || link.startsWith('?')) return { route: routeFromQuery(new URLSearchParams(link.slice(link.indexOf('?')))) }
   return { href: link }

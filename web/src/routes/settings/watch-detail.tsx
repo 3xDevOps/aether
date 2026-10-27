@@ -17,7 +17,7 @@ import type { Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { errorSentence } from '@/lib/format'
 import type { Watch, WatchCondition, WatchNotification } from '@/lib/types'
-import { conditionChoices, conditionLabel, deliveryText, deliveryTone, isLive, linkTarget, maxExpiryDays, stateWords, targetKindLabel } from '@/lib/watches'
+import { conditionChoices, conditionLabel, deliveryText, deliveryTone, isLive, linkTarget, maxExpiryDays, targetLink, stateWords, targetKindLabel } from '@/lib/watches'
 import { useStore } from '@/store'
 import { readWatch } from '@/store/watches'
 
@@ -273,7 +273,7 @@ export function WatchDetail({ watchID, client, onClose }: { watchID: string; cli
                 <span>{targetKindLabel(watch.target)}</span>
                 <span aria-hidden>·</span>
                 <span>{watch.conditions.map((c) => conditionLabel(watch.target.kind, c)).join(', ')}</span>
-                {watch.link && <><span aria-hidden>·</span><LinkTo link={watch.link}>Open {watch.target.kind === 'mission' ? 'swarm' : watch.target.kind === 'pr' ? 'pull request' : 'run'}</LinkTo></>}
+                <span aria-hidden>·</span><LinkTo link={targetLink(watch.target)}>Open {watch.target.kind === 'mission' ? 'swarm' : watch.target.kind === 'pr' ? 'pull request' : 'run'}</LinkTo>
               </div>
             </DialogDescription>
           )}

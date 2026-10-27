@@ -6233,7 +6233,9 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   a watch is and where to add one.
 - **Detail** (`src/routes/settings/watch-detail.tsx`): a row opens
   `?page=settings&id=watches&watch=<id>`, a dialog that is a full-screen
-  sheet under 768px. It reads `watch.get` and shows what the server sees
+  sheet under 768px. Its **Open run**, **Open swarm** or **Open pull
+  request** link is built from `watch.target`, since `watch.link` is the
+  watch's own page. It reads `watch.get` and shows what the server sees
   (`observed`), the conditions, label and end date to change
   (`watch.update` with only the fields the member changed, the end at most
   90 days from now). An untouched form follows changes made elsewhere, such

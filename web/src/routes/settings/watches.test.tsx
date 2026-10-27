@@ -30,7 +30,7 @@ function watch(over: Partial<Watch> = {}): Watch {
     updated_at: '2026-10-26T10:00:00Z',
     expires_at: '2026-11-09T10:00:00Z',
     observed: { summary: 'Working: editing auth.go', run_status: 'running', activity: 'working' },
-    link: `/?run=${fixRun.id}`,
+    link: '/?page=settings&id=watches&watch=wat-1',
     ...over,
   }
 }
@@ -149,6 +149,8 @@ describe('watches in settings', () => {
     expect(within(dialog).getByText('Push skipped: The run notification already sent it')).toBeDefined()
     expect(within(dialog).getByText('In the assistant chat')).toBeDefined()
     expect(within(dialog).getByText('Push withdrawn from your devices: the need ended')).toBeDefined()
+    await user.click(within(dialog).getByRole('button', { name: 'Open run' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: fixRun.id } })
   })
 
   it('pauses, resumes and deletes with the server receipt', async () => {
