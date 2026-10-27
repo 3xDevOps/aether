@@ -4183,7 +4183,7 @@ whatever opened it. Sections (`details.tsx`):
   minute past due; **Failures** ("3 in a row: <error>") with the source's
   own error; **Resolved**; **Delivery** ("Delivered to the agent", "Waiting
   to be delivered", or "Not delivered after N attempts: <error>"); why it
-  ended; and when a pending one gives up. **Cancel** (`run.wait.cancel`, for
+  ended, "Cancelled by <name>" when a person cancelled it; and when a pending one gives up. **Cancel** (`run.wait.cancel`, for
   whoever may steer the run) ends a pending condition and rereads the run.
   The section rereads the run on every `run.wait.changed` event.
 - **Child runs**, where the server offers `run.children` and the run has

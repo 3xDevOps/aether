@@ -63,6 +63,8 @@ describe('waiting until', () => {
     expect(within(old).getByText('Completed', { exact: true })).toBeDefined()
     expect(old.textContent).toContain('Delivered to the agent')
 
+    expect(old.textContent).not.toContain('Ended')
+
     await user.click(within(checks).getByRole('button', { name: 'Cancel' }))
     expect(client.runWaitCancel).toHaveBeenCalledWith('run_1', 'wait_1')
     await waitFor(() => expect(useStore.getState().runs.run_1?.wait_conditions).toEqual([]))
@@ -73,6 +75,9 @@ describe('waiting until', () => {
     setUp(waiting, ['run.get'])
     const { rerender } = render(<WaitConditions run={toRecord(waiting)} inset={false} client={fakeApi()} />)
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    const cancelled = run({ wait_conditions: [wait({ state: 'cancelled', ended_cause: 'cancelled', ended_by_member_id: bob.id })] })
+    rerender(<WaitConditions run={toRecord(cancelled)} inset={false} client={fakeApi()} />)
+    expect(screen.getByText('Cancelled by Bob')).toBeDefined()
     rerender(<WaitConditions run={toRecord(run())} inset={false} client={fakeApi()} />)
     expect(screen.queryByRole('region', { name: 'Waiting until' })).toBeNull()
   })

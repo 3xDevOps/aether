@@ -9,6 +9,7 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { api, type Api } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import { message } from '@/lib/format'
+import { memberName } from '@/lib/member-name'
 import { allowed } from '@/lib/permissions'
 import { runLabel } from '@/lib/status'
 import type { WaitCondition } from '@/lib/types'
@@ -33,6 +34,12 @@ function Target({ wait }: { wait: WaitCondition }) {
     )
   }
   return <Code>{wait.spec}</Code>
+}
+
+function EndedBy({ id }: { id: string }) {
+  const name = useStore((s) => memberName(s, id))
+  const self = useStore((s) => s.info?.member.id)
+  return <>Cancelled by {id === self ? 'you' : name}</>
 }
 
 function Fact({ term, children, tone }: { term: string; children: ReactNode; tone?: 'failed' }) {
@@ -103,7 +110,9 @@ function WaitRow({ wait, runID, mayCancel, client }: { wait: WaitCondition; runI
             {delivery.text}{wait.delivered_at && <> <RelativeTime at={wait.delivered_at} /></>}
           </Fact>
         )}
-        {wait.ended_cause && <Fact term="Ended">{wait.ended_cause}</Fact>}
+        {wait.ended_by_member_id
+          ? <Fact term="Ended"><EndedBy id={wait.ended_by_member_id} /></Fact>
+          : wait.ended_cause && <Fact term="Ended">{wait.ended_cause}</Fact>}
         {wait.state === 'pending' && wait.expires_at && <Fact term="Gives up"><RelativeTime at={wait.expires_at} /></Fact>}
       </dl>
       {mayCancel && wait.state === 'pending' && (

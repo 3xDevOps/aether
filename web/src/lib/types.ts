@@ -98,6 +98,8 @@ export interface WaitCondition {
   last_delivery_error?: string
   expires_at: string
   ended_cause?: string
+  /** The person who cancelled the condition. */
+  ended_by_member_id?: string
 }
 
 export interface Run {
