@@ -410,7 +410,7 @@ permission request, a `needs-input` or `blocked` report, or a disconnected
 agent), 4 when it is parked with nothing pending, because its turn ended with
 an `answered` report or no report or it went silent, and a message continues it (`aether message
 <run-id> "<reply>"`), 5 when its wait broke (a condition it waited on resolved
-and the wake never reached the agent; see [Waits Aether can
+and the wake never reached the agent, or its source went unread for an hour; see [Waits Aether can
 check](failure-handling.md#waits-aether-can-check)), and 124 on timeout. Before exiting it prints `run
 <run-id> <state>: <reason>`, with the state as `aether runs` labels it. It keeps waiting
 while the run waits on agents, CI or a process, and on a swarm worker's

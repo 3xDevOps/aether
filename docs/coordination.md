@@ -1929,7 +1929,8 @@ People read reports from the CLI too: `aether timeline` prints one as
 `aether wait <run-id>` returns on a terminal report and on a needs-input or
 blocked one (a swarm worker's only when blocked), exits 4 on an answered
 one, keeps waiting on a waiting one, and exits 5 when a condition the wait
-named resolved but its wake never reached the agent
+named resolved but its wake never reached the agent, or its source went
+unread for an hour
 ([exit codes](quickstart.md#from-a-script-or-agent)).
 
 Before accepting `coord.report`, Aether captures evidence for the run. The

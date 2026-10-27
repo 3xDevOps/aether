@@ -188,7 +188,8 @@ func waitRun(c *protocol.Client, w, stderr io.Writer, runID string, asJSON bool,
 // shares; one parked with nothing pending waits for a message, which is not a
 // request for a person. Waiting on agents, CI or a process, or a swarm
 // worker's request its integrator answers, keeps the wait going. A wait
-// whose condition resolved but whose wake never reached the agent is broken.
+// whose condition resolved but whose wake never reached the agent, or whose
+// source went unread for an hour, is broken.
 func waitOutcome(r protocol.Run, items []protocol.AttentionItem) (int, bool) {
 	status := domain.RunStatus(r.Status)
 	switch {

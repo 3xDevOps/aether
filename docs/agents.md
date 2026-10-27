@@ -258,7 +258,8 @@ aether message <run-id> "<reply>"
 `aether wait` exits 0 when the run finished, 1 when it failed, 3 when it needs
 you, 4 when it is parked with nothing pending (its turn ended without a
 report, or it went silent) and a message continues it, 5 when its wait broke
-(a condition resolved and the wake never reached the agent), and 124 on
+(a condition resolved and the wake never reached the agent, or its source
+went unread for an hour), and 124 on
 timeout. `aether runs <run-id>` shows what a run needs, each
 with the command that answers it.
 
