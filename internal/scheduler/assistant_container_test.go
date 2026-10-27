@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -51,9 +52,9 @@ func TestAssistantContainerMountsNothingFromTheMemberHome(t *testing.T) {
 		writeHomeFile(t, memberHome, rel, content)
 	}
 
-	cid, err := e.sched.ensureAssistantContainer(ctx, e.member.ID)
+	cid, err := e.sched.createAssistantContainer(ctx, e.member.ID)
 	if err != nil {
-		t.Fatalf("ensureAssistantContainer: %v", err)
+		t.Fatalf("createAssistantContainer: %v", err)
 	}
 	c, err := e.rt.get(cid)
 	if err != nil {
@@ -106,10 +107,6 @@ func TestAssistantContainerMountsNothingFromTheMemberHome(t *testing.T) {
 		t.Errorf("the member's own sign-in made the assistant ready: %v, %v", found, loginErr)
 	}
 
-	again, err := e.sched.ensureAssistantContainer(ctx, e.member.ID)
-	if err != nil || again != cid {
-		t.Fatalf("second ensure = %q, %v; want the kept container %q", again, err, cid)
-	}
 	if err = e.sched.RemoveAssistant(ctx, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +210,7 @@ func TestSanitizeAssistantLogin(t *testing.T) {
 		`"enterpriseGateway":{"url":"https://gateway.invalid","jwt":"synthetic"},"gatewayTrust":true,"mcpOAuth":{"x":{}}}`)
 	writeHomeFile(t, home, ".codex/auth.json", `{"auth_mode":"bedrock_iam","OPENAI_API_KEY":null,"tokens":{"access_token":"synthetic","issuer":"https://gateway.invalid"},"last_refresh":"2026-10-27T00:00:00Z","agent_identity":{}}`)
 
-	_, err := e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, true)
+	_, err := e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, "")
 	for _, key := range []string{"enterpriseGateway", "gatewayTrust", "mcpOAuth", "claudeAiOauth.baseUrl", `auth_mode "bedrock_iam"`, "agent_identity", "tokens.issuer"} {
 		if err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("start error %v does not name %s", err, key)
@@ -227,7 +224,7 @@ func TestSanitizeAssistantLogin(t *testing.T) {
 			t.Errorf("%s = %s, %v; want %s", rel, got, readErr, want)
 		}
 	}
-	if _, err = e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, true); err != nil {
+	if _, err = e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, ""); err != nil {
 		t.Fatalf("the start after the cleanup: %v", err)
 	}
 	if found, err := e.sched.AssistantLoginFound(e.member.ID, "claude"); err != nil || !found {
@@ -263,8 +260,42 @@ func TestAssistantLoginRunsInTheAssistantContainer(t *testing.T) {
 	if _, err = e.sched.StartAssistantLogin(t.Context(), e.member.ID, "codex", 100, 30); err != nil || len(e.rt.execTTYCalls()) != 1 {
 		t.Fatalf("a second sign-in while one runs started another: %v, %d execs", err, len(e.rt.execTTYCalls()))
 	}
+	if _, err = e.sched.StartAssistantLogin(t.Context(), e.member.ID, "claude", 100, 30); err == nil || !strings.Contains(err.Error(), "sign-in for the assistant is running") {
+		t.Fatalf("a Claude Code sign-in during the Codex one = %v, want it refused", err)
+	}
+	if _, err = e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, ""); err == nil || !strings.Contains(err.Error(), "sign-in for the assistant is running") {
+		t.Fatalf("a start during the sign-in = %v, want it refused", err)
+	}
+	if _, err = e.rt.get(cid); err != nil {
+		t.Fatalf("the refused start removed the container the sign-in runs in: %v", err)
+	}
 	if _, err = e.sched.StartAssistantLogin(t.Context(), e.member.ID, "pi", 100, 30); err == nil {
 		t.Fatal("signed in an agent the assistant does not run")
+	}
+}
+
+// TestAssistantStartRefusesARemovedMember keeps a start or sign-in that
+// waited behind a member's removal from creating their assistant again.
+func TestAssistantStartRefusesARemovedMember(t *testing.T) {
+	t.Parallel()
+	assistantDir := filepath.Join(t.TempDir(), "assistant")
+	e := newTestEnv(t, func(c *Config) {
+		c.ServerBinary = fakeServerBinary(t, "current build")
+		c.AssistantDir = assistantDir
+	})
+	withCoordination(t, e)
+	gone := &domain.Member{DisplayName: "Gone", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
+	if err := e.db.CreateMember(t.Context(), gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.DeleteMember(t.Context(), gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.sched.StartAssistantLogin(t.Context(), gone.ID, "codex", 80, 24); err == nil {
+		t.Fatal("started a sign-in for a removed member")
+	}
+	if _, err := os.Stat(filepath.Join(assistantDir, string(gone.ID))); !os.IsNotExist(err) {
+		t.Fatalf("a removed member's assistant directory exists: %v", err)
 	}
 }
 
@@ -285,7 +316,7 @@ func TestDiscardAssistantStateKeepsOnlyTheSignIns(t *testing.T) {
 		}
 	})
 	withCoordination(t, e)
-	cid, err := e.sched.ensureAssistantContainer(t.Context(), e.member.ID)
+	cid, err := e.sched.createAssistantContainer(t.Context(), e.member.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,8 +3,6 @@ package scheduler
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,7 +68,8 @@ func assistantPolicyDir(root string, member domain.MemberID) string {
 }
 
 // assistantInstalled records the adapter in AssistantInstallDir once its
-// install succeeded. Only the server writes it, and no container mounts it.
+// install succeeded. Only the server writes it; the assistant container
+// reads it in the read-only install root.
 func assistantInstalled(root string, member domain.MemberID, agent string) string {
 	return filepath.Join(root, string(member), "install", agent+".installed")
 }
@@ -172,7 +171,7 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	for _, agent := range assistantAgents {
 		bins = append(bins, path.Join(AssistantInstallPath, agent, "node_modules", ".bin"))
 	}
-	spec := runtime.Spec{
+	return runtime.Spec{
 		Name:             "aether-assistant-" + string(member),
 		Image:            image,
 		Env:              map[string]string{"HOME": home, "PATH": strings.Join(append(bins, assistantPath), ":")},
@@ -184,59 +183,17 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 		CPULimit:         s.cfg.RunCPULimit,
 		MemoryLimitBytes: s.cfg.RunMemoryBytes,
 		PidsLimit:        s.cfg.RunPidsLimit,
-	}
-	spec.Fingerprint = assistantFingerprint(spec)
-	return spec, nil
+	}, nil
 }
 
-func assistantFingerprint(spec runtime.Spec) string {
-	spec.Name, spec.CreationKey, spec.Fingerprint = "", "", ""
-	data, err := json.Marshal(spec)
-	if err != nil {
-		panic(fmt.Sprintf("scheduler: fingerprint assistant spec: %v", err))
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
-}
-
-// ensureAssistantContainer starts the member's assistant container, keeping
-// the existing one only when it was created from the same plan. Callers hold
-// assistantLock.
-func (s *Scheduler) ensureAssistantContainer(ctx context.Context, member domain.MemberID) (runtime.ID, error) {
+// createAssistantContainer creates and starts the member's assistant
+// container. Callers hold assistantLock and removed the previous one.
+func (s *Scheduler) createAssistantContainer(ctx context.Context, member domain.MemberID) (runtime.ID, error) {
 	spec, err := s.assistantContainerPlan(ctx, member)
 	if err != nil {
 		return "", err
 	}
-	cid, err := s.cfg.Runtime.FindByCreationKey(ctx, spec.CreationKey)
-	switch {
-	case err == nil:
-		info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
-		if inspectErr != nil && !errors.Is(inspectErr, runtime.ErrNotFound) {
-			return "", fmt.Errorf("scheduler: inspect the assistant container: %w", inspectErr)
-		}
-		if inspectErr == nil && info.Fingerprint == spec.Fingerprint {
-			running, probeErr := s.terminalContainerRunning(ctx, cid, s.cfg.ExitProbeTimeout)
-			if probeErr != nil {
-				return "", fmt.Errorf("scheduler: probe the assistant container: %w", probeErr)
-			}
-			if running {
-				return cid, nil
-			}
-			startErr := s.cfg.Runtime.Start(ctx, cid)
-			if startErr == nil {
-				return cid, nil
-			}
-			if ctx.Err() != nil {
-				return "", fmt.Errorf("scheduler: start the assistant container: %w", startErr)
-			}
-		}
-		if err = s.destroyTerminalContainer(ctx, cid); err != nil {
-			return "", fmt.Errorf("scheduler: replace the assistant container: %w", err)
-		}
-	case !errors.Is(err, runtime.ErrNotFound):
-		return "", fmt.Errorf("scheduler: find the assistant container: %w", err)
-	}
-	cid, err = s.cfg.Runtime.Create(ctx, spec)
+	cid, err := s.cfg.Runtime.Create(ctx, spec)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: create the assistant container: %w", err)
 	}

@@ -219,9 +219,9 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	}
 	s.authorizationMu.Unlock()
 	// A first sign-in installs the adapter, too long to hold admissions for;
-	// revokeOnPolicyChange still ends the stream if the member is removed.
+	// the assistant's own lock orders it with the member's removal.
 	if admissionErr == nil && req.AssistantLogin != "" {
-		key, admissionErr = s.cfg.Runs.StartAssistantLogin(ctx, member, req.AssistantLogin, cols, rows)
+		admissionErr = s.startAssistantLogin(ctx, member, req.AssistantLogin, cols, rows, &key)
 	}
 	if admissionErr != nil {
 		e := rpcError(admissionErr)
@@ -282,6 +282,28 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	default:
 		ch.exit(1)
 	}
+}
+
+// startAssistantLogin starts agent's sign-in for member's assistant and sets
+// key to the session that streams it. It needs the same permission as a
+// prompt.
+func (s *Server) startAssistantLogin(ctx context.Context, member domain.MemberID, agent string, cols, rows uint, key *ptyhost.SessionKey) error {
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return errors.New("the assistant is not configured on this server")
+	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return err
+	}
+	if err := permissions.Check(permissions.Launch, actor, permissions.Target{}); err != nil {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: "assistant sign-in: " + err.Error()}
+	}
+	return svc.SignIn(ctx, member, func(ctx context.Context) error {
+		var err error
+		*key, err = s.cfg.Runs.StartAssistantLogin(ctx, member, agent, cols, rows)
+		return err
+	})
 }
 
 func (s *Server) terminalStatus(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {

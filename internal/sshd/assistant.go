@@ -37,6 +37,7 @@ type AssistantService interface {
 	Settings(ctx context.Context, member domain.MemberID) (protocol.AssistantSettings, error)
 	SetSettings(ctx context.Context, member domain.MemberID, p protocol.AssistantSettingsParams) (protocol.AssistantSettings, error)
 	SetShareView(ctx context.Context, member domain.MemberID, on bool) error
+	SignIn(ctx context.Context, member domain.MemberID, start func(context.Context) error) error
 }
 
 func init() {

@@ -22,3 +22,19 @@ func (s *Service) DiscardAgentState(ctx context.Context, id domain.MemberID) err
 	}
 	return nil
 }
+
+// SignIn stops the member's session and runs start, which begins a sign-in
+// for their assistant, under the member's lock: the sign-in replaces the
+// assistant container, so it must not race a start or the member's removal.
+func (s *Service) SignIn(ctx context.Context, id domain.MemberID, start func(context.Context) error) error {
+	m := s.member(id)
+	m.op.Lock()
+	defer m.op.Unlock()
+	if m.removing {
+		return ErrRemoving
+	}
+	if err := s.stop(ctx, m); err != nil {
+		return err
+	}
+	return start(ctx)
+}

@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"errors"
+	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -33,3 +34,23 @@ func (h *fakeHost) RemoveAssistant(_ context.Context, member domain.MemberID) er
 }
 
 func (*fakeHost) AssistantLoginFound(domain.MemberID, string) (bool, error) { return false, nil }
+
+// TestSignInWaitsOutRemoval refuses a sign-in for a member whose removal
+// has begun, and runs it otherwise.
+func TestSignInWaitsOutRemoval(t *testing.T) {
+	s := New(Config{Dir: t.TempDir(), Host: &fakeHost{}})
+	started := 0
+	start := func(context.Context) error {
+		started++
+		return nil
+	}
+	if err := s.SignIn(t.Context(), "m1", start); err != nil || started != 1 {
+		t.Fatalf("SignIn = %v, started %d", err, started)
+	}
+	if err := s.Fence(t.Context(), "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SignIn(t.Context(), "m1", start); !errors.Is(err, ErrRemoving) || started != 1 {
+		t.Fatalf("SignIn during removal = %v, started %d; want ErrRemoving", err, started)
+	}
+}

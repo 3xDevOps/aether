@@ -42,6 +42,8 @@ func (g *Gateway) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if cols == 0 || rows == 0 {
 		cols, rows = defaultCols, defaultRows
 	}
+	// An assistant sign-in may install its adapter first, past a ping.
+	s.starting.Store(true)
 	term, ack, err := s.Backend.Terminal(s.Ctx, protocol.TerminalRequest{
 		Tab:            tab,
 		AssistantLogin: login,
@@ -50,6 +52,7 @@ func (g *Gateway) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		Follow:         req.Follow,
 		Framed:         true,
 	})
+	s.starting.Store(false)
 	if err == nil && ack.OK && !ack.Framed {
 		err = errors.New("server does not support ordered terminal snapshots; update aether-server")
 		ack = protocol.TerminalResponse{Code: protocol.CodeInternal, Error: err.Error()}

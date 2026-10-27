@@ -62,7 +62,7 @@ func (s *Scheduler) StartAssistantExec(ctx context.Context, member domain.Member
 	if !ok {
 		return nil, fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
 	}
-	cid, err := s.freshAssistantContainer(ctx, member, agent, installing, true)
+	cid, err := s.freshAssistantContainer(ctx, member, agent, installing, "")
 	if err != nil {
 		return nil, err
 	}
@@ -79,20 +79,17 @@ var assistantLoginArgv = map[string][]string{
 
 // StartAssistantLogin starts agent's sign-in for the member's assistant on
 // a PTY session, unless it runs already, and returns the session to attach
-// to. It replaces the assistant container like a start, so a running
-// assistant session stops and the next prompt starts it again.
+// to. It replaces the assistant container like a start, so callers stop the
+// assistant's session first and serialize with starting it.
 func (s *Scheduler) StartAssistantLogin(ctx context.Context, member domain.MemberID, agent string, cols, rows uint) (ptyhost.SessionKey, error) {
 	argv, ok := assistantLoginArgv[agent]
 	if !ok {
 		return "", fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
 	key := ptyhost.AssistantLoginSession(member, agent)
-	if slices.Contains(s.cfg.PTY.ActiveSessions(string(key)), key) {
-		return key, nil
-	}
-	cid, err := s.freshAssistantContainer(ctx, member, agent, func() {}, false)
-	if err != nil {
-		return "", err
+	cid, err := s.freshAssistantContainer(ctx, member, agent, func() {}, agent)
+	if err != nil || cid == "" {
+		return key, err
 	}
 	att, err := s.cfg.Runtime.ExecTTY(ctx, cid, argv, AssistantCwd, cols, rows)
 	if err != nil {
@@ -105,10 +102,13 @@ func (s *Scheduler) StartAssistantLogin(ctx context.Context, member domain.Membe
 	return key, nil
 }
 
-// freshAssistantContainer installs agent's adapter, prepares the assistant
-// home and starts a new assistant container. With strict, a sign-in file
-// that held keys Aether does not keep refuses the start once they are gone.
-func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.MemberID, agent string, installing func(), strict bool) (runtime.ID, error) {
+// freshAssistantContainer removes the member's assistant container,
+// installs agent's adapter, prepares the assistant home and starts a new
+// container. A new container would end a running sign-in, so it refuses
+// while one runs; for signIn, the agent being signed in, a running sign-in of
+// that agent returns no container and no error. A start, but not a sign-in,
+// is refused once a sign-in file held keys Aether does not keep.
+func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.MemberID, agent string, installing func(), signIn string) (runtime.ID, error) {
 	profile, ok := harness.Lookup(agent)
 	if !ok || profile.ACPInstall == nil {
 		return "", fmt.Errorf("agent %q cannot run the assistant", agent)
@@ -121,20 +121,31 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 	lock := s.assistantLock(member)
 	lock.Lock()
 	defer lock.Unlock()
-	if err = s.installAssistant(ctx, member, profile, installing); err != nil {
-		return "", err
+	// A member removed while this waited would get their assistant back.
+	if _, err = s.cfg.Store.GetMember(ctx, member); err != nil {
+		return "", fmt.Errorf("scheduler: the assistant's member: %w", err)
+	}
+	running := s.cfg.PTY.ActiveSessions(string(ptyhost.AssistantLoginSession(member, "")))
+	switch {
+	case signIn != "" && slices.Contains(running, ptyhost.AssistantLoginSession(member, signIn)):
+		return "", nil
+	case len(running) > 0:
+		return "", fmt.Errorf("scheduler: a sign-in for the assistant is running (%s); finish it first", running[0])
 	}
 	if err = s.removeAssistantContainer(ctx, member); err != nil {
+		return "", err
+	}
+	if err = s.installAssistant(ctx, member, profile, installing); err != nil {
 		return "", err
 	}
 	removed, err := s.prepareAssistantHome(ctx, member)
 	if err != nil {
 		return "", err
 	}
-	if strict && len(removed) > 0 {
+	if signIn == "" && len(removed) > 0 {
 		return "", fmt.Errorf("scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: %s. Retry starts with the rest; if the agent then reports no sign-in, sign in for the assistant again", strings.Join(removed, "; "))
 	}
-	return s.ensureAssistantContainer(ctx, member)
+	return s.createAssistantContainer(ctx, member)
 }
 
 // StopAssistantExec stops an adapter an earlier session or server process

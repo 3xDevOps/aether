@@ -779,15 +779,32 @@ func TestTerminalDropsOnMembershipRevocation(t *testing.T) {
 	c.expectExit(t, protocol.AttachExitMembershipRevoked)
 }
 
-// An assistant sign-in streams the member's own sign-in session and never
-// starts their environment terminal.
+// signInOnly is an assistant service whose SignIn runs the start it is
+// given; nothing else is called.
+type signInOnly struct {
+	AssistantService
+	signedIn chan domain.MemberID
+}
+
+func (a signInOnly) SignIn(ctx context.Context, member domain.MemberID, start func(context.Context) error) error {
+	a.signedIn <- member
+	return start(ctx)
+}
+
+// An assistant sign-in goes through the assistant service, streams the
+// member's own sign-in session and never starts their environment terminal.
+// A viewer, who cannot prompt the assistant, cannot sign it in either.
 func TestTerminalAssistantLoginStartsOnlyTheSignIn(t *testing.T) {
 	t.Parallel()
-	e := revocableEnv(t)
+	svc := signInOnly{signedIn: make(chan domain.MemberID, 1)}
+	e := newTestEnv(t, func(c *Config) { c.Services.Assistant = svc })
 	collab, cm := addMember(t, e, "Sign-in user", domain.RoleCollaborator, false)
 	_, ack := rawTerminalRequest(t, e, collab, true, protocol.TerminalRequest{AssistantLogin: "claude"})
 	if !ack.OK {
 		t.Fatalf("ack = %+v, want ok", ack)
+	}
+	if got := <-svc.signedIn; got != cm.ID {
+		t.Fatalf("the service signed in %s, want %s", got, cm.ID)
 	}
 	calls := e.runs.Calls()
 	if len(calls) == 0 || calls[len(calls)-1] != "assistant-login:"+string(cm.ID)+":claude:80:24" {
@@ -797,6 +814,10 @@ func TestTerminalAssistantLoginStartsOnlyTheSignIn(t *testing.T) {
 		if strings.HasPrefix(call, "terminal") {
 			t.Fatalf("RunController calls = %v, want no environment terminal", calls)
 		}
+	}
+	viewer, _ := addMember(t, e, "Sign-in viewer", domain.RoleViewer, false)
+	if _, ack = rawTerminalRequest(t, e, viewer, true, protocol.TerminalRequest{AssistantLogin: "claude"}); ack.OK || ack.Code != protocol.CodeDenied {
+		t.Fatalf("viewer ack = %+v, want denied", ack)
 	}
 }
 
