@@ -9,12 +9,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// Liveness is the live Enhanced run's turn phase, the agent's last progress
-// and whether its connection is open. ok is false for any other run.
+// Liveness is the live or provisioning Enhanced run's turn phase, the
+// agent's last progress and whether its connection is open. ok is false for
+// any other run.
 func (s *Scheduler) Liveness(run domain.RunID) (domain.RunLiveness, bool) {
 	s.mu.Lock()
 	entry := s.runs[run]
-	enhanced := entry != nil && entry.acp && entry.status.Live()
+	enhanced := entry != nil && entry.acp && (entry.status.Live() || entry.status == domain.RunProvisioning)
 	var status domain.RunStatus
 	if enhanced {
 		status = entry.status
@@ -26,9 +27,20 @@ func (s *Scheduler) Liveness(run domain.RunID) (domain.RunLiveness, bool) {
 	if status == domain.RunProvisioning {
 		return domain.RunLiveness{Phase: domain.PhaseSetup, Transport: domain.TransportUnknown}, true
 	}
-	sess := s.acp.session(run)
+	s.acp.mu.Lock()
+	r := s.acp.runs[run]
+	var sess *acphost.Session
+	if r != nil {
+		sess = r.session
+	}
+	s.acp.mu.Unlock()
 	if sess == nil {
-		return domain.RunLiveness{Transport: domain.TransportUnknown}, true
+		// A run is recorded once its session opened, or failed to.
+		l := domain.RunLiveness{Transport: domain.TransportUnknown}
+		if r != nil {
+			l.Transport = domain.TransportClosed
+		}
+		return l, true
 	}
 	return livenessOf(sess.State()), true
 }

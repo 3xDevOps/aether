@@ -35,7 +35,8 @@ type Run struct {
 	// Cause comes from the scheduler: what chose Activity, as in the
 	// run.status event.
 	Cause string `json:"cause,omitempty"`
-	// Liveness comes from the scheduler for a live Enhanced run only.
+	// Liveness comes from the scheduler for a live or provisioning Enhanced
+	// run only.
 	Liveness *RunLiveness `json:"liveness,omitempty"`
 	// RequestedAccountMemberID is the account the launcher asked for, set
 	// only when its usage was exhausted and the run launched on

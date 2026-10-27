@@ -130,7 +130,8 @@ func TestEnhancedFailedFirstPromptShowsItsError(t *testing.T) {
 }
 
 // TestEnhancedAdapterExitIsDisconnected: losing the agent process is the
-// one thing that reads disconnected.
+// one thing that reads disconnected, and its liveness then reads closed. A
+// provisioning run is in setup.
 func TestEnhancedAdapterExitIsDisconnected(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t, func(cfg *Config) {
@@ -148,6 +149,15 @@ func TestEnhancedAdapterExitIsDisconnected(t *testing.T) {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Activity == domain.ActivityDisconnected
 	})
+	if l, ok := e.sched.Liveness(run.ID); !ok || l.Transport != domain.TransportClosed {
+		t.Fatalf("Liveness = %+v, %v; want closed", l, ok)
+	}
+	e.sched.mu.Lock()
+	e.sched.runs[run.ID].status = domain.RunProvisioning
+	e.sched.mu.Unlock()
+	if l, ok := e.sched.Liveness(run.ID); !ok || l.Phase != domain.PhaseSetup {
+		t.Fatalf("Liveness = %+v, %v; want setup while provisioning", l, ok)
+	}
 }
 
 // TestResumeRestartsTheStallClock: a run paused for longer than the stall
