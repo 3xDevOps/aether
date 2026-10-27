@@ -79,6 +79,9 @@ type RunController interface {
 	// AgentModels lists the models harness offers on account, resolving the
 	// harness and the account owner's login as Launch does.
 	AgentModels(ctx context.Context, member, account domain.MemberID, harness string, refresh bool) (protocol.AgentModelsResult, error)
+	// CachedAgentModels is AgentModels' fresh cached answer for harness on
+	// account, without probing; false when there is none.
+	CachedAgentModels(account domain.MemberID, harness string) (protocol.AgentModelsResult, bool)
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
 	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error

@@ -509,6 +509,48 @@ runs of `claude` and `codex` and Standard `claude` runs
 that spent it. A run that cannot move parks or fails with a reason that says
 why ([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
 
+### Saved launch choices
+
+The server keeps one set of saved launch choices per member, so every device
+and the built-in assistant can start from the same ones. They hold the agent
+to preselect, each agent's mode and model (at most 32 agents, names up to 64
+bytes with no control characters), the account to launch on, and the
+fallback policy: `automatic` (every account you may launch on), `ordered` (at
+most 8 member IDs, your own allowed), or `off`. They hold no credentials and
+grant nothing. `run.launch` does not read them: a client fills a launch from
+them, and the launch is authorized as if nothing were saved.
+
+`launch.defaults.get` returns your choices with a `revision`, which is 0 when
+none are saved. It also checks each choice now. `invalid` lists the choices a
+launch could not use, with the reason: an agent not installed on the account,
+an Enhanced mode that is not installed, or an account or fallback member who
+stopped sharing with you. `unknown` lists what it could not check:
+
+- a model with no current model list for that agent and account;
+- a model not in that list: it may be a full model ID for a listed alias,
+  which launches accept;
+- a model for your own agent definition, which a launch passes only if the
+  definition sets model arguments;
+- an agent with no login file, which still launches if an API key in the
+  environment signs it in;
+- every saved agent, when the account's agents could not be listed.
+
+Choices that fail a check stay saved until you replace them.
+
+`launch.defaults.set` replaces all your choices (`defaults`) or deletes them
+(`clear: true`). It takes the `revision` you last read. If someone saved since
+then, it fails with code `-32003`, and the error's data holds the current
+choices. Saving an account or fallback member who has not shared with you
+fails with `account_member_id: permission denied: member <id> has not shared
+their account with you`. Both methods act only on the caller, admins included.
+A save records whether the built-in assistant or the member made it
+(`source`). The built-in assistant saves only after you approve a card that
+spells out every choice, naming the account and each fallback member.
+
+A [member merge](#link-or-merge-sign-ins) keeps the survivor's saved choices.
+Any account or fallback member that names the absorbed member, in anyone's
+choices, is moved to the survivor, and those choices get a new `revision`.
+
 ## Swarms
 
 A **swarm** is one objective handed to an **integrator** run. The integrator asks

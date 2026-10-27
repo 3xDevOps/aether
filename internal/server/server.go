@@ -476,7 +476,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Store:  s.db,
 		Homes:  homes,
 		Runs:   s.sched,
-		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
+		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
 		Bus:    s.bus,
 	})
 	sshCfg.Services.Assistant = s.assistant
