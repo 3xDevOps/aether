@@ -1123,9 +1123,6 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 	return outbox.MarkCoordAuditPublished(ctx, pub.EventID)
 }
 
-// sendMessage is shared by send, ask, and reply. For replies, correlated is
-// true and route authorization is intentionally skipped only after the
-// question ownership check in Reply.
 type takeoverStore interface {
 	GetMissionWorkerAssignment(context.Context, domain.RunID) (*domain.MissionWorkerAssignment, error)
 }
@@ -1161,6 +1158,9 @@ func (s *Service) receiptStatus(ctx context.Context, method string, to domain.Ru
 	return string(recipient), nil
 }
 
+// sendMessage is shared by send, ask, and reply. For replies, correlated is
+// true and route authorization is intentionally skipped only after the
+// question ownership check in Reply.
 type peerMessageStore interface {
 	AppendRunMessageWithPeer(context.Context, *store.RunMessage, int, int, bool) (bool, error)
 	CoordConversationsAtCap(context.Context, domain.RunID, int) (bool, map[domain.RunID]bool, error)

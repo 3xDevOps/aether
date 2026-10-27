@@ -109,9 +109,10 @@ current controller and cancels every queued message. While protected, other
 members cannot message the run.
 
 On a swarm worker, taking control also sets a hold: the integrator cannot steer
-the worker while you control it. **Release**, or a lease that lapses 15
-seconds after your tab closes, clears it, as does **Release control** on the
-worker's task in the swarm page. See
+the worker while you control it. **Release** or leaving the run page clears
+it, as does **Release control** on the worker's task in the swarm page. If
+that release never arrives, as when the tab is killed, the lease lapses 15
+seconds later and the hold with it. See
 [coordination.md](coordination.md#delivery-acknowledgement-and-retries) for every session
 that keeps a hold.
 

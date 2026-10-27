@@ -632,6 +632,10 @@ func TestMissionWorkerHoldGenerationAndRestartRelease(t *testing.T) {
 	if shown, getErr := db.GetAttemptByRun(ctx, attempt.RunID); getErr != nil || !shown.TakeoverSince.Equal(held.UpdatedAt) {
 		t.Fatalf("attempt while held = %+v, %v; want takeover_since %s", shown, getErr, held.UpdatedAt)
 	}
+	if _, _, reserveErr := reserveMissionAttempt(t, db, mission, task, "held-worker-again"); !errors.Is(reserveErr, ErrMissionTakeover) ||
+		!strings.Contains(reserveErr.Error(), "member "+string(member.ID)+" has held it since ") {
+		t.Fatalf("worker.start while held = %v, want ErrMissionTakeover naming %s", reserveErr, member.ID)
+	}
 	other := mustCreateMember(t, db)
 	taken, err := db.SetMissionWorkerTakeover(ctx, attempt.RunID, other.ID, true)
 	if err != nil || taken.Generation <= held.Generation {
