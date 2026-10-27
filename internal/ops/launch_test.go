@@ -2,6 +2,7 @@ package ops
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -350,5 +351,24 @@ func TestLaunchChildren(t *testing.T) {
 	if text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "template": "triage", "children": "off"}); !failed ||
 		!strings.Contains(text, "children cannot be given") {
 		t.Fatalf("a template launch with children = %q", text)
+	}
+}
+
+// aether_launch_options lists at most maxRows workspaces and accounts, the
+// caller's own first, and says how many there are.
+func TestConnectorLaunchOptionsCapsRows(t *testing.T) {
+	f := newFake(t)
+	var accounts []protocol.Member
+	var workspaces []protocol.Workspace
+	for i := range maxRows + 1 {
+		accounts = append(accounts, protocol.Member{ID: fmt.Sprintf("mem-%d", i)})
+		workspaces = append(workspaces, protocol.Workspace{ID: fmt.Sprintf("ws-%d", i)})
+	}
+	f.answers[protocol.MethodAccountList] = returns(protocol.AccountListResult{Accounts: accounts})
+	f.answers[protocol.MethodWorkspaceList] = returns(protocol.WorkspaceListResult{Workspaces: workspaces})
+	text, out := run(t, connectorSession(t, f), "aether_launch_options", nil)
+	if text != "100 workspaces, 100 accounts." || out["workspaces_total"] != float64(maxRows+1) || out["accounts_total"] != float64(maxRows+1) ||
+		len(called(f, protocol.MethodAgentList)) != maxRows {
+		t.Fatalf("aether_launch_options = %q, totals %v %v", text, out["workspaces_total"], out["accounts_total"])
 	}
 }

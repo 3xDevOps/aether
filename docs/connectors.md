@@ -292,7 +292,8 @@ text again on purpose, pass a new `idempotency_key`.
   one a teammate shared with you ([Agent accounts](teams.md#agent-accounts)).
   Each has `access` (`own` or `shared`), `ready` (some agent can launch on it),
   its usage, and its agents. A teammate's account that is not shared with you
-  never appears.
+  never appears. Past 100 workspaces or accounts, `workspaces_total` and
+  `accounts_total` say how many there are.
 - Usage is each provider's windows, labelled as the provider labels them, with
   `used_percent` and `resets_at`. It is never money. An agent with no usage row
   has unknown usage.

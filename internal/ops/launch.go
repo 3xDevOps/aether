@@ -298,11 +298,11 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 	if err := c.read(ctx, protocol.MethodWorkspaceList, nil, &ws); err != nil {
 		return "", nil, err
 	}
-	workspaces := make([]repoRef, 0, len(ws.Workspaces))
-	for _, w := range ws.Workspaces {
+	workspaces := make([]repoRef, 0, min(len(ws.Workspaces), maxRows))
+	for _, w := range ws.Workspaces[:min(len(ws.Workspaces), maxRows)] {
 		workspaces = append(workspaces, repoRef{WorkspaceID: w.ID, Name: w.Name})
 	}
-	rows := accountRows(ctx, c.read, book)
+	rows := accountRows(ctx, c.read, book[:min(len(book), maxRows)])
 	out := map[string]any{
 		"server":     map[string]any{"version": info.ServerVersion, "ops_contract": ContractVersion},
 		"workspaces": workspaces, "accounts": rows, "modes": modeNames,
@@ -310,6 +310,12 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 			"moves to the usable account with the most usage left. Usage is unknown for agents with no usage row.", fallback.ExhaustedPercent),
 	}
 	summary := fmt.Sprintf("%d workspaces, %d accounts.", len(workspaces), len(rows))
+	if len(ws.Workspaces) > len(workspaces) {
+		out["workspaces_total"] = len(ws.Workspaces)
+	}
+	if len(book) > len(rows) {
+		out["accounts_total"] = len(book)
+	}
 	if in.WorkspaceID != "" {
 		var res protocol.TemplateListResult
 		if err := c.read(ctx, protocol.MethodTemplateList, protocol.TemplateListParams{WorkspaceID: in.WorkspaceID}, &res); err != nil {
