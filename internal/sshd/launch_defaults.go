@@ -253,13 +253,19 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 		if a.Model == "" {
 			continue
 		}
+		if agents[i].Source == "member" {
+			unknown("agents."+name+".model", a.Model, name+" is a member's own agent definition, which lists no models; a launch passes the model only if the definition sets model arguments, and refuses it otherwise")
+			continue
+		}
 		models, known := s.cfg.Runs.CachedAgentModels(account, name)
 		if !known || (models.Source != protocol.ModelSourceAgent && models.Source != protocol.ModelSourceCache) {
 			unknown("agents."+name+".model", a.Model, "Aether has no current list of the models "+name+" offers on this account to check it against")
 			continue
 		}
 		if !slices.ContainsFunc(models.Models, func(m protocol.AgentModel) bool { return m.ID == a.Model }) {
-			issue("agents."+name+".model", a.Model, fmt.Sprintf("%s does not offer model %q on this account (list fetched %s)", name, a.Model, models.FetchedAt))
+			unknown("agents."+name+".model", a.Model, fmt.Sprintf(
+				"model %q is not in the list %s gave on this account (fetched %s); it may be a full model ID for a listed alias, which launches accept, or a model %s no longer offers",
+				a.Model, name, models.FetchedAt, name))
 		}
 	}
 	return out, nil

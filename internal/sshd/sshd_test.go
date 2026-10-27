@@ -469,7 +469,7 @@ func (f *fakeRuns) CachedAgentModels(_ domain.MemberID, harness string) (protoco
 	if harness != "claude" && harness != "codex" {
 		return protocol.AgentModelsResult{}, false
 	}
-	return protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: harness}}}, true
+	return protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: harness}, {ID: "opus"}}}, true
 }
 
 func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {

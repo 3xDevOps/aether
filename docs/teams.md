@@ -523,11 +523,19 @@ them, and the launch is authorized as if nothing were saved.
 `launch.defaults.get` returns your choices with a `revision`, which is 0 when
 none are saved. It also checks each choice now. `invalid` lists the choices a
 launch could not use, with the reason: an agent not installed on the account,
-an Enhanced mode that is not installed, a model the agent no longer offers, or
-an account or fallback member who stopped sharing with you. `unknown` lists
-what it could not check: a model with no current model list, an agent with
-no login file, which still launches if an API key in the environment signs it
-in, or every agent when the account's agents could not be listed. Choices that fail a check stay saved until you replace them.
+an Enhanced mode that is not installed, or an account or fallback member who
+stopped sharing with you. `unknown` lists what it could not check:
+
+- a model with no current model list for that agent and account;
+- a model not in that list: it may be a full model ID for a listed alias,
+  which launches accept;
+- a model for your own agent definition, which a launch passes only if the
+  definition sets model arguments;
+- an agent with no login file, which still launches if an API key in the
+  environment signs it in;
+- every saved agent, when the account's agents could not be listed.
+
+Choices that fail a check stay saved until you replace them.
 
 `launch.defaults.set` replaces all your choices (`defaults`) or deletes them
 (`clear: true`). It takes the `revision` you last read. If someone saved since

@@ -44,8 +44,8 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 	want := protocol.LaunchDefaults{
 		Agent: "claude",
 		Agents: map[string]protocol.AgentLaunchDefault{
-			"claude":   {Mode: string(domain.LaunchACP), Model: "claude"},
-			"codex":    {Model: "gpt-unlisted"},
+			"claude":   {Mode: string(domain.LaunchACP), Model: "opus"},
+			"codex":    {Model: "gpt-5.5-codex-2026-10-01"},
 			"opencode": {Model: "any"},
 		},
 		AccountMemberID: string(bo.ID),
@@ -60,12 +60,12 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 	if got.Revision == 0 || got.Source != protocol.LaunchSourceMember || got.UpdatedAt == "" || string(gotJSON) != string(wantJSON) {
 		t.Fatalf("saved = %+v (%s), want %s", got, gotJSON, wantJSON)
 	}
-	if len(got.Invalid) != 1 || got.Invalid[0].Field != "agents.codex.model" || got.Invalid[0].Value != "gpt-unlisted" ||
-		!strings.Contains(got.Invalid[0].Reason, `does not offer model "gpt-unlisted"`) {
-		t.Fatalf("invalid = %+v, want only the model codex does not offer", got.Invalid)
+	if len(got.Invalid) != 0 {
+		t.Fatalf("invalid = %+v, want none: a listed alias is valid and an unlisted model only unknown", got.Invalid)
 	}
-	if len(got.Unknown) != 1 || got.Unknown[0].Field != "agents.opencode.model" {
-		t.Fatalf("unknown = %+v, want the opencode model, whose list was never read", got.Unknown)
+	if len(got.Unknown) != 2 || got.Unknown[0].Field != "agents.codex.model" || got.Unknown[0].Value != "gpt-5.5-codex-2026-10-01" ||
+		!strings.Contains(got.Unknown[0].Reason, "full model ID for a listed alias") || got.Unknown[1].Field != "agents.opencode.model" {
+		t.Fatalf("unknown = %+v, want the unlisted codex model ID and the opencode model, whose list was never read", got.Unknown)
 	}
 	saved := got
 	if after, err := children.ChildSettings(ctx, e.member.ID); err != nil || after != childSettings {
