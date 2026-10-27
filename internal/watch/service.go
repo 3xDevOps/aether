@@ -132,8 +132,6 @@ type Service struct {
 	// unsaved holds watches whose startup check failed and whose retry
 	// could not be saved; housekeep retries them until one is.
 	unsaved map[string]bool
-	// loop bounds the background work Start began.
-	loop context.Context
 }
 
 // New builds the service; call Start to begin.
@@ -179,7 +177,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	loopCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.mu.Lock()
-	s.cursor, s.stop, s.started, s.loop = cursor, cancel, time.Now(), loopCtx
+	s.cursor, s.stop, s.started = cursor, cancel, time.Now()
 	s.mu.Unlock()
 	s.wg.Go(func() {
 		if s.awaitRecovery(loopCtx) {
