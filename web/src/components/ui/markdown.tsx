@@ -92,7 +92,9 @@ function dashboardRoute(href: string | undefined): Route | undefined {
     return undefined
   }
   if (url.origin !== window.location.origin || !(url.searchParams.has('run') || url.searchParams.has('page'))) return undefined
-  return routeFromQuery(url.searchParams)
+  const route = routeFromQuery(url.searchParams)
+  const watch = url.searchParams.get('watch')
+  return route.name === 'settings' && watch ? { ...route, params: { ...route.params, watch } } : route
 }
 
 function Link({ href, children }: { href?: string; children?: React.ReactNode }) {
@@ -113,6 +115,20 @@ function Link({ href, children }: { href?: string; children?: React.ReactNode })
       {children}
     </a>
   )
+}
+
+const dashboardLink = /\[([^\]\n]+)\]\((\?[^)\s]+)\)/g
+
+/** Plain text whose `[text](?run=...)` dashboard links open in the app; nothing else is read as markdown. */
+export function LinkedText({ text }: { text: string }) {
+  const parts: React.ReactNode[] = []
+  let at = 0
+  for (const match of text.matchAll(dashboardLink)) {
+    parts.push(text.slice(at, match.index), <Link key={match.index} href={match[2]}>{match[1]}</Link>)
+    at = match.index + match[0].length
+  }
+  parts.push(text.slice(at))
+  return <>{parts}</>
 }
 
 const components: Components = {

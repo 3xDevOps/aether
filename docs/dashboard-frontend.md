@@ -2856,7 +2856,9 @@ and inline code, in a tool step's command and output tail, and in a
 opens there as well, where it used to open a dead address in a new tab. A link to a
 same-origin dashboard route (`?run=<id>`, `?page=...`) opens in the app
 (`OpenRoute`, which the assistant panel supplies so its phone sheet closes
-too); any other link opens in a new tab.
+too); any other link opens in a new tab. A notice's description is plain
+text except `[text](?<query>)` dashboard links (`LinkedText`), which open
+the same way.
 Fenced code blocks, a person's own messages and the entry labels, which
 toggle their detail, are left as text.
 

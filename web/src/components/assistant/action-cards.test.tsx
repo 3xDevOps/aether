@@ -356,6 +356,17 @@ describe('review fixes', () => {
     opened.mockRestore()
   })
 
+  it('opens the watch a notice links to in the app', async () => {
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Watch it'),
+      item('notice', 1, { notice: { severity: 'info', title: 'Watching run fix-login', description: 'Aether tells you when it finishes. [Stop or change this watch](?page=settings&id=watches&watch=wat-1)' } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    await userEvent.click(await within(aside).findByRole('link', { name: 'Stop or change this watch' }))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'watches', watch: 'wat-1' } })
+  })
+
   it('loads earlier actions into the history when the conversation has more', async () => {
     const older = [item('turn_start', 1), say(1, 'user', 'Launch'), aether(1, 'o1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }), item('turn_end', 1, { stop_reason: 'end_turn' })]
     const recent = [item('turn_start', 2), say(2, 'user', 'Read'), aether(2, 'r1', 'aether_get_run', 'completed', { raw_input: { run_id: 'run_fix' } }), item('turn_end', 2, { stop_reason: 'end_turn' })]
