@@ -445,8 +445,10 @@ own `children` setting, `via`, and `url`. A new launch's receipt adds
 `defaults_applied`, the input fields your saved choices filled,
 `defaults_skipped`, each saved choice it did not use with `field` and `reason`,
 and `defaults_unchecked`, a saved model it used that nothing checked on the
-launch's account, with the reason. A duplicate or replayed launch's receipt
-has none of them.
+account the run started on, with the reason. A duplicate or replayed run
+launch's receipt has none of them; a swarm launch replayed by its
+`idempotency_key` still lists them, since `mission.create` does not say it
+replayed.
 It adds
 `idempotency_key` and `skipped_fallback_accounts`: the fallback accounts the
 server left out because checking them failed, each with a fixed `error` reason;

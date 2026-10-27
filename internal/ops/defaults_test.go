@@ -199,6 +199,25 @@ func TestTemplateLaunchIgnoresSavedDefaults(t *testing.T) {
 	}
 }
 
+// A saved model checked on your own account is reported unchecked when
+// usage fallback starts the run on another.
+func TestFallbackMovedRunReportsSavedModelUnchecked(t *testing.T) {
+	saved := savedChoices
+	saved.Defaults.AccountMemberID, saved.Defaults.Fallback = "", nil
+	f := savedFake(t, saved)
+	f.answers[protocol.MethodRunLaunch] = answerTo(func(p protocol.RunLaunchParams) any {
+		r := testRun
+		r.Model, r.AccountMemberID, r.RequestedAccountMemberID = p.Model, "mem-bo", "mem-me"
+		return protocol.RunLaunchResult{Run: r}
+	})
+	cs := connectorSession(t, f, ScopeWrite)
+	_, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
+	unchecked := jsonOf(t, out["launch"].(map[string]any)["defaults_unchecked"])
+	if unchecked != `[{"field":"model","reason":"it was saved and checked for account mem-me, and usage fallback started the run on mem-bo"}]` {
+		t.Fatalf("defaults_unchecked = %s", unchecked)
+	}
+}
+
 // A receipt for a launch that already happened, replayed by its key or
 // returned as a keyless duplicate, does not claim what saved defaults filled
 // this time.

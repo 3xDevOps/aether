@@ -312,7 +312,7 @@ not covered   the assistant's own shell and file tools, which never ask
   without a card; the transcript note names the account and its owner.
 - A launch with automatic [usage fallback](teams.md#usage-fallback) while any
   account is shared with you always asks, since it may move to an account
-  nobody chose, unless automatic is the fallback you saved.
+  nobody chose, even when automatic is the fallback you saved.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as

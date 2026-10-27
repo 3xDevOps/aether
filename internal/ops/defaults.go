@@ -26,6 +26,9 @@ type savedFill struct {
 	Applied   []string
 	Skipped   []defaultSkip
 	Unchecked []defaultSkip
+	// modelCheckedOn is the account get checked the saved model on, when the
+	// launch used it and no note says it went unchecked.
+	modelCheckedOn string
 	// Account is the saved account, for a swarm worker that names none, or
 	// AccountErr why it cannot be used.
 	Account    string
@@ -40,6 +43,15 @@ func (f *savedFill) skip(field, reason string) {
 
 func (f savedFill) stamp(r *launchReceipt) {
 	r.DefaultsApplied, r.DefaultsSkipped, r.DefaultsUnchecked = f.Applied, f.Skipped, f.Unchecked
+}
+
+// startedOn notes the saved model unchecked when usage fallback started the
+// run on another account than the one get checked it on.
+func (f *savedFill) startedOn(account string) {
+	if f.modelCheckedOn != "" && account != "" && account != f.modelCheckedOn {
+		f.Unchecked = append(f.Unchecked, defaultSkip{Field: "model",
+			Reason: fmt.Sprintf("it was saved and checked for account %s, and usage fallback started the run on %s", f.modelCheckedOn, account)})
+	}
 }
 
 // savedDefaults reads the caller's saved launch choices for a launch that
@@ -178,6 +190,8 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 				Reason: fmt.Sprintf("it was saved and checked for account %s, and this launch runs on %s", checked, launched)})
 		} else if reason, unknown := savedIssue(saved.Unknown, "agents."+*slots.harness+".model", choice.Model); unknown {
 			fill.Unchecked = append(fill.Unchecked, defaultSkip{Field: "model", Reason: reason})
+		} else {
+			fill.modelCheckedOn = checked
 		}
 	}
 	return fill, nil

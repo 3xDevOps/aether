@@ -362,6 +362,7 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	receipt := out["launch"].(*launchReceipt)
 	receipt.IdempotencyKey, receipt.Skipped = params.IdempotencyKey, res.SkippedFallbackAccounts
 	if !dup && !res.Replayed {
+		fill.startedOn(res.Run.AccountMemberID)
 		fill.stamp(receipt)
 	}
 	out["idempotency_key"] = params.IdempotencyKey

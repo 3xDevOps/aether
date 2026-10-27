@@ -282,9 +282,10 @@ card's `other_member` and `other_owner` name the accounts' owners. A launch
 that names a shared account itself, in `account_member_id` or
 `fallback_account_member_ids`, does not wait: the member chose it, the card
 names it and its owner, and the server refuses an account not shared with the
-member. The same holds for the account and the automatic fallback the member
-saved as [launch defaults](teams.md#saved-launch-choices), which
-`launch.defaults.get` confirms when the card is built. The card names what the call acts on: the run's title and
+member. The same holds for an account or fallback order the member saved as
+[launch defaults](teams.md#saved-launch-choices), which the launch tools fill
+into those fields; saved automatic fallback still waits, since it also covers
+accounts shared after it was saved. The card names what the call acts on: the run's title and
 owner, the request and the option chosen, a message's attachments and anchor, a
 launch's account when it is a teammate's, its fallback (saying when it may fall
 back to accounts shared with the member), extra repositories and child-run
