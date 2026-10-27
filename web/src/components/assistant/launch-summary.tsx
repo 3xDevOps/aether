@@ -80,7 +80,7 @@ export function useLaunchRows(method: string, params: unknown): [string, string]
  * before it and leaves the rows room on a phone.
  */
 export function launchTitle(summary: string): { title: string; reason?: string } {
-  const reason = /Assistant's reason: "(.*)"\s*$/s.exec(summary)?.[1]
+  const reason = /The assistant's reason: "(.*)"\s*$/s.exec(summary)?.[1]
   const quoted = summary.indexOf(': "')
   return { title: quoted > 0 ? summary.slice(0, quoted) : summary, ...(reason ? { reason } : {}) }
 }
