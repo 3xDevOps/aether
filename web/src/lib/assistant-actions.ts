@@ -44,19 +44,34 @@ export interface AssistantView {
   actions: AssistantAction[]
 }
 
-/** The RPC method each acting tool calls: what a pending card and an action record name. */
-const toolMethods: Record<string, string> = {
+/** The RPC method each acting tool calls, by its input where one tool has several: what a pending card and an action record name. */
+const toolMethods: Record<string, string | ((input: Record<string, unknown>) => string | undefined)> = {
   aether_launch_run: 'run.launch',
   aether_message_run: 'run.inject',
-  aether_stop_run: 'run.kill',
+  aether_stop_run: (input) => (text(input.outcome) ? 'run.close' : 'run.kill'),
   aether_pause_run: 'run.pause',
   aether_resume_run: 'run.resume',
   aether_save_environment: 'env.save',
   aether_launch_swarm: 'mission.create',
   aether_launch_template: 'run.launch',
   aether_pr_merge: 'run.pr.merge',
+  aether_pr_create: 'run.pr.create',
   aether_relaunch_run: 'run.relaunch',
   aether_answer: 'run.input.respond',
+  aether_decide_approval: 'run.input.respond',
+  aether_run_lifecycle: (input) => ({ relaunch: 'run.relaunch', protect: 'run.protect', unprotect: 'run.protect', archive: 'run.archive', restore: 'run.archive' } as Record<string, string>)[text(input.action) ?? ''],
+  aether_switch_run_mode: 'run.mode.switch',
+  aether_handoff_run: 'run.handoff',
+  aether_swarm_manage: (input) => ({ release_worker: 'mission.worker.release', archive: 'mission.archive', unarchive: 'mission.unarchive' } as Record<string, string>)[text(input.action) ?? ''],
+  aether_replace_integrator: 'mission.replace-integrator',
+  aether_integration_decide: (input) => (input.action === 'deliver' ? 'integration.deliver' : 'integration.decide'),
+  aether_memory_add: 'memory.add',
+  aether_memory_pin: (input) => (input.pin === false ? 'memory.unpin' : 'memory.pin'),
+}
+
+function toolMethod(tool: string, input: Record<string, unknown>): string | undefined {
+  const method = toolMethods[tool]
+  return typeof method === 'function' ? method(input) : method
 }
 
 const readTools: Record<string, [string, string]> = {
@@ -170,18 +185,19 @@ export function swarmTarget(id: string): ActionTarget {
 }
 
 function target(tool: string, input: Record<string, unknown>, result: Record<string, unknown>, saved?: AssistantActionRecord): ActionTarget | undefined {
-  const link = text(result.link) ?? text(result.url) ?? text(record(result.launch).link)
+  if (tool === 'aether_pr_merge' || tool === 'aether_pr_create') {
+    const url = text(record(result.pull_request).url) ?? text(result.pr_url) ?? text(record(result.pr).url)
+    if (url) return { kind: 'pr', id: url, url }
+  }
+  const link = text(result.link) ?? text(result.url) ?? text(record(result.launch).url)
   const linked = link ? linkTarget(link) : undefined
   if (linked) return linked
   const ids = record(result.ids)
   const run = text(saved?.result?.run_id) ?? text(record(result.run).id) ?? text(ids.run_id)
   const swarm = text(record(result.mission).id) ?? text(record(result.swarm).id) ?? text(ids.mission_id) ?? text(ids.swarm_id)
-  if (tool === 'aether_pr_merge') {
-    const url = text(result.url) ?? text(result.pr_url) ?? text(record(result.pr).url)
-    if (url) return { kind: 'pr', id: url, url }
-  }
   if (tool === 'aether_save_environment') return { kind: 'environment', id: 'environment', route: { name: 'environment', params: {} } }
-  if (swarm || (tool.endsWith('_swarm') && text(input.mission_id))) return swarmTarget(swarm ?? text(input.mission_id)!)
+  const named = text(input.mission_id) ?? text(input.swarm_id)?.replace(/^swarm:/, '')
+  if (swarm || ((tool.endsWith('_swarm') || tool === 'aether_swarm_manage' || tool === 'aether_replace_integrator') && named)) return swarmTarget(swarm ?? named!)
   const runID = run ?? text(input.run_id)
   if (runID) return runTarget(runID)
   const workspace = text(input.workspace_id)
@@ -356,7 +372,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       ...callValues(calls.get(entry.id), entry),
       ...(entry.truncated && entry.seq !== undefined ? { seq: entry.seq } : {}),
     }
-    drafts.push({ action, entry, block, method: toolMethods[tool] })
+    drafts.push({ action, entry, block, method: toolMethod(tool, action.input) })
     return action
   }
   const claim = (step: Step | SessionRow): boolean => {
@@ -450,6 +466,11 @@ export interface ActionNames {
 
 type Verb = [imperative: string, past: string, present: string]
 
+const words = (verb: string): Verb => {
+  const stem = verb.replace(/e$/, '')
+  return [verb.charAt(0).toUpperCase() + verb.slice(1), `${verb.charAt(0).toUpperCase() + verb.slice(1)}${verb.endsWith('e') ? 'd' : 'ed'}`, `${stem.charAt(0).toUpperCase() + stem.slice(1)}ing`]
+}
+
 const runVerb = (verb: Verb, suffix = '') => ({ verb, object: (a: AssistantAction, n: ActionNames) => `run ${runName(a, n)}${suffix}` })
 
 function runName(action: AssistantAction, names: ActionNames): string {
@@ -467,7 +488,7 @@ function launchObject(kind: string) {
 
 function prName(action: AssistantAction, names: ActionNames): string {
   const result = record(action.result)
-  const number = text(result.number) ?? text(record(result.pr).number) ?? text(action.input.pr_number)
+  const number = text(result.number) ?? text(record(result.pull_request).number) ?? text(record(result.pr).number) ?? text(action.input.number) ?? text(action.input.pr_number)
   return number ? `PR #${number}` : `the pull request of run ${runName(action, names)}`
 }
 
@@ -479,13 +500,16 @@ function watchObject(action: AssistantAction, names: ActionNames): string {
   return text(action.input.run_id) ? `run ${runName(action, names)}` : text(action.input.watch_id) ?? ''
 }
 
-const phrases: Record<string, { verb: Verb; object: (action: AssistantAction, names: ActionNames) => string }> = {
+const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb); object: (action: AssistantAction, names: ActionNames) => string }> = {
   aether_launch_run: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run') },
   aether_launch_swarm: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('swarm') },
   aether_launch_template: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run from a template') },
   aether_relaunch_run: runVerb(['Relaunch', 'Relaunched', 'Relaunching']),
   aether_message_run: runVerb(['Message', 'Messaged', 'Messaging']),
-  aether_stop_run: runVerb(['Stop', 'Stopped', 'Stopping']),
+  aether_stop_run: {
+    verb: (a) => (text(a.input.outcome) ? ['Close', 'Closed', 'Closing'] : ['Stop', 'Stopped', 'Stopping']),
+    object: (a, n) => `run ${runName(a, n)}${text(a.input.outcome) ? ` as ${text(a.input.outcome)}` : ''}`,
+  },
   aether_pause_run: runVerb(['Pause', 'Paused', 'Pausing']),
   aether_resume_run: runVerb(['Resume', 'Resumed', 'Resuming']),
   aether_close_run: runVerb(['Close', 'Closed', 'Closing']),
@@ -495,13 +519,25 @@ const phrases: Record<string, { verb: Verb; object: (action: AssistantAction, na
   aether_cancel_swarm: { verb: ['Cancel', 'Cancelled', 'Cancelling'], object: (a) => `swarm ${text(a.input.mission_id) ?? a.target?.id ?? ''}`.trimEnd() },
   aether_pr_merge: { verb: ['Merge', 'Merged', 'Merging'], object: prName },
   aether_save_environment: { verb: ['Save', 'Saved', 'Saving'], object: () => 'your environment' },
+  aether_run_lifecycle: { verb: (a) => words(text(a.input.action) ?? 'change'), object: (a, n) => `run ${runName(a, n)}` },
+  aether_switch_run_mode: { verb: ['Switch', 'Switched', 'Switching'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.mode) ?? 'another'} mode` },
+  aether_handoff_run: { verb: ['Hand off', 'Handed off', 'Handing off'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.to_member_id) ?? 'a teammate'}` },
+  aether_swarm_manage: {
+    verb: (a) => (a.input.action === 'release_worker' ? ['Release', 'Released', 'Releasing'] : words(text(a.input.action) ?? 'change')),
+    object: (a, n) => a.input.action === 'release_worker' ? `worker run ${runName(a, n)}` : `swarm ${text(a.input.swarm_id)?.replace(/^swarm:/, '') ?? ''}`.trimEnd(),
+  },
+  aether_replace_integrator: { verb: ['Replace', 'Replaced', 'Replacing'], object: (a) => `the integrator of swarm ${text(a.input.swarm_id)?.replace(/^swarm:/, '') ?? ''}`.trimEnd() },
+  aether_integration_decide: { verb: (a) => words(text(a.input.action) ?? 'decide'), object: (a) => `candidate ${text(a.input.candidate_id) ?? ''}`.trimEnd() },
+  aether_pr_create: { verb: ['Open', 'Opened', 'Opening'], object: (a, n) => `a pull request for run ${runName(a, n)}` },
+  aether_memory_add: { verb: ['Add', 'Added', 'Adding'], object: (a) => (text(a.input.kind) ? `a ${text(a.input.kind)} note` : 'a note') },
+  aether_memory_pin: { verb: (a) => (a.input.pin === false ? ['Unpin', 'Unpinned', 'Unpinning'] : ['Pin', 'Pinned', 'Pinning']), object: (a) => `note ${text(a.input.id) ?? ''}`.trimEnd() },
   aether_watch_create: { verb: ['Watch', 'Started watching', 'Starting to watch'], object: watchObject },
   aether_watch_delete: { verb: ['Stop watching', 'Stopped watching', 'Stopping watching'], object: watchObject },
 }
 
 export function actionSummary(action: AssistantAction, names: ActionNames): string {
   const phrase = phrases[action.tool] ?? { verb: ['Use', 'Used', 'Using'] as Verb, object: () => action.tool }
-  const [imperative, past, present] = phrase.verb
+  const [imperative, past, present] = typeof phrase.verb === 'function' ? phrase.verb(action) : phrase.verb
   const verb = action.state === 'done' ? past : action.state === 'running' || action.state === 'approval' ? present : imperative
   return `${verb} ${phrase.object(action, names)}`.trimEnd()
 }

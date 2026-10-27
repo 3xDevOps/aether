@@ -1,4 +1,4 @@
-import { aetherTool, assistantView, readSummary, type AssistantAction } from '@/lib/assistant-actions'
+import { actionSummary, aetherTool, assistantView, readSummary, type AssistantAction } from '@/lib/assistant-actions'
 import type { AssistantActionRecord } from '@/lib/assistant-types'
 import type { SessionRow } from '@/store/session-rows'
 import { stepsBlock, type WorkItem } from '@/store/session-steps'
@@ -135,5 +135,41 @@ describe('assistantView', () => {
       const view = assistantView([block(stop, save), ...rows], [], { records, calls: new Map([['1:t0', call('t0')], ['1:t1', call('t1')]]) })
       expect(view.actions.map((a) => [a.state, a.approval])).toEqual([['unfinished', 'approved'], ['unfinished', 'auto-approved']])
     })
+  })
+})
+
+describe('the lifecycle, swarm, pull request and memory tools', () => {
+  const names = { run: () => undefined, workspace: () => undefined, agent: () => undefined, sharer: () => undefined }
+  const confirm = (method: string) => ({ id: method, method, summary: '', params: {}, created_at: at, expires_at: at })
+
+  it.each([
+    ['aether_run_lifecycle', { run_id: 'r1', action: 'relaunch' }, 'run.relaunch', 'Relaunch run r1', 'Relaunched run r1'],
+    ['aether_run_lifecycle', { run_id: 'r1', action: 'unprotect' }, 'run.protect', 'Unprotect run r1', 'Unprotected run r1'],
+    ['aether_run_lifecycle', { run_id: 'r1', action: 'restore' }, 'run.archive', 'Restore run r1', 'Restored run r1'],
+    ['aether_switch_run_mode', { run_id: 'r1', mode: 'enhanced' }, 'run.mode.switch', 'Switch run r1 to enhanced mode', 'Switched run r1 to enhanced mode'],
+    ['aether_handoff_run', { run_id: 'r1', to_member_id: 'Dana' }, 'run.handoff', 'Hand off run r1 to Dana', 'Handed off run r1 to Dana'],
+    ['aether_swarm_manage', { swarm_id: 'swarm:mis-1', action: 'release_worker', run_id: 'r7' }, 'mission.worker.release', 'Release worker run r7', 'Released worker run r7'],
+    ['aether_swarm_manage', { swarm_id: 'swarm:mis-1', action: 'archive' }, 'mission.archive', 'Archive swarm mis-1', 'Archived swarm mis-1'],
+    ['aether_replace_integrator', { swarm_id: 'mis-1' }, 'mission.replace-integrator', 'Replace the integrator of swarm mis-1', 'Replaced the integrator of swarm mis-1'],
+    ['aether_integration_decide', { candidate_id: 'cand-1', action: 'deliver' }, 'integration.deliver', 'Deliver candidate cand-1', 'Delivered candidate cand-1'],
+    ['aether_pr_create', { run_id: 'r1' }, 'run.pr.create', 'Open a pull request for run r1', 'Opened a pull request for run r1'],
+    ['aether_memory_add', { kind: 'gotcha', text: 'x' }, 'memory.add', 'Add a gotcha note', 'Added a gotcha note'],
+    ['aether_memory_pin', { id: 'mem-9', pin: false }, 'memory.unpin', 'Unpin note mem-9', 'Unpinned note mem-9'],
+    ['aether_stop_run', { run_id: 'r1', outcome: 'merged' }, 'run.close', 'Close run r1 as merged', 'Closed run r1 as merged'],
+    ['aether_decide_approval', { run_id: 'r1' }, 'run.input.respond', 'Decide an approval for run r1', 'Decided an approval for run r1'],
+  ])('%s %j waits on %s and reads "%s", then "%s"', (tool, input, method, pending, done) => {
+    const call = (status: 'running' | 'done') => block({ id: '1:t0', name: tool, status, input })
+    const [waiting] = assistantView([call('running')], [confirm(method)]).actions
+    expect([waiting!.state, actionSummary({ ...waiting!, state: 'failed' }, names)]).toEqual(['approval', pending])
+    const [finished] = assistantView([call('done')], []).actions
+    expect(actionSummary(finished!, names)).toBe(done)
+  })
+
+  it('links a swarm tool to its swarm and a created pull request to GitHub', () => {
+    const view = assistantView([block(
+      { id: '1:t0', name: 'aether_swarm_manage', input: { swarm_id: 'swarm:mis-1', action: 'archive' }, result: {} },
+      { id: '1:t1', name: 'aether_pr_create', input: { run_id: 'r1' }, result: { pull_request: { number: 7, url: 'https://github.com/acme/api/pull/7' }, url: '?run=r1' } },
+    )], [])
+    expect(view.actions.map((a) => [a.target?.kind, a.target?.id])).toEqual([['swarm', 'mis-1'], ['pr', 'https://github.com/acme/api/pull/7']])
   })
 })

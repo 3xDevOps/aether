@@ -578,7 +578,10 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   ran; a part left with no work becomes the rows its prose and notices would
   have been. The card names the verb and target from the inputs and the
   store's names ("Launched run on api with Claude Code", "Messaged run
-  fix-login", "Merged PR #42"; a run is named by `runLabel`), a state
+  fix-login", "Merged PR #42"; a run is named by `runLabel`; a tool with
+  several actions, such as `aether_run_lifecycle` or `aether_swarm_manage`,
+  takes its verb and the method its card waits on from its `action` input),
+  a state
   (`Running`, `Done`, `Failed`, `You declined`, `No answer in 10 minutes`,
   `Withdrawn: the turn ended before you answered`, or `Did not finish: the
   turn ended first` for a call still open when its turn ended, approved or
