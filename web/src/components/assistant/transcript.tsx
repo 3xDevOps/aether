@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { type CacheSnapshot, VList, type VListHandle } from 'virtua'
-import { ActionCard, ReadsLine } from '@/components/assistant/action-card'
+import { ActionCard, ReadsLine, useOpenTarget } from '@/components/assistant/action-card'
 import { Button } from '@/components/ui/button'
+import { OpenRoute } from '@/components/ui/markdown'
 import { api } from '@/lib/api'
 import { assistantView, transcriptFacts, type ActionGroup, type AssistantView } from '@/lib/assistant-actions'
 import { cn } from '@/lib/utils'
@@ -11,6 +12,7 @@ import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 import { loadOlderAssistant } from '@/store/assistant-stream'
 import type { AcpSession } from '@/store/sessions'
+import type { Route } from '@/store/ui'
 import { noAgents, turnExtras } from '@/store/subagents'
 
 const bottomSlack = 24
@@ -66,6 +68,8 @@ export function Transcript({ session }: { session: AcpSession }) {
     setFollowing(value)
   }
   const [focused, setFocused] = useState<string | null>(null)
+  const openTarget = useOpenTarget()
+  const openRoute = (route: Route) => openTarget({ kind: 'link', id: route.name, route })
   const steps = useFlatRows(rows, expanded, following, focused)
   const arrivals = useArrivals(steps, expanded)
   const flat = useMemo(() => withActions(steps, view.groups), [steps, view.groups])
@@ -97,52 +101,54 @@ export function Transcript({ session }: { session: AcpSession }) {
   }), [self])
 
   return (
-    <VList
-      ref={list}
-      role="log"
-      aria-live="off"
-      aria-label="Assistant conversation"
-      className="min-h-0 flex-1"
-      data={older ? [null, ...flat] : flat}
-      cache={restored?.cache}
-      shift={shift}
-      keepMounted={focusedIndex >= 0 ? [focusedIndex + Number(older)] : undefined}
-      onScroll={(offset) => {
-        const handle = list.current
-        if (handle) pin(offset + handle.viewportSize >= handle.scrollSize - bottomSlack)
-      }}
-    >
-      {(item: Item | null, index: number) => item === null ? (
-        <div key="older" className="flex justify-center px-3 pt-3">
-          <Button size="sm" variant="ghost" disabled={session.olderLoading} onClick={() => {
-            pin(false)
-            void loadOlderAssistant(useStore, api)
-          }}>
-            {session.olderLoading ? 'Loading…' : 'Show earlier messages'}
-          </Button>
-          {session.olderError && <p role="alert" className="text-ui-sm text-state-failed">{session.olderError}</p>}
-        </div>
-      ) : (
-        <EnteringRow
-          key={item.key}
-          itemKey={item.key}
-          arrivals={arrivals}
-          role="article"
-          aria-posinset={index + (older ? 0 : 1)}
-          aria-setsize={flat.length}
-          onFocus={() => setFocused(item.key)}
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null)
-          }}
-          className={cn('w-full px-3', item.kind === 'actions' ? 'pt-2' : rowGap(item), index === count - 1 && 'pb-3', index === 0 && 'pt-3')}
-        >
-          {item.kind !== 'actions'
-            ? <TimelineRow item={item} ctx={ctx} />
-            : item.group.kind === 'action'
-              ? <ActionCard action={item.group.action} />
-              : <ReadsLine id={item.group.id} actions={item.group.actions} />}
-        </EnteringRow>
-      )}
-    </VList>
+    <OpenRoute.Provider value={openRoute}>
+      <VList
+        ref={list}
+        role="log"
+        aria-live="off"
+        aria-label="Assistant conversation"
+        className="min-h-0 flex-1"
+        data={older ? [null, ...flat] : flat}
+        cache={restored?.cache}
+        shift={shift}
+        keepMounted={focusedIndex >= 0 ? [focusedIndex + Number(older)] : undefined}
+        onScroll={(offset) => {
+          const handle = list.current
+          if (handle) pin(offset + handle.viewportSize >= handle.scrollSize - bottomSlack)
+        }}
+      >
+        {(item: Item | null, index: number) => item === null ? (
+          <div key="older" className="flex justify-center px-3 pt-3">
+            <Button size="sm" variant="ghost" disabled={session.olderLoading} onClick={() => {
+              pin(false)
+              void loadOlderAssistant(useStore, api)
+            }}>
+              {session.olderLoading ? 'Loading…' : 'Show earlier messages'}
+            </Button>
+            {session.olderError && <p role="alert" className="text-ui-sm text-state-failed">{session.olderError}</p>}
+          </div>
+        ) : (
+          <EnteringRow
+            key={item.key}
+            itemKey={item.key}
+            arrivals={arrivals}
+            role="article"
+            aria-posinset={index + (older ? 0 : 1)}
+            aria-setsize={flat.length}
+            onFocus={() => setFocused(item.key)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null)
+            }}
+            className={cn('w-full px-3', item.kind === 'actions' ? 'pt-2' : rowGap(item), index === count - 1 && 'pb-3', index === 0 && 'pt-3')}
+          >
+            {item.kind !== 'actions'
+              ? <TimelineRow item={item} ctx={ctx} />
+              : item.group.kind === 'action'
+                ? <ActionCard action={item.group.action} />
+                : <ReadsLine id={item.group.id} actions={item.group.actions} />}
+          </EnteringRow>
+        )}
+      </VList>
+    </OpenRoute.Provider>
   )
 }
