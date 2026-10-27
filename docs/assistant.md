@@ -272,6 +272,8 @@ and connected apps such as ChatGPT cannot reach them.
   can also forget one after you approve its card, even while preferences are
   off or the conversation is temporary. Forgetting deletes the preference;
   the assistant's next prompt tells it not to use the old text.
+  **Undo** on a Saved, Updated or Forgotten card restores the earlier text
+  through Settings, so the preference then reads **Added in Settings**.
 - **Turn off:** switch off preferences in **Settings → Memory**
   (`assistant.settings` with `preferences_enabled: false`). The assistant
   then neither reads nor saves them. A **temporary** conversation

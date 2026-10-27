@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { Api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import { prefersReducedMotion, useDelayed } from '@/lib/hooks'
-import { restorePreference } from '@/lib/preferences'
+import { type Restore, restorePreference } from '@/lib/preferences'
 import type { Preference } from '@/lib/types'
 import { forgetWarning, PreferenceRow, type Scope, ScopePills } from '@/routes/settings/memory-row'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
@@ -52,6 +52,9 @@ function MemoryBody({ client }: { client: Api }) {
   const [undoError, setUndoError] = useState<string | null>(null)
   const [undoing, setUndoing] = useState(false)
   const reloaded = useRef<string | null>(null)
+  const restore = useRef<Restore>({})
+  const [saving, setSaving] = useState(false)
+  const navigate = useStore((s) => s.navigate)
   const [flash, setFlash] = useState<string | null>(null)
   const skeleton = useDelayed(load.kind === 'loading')
   const textID = useId()
@@ -84,10 +87,14 @@ function MemoryBody({ client }: { client: Api }) {
   useEffect(() => {
     if (!entry || !found) return
     document.getElementById(`preference-${entry}`)?.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+    setQuery('')
     setFlash(entry)
-    const timer = setTimeout(() => setFlash(null), highlightMs)
+    const timer = setTimeout(() => {
+      setFlash(null)
+      navigate('settings', { section: 'memory' })
+    }, highlightMs)
     return () => clearTimeout(timer)
-  }, [entry, found])
+  }, [entry, found, navigate])
 
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
@@ -111,14 +118,19 @@ function MemoryBody({ client }: { client: Api }) {
   }
 
   const setUse = async (next: boolean) => {
+    const identity = useStore.getState().identityKey
     setToggleError(null)
+    setSaving(true)
     try {
       const settings = await client.assistantSettings({ preferences_enabled: next })
+      if (useStore.getState().identityKey !== identity) return
       setEnabled(settings.preferences_enabled !== false)
       const status = useStore.getState().assistantStatus
       if (status) useStore.getState().setAssistantStatus({ ...status, ...settings })
     } catch (err) {
       setToggleError(errorSentence(err))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -127,7 +139,9 @@ function MemoryBody({ client }: { client: Api }) {
     setUndoError(null)
     setUndoing(true)
     try {
-      put(await restorePreference(client, forgotten))
+      const back = await restorePreference(client, forgotten, restore.current)
+      if (back) put(back)
+      restore.current = {}
       setForgotten(null)
     } catch (err) {
       setUndoError(errorSentence(err))
@@ -139,7 +153,7 @@ function MemoryBody({ client }: { client: Api }) {
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-1 text-ui text-muted">
-        <p>Only you can see these. Teammates, their runs and connected apps can&apos;t. Server operators can read the server database.</p>
+        <p>Only you can see these. Teammates, admins, your runs and connected apps can&apos;t. Server operators can read the server database.</p>
         <p>The assistant uses them when they fit; what you say in a message always wins.</p>
       </div>
       {load.kind === 'failed' && <FailureCallout error={load.error} onRetry={() => setAttempt((n) => n + 1)} />}
@@ -156,7 +170,7 @@ function MemoryBody({ client }: { client: Api }) {
               <Checkbox
                 id="settings-preferences-enabled"
                 checked={enabled !== false}
-                disabled={enabled === null}
+                disabled={enabled === null || saving}
                 onCheckedChange={(checked) => void setUse(checked === true)}
               />
             )}
@@ -220,7 +234,9 @@ function MemoryBody({ client }: { client: Api }) {
                 onForgotten={(gone) => {
                   setList((current) => current.filter((p) => p.id !== gone.id))
                   setUndoError(null)
+                  restore.current = {}
                   setForgotten(gone)
+                  if (gone.id === entry) navigate('settings', { section: 'memory' })
                 }}
               />
             ))}

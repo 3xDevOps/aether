@@ -1,27 +1,48 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ChevronRight, Undo2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import type { AssistantAction, PreferenceFacts } from '@/lib/assistant-actions'
 import { errorSentence } from '@/lib/format'
-import { restorePreference } from '@/lib/preferences'
+import { type Restore, restorePreference } from '@/lib/preferences'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 
 type Facts = Exclude<PreferenceFacts, { kind: 'used' }>
 
-async function undo(facts: Facts): Promise<void> {
+const undoneKey = 'aether.preferences.undone'
+const undoneKept = 200
+
+function undoneIDs(): string[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(undoneKey) ?? '[]')
+    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function markUndone(id: string) {
+  try {
+    localStorage.setItem(undoneKey, JSON.stringify([...undoneIDs().filter((kept) => kept !== id), id].slice(-undoneKept)))
+  } catch {
+    // Without storage the notice still says Undone until it remounts.
+  }
+}
+
+async function undo(facts: Facts, progress: Restore): Promise<void> {
   if (facts.kind === 'saved') await api.preferenceDelete(facts.id)
   else if (facts.kind === 'updated') {
     const { text, workspace_id } = facts.previous
     await api.preferenceUpdate({ id: facts.id, text, ...(workspace_id ? { workspace_id } : { clear_workspace: true }) })
-  } else await restorePreference(api, facts)
+  } else await restorePreference(api, facts, progress)
 }
 
 /** Undo for a saved, updated or forgotten preference, with the server's refusal shown as it came. */
-function UndoPreference({ facts }: { facts: Facts }) {
-  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'undone' } | { kind: 'failed'; error: string }>({ kind: 'idle' })
+function UndoPreference({ actionID, facts }: { actionID: string; facts: Facts }) {
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'undone' } | { kind: 'failed'; error: string }>(() => undoneIDs().includes(actionID) ? { kind: 'undone' } : { kind: 'idle' })
+  const progress = useRef<Restore>({})
   if (state.kind === 'undone') return <span role="status" className="text-ui-sm text-muted">Undone</span>
   return (
     <>
@@ -31,7 +52,10 @@ function UndoPreference({ facts }: { facts: Facts }) {
         disabled={state.kind === 'busy'}
         onClick={() => {
           setState({ kind: 'busy' })
-          undo(facts).then(() => setState({ kind: 'undone' }), (err: unknown) => setState({ kind: 'failed', error: errorSentence(err) }))
+          undo(facts, progress.current).then(() => {
+            markUndone(actionID)
+            setState({ kind: 'undone' })
+          }, (err: unknown) => setState({ kind: 'failed', error: errorSentence(err) }))
         }}
       >
         <Undo2 aria-hidden />
@@ -47,11 +71,11 @@ export function PreferenceDetail({ facts }: { facts: PreferenceFacts }) {
   return null
 }
 
-export function PreferenceUndo({ facts }: { facts: PreferenceFacts }) {
-  return facts.kind === 'used' ? null : <UndoPreference facts={facts} />
+export function PreferenceUndo({ actionID, facts }: { actionID: string; facts: PreferenceFacts }) {
+  return facts.kind === 'used' ? null : <UndoPreference actionID={actionID} facts={facts} />
 }
 
-/** "Used N of your preferences": the list is the reason the answer looks the way it does. */
+/** "Read N of your preferences": the list is the reason the answer looks the way it does. */
 export function UsedPreferences({ action, items }: { action: AssistantAction; items: { id: string; text: string; scope: string }[] }) {
   const key = `${action.id}:used`
   const open = useStore((s) => s.expandedRows[assistantSessionID]?.[key] ?? false)
@@ -65,8 +89,8 @@ export function UsedPreferences({ action, items }: { action: AssistantAction; it
       </Button>
       {open && (
         <ul aria-label="Preferences used" className="flex min-w-0 flex-col gap-1 text-ui-sm">
-          {items.map((item) => (
-            <li key={item.id} className="min-w-0 break-words">
+          {items.map((item, i) => (
+            <li key={item.id || i} className="min-w-0 break-words">
               {item.text}
               <span className="text-muted"> · {item.scope === 'workspace' ? 'This workspace' : 'All my workspaces'}</span>
             </li>

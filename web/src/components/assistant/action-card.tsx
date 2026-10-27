@@ -199,7 +199,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
             {link.url && <ExternalLink aria-hidden className="size-3.5" />}
           </Button>
         )}
-        {preference && <PreferenceUndo facts={preference} />}
+        {preference && <PreferenceUndo actionID={action.id} facts={preference} />}
         {retry && (
           <Button variant="secondary" size="sm" onClick={() => retryDraft(action, names)}>
             <RotateCcw aria-hidden />

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Ellipsis, Pencil, Trash2 } from '@/components/icons'
+import { Ellipsis, Eye, EyeOff, Pencil, Trash2 } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -13,7 +13,7 @@ import type { Preference } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 export const forgetWarning =
-  "New conversations and launches won't use it. Runs already started keep the text they were given. Server backups and update snapshots taken earlier may still contain it until replaced."
+  "New conversations and launches won't use it. Runs already started keep the text they were given. Server backups and update snapshots taken earlier may still contain it until replaced. The current assistant conversation keeps it until New conversation. Copies a connected app or agent made aren't removed."
 
 export type Scope = 'all' | 'workspace'
 
@@ -129,9 +129,9 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
                       <Button size="icon" variant="ghost" label="Actions"><Ellipsis /></Button>
                     </MenuTrigger>
                     <MenuContent align="end">
-                      <MenuItem icon={<Pencil />} onSelect={startEdit}>Edit</MenuItem>
-                      <MenuItem onSelect={toggle}>{preference.enabled ? 'Turn off' : 'Turn on'}</MenuItem>
-                      <MenuItem tone="danger" icon={<Trash2 />} onSelect={() => { setError(null); setMode('forget') }}>Forget</MenuItem>
+                      <MenuItem icon={<Pencil />} disabled={busy} onSelect={startEdit}>Edit</MenuItem>
+                      <MenuItem icon={preference.enabled ? <EyeOff /> : <Eye />} disabled={busy} onSelect={toggle}>{preference.enabled ? 'Turn off' : 'Turn on'}</MenuItem>
+                      <MenuItem tone="danger" icon={<Trash2 />} disabled={busy} onSelect={() => { setError(null); setMode('forget') }}>Forget</MenuItem>
                     </MenuContent>
                   </Menu>
                 </div>

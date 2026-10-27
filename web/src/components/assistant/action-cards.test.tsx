@@ -480,6 +480,7 @@ describe('preference cards', () => {
   })
 
   it('shows a forgotten preference, undoes it by adding the text again and shows a refusal verbatim', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [], enabled: true })
     vi.mocked(api.preferenceAdd).mockRejectedValueOnce(new Error('preference.add: memory is off: you turned it off in Settings'))
     const aside = await openPanel([
       item('turn_start', 1),
@@ -510,7 +511,7 @@ describe('preference cards', () => {
       }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const notice = await card(aside, /^Used 2 of your preferences\. Done$/)
+    const notice = await card(aside, /^Read 2 of your preferences\. Done$/)
     expect(within(notice).queryByText('Use pnpm here')).toBeNull()
     await userEvent.click(within(notice).getByRole('button', { name: 'Show preferences' }))
     const list = within(notice).getByRole('list', { name: 'Preferences used' })
@@ -518,5 +519,18 @@ describe('preference cards', () => {
       'Prefer table output · All my workspaces',
       'Use pnpm here · This workspace',
     ])
+  })
+
+  it('keeps Undone after the card is shown again', async () => {
+    localStorage.setItem('aether.preferences.undone', JSON.stringify(['1:t1']))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Saved: Prefer table output\. Done$/)
+    expect(within(notice).queryByRole('button', { name: 'Undo' })).toBeNull()
+    expect(within(notice).getByText('Undone')).toBeDefined()
   })
 })

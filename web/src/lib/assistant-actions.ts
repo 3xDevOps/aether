@@ -541,7 +541,7 @@ function preferenceSummary(facts: PreferenceFacts): string {
     case 'saved': return `Saved: ${facts.text}`
     case 'updated': return `Updated: ${facts.text}`
     case 'forgotten': return `Forgotten: ${facts.text}`
-    case 'used': return `Used ${facts.items.length} of your ${facts.items.length === 1 ? 'preference' : 'preferences'}`
+    case 'used': return `Read ${facts.items.length} of your ${facts.items.length === 1 ? 'preference' : 'preferences'}`
   }
 }
 

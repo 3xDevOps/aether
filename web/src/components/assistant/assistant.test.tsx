@@ -465,16 +465,16 @@ describe('temporary chat', () => {
     acpOpen([item('turn_start', 1), say(1, 'user', 'old question'), item('turn_end', 1)])
     const toggle = await within(aside).findByRole('button', { name: 'Temporary chat' })
     expect(toggle.getAttribute('aria-pressed')).toBe('false')
-    expect(within(aside).queryByText(/Temporary: the assistant won't use or save your preferences/)).toBeNull()
+    expect(within(aside).queryByText(/Temporary: the assistant won't read or save your preferences/)).toBeNull()
 
     await userEvent.click(toggle)
     expect(api.assistantSettings).toHaveBeenCalledWith({ temporary: true })
-    expect(await within(aside).findByText("Temporary: the assistant won't use or save your preferences, and this chat is discarded when you start a new one.")).toBeDefined()
+    expect(await within(aside).findByText("Temporary: the assistant won't read or save your preferences until New conversation.")).toBeDefined()
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
 
     await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
-    await waitFor(() => expect(within(aside).queryByText(/Temporary: the assistant won't use/)).toBeNull())
+    await waitFor(() => expect(within(aside).queryByText(/Temporary: the assistant won't read/)).toBeNull())
   })
 
   it('shows the server refusal as it came', async () => {

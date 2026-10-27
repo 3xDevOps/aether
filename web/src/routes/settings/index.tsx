@@ -86,7 +86,7 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
     const before = shownParams.current
     shownParams.current = params
     // Opening or closing a watch's detail stays in the category, and the dialog owns focus.
-    if (before !== params && before.section === params.section && (before.watch || params.watch)) return
+    if (before !== params && before.section === params.section && (before.watch || params.watch || before.entry || params.entry)) return
     if (!target || !linked) return
     if (target === linked.id) {
       heading.current?.focus()

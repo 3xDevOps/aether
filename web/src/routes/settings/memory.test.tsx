@@ -58,7 +58,7 @@ describe('memory in settings', () => {
       pref({ last_used_at: '2026-10-27T11:00:00Z' }),
       pref({ id: 'pref-2', text: 'Use pnpm here', workspace_id: workspace.id, source: 'settings', updated_at: '2026-10-26T10:00:00Z' }),
     ])
-    expect(screen.getByText(/Only you can see these\. Teammates, their runs and connected apps can't\. Server operators can read the server database\./)).toBeDefined()
+    expect(screen.getByText(/Only you can see these\. Teammates, admins, your runs and connected apps can't\. Server operators can read the server database\./)).toBeDefined()
     expect(screen.getByText('The assistant uses them when they fit; what you say in a message always wins.')).toBeDefined()
     const rows = within(await screen.findByRole('list', { name: 'Preferences' })).getAllByRole('listitem')
     expect(rows).toHaveLength(2)
@@ -141,7 +141,9 @@ describe('memory in settings', () => {
 
   it('asks before forgetting, says what forgetting does not undo, and offers undo', async () => {
     const user = userEvent.setup()
+    const listed = vi.fn().mockResolvedValueOnce({ preferences: [pref()], enabled: true }).mockResolvedValue({ preferences: [], enabled: true })
     const client = show([pref()], {
+      preferenceList: listed,
       preferenceDelete: vi.fn(async () => ({ deleted: pref() })),
       preferenceAdd: vi.fn(async (params) => ({ preference: pref({ id: 'pref-2', text: params.text }) })),
     })
@@ -203,7 +205,9 @@ describe('memory in settings', () => {
 
   it('puts a forgotten, turned-off preference back turned off', async () => {
     const user = userEvent.setup()
+    const listed = vi.fn().mockResolvedValueOnce({ preferences: [pref({ enabled: false })], enabled: true }).mockResolvedValue({ preferences: [], enabled: true })
     const client = show([pref({ enabled: false })], {
+      preferenceList: listed,
       preferenceDelete: vi.fn(async () => ({ deleted: pref({ enabled: false }) })),
       preferenceAdd: vi.fn(async () => ({ preference: pref({ id: 'pref-2' }) })),
       preferenceUpdate: vi.fn(async () => ({ preference: pref({ id: 'pref-2', enabled: false }) })),
@@ -219,5 +223,35 @@ describe('memory in settings', () => {
     expect(await screen.findByText('Prefer table output')).toBeDefined()
     act(() => useStore.setState({ identityKey: 'someone-else' }))
     await waitFor(() => expect(screen.queryByText('Prefer table output')).toBeNull())
+  })
+
+  it('refuses to put a forgotten preference back when the same text is already remembered', async () => {
+    const user = userEvent.setup()
+    const client = show([pref()], { preferenceDelete: vi.fn(async () => ({ deleted: pref() })) })
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    await user.click(await screen.findByRole('button', { name: 'Undo' }))
+    expect((await screen.findAllByRole('alert')).at(-1)!.textContent).toBe('This preference is already remembered.')
+    expect(client.preferenceAdd).not.toHaveBeenCalled()
+  })
+
+  it('retries only the turn-off when the second step of a restore failed', async () => {
+    const user = userEvent.setup()
+    const listed = vi.fn().mockResolvedValueOnce({ preferences: [pref({ enabled: false })], enabled: true }).mockResolvedValue({ preferences: [], enabled: true })
+    const client = show([pref({ enabled: false })], {
+      preferenceList: listed,
+      preferenceDelete: vi.fn(async () => ({ deleted: pref({ enabled: false }) })),
+      preferenceAdd: vi.fn(async () => ({ preference: pref({ id: 'pref-2' }) })),
+      preferenceUpdate: vi.fn()
+        .mockRejectedValueOnce(new ApiError(-32001, 'preference.update: database is locked'))
+        .mockResolvedValue({ preference: pref({ id: 'pref-2', enabled: false }) }),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    await user.click(await screen.findByRole('button', { name: 'Undo' }))
+    expect((await screen.findAllByRole('alert')).at(-1)!.textContent).toBe('database is locked')
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenCalledTimes(2))
+    expect(client.preferenceAdd).toHaveBeenCalledTimes(1)
   })
 })
