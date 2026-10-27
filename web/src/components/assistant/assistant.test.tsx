@@ -423,13 +423,15 @@ describe('confirmations', () => {
     const aside = await openPanel()
     acpOpen()
     assistantSocket().send({ status: status({ confirmations: [
-      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch a run', other_member: true, other_owner: 'Bob', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', model: 'opus', account_member_id: 'mem_bob', fallback_account_member_ids: ['mem_carol'], task: 'Fix the flaky login test\nthen open a PR' } },
+      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in ws_1: "Fix the flaky login test\\nthen open a PR". Assistant\'s reason: "one coherent change"', other_member: true, other_owner: 'Bob', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', model: 'opus', account_member_id: 'mem_bob', fallback_account_member_ids: ['mem_carol'], task: 'Fix the flaky login test\nthen open a PR' } },
       { ...stop, id: 'm', method: 'run.inject', summary: 'Message a run', params: { run_id: 'run_9', message: 'Please stop and summarise' } },
     ] }) })
-    const launch = await within(aside).findByRole('group', { name: 'Approve this action? Launch a run' })
+    const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude \(acp\) in ws_1: "Fix the flaky/ })
+    expect(within(launch).getByText('Launch claude (acp) in ws_1')).toBeDefined()
     expect(within(launch).getByText("Bob's account pays for this launch, so this asks even with auto-approval on.")).toBeDefined()
     const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
     expect(rows).toEqual({
+      Reason: 'one coherent change',
       Kind: 'Run: one agent on one task',
       Workspace: 'ws_1',
       Agent: 'Claude Code opus (Enhanced)',

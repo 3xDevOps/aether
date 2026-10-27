@@ -557,7 +557,9 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   confirmation renders as a card titled with the summary, the method as its
   source line, a **Details** section with the exact params (three, then
   **N more**), or for `run.launch` and `mission.create` a **What starts**
-  list (`components/assistant/launch-summary.tsx`) of kind, workspace,
+  list (`components/assistant/launch-summary.tsx`; the title then stops
+  before the quoted task, and the assistant's stated reason is a **Reason**
+  row) of kind, workspace,
   agent with model and mode, account (`Yours` or `<name>'s, shared with
   you`), fallback, task or objective, and how the member hears back, a
   relative deadline with a bar draining toward it, **Decline**

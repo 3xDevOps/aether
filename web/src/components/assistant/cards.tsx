@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { isLaunch, useLaunchRows } from '@/components/assistant/launch-summary'
+import { isLaunch, launchTitle, useLaunchRows } from '@/components/assistant/launch-summary'
 import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Code } from '@/components/ui/code'
@@ -72,6 +72,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
   const launch = useLaunchRows(confirmation.method, confirmation.params)
   const params = paramRows(confirmation.params)
+  const reason = launch && launchTitle(confirmation.summary).reason
   const autoApprove = useStore((s) => s.assistantStatus?.auto_approve ?? false)
   const remaining = useSecondsUntil(confirmation.expires_at)
   const total = Date.parse(confirmation.expires_at) - Date.parse(confirmation.created_at)
@@ -79,7 +80,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
     <RequestCard
       aria-label={`Approve this action? ${confirmation.summary}`}
       avatar={<IconTile aria-hidden><AgentGlyph agent={harness} className="size-4" /></IconTile>}
-      title={confirmation.summary}
+      title={launch ? launchTitle(confirmation.summary).title : confirmation.summary}
       source={<Code>{confirmation.method}</Code>}
       meta={<>expires <RelativeTime at={confirmation.expires_at} /></>}
       timeBar={remaining > 0 && total > 0 && <RequestTimeBar left={remaining * 1000} total={total} />}
@@ -105,7 +106,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
       {launch ? (
         <RequestSection label="What starts">
           <dl className="flex min-w-0 flex-col text-ui-sm">
-            {launch.map(([key, value]) => (
+            {[...(reason ? [['Reason', reason] as [string, string]] : []), ...launch].map(([key, value]) => (
               <div key={key} className="flex min-w-0 gap-3 py-0.5">
                 <dt className="w-24 shrink-0 text-muted">{key}</dt>
                 <dd className="max-h-32 min-w-0 flex-1 overflow-y-auto break-words whitespace-pre-wrap">{value}</dd>
