@@ -73,10 +73,11 @@ func observe(ctx context.Context, read Call, runID, repo string, status *protoco
 		if fb.Error != "" {
 			errs = append(errs, "checks and reviews: "+fb.Error)
 		}
-		if o.PR == nil {
-			o.PR, o.shown = prOf(fb.PullRequest), fb.PullRequest
-		}
-		if fb.PullRequest != nil {
+		if shown := fb.PullRequest; shown != nil {
+			if prior := o.shown; prior != nil && (prior.Number != shown.Number || !strings.EqualFold(prior.Repository, shown.Repository) || prior.HeadOID != shown.HeadOID) {
+				errs = append(errs, fmt.Sprintf("the pull request changed between lookups, from #%d at %s to #%d at %s; read again", prior.Number, prior.HeadOID, shown.Number, shown.HeadOID))
+			}
+			o.PR, o.shown = prOf(shown), shown
 			b := fb.Blockers()
 			o.Checks = map[string]int{"total": len(fb.Checks), "failing": b.FailingChecks, "pending": b.PendingChecks}
 			o.ChangesRequested, o.MergeState, o.Partial = b.ChangesRequested, fb.MergeStateStatus, b.Partial
@@ -97,19 +98,22 @@ func observe(ctx context.Context, read Call, runID, repo string, status *protoco
 	return o
 }
 
-// refresh replaces each recorded pull request GitHub just showed with what
-// it showed.
-func refresh(prs []mergedPR, o observation) {
-	shown := o.shown
+// include puts the pull request GitHub showed at into prs: in place of the
+// recorded one, or first when Aether has not recorded it, as for one opened
+// with gh in the run.
+func include(prs []mergedPR, shown *protocol.RunPullRequest, at time.Time) []mergedPR {
 	if shown == nil {
-		return
+		return prs
 	}
-	at, _ := time.Parse(time.RFC3339, o.CheckedAt)
-	for i, pr := range prs {
-		if pr.Number == shown.Number && (shown.Repository == "" || strings.EqualFold(pr.Repository, shown.Repository)) {
-			prs[i].State, prs[i].MergedAt, prs[i].CheckedAt, prs[i].Source = shown.State, shown.MergedAt, at, sourceGitHub
-		}
+	i := slices.IndexFunc(prs, func(pr mergedPR) bool {
+		return pr.Number == shown.Number && (shown.Repository == "" || strings.EqualFold(pr.Repository, shown.Repository))
+	})
+	if i < 0 {
+		return append([]mergedPR{{RecordedPullRequest: protocol.RecordedPullRequest{Repository: shown.Repository, Number: shown.Number, URL: shown.URL,
+			State: shown.State, MergedAt: shown.MergedAt, CheckedAt: at}, Source: sourceGitHub}}, prs...)
 	}
+	prs[i].State, prs[i].MergedAt, prs[i].CheckedAt, prs[i].Source = shown.State, shown.MergedAt, at, sourceGitHub
+	return prs
 }
 
 func merged(state string) bool { return strings.EqualFold(state, "merged") }
@@ -189,14 +193,8 @@ func fanOut(n int, f func(i int)) {
 // whose pull request is listed even when Aether has not recorded it.
 func addRunEvidence(ctx context.Context, read Call, r protocol.Run, recordedPRs []protocol.RecordedPullRequest, reps []report,
 	status *protocol.RunPRStatusResult, out map[string]any) {
-	prs := recorded(recordedPRs)
 	asOf := time.Now().UTC()
-	if shown := status.PullRequest; shown != nil && !slices.ContainsFunc(prs, func(pr mergedPR) bool {
-		return pr.Number == shown.Number && strings.EqualFold(pr.Repository, shown.Repository)
-	}) {
-		prs = append([]mergedPR{{RecordedPullRequest: protocol.RecordedPullRequest{Repository: shown.Repository, Number: shown.Number, URL: shown.URL,
-			State: shown.State, MergedAt: shown.MergedAt, CheckedAt: asOf}, Source: sourceGitHub}}, prs...)
-	}
+	prs := include(recorded(recordedPRs), status.PullRequest, asOf)
 	ev := map[string]any{"as_of": asOf.Format(time.RFC3339)}
 	var o *observation
 	if repo, open := unmerged(prs); open {
@@ -204,7 +202,7 @@ func addRunEvidence(ctx context.Context, read Call, r protocol.Run, recordedPRs 
 			status = nil
 		}
 		got := observe(ctx, read, r.ID, repo, status)
-		refresh(prs, got)
+		prs = include(prs, got.shown, asOf)
 		o = &got
 		ev["reviewed"] = got
 	}
@@ -230,6 +228,9 @@ type swarmRun struct {
 	children *childSummary
 	childErr string
 	observed *observation
+	// lookupErr is why a live lookup of a run with no recorded pull request
+	// found none.
+	lookupErr string
 }
 
 // childSummary counts a run's descendants by state.
@@ -375,18 +376,31 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 		}
 		runs[i].children, runs[i].childErr = summarizeChildren(ctx, read, ids[i])
 	})
+	// Runs with a pull request not merged come first; then runs with none
+	// recorded, whose pull request may have been opened with gh.
 	var live []int
 	for i := range runs {
-		if _, open := unmerged(runs[i].prs); open && len(live) < evidenceLive {
+		if _, open := unmerged(runs[i].prs); open {
 			live = append(live, i)
 		}
 	}
+	for i := range runs {
+		if len(runs[i].prs) == 0 && runs[i].err == "" {
+			live = append(live, i)
+		}
+	}
+	live = live[:min(len(live), evidenceLive)]
 	fanOut(len(live), func(j int) {
 		sr := &runs[live[j]]
 		repo, _ := unmerged(sr.prs)
 		o := observe(ctx, read, sr.run.ID, repo, nil)
-		refresh(sr.prs, o)
-		sr.observed = &o
+		at, _ := time.Parse(time.RFC3339, o.CheckedAt)
+		sr.prs = include(sr.prs, o.shown, at)
+		if o.shown != nil || len(sr.prs) > 0 {
+			sr.observed = &o
+		} else {
+			sr.lookupErr = o.Error
+		}
 	})
 
 	reps, repErr := reports(ctx, read, m.WorkspaceID, "")
@@ -403,6 +417,7 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 		PullRequests   []mergedPR `json:"pull_requests"`
 		NotCheckedLive bool       `json:"not_checked_live,omitempty"`
 		Error          string     `json:"error,omitempty"`
+		LookupError    string     `json:"pr_lookup_error,omitempty"`
 	}
 	type reportRow struct {
 		RunID   string `json:"run_id"`
@@ -423,7 +438,7 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 	reportTexts := map[string]report{}
 	for _, sr := range runs {
 		id := sr.run.ID
-		row := mergedRow{RunID: id, RunState: sr.run.Status, ClosedAsMerged: closedAs(sr.run), PullRequests: sr.prs, Error: sr.err}
+		row := mergedRow{RunID: id, RunState: sr.run.Status, ClosedAsMerged: closedAs(sr.run), PullRequests: sr.prs, Error: sr.err, LookupError: sr.lookupErr}
 		if _, open := unmerged(sr.prs); open && sr.observed == nil {
 			row.NotCheckedLive = true
 		}

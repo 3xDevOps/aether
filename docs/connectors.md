@@ -407,7 +407,9 @@ does not track releases or deployments of this repository"}`.
   person closed it, which is not a GitHub merge.
 - `reviewed`: for a run with a pull request not merged, GitHub's checks
   (`total`, `failing`, `pending`), `approvals` and `changes_requested` from
-  the latest verdict of each reviewer, `merge_state` and `checked_at`.
+  the latest verdict of each reviewer, `merge_state` and `checked_at`. The
+  checks belong to the `pr` and head shown; when the pull request moved
+  between the status and checks lookups, `error` says so.
 - `report`: the latest report's `outcome` and `at`, or `not in the last 100
   reports`.
 - `conflicts`: `success_with_failing_checks`, `success_with_pending_checks`,
@@ -423,9 +425,11 @@ does not track releases or deployments of this repository"}`.
   number of `scope_violations`.
 - `merged`, `reviewed`, `reports` and `children`: per run, as for one run,
   for the integrator and the first 20 worker runs (`runs_total` when there
-  are more). At most 5 runs with a pull request not merged are checked on
-  GitHub per call, 4 at a time; the rest have `not_checked_live` and keep
-  Aether's record and its `checked_at`. Reports come from the workspace's last
+  are more). At most 5 runs are checked on GitHub per call, 4 at a time:
+  first those with a pull request not merged, then those with none recorded,
+  whose agent may have opened one with `gh` (`pr_lookup_error` says why none
+  was found). The rest have `not_checked_live` and keep Aether's record and
+  its `checked_at`. Reports come from the workspace's last
   100; their summaries are under `untrusted.progress_reports`.
 - `aether_delivery`: the swarm's delivery receipts, which land in Aether's
   own git, not on GitHub.

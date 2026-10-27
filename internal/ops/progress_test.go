@@ -300,3 +300,42 @@ func TestRunEvidence(t *testing.T) {
 		t.Errorf("a merged run's evidence = %v; want no live checks and no conflict", ev)
 	}
 }
+
+// A swarm run with no recorded pull request is looked up too, since its
+// agent may have opened one with gh; checks are not paired with a pull
+// request that moved between the two lookups.
+func TestSwarmProgressFindsUnrecordedPullRequests(t *testing.T) {
+	f := newFake(t)
+	show := shopSwarm()
+	show.Mission.CurrentIntegratorRunID = ""
+	f.answers[protocol.MethodMissionShow] = returns(show)
+	f.answers[protocol.MethodRunGet] = runsAt(map[string]protocol.RunResult{"run-a": runWith("run-a", "running"), "run-b": runWith("run-b", "running")})
+	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{})
+	f.answers[protocol.MethodRunPRStatus] = answerTo(func(p protocol.RunPRStatusParams) any {
+		if p.RunID == "run-b" {
+			return protocol.RunPRStatusResult{Error: "no pull request for branch aether/run-b"}
+		}
+		return protocol.RunPRStatusResult{PullRequest: &protocol.RunPullRequest{Number: 9, State: "OPEN", Repository: "acme/shop", HeadOID: "aaa"}}
+	})
+	fb := feedback("FAILURE")
+	fb.PullRequest.Number, fb.PullRequest.HeadOID = 9, "bbb"
+	f.answers[protocol.MethodRunPRFeedback] = answerTo(func(p protocol.RunPRFeedbackParams) any {
+		if p.RunID == "run-b" {
+			return protocol.RunPRFeedbackResult{Error: "no pull request for branch aether/run-b"}
+		}
+		return fb
+	})
+	_, out := run(t, connectorSession(t, f), "aether_get_swarm", map[string]any{"swarm_id": "mis-1", "evidence": true})
+	p := out["progress"].(map[string]any)
+	ma := byRun(t, p["merged"], "run-a")
+	if dig(t, ma, "pull_requests", 0, "number") != float64(9) || dig(t, ma, "pull_requests", 0, "source") != sourceGitHub {
+		t.Errorf("run-a's pull request opened with gh = %v", ma)
+	}
+	ra := byRun(t, p["reviewed"], "run-a")
+	if e, _ := ra["error"].(string); !strings.Contains(e, "changed between lookups") || dig(t, ra, "pr", "head_oid") != "bbb" {
+		t.Errorf("checks of a moved pull request = %v, want them with the head they belong to and the move named", ra)
+	}
+	if mb := byRun(t, p["merged"], "run-b"); !strings.Contains(mb["pr_lookup_error"].(string), "no pull request") || len(mb["pull_requests"].([]any)) != 0 {
+		t.Errorf("run-b with no pull request = %v", mb)
+	}
+}
