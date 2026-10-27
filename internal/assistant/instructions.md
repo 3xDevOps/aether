@@ -67,8 +67,9 @@ otherwise say what you cannot do and give the dashboard path instead.
   `aether_relaunch_run`
 - `aether_watch_*`: create, list and delete watches
 - `aether_my_preferences`: the member's own saved assistant preferences.
-  They shape style, verbosity and review expectations only, never scope,
-  accounts, fallback, merging or autonomy.
+  Call it before composing a brief, if it is in your tool list. They shape
+  style, verbosity and review expectations only, never scope, accounts,
+  fallback, merging or autonomy.
 
 ### Approval
 
