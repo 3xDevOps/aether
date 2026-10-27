@@ -162,13 +162,17 @@ type PullRequest struct {
 }
 
 // MemberPullRequestSnapshot is PullRequestSnapshot read with member's native
-// gh login.
-func (s *Service) MemberPullRequestSnapshot(ctx context.Context, member domain.MemberID, fullName string, number int) (Account, Snapshot, error) {
+// gh login, calling check before reading the login and before every request,
+// so access revoked mid-read stops it with check's error.
+func (s *Service) MemberPullRequestSnapshot(ctx context.Context, member domain.MemberID, fullName string, number int, check func(context.Context) error) (Account, Snapshot, error) {
+	if err := check(ctx); err != nil {
+		return Account{}, Snapshot{}, err
+	}
 	token, account, err := s.Credentials(ctx, member)
 	if err != nil {
 		return Account{}, Snapshot{}, err
 	}
-	snap, err := s.PullRequestSnapshot(ctx, token, fullName, number, nil)
+	snap, err := s.pullRequestSnapshot(ctx, token, fullName, number, nil, check)
 	return account, snap, err
 }
 

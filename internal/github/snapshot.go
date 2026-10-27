@@ -114,6 +114,23 @@ type Review struct {
 }
 
 func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, number int, prev *Snapshot) (Snapshot, error) {
+	return s.pullRequestSnapshot(ctx, token, repo, number, prev, nil)
+}
+
+// fetchFunc is one conditional GET of a snapshot.
+type fetchFunc func(ctx context.Context, path, etag string, dst any) (header http.Header, notModified bool, err error)
+
+// pullRequestSnapshot is PullRequestSnapshot calling check, when set, before
+// every request, so access revoked mid-read stops it.
+func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, number int, prev *Snapshot, check func(context.Context) error) (Snapshot, error) {
+	fetch := func(ctx context.Context, path, etag string, dst any) (http.Header, bool, error) {
+		if check != nil {
+			if err := check(ctx); err != nil {
+				return nil, false, err
+			}
+		}
+		return s.fetch(ctx, token, path, etag, dst)
+	}
 	if !validFullName(repo) || number <= 0 {
 		return Snapshot{}, errors.New("github: pull request must be an owner/name on github.com and a positive number")
 	}
@@ -142,7 +159,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	if cached {
 		etag = old.ETag
 	}
-	header, notModified, err := s.fetch(ctx, token, pullPath, etag, &pull)
+	header, notModified, err := fetch(ctx, pullPath, etag, &pull)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -187,7 +204,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			} `json:"app"`
 		} `json:"check_runs"`
 	}
-	runs, pages, err := paginate(ctx, s, token, commit+"/check-runs?", prev, prevRuns, "check runs", nil, func(page checkRunsPage) []CheckRun {
+	runs, pages, err := paginate(ctx, fetch, commit+"/check-runs?", prev, prevRuns, "check runs", nil, func(page checkRunsPage) []CheckRun {
 		out := make([]CheckRun, 0, len(page.CheckRuns))
 		for _, r := range page.CheckRuns {
 			run := CheckRun{ID: r.ID, Name: r.Name, Status: r.Status, SuiteID: r.Suite.ID, App: r.App.Name, URL: r.URL, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt}
@@ -215,7 +232,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			} `json:"app"`
 		} `json:"check_suites"`
 	}
-	suites, pages, err := paginate(ctx, s, token, commit+"/check-suites?", prev, prevSuites, "check suites", nil, func(page checkSuitesPage) []CheckSuite {
+	suites, pages, err := paginate(ctx, fetch, commit+"/check-suites?", prev, prevSuites, "check suites", nil, func(page checkSuitesPage) []CheckSuite {
 		out := make([]CheckSuite, 0, len(page.CheckSuites))
 		for _, r := range page.CheckSuites {
 			suite := CheckSuite{ID: r.ID, Status: r.Status, App: r.App.Name, AppSlug: r.App.Slug, Runs: r.Runs}
@@ -240,7 +257,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			WorkflowRuns []WorkflowRun `json:"workflow_runs"`
 		}
 		var workflows []WorkflowRun
-		workflows, pages, err = paginate(ctx, s, token, "/repos/"+repo+"/actions/runs?head_sha="+snap.HeadSHA+"&", prev, prevWorkflows, "workflow runs", nil, func(page workflowRunsPage) []WorkflowRun {
+		workflows, pages, err = paginate(ctx, fetch, "/repos/"+repo+"/actions/runs?head_sha="+snap.HeadSHA+"&", prev, prevWorkflows, "workflow runs", nil, func(page workflowRunsPage) []WorkflowRun {
 			return page.WorkflowRuns
 		})
 		var refused *APIError
@@ -257,7 +274,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	type statusPage struct {
 		Statuses []CommitStatus `json:"statuses"`
 	}
-	statuses, pages, err := paginate(ctx, s, token, commit+"/status?", prev, prevStatuses, "commit statuses", nil, func(page statusPage) []CommitStatus {
+	statuses, pages, err := paginate(ctx, fetch, commit+"/status?", prev, prevStatuses, "commit statuses", nil, func(page statusPage) []CommitStatus {
 		return page.Statuses
 	})
 	if err != nil {
@@ -278,7 +295,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	// A PENDING review is the token owner's unsubmitted draft; submitting it
 	// later keeps the ID, so announcing the draft would hide the real review.
 	submitted := func(r Review) bool { return r.State != "PENDING" }
-	reviews, pages, err := paginate(ctx, s, token, pullPath+"/reviews?", prev, prevReviews, "reviews", submitted, func(page []reviewRecord) []Review {
+	reviews, pages, err := paginate(ctx, fetch, pullPath+"/reviews?", prev, prevReviews, "reviews", submitted, func(page []reviewRecord) []Review {
 		out := make([]Review, 0, len(page))
 		for _, r := range page {
 			review := Review{ID: r.ID, State: r.State, Body: truncate(r.Body, reviewBodyMax), URL: r.URL, SubmittedAt: r.SubmittedAt,
@@ -302,7 +319,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 // recorded in prev. A 304 page reuses its items from cached, which holds
 // prev's items for the same endpoint in page order. keep, when set, drops
 // items before they are recorded.
-func paginate[R, T any](ctx context.Context, s *Service, token, base string, prev *Snapshot, cached []T, what string, keep func(T) bool, items func(R) []T) ([]T, []Page, error) {
+func paginate[R, T any](ctx context.Context, fetch fetchFunc, base string, prev *Snapshot, cached []T, what string, keep func(T) bool, items func(R) []T) ([]T, []Page, error) {
 	var out []T
 	var pages []Page
 	offset, reusable := 0, prev != nil
@@ -322,7 +339,7 @@ func paginate[R, T any](ctx context.Context, s *Service, token, base string, pre
 			etag = old.ETag
 		}
 		var record R
-		header, notModified, err := s.fetch(ctx, token, path, etag, &record)
+		header, notModified, err := fetch(ctx, path, etag, &record)
 		if err != nil {
 			return nil, nil, err
 		}

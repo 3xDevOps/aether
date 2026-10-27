@@ -66,6 +66,9 @@ type runRepoCall struct {
 	account     domain.MemberID
 	home        domain.MemberID
 	accountName string
+	// authorize rechecks the caller's access to the run and its account;
+	// it is set even when the run has no live execution.
+	authorize func(context.Context, bool) error
 }
 
 // repoOwner is the workspace of the extra repository the call acts on, empty
@@ -136,7 +139,7 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 	}
 	execution, executionErr := s.cfg.Services.RunRepo.Execution(ctx, *run)
 	if executionErr != nil {
-		call.run, call.repo, call.account, call.home = *run, repo, account, run.HomeMember()
+		call.run, call.repo, call.account, call.home, call.authorize = *run, repo, account, run.HomeMember(), authorize
 		return call, executionErr
 	}
 	if repo.WorkspaceID != run.WorkspaceID {
@@ -456,7 +459,11 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 			return nil, invalidParams(fmt.Sprintf("limit must be between 1 and %d (or zero for the default)", protocol.MaxRunPRFeedbackEntries))
 		}
 		pr := status.PullRequest
-		account, snap, snapErr := s.cfg.Services.GitHub.MemberPullRequestSnapshot(ctx, call.home, pr.Repository, pr.Number)
+		account, snap, snapErr := s.cfg.Services.GitHub.MemberPullRequestSnapshot(ctx, call.home, pr.Repository, pr.Number,
+			func(ctx context.Context) error { return call.authorize(ctx, false) })
+		if errors.Is(snapErr, permissions.ErrDenied) {
+			return nil, rpcError(snapErr)
+		}
 		if snapErr != nil {
 			out.Error = strings.TrimSuffix("read checks and reviews from GitHub: "+repoError(snapErr)+"; "+status.Error, "; ")
 			return out, nil

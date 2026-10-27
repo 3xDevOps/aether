@@ -477,8 +477,24 @@ func TestInsightsGet(t *testing.T) {
 		feedback.PullRequest.HeadOID != gh.snap.HeadSHA || feedback.PullRequest.BaseBranch != "main" || feedback.PullRequest.Title != "Fix login" ||
 		feedback.PullRequest.State != "merged" || feedback.PullRequest.MergedAt == nil || feedback.Identity != "octocat" || !reflect.DeepEqual(feedback.Checks, wantChecks) ||
 		len(feedback.Reviews) != 1 || feedback.Reviews[0].Author != "grace" || feedback.Reviews[0].State != "CHANGES_REQUESTED" ||
-		gh.lookups[len(gh.lookups)-1] != "snapshot "+string(alice)+" acme/app#4" {
+		gh.lookups[len(gh.lookups)-1] != "snapshot "+string(alice)+" acme/app#4 page 2" {
 		t.Errorf("run.pr.feedback of a finished run = %+v, %+v, lookups %v; want GitHub's checks and reviews, truncated by the clipped review", feedback, perr, gh.lookups)
+	}
+	// Bob revoking his share while the read is between pages stops it,
+	// with the access error and nothing read after.
+	gh.betweenPages = func() {
+		if err := db.RevokeAccountShare(ctx, bob, alice); err != nil {
+			t.Error(err)
+		}
+	}
+	before := len(gh.lookups)
+	if out, perr = e.srv.dispatch(ctx, alice, protocol.MethodRunPRFeedback, repoParams(t, protocol.RunPRFeedbackParams{RunID: "top2", Limit: 30})); perr == nil ||
+		perr.Code != protocol.CodeDenied || len(gh.lookups) != before+1 {
+		t.Errorf("run.pr.feedback revoked between pages = %s, %+v after lookups %v; want denied after one page", out, perr, gh.lookups[before:])
+	}
+	gh.betweenPages = nil
+	if err := db.ShareAccount(ctx, bob, alice); err != nil {
+		t.Fatal(err)
 	}
 	lookup = slices.Clone(gh.lookups)
 	if _, perr = status("top6"); perr == nil || perr.Code != protocol.CodeInvalidState {

@@ -27,7 +27,9 @@ type githubRepositoryFixture struct {
 	pages   []int
 	pr      githubservice.PullRequest
 	snap    githubservice.Snapshot
-	lookups []string
+	// betweenPages runs between MemberPullRequestSnapshot's two pages.
+	betweenPages func()
+	lookups      []string
 }
 
 func newGitHubRepositoryFixture() *githubRepositoryFixture {
@@ -62,10 +64,25 @@ func (f *githubRepositoryFixture) PullRequest(_ context.Context, member domain.M
 	return f.account, f.pr, f.err
 }
 
-func (f *githubRepositoryFixture) MemberPullRequestSnapshot(_ context.Context, member domain.MemberID, fullName string, number int) (githubservice.Account, githubservice.Snapshot, error) {
+// MemberPullRequestSnapshot reads two pages, calling check before each as
+// the real reader does before every request, and betweenPages, when set,
+// between them.
+func (f *githubRepositoryFixture) MemberPullRequestSnapshot(ctx context.Context, member domain.MemberID, fullName string, number int,
+	check func(context.Context) error) (githubservice.Account, githubservice.Snapshot, error) {
+	for page := range 2 {
+		if err := check(ctx); err != nil {
+			return githubservice.Account{}, githubservice.Snapshot{}, err
+		}
+		f.mu.Lock()
+		f.lookups = append(f.lookups, fmt.Sprintf("snapshot %s %s#%d page %d", member, fullName, number, page+1))
+		between := f.betweenPages
+		f.mu.Unlock()
+		if page == 0 && between != nil {
+			between()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.lookups = append(f.lookups, fmt.Sprintf("snapshot %s %s#%d", member, fullName, number))
 	return f.account, f.snap, f.err
 }
 

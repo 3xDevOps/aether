@@ -550,3 +550,22 @@ func TestPullRequestSnapshotRejectsUnsafeInput(t *testing.T) {
 		t.Fatal("accepted pull request 0")
 	}
 }
+
+// A check that fails partway, as when access is revoked mid-read, stops the
+// snapshot before its next request.
+func TestPullRequestSnapshotChecksBeforeEveryRequest(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	revoked := errors.New("access revoked")
+	checks := 0
+	_, err := snapshotService(t, f).pullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil, func(context.Context) error {
+		checks++
+		if checks == 3 {
+			return revoked
+		}
+		return nil
+	})
+	if !errors.Is(err, revoked) || checks != 3 || len(f.requests) != 2 {
+		t.Fatalf("snapshot = %v after %d checks and requests %v; want the check's error after two requests", err, checks, f.requests)
+	}
+}

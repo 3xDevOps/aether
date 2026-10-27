@@ -73,7 +73,7 @@ type GitHubService interface {
 	Repositories(context.Context, domain.MemberID, int) (githubservice.RepositoryPage, error)
 	Repository(context.Context, domain.MemberID, string) (githubservice.Account, githubservice.Repository, error)
 	PullRequest(context.Context, domain.MemberID, string, int) (githubservice.Account, githubservice.PullRequest, error)
-	MemberPullRequestSnapshot(context.Context, domain.MemberID, string, int) (githubservice.Account, githubservice.Snapshot, error)
+	MemberPullRequestSnapshot(context.Context, domain.MemberID, string, int, func(context.Context) error) (githubservice.Account, githubservice.Snapshot, error)
 }
 
 // snapshotFeedback is run.pr.feedback's checks and reviews from a snapshot,
