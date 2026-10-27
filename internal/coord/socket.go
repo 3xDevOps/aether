@@ -575,6 +575,8 @@ func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protoc
 			result, rpcErr = s.handleMemory(ctx, run, req.Method, req.Params)
 		} else if isDevelopmentMethod(req.Method) {
 			result, rpcErr = s.handleDevelopment(ctx, run, req.Method, req.Params)
+		} else if isChildMethod(req.Method) {
+			result, rpcErr = s.handleChild(ctx, run, req.Method, req.Params)
 		} else if isMissionMethod(req.Method) {
 			if s.cfg.Disabled {
 				resp.Error = unavailable(req.Method)

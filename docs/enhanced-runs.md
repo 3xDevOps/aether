@@ -229,6 +229,30 @@ the server sends the agent one prompt telling it to run
 A message steered into a running turn carries no such line. Messages that arrive together
 share one prompt, and each set of new unread messages starts at most one turn.
 
+### Report reminder
+
+A turn that ends normally (`end_turn`) without an outcome report gets one more
+prompt from the server:
+`Report your state with aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn.`,
+naming only the outcomes the run's role may use. It appears in the Session
+view as a message. The turn it starts is never
+reminded, so an agent that still does not report parks with
+`turn ended without a report`. A swarm worker's integrator then gets the
+last message of the reminded turn, not the reminder's.
+
+No reminder follows a turn that was cancelled, interrupted, failed or stopped
+on another stop reason, or one that background tasks or a request waiting on
+you hold. A message you sent during the turn starts the next turn instead. A
+run a member controls gets none: the next prompt is theirs. The reminder also
+waits on the same admission as a mail prompt: a protected run, a swarm worker
+a human holds, and a paused or switching run get none. Background
+runs get none either: their turn end finishes the run.
+
+The reminder is a prompt, not a hook, so it works the same for every agent.
+Claude Code's ACP adapter does forward `_meta.claudeCode.options.settings`,
+where a Stop hook could live, but that setting replaces the adapter's own
+settings and reaches only Claude Code.
+
 The prompt waits while a run is protected, a human holds a swarm worker, or the
 run is paused or switching modes. Lifting protection, releasing control or
 **Resume** offers the mail that arrived meanwhile at once; otherwise the server
@@ -348,7 +372,10 @@ restart mid-turn resumes the session and prompts the agent to continue.
 Every run gets the [agent instructions](coordination.md#agent-instructions) and the
 [team memory brief](harnesses.md#agent-instructions-and-the-team-memory-brief).
 Claude Code takes them as a system prompt. Other agents get them with the task, or
-after the first message when there is no task.
+after the first message when there is no task, so compaction can drop them; the
+[report reminder](#report-reminder) repeats the reporting rule when it matters.
+The run's timeline records `run instructions: system prompt` or
+`run instructions: first message` when the session opens.
 
 The conversation is stored at `<data-dir>/transcripts/<run_id>.items.jsonl` with
 no size or age limit, and is deleted with the run. Anything an agent or tool

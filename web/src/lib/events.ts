@@ -9,6 +9,7 @@ export const eventLabel = {
   'run.deleted': 'Run deleted',
   'workspace.deleted': 'Workspace deleted',
   'run.protected': 'Run protection',
+  'run.children': 'Child runs',
   'run.controller': 'Run control',
   'run.mode': 'Run mode',
   'run.account': 'Account changed',

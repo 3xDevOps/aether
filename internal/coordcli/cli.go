@@ -138,6 +138,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = developmentCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In)
 	case "memory":
 		return memoryCommand(ctx, cfg, args[1:])
+	case "child":
+		result, err = childCommand(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	default:
 		return fail(cfg.Out, protocol.CodeMethodNotFound, "unknown command: "+args[0])
 	}
@@ -167,6 +169,7 @@ Commands:
   integration run the five integrator candidate operations
   report    record your state: an outcome, a question, or what you wait on
   memory    search and add team memory notes
+  child     start and manage child runs on other agents
   terminal  run, observe and interact with development PTYs
   browser   operate the isolated headless browser companion
   control   inspect, acquire and release development surface control
@@ -176,7 +179,8 @@ Run "aether-internal <command> --help" for command options.
 `
 
 var commandUsages = map[string]string{
-	"hook": hookUsage,
+	"hook":  hookUsage,
+	"child": childUsage,
 	"status": `usage: aether-internal status [--json]
 
 Print this run's identity, assignment, peers, unread count, and capabilities
@@ -622,6 +626,9 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 		if _, err := fmt.Fprintf(out, "Task summary (bounded): %s\n", summary); err != nil {
 			return ExitFailure, fmt.Errorf("write skill task summary: %w", err)
 		}
+	}
+	if _, err := io.WriteString(out, childSkill(status)); err != nil {
+		return ExitFailure, fmt.Errorf("write child run skill: %w", err)
 	}
 	if err := writeDevelopmentEntrypoints(out, status); err != nil {
 		return ExitFailure, fmt.Errorf("write development entrypoints: %w", err)

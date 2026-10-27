@@ -541,13 +541,13 @@ there is no terminal, file, settings or git-writing tool.
   assistant into approving or ending work. A connector serves only
   its scopes' tools, and the server checks every call's method against its
   scopes, a permission decision against `control`, and refuses every method
-  outside its table ([connectors.md](connectors.md#scopes)).
+  outside its table ([connectors.md](connectors.md#scopes)). It can make 30
+  write calls at once, then one every 2 seconds.
 - Audit history: a connector's write calls, refused ones included, and its
   creation and revocation are recorded with the member, connector, method,
   target and outcome, never the parameters
   ([connectors.md](connectors.md#audit-history)). A member reads their own
-  entries; an admin reads all. It can make 30 write calls at once,
-  then one every 2 seconds.
+  entries; an admin reads all.
 - A connector minted over a member SSH key or a tailnet connection has no
   device: revoking a device does not cut it off. `aether mcp revoke` does.
 - TLS ends at the edge, because ChatGPT and Claude need a public certificate.

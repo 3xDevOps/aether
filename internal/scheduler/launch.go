@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/mirror"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -221,11 +222,15 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	}
 	// A reserved identity that already has a run is a replay: its base was
 	// captured on the original handoff, and a new fetch could fail or differ.
-	if opts.AssignedRunID != "" {
-		existing, getErr := s.cfg.Store.GetRun(ctx, opts.AssignedRunID)
+	reservedID := opts.AssignedRunID
+	if reservedID == "" {
+		reservedID = opts.ReservedRunID
+	}
+	if reservedID != "" {
+		existing, getErr := s.cfg.Store.GetRun(ctx, reservedID)
 		if getErr == nil {
 			requested := &domain.Run{
-				ID: opts.AssignedRunID, WorkspaceID: workspace,
+				ID: reservedID, WorkspaceID: workspace,
 				MemberID: member, AccountMemberID: account, Task: task,
 				Harness: harness, Mode: mode, Model: opts.Model,
 			}
@@ -257,7 +262,12 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 			extrasCh <- extraCapture{repos, captureErr}
 		}()
 	}
-	base, err := bases.Capture(ctx, workspace, opts.CachedBase)
+	var base mirror.CaptureResult
+	if opts.FromCommit != "" {
+		base = mirror.CaptureResult{Commit: opts.FromCommit, Branch: opts.FromBranch, Source: "run", Configured: true, CheckedAt: time.Now().UTC()}
+	} else {
+		base, err = bases.Capture(ctx, workspace, opts.CachedBase)
+	}
 	var extras extraCapture
 	if extrasCh != nil {
 		extras = <-extrasCh
@@ -309,9 +319,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if opts.RequestedAccount != account {
 		run.RequestedAccountMemberID = opts.RequestedAccount
 	}
-	if err := createAssignedRun(ctx, s.cfg.Store, run, opts.AssignedRunID); err != nil {
-		if opts.AssignedRunID != "" {
-			existing, getErr := s.cfg.Store.GetRun(ctx, opts.AssignedRunID)
+	if err := createAssignedRun(ctx, s.cfg.Store, run, reservedID); err != nil {
+		if reservedID != "" {
+			existing, getErr := s.cfg.Store.GetRun(ctx, reservedID)
 			if getErr == nil && sameReservedRun(existing, run) && (opts.CachedBase == "" || opts.CachedBase == existing.BaseCommit) {
 				return s.freshen(ctx, existing), nil
 			}

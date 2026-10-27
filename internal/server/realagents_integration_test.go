@@ -134,6 +134,16 @@ func TestIntegrationRealAgents(t *testing.T) {
 						a.waitFor(ctx, t, "the tool call's output", func() bool { return model.saw(a.marker, realAgentOutput) })
 						a.waitIdle(ctx, t, 0)
 						a.waitFor(ctx, t, "the model's answer in the run", func() bool { return strings.Contains(a.transcript(), realAgentAnswer) })
+						// Aether asks a turn that ended without a report for one: a
+						// Standard Claude Code stop is held, an Enhanced session is
+						// prompted. Standard Codex is not asked.
+						want := domain.ActivityAnswered
+						if agent == "codex" && mode == domain.LaunchTUI {
+							want = domain.ActivityWaiting
+						}
+						if got := domain.RunActivity(a.get(t).Activity); got != want {
+							t.Fatalf("activity %q after the turn, want %q", got, want)
+						}
 					}) {
 						return
 					}
@@ -183,7 +193,8 @@ func (a *realAgentRun) waitIdle(ctx context.Context, t *testing.T, after int64) 
 	t.Helper()
 	a.waitFor(ctx, t, "the run to settle idle", func() bool {
 		r := a.get(t)
-		return r.StatusSeq > after && r.Status == string(domain.RunNeedsAttention) && domain.RunActivity(r.Activity) == domain.ActivityWaiting
+		activity := domain.RunActivity(r.Activity)
+		return r.StatusSeq > after && r.Status == string(domain.RunNeedsAttention) && (activity == domain.ActivityWaiting || activity == domain.ActivityAnswered)
 	})
 }
 

@@ -277,6 +277,26 @@ func TestQuestionAnswerRefusesANonAccountableCollaborator(t *testing.T) {
 	}
 }
 
+// mission.show finds a mission by one of its questions.
+func TestShowByQuestion(t *testing.T) {
+	ctx := context.Background()
+	f := newMissionFixture(t)
+	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
+		Body: "which checkout flow?", IdempotencyKey: "ask-1",
+	})
+	questions, err := f.db.ListMissionQuestions(ctx, f.mission.ID)
+	if err != nil || len(questions) != 1 {
+		t.Fatalf("list questions = %v (err %v), want one", questions, err)
+	}
+	shown, err := f.svc.Show(ctx, protocol.MissionShowParams{QuestionID: string(questions[0].ID)})
+	if err != nil || shown.Mission.ID != string(f.mission.ID) || len(shown.Questions) != 1 {
+		t.Fatalf("show by question = %+v (err %v), want mission %s", shown.Mission, err, f.mission.ID)
+	}
+	if _, err := f.svc.Show(ctx, protocol.MissionShowParams{QuestionID: "ques-missing"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("show by an unknown question = %v, want not found", err)
+	}
+}
+
 // An answer publishes the decision note it wrote as a change by the member
 // who answered, on the run that asked; a replayed answer publishes nothing.
 func TestQuestionAnswerPublishesItsDecisionNote(t *testing.T) {

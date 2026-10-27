@@ -679,6 +679,15 @@ Antigravity have none.
 Enhanced and Background-over-ACP runs need no reporter: the session reports both
 ends of each turn. Background runs without ACP are never reported.
 
+A Standard Claude Code turn that ends without an outcome report is held once:
+its Stop hook blocks the stop and Claude Code shows **Stop hook feedback**
+asking the agent to report
+([coordination.md](coordination.md#lifecycle-status-is-separate)). Enhanced
+runs get a [report reminder](enhanced-runs.md#report-reminder) prompt
+instead. Standard runs of other agents are not held: Codex runs load no
+hooks, and the app-server reports an idle thread the same way after a
+finished turn and after you press Esc.
+
 ## Agent configuration: import and Files
 
 `aether config push` uploads an agent's configuration directory from your

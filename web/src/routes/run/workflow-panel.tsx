@@ -12,7 +12,7 @@ import { usePrimaryAction, type RunNavigation } from '@/routes/run/header'
 import { openAgent } from '@/routes/run/subagent-cards'
 import type { RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
-import { useNeedsYouRuns, useRunPresentation } from '@/store/hooks'
+import { useChildRunFacts, useNeedsYouRuns, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import { noAgents } from '@/store/subagents'
 import { deriveRunWorkflow, runFacts, shareTree, workflowLabel, workflowTone, type WorkflowNode } from '@/store/workflow'
@@ -24,12 +24,13 @@ function useRunWorkflow(run: RunRecord): WorkflowNode {
   const ids = useMemo(() => [run.id], [run.id])
   const asks = useNeedsYouRuns(ids).has(run.id)
   const agents = useStore((s) => s.acpSessions[run.id]?.agents ?? noAgents)
+  const childRuns = useChildRunFacts(ids)
   const previous = useRef<WorkflowNode | undefined>(undefined)
   return useMemo(() => {
-    const next = shareTree(previous.current, deriveRunWorkflow(run.id, runFacts(run, shown, runLabel(run), asks), agents))
+    const next = shareTree(previous.current, deriveRunWorkflow(run.id, runFacts(run, shown, runLabel(run), asks), agents, childRuns))
     previous.current = next
     return next
-  }, [run, shown, asks, agents])
+  }, [run, shown, asks, agents, childRuns])
 }
 
 export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: boolean; onToggle: (opener: HTMLElement) => void }) {
@@ -71,7 +72,12 @@ export function WorkflowPanel({ run, view, agent, nav, onClose, onLeave, classNa
 }) {
   const tree = useRunWorkflow(run)
   const primary = usePrimaryAction(run, view, agent, nav)
+  const navigate = useStore((s) => s.navigate)
   const select = (node: WorkflowNode) => {
+    if (node.kind === 'run' && node.runId && node.runId !== run.id) {
+      navigate('run', { runId: node.runId })
+      return true
+    }
     if (node.agentId) {
       onLeave?.()
       openAgent(run.id, node.agentId)

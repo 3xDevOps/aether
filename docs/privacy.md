@@ -177,7 +177,8 @@ removed.
 When one of your runs starts needing you, or a run your
 [assistant](assistant.md#notifications) launched or messaged finishes, or
 needs you and is another member's, your server sends one HTTPS request per
-subscribed browser to that browser's address. Nothing is sent for a member
+subscribed browser to that browser's address, and one more to each of those
+browsers when the run stops needing you. Nothing is sent for a member
 with no subscribed browser, and nothing is sent to the publisher. The
 push service receives:
 
@@ -191,7 +192,8 @@ push service receives:
   generated for this purpose, the push service's own address, an expiry, and
   the fixed contact `https://github.com/3xDevOps/Aether`. It names neither
   your server nor you.
-- **Delivery settings**: a 24-hour time to live, high urgency, and a topic,
+- **Delivery settings**: a 24-hour time to live, high urgency (normal for a
+  reported success and for the message that clears a need), and a topic,
   which is a hash of the run's ID, so that a newer notification for a run
   replaces an undelivered older one.
 

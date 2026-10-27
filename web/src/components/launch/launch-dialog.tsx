@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
-import { AccountOptions, automaticFallback, fallbackParams, WorkspaceLine } from '@/components/launch/launch-options'
+import { LaunchChildHint } from '@/components/child-nudge'
+import { AccountOptions, automaticFallback, ChildRunsOption, type ChildRunsChoice, fallbackParams, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
 import { integratorModes } from '@/components/launch/modes'
 import { ExtraRepos } from '@/components/launch/extra-repos'
@@ -22,6 +23,7 @@ import { multiRepoFeature, multiRepoMethod, swarmReposFeature } from '@/lib/repo
 import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
+import { useChildSettingsRead } from '@/store/children'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
@@ -68,6 +70,9 @@ export function LaunchDialog() {
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
   const [fallback, setFallback] = useState(automaticFallback)
+  const childRunsOffered = cap.hasMethod('run.children.allow')
+  const childSettings = useChildSettingsRead()
+  const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
   const choice = useAgentChoice({ account, ownAccountID })
   const { agents, agentError, agent, harness, mode, model, noAgents } = choice
   const [task, setTask] = useState('')
@@ -168,6 +173,7 @@ export function LaunchDialog() {
       ...(sharedAccount ? { account_member_id: account } : {}),
       ...fallbackParams(fallback, accounts, account),
       ...extraRepos,
+      ...(childRunsOffered && childRuns ? { children: childRuns } : {}),
     })
     rememberLaunch(harness, mode, chosenModel)
     upsertRun(run)
@@ -290,6 +296,12 @@ export function LaunchDialog() {
           >
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
+              {childRunsOffered && (
+                <>
+                  <ChildRunsOption value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} disabled={launching} />
+                  <LaunchChildHint launchable={agents?.filter(launchable).length ?? 0} onLeave={close} />
+                </>
+              )}
             </TabsContent>
             <TabsContent value="swarm" className="flex flex-col gap-4">
               {swarmUnavailable && <Callout tone="needs-you" role="status" id="launch-swarm-unavailable">{swarmUnavailable}</Callout>}

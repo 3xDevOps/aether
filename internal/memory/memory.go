@@ -242,7 +242,7 @@ func (s *Service) head(ctx context.Context, run *domain.Run) (string, error) {
 	}
 	filter := events.Filter{Workspace: run.WorkspaceID, Run: run.ID, Types: []events.Type{events.TypeRunDiff}}
 	for before++; ; {
-		diffs, err := s.cfg.Log.ReadBefore(ctx, filter, before, headDiffPage)
+		diffs, err := s.cfg.Log.ReadBefore(ctx, filter, 0, before, headDiffPage)
 		if err != nil {
 			return "", fmt.Errorf("read the latest diff of run %s: %w", run.ID, err)
 		}

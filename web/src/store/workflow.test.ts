@@ -13,6 +13,7 @@ import {
   runFacts,
   shareTree,
   type CandidateFacts,
+  type ChildRunFacts,
   type RunFacts,
   type WorkflowNode,
 } from '@/store/workflow'
@@ -191,6 +192,28 @@ describe('swarm workflow', () => {
     const next = shareTree(prev, swarm(detail, { run_w1: working, run_w2: facts({ id: 'run_w2', status: 'running', state: 'waiting-ci' }) }))
     expect(byID(next, 'task:task_1')).toBe(byID(prev, 'task:task_1'))
     expect(byID(next, 'task:task_2')!.state).toBe('waiting-ci')
+  })
+})
+
+describe('child runs', () => {
+  const childFacts = (runId: string, parentRunId: string, over: Partial<Run> = {}): ChildRunFacts =>
+    ({ ...facts({ id: runId, child_purpose: `review ${runId}`, ...over }), runId, parentRunId })
+
+  it('nests child runs under the run that started them, at any depth', () => {
+    const tree = deriveRunWorkflow('run_1', facts(), noAgents, [childFacts('c1', 'run_1'), childFacts('c2', 'c1', { status: 'needs-attention', state: 'needs-you' })])
+    expect(byID(tree, 'run:c1')).toMatchObject({ parentId: 'run:run_1', kind: 'run', label: 'review c1', runId: 'c1' })
+    expect(byID(tree, 'run:c2')).toMatchObject({ parentId: 'run:c1', state: 'needs-you' })
+    expect(needsYouBelow(tree).map((node) => node.id)).toEqual(['run:c2'])
+  })
+
+  it('nests a worker\'s child runs under its attempt and the integrator\'s under the root', () => {
+    const detail: MissionDetail = { mission: mission({ current_integrator_run_id: 'run_int' }), tasks, attempts: [attempt({})], submissions: [], diagnostics: [], questions: [] }
+    const tree = deriveSwarmWorkflow({
+      detail, runs: {}, candidates: [], integratorLabel: 'Integrator',
+      childRuns: [childFacts('wc', 'run_w1'), childFacts('ic', 'run_int')],
+    })
+    expect(byID(tree, 'run:wc')?.parentId).toBe('attempt:att_1')
+    expect(byID(tree, 'run:ic')?.parentId).toBe('integrator:mission_1')
   })
 })
 

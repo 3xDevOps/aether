@@ -106,7 +106,8 @@ The connector then works in Claude on the web, desktop and mobile.
 
 `https://<edge>/mcp` is one URL for every Aether server, so one ChatGPT
 plugin can serve every Aether user. Once Aether is listed in ChatGPT's plugin
-directory ([chatgpt-plugin.md](chatgpt-plugin.md)), install it from there
+directory ([chatgpt-plugin.md](chatgpt-plugin.md)) or Claude's connector
+directory ([claude-connector.md](claude-connector.md)), install it from there
 instead of adding a custom MCP server; connecting then works as described here.
 
 When you connect, the edge's sign-in page opens: sign in with GitHub if you
@@ -231,8 +232,14 @@ or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns. When
 the server no longer keeps the start of a run's conversation or terminal,
 `aether_run_history` returns `truncated_before: true` and a `note` saying so.
 
-A launch, swarm or message takes an optional `idempotency_key`; a retry with
-the same key returns the first result. A launch or swarm still starting after
+A launch, swarm, message or answer takes an optional `idempotency_key`; a
+retry with the same key returns the first result. A write's result has
+`write: "done"`, or `"pending"` while a launch is starting or a message waits
+for approval, and the key it used. A failure that leaves it unknown whether the
+write happened, such as a timeout, ends with the key to retry with. A
+swarm or teammate answer retried with its key after the question stopped
+waiting returns the saved answer; an `answer_id` that is neither a swarm
+question nor a teammate question on the run fails and writes nothing. A launch or swarm still starting after
 30 seconds, such as one pulling its image, keeps starting after the tool call
 ends. The tool then repeats the call with the key to look up the run or swarm,
 which does not count as a write call. If the lookup answers within 5 seconds,
@@ -244,7 +251,11 @@ the same workspace, agent, task, mode and model within 60 seconds returns your
 earlier run, unless it failed, was interrupted or was abandoned, and a swarm
 with the same workspace, objective and agents within 60 seconds returns your
 earlier swarm, unless it was cancelled, instead of starting another; so does an
-identical launch still starting. A retried message without a key is sent again.
+identical launch still starting, or one that failed in the last 60 seconds
+without saying whether it started. A message without a key reuses the key of the
+same message to the same run still being sent or sent within 60 seconds, so a
+retry is delivered once and its result has `duplicate: true`. To send the same
+text again on purpose, pass a new `idempotency_key`.
 `aether_mark_reviewed` completes only a run whose agent reported success and
 awaits your review; to end any other run, use `aether_stop_run` or
 `aether_close_run` under `control`. A message to your own run that no one

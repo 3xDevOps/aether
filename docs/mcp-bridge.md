@@ -81,9 +81,10 @@ See [coordination.md](coordination.md) for the established CLI commands and
 wire limits. The optional bridge does not install a skill package or carry an
 identity claim.
 
-## The eight-tool surface
+## The tool surface
 
-The bridge exposes exactly eight tools. Their parameters, receipts,
+The bridge exposes eight tools, and four child-run tools on servers that
+offer [child runs](coordination.md#child-runs). Their parameters, receipts,
 authorization rules, limits, idempotency behavior, and durable storage map to
 the established v3 run socket methods. This is the bridge's complete
 surface; it does not expose Release B swarm, task, worker, takeover, or
@@ -99,10 +100,19 @@ integrator-management commands.
 | `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, optional `waiting_for`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 | `aether_memory_search` | `memory.search`, or `memory.show` with `id` | optional `query`, `id`, `kind`, `file`, `all` | up to 10 `items`, best first; with `id`, that note as the one item and its supersede `chain` |
 | `aether_memory_add` | `memory.add` | `kind`, `text`, optional `files`, `supersedes`, `scope` | the stored `item`, `duplicate`, up to 3 `similar` live notes |
+| `aether_child_options` | `child.options` | optional `harness` | `allowed`, the refusal `reason`, `scope`, `limits`, `busy`, `queued`, `total`, each `choice` with its `status` |
+| `aether_child_start` | `child.start` | `harness`, `purpose`, `task`, `idempotency_key`, optional `model`, `mode`, `account_member_id` | the child and `next` |
+| `aether_children` | `child.list` | optional `run_id` | `children` |
+| `aether_child_cancel` | `child.cancel` | `run_id` | the child |
 
 The bridge returns the established structured result directly. This
 presentation differs from any CLI envelope, but it does not add operations or
 make MCP a Release B-parity interface.
+
+The bridge registers the child-run tools when the run's `coord.status`
+lists `child.options` as it starts; the server still refuses a start the
+run's owner or swarm does not allow. `child.detach` and `child.fetch` are
+CLI-only.
 
 The two memory tools read and write the workspace's
 [team memory](coordination.md#team-memory). Both descriptions end with
@@ -251,25 +261,45 @@ member id and the server rejects any param containing `member_id`, except the `r
 
 | Tier | Tools |
 | --- | --- |
-| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_list_workspaces`, `aether_get_workspace`, `aether_list_agents`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_memory_search` |
+| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_list_swarms`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_list_workspaces`, `aether_get_workspace`, `aether_list_agents`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
 | Reversible | `aether_pause_run`, `aether_resume_run` |
-| Confirmed | `aether_launch_run`, `aether_message_run`, `aether_stop_run`, `aether_save_environment` |
+| Confirmed | `aether_launch_run`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment` |
 
 A confirmed call blocks until the member approves it in the dashboard, or
 runs at once when the member turned on
 [auto-approval](assistant.md#auto-approval), except that a message to or stop
-of another member's run always waits for a click. A decline, timeout or closed
-session fails the call with the reason. `aether_docs`
-reads the guides in `docs/`, which the server binary embeds. Without
-`--assistant` the bridge serves the coordination tools above, unchanged.
-
-The tool definitions are one table, in `internal/mcpbridge/assistant.go`,
-that takes a call function rather than a socket. The assistant's call dials
-the socket. A [ChatGPT or Claude connector](connectors.md) calls the server
-in process as its member and serves its own tool set. Its descriptions leave
-out the tier wording, because ChatGPT and Claude ask before each write
-themselves, and each tool has a title and the hints in
-[chatgpt-plugin.md](chatgpt-plugin.md#tool-hints). The parameter shaping is
-the same on both paths: `mine`, the default history page of 20, and a fresh idempotency key
-on each message. A failed connector call returns the server's error message
+of another member's run always waits for a click, and an answer or approval
+decision always does. The card names what the call acts on: the run's title
+and owner, the request and the option chosen, a message's attachments and
+anchor, or the swarm's goal, its accountable human when that is someone else,
+and its question, saying so when the question was already answered. A decline, timeout or closed session fails the call with the reason.
+`aether_docs` reads the guides in `docs/`, which the server binary embeds.
+Without `--assistant` the bridge serves the coordination tools above,
 unchanged.
+
+The tools are one registry, `internal/ops`, shared with the
+[ChatGPT and Claude connector](connectors.md). Each op declares its name,
+input, connector scope, assistant tier, MCP hints and the RPC methods it
+calls; it cannot call any other. The socket serves only the methods in the
+`tiers` map of `internal/assistant/tools/tools.go`, and a test fails when an
+op the assistant offers calls a method without a tier there. Results are the
+connector's: a one-line summary, then bounded JSON with ids, dashboard links,
+and text agents, teammates or GitHub users wrote under `untrusted`
+([connectors.md](connectors.md#what-it-can-do) lists the limits). A failure
+returns the server's message and error code, with the tool that resolves it
+for an unknown id or a bad argument.
+
+The two surfaces differ only where they must. A connector's descriptions
+leave out the tier wording, because ChatGPT and Claude ask before each write
+themselves, and each tool has a title and the hints in
+[chatgpt-plugin.md](chatgpt-plugin.md#tool-hints). `aether_list_runs` lists
+only the member's runs by default on a connector and every run they can see on
+the assistant. A connector call is cut off after 40 seconds and a launch keeps
+starting past it; an assistant call waits, since its member may still be
+deciding a card. The assistant does not offer `search`, `fetch`,
+`aether_launch_swarm`, `aether_mark_reviewed`, `aether_close_run` or
+`aether_cancel_swarm`; the connector does not offer the environment, usage,
+docs, view context and workspace tools. Messages and launches dedupe the same
+way on both: an `idempotency_key` repeats a call safely, and a keyless message
+reuses the key of the same message to the same run still being sent or sent in
+the last 60 seconds, returning that message with `duplicate: true`.

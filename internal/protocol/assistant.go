@@ -21,7 +21,8 @@ const (
 	MethodAssistantSettings = "assistant.settings"
 	// MethodAssistantDocs is served only on the assistant tool socket.
 	MethodAssistantDocs = "assistant.docs"
-	// MethodAssistantView replaces the caller's latest view context.
+	// MethodAssistantView offers a navigation update as the caller's held
+	// view context.
 	MethodAssistantView = "assistant.view"
 	// MethodAssistantViewContext is served only on the assistant tool socket.
 	MethodAssistantViewContext = "assistant.view_context"
@@ -141,10 +142,15 @@ type AssistantViewFile struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
-// AssistantViewContextResult is the member's latest view context. Several
-// dashboards share one: the one the server received last wins.
+// AssistantViewContextResult is the member's held view context, shared by
+// all their dashboards. A sent prompt's view always becomes it. A navigation
+// update captured before the held view is dropped while that view is under
+// 10 seconds old; otherwise the last one received wins.
 type AssistantViewContextResult struct {
 	ViewContext *AssistantViewContext `json:"view_context"`
+	// Source is "prompt" when the member's last prompt carried the view,
+	// "navigation" when a later page change replaced it.
+	Source string `json:"source,omitempty"`
 	// AgeSeconds counts from when the server received it.
 	AgeSeconds int64 `json:"age_seconds,omitempty"`
 	// Connected is true while a dashboard streams the member's assistant
@@ -199,3 +205,49 @@ type AssistantFrame struct {
 
 // SubsystemAssistant streams the caller's own assistant session.
 const SubsystemAssistant = "aether-assistant"
+
+// Outcomes of an assistant action. Approved and auto-approved are written
+// before the call runs; succeeded or failed follows under the same action
+// id. A declined, expired or withdrawn card, or a failure to read or count
+// the approval, is the action's only record.
+const (
+	AssistantActionApproved     = "approved"
+	AssistantActionAutoApproved = "auto_approved"
+	AssistantActionDeclined     = "declined"
+	AssistantActionExpired      = "expired"
+	AssistantActionWithdrawn    = "withdrawn"
+	AssistantActionFailed       = "failed"
+	AssistantActionSucceeded    = "succeeded"
+)
+
+// AssistantAction is one record of an action the assistant took or asked to
+// take, carried by a notice item of the member's transcript. Records with
+// the same ID describe one action; the latest replaces the earlier.
+type AssistantAction struct {
+	ID     string `json:"id"`
+	Method string `json:"method"`
+	// Summary is the line the member approved, or would have.
+	Summary string                `json:"summary"`
+	Target  AssistantActionTarget `json:"target"`
+	Outcome string                `json:"outcome"`
+	// Approval is how the call was allowed to run: "card" when the member
+	// approved it, "auto" by auto-approval, empty for a reversible call
+	// that needs none.
+	Approval string `json:"approval,omitempty"`
+	// ConfirmationID is the card's id, when the action showed one.
+	ConfirmationID string `json:"confirmation_id,omitempty"`
+	OtherOwner     string `json:"other_owner,omitempty"`
+	// Error is the failure's text: the server's error, or why the approval
+	// could not be read or counted.
+	Error string `json:"error,omitempty"`
+	// Result names what the action created, such as a launched run.
+	Result     *AssistantActionTarget `json:"result,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
+	DecidedAt  time.Time              `json:"decided_at,omitzero"`
+	FinishedAt time.Time              `json:"finished_at,omitzero"`
+}
+
+type AssistantActionTarget struct {
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	RunID       string `json:"run_id,omitempty"`
+}

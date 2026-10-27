@@ -348,7 +348,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt,
 	}
 	if e != nil {
-		e.status, e.reason, e.activity = to, public, activity
+		e.status, e.reason, e.activity, e.cause = to, public, activity, d.cause
 		e.workersReason = workersReason
 		if startedAt != nil {
 			e.startedAt = now

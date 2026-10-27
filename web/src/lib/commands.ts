@@ -73,7 +73,8 @@ export interface Command {
   report?: (result: unknown) => [string, ExternalToast?]
   disabled?: boolean
   /** Set on irreversible verbs; every surface confirms before running them. */
-  confirm?: { title: string; body: string; action: string }
+  /** `stopsChildren` marks a verb that also stops the run's unfinished child runs. */
+  confirm?: { title: string; body: string; action: string; stopsChildren?: boolean }
   /** The state the verb's success certainly sets; the runner shows it before the server answers. */
   predict?: () => Prediction
   /** The server answers only once the change is done, which can outlast the deadline, so the prediction waits for that answer. */
@@ -406,6 +407,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         title: 'Kill this run?',
         body: 'The agent stops immediately. Work already committed to the run branch stays.',
         action: 'Kill run',
+        stopsChildren: true,
       },
       predict: () => ({ runID: id, record: { status: 'abandoned', reason: 'killed', ...finishedNow() } }),
       slow: true,
@@ -424,6 +426,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         title: 'Delete this run?',
         body: 'The run, transcript, and coordination records will be removed from Aether.',
         action: 'Delete run',
+        stopsChildren: true,
       },
       // Over another verb's pending prediction it waits for the server instead.
       predict: ctx.predicting ? undefined : () => ({ runID: id, removed: true }),
