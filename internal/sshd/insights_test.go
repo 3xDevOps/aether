@@ -57,7 +57,8 @@ func TestInsightsGet(t *testing.T) {
 	}
 	gh := newGitHubRepositoryFixture()
 	gh.pr = githubservice.PullRequest{URL: "https://github.com/acme/app/pull/4", State: "merged", MergedAt: ptr("2026-03-09T08:00:00-07:00")}
-	gh.snap = githubservice.Snapshot{
+	gh.snap = githubservice.Snapshot{State: "merged", MergedAt: ptr("2026-03-09T08:00:00-07:00"), Title: "Fix login", URL: "https://github.com/acme/app/pull/4",
+		HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main",
 		CheckRuns: []githubservice.CheckRun{{ID: 1, Name: "test", Status: "completed", Conclusion: "failure", SuiteID: 7, App: "GitHub Actions"},
 			{ID: 2, Name: "test", Status: "completed", Conclusion: "success", SuiteID: 7, App: "GitHub Actions"},
 			{ID: 3, Name: "lint", Status: "in_progress", SuiteID: 7, App: "GitHub Actions"}},
@@ -472,7 +473,9 @@ func TestInsightsGet(t *testing.T) {
 	}
 	wantChecks := []protocol.RunPRCheck{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS"}, {Name: "lint", Status: "IN_PROGRESS"},
 		{Name: "ci/legacy", Status: "COMPLETED", Conclusion: "FAILURE"}}
-	if perr != nil || feedback.Error != "" || !feedback.Truncated || feedback.PullRequest == nil || feedback.Identity != "octocat" || !reflect.DeepEqual(feedback.Checks, wantChecks) ||
+	if perr != nil || feedback.Error != "" || !feedback.Truncated || feedback.PullRequest == nil ||
+		feedback.PullRequest.HeadOID != gh.snap.HeadSHA || feedback.PullRequest.BaseBranch != "main" || feedback.PullRequest.Title != "Fix login" ||
+		feedback.PullRequest.State != "merged" || feedback.PullRequest.MergedAt == nil || feedback.Identity != "octocat" || !reflect.DeepEqual(feedback.Checks, wantChecks) ||
 		len(feedback.Reviews) != 1 || feedback.Reviews[0].Author != "grace" || feedback.Reviews[0].State != "CHANGES_REQUESTED" ||
 		gh.lookups[len(gh.lookups)-1] != "snapshot "+string(alice)+" acme/app#4" {
 		t.Errorf("run.pr.feedback of a finished run = %+v, %+v, lookups %v; want GitHub's checks and reviews, truncated by the clipped review", feedback, perr, gh.lookups)
