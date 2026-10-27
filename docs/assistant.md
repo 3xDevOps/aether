@@ -44,14 +44,23 @@ The sign-in file must hold only what a sign-in writes. Claude Code's
 prompts, is removed, and that start fails with the keys it removed. **Retry**
 starts with the rest. A sign-in file over 64 KiB is deleted.
 
-The server also records, outside the home, which sign-in you made, and every
-start checks the file against it. For Codex that is the mode Codex will use
-(`auth_mode`, else an API key over tokens), the ChatGPT account the access
-token names, and any API key. For Claude Code, whose file names no account, it
-is the `scopes`, `subscriptionType` and `rateLimitTier` values, which a token
-refresh keeps. A file that no longer matches makes the agent not ready, and a
-start fails with `the assistant's sign-in changed since you signed in. Sign in
-again`. A plan change on your account needs a new sign-in too.
+On every start the server itself checks the sign-in with the vendor before
+the container starts. It refreshes the token at the vendor's sign-in service
+(`platform.claude.com` for Claude Code, `auth.openai.com` for Codex), writes the
+new tokens back into the home, and asks which account they belong to: Claude
+Code's profile endpoint at `api.anthropic.com` names the account and
+organization, and Codex's new tokens name the ChatGPT account. A Codex API-key
+sign-in is not refreshed; its key is the identity. The first start after you
+sign in records that account outside the home; every later start must find the
+same one, or fails with `the assistant's sign-in changed since you signed in.
+Sign in again`.
+
+So the assistant cannot start without reaching the vendor: when it is
+unreachable or answers with an error, the start fails with `couldn't verify
+the assistant's sign-in with <vendor>: ...` and the sign-in stays. When the
+vendor refuses the refresh token, the agent is no longer signed in. A server
+that stops between refreshing and writing the new tokens back leaves a used
+refresh token, so the next start asks you to sign in again.
 
 On the first start, and after a server upgrade that pins a newer adapter, the
 panel shows **Installing** while a short-lived container,
@@ -330,6 +339,8 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | Message | Fix |
 | --- | --- |
 | `assistant: no agent is ready; sign in to Claude Code or Codex for the assistant` | [Sign in for the assistant](#first-use) |
+| `scheduler: couldn't verify the assistant's sign-in with Anthropic: ...` (or `OpenAI`) | The server could not reach the vendor's sign-in service, or it answered with an error; the detail follows. Check the server's network access, then **Retry** |
+| `scheduler: Anthropic answered 400 Bad Request: ...: the sign-in service refused the assistant's sign-in. Sign in again` | The vendor refused the refresh token. [Sign in again](#first-use) |
 | `scheduler: not signed in for the assistant. Sign in for the assistant first` | No sign-in was recorded, or the sign-in wrote no usable file. [Sign in](#first-use) |
 | `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
 | `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |

@@ -390,7 +390,13 @@ Your [assistant](assistant.md) keeps its conversation on your server under
   session files (`.claude/projects/` or `.codex/sessions/`). History, todos,
   file history, shell snapshots and debug logs exist only while a session
   runs; each start deletes them.
-- `signin/` records which sign-in you made, to check the file against.
+- `signin/` records the account of the sign-in you made: the Claude account
+  and organization ids, the ChatGPT account id, or a SHA-256 hash of a Codex
+  API key.
+
+On every assistant start the server sends the sign-in's refresh token to the
+vendor's sign-in service and the new access token to its profile endpoint
+(Claude Code), to learn which account the sign-in belongs to.
 - `install/` holds each agent's installed adapter, and `install/<agent>.installed`
   its version.
 - `instructions/` holds the instructions the server gives it, and `tools/` its

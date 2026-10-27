@@ -28,7 +28,7 @@ credentials out of the report.
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
-| [Assistant](#the-assistant) | Its own container, home and sign-in, which your runs and account share recipients cannot see or change. Launching, messaging and stopping runs and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session, and swap its Claude Code sign-in for another account on the same plan until you sign in again. Auto-approve removes the click. |
+| [Assistant](#the-assistant) | Its own container, home and sign-in, which your runs and account share recipients cannot see or change. Launching, messaging and stopping runs and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Candidate delivery](#candidate-verification-and-delivery) | Permission to push is checked again at delivery. A mirrored target gets a proposal branch, never an upstream push. | Verification runs with the member's home credentials. An agent can still push on its own outside Aether. |
@@ -286,25 +286,19 @@ permissions, and it uses the account you signed it in to.
 - The one remaining writer of that home is the assistant's own agent. Each
   start therefore runs a new container, deletes everything in the home but the
   sign-in and the session files, rewrites the sign-in file to the keys a
-  sign-in writes, and refuses the start if it removed any. It also checks the
-  sign-in against the one the server recorded when you signed in, and refuses
-  a start that does not match: a Codex sign-in in another mode, of another
-  ChatGPT account or with another API key, or a Claude Code sign-in with other
-  scopes or another plan.
-- What a steered agent can still do:
-  - Within its running session, change what that session reads again: Claude
-    Code rereads `.credentials.json` and `~/.claude/settings.json`, so it can
-    point the rest of the session at another endpoint or account. The next
-    start undoes it.
-  - Put another Claude Code account's tokens in its sign-in when that account
-    has the same plan and scopes. The file names no account, so the check
-    cannot tell, and a token refresh changes the tokens anyway. Later sessions
-    use that account until you sign in again.
-  - Keep a Codex access token naming your account but put another account's
-    refresh token beside it. The next refresh, within the session, moves it to
-    that account; the next start refuses it.
-  - Write text into the session files, which the same conversation reads back
-    when it resumes, until **New conversation**.
+  sign-in writes, and refuses the start if it removed any. Then the server
+  refreshes the sign-in with the vendor itself and asks the vendor which
+  account it belongs to, and refuses the start unless it is the account you
+  signed in with. A sign-in the agent swapped for another account's, in any
+  field, is caught at the next start.
+- What a steered agent can still do, within the one session it runs in:
+  change what that session reads again (Claude Code rereads
+  `.credentials.json` and `~/.claude/settings.json`) and so point the rest of
+  the session at another endpoint or account, and write text into the session
+  files, which the same conversation reads back when it resumes, until
+  **New conversation**.
+- The assistant does not start when the server cannot reach the vendor's
+  sign-in service.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a run and saving your environment wait for you to
   approve a card. An unanswered card fails after 10 minutes.

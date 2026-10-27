@@ -100,7 +100,7 @@ Some tests take an image from the environment:
 | `AETHER_BROWSER_TEST_IMAGE` | `TestDockerBrowser*` and the server's browser scenarios | `aether/browser:test`, which `make browser-image` builds ([The browser companion](#the-browser-companion)) |
 | `AETHER_BROWSER_IMAGE` | The companion image a server under test starts | The build's default companion image |
 | `AETHER_NESTED_DOCKER_TEST_IMAGE` | `TestDockerNestedDocker` ([inside a run](#running-the-docker-suites-inside-a-run)) | The test skips |
-| `AETHER_ACP_IMAGE` | Enhanced-mode adapter tests ([Enhanced mode](#enhanced-mode)) and `TestIntegrationAssistantIgnoresPlantedGatewayDocker`, which installs the assistant's adapters from the npm registry | The test skips, or uses busybox only |
+| `AETHER_ACP_IMAGE` | Enhanced-mode adapter tests ([Enhanced mode](#enhanced-mode)), `TestIntegrationAssistantIgnoresPlantedGatewayDocker` and `TestIntegrationAssistantIssuerMatchesTheBundledCLIs`, which install the assistant's adapters from the npm registry | The test skips, or uses busybox only |
 
 The resource tests check real cgroup limits, PID exhaustion and OOM
 containment. The capacity test starts its own `dockerd` and `containerd` in
@@ -260,6 +260,16 @@ the versions members install. The smoke image takes each vendor's latest
 release; this one is pinned so a vendor release cannot fail an unrelated pull
 request. To bump, change the version, run the two commands above, and fix
 what the new release broke in the same pull request.
+
+The assistant installs the adapters at the versions in `acpregistry.json` and
+`assistantPins` (`internal/scheduler/assistant_container.go`), and refreshes
+its sign-ins with the endpoints and client ids next to `assistantPins`. After
+moving either, run:
+
+```sh
+AETHER_ACP_IMAGE=aether-standard:local \
+  go test -tags integration -run TestIntegrationAssistantIssuerMatchesTheBundledCLIs -v ./internal/scheduler/
+```
 
 ## Native hook tests
 
