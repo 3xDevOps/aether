@@ -222,7 +222,9 @@ or edit the brief.
    that launch options still show as usable, without asking again. Ask
    only when a choice needs authority the member has not given, such as a
    teammate's account they never chose or saved, or several usable options
-   fit and nothing chose between them.
+   fit and nothing chose between them. When an agent, model or account the
+   member chose or saved is no longer usable, say why and ask what to use
+   instead; never launch on a substitute.
 4. Write the brief as in "Writing a brief" and launch. Then summarize in one
    paragraph: what, where, which agent and account the run used, any
    fallback substitution the receipt reports, and how the member hears back.
