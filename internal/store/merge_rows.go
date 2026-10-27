@@ -43,6 +43,8 @@ var memberRefs = map[string]bool{
 	"notify_prefs.member_id":                               true,
 	"watch_pr_snapshots.member_id":                         false,
 	"assistant_settings.member_id":                         false,
+	"launch_defaults.member_id":                            false,
+	"launch_defaults.account_member_id":                    true,
 	"events.actor_id":                                      false,
 	"evidence_packets.origin_id":                           false,
 	"evidence_packets.owner_id":                            false,
@@ -127,6 +129,12 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"watches", `UPDATE watches SET member_id = ?2, idempotency_key = NULL, version = version + 1 WHERE member_id = ?1`},
 		{"notification settings", `UPDATE OR IGNORE notify_prefs SET member_id = ?2 WHERE member_id = ?1`},
 		{"notification settings", `DELETE FROM notify_prefs WHERE member_id = ?1`},
+		{"launch defaults", `INSERT OR REPLACE INTO launch_defaults (member_id, agent, agents, account_member_id, fallback_policy, fallback_order, source, updated_at)
+			SELECT l.member_id, l.agent, l.agents, CASE l.account_member_id WHEN ?1 THEN ?2 ELSE l.account_member_id END, l.fallback_policy,
+				(SELECT json_group_array(member ORDER BY first) FROM (
+					SELECT CASE value WHEN ?1 THEN ?2 ELSE value END AS member, MIN(key) AS first FROM json_each(l.fallback_order) GROUP BY member)),
+				l.source, l.updated_at
+			FROM launch_defaults l WHERE l.account_member_id = ?1 OR instr(l.fallback_order, '"' || ?1 || '"') > 0`},
 		{"memory pins", `UPDATE memory SET pinned_by = ?2 WHERE pinned_by = ?1`},
 		{"connectors", `UPDATE connectors SET member_id = ?2 WHERE member_id = ?1`},
 		{"slack links", `UPDATE OR IGNORE slack_links SET member_id = ?2 WHERE member_id = ?1`},

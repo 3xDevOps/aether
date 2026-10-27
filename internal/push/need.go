@@ -11,8 +11,8 @@ import (
 // These mirror the scheduler's reasons: acp*Reason in
 // internal/scheduler/acp_turn.go, reported*Reason in
 // internal/scheduler/reported.go, usageLimitReason in
-// internal/scheduler/usage_fallback.go, and the blocked and needs-input
-// prefixes.
+// internal/scheduler/usage_fallback.go, waitBrokenReasonPrefix in
+// internal/scheduler/wait.go, and the blocked and needs-input prefixes.
 // The labels are the dashboard's (web/src/lib/needs-you.ts).
 var disconnects = []struct{ prefix, label string }{
 	{"enhanced session failed: ", "Enhanced could not start: "},
@@ -25,6 +25,7 @@ const (
 	turnFailedPrefix = "enhanced turn failed: "
 	interrupted      = "turn interrupted"
 	turnEndedPrefix  = "turn ended: "
+	waitBrokenPrefix = "wait broken: "
 	reportedFailure  = "agent reported failure"
 
 	// fallbackTitleRunes matches fallbackLabelLength in web/src/lib/status.ts.
@@ -133,6 +134,9 @@ func statusBody(run *domain.Run, worker bool) string {
 		}
 		if rest, ok := strings.CutPrefix(run.Reason, turnEndedPrefix); ok {
 			return "Turn ended (" + rest + "), send a message to continue"
+		}
+		if rest, ok := strings.CutPrefix(run.Reason, waitBrokenPrefix); ok {
+			return "Wait broken, send a message to continue: " + rest
 		}
 		return "Waiting for your reply"
 	case domain.ActivityDisconnected:
