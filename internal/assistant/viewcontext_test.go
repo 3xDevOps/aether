@@ -3,8 +3,10 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -186,6 +188,118 @@ func TestPromptViewHoldsOnceSentUntilANewerNavigation(t *testing.T) {
 	}
 	if got := held(sent); got.ViewContext != slow {
 		t.Fatalf("held after a retried prompt = %+v, want it unchanged", got.ViewContext.Route)
+	}
+}
+
+func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
+	in := &protocol.AssistantViewContext{Version: 1, Attachments: []protocol.AssistantViewAttachment{
+		{Kind: "check", RunID: "run-1", PR: 42, Repository: "acme/api", Check: "test (ubuntu-latest)"},
+		{Kind: "failure", RunID: "run-1", Failure: "adapter", Seq: 17},
+		{Kind: "task", MissionID: "mis-1", TaskID: "task-1", AttemptID: "att-1"},
+		{Kind: "secret", RunID: "run-1"},
+		{Kind: "run"},
+		{Kind: "pr", RunID: "run 1", PR: -3, Repository: "https://github.com/acme/api", Check: "a\nb", Failure: "Bad Word"},
+		{Kind: "run", RunID: "run-2", Check: strings.Repeat("c", maxViewCheck+1)},
+		{Kind: "check", RunID: "run-3", Check: "lint\u202e"},
+		{Kind: "check", RunID: "run-4", Check: "li\u200bnt"},
+	}}
+	got, err := CleanViewContext(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []protocol.AssistantViewAttachment{
+		{Kind: "check", RunID: "run-1", PR: 42, Repository: "acme/api", Check: "test (ubuntu-latest)"},
+		{Kind: "failure", RunID: "run-1", Failure: "adapter", Seq: 17},
+		{Kind: "task", MissionID: "mis-1", TaskID: "task-1", AttemptID: "att-1"},
+		{Kind: "run", RunID: "run-2"},
+		{Kind: "check", RunID: "run-3"},
+		{Kind: "check", RunID: "run-4"},
+	}
+	if !reflect.DeepEqual(got.Attachments, want) || got.Route.Name != "" {
+		t.Fatalf("attachments = %+v, want unknown kinds, unnamed and malformed fields, and check names with control or format characters, dropped", got.Attachments)
+	}
+	if b, _ := json.Marshal(got); strings.Contains(string(b), `"route"`) {
+		t.Fatalf("encoded = %s, want no route when the page was removed", b)
+	}
+
+	in.Attachments = nil
+	for i := range maxViewAttachments + 2 {
+		in.Attachments = append(in.Attachments, protocol.AssistantViewAttachment{Kind: "run", RunID: fmt.Sprintf("run-%d", i)})
+	}
+	if got, _ = CleanViewContext(in); len(got.Attachments) != maxViewAttachments || got.Attachments[0].RunID != "run-0" {
+		t.Fatalf("attachments = %+v, want the first %d", got.Attachments, maxViewAttachments)
+	}
+
+	in.Route = protocol.AssistantViewEntry{Name: "run", RunID: "run-1"}
+	in.Attachments = nil
+	for range maxViewAttachments {
+		in.Attachments = append(in.Attachments, protocol.AssistantViewAttachment{Kind: "check", RunID: strings.Repeat("r", 128), Check: strings.Repeat("c", maxViewCheck)})
+	}
+	for range maxViewRecent {
+		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), MissionID: strings.Repeat("m", 128)})
+	}
+	got, err = CleanViewContext(in)
+	b, _ := json.Marshal(got)
+	if err != nil || len(b) > maxViewContextBytes || len(got.Recent) == maxViewRecent || len(got.Attachments) != maxViewAttachments {
+		t.Fatalf("oversized context = %d bytes, %d recent, %d attachments, %v, want recent pages dropped before attachments", len(b), len(got.Recent), len(got.Attachments), err)
+	}
+}
+
+func TestAttachmentsOutliveSharingButNeverBecomeTheView(t *testing.T) {
+	s := New(Config{Store: newMemStore()})
+	s.cancel()
+	ctx := t.Context()
+	m := s.member("m1")
+	check := protocol.AssistantViewAttachment{Kind: "check", RunID: "run-1", Check: "lint"}
+	v := &protocol.AssistantViewContext{Version: 1, Route: protocol.AssistantViewEntry{Name: "run", RunID: "run-2"}, Recent: []protocol.AssistantViewEntry{{Name: "board"}}, Attachments: []protocol.AssistantViewAttachment{check}}
+	if err := s.SetShareView(ctx, "m1", true); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := s.sharedView(ctx, m, v)
+	if kept != v || err != nil {
+		t.Fatalf("a shared prompt's context = %+v, %v, want it whole", kept, err)
+	}
+	m.holdView(kept, viewFromPrompt, time.Now())
+	if got := s.View("m1", time.Now()).ViewContext; got == nil || got.Route.RunID != "run-2" || got.Attachments != nil || v.Attachments == nil {
+		t.Fatalf("held view = %+v, want the page without the message's attachments, and the message's own left whole", got)
+	}
+	if err = s.SetShareView(ctx, "m1", false); err != nil {
+		t.Fatal(err)
+	}
+	kept, err = s.sharedView(ctx, m, v)
+	if err != nil || kept == nil || kept.Route.Name != "" || kept.Recent != nil || !reflect.DeepEqual(kept.Attachments, v.Attachments) {
+		t.Fatalf("an unshared prompt's context = %+v, %v, want only its attachments", kept, err)
+	}
+	m.holdView(kept, viewFromPrompt, time.Now())
+	if got := s.View("m1", time.Now()).ViewContext; got != nil {
+		t.Fatalf("held view with sharing off = %+v, want none", got)
+	}
+}
+
+func TestANavigationUpdateWithoutAPageForgetsTheHeldView(t *testing.T) {
+	s := New(Config{Store: newMemStore()})
+	s.cancel()
+	ctx := t.Context()
+	m := s.member("m1")
+	t0 := time.Now()
+	page := &protocol.AssistantViewContext{Version: 1, CapturedAt: t0, Route: protocol.AssistantViewEntry{Name: "run", RunID: "run-a"}}
+	removed := func(captured time.Time) *protocol.AssistantViewContext {
+		return &protocol.AssistantViewContext{Version: 1, CapturedAt: captured}
+	}
+	m.holdView(page, viewFromNavigation, t0)
+	m.holdView(removed(t0.Add(time.Second)), viewFromPrompt, t0.Add(time.Second))
+	if got := s.View("m1", t0).ViewContext; got != page {
+		t.Fatalf("held after a prompt without its page = %+v, want the page kept", got)
+	}
+	m.holdView(removed(t0.Add(-time.Second)), viewFromNavigation, t0.Add(time.Second))
+	if got := s.View("m1", t0).ViewContext; got != page {
+		t.Fatalf("held after a late update captured before it = %+v, want the page kept", got)
+	}
+	if err := s.SetView(ctx, "m1", removed(t0.Add(2*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.View("m1", t0).ViewContext; got != nil {
+		t.Fatalf("held after the member removed the page = %+v, want none", got)
 	}
 }
 

@@ -42,6 +42,7 @@ var memberRefs = map[string]bool{
 	"assistant_follows.member_id":                          true,
 	"watches.member_id":                                    true,
 	"notify_prefs.member_id":                               true,
+	"watch_pr_snapshots.member_id":                         false,
 	"assistant_settings.member_id":                         false,
 	"events.actor_id":                                      false,
 	"evidence_packets.origin_id":                           false,

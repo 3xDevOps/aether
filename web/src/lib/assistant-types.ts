@@ -24,6 +24,30 @@ export interface AssistantConfirmation {
   other_owner?: string
 }
 
+export interface AssistantActionTarget {
+  workspace_id?: string
+  run_id?: string
+}
+
+/** The server's record of one assistant action, on a transcript notice; a later record with the same `id` replaces an earlier one. */
+export interface AssistantActionRecord {
+  id: string
+  method: string
+  summary: string
+  target: AssistantActionTarget
+  outcome: 'approved' | 'auto_approved' | 'declined' | 'expired' | 'withdrawn' | 'failed' | 'succeeded'
+  /** How it passed; absent for a call that never asks, such as a pause. */
+  approval?: 'card' | 'auto'
+  confirmation_id?: string
+  other_owner?: string
+  error?: string
+  /** Only what the call created, such as a launched run. */
+  result?: AssistantActionTarget
+  created_at: string
+  decided_at?: string
+  finished_at?: string
+}
+
 export interface AssistantStatus {
   state: AssistantState
   agent?: string
@@ -75,11 +99,33 @@ export interface ViewEntry {
   at?: string
 }
 
-/** What `assistant.prompt` and `assistant.view` carry as `view_context`. */
+export type ViewAttachmentKind = 'workspace' | 'run' | 'mission' | 'pr' | 'check' | 'failure' | 'task'
+
+/** One thing a prompt is about, by id: never a title, log or file contents. */
+export interface ViewAttachment {
+  kind: ViewAttachmentKind
+  workspace_id?: string
+  run_id?: string
+  mission_id?: string
+  task_id?: string
+  attempt_id?: string
+  pr?: number
+  /** `owner/name` of the pull request. */
+  repository?: string
+  /** A CI check's name. */
+  check?: string
+  /** A word for the failure, such as `adapter`. */
+  failure?: string
+  /** The transcript item that reported the failure. */
+  seq?: number
+}
+
+/** What `assistant.prompt` and `assistant.view` carry as `view_context`. A prompt whose page the member removed has no route. */
 export interface ViewContext {
   version: 1
   captured_at: string
-  route: ViewEntry
+  route?: ViewEntry
   open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
   recent?: ViewEntry[]
+  attachments?: ViewAttachment[]
 }

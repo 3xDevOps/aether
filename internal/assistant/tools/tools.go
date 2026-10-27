@@ -49,6 +49,7 @@ var tiers = map[string]string{
 	protocol.MethodWorkspaceTimeline:     tierRead,
 	protocol.MethodAgentList:             tierRead,
 	protocol.MethodAccountUsage:          tierRead,
+	protocol.MethodAccountList:           tierRead,
 	protocol.MethodTerminalStatus:        tierRead,
 	protocol.MethodAssistantDocs:         tierRead,
 	protocol.MethodAssistantViewContext:  tierRead,
@@ -70,10 +71,32 @@ var tiers = map[string]string{
 	protocol.MethodRunPause:              tierReversible,
 	protocol.MethodRunResume:             tierReversible,
 	protocol.MethodRunKill:               tierConfirmed,
+	protocol.MethodRunClose:              tierConfirmed,
 	protocol.MethodEnvSave:               tierConfirmed,
 	protocol.MethodRunInputRespond:       tierConfirmed,
 	protocol.MethodMissionQuestionAnswer: tierConfirmed,
 	protocol.MethodRunRoomPost:           tierConfirmed,
+
+	protocol.MethodMemberList:               tierRead,
+	protocol.MethodIntegrationList:          tierRead,
+	protocol.MethodIntegrationShow:          tierRead,
+	protocol.MethodMemoryShow:               tierRead,
+	protocol.MethodMemoryAdd:                tierConfirmed,
+	protocol.MethodRunRelaunch:              tierConfirmed,
+	protocol.MethodRunModeSwitch:            tierConfirmed,
+	protocol.MethodRunProtect:               tierConfirmed,
+	protocol.MethodRunArchive:               tierConfirmed,
+	protocol.MethodRunHandoff:               tierConfirmed,
+	protocol.MethodMissionWorkerRelease:     tierConfirmed,
+	protocol.MethodMissionArchive:           tierConfirmed,
+	protocol.MethodMissionUnarchive:         tierConfirmed,
+	protocol.MethodMissionReplaceIntegrator: tierConfirmed,
+	protocol.MethodIntegrationDecide:        tierConfirmed,
+	protocol.MethodIntegrationDeliver:       tierConfirmed,
+	protocol.MethodRunPRCreate:              tierConfirmed,
+	protocol.MethodRunPRMerge:               tierConfirmed,
+	protocol.MethodMemoryPin:                tierConfirmed,
+	protocol.MethodMemoryUnpin:              tierConfirmed,
 }
 
 // Reversible reports whether the assistant may call method without a card
@@ -304,6 +327,9 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		}
 		c.Summary = fmt.Sprintf("%s run %s (%q)%s: %q%s", verb, p.RunID, runLabel(run), ownedBy(c), truncate(p.Body), attached(p.Attachments, p.Anchor))
 		return nil
+	}
+	if summary, ok := actSummaries[req.Method]; ok {
+		return summary(s, ctx, req, c)
 	}
 	return &protocol.Error{Code: protocol.CodeInternal, Message: req.Method + ": no confirmation summary for this method"}
 }
@@ -540,7 +566,8 @@ func truncate(text string) string {
 // Prepare checks the params of a call made for member, by the assistant's
 // socket or a connector. Either is bound to one member, so the wire never
 // names one, except that run.list takes member_id as a read filter, and
-// "mine" there selects member. mission.create makes member the swarm's
+// "mine" there selects member, and run.handoff names the teammate it hands
+// the run to. mission.create makes member the swarm's
 // accountable human and the account of every agent, which falls back to
 // accounts member may launch on as member's own launches do.
 func Prepare(member, method string, params json.RawMessage) (json.RawMessage, error) {
@@ -552,7 +579,8 @@ func Prepare(member, method string, params json.RawMessage) (json.RawMessage, er
 		return nil, errors.New("params must be an object")
 	}
 	for name := range fields {
-		if strings.Contains(strings.ToLower(name), "member_id") && (method != protocol.MethodRunList || name != "member_id") {
+		if strings.Contains(strings.ToLower(name), "member_id") && (method != protocol.MethodRunList || name != "member_id") &&
+			(method != protocol.MethodRunHandoff || name != "to_member_id") {
 			return nil, fmt.Errorf("%s is not accepted: calls act as the member this socket belongs to", name)
 		}
 	}

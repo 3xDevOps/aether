@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +29,16 @@ const (
 	callConfirmedTimeout = 25 * time.Minute
 )
 
+// ConfirmedMethods wait for the member to decide the assistant's card for
+// them, so a call outlasts the card; internal/assistant/tools checks every
+// method it confirms is here.
+var ConfirmedMethods = []string{protocol.MethodRunKill, protocol.MethodRunClose, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
+	protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost,
+	protocol.MethodRunRelaunch, protocol.MethodRunModeSwitch, protocol.MethodRunProtect, protocol.MethodRunArchive, protocol.MethodRunHandoff,
+	protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive, protocol.MethodMissionReplaceIntegrator,
+	protocol.MethodIntegrationDecide, protocol.MethodIntegrationDeliver, protocol.MethodRunPRCreate, protocol.MethodRunPRMerge,
+	protocol.MethodMemoryAdd, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin}
+
 func callTimeout(method string, params any) time.Duration {
 	timeout := callDefaultTimeout
 	switch method {
@@ -39,9 +50,6 @@ func callTimeout(method string, params any) time.Duration {
 		}
 	case protocol.MethodCoordInbox, protocol.MethodMissionPlanShow:
 		timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
-	case protocol.MethodRunKill, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
-		protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost:
-		timeout = callConfirmedTimeout
 	case protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop, protocol.MethodDevBrowserReset:
 		timeout = 30*time.Second + callMargin
 	case protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserAction, protocol.MethodDevBrowserWait:
@@ -51,6 +59,9 @@ func callTimeout(method string, params any) time.Duration {
 	case protocol.MethodDevBrowserOpen, protocol.MethodDevTerminalScreenshot:
 		// First launch includes image acquisition and companion readiness.
 		timeout = 90*time.Second + callMargin
+	}
+	if slices.Contains(ConfirmedMethods, method) {
+		timeout = callConfirmedTimeout
 	}
 	if timeout > callDeadlineCeiling && !longPoll(method) && timeout != callConfirmedTimeout {
 		return callDeadlineCeiling

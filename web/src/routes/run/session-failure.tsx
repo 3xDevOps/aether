@@ -10,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { AskAssistantButton } from '@/components/assistant/ask'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
@@ -26,8 +27,8 @@ const adapterFailed = ['Enhanced session failed', 'Enhanced session ended']
 const authError = /authentication required|authrequired|not logged in|not signed in/i
 
 export type SessionFailure =
-  | { kind: 'adapter'; title: string; detail?: string }
-  | { kind: 'auth'; detail?: string }
+  | { kind: 'adapter'; title: string; detail?: string; seq?: number }
+  | { kind: 'auth'; detail?: string; seq?: number }
 
 export function sessionFailure(session: AcpSession | undefined): SessionFailure | null {
   if (!session) return null
@@ -45,8 +46,8 @@ export function sessionFailure(session: AcpSession | undefined): SessionFailure 
   }
   const authNone = session.state?.auth?.authStatus?.kind === 'none'
   const detail = notice?.notice?.description
-  if ((detail && authError.test(detail)) || authNone) return { kind: 'auth', detail }
-  if (notice && !session.live && adapterFailed.includes(notice.notice!.title)) return { kind: 'adapter', title: notice.notice!.title, detail }
+  if ((detail && authError.test(detail)) || authNone) return { kind: 'auth', detail, seq: notice?.seq }
+  if (notice && !session.live && adapterFailed.includes(notice.notice!.title)) return { kind: 'adapter', title: notice.notice!.title, detail, seq: notice.seq }
   return null
 }
 
@@ -134,6 +135,7 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
   const [retrying, setRetrying] = useState(false)
   const failure = sessionFailure(session)
   if (!failure || isTerminal(run.status)) return null
+  const target = { kind: 'failure' as const, workspace_id: run.workspace_id, run_id: run.id, failure: failure.kind, seq: failure.seq, label: failure.kind === 'auth' ? 'Agent not signed in' : failure.title }
   if (failure.kind === 'auth') {
     const label = session?.state?.auth?.authStatus?.label
     const methods = session?.state?.auth_methods ?? []
@@ -141,7 +143,12 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
       <Callout
         tone="needs-you"
         title="The agent is not signed in"
-        actions={<LoginActions run={run} command={session?.state?.agent_command} methods={methods} shells={shells} nav={nav} />}
+        actions={
+          <>
+            <LoginActions run={run} command={session?.state?.agent_command} methods={methods} shells={shells} nav={nav} />
+            <AskAssistantButton size="sm" variant="secondary" ask={{ draft: 'Help me sign the agent in', attachments: [target] }}>Ask the assistant</AskAssistantButton>
+          </>
+        }
       >
         <p>{label ? `${label}. ` : ''}Log the agent in from a terminal in this run, then send your message again.</p>
         {methods.length > 0 && (
@@ -174,6 +181,7 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
             {retrying ? 'Retrying…' : 'Retry Enhanced'}
           </Button>
           <OpenInStandard run={run} switchable={switchable} nav={nav} />
+          <AskAssistantButton size="sm" variant="secondary" ask={{ draft: 'Fix this', attachments: [target] }}>Fix this</AskAssistantButton>
         </>
       }
     >

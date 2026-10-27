@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -267,7 +268,11 @@ type RunPullRequest struct {
 
 // Status always comes from GitHub, including PRs created by native gh.
 type RunPRStatusResult struct {
-	Repo            string               `json:"repo,omitempty"`
+	Repo string `json:"repo,omitempty"`
+	// Expected and Target are what the lookup used, defaults filled in,
+	// for a run.pr.create of exactly that pull request.
+	Expected        *RunGitExpected      `json:"expected,omitempty"`
+	Target          *RunPRTarget         `json:"target,omitempty"`
 	Identity        string               `json:"identity"`
 	PullRequest     *RunPullRequest      `json:"pull_request"`
 	Output          RunRepoCommandOutput `json:"output"`
@@ -359,6 +364,43 @@ type RunPRFeedbackResult struct {
 	Truncated        bool                 `json:"truncated"`
 	Output           RunRepoCommandOutput `json:"output"`
 	Error            string               `json:"error,omitempty"`
+}
+
+// RunPRBlockers counts what a pull request's feedback reports could block
+// its merge: checks that failed or have not finished, and reviewers whose
+// latest verdict requests changes. Partial means the feedback was cut off,
+// so the counts are lower bounds.
+type RunPRBlockers struct {
+	FailingChecks    int  `json:"failing_checks"`
+	PendingChecks    int  `json:"pending_checks"`
+	ChangesRequested int  `json:"changes_requested"`
+	Partial          bool `json:"partial,omitempty"`
+}
+
+func (r RunPRFeedbackResult) Blockers() RunPRBlockers {
+	b := RunPRBlockers{Partial: r.Truncated}
+	for _, ch := range r.Checks {
+		switch strings.ToUpper(ch.Conclusion) {
+		case "SUCCESS", "NEUTRAL", "SKIPPED":
+		case "":
+			b.PendingChecks++
+		default:
+			b.FailingChecks++
+		}
+	}
+	latest := map[string]string{}
+	for _, rv := range r.Reviews {
+		// A comment does not withdraw a verdict.
+		if rv.State == "APPROVED" || rv.State == "CHANGES_REQUESTED" || rv.State == "DISMISSED" {
+			latest[rv.Author] = rv.State
+		}
+	}
+	for _, state := range latest {
+		if state == "CHANGES_REQUESTED" {
+			b.ChangesRequested++
+		}
+	}
+	return b
 }
 
 // Without Repository and Number, run.pr.merge merges the pull request the run

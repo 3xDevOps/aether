@@ -200,7 +200,7 @@ Standard run whose agent reports its turns. The reason tells you how it ended:
 | `turn ended: <stop reason>` | `needs-you` | Any other ACP stop reason, such as `max_tokens` or `refusal`. Send a message to continue |
 | `enhanced turn failed: <error>` | `failed` | The agent failed the prompt but stayed connected |
 | `enhanced session ended: <cause>` | `disconnected` | The adapter exited. Reopening the session clears it |
-| `enhanced session failed: <error>` | `disconnected` | The adapter could not start or open the session |
+| `enhanced session failed: <error>` | `disconnected` | The adapter could not start or open the session, or the agent lost its session twice within 5 minutes |
 
 ### Background work
 
@@ -227,7 +227,9 @@ the server sends the agent one prompt telling it to run
 `aether-internal inbox` and acknowledge the batch, ending with
 `End this turn with exactly one /usr/local/bin/aether-internal report as your last action.`
 A message steered into a running turn carries no such line. Messages that arrive together
-share one prompt, and each set of new unread messages starts at most one turn.
+share one prompt, and each set of new unread messages starts at most one turn,
+even a turn the agent refuses. A session that opens afterwards gets the prompt
+again.
 
 ### Report reminder
 
@@ -272,6 +274,14 @@ be restored starts a new one and says `Started a new agent session`.
 
 Restoration depends on the agent's own saved session and login. Check the
 checkout before you retry interrupted work.
+
+Claude's adapter keeps running when its Claude Code process dies, but drops the
+session and answers every later prompt with `Session not found`. Aether shows
+that prompt's **Prompt failed** notice, then **Agent session lost**, and
+restores the session in a fresh adapter as above. Send the failed message
+again. If the agent loses the session again within 5 minutes, Aether stops the
+adapter and the run parks with
+`enhanced session failed: the agent lost its session again within 5 minutes: ...`.
 
 If the adapter fails to start or exits, the container and login shell stay
 available. The log shows the real error and the end of the adapter's stderr, and
