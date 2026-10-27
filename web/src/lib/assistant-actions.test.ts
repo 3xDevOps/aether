@@ -1,4 +1,4 @@
-import { aetherTool, assistantView, readSummary, type AssistantAction } from '@/lib/assistant-actions'
+import { actionSummary, aetherTool, assistantView, launchLine, readSummary, type AssistantAction } from '@/lib/assistant-actions'
 import type { AssistantActionRecord } from '@/lib/assistant-types'
 import type { SessionRow } from '@/store/session-rows'
 import { stepsBlock, type WorkItem } from '@/store/session-steps'
@@ -93,6 +93,16 @@ describe('assistantView', () => {
       return { records, rows }
     }
 
+    it.each(['mission.question.answer', 'run.room.post', 'run.input.respond'])('folds an answer recorded as %s into its aether_answer card', (method) => {
+      const answer = { id: '1:t0', name: 'aether_answer', status: 'running' as const, input: { run_id: 'r1', answer_id: 'q1', answer: 'use main' } }
+      const waiting = [{ id: 'c', method, summary: '', params: {}, created_at: at, expires_at: at }]
+      expect(assistantView([block(answer)], waiting).actions.map((a) => a.state)).toEqual(['approval'])
+      const { records, rows } = notices(1, record({ method, summary: 'Answered', target: { run_id: 'r1' }, outcome: 'succeeded' }))
+      const view = assistantView([block({ ...answer, status: 'done' }), ...rows], [], { records, calls: new Map() })
+      expect(view.actions.map((a) => [a.state, a.approval, a.target?.id])).toEqual([['done', 'approved', 'r1']])
+      expect(view.rows).toEqual([])
+    })
+
     it('gives identical calls of one block their records in the order they ran', () => {
       const message = (id: string, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status, input: { run_id: 'r1', message: 'go' }, result })
       const { records, rows } = notices(1,
@@ -107,6 +117,29 @@ describe('assistantView', () => {
         ['1:t1', 'done', undefined],
       ])
       expect(view.rows).toEqual([])
+    })
+
+    it('gives a decision to the call its idempotency key names, whatever the order', () => {
+      const message = (id: string, key: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status: 'running', input: { run_id: 'r1', message: key, idempotency_key: key } })
+      const { records, rows } = notices(1, record({ id: 'a2', target: { run_id: 'r1' }, outcome: 'declined', idempotency_key: 'second' }))
+      const waiting = [{ id: 'c', method: 'run.inject', summary: '', params: {}, created_at: at, expires_at: at }]
+      const view = assistantView([block(message('1:t0', 'first'), message('1:t1', 'second')), ...rows], waiting, { records, calls: new Map() })
+      expect(view.actions.map((a) => [a.id, a.state])).toEqual([['1:t0', 'approval'], ['1:t1', 'declined']])
+    })
+
+    it('shows a merge GitHub refused as failed, and one it queued as queued', () => {
+      const merge = (status: WorkItem['status'], result: unknown): Partial<WorkItem> => ({ id: '1:t0', name: 'aether_pr_merge', status, input: { run_id: 'r1', number: 42 }, result })
+      const names = { run: () => undefined, workspace: () => undefined, agent: () => undefined, sharer: () => undefined }
+      const { records, rows } = notices(1, record({ method: 'run.pr.merge', target: { run_id: 'r1' }, outcome: 'succeeded' }))
+      const [refused] = assistantView([block(merge('failed', 'GitHub did not merge pull request #42: required checks failed')), ...rows], [], { records, calls: new Map() }).actions
+      expect([refused!.state, refused!.error]).toEqual(['failed', 'GitHub did not merge pull request #42: required checks failed'])
+      const [queued] = assistantView([block(merge('done', { merged: false, write: 'pending', run_id: 'r1' })), ...rows], [], { records, calls: new Map() }).actions
+      expect([queued!.state, actionSummary(queued!, names)]).toEqual(['done', 'Queued to merge PR #42'])
+    })
+
+    it('links a relaunch to the new run the result names, not the old one', () => {
+      const [relaunch] = assistantView([block({ id: '1:t0', name: 'aether_run_lifecycle', input: { run_id: 'r1', action: 'relaunch' }, result: { run_id: 'r2', state: 'starting' } })], []).actions
+      expect(relaunch!.target?.id).toBe('r2')
     })
 
     it('gives a launch record, which names no run, to the newest launch on its workspace past an unrecorded older one', () => {
@@ -135,5 +168,59 @@ describe('assistantView', () => {
       const view = assistantView([block(stop, save), ...rows], [], { records, calls: new Map([['1:t0', call('t0')], ['1:t1', call('t1')]]) })
       expect(view.actions.map((a) => [a.state, a.approval])).toEqual([['unfinished', 'approved'], ['unfinished', 'auto-approved']])
     })
+  })
+})
+
+describe('the lifecycle, swarm, pull request and memory tools', () => {
+  const names = { run: () => undefined, workspace: () => undefined, agent: () => undefined, sharer: () => undefined }
+  const confirm = (method: string) => ({ id: method, method, summary: '', params: {}, created_at: at, expires_at: at })
+
+  it.each([
+    ['aether_run_lifecycle', { run_id: 'r1', action: 'relaunch' }, 'run.relaunch', 'Relaunch run r1', 'Relaunched run r1'],
+    ['aether_run_lifecycle', { run_id: 'r1', action: 'unprotect' }, 'run.protect', 'Unprotect run r1', 'Unprotected run r1'],
+    ['aether_run_lifecycle', { run_id: 'r1', action: 'restore' }, 'run.archive', 'Restore run r1', 'Restored run r1'],
+    ['aether_switch_run_mode', { run_id: 'r1', mode: 'enhanced' }, 'run.mode.switch', 'Switch run r1 to enhanced mode', 'Switched run r1 to enhanced mode'],
+    ['aether_handoff_run', { run_id: 'r1', to_member_id: 'Dana' }, 'run.handoff', 'Hand off run r1 to Dana', 'Handed off run r1 to Dana'],
+    ['aether_swarm_manage', { swarm_id: 'swarm:mis-1', action: 'release_worker', run_id: 'r7' }, 'mission.worker.release', 'Release worker run r7', 'Released worker run r7'],
+    ['aether_swarm_manage', { swarm_id: 'swarm:mis-1', action: 'archive' }, 'mission.archive', 'Archive swarm mis-1', 'Archived swarm mis-1'],
+    ['aether_replace_integrator', { swarm_id: 'mis-1' }, 'mission.replace-integrator', 'Replace the integrator of swarm mis-1', 'Replaced the integrator of swarm mis-1'],
+    ['aether_integration_decide', { candidate_id: 'cand-1', action: 'deliver' }, 'integration.deliver', 'Deliver candidate cand-1', 'Delivered candidate cand-1'],
+    ['aether_pr_create', { run_id: 'r1' }, 'run.pr.create', 'Open a pull request for run r1', 'Opened a pull request for run r1'],
+    ['aether_memory_add', { kind: 'gotcha', text: 'x' }, 'memory.add', 'Add a gotcha note', 'Added a gotcha note'],
+    ['aether_memory_pin', { id: 'mem-9', pin: false }, 'memory.unpin', 'Unpin note mem-9', 'Unpinned note mem-9'],
+    ['aether_stop_run', { run_id: 'r1', outcome: 'merged' }, 'run.close', 'Close run r1 as merged', 'Closed run r1 as merged'],
+    ['aether_decide_approval', { run_id: 'r1' }, 'run.input.respond', 'Decide an approval for run r1', 'Decided an approval for run r1'],
+  ])('%s %j waits on %s and reads "%s", then "%s"', (tool, input, method, pending, done) => {
+    const call = (status: 'running' | 'done') => block({ id: '1:t0', name: tool, status, input })
+    const [waiting] = assistantView([call('running')], [confirm(method)]).actions
+    expect([waiting!.state, actionSummary({ ...waiting!, state: 'failed' }, names)]).toEqual(['approval', pending])
+    const [finished] = assistantView([call('done')], []).actions
+    expect(actionSummary(finished!, names)).toBe(done)
+  })
+
+  it('says a pull request GitHub may not have opened is unconfirmed, never done', () => {
+    const [created] = assistantView([block({ id: '1:t0', name: 'aether_pr_create', input: { run_id: 'r1' }, result: { run_id: 'r1', write: 'pending', url: '?run=r1' } })], []).actions
+    expect([created!.state, actionSummary(created!, names)]).toEqual(['unconfirmed', 'Open a pull request for run r1'])
+  })
+
+  it('links a released worker to its run, not its swarm', () => {
+    const [released] = assistantView([block({ id: '1:t0', name: 'aether_swarm_manage', input: { swarm_id: 'swarm:mis-1', action: 'release_worker', run_id: 'r7' }, result: { swarm_id: 'mis-1', run_id: 'r7' } })], []).actions
+    expect([released!.target?.kind, released!.target?.id]).toEqual(['run', 'r7'])
+  })
+
+  it('links a swarm tool to its swarm and a created pull request to GitHub', () => {
+    const view = assistantView([block(
+      { id: '1:t0', name: 'aether_swarm_manage', input: { swarm_id: 'swarm:mis-1', action: 'archive' }, result: {} },
+      { id: '1:t1', name: 'aether_pr_create', input: { run_id: 'r1' }, result: { pull_request: { number: 7, url: 'https://github.com/acme/api/pull/7' }, url: '?run=r1' } },
+    )], [])
+    expect(view.actions.map((a) => [a.target?.kind, a.target?.id])).toEqual([['swarm', 'mis-1'], ['pr', 'https://github.com/acme/api/pull/7']])
+  })
+})
+
+describe('launchLine', () => {
+  it('names a swarm launch\'s agent and model from the tool\'s own inputs', () => {
+    const names = { run: () => undefined, workspace: () => 'api', agent: () => 'Claude Code', sharer: () => undefined }
+    const [swarm] = assistantView([block({ id: '1:t0', name: 'aether_launch_swarm', input: { workspace_id: 'ws1', harness: 'claude', model: 'opus', objective: 'x' }, result: { ids: { mission_id: 'mis-1' } } })], []).actions
+    expect(launchLine(swarm!, names)).toBe('swarm · api · Claude Code opus')
   })
 })

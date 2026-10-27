@@ -39,6 +39,8 @@ export interface AssistantActionRecord {
   /** How it passed; absent for a call that never asks, such as a pause. */
   approval?: 'card' | 'auto'
   confirmation_id?: string
+  /** The call's idempotency key, when its method takes one. */
+  idempotency_key?: string
   other_owner?: string
   error?: string
   /** Only what the call created, such as a launched run. */
@@ -134,5 +136,13 @@ export interface ViewContext {
   route?: ViewEntry
   open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
   recent?: ViewEntry[]
+  /** The modes and models the member's launches remembered, newest first. They travel with the page. */
+  launch_defaults?: LaunchDefault[]
   attachments?: ViewAttachment[]
+}
+
+export interface LaunchDefault {
+  agent: string
+  mode: 'tui' | 'acp' | 'headless'
+  model?: string
 }

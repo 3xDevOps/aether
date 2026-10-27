@@ -210,7 +210,7 @@ describe('action cards', () => {
       say(1, 'user', 'Launch and watch it'),
       aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: {
         run: { id: 'run_fix' },
-        launch: { kind: 'run', workspace_id: workspace.id, harness: 'claude', model: 'opus', account: { name: 'Bob', shared: true }, requested_account: { name: 'Alice' }, link: '?run=run_fix' },
+        launch: { kind: 'run', id: 'run_fix', workspace_id: workspace.id, harness: 'claude', model: 'opus', mode: 'acp', mode_name: 'Enhanced', account: { member_id: 'mem_bob', name: 'Bob', access: 'shared' }, requested_account: { member_id: alice.id, name: 'Alice', access: 'own' }, fallback: { policy: 'ordered', order: ['mem_bob', alice.id] }, url: '?run=run_fix' },
       } }),
       aether(1, 't2', 'aether_watch_create', 'completed', { raw_input: { run_id: 'run_fix' }, raw_output: {
         watch: { state: 'active', conditions: ['needs_you', 'finished'], last_notification: { deliveries: [{ channel: 'push', status: 'no_destination' }] } },
@@ -219,7 +219,7 @@ describe('action cards', () => {
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const launched = await card(aside, /^Launched run on main-repo with Claude Code\./)
-    expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · fell back from Alice")).toBeDefined()
+    expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · fell back from your account · then mem_bob, your account")).toBeDefined()
     const watching = await card(aside, /^Started watching run fix-login\. Done$/)
     expect(within(watching).getByText('active · on needs you, finished · last notice: push no destination')).toBeDefined()
     await userEvent.click(within(watching).getByRole('button', { name: 'Open watch' }))
@@ -329,6 +329,44 @@ describe('review fixes', () => {
     expect(await within(aside).findByText(/the whole message/)).toBeDefined()
   })
 
+  it('stops saying it is loading once the whole item is read, even if the call still reads as cut', async () => {
+    const head = [item('turn_start', 1), say(1, 'user', 'Message')]
+    const cut = { ...aether(1, 't1', 'aether_message_run', 'completed', { raw_input: { run_id: 'run_fix' } }), truncated: true }
+    vi.mocked(api.assistantItem).mockResolvedValue(cut)
+    const aside = await openPanel([...head, cut, item('turn_end', 1, { stop_reason: 'end_turn' })])
+    const messaged = await card(aside, /^Messaged run fix-login\. Done$/)
+    await userEvent.click(within(messaged).getByRole('button', { name: 'Details' }))
+    await waitFor(() => expect(api.assistantItem).toHaveBeenCalledWith(cut.seq))
+    await waitFor(() => expect(within(messaged).queryByText('Loading the whole call…')).toBeNull())
+  })
+
+  it('opens a dashboard link in an assistant message in the app, and any other link in a new tab', async () => {
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Briefing'),
+      say(1, 'assistant', 'Shipped: [fix-login](?run=run_fix). Docs: [guide](https://example.com/guide)'),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const external = await within(aside).findByRole('link', { name: 'guide' })
+    expect(external.getAttribute('target')).toBe('_blank')
+    await userEvent.click(within(aside).getByRole('link', { name: 'fix-login' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_fix' } })
+    expect(opened).not.toHaveBeenCalled()
+    opened.mockRestore()
+  })
+
+  it('opens the watch a notice links to in the app', async () => {
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Watch it'),
+      item('notice', 1, { notice: { severity: 'info', title: 'Watching run fix-login', description: 'Aether tells you when it finishes. [Stop or change this watch](?page=settings&id=watches&watch=wat-1)' } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    await userEvent.click(await within(aside).findByRole('link', { name: 'Stop or change this watch' }))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'watches', watch: 'wat-1' } })
+  })
+
   it('loads earlier actions into the history when the conversation has more', async () => {
     const older = [item('turn_start', 1), say(1, 'user', 'Launch'), aether(1, 'o1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }), item('turn_end', 1, { stop_reason: 'end_turn' })]
     const recent = [item('turn_start', 2), say(2, 'user', 'Read'), aether(2, 'r1', 'aether_get_run', 'completed', { raw_input: { run_id: 'run_fix' } }), item('turn_end', 2, { stop_reason: 'end_turn' })]
@@ -427,6 +465,8 @@ describe('quiet outcomes and names', () => {
     expect(api.missionShow).toHaveBeenCalledWith('mis_7')
     act(() => finish({ mission: mission({ id: 'mis_7', phase: 'completed' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] }))
     expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
+    act(() => useStore.setState({ missions: {} }))
+    expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
   })
 
   it('shows why a launched swarm could not be read instead of calling it working', async () => {
@@ -439,6 +479,44 @@ describe('quiet outcomes and names', () => {
     ])
     const launched = await card(aside, /^Launched swarm on main-repo\. Done$/)
     expect(within(launched).getByText('Could not read swarm mis_7: mission.get: mission mis_7 not found (-32004)')).toBeDefined()
+  })
+
+  it('reads a launched swarm again on each of its changes, so the card and the history agree', async () => {
+    vi.mocked(api.missionShow).mockResolvedValue({ mission: mission({ id: 'mis_7', phase: 'active' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Start a swarm'),
+      aether(1, 't1', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { ids: { mission_id: 'mis_7' } } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    expect(await card(aside, /^Launched swarm on main-repo\. Working in the background$/)).toBeDefined()
+    await waitFor(() => expect(useStore.getState().missions.mis_7?.phase).toBe('active'))
+
+    vi.mocked(api.missionShow).mockResolvedValue({ mission: mission({ id: 'mis_7', phase: 'completed' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })
+    act(() => useStore.getState().bumpWorkflowSignal('missionSeq', 'mis_7'))
+    expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: 'Actions' }))
+    const history = await screen.findByRole('dialog', { name: 'Actions in this conversation' })
+    expect(within(history).getByText(/^Done · opens the swarm$/)).toBeDefined()
+  })
+
+  it('says what a launch started without a receipt, and how the member hears back', async () => {
+    useStore.setState({ members: { [alice.id]: alice, mem_bob: { id: 'mem_bob', display_name: 'Bob', color: '#000', role: 'collaborator' } } })
+    act(() => useStore.getState().upsertRun(run({ id: 'run_9', title: 'login-test', status: 'running' })))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Fix the login test on Bob'),
+      aether(1, 't1', 'aether_launch_run', 'completed', {
+        raw_input: { ...launchInput, model: 'opus', account_member_id: 'mem_bob', no_fallback: true },
+        content: [{ type: 'text', text: `Launched run run_9.\n${JSON.stringify({ run_id: 'run_9', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' })}` }],
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const launched = await card(aside, /^Launched run on main-repo with Claude Code\. Working in the background$/)
+    expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · no fallback")).toBeDefined()
+    expect(within(launched).getByText(/^Aether notifies you here/)).toBeDefined()
+    await userEvent.click(within(launched).getByRole('button', { name: 'Open run' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
   })
 })
 

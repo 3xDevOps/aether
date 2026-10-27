@@ -27,10 +27,10 @@ func TestWriteCheckoutPreservesOwnerAndNestedParents(t *testing.T) {
 		t.Fatal(err)
 	}
 	revision := fileRevision([]byte("old\n"))
-	if _, err := writeCheckoutFile(e, checkout, "missing.txt", []byte("new\n"), revision); !errors.Is(err, ErrRevisionConflict) {
+	if _, err := writeCheckoutFile(e, checkout, "missing.txt", []byte("new\n"), revision, 0o644); !errors.Is(err, ErrRevisionConflict) {
 		t.Fatalf("missing target with revision error = %v, want ErrRevisionConflict", err)
 	}
-	if _, err := writeCheckoutFile(e, checkout, "config.txt", []byte("new\n"), revision); err != nil {
+	if _, err := writeCheckoutFile(e, checkout, "config.txt", []byte("new\n"), revision, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(target)
@@ -42,7 +42,7 @@ func TestWriteCheckoutPreservesOwnerAndNestedParents(t *testing.T) {
 		t.Fatalf("replacement owner/mode = %#v/%o, want uid 1000/0600", info.Sys(), info.Mode().Perm())
 	}
 
-	if _, err := writeCheckoutFile(e, checkout, "nested/deep/new.txt", []byte("nested\n"), ""); err != nil {
+	if _, err := writeCheckoutFile(e, checkout, "nested/deep/new.txt", []byte("nested\n"), "", 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{

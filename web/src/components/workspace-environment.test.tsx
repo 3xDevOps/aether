@@ -265,6 +265,80 @@ describe('workspace environment', () => {
     }))
   })
 
+  it('adds, replaces and removes files, and never shows their content', async () => {
+    const withFiles: WorkspaceEnvironment = { ...saved, files: [{ path: '.env', size: 412 }, { path: 'config/sa.json', size: 30 }] }
+    const client = mount({ workspaceEnvironment: vi.fn(async () => withFiles), workspaceEnvironmentSet: vi.fn(async () => withFiles) })
+    const pick = (file: File) => fireEvent.change(screen.getByLabelText('Choose a file'), { target: { files: [file] } })
+
+    const files = within(await screen.findByRole('list', { name: 'Files' }))
+    expect(files.getAllByRole('listitem').map((item) => item.textContent)).toEqual(['.env412 B', 'config/sa.json30 B'])
+    pick(new File(['API_URL=${HOST}/api # kept\n'], '.env'))
+    await waitFor(() => expect(files.getByRole('textbox', { name: 'Path' })).toHaveProperty('value', '.env'))
+    expect(files.getAllByRole('listitem')).toHaveLength(2)
+
+    fireEvent.drop(files.getByText('config/sa.json'), { dataTransfer: { files: [new File(['NEXT_PUBLIC_A=1\n'], '.env.local')] } })
+    const local = await waitFor(() => files.getByDisplayValue('.env.local'))
+    fireEvent.change(local, { target: { value: 'apps/web/.env.local' } })
+    fireEvent.click(files.getByRole('button', { name: 'Remove config/sa.json' }))
+    expect(screen.queryByText(/HOST|NEXT_PUBLIC_A/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.workspaceEnvironmentSet).toHaveBeenCalledWith({
+      workspace_id: workspace.id,
+      set: [],
+      unset: [],
+      files: [{ path: '.env', content: 'API_URL=${HOST}/api # kept\n' }, { path: 'apps/web/.env.local', content: 'NEXT_PUBLIC_A=1\n' }],
+      remove_files: ['config/sa.json'],
+    }))
+  })
+
+  it.each([
+    { path: 'apps/web/.env', savedShown: true },
+    { path: '.env', savedShown: false },
+  ])('removes a saved file only by its own Remove, not by adding one of the same name at $path', async ({ path, savedShown }) => {
+    const withEnv: WorkspaceEnvironment = { ...saved, files: [{ path: '.env', size: 412 }] }
+    const client = mount({ workspaceEnvironment: vi.fn(async () => withEnv), workspaceEnvironmentSet: vi.fn(async () => withEnv) })
+
+    const files = within(await screen.findByRole('list', { name: 'Files' }))
+    fireEvent.change(screen.getByLabelText('Choose a file'), { target: { files: [new File(['NESTED=1\n'], '.env')] } })
+    const added = await waitFor(() => files.getByRole('textbox', { name: 'Path' }))
+    expect(files.queryByText('412 B')).toBeNull()
+    fireEvent.change(added, { target: { value: path } })
+    expect(files.queryByText('412 B') !== null).toBe(savedShown)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.workspaceEnvironmentSet).toHaveBeenCalledWith({
+      workspace_id: workspace.id,
+      set: [],
+      unset: [],
+      files: [{ path, content: 'NESTED=1\n' }],
+    }))
+  })
+
+  it('refuses a file that is not UTF-8 text or is too large before anything is sent', async () => {
+    const client = mount({ workspaceEnvironment: vi.fn(async () => ({ ...saved, files: [] })) })
+    const pick = (file: File) => fireEvent.change(screen.getByLabelText('Choose a file'), { target: { files: [file] } })
+
+    expect(await screen.findByText('No files. Choose Add file… or drop one here.')).toBeDefined()
+    pick(new File([new Uint8Array([0x30, 0x82, 0xff, 0xfe])], 'cert.der'))
+    expect((await screen.findByRole('alert')).textContent).toBe('cert.der is not UTF-8 text. A workspace file must be.')
+    const big = new File(['x'.repeat(100 << 10)], 'big.env')
+    big.arrayBuffer = vi.fn()
+    pick(big)
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('big.env is 100 KB. A workspace file holds at most 64 KB.'))
+    expect(big.arrayBuffer).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
+    expect(client.workspaceEnvironmentSet).not.toHaveBeenCalled()
+  })
+
+  it('lists the files by path and size to a member without the admin role', async () => {
+    mount({ workspaceEnvironment: vi.fn(async () => ({ ...saved, files: [{ path: '.env', size: 2048 }] })) }, false)
+
+    const files = within(await screen.findByRole('list', { name: 'Files' }))
+    expect(files.getByRole('listitem').textContent).toBe('.env2.0 KB')
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
   it('shows a member without the admin role whether egress is limited, read-only', async () => {
     mount({ workspaceEnvironment: vi.fn(async () => ({ ...saved, egress: true, egress_hosts: ['github.com'] })) }, false)
 
