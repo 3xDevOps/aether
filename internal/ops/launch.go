@@ -3,13 +3,13 @@ package ops
 import (
 	"context"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	templatesvc "github.com/3xDevOps/Aether/internal/templates"
 )
 
 // ContractVersion is the version of the ops' inputs and results; it rises
@@ -321,21 +321,37 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 		if err := c.read(ctx, protocol.MethodTemplateList, protocol.TemplateListParams{WorkspaceID: in.WorkspaceID}, &res); err != nil {
 			return "", nil, err
 		}
-		type template struct {
-			Name    string   `json:"name"`
-			Version string   `json:"version"`
-			Harness string   `json:"harness"`
-			Mode    string   `json:"mode"`
-			Model   string   `json:"model,omitempty"`
-			Params  []string `json:"params,omitempty"`
+		// A param is required when its placeholder has no default; the
+		// defaults are template text, so they sit under untrusted.
+		type param struct {
+			Name     string `json:"name"`
+			Required bool   `json:"required,omitempty"`
 		}
-		templates, tasks := []template{}, map[string]string{}
+		type template struct {
+			Name    string  `json:"name"`
+			Version string  `json:"version"`
+			Harness string  `json:"harness"`
+			Mode    string  `json:"mode"`
+			Model   string  `json:"model,omitempty"`
+			Params  []param `json:"params,omitempty"`
+		}
+		templates, tasks, defaults := []template{}, map[string]string{}, map[string]map[string]string{}
 		for _, t := range res.Templates[:min(len(res.Templates), maxRows)] {
-			params := slices.Sorted(maps.Keys(t.Params))
-			templates = append(templates, template{Name: t.Name, Version: t.Version, Harness: t.Harness, Mode: t.Mode, Model: t.Model, Params: params})
+			row := template{Name: t.Name, Version: t.Version, Harness: t.Harness, Mode: t.Mode, Model: t.Model}
+			for _, name := range templatesvc.Placeholders(t.Task) {
+				value, ok := t.Params[name]
+				row.Params = append(row.Params, param{Name: name, Required: !ok})
+				if ok {
+					if defaults[t.Name] == nil {
+						defaults[t.Name] = map[string]string{}
+					}
+					defaults[t.Name][name] = clip(value, maxReport)
+				}
+			}
+			templates = append(templates, row)
 			tasks[t.Name] = clip(t.Task, maxReport)
 		}
-		out["templates"], out["untrusted"] = templates, map[string]any{"template_tasks": tasks}
+		out["templates"], out["untrusted"] = templates, map[string]any{"template_tasks": tasks, "template_defaults": defaults}
 		summary += fmt.Sprintf(" %d templates.", len(templates))
 		if len(res.Templates) > len(templates) {
 			out["templates_total"] = len(res.Templates)
