@@ -152,23 +152,17 @@ func TestResumeRestartsTheStallClock(t *testing.T) {
 		cfg.StallThreshold = threshold
 		cfg.PollInterval = 20 * time.Millisecond
 	})
-	e.startStalls(t)
 	run, _ := e.launchFake(t, "task")
 	if err := e.sched.Pause(t.Context(), run.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
+	e.startStalls(t)
 	time.Sleep(2 * threshold)
+	resumed := time.Now()
 	if err := e.sched.Resume(t.Context(), run.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(threshold / 2)
-	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunRunning {
-		t.Fatalf("run = %+v, %v; want running right after the resume", r, err)
-	}
-	waitFor(t, "the resumed run to stall", func() bool {
-		r, err := e.db.GetRun(t.Context(), run.ID)
-		return err == nil && strings.HasPrefix(r.Reason, "stalled: ")
-	})
+	waitStalledAfter(t, e, run.ID, resumed, threshold)
 }
 
 func TestRestartRestartsTheStallClock(t *testing.T) {
@@ -183,14 +177,25 @@ func TestRestartRestartsTheStallClock(t *testing.T) {
 	if err := e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
+	restarted := time.Now()
 	s2 := e.newScheduler(t, e.rt, newFakePTY())
 	startScheduler(t, s2)
-	time.Sleep(threshold / 2)
-	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunRunning {
-		t.Fatalf("run = %+v, %v; want running right after the restart", r, err)
-	}
-	waitFor(t, "the reattached run to stall", func() bool {
-		r, err := e.db.GetRun(t.Context(), run.ID)
+	waitStalledAfter(t, e, run.ID, restarted, threshold)
+}
+
+// waitStalledAfter waits for the run to park as stalled and fails if it
+// parked sooner than threshold after from: a clock that did not restart at
+// from would park it on the first poll, as the run was already idle longer.
+// It bounds the park from below only, so a slow machine cannot fail it.
+func waitStalledAfter(t *testing.T, e *testEnv, id domain.RunID, from time.Time, threshold time.Duration) {
+	t.Helper()
+	var r *domain.Run
+	waitFor(t, "the run to stall", func() bool {
+		var err error
+		r, err = e.db.GetRun(t.Context(), id)
 		return err == nil && strings.HasPrefix(r.Reason, "stalled: ")
 	})
+	if r.StatusChangedAt == nil || r.StatusChangedAt.Sub(from) < threshold {
+		t.Fatalf("run = %+v; parked sooner than %s after the stall clock restarted at %s", r, threshold, from)
+	}
 }
