@@ -560,6 +560,40 @@ If the owner's terminal is not running, the result is the fallback with an error
 saying so. A failed discovery shows the CLI's error, for example
 `codex exited 127: sh: 3: codex: not found`.
 
+### Choose an effort
+
+`aether run --effort <level>` or the **Effort** field in the dashboard sets the
+agent's effort or thinking level for the run. Empty keeps the agent's default.
+The dashboard shows the field only for an agent that has levels, and offers
+only those:
+
+| Agent | Flag | Levels | Enhanced |
+| --- | --- | --- | --- |
+| Claude Code | `--effort <level>` | `low`, `medium`, `high`, `xhigh`, `max` | `effort` session option |
+| Codex | `-c model_reasoning_effort=<level>` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `reasoning_effort` session option |
+| pi | `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | `thought_level` session option |
+| oh-my-pi | `--thinking=<level>` | pi's, plus `auto` | `thinking` session option |
+| GitHub Copilot CLI | `--reasoning-effort <level>` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | the same flag on `copilot --acp` |
+
+OpenCode, Gemini CLI, Cursor CLI and Antigravity CLI have no effort setting.
+Not every Codex model takes every level; `codex debug models` lists each
+model's `supported_reasoning_levels`, and Codex reports a level its model
+refuses. A level the agent does not list is refused before launch:
+
+```text
+scheduler: agent "codex" takes effort low, medium, high, xhigh, max, ultra, not "minimal"
+```
+
+An agent with no effort flag refuses a Standard or Background launch with an
+effort:
+
+```text
+scheduler: agent "gemini" has no effort flag; launch it without an effort
+```
+
+For Enhanced runs the effort is set over ACP after the model; see
+[enhanced-runs.md](enhanced-runs.md#launch-an-enhanced-run).
+
 If a launch fails because the CLI rejects its own arguments, the installed CLI
 has drifted from what Aether expects. Install a compatible version in your
 environment.

@@ -1353,13 +1353,14 @@ The integrator always runs in Standard or Enhanced mode (`tui` or `acp`):
 (`headless`) with `-32602` and
 `integrator mode must be tui or acp: a headless integrator exits after one
 turn and cannot be asked or told`. `mission.create` needs the integrator's exact
-account, agent, mode, and model among the execution choices (the run may
+account, agent, mode, model, and effort among the execution choices (the run may
 still launch on another account; see the usage fallback note under `worker
 start`); `mission.replace-integrator` accepts any listed account, agent and
 model in Standard or Enhanced, so a swarm whose choices are all Background can
 still get an interactive integrator; `aether swarm replace-integrator` sends
 `--mode`, Enhanced by default where the agent's Enhanced mode is installed, and
-the model `--model` names, empty for the agent's default. Both refuse, with
+the model `--model` and the effort `--effort` name, empty for the agent's
+default. Both refuse, with
 `-32602` and `integrator harness <name> cannot launch in <mode> mode: <cause>`,
 an agent the integrator's run owner cannot
 start in that mode on that account, such as one whose definition the run owner no
@@ -1532,14 +1533,15 @@ above states: `propose`, `revise`, and `abandon` in `planning` and `active`;
 /usr/local/bin/aether-internal worker start --task-id task-example --harness claude
 ```
 
-An execution choice is the tuple account, agent, mode, and model.
-`--harness`, `--mode`, `--account-owner-id`, and `--model` select one
+An execution choice is the tuple account, agent, mode, model, and effort.
+`--harness`, `--mode`, `--account-owner-id`, `--model`, and `--effort` select one
 approved execution choice and may be omitted when only one choice matches.
 Without `--mode`, matches that differ only in mode start the Enhanced
 (`acp`) one; any other ambiguous selection is refused with every choice
 listed. The worker runs
-the chosen choice's model, passed to the agent as is; an empty model keeps
-the agent's default. The mission, integrator generation, and
+the chosen choice's model, passed to the agent as is, and its effort; an
+empty model or effort keeps the agent's default. An explicit `--effort ""`
+selects the choice without an effort. The mission, integrator generation, and
 current task revision are read from the assignment, and the dispatch key
 defaults to `<task-id>-r<revision>`. The dispatch key is also the idempotency
 key, so replaying the same start cannot create a second attempt. Worker
