@@ -997,7 +997,8 @@ dashboard proposes: the branch's upstream (else `origin`, when the
 workspace sets an origin) as the head, into the run's base branch on the
 workspace's GitHub source, or on the head repository without one. A
 checkout with no GitHub push remote answers `error` saying to pass
-`target`, and one on a detached HEAD answers `error` saying to pass both. Once a finished run's container is gone, both report the pull
+`target`, and one on a detached HEAD answers `error` saying to pass both. `run.pr.status`
+returns the `expected` and `target` it used, to pass to `run.pr.create`. Once a finished run's container is gone, both report the pull
 request the run last recorded (`number`, `url`, `state`); `run.pr.feedback`
 then has no checks or comments, and `error` says why.
 

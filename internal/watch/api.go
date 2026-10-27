@@ -215,6 +215,10 @@ func (s *Service) Create(ctx context.Context, memberID domain.MemberID, p protoc
 	if err != nil {
 		return protocol.WatchResult{}, err
 	}
+	// GitHub owner and repository names are case-insensitive.
+	if p.Target.Kind == protocol.WatchTargetPR {
+		p.Target.Repo = strings.ToLower(p.Target.Repo)
+	}
 	now := s.now()
 	expires, err := s.expiry(p.ExpiresAt, now)
 	if err != nil {

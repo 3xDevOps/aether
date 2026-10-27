@@ -30,6 +30,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -93,7 +94,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if len(got) > 512 {
 		t.Errorf("the instructions are %d characters, over 512: %q", len(got), got)
 	}
-	for _, want := range []string{"aether_list_workspaces", "aether_list_agents", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted"} {
+	for _, want := range []string{"aether_list_workspaces", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions lack %q: %q", want, got)
 		}
@@ -241,6 +242,28 @@ func TestConnectorScopes(t *testing.T) {
 	e.callTool(t, writer.session, "aether_list_runs", nil)
 	e.skew.Store(int64(2 * time.Second))
 	e.callTool(t, writer.session, "aether_launch_run", launch)
+}
+
+// A connector granted an op's scope, and read, can make every call the op
+// declares: the server admits each method under read or under that scope.
+// Write and control are separate boxes, so a control op cannot lean on
+// write.
+func TestOpsMethodsFitTheirConnectorScope(t *testing.T) {
+	for _, o := range ops.Ops {
+		if o.Scope == "" {
+			continue
+		}
+		for _, method := range o.Methods {
+			scopes, ok := sshd.ConnectorMethodScopes(method)
+			if !ok {
+				t.Errorf("%s calls %s, which the server refuses to every connector", o.Name, method)
+				continue
+			}
+			if !slices.Contains(scopes, sshd.ConnectorScopeRead) && !slices.Contains(scopes, string(o.Scope)) {
+				t.Errorf("%s (scope %s) calls %s, which needs %v", o.Name, o.Scope, method, scopes)
+			}
+		}
+	}
 }
 
 // connector.revoke ends a connector at once: its open session, its
@@ -423,6 +446,45 @@ func TestWriteBucketsOfIdleConnectorsDropped(t *testing.T) {
 	}
 }
 
+// A sign-in issued within ClockSkew of the handler's start, by the edge's
+// clock, may have been issued before it by this one, so it is refused.
+func TestAssertionsBeforeStartRefused(t *testing.T) {
+	started := time.Now()
+	h := &handler{started: started}
+	for _, tt := range []struct {
+		issued time.Time
+		ok     bool
+	}{
+		{started.Add(-time.Second), false},
+		{started, false},
+		{started.Add(edgeproto.ClockSkew - time.Nanosecond), false},
+		{started.Add(edgeproto.ClockSkew), true},
+	} {
+		if err := h.beforeStart(tt.issued); (err == nil) != tt.ok {
+			t.Fatalf("beforeStart(started+%s) = %v, want ok %v", tt.issued.Sub(started), err, tt.ok)
+		}
+	}
+}
+
+// An edge before VersionConnectorSignIn passes a client's own
+// Aether-Edge-Browser through, so the handler binds no sign-in to it.
+func TestBrowserOnlyFromBindingEdge(t *testing.T) {
+	srv := new(sshd.Server)
+	edge := &edgeAt{}
+	srv.SetEdgeOwner(edge)
+	h := &handler{ssh: srv}
+	r := httptest.NewRequest(http.MethodPost, "/mcp/authorize", nil)
+	r.Header.Set(edgeproto.HeaderBrowser, "forged")
+	edge.version.Store(edgeproto.VersionConnectorSignIn - 1)
+	if got := h.edgeBrowser(r); got != "" {
+		t.Fatalf("browser from a protocol %d edge = %q, want none", edge.version.Load(), got)
+	}
+	edge.version.Store(edgeproto.VersionConnectorSignIn)
+	if got := h.edgeBrowser(r); got != "forged" {
+		t.Fatalf("browser from a protocol %d edge = %q, want its header", edge.version.Load(), got)
+	}
+}
+
 // consentPoster posts a consent form for one authorization request with a
 // pairing code, as the edge relays it from a client address.
 func (e *env) consentPoster(t *testing.T) func(from, code string) (int, string) {
@@ -588,12 +650,13 @@ type connection struct {
 
 // The connector's tools by scope.
 var (
-	readTools = []string{"aether_list_workspaces", "aether_list_agents", "aether_list_runs", "aether_get_run", "aether_run_history",
-		"aether_needs_attention", "aether_activity_summary", "aether_list_swarms", "aether_get_swarm", "aether_run_changes",
-		"aether_pr_status", "aether_overlaps", "aether_memory_search", "search", "fetch"}
+	readTools = []string{"aether_list_workspaces", "aether_list_runs", "aether_get_run", "aether_run_history",
+		"aether_needs_attention", "aether_activity_summary", "aether_get_swarm", "aether_run_changes",
+		"aether_pr_status", "aether_overlaps", "aether_memory_search", "aether_integration", "search", "fetch"}
 	writeTools = []string{"aether_launch_run", "aether_launch_swarm", "aether_message_run", "aether_answer", "aether_pause_run",
-		"aether_resume_run", "aether_mark_reviewed"}
-	controlTools = []string{"aether_decide_approval", "aether_stop_run", "aether_close_run", "aether_cancel_swarm"}
+		"aether_resume_run", "aether_mark_reviewed", "aether_run_lifecycle", "aether_memory_add", "aether_memory_pin"}
+	controlTools = []string{"aether_decide_approval", "aether_stop_run", "aether_cancel_swarm", "aether_handoff_run",
+		"aether_replace_integrator", "aether_integration_decide", "aether_pr_create", "aether_pr_merge", "aether_swarm_manage", "aether_switch_run_mode"}
 )
 
 func sorted(lists ...[]string) []string {
@@ -851,6 +914,12 @@ func (f *fakeRuns) Launch(ctx context.Context, ws domain.WorkspaceID, member, _ 
 	defer f.mu.Unlock()
 	f.launched = append(f.launched, fmt.Sprintf("%s %s %s via %s", ws, harness, task, domain.ViaFrom(ctx)))
 	return &domain.Run{ID: "run-launched", WorkspaceID: ws, MemberID: member, Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued}, nil
+}
+
+func (*fakeRuns) SwarmRefusal(string, domain.LaunchMode) error { return nil }
+
+func (*fakeRuns) AgentSwitchable(context.Context, domain.MemberID, domain.MemberID, string) (bool, error) {
+	return false, nil
 }
 
 func (f *fakeRuns) launches() []string {

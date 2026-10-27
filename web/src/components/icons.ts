@@ -130,6 +130,7 @@ import {
   PinOff as LucidePinOff,
   Undo2 as LucideUndo2,
   Bell as LucideBell,
+  Eye as LucideEye,
   Gauge as LucideGauge,
   Upload as LucideUpload,
   type LucideIcon,
@@ -182,6 +183,7 @@ export const Pin = icon(LucidePin)
 export const PinOff = icon(LucidePinOff)
 export const Undo2 = icon(LucideUndo2)
 export const Bell = icon(LucideBell)
+export const Eye = icon(LucideEye)
 export const Gauge = icon(LucideGauge)
 export const Upload = icon(LucideUpload)
 export const Keyboard = icon(LucideKeyboard)

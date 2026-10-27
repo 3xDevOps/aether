@@ -122,6 +122,28 @@ func TestBehindNginx(t *testing.T) {
 		t.Fatalf("request to the edge without the proxy: %s %s", resp.Status, body)
 	}
 
+	// The access log keeps the path of an authorization request and the
+	// sign-in pages it passes and drops their query; any other request is
+	// logged whole.
+	for _, target := range []string{relayURL + "/mcp/authorize?state=logged-state", relayURL + "/healthz?probe=logged-probe"} {
+		if resp, err = http.Get(target); err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close() //nolint:errcheck,gosec // probe
+	}
+	eventually(t, "nginx to log both requests", func() error {
+		logged, rerr := os.ReadFile(filepath.Join(dir, "access.log"))
+		switch {
+		case rerr != nil:
+			return rerr
+		case strings.Contains(string(logged), "logged-state") || !strings.Contains(string(logged), `"GET /mcp/authorize HTTP/1.1"`):
+			return fmt.Errorf("the authorization request was not logged by its path alone:\n%s", logged)
+		case !strings.Contains(string(logged), "/healthz?probe=logged-probe"):
+			return fmt.Errorf("the probe was not logged whole:\n%s", logged)
+		}
+		return nil
+	})
+
 	s := h.newServer(edgeproto.PolicyApprovedDevices)
 	al := h.login(alice)[0]
 	h.claimServer(al, s)
@@ -253,6 +275,7 @@ func renderNginx(t *testing.T, dir, port, upstream string) string {
 		"<signin-host>", "localhost",
 		"<relay-host>", "127.0.0.1",
 		"/etc/letsencrypt/live/", filepath.Join(dir, "live")+"/",
+		"/var/log/nginx/", dir+"/",
 		"listen 443 ssl;", "listen 127.0.0.1:"+port+" ssl;",
 		"listen [::]:443 ssl;", "",
 		"127.0.0.1:8443", upstream,

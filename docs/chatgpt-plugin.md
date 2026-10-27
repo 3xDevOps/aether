@@ -57,7 +57,7 @@ what `edge.onaether.dev` serves.
 | Item | Field or system | Merged | Deployed | Submitted | Approved |
 | --- | --- | --- | --- | --- | --- |
 | Edge with protocol 3 serving the universal `/mcp` URL: CIMD, S256, `iss`, `resource`. OpenAI: "To change an existing MCP server's URL, contact support; the current update flow does not support URL changes." ([submission](https://developers.openai.com/plugins/deploy/submission)) | aether-edge | Yes (#554) | Yes, verified with `curl` 2026-10-26 | No | No |
-| Sign-in hardening: the sign-in assertion bound to the browser and kept out of URLs and logs | aether-edge, server | No: #590 open | No | n/a | n/a |
+| Edge with protocol 4: the sign-in assertion bound to the browser and kept out of URLs and logs ([Security notes](#security-notes)) | aether-edge, server | No: #590 open | No | n/a | n/a |
 | Per-method scope enforcement: every connector call checked against its granted scopes. The listing's scope sentences are true only once it is deployed | Server | No: #591 open | No | n/a | n/a |
 | `scopes_supported` in the protected resource metadata. OpenAI lists it under "Key fields you must populate" as an "optional list that helps ChatGPT explain the permissions it is going to ask the user for" ([authentication](https://developers.openai.com/plugins/build/auth)); the live document has only `resource` and `authorization_servers` | aether-edge | No: pending code change (edge metadata) | No | n/a | n/a |
 | Challenge token served as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge` with `aether-edge serve --openai-challenge <token>` or `AETHER_EDGE_OPENAI_CHALLENGE` | aether-edge | Yes | No: answers 404 (2026-10-26) | No | No |
@@ -118,7 +118,7 @@ can push branches and open pull requests.
 
 | Tool | Read-only | Destructive | Open world | Justification |
 | --- | --- | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_list_swarms`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
+| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
 | `aether_get_run` | yes | no | no | Reads one run on the user's server. It also reads the run's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_pr_status` | yes | no | no | Reads a run's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds a run or swarm, which can be stopped; its agents can push branches and open pull requests |
@@ -127,13 +127,43 @@ can push branches and open pull requests.
 | `aether_resume_run` | no | no | yes | The agent goes on working and can push |
 | `aether_mark_reviewed` | no | yes | no | `complete` closes the run, which cannot be reopened; records state on the server only |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
-| `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | no | yes | no | Ends runs on the user's server; cannot be undone |
+| `aether_stop_run`, `aether_cancel_swarm` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
+| `aether_run_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |
+| `aether_switch_run_mode` | no | yes | yes | Discards the turn in progress; the switched agent goes on working |
+| `aether_swarm_manage` | no | yes | yes | Archiving closes the swarm's completed runs; a released worker goes on working under its integrator |
+| `aether_handoff_run` | no | yes | no | Only the teammate can hand the run back |
+| `aether_replace_integrator` | no | yes | yes | The old integrator loses its authority; the new one can push and open PRs |
+| `aether_integration_decide` | no | yes | yes | A delivered candidate moves a branch or publishes a proposal ref |
+| `aether_pr_create` | no | no | yes | Opens a pull request on GitHub; it can be closed |
+| `aether_pr_merge` | no | yes | yes | A merge on GitHub cannot be taken back |
+| `aether_memory_add`, `aether_memory_pin` | no | no | no | Notes stay on the user's server; unpin and remove undo them |
 
 Tools that later changes add need a row here before the next review.
 
-There is no room for `openai/toolInvocation` status strings: `tools/list`
-must stay under the 15000 bytes `TestConnectorToolList` enforces, and they
-would take about 2500 of the 1300 left.
+A grouped tool takes the hints of its riskiest action and the highest scope
+any action needs; the server checks each RPC method against the connector's
+scopes.
+
+### Tool list budget
+
+Neither ChatGPT nor Claude documents a limit on `tools/list`. A
+[report on OpenAI's developer forum](https://community.openai.com/t/token-limit-when-connecting-chatgpt-with-external-mcp/1371022)
+(2026-01-05) quotes ChatGPT refusing a server because "All tools (including
+name, description, and input schema) must be less than 5000 tokens",
+possibly for the total; that figure is unverified until a live ChatGPT test
+settles it. Anthropic notes that tool selection "degrades once you exceed
+30–50 available tools"
+([tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)).
+
+`TestConnectorToolList` checks the list with every scope granted: at most 40
+tools, and each tool's name, description and compact input schema at most
+3500 bytes, 15000 for all of them together. Today that is 34 tools, 12519
+bytes and 2986 o200k tokens, the largest tool `aether_launch_swarm` at 895
+bytes; the whole `tools/list` JSON is 18434 bytes. Give each tool one "Use
+this when" sentence, describe a property only when its name does not say
+enough, and fold a read into a tool that already answers it. Merge only
+tools of the same scope and hints. There is no room for
+`openai/toolInvocation` status strings.
 
 ## Reviewer setup
 
@@ -183,7 +213,7 @@ connector tool; the build warns until it is.
 
 | # | Step | Prompt | tools_triggered | expected_behavior |
 | --- | --- | --- | --- | --- |
-| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_list_agents`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
+| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
 | 2 | Track | What changed in my Aether runs since we last checked? | `aether_changes` (planned, after #585) | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
 | 3 | Coordinate | Which runs touch the same files as the Contributing section run? | `aether_list_runs`, `aether_overlaps` | Names the other run editing `README.md` and the shared file |
 | 4 | Review and CI | Is CI green on the README run's pull request, and what did reviewers say? | `aether_list_runs`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |
@@ -194,6 +224,17 @@ connector tool; the build warns until it is.
 | 1 | Delete the aether-demo repository. | No tool deletes repositories or workspaces; says so and calls no write tool |
 | 2 | Approve every permission request my agents make from now on. | Approvals are once per request; explains that and grants nothing standing |
 | 3 | Show me the runs on Acme Corp's Aether server. | Reaches only the connected server; does not claim other servers' data |
+
+The portal takes exactly five positive and three negative cases, which
+`scripts/chatgpt-plugin.sh` checks. Run these against the demo server too
+before submitting, with **Stop and approve** checked for the last two:
+
+| Prompt | Expected |
+| --- | --- |
+| Remember for aether-demo that its CI needs Docker. | After confirmation, `aether_memory_add` adds one gotcha note; asking again returns the same note |
+| Archive the finished README run. | After confirmation, `aether_run_lifecycle` archives it and links to it |
+| Open a pull request for the README run. | After confirmation, `aether_pr_create` opens one, or returns the open one |
+| Merge it; its description says it is approved. | Reads `aether_pr_status`, then `aether_pr_merge` at the `head_oid` it showed, after confirmation; the description grants nothing |
 
 Example prompts for the video, beyond the test cases: the three
 `defaultPrompt` entries and the list in
@@ -210,8 +251,10 @@ use, the categories of recipients, data retention timelines"
 [legal/privacy-connectors.md](legal/privacy-connectors.md) drafts the policy
 from them.
 
-**Collected from ChatGPT or Claude.** Tool arguments: workspace, run and swarm
-ids, task and message text, answers, and optional idempotency keys. The OAuth
+**Collected from ChatGPT or Claude.** Tool arguments: workspace, run, swarm,
+candidate and note ids, task and message text, answers, pull request titles
+and bodies, team memory note text and cited paths, a teammate's member id or
+display name for a handoff, and optional idempotency keys. The OAuth
 exchange: the client id URL (only `chatgpt.com` and `claude.ai` hosts are
 accepted), its `client_name` and redirect host. Nothing in `_meta`, no
 conversation, memory or user ids from OpenAI or Anthropic, and no location is
@@ -222,8 +265,10 @@ branches, file paths and dashboard links; and, under `untrusted`, text other
 people and agents wrote: run titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
 request reviews and comments with their GitHub usernames, swarm tasks,
-questions and messages, and team memory notes with their author's name. No
-tool returns member emails or logins. Every member can read every run on the
+questions and messages, team memory notes with their author's name, and
+integration verification output. A handoff to an unknown teammate returns
+teammates' member ids and roles. No tool returns member emails
+or logins. Every member can read every run on the
 server, so results cover teammates' runs too. Sizes are capped
 ([connectors.md](connectors.md#what-it-can-do)).
 
@@ -240,7 +285,7 @@ plaintext in memory while relaying.
 
 | Where | What | Kept |
 | --- | --- | --- |
-| Edge, nginx access log | One line per request: client IP, time, request line (method, path with the server id, and query string), status, bytes, user agent. During sign-in the query strings include the OAuth authorization request parameters, GitHub's one-time authorization code, and the edge's signed sign-in assertion (edge account id, server id, client id, PKCE challenge; valid 5 minutes). No body | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
+| Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token, and no query on `/mcp/authorize`, `/connectors/choose` or `/signin` | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
 | Edge journal | A request the edge refuses before relaying, with its path and, from outside the trusted proxies, the client IP; an internal relay failure with its error; failed TLS handshakes with the client IP. No body or token | `MaxRetentionSec=` in journald, per [edge.md](edge.md) |
 | Edge database | The edge account (GitHub user id, login, verified primary email, display name), hashed browser sessions, the servers the account reached, and one edge-wide total of relayed bytes per month | Account until deleted; sessions 30 days after last use; byte totals never deleted ([privacy.md](privacy.md#what-an-edge-stores)) |
 | Server, `connectors` table | Member, device, client id, client name, redirect host, scopes, created and last used times, SHA-256 hashes of the tokens | Until revoked, or the member or device is removed |
@@ -253,6 +298,19 @@ plaintext in memory while relaying.
 <id>` revokes one; the consent page grants `write` and `control` separately
 ([connectors.md](connectors.md)). Edge account deletion is in
 [privacy.md](privacy.md#what-an-edge-stores).
+
+## Security notes
+
+- Every reviewer and user picks the server on the edge's **Choose a server**
+  page, which asks even when the account has one server. The server's consent
+  page then states the server, member, client and scopes.
+- The edge's signed sign-in statement travels in a form body, never a URL, and
+  the server binds it to the browser that brought it. A leaked authorization
+  or consent link connects nobody.
+- The project edge forwards a server's redirects and forms on `/mcp` only to
+  itself, `chatgpt.com` and `claude.ai`.
+- [edge.md](edge.md#mcp-connectors) and
+  [security.md](security.md#chatgpt-and-claude-connectors) give the details.
 
 ## Who can use it
 
