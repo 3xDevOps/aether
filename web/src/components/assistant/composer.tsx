@@ -64,7 +64,7 @@ export function AssistantComposer({ textarea, running, dock }: {
         const next = draftViewContext(now)
         const changed = now.assistantDraft.trim() !== text || (next && viewContextKey(next)) !== fingerprint
         // The member edited the draft or a chip while the key was made: send nothing they no longer see.
-        if (now.assistantGeneration !== generation || changed) {
+        if (now.assistantGeneration !== generation || changed || draftConflict(now)) {
           settlePromptKey(attempt.key)
           return
         }
