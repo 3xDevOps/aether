@@ -7,8 +7,8 @@ import { cn, focusRing } from '@/lib/utils'
 const controlMotion =
   '[--press-duration:var(--duration-release)] active:[--press-duration:var(--duration-press)] [transition:color_var(--duration-hover)_var(--ease-hover),background-color_var(--duration-hover)_var(--ease-hover),border-color_var(--duration-hover)_var(--ease-hover),box-shadow_var(--duration-hover)_var(--ease-hover),opacity_var(--duration-hover)_var(--ease-hover),scale_var(--press-duration)_var(--ease-press)] motion-reduce:transition-none'
 
-// The pseudo-element grows the click target 4px past the painted square on every side.
-const hitbox = 'relative after:absolute after:-inset-1'
+// The pseudo-element grows the click target 2px past the painted square, so neighbours 2px apart (gap-0.5) never overlap.
+const hitbox = 'relative after:absolute after:-inset-0.5'
 
 const buttonVariants = cva(
   // An `aria-disabled` control stays focusable and keeps its pointer, so each
