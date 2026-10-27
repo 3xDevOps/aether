@@ -22,7 +22,7 @@ import { allowed } from '@/lib/permissions'
 import { multiRepoFeature, multiRepoMethod, swarmReposFeature } from '@/lib/repos'
 import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useChildSettingsRead } from '@/store/children'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
@@ -164,6 +164,7 @@ export function LaunchDialog() {
   const launchRun = async () => {
     const trimmed = task.trim()
     const chosenModel = model.trim()
+    const signedIn = sameIdentity()
     const run = await api.runLaunch({
       workspace_id: workspaceID,
       harness,
@@ -175,7 +176,7 @@ export function LaunchDialog() {
       ...extraRepos,
       ...(childRunsOffered && childRuns ? { children: childRuns } : {}),
     })
-    rememberLaunch(harness, mode, chosenModel)
+    if (signedIn()) rememberLaunch(harness, mode, chosenModel)
     upsertRun(run)
     close()
     navigate('run', { runId: run.id })
@@ -215,9 +216,10 @@ export function LaunchDialog() {
     const serialized = JSON.stringify(contents)
     const key = swarmKeys.get(serialized) ?? idempotencyKey()
     swarmKeys.set(serialized, key)
+    const signedIn = sameIdentity()
     const result = await api.missionCreate({ ...contents, idempotency_key: key })
     swarmKeys.delete(serialized)
-    rememberLaunch(harness, integratorMode, integratorModel)
+    if (signedIn()) rememberLaunch(harness, integratorMode, integratorModel)
     close()
     navigate('missions', { missionId: result.mission.id })
     toast.success('Swarm created')
