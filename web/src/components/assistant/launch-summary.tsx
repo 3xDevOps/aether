@@ -75,12 +75,11 @@ export function useLaunchRows(method: string, params: unknown): [string, string]
 }
 
 /**
- * A launch card's title and the assistant's stated reason. The summary
- * quotes the task, which the rows already show in full, so the title stops
- * before it and leaves the rows room on a phone.
+ * A launch card's title. The summary quotes the task, which the rows already
+ * show in full, so the title stops before it and leaves the rows room on a
+ * phone.
  */
-export function launchTitle(summary: string): { title: string; reason?: string } {
-  const reason = /The assistant's reason: "(.*)"\s*$/s.exec(summary)?.[1]
+export function launchTitle(summary: string): string {
   const quoted = summary.indexOf(': "')
-  return { title: quoted > 0 ? summary.slice(0, quoted) : summary, ...(reason ? { reason } : {}) }
+  return quoted > 0 ? summary.slice(0, quoted) : summary
 }
