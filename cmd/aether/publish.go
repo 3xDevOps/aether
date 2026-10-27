@@ -112,6 +112,9 @@ func publish(c *protocol.Client, w, notes io.Writer, runID, repoName string) err
 		return fmt.Errorf("the checkout is on a detached HEAD at %s. Check out a branch in the run's terminal (aether attach %s), then run aether publish %s again", st.Head, r.ID, r.ID)
 	}
 	if repo == "" && st.Head == r.BaseCommit {
+		if len(st.Changes) > 0 {
+			return fmt.Errorf("run %s's branch %s has no commit beyond its base %s, and %s uncommitted; publish pushes commits only. Ask the agent to commit (aether message %s \"commit your changes\"), then run aether publish %s again", r.ID, st.Branch, r.BaseCommit, plural(len(st.Changes), "change"), r.ID, r.ID)
+		}
 		return fmt.Errorf("run %s's branch %s has no commit beyond its base %s; nothing to publish", r.ID, st.Branch, r.BaseCommit)
 	}
 	push := protocol.DefaultPushTarget(st.Remotes, st.Upstream, st.Branch, ws.Origin != "")

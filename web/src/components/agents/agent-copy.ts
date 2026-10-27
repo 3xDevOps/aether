@@ -9,7 +9,10 @@ const adapters: Record<string, string> = {
 
 const logins: Record<string, { command: string; hint: string }> = {
   claude: { command: 'claude', hint: 'Start Claude Code, then type /login.' },
-  codex: { command: 'codex login', hint: 'Choose the device code option.' },
+  codex: {
+    command: 'codex login --device-auth',
+    hint: 'Open the printed URL and enter the code. Device code login must be on in ChatGPT’s security settings, or in your ChatGPT workspace’s permissions.',
+  },
   pi: { command: 'pi', hint: 'Start pi, then type /login.' },
   omp: { command: 'omp', hint: 'Start oh-my-pi and follow its login.' },
   opencode: { command: 'opencode auth login', hint: 'Pick your provider.' },

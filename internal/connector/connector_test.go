@@ -479,6 +479,45 @@ func TestWriteBucketsOfIdleConnectorsDropped(t *testing.T) {
 	}
 }
 
+// A sign-in issued within ClockSkew of the handler's start, by the edge's
+// clock, may have been issued before it by this one, so it is refused.
+func TestAssertionsBeforeStartRefused(t *testing.T) {
+	started := time.Now()
+	h := &handler{started: started}
+	for _, tt := range []struct {
+		issued time.Time
+		ok     bool
+	}{
+		{started.Add(-time.Second), false},
+		{started, false},
+		{started.Add(edgeproto.ClockSkew - time.Nanosecond), false},
+		{started.Add(edgeproto.ClockSkew), true},
+	} {
+		if err := h.beforeStart(tt.issued); (err == nil) != tt.ok {
+			t.Fatalf("beforeStart(started+%s) = %v, want ok %v", tt.issued.Sub(started), err, tt.ok)
+		}
+	}
+}
+
+// An edge before VersionConnectorSignIn passes a client's own
+// Aether-Edge-Browser through, so the handler binds no sign-in to it.
+func TestBrowserOnlyFromBindingEdge(t *testing.T) {
+	srv := new(sshd.Server)
+	edge := &edgeAt{}
+	srv.SetEdgeOwner(edge)
+	h := &handler{ssh: srv}
+	r := httptest.NewRequest(http.MethodPost, "/mcp/authorize", nil)
+	r.Header.Set(edgeproto.HeaderBrowser, "forged")
+	edge.version.Store(edgeproto.VersionConnectorSignIn - 1)
+	if got := h.edgeBrowser(r); got != "" {
+		t.Fatalf("browser from a protocol %d edge = %q, want none", edge.version.Load(), got)
+	}
+	edge.version.Store(edgeproto.VersionConnectorSignIn)
+	if got := h.edgeBrowser(r); got != "forged" {
+		t.Fatalf("browser from a protocol %d edge = %q, want its header", edge.version.Load(), got)
+	}
+}
+
 // consentPoster posts a consent form for one authorization request with a
 // pairing code, as the edge relays it from a client address.
 func (e *env) consentPoster(t *testing.T) func(from, code string) (int, string) {
@@ -928,7 +967,10 @@ func (*fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, 
 }
 func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
 func (*fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
-func (*fakeRuns) Switching(domain.RunID) domain.LaunchMode                     { return "" }
+func (*fakeRuns) Liveness(domain.RunID) (domain.RunLiveness, bool) {
+	return domain.RunLiveness{}, false
+}
+func (*fakeRuns) Switching(domain.RunID) domain.LaunchMode { return "" }
 func (*fakeRuns) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
 	return scheduler.RetentionInfo{}, nil
 }

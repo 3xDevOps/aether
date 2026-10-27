@@ -29,6 +29,7 @@ import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
 import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
 import { createViewContextSlice, type ViewContextSlice } from '@/store/view-context'
+import { createWatchesSlice, type WatchesSlice } from '@/store/watches'
 import { createWorkflowSignalsSlice, type WorkflowSignalsSlice } from '@/store/workflow-signals'
 import {
   createUiSlice,
@@ -64,6 +65,7 @@ export type RootState = ServerSlice &
   RunsSlice &
   MembersSlice &
   DevicesSlice &
+  WatchesSlice &
   EdgeSlice &
   TerminalSlice &
   EnvTerminalSlice &
@@ -140,6 +142,7 @@ export function createRootStore() {
         ...createRunsSlice(...a),
         ...createMembersSlice(...a),
         ...createDevicesSlice(...a),
+        ...createWatchesSlice(...a),
         ...createEdgeSlice(...a),
         ...createEnvTerminalSlice(...a),
         ...createTerminalSlice(...a),

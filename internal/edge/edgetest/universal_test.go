@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -25,7 +27,35 @@ import (
 	"github.com/3xDevOps/Aether/internal/sshd"
 )
 
-var chooseLink = regexp.MustCompile(`<a href="(/connectors/choose\?[^"]+)">([^<]+)</a>`)
+var (
+	chooseForm  = regexp.MustCompile(`(?s)<form method="post" action="([^"]+)">(.*?)</form>`)
+	hiddenField = regexp.MustCompile(`<input type="hidden" name="([^"]+)" value="([^"]*)">`)
+)
+
+// universalCSP is connectorCSP as the edge stamps it on the universal
+// paths, with forms limited to the relay origin and the test client's
+// host.
+func (h *harness) universalCSP() string {
+	return connectorCSP + "; form-action " + h.relayURL + " https://127.0.0.1 http://localhost:*/callback http://127.0.0.1:*/callback"
+}
+
+// chooseForms are the choose page's forms by the server each picks, with
+// the URL each posts to.
+func chooseForms(t *testing.T, page string) (string, map[string]url.Values) {
+	t.Helper()
+	var action string
+	forms := map[string]url.Values{}
+	for _, m := range chooseForm.FindAllStringSubmatch(page, -1) {
+		form := url.Values{}
+		for _, f := range hiddenField.FindAllStringSubmatch(m[2], -1) {
+			form.Add(html.UnescapeString(f[1]), html.UnescapeString(f[2]))
+		}
+		if id := form.Get(edgeproto.ParamServer); id != "" {
+			action, forms[id] = html.UnescapeString(m[1]), form
+		}
+	}
+	return action, forms
+}
 
 // visit is a signed-in browser following an authorization request from
 // target across the edge's two origins until a page answers.
@@ -75,47 +105,59 @@ func (b *browser) send(t *testing.T, method, target string, form url.Values) (*h
 	return resp, string(page)
 }
 
+// signInFlow is one browser's way through the universal sign-in: the
+// choose page's form for the server it picked, which carries the
+// assertion, and the consent page's form, both posted to action.
+type signInFlow struct {
+	action          string
+	choose, consent url.Values
+}
+
 // universalConsent is a member's browser authorizing a connector on the
-// universal URL: the edge sends it to choose a server (pick, when set,
-// names the one to pick from the list), then to that server's consent
-// page. Under account the page names the member and asks no code; under
-// approved-devices it asks the code. It returns the authorization result
-// and the consent page's URL and form.
-func universalConsent(t *testing.T, b *browser, authURL, pick, member, code string, policy edgeproto.AccessPolicy, scopes ...string) (*auth.AuthorizationResult, string, url.Values) {
+// universal URL: the edge sends it to choose a server, which it always
+// asks, even of an account that can reach only one (pick, when set, names
+// the one to pick), then posts the choice to that server's consent page.
+// Under account the page names the member and asks no code; under
+// approved-devices it asks the code. No URL on the way carries the
+// assertion. It returns the authorization result and the forms.
+func universalConsent(t *testing.T, b *browser, authURL, pick, member, code string, policy edgeproto.AccessPolicy, scopes ...string) (*auth.AuthorizationResult, signInFlow) {
 	t.Helper()
 	resp, page, at := b.visit(t, authURL)
-	if pick != "" {
-		var link string
-		for _, m := range chooseLink.FindAllStringSubmatch(page, -1) {
-			if strings.Contains(m[1], "server="+pick) {
-				link = m[1]
-			}
+	action, forms := chooseForms(t, page)
+	if pick == "" && len(forms) == 1 {
+		for id := range forms {
+			pick = id
 		}
-		if resp.StatusCode != http.StatusOK || link == "" {
-			t.Fatalf("choose page at %s: %s, no link to %s\n%s", at, resp.Status, pick, page)
-		}
-		resp, page, at = b.visit(t, b.h.signinURL+strings.ReplaceAll(link, "&amp;", "&"))
 	}
+	flow := signInFlow{action: action, choose: forms[pick]}
+	if resp.StatusCode != http.StatusOK || flow.choose == nil || action != b.h.relayURL+edgeproto.PathUniversalMCPAuthorize ||
+		!strings.Contains(page, "Continue with ") {
+		t.Fatalf("choose page at %s: %s, no form for %q posting to the relay\n%s", at, resp.Status, pick, page)
+	}
+	if strings.Contains(at, edgeproto.ParamAssertion) {
+		t.Fatalf("the choose page's URL carries the assertion: %s", at)
+	}
+	resp, page = b.send(t, http.MethodPost, action, flow.choose)
 	m := requestField.FindStringSubmatch(page)
-	if resp.StatusCode != http.StatusOK || m == nil || resp.Header.Get("Content-Security-Policy") != connectorCSP {
-		t.Fatalf("consent page at %s: %s\n%s", at, resp.Status, page)
+	if resp.StatusCode != http.StatusOK || m == nil || resp.Header.Get("Content-Security-Policy") != b.h.universalCSP() {
+		t.Fatalf("consent page: %s %v\n%s", resp.Status, resp.Header, page)
 	}
-	form := url.Values{"request": {m[1]}, "scope": scopes}
+	flow.consent = url.Values{"request": {m[1]}, edgeproto.ParamServer: {pick}, "scope": scopes}
 	switch asked := strings.Contains(page, `name="code"`); {
 	case policy == edgeproto.PolicyAccount && (asked || !strings.Contains(page, "</strong> as <strong>"+member+"</strong>")):
 		t.Fatalf("consent page under account asks a code or does not name %s:\n%s", member, page)
 	case policy == edgeproto.PolicyApprovedDevices && !asked:
 		t.Fatalf("consent page under approved-devices asks no code:\n%s", page)
 	case policy == edgeproto.PolicyApprovedDevices:
-		form.Set("code", code)
+		flow.consent.Set("code", code)
 	}
-	resp, page = b.send(t, http.MethodPost, at, form)
+	resp, page = b.send(t, http.MethodPost, action, flow.consent)
 	loc, err := resp.Location()
 	if err != nil || resp.StatusCode != http.StatusSeeOther || loc.Path != "/callback" {
 		t.Fatalf("allow: %s %v %v\n%s", resp.Status, loc, err, page)
 	}
 	q := loc.Query()
-	return &auth.AuthorizationResult{Code: q.Get("code"), State: q.Get("state"), Iss: q.Get("iss")}, at, form
+	return &auth.AuthorizationResult{Code: q.Get("code"), State: q.Get("state"), Iss: q.Get("iss")}, flow
 }
 
 // TestUniversalConnectorThroughTheEdge adds connectors at the one URL
@@ -123,11 +165,11 @@ func universalConsent(t *testing.T, b *browser, authURL, pick, member, code stri
 // go-sdk's MCP and OAuth client, through a real edge to two servers
 // serving the real connector handler, under both policies. The edge
 // serves the metadata and a 401 naming it; the browser signed in at the
-// edge chooses a server (at once when the account can reach only one)
-// and reaches its consent page, which under account names the member and
+// edge chooses a server, even the only one the account can reach, and
+// posts the choice to its consent page, which under account names the member and
 // asks no code, and under approved-devices asks the code. The token
-// exchange, tools/list, a refresh and connector.revoke work through the
-// edge, routed by the tokens' server prefix; a token presented with
+// exchange, tools/list, with or without ChatGPT's or Claude's Origin, a
+// refresh and connector.revoke work through the edge, routed by the tokens' server prefix; a token presented with
 // another server's prefix, a replayed consent form or assertion, and a
 // forged assertion are refused. Under account, unbinding the member's
 // GitHub account or tightening the policy cuts off a connector authorized
@@ -175,7 +217,8 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 			}
 			var prm, asm map[string]any
 			if resp, body = mcpRequest(t, http.MethodGet, metadata, nil, nil); resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &prm) != nil ||
-				prm["resource"] != base || fmt.Sprint(prm["authorization_servers"]) != "["+base+"]" {
+				prm["resource"] != base || fmt.Sprint(prm["authorization_servers"]) != "["+base+"]" ||
+				fmt.Sprint(prm["scopes_supported"]) != "[offline_access]" {
 				t.Fatalf("protected resource metadata: %s %s", resp.Status, body)
 			}
 			if resp, body = mcpRequest(t, http.MethodGet, h.relayURL+edgeproto.PathUniversalAuthServerMetadata, nil, nil); resp.StatusCode != http.StatusOK ||
@@ -199,14 +242,13 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 			}
 			bobName := s1.memberOf(t, bob).DisplayName
 			var token *oauth2.Token
-			var consentURL string
-			var consentForm url.Values
+			var flow signInFlow
 			handler, err := auth.NewAuthorizationCodeHandler(&auth.AuthorizationCodeHandlerConfig{
 				ClientIDMetadataDocumentConfig: &auth.ClientIDMetadataDocumentConfig{URL: client.id},
 				RedirectURL:                    client.redirect,
 				AuthorizationCodeFetcher: func(_ context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
 					var res *auth.AuthorizationResult
-					res, consentURL, consentForm = universalConsent(t, bobBrowser, args.URL, "", bobName, code.Code, policy, "write")
+					res, flow = universalConsent(t, bobBrowser, args.URL, "", bobName, code.Code, policy, "write")
 					return res, nil
 				},
 				RequestRefreshToken: true,
@@ -239,18 +281,17 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 			}
 
 			for _, tt := range []struct {
-				what, method, target string
-				form                 url.Values
-				want                 string
+				what string
+				form url.Values
+				want string
 			}{
-				{"the consent form posted again", http.MethodPost, consentURL, consentForm, "the edge&#39;s sign-in for it was already used"},
-				{"the spent assertion again", http.MethodGet, consentURL, nil, "the edge&#39;s sign-in for it was already used"},
-				{"an assertion signed by another key", http.MethodGet, forgeAssertion(t, consentURL, nil), nil,
-					"grant signature is not from the pinned edge key"},
-				{"an edge-signed assertion for another request", http.MethodGet, forgeAssertion(t, consentURL, h.edgeKey()), nil,
+				{"the consent form posted again", flow.consent, "the edge&#39;s sign-in for it was already used"},
+				{"the spent assertion again", flow.choose, "the edge&#39;s sign-in for it was already used"},
+				{"an assertion signed by another key", forgeAssertion(t, flow.choose, nil), "grant signature is not from the pinned edge key"},
+				{"an edge-signed assertion for another request", forgeAssertion(t, flow.choose, h.edgeKey()),
 					"edge assertion is for another edge, server or authorization request"},
 			} {
-				r, page := bobBrowser.send(t, tt.method, tt.target, tt.form)
+				r, page := bobBrowser.send(t, http.MethodPost, flow.action, tt.form)
 				if policy == edgeproto.PolicyAccount && (r.StatusCode != http.StatusBadRequest || !strings.Contains(page, tt.want)) {
 					t.Fatalf("%s: %s, want 400 %q\n%s", tt.what, r.Status, tt.want, page)
 				}
@@ -281,6 +322,14 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 			live := connectMCP(t, &mcp.StreamableClientTransport{Endpoint: base,
 				HTTPClient: &http.Client{Transport: &oauth2.Transport{Source: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: rotated.AccessToken})}}})
 			callTool(t, live, "aether_list_workspaces", nil)
+			for _, origin := range []string{"https://chatgpt.com", "https://claude.ai"} {
+				header := http.Header{"Content-Type": {"application/json"}, "Accept": {"application/json, text/event-stream"},
+					"Authorization": {"Bearer " + rotated.AccessToken}, "Origin": {origin}}
+				if resp, body = mcpRequest(t, http.MethodPost, base, header,
+					strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)); resp.StatusCode != http.StatusOK {
+					t.Fatalf("tools/list with Origin %s: %s %s", origin, resp.Status, body)
+				}
+			}
 
 			alBrowser, err := h.signIn(alice)
 			if err != nil {
@@ -291,7 +340,7 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 			authURL := base + "/authorize?" + url.Values{"response_type": {"code"}, "client_id": {client.id}, "redirect_uri": {client.redirect},
 				"code_challenge": {oauth2.S256ChallengeFromVerifier(verifier)}, "code_challenge_method": {"S256"},
 				"resource": {base}, "state": {"s"}}.Encode()
-			res, _, _ := universalConsent(t, alBrowser, authURL, s2.id, s2.memberOf(t, alice).DisplayName, acode.Code, policy)
+			res, _ := universalConsent(t, alBrowser, authURL, s2.id, s2.memberOf(t, alice).DisplayName, acode.Code, policy)
 			if !strings.HasPrefix(res.Code, s2.id+".") || res.Iss != base || res.State != "s" {
 				t.Fatalf("alice's authorization on server 2 = %+v, want a code for %s, iss %s", res, s2.id, base)
 			}
@@ -324,8 +373,8 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				}
 				s1.restart(edgeproto.PolicyAccount)
 				eventually(t, "server 1 to refuse, after restarting, the consent form it issued before", func() error {
-					if r, page := bobBrowser.send(t, http.MethodPost, consentURL, consentForm); r.StatusCode != http.StatusBadRequest ||
-						!strings.Contains(page, "before this server last started") {
+					if r, page := bobBrowser.send(t, http.MethodPost, flow.action, flow.consent); r.StatusCode != http.StatusBadRequest ||
+						!strings.Contains(page, "this server takes only sign-ins issued from") {
 						return fmt.Errorf("%s %s", r.Status, page)
 					}
 					return nil
@@ -351,17 +400,12 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 	}
 }
 
-// forgeAssertion returns consentURL with its assertion replaced by one
-// for a fresh nonce: signed by key, or by a key of its own when key is
-// nil. One signed by the edge's key names another challenge.
-func forgeAssertion(t *testing.T, consentURL string, key ed25519.PrivateKey) string {
+// forgeAssertion returns the choose form with its assertion replaced by
+// one for a fresh nonce: signed by key, or by a key of its own when key
+// is nil. One signed by the edge's key names another challenge.
+func forgeAssertion(t *testing.T, choose url.Values, key ed25519.PrivateKey) url.Values {
 	t.Helper()
-	u, err := url.Parse(consentURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	q := u.Query()
-	payload, _, _ := strings.Cut(q.Get(edgeproto.ParamAssertion), ".")
+	payload, _, _ := strings.Cut(choose.Get(edgeproto.ParamAssertion), ".")
 	var a edgeproto.ConnectorAssertion
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
@@ -380,7 +424,7 @@ func forgeAssertion(t *testing.T, consentURL string, key ed25519.PrivateKey) str
 	if err != nil {
 		t.Fatal(err)
 	}
-	q.Set(edgeproto.ParamAssertion, signed)
-	u.RawQuery = q.Encode()
-	return u.String()
+	forged := maps.Clone(choose)
+	forged.Set(edgeproto.ParamAssertion, signed)
+	return forged
 }

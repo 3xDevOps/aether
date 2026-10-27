@@ -153,6 +153,9 @@ type WatchStore interface {
 	// WithdrawWatchNeeds makes watch's needs_you notices whose push was
 	// delivered due at now to be withdrawn, and counts them.
 	WithdrawWatchNeeds(ctx context.Context, watch string, now time.Time) (int64, error)
+	// DropWatchNeedPushes drops watch's pending and held needs_you pushes
+	// as cleared with detail.
+	DropWatchNeedPushes(ctx context.Context, watch string, now time.Time, detail string) error
 
 	GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error)
 	PutNotifyPrefs(ctx context.Context, member domain.MemberID, p NotifyPrefs) error
