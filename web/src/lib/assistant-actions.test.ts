@@ -119,6 +119,29 @@ describe('assistantView', () => {
       expect(view.rows).toEqual([])
     })
 
+    it('gives a decision to the call its idempotency key names, whatever the order', () => {
+      const message = (id: string, key: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status: 'running', input: { run_id: 'r1', message: key, idempotency_key: key } })
+      const { records, rows } = notices(1, record({ id: 'a2', target: { run_id: 'r1' }, outcome: 'declined', idempotency_key: 'second' }))
+      const waiting = [{ id: 'c', method: 'run.inject', summary: '', params: {}, created_at: at, expires_at: at }]
+      const view = assistantView([block(message('1:t0', 'first'), message('1:t1', 'second')), ...rows], waiting, { records, calls: new Map() })
+      expect(view.actions.map((a) => [a.id, a.state])).toEqual([['1:t0', 'approval'], ['1:t1', 'declined']])
+    })
+
+    it('shows a merge GitHub refused as failed, and one it queued as queued', () => {
+      const merge = (status: WorkItem['status'], result: unknown): Partial<WorkItem> => ({ id: '1:t0', name: 'aether_pr_merge', status, input: { run_id: 'r1', number: 42 }, result })
+      const names = { run: () => undefined, workspace: () => undefined, agent: () => undefined, sharer: () => undefined }
+      const { records, rows } = notices(1, record({ method: 'run.pr.merge', target: { run_id: 'r1' }, outcome: 'succeeded' }))
+      const [refused] = assistantView([block(merge('failed', 'GitHub did not merge pull request #42: required checks failed')), ...rows], [], { records, calls: new Map() }).actions
+      expect([refused!.state, refused!.error]).toEqual(['failed', 'GitHub did not merge pull request #42: required checks failed'])
+      const [queued] = assistantView([block(merge('done', { merged: false, write: 'pending', run_id: 'r1' })), ...rows], [], { records, calls: new Map() }).actions
+      expect([queued!.state, actionSummary(queued!, names)]).toEqual(['done', 'Queued to merge PR #42'])
+    })
+
+    it('links a relaunch to the new run the result names, not the old one', () => {
+      const [relaunch] = assistantView([block({ id: '1:t0', name: 'aether_run_lifecycle', input: { run_id: 'r1', action: 'relaunch' }, result: { run_id: 'r2', state: 'starting' } })], []).actions
+      expect(relaunch!.target?.id).toBe('r2')
+    })
+
     it('gives a launch record, which names no run, to the newest launch on its workspace past an unrecorded older one', () => {
       const launch = (id: string, workspace: string): Partial<WorkItem> => ({ id, name: 'aether_launch_run', status: 'done', input: { workspace_id: workspace, task: 'x' } })
       const { records, rows } = notices(5,

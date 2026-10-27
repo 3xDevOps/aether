@@ -195,8 +195,8 @@ function target(tool: string, input: Record<string, unknown>, result: Record<str
   const linked = link ? linkTarget(link) : undefined
   if (linked) return linked
   const ids = record(result.ids)
-  const run = text(saved?.result?.run_id) ?? text(record(result.run).id) ?? text(ids.run_id)
-  const swarm = text(record(result.mission).id) ?? text(record(result.swarm).id) ?? text(ids.mission_id) ?? text(ids.swarm_id)
+  const run = text(saved?.result?.run_id) ?? text(result.run_id) ?? text(record(result.run).id) ?? text(ids.run_id)
+  const swarm = text(result.swarm_id) ?? text(record(result.mission).id) ?? text(record(result.swarm).id) ?? text(ids.mission_id) ?? text(ids.swarm_id)
   if (tool === 'aether_save_environment') return { kind: 'environment', id: 'environment', route: { name: 'environment', params: {} } }
   const named = text(input.mission_id) ?? text(input.swarm_id)?.replace(/^swarm:/, '')
   if (swarm || ((tool.endsWith('_swarm') || tool === 'aether_swarm_manage' || tool === 'aether_replace_integrator') && named)) return swarmTarget(swarm ?? named!)
@@ -264,7 +264,8 @@ export function actionOutcome(
     case 'failed':
       return { state: 'failed', approval }
     case 'succeeded':
-      return { state: 'done', approval }
+      // The call can still fail after its method succeeded, as when GitHub refuses a merge it was asked for.
+      return { state: entry.status === 'failed' ? 'failed' : 'done', approval }
   }
   if (entry.status === 'failed') {
     if (!saved && error?.includes('the member declined this action')) return { state: 'declined' }
@@ -525,7 +526,10 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
   aether_answer: runVerb(['Answer', 'Answered', 'Answering']),
   aether_decide_approval: { verb: ['Decide', 'Decided', 'Deciding'], object: (a, n) => `an approval for run ${runName(a, n)}` },
   aether_cancel_swarm: { verb: ['Cancel', 'Cancelled', 'Cancelling'], object: (a) => `swarm ${text(a.input.mission_id) ?? a.target?.id ?? ''}`.trimEnd() },
-  aether_pr_merge: { verb: ['Merge', 'Merged', 'Merging'], object: prName },
+  aether_pr_merge: {
+    verb: (a) => (record(a.result).write === 'pending' && record(a.result).merged === false ? ['Queue to merge', 'Queued to merge', 'Queueing to merge'] : ['Merge', 'Merged', 'Merging']),
+    object: prName,
+  },
   aether_save_environment: { verb: ['Save', 'Saved', 'Saving'], object: () => 'your environment' },
   aether_run_lifecycle: { verb: (a) => words(text(a.input.action) ?? 'change'), object: (a, n) => `run ${runName(a, n)}` },
   aether_switch_run_mode: { verb: ['Switch', 'Switched', 'Switching'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.mode) ?? 'another'} mode` },

@@ -55,7 +55,12 @@ const goneWord: Partial<Record<ActionTarget['kind'], string>> = {
   workspace: 'This workspace no longer exists',
 }
 
-const launches = new Set(['aether_launch_run', 'aether_launch_swarm', 'aether_relaunch_run'])
+const launchTools = new Set(['aether_launch_run', 'aether_launch_swarm', 'aether_relaunch_run'])
+
+/** Whether the call starts a run or swarm, whose target can reach the transcript before the store. */
+function startsWork(action: AssistantAction): boolean {
+  return launchTools.has(action.tool) || (action.tool === 'aether_run_lifecycle' && action.input.action === 'relaunch')
+}
 
 /** States the member chose or let lapse: said quietly, with any error kept for the details. */
 const quiet = new Set<ActionState>(['declined', 'expired', 'withdrawn'])
@@ -90,7 +95,7 @@ export function useActionNames(): ActionNames {
 export function useTargetGone(action: AssistantAction): boolean {
   const target = action.target
   return useStore((s) => {
-    if (!s.hydrated || !target || launches.has(action.tool)) return false
+    if (!s.hydrated || !target || startsWork(action)) return false
     if (target.kind === 'run') return !s.runs[target.id] && !s.deletingRuns[target.id]
     if (target.kind === 'workspace') return !s.workspaces[target.id]
     return false
@@ -119,7 +124,7 @@ export function useOpenTarget(): (target: ActionTarget) => void {
  * list can replace the store's swarms.
  */
 export function useBackground(action: AssistantAction): { background: boolean; swarmError?: string } {
-  const swarm = action.state === 'done' && launches.has(action.tool) && action.target?.kind === 'swarm' ? action.target.id : undefined
+  const swarm = action.state === 'done' && startsWork(action) && action.target?.kind === 'swarm' ? action.target.id : undefined
   const seq = useStore((s) => (swarm ? missionSeqOf(swarm)(s) : 0))
   const [error, setError] = useState<string>()
   const [phase, setPhase] = useState<string>()
@@ -137,7 +142,7 @@ export function useBackground(action: AssistantAction): { background: boolean; s
     }
   }, [swarm, seq])
   const background = useStore((s) => {
-    if (action.state !== 'done' || !launches.has(action.tool) || !action.target) return false
+    if (action.state !== 'done' || !startsWork(action) || !action.target) return false
     if (action.target.kind === 'run') {
       const run = s.runs[action.target.id]
       return run !== undefined && !isTerminal(run.status)
