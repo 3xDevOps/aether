@@ -216,17 +216,52 @@ ACP_LIVE=1 go test -tags integration -run TestLiveEnhancedRunsWithoutPermissionP
 ## Real agents against a mock model
 
 `TestIntegrationRealAgents` (`internal/server/realagents_integration_test.go`)
-launches real Claude Code and Codex runs, Standard and Enhanced, on real
-Docker. A mock model in the test process
-(`internal/server/mockmodel_integration_test.go`) serves streaming Anthropic
-`/v1/messages` and OpenAI `/v1/responses` and plays one turn: a shell tool
-call, then a text answer. For each run the test requires that the tool's
-output reaches the model, the run settles idle, and the answer shows on the
-run's screen (Standard) or in its ACP history (Enhanced). It then sends the
-idle run mail and waits for the turn the mail starts, where Aether can wake
-the run: every Enhanced run, and a Standard run whose agent sets `IdleWake` in
-its capabilities (`internal/harness/capabilities.go`). The other runs report
-that step as skipped.
+launches real Claude Code and Codex runs, Standard, Enhanced and Background,
+on real Docker, and checks that each report an agent makes, or fails to make,
+leaves the run in the state the dashboard shows. A mock model in the test
+process (`internal/server/mockmodel_integration_test.go`) serves streaming
+Anthropic `/v1/messages` and OpenAI `/v1/responses`. Each prompt the test
+sends carries a tag, `aether-script:<turn>;`, naming the script the mock
+plays for that turn: one tool call per step, then a text answer. The mock
+answers each report reminder Aether sends with `aether-internal report`.
+
+One Standard and one Enhanced run per agent play these turns in order. The
+launch starts `turn`, mail starts `wake`, and `run.inject` starts the rest:
+
+| Turn | The agent | The run must show |
+| --- | --- | --- |
+| `turn` | runs a command and ends the turn without a report | `answered` after one reminder; Standard Codex, which Aether cannot remind, `waiting` |
+| `wake` | gets mail while idle | a new turn, where Aether can wake the run |
+| `waiting` | reports `waiting --for ci` | `waiting-ci` with the summary |
+| `answered` | reports `answered` | `answered`, not Needs you |
+| `late-report` | reports `waiting --for process` from a detached process five seconds later | the report landing after the run parked, then `waiting-tools` |
+| `compaction` | claims more tokens than its context holds, compacts, then reports | the reporting rules still in the next request, then `answered` |
+| `subagent` | starts a subagent that runs for eight seconds | not Needs you at any point while it runs, the subagent never reminded, then the turn ends like `turn` |
+| `needs-input` | reports `needs-input` | `needs-you`, Needs you |
+
+Each check also reads the run's `cause`, its report entries on the timeline,
+and whether the report's output reached the model. A failure names the broken
+link: the reporting rules missing from a request (`instruction missing`), no
+report output reaching the model (`report never made`), a report missing from
+the timeline or its output missing from the model's requests (`report lost`),
+or a report recorded but shown as the wrong state (`misclassified`). The
+first turn and every Background run also require the launch to record where
+its instructions went.
+
+The `wake` turn runs where Aether can wake the run: every Enhanced run, and a
+Standard run whose agent sets `IdleWake` in its capabilities
+(`internal/harness/capabilities.go`); the others skip it. A run must never
+need you while its subagent works. It should show `working`, or
+`waiting-agents` when Standard Claude Code ends the turn with the subagent
+still running in the background. Aether gets no
+signal for a Codex subagent, and Standard Claude Code's Stop hook can arrive
+without the subagent among its background tasks, so those runs can read as
+idle; the test logs their idle states as a known gap and fails any other.
+
+Two Background runs per agent check that a Background run is never reminded:
+one reports `success` and finishes awaiting review, the only Background state
+that needs you; the other has its `needs-input` report refused and finishes
+without a report.
 
 `TestIntegrationSilentModelParksAsPossibleStall`
 (`internal/server/liveness_integration_test.go`) launches an Enhanced Claude
@@ -238,7 +273,9 @@ Runs reach the mock the way they reach a [model
 gateway](harnesses.md#per-agent-setup): `ANTHROPIC_BASE_URL` for Claude Code,
 `openai_base_url` in `~/.codex/config.toml` for Codex. The test seeds the
 member home with what a member's first runs leave there: onboarding, an
-approved API key and a trusted checkout.
+approved API key and a trusted checkout. The Codex config also sets
+`model_auto_compact_token_limit`, so the `compaction` turn's claimed usage
+makes Codex compact.
 
 CI's `agents` job runs both as root. Run them the same way, with Docker and
 git:
@@ -249,8 +286,9 @@ sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
 ```
 
 `AGENTS_BASE=aether-standard:local` builds on a standard image you built. A
-failure prints the agent's screen (Standard) or ACP history (Enhanced) and the
-final item of each request the mock received.
+failure prints the broken link, the run's report entries, the agent's screen
+(Standard) or ACP history (Enhanced), and the final item of each request the
+mock received.
 
 ### Bumping the pinned versions
 
