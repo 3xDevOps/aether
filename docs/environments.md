@@ -213,6 +213,14 @@ processes. An admin changes the defaults with `aether-server serve` flags:
 sudo aether-server config set run-memory 12884901888   # 12 GiB
 ```
 
+An admin can also set the limits from **Settings → Server → Run limits**,
+which calls `server.run_limits`. Limits saved there replace the flags for
+containers created afterwards, one field at a time; clear a field to fall
+back to the flag or the default. A single run overrides both under
+**Resource limits** in the launch dialog's **Run** tab (`limits` on
+`run.launch`; CPUs, memory in GiB, processes). An empty field follows the
+server limit. A swarm uses the server limits.
+
 A new limit applies to containers created afterwards. Docker must report
 support for CPU quotas, memory and swap limits, and PID limits, or new
 containers are refused.
@@ -321,6 +329,17 @@ you pass `--plain`. The dashboard's **Import .env…** previews each line first.
 aether workspace env import .env
 aether workspace env import --plain .env
 ```
+
+A project that needs the `.env` file, not just the variables, can import them
+as secrets and have the [setup script](#setup-script) write the file:
+
+```sh
+printf 'DATABASE_URL=%s\nSTRIPE_KEY=%s\n' "$DATABASE_URL" "$STRIPE_KEY" > .env
+```
+
+Keep `.env` in the repository's `.gitignore` so the run never commits it. The
+file is readable by anyone who can view the run, in its **Files**. For a
+one-off file in one run, upload it in that run's **Files**.
 
 > [!WARNING]
 > A secret is hidden from the settings, not from a run. Inside the container it

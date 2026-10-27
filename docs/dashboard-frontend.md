@@ -2253,13 +2253,13 @@ caller. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Login found" or "No login found" for a
 shipped agent (`login_found` checks the launch home for login files, not for a
 working session; a server that does not report it shows nothing). An agent
-that is not installed stays listed, disabled, with **Set up**, which closes
-the dialog and opens Agents. The last row is `custom`, the escape hatch that
+that is not installed is not listed. **Install more agents...** below the
+list closes the dialog and opens Agents. The last row is `custom`, the escape hatch that
 `agent.list` never returns and that only launches where the deployment pinned
 an agent definition with `--agent-definitions`. With nothing installed,
 nothing is preselected, Launch stays disabled, and the form says "No agent is
 installed in your environment." with a **Set up an agent** button in place of
-the per-row links. The list is read each time the dialog opens; a failed read
+**Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
 **Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
@@ -5261,6 +5261,18 @@ on the Files route. The pane is measured: below 640px, with the Browser
 docked beside it for instance, it shows the tree until a file is open and
 then the editor with **Browse**, as a phone does.
 
+A live run's checkout root, here and under **Run checkouts** on the Files
+route, is a `RunCheckoutTree` (`tree.tsx`). When the gateway serves
+`files.upload`, its row has an **Upload files…** icon button, and files and
+folders dropped on its tree upload into the root of the repository it shows,
+folders kept (`droppedUploads`). `useUpload` sends one `files.upload` per
+file, so a path the checkout has
+fails as **README.md already exists in this run; open it to edit**; there is
+no **Replace**. `UploadStatus` under that tree shows progress and failures as
+on Home, and `invalidateRun` rereads the run's listings afterwards. The
+upload state lives in the tree: closing the phone sheet or folding **Run
+checkouts** hides an upload's progress, not the upload.
+
 `openInFiles(runID, { path, line, column })` (`open.ts`) is the one way in
 from outside the tree. It navigates to the run route with `view: 'files'`,
 `file` and, when named, `line` and `column`; those three are not written to
@@ -5305,9 +5317,10 @@ a whole checkout.
 **Home** is one root row with a trailing `~`, shown when the gateway serves
 `home.tree`. Under it is the member's whole persistent home, the directory
 that is `$HOME` in their Environment and runs, read one folder at a time
-through `home.tree` with nothing filtered. Only this tree changes files;
-base and run-checkout trees are read and edited as before. The methods and
-the server's rules are in
+through `home.tree` with nothing filtered. Only this tree creates, renames,
+moves and deletes entries; base and run-checkout trees are read and edited,
+and a live run's takes uploads ([Files in a run](#files-in-a-run)). The
+methods and the server's rules are in
 [local-gateway.md](local-gateway.md#files-and-member-configuration).
 
 | File | Holds |
@@ -5317,7 +5330,7 @@ the server's rules are in
 | `home-menu.tsx` | `HomeMenu`, a row's actions |
 | `home-name.tsx` | `NameRow`, the field a name is typed into |
 | `home-dialogs.tsx` | The delete, move and replace confirmations |
-| `home-upload.ts` | `useHomeUpload` and `droppedUploads` |
+| `home-upload.ts` | `useUpload` and `droppedUploads`, shared with run checkouts |
 
 `HomeFiles` wraps the whole route, above `FilesPane`: a phone remounts the
 tree in its side sheet, and an upload in progress or an open dialog must
@@ -5364,7 +5377,7 @@ that folder, a file row its parent, and the **Home** row or the empty pane
 below the tree is `~`. The folder that would receive them is outlined, and
 a folded one opens after 600ms. `droppedUploads` walks dropped folders with
 `webkitGetAsEntry`, so their structure is kept; empty folders are not
-created. `useHomeUpload` sends one `home.upload` per file, in order, first
+created. `useUpload` sends one `home.upload` per file, in order, first
 without `overwrite`, while `HomeStatus` shows **Uploading 3 of 12 · name**
 pinned to the bottom of the tree pane. A file over 64 MiB fails without being
 read. Files the server already has are collected and asked about once at the
@@ -6280,6 +6293,11 @@ Categories:
   board's Finished menu for the active workspace. It prevents reopening those
   runs but does not delete all run data: checkouts, homes, repositories and
   history retain their existing lifecycle.
+- **Run limits**, a row in **Server › Admin**, for admins when the server
+  answers `server.run_limits`: CPUs, memory in GiB and processes, empty
+  meaning the flag or automatic value shown in grey, and **Save**. The launch
+  dialog's **Run** tab reads the same method for the grey values and sends a
+  run's own `limits` under **Resource limits**.
 - **Docker inside runs**, a row in **Server › Admin**, for admins when the
   server answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States:
   **On**, **Off** with **Install**, `Unavailable on this host` plus the
@@ -7492,7 +7510,8 @@ terminal links.
 `src/routes/files/home.test.tsx` covers the Home tree: each row's menu,
 naming in place, delete, upload from the picker and from a drop, and moving
 a dragged row.
-`src/routes/files/run-files.test.tsx` covers the run's Files view and path
+`src/routes/files/run-files.test.tsx` covers the run's Files view, a drop
+uploaded into its checkout, and path
 links in the Session view, `paths.test.ts` what reads as a path, and
 `src/routes/run/terminal-links.test.tsx` a path link in a terminal.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.

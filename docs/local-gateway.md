@@ -211,8 +211,8 @@ in `internal/localgw/backend.go`. Their lost response may follow a committed wri
 so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A call with no answer after 60 seconds fails with `-32004`
 `server did not answer <method> within 1m0s` and is not retried;
-`home.upload`, `home.download` and `terminal.file`, which carry up to
-64 MiB, and `workspace.import`, whose first fetch of a large repository is
+`home.upload`, `home.download`, `files.upload` and `terminal.file`, which
+carry up to 64 MiB, and `workspace.import`, whose first fetch of a large repository is
 slow, get 15 minutes. Only that call's channel closes: a slow server
 handler is not a dead connection, so the connection, its streams and its
 other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
@@ -1094,6 +1094,7 @@ unavailable owned source remains the server's protocol error.
 | `coord.messages.list` | `{"workspace_id":"...","mission_id":"...","run_id":"...","correlation_id":"...","before":"...","limit":50}` (only `workspace_id` required; `run_id` matches either side) | `{"messages":[{"id":"...","workspace_id":"...","mission_id":"...","from_run_id":"...","to_run_id":"...","kind":"message"\|"question"\|"reply"\|"report","correlation_id":"...","body":"...","created_at":"...","delivered_at":"...","acked_at":"...","outcome":"...","summary":"...","next_action":"..."}],"next_before":"..."}` newest first; report fields only on `report` rows. See [coordination.md](coordination.md#seeing-agent-messages) |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `system.stats` | `{"since_ms":1761100000000}` (optional; Unix milliseconds, 0 or absent returns the whole window) | `SystemStatsResult` - `{"interval_ms":5000,"retention_ms":3600000,"host":{"cpu_cores","memory_total_bytes","swap_total_bytes","uptime_seconds"},"host_error":"","samples":[{"t_ms","cpu_user","cpu_system","cpu_iowait","cpu_steal","memory_used_bytes","memory_available_bytes","memory_free_bytes","swap_used_bytes","load1","load5","load15","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps","pressure_cpu","pressure_memory","pressure_io"}],"containers_at_ms":0,"containers_error":"","containers":[{"owner_kind":"run"\|"browser"\|"member","owner_id","member_id","workspace_id","title","status","cpu_cores","cpu_limit_cores","cpu_throttled_percent","memory_bytes","memory_limit_bytes","pids","pids_limit","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps"}],"others":{"containers","cpu_cores","memory_bytes"}}`. The host is sampled every 5 s from server start and kept for an hour; CPU fields are percent of all cores over the interval, and the `pressure_*` fields (PSI `some avg10`) are absent without `/proc/pressure`. Host sampling reads `/proc` and `/sys`, so on a non-Linux server `host_error` says so. Containers are sampled only while a `system.stats` call arrived in the last 60 s; a call while idle starts sampling without waiting for it and the next sample follows 1 s later. `containers` is empty and `containers_at_ms` 0 when the latest snapshot is older than two intervals, and `containers_error` carries the Docker error when sampling failed. A run's browser sidecar is its own entry with `owner_kind` `browser`, the run's id and its own limits. `cpu_cores` and the rate fields are absent until a container has two samples; `cpu_limit_cores` is absent when unlimited. A member sees only their own containers; `others` sums the rest and any container with no run or member owner, and is absent when empty |
+| `server.run_limits` | optional `cpus`, `memory_bytes`, `pids` (`0` clears one); setting any is admin only | `{"limits":{...},"default":{...},"effective":{...}}` - what an admin set, what an unset field gets (the flag or automatic value), and what a run with no override of its own gets. New containers only. `run.launch` takes `limits` `{cpus,memory_bytes,pids}` to override them for one run |
 | `server.sysbox.status` | none; admin only | `{"state":"on"\|"off"\|"unsupported"\|"installing"\|"failed","reason":"...","log":"..."}` - whether Docker lists `sysbox-runc`. `reason` explains `off`, `unsupported` and `failed`; `off` with a reason naming `sudo aether-server sysbox install` means the server is not root. `log` is the last 8 KiB of installer output |
 | `server.sysbox.install` | none; admin only | the same status. Starts the installer in the background, one at a time; a call while one runs returns `installing`. Poll `server.sysbox.status` until `on`, `unsupported` or `failed`. The server then uses Sysbox for new containers at once. Never retried after a transport failure. While it runs, `server.update` answers `-32003` |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
@@ -1105,6 +1106,7 @@ unavailable owned source remains the server's protocol error.
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
+| `files.upload` | `{"workspace_id":"...","run_id":"...","path":"assets/logo.png","content_base64":"..."}` | empty result |
 | `files.diff` | `{"run_id":"...","path":"README.md"}` | `{"patch":"...","truncated":false}` |
 | `config.roots` | `{}` | `{"roots":[{"harness":"claude","display_name":"Claude Code","path":"~/.claude","runtime_ignores":["projects/","shell-snapshots/","statsig/","todos/","file-history/","history.jsonl","daemon/","transcripts/",...],"credential_names":[".credentials.json",...]}]}` |
 | `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
@@ -1333,7 +1335,9 @@ rebinds to the current admin's verified account (and can check
 ### Files and member configuration
 
 `files.tree` and `files.read` address a workspace's base branch when
-`run_id` is omitted, or a live run checkout when it is present. Complete
+`run_id` is omitted, or a live run checkout when it is present. A run
+checkout's tree lists tracked, untracked and ignored files, but not a folder
+that is ignored as a whole, such as `node_modules/`. Complete
 valid UTF-8 text without NUL bytes is returned with an exact SHA-256
 `revision` and may be writable. Binary content is read-only with an empty
 revision. File reads, diffs, and editor writes carry complete content up to 64
@@ -1347,7 +1351,13 @@ requires **Steer** and changes that run's uncommitted checkout. Existing file
 modes are preserved and new files use `0644`. Run-checkout saves recheck the
 revision immediately before atomic rename under Aether's root lock. Base
 commits compare-and-swap the branch head. Aether's locks do not serialize
-arbitrary live-agent filesystem writers.
+arbitrary live-agent filesystem writers. `content` is text without NUL bytes.
+
+`files.upload` adds one new file of any bytes, up to the same 64 MiB, to a
+run's checkout, the dashboard's **Upload files…**. It requires `run_id` and
+**Steer**, like a run-checkout `files.write`, and never replaces a file: a path
+the checkout already has answers `-32003` `files.upload: file changed; reload
+before saving`.
 
 `config.roots`, `config.tree`, `config.read`, `config.stat`, `config.write`,
 and `config.import` always address the authenticated member's own persistent
@@ -1497,7 +1507,7 @@ delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
-and `config.import` and `terminal.file` at 96 MiB. The 64 MiB file and
+and `config.import`, `home.upload`, `files.upload` and `terminal.file` at 96 MiB. The 64 MiB file and
 per-request import limits remain authoritative after JSON decoding. The SSH control-channel line cap is
 96 MiB, allowing base64 import requests without unbounded framing.
 The HTTP gateway admits at most two imports at once, before reading their

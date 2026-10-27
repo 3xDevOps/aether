@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,8 +24,9 @@ const (
 	cachePoolTarget  uint64 = 4 << 30
 	cacheTotalTarget uint64 = 16 << 30
 	cacheInactiveAge        = 7 * 24 * time.Hour
+	memberCacheCap   uint64 = 20 << 30
 	// Must exceed the longest go command by more than Go's hourly mtime refresh.
-	goBuildCacheInactiveAge = 24 * time.Hour
+	goBuildCacheInUseAge = 2 * time.Hour
 )
 
 // CacheRetentionInfo describes ownership, not a promise of physically freed
@@ -163,7 +165,7 @@ func cacheRetention(info memberhome.CacheInfo, owners cacheOwnership, ownershipE
 	case ownershipErr != nil || info.MetadataError != "":
 		out.Protected, out.Reason, out.Error = true, "Cache ownership uncertain; preserved", "Cache ownership metadata unavailable"
 	case protected || len(info.Owners) != 0:
-		out.Protected, out.Reason = true, "Active, retained or finalizing owner; cache protected"
+		out.Protected, out.Reason = true, "Active, retained or finalizing owner; protected except the oldest Go build files over 20 GiB per member"
 	default:
 		until := info.LastUsed.Add(cacheInactiveAge)
 		out.RetainedUntil = &until
@@ -278,6 +280,7 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 		total += n
 	}
 	sort.SliceStable(infos, func(i, j int) bool { return infos[i].LastUsed.Before(infos[j].LastUsed) })
+	trim := make(map[domain.MemberID][]string)
 	for _, info := range infos {
 		if ctx.Err() != nil {
 			return
@@ -291,7 +294,6 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 			terminalLock.Unlock()
 			continue
 		}
-		trim := false
 		func() {
 			defer unlock()
 			defer terminalLock.Unlock()
@@ -325,11 +327,11 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 				}
 			}
 			retention := cacheRetention(latest, owners, nil)
+			key := cacheKey(info.Member, info.Pool)
 			if retention.Protected {
 				_ = s.cfg.Homes.TouchCache(info.Member, info.Pool)
-				trim = pressure || bytes[cacheKey(info.Member, info.Pool)] > cachePoolTarget
 			} else {
-				n := bytes[cacheKey(info.Member, info.Pool)]
+				n := bytes[key]
 				eligible := latest.DataCleanupPending || pressure || n > cachePoolTarget || total > cacheTotalTarget || !s.cfg.Now().Before(latest.LastUsed.Add(cacheInactiveAge)) || !current[info.Member]
 				if (latest.DataExists || latest.DataCleanupPending) && eligible {
 					if err := s.cfg.Homes.RemoveCache(ctx, info.Member, info.Pool); err != nil {
@@ -338,7 +340,11 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 					}
 					// Apparent de-duplicated retained bytes, not freed disk space.
 					total -= min(total, n)
+					delete(bytes, key)
 				}
+			}
+			if latest.DataExists && bytes[key] != 0 {
+				trim[info.Member] = append(trim[info.Member], info.Pool)
 			}
 			if info.Pool != memberhome.CachePoolTerminal {
 				return
@@ -377,15 +383,27 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 			}
 			s.sweepMemberImages(ctx, info.Member, "")
 		}()
-		// Unlocked: the pool's owners are using it anyway, and Go tolerates
-		// removal of entries older than the cutoff while it builds.
-		if trim {
-			freed, err := s.cfg.Homes.TrimGoBuildCache(ctx, info.Member, info.Pool, s.cfg.Now().Add(-goBuildCacheInactiveAge))
-			// An unprivileged server cannot remove what root containers wrote.
-			if err != nil && (!errors.Is(err, os.ErrPermission) || os.Geteuid() == 0) {
-				slog.Warn("scheduler: trim Go build cache", "member", info.Member, "pool", info.Pool, "error", err)
+	}
+	// Unlocked so a long trim never delays a launch: owners keep using the
+	// pools, and Go tolerates removal of entries older than the cutoff while
+	// it builds. Under the cap no Go build cache is walked.
+	cutoff := s.cfg.Now().Add(-goBuildCacheInUseAge)
+	for member, pools := range trim {
+		if ctx.Err() != nil {
+			return
+		}
+		used := bytes[cacheKey(member, memberhome.CachePoolRuns)] + bytes[cacheKey(member, memberhome.CachePoolTerminal)]
+		excess := uint64(math.MaxUint64)
+		if !pressure {
+			if used <= memberCacheCap {
+				continue
 			}
-			total -= min(total, freed)
+			excess = used - memberCacheCap
+		}
+		err := s.cfg.Homes.TrimGoBuildCache(ctx, member, pools, cutoff, excess)
+		// An unprivileged server cannot remove what root containers wrote.
+		if err != nil && (!errors.Is(err, os.ErrPermission) || os.Geteuid() == 0) {
+			slog.Warn("scheduler: trim Go build cache", "member", member, "error", err)
 		}
 	}
 }

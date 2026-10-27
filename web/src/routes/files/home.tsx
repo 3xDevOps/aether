@@ -4,7 +4,7 @@ import type { Api } from '@/lib/api'
 import { useRefuseStrayFileDrops } from '@/lib/file-drag'
 import { errorSentence } from '@/lib/format'
 import { DeleteDialog, MoveDialog, ReplaceDialog } from '@/routes/files/home-dialogs'
-import { droppedUploads, useHomeUpload, type UploadState } from '@/routes/files/home-upload'
+import { droppedUploads, useUpload, type UploadState } from '@/routes/files/home-upload'
 import { baseName, childPath, parentPath } from '@/routes/files/sources'
 import { useExpansion } from '@/routes/files/tree'
 import { sameIdentity, useStore } from '@/store'
@@ -59,7 +59,7 @@ export function HomeFiles({ client, onOpen, children }: { client: Api; onOpen: (
   const [moving, setMoving] = useState<{ from: string; dir: string } | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
-  const uploader = useHomeUpload(client)
+  const uploader = useUpload(client.homeUpload, useStore((s) => s.refreshHome))
   const picker = useRef<HTMLInputElement>(null)
   const pickedFor = useRef('')
   const dragged = useRef<string | null>(null)

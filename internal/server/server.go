@@ -460,6 +460,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Addr:              cfg.Addr,
 		HostKeyPath:       HostKeyPath(cfg.DataDir),
 		Store:             s.db,
+		RunLimits:         scheduler.ResolveRunLimits(domain.RunLimits{CPUs: cfg.RunCPULimit, MemoryBytes: cfg.RunMemoryBytes, Pids: cfg.RunPidsLimit}),
 		Bus:               s.bus,
 		Git:               lazyGit{s.git},
 		PTY:               s.pty,
