@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type * as React from 'react'
-import { ContextChip } from '@/components/assistant/context-chip'
+import { conflictChoiceID, ContextChips } from '@/components/assistant/context-chips'
 import { ArrowUp, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -10,7 +10,8 @@ import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { assistantShareView, buildViewContext } from '@/store/view-context'
+import { promptKey, settlePromptKey } from '@/store/assistant'
+import { assistantShareView, draftConflict, draftViewContext, unsharedPart, viewContextKey } from '@/store/view-context'
 
 export function AssistantComposer({ textarea, running, dock }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
@@ -22,38 +23,77 @@ export function AssistantComposer({ textarea, running, dock }: {
   const coarse = useMediaQuery(coarsePointer)
   const [focused, setFocused] = useState(false)
   const busy = useStore((s) => s.assistantSending)
-  const [error, setError] = useState<string>()
+  const stopping = useStore((s) => s.assistantStopping)
+  const error = useStore((s) => s.assistantError)
+  const focus = useStore((s) => s.assistantFocus)
+
+  useEffect(() => {
+    if (!focus) return
+    // A frame later, so a menu that opened the panel has finished returning focus.
+    const frame = requestAnimationFrame(() => {
+      const box = textarea.current
+      box?.focus()
+      box?.setSelectionRange(box.value.length, box.value.length)
+      useStore.getState().takeAssistantFocus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [focus, textarea])
 
   const send = async () => {
-    const text = draft.trim()
-    if (!text || busy || running) return
     const state = useStore.getState()
-    // A retry of the same text reuses its key and view context, so a lost reply cannot send it twice.
-    const attempt = state.assistantAttempt?.text === text
-      ? state.assistantAttempt
-      : { text, key: crypto.randomUUID(), viewContext: assistantShareView(state) ? buildViewContext(state) : undefined }
+    const text = state.assistantDraft.trim()
+    if (!text || state.assistantSending || running) return
+    if (draftConflict(state)) {
+      document.getElementById(conflictChoiceID)?.focus()
+      return
+    }
     const generation = state.assistantGeneration
-    state.setAssistantAttempt(attempt)
     state.setAssistantSending(true)
-    setError(undefined)
+    state.setAssistantError(null)
     try {
-      await api.assistantPrompt(text, attempt.key, assistantShareView(useStore.getState()) ? attempt.viewContext : undefined)
+      // A retry of the same text and context reuses its key and context, so a lost reply cannot send it twice.
+      let attempt = state.assistantAttempt?.text === text ? state.assistantAttempt : null
+      if (!attempt) {
+        const viewContext = draftViewContext(state)
+        const fingerprint = viewContext && viewContextKey(viewContext)
+        attempt = { text, viewContext, key: await promptKey(JSON.stringify([state.identityKey, text, fingerprint])) }
+        const now = useStore.getState()
+        const next = draftViewContext(now)
+        const changed = now.assistantDraft.trim() !== text || (next && viewContextKey(next)) !== fingerprint
+        // The member edited the draft or a chip while the key was made: send nothing they no longer see.
+        if (now.assistantGeneration !== generation || changed) {
+          settlePromptKey(attempt.key)
+          return
+        }
+        now.setAssistantAttempt(attempt)
+      }
+      try {
+        await api.assistantPrompt(text, attempt.key, assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext))
+      } finally {
+        settlePromptKey(attempt.key)
+      }
       const now = useStore.getState()
       if (now.assistantGeneration !== generation) return
-      now.setAssistantAttempt(null)
-      if (now.assistantDraft.trim() === text) setDraft('')
+      if (now.assistantDraft.trim() === text) now.clearAssistantDraft()
+      else now.setAssistantAttempt(null)
     } catch (err) {
-      setError(message(err))
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantError(message(err))
     } finally {
       if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantSending(false)
     }
   }
+  // Blocks a second press only while assistant.cancel is in flight: an agent that ignores it can be stopped again.
   const stop = async () => {
-    setError(undefined)
+    const state = useStore.getState()
+    if (state.assistantStopping) return
+    state.setAssistantStopping(true)
+    state.setAssistantError(null)
     try {
       await api.assistantCancel()
     } catch (err) {
-      setError(message(err))
+      useStore.getState().setAssistantError(message(err))
+    } finally {
+      useStore.getState().setAssistantStopping(false)
     }
   }
 
@@ -69,7 +109,7 @@ export function AssistantComposer({ textarea, running, dock }: {
       <div className="flex flex-col gap-2 px-3 py-3">
         {dock}
         {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}</p>}
-        <ContextChip />
+        <ContextChips textarea={textarea} />
         <div className={cn('overflow-hidden rounded-control border border-control bg-canvas', focused && 'outline-1 -outline-offset-1 outline-accent shadow-field-focus')}>
           <Textarea
             variant="embedded"
@@ -93,9 +133,9 @@ export function AssistantComposer({ textarea, running, dock }: {
         </div>
         <div className="flex items-center justify-end gap-2">
           {running ? (
-            <Button size="sm" variant="danger" onClick={() => void stop()}>
+            <Button size="sm" variant="danger" disabled={stopping} onClick={() => void stop()}>
               <Square className="fill-current" />
-              Stop
+              {stopping ? 'Stopping…' : 'Stop'}
             </Button>
           ) : (
             <Button size="sm" disabled={busy || !draft.trim()} hint={coarse ? undefined : `Send (${shortcutLabel('composer-send')} or Enter)`} onClick={() => void send()}>
