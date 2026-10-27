@@ -7,10 +7,30 @@ permissions and asks before it launches, messages or stops a run, or saves your
 environment, unless you turn on [auto-approval](#auto-approval).
 
 The assistant is not a run. It is an [Enhanced](enhanced-runs.md) session of
-your own Claude Code or Codex, started in your
-[environment](environments.md) (the persistent container `aether terminal` opens,
-with your home at `$HOME`). It uses the login in that home, so its usage counts
-against your own subscription. It works before you have a workspace.
+Claude Code or Codex signed in with your own login, so its usage counts against
+your own subscription. It works before you have a workspace.
+
+## Where it runs
+
+Each member's assistant runs in a container of its own,
+`aether-assistant-<member>`, created from the server's standard image. Your
+runs and your [environment](environments.md) (the persistent container
+`aether terminal` opens) cannot see it:
+
+- Its home is `<data>/assistant/<member>/home` on the server, not your home.
+  Nothing in your home configures it: no `CLAUDE.md`, `AGENTS.md`,
+  `~/.claude/settings.json`, `~/.codex/config.toml` or `~/.local/bin`.
+- Its working directory is `/assistant`, which holds the server's
+  instructions and is read-only.
+- From your home it mounts only the login file of the agent it runs:
+  `~/.claude/.credentials.json` for Claude Code or `~/.codex/auth.json` for
+  Codex. A token refresh on either side reaches the other. Signing in again in
+  `aether terminal` takes effect at the assistant's next start.
+- Claude Code's auto-memory is off for it.
+
+On the first start, and after a server upgrade that pins a newer adapter, the
+panel shows **Installing** while the agent and its Enhanced adapter install into
+the assistant's home. This downloads the agent and takes a minute or more.
 
 ## Open it
 
@@ -28,11 +48,9 @@ it. On a phone it is a side sheet. Closing it keeps your unsent message.
 ## First use
 
 With no ready agent the panel shows **Needs setup** and lists Claude Code and
-Codex. An agent is ready when it is installed in your home, its Enhanced adapter
-is installed and a login file exists. Each row that is not ready says which
-piece is missing (`Not installed`, `Enhanced adapter not installed`,
-`No sign-in found`) and has **Set up**, which runs the same flow as the
-**Agents** page. From the CLI:
+Codex. An agent is ready when its login file exists in your home. A row that is
+not ready says `No sign-in found` and has **Set up**, which runs the same flow
+as the **Agents** page. From the CLI:
 
 ```sh
 aether agent add claude --enhanced
@@ -48,14 +66,6 @@ conversation keeps its agent, because another agent cannot continue it. If that
 agent stops being ready, a prompt fails with, for example, `Claude Code is not
 ready: No sign-in found; sign in again or start with another agent`. Sign in
 again, or select **New conversation**, which picks the first ready agent.
-
-### Restart the environment
-
-An environment created before the assistant existed cannot be given the mounts
-the assistant needs, so the panel shows **Restart your environment** with
-**Restart environment**. Restarting closes any shell open in it. Files in
-`$HOME` are kept. Anything installed outside `$HOME` is lost unless you
-[saved the environment](environments.md#save-the-environment).
 
 ## What it can do
 
@@ -245,10 +255,24 @@ progress; if the agent keeps going, press it again. While a turn runs you
 cannot send another prompt.
 
 There is one conversation per member. It survives page reloads and server
-restarts. If the environment stops, the agent stops with it and the next prompt
-starts it again. **New conversation** asks **Start a new conversation?** and
-discards the transcript and the agent's session. What the assistant already did
-stays done.
+restarts. If the agent stops, the next prompt starts it again. **New
+conversation** asks **Start a new conversation?**, then deletes the transcript,
+removes the assistant's container and deletes everything in its home except the
+installed agent (`.local`): sessions, history, todos, file history, shell
+snapshots and logs. What the assistant already did stays done.
+
+### Earlier assistant state in your home
+
+Before the assistant had its own container it ran in your environment, in
+`~/.aether/assistant`, and kept its sessions in your home. That state is not
+moved, because any run could have changed it. Delete it from `aether terminal`:
+
+```sh
+rm -rf ~/.aether/assistant ~/.claude/projects/-root--aether-assistant
+```
+
+Codex sessions from that time are in `~/.codex/sessions` together with your
+runs' sessions.
 
 ## Limits
 
@@ -265,10 +289,10 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 
 | Message | Fix |
 | --- | --- |
-| `assistant: no agent is ready; install Claude Code or Codex with its Enhanced adapter and sign in` | [Set up an agent](#first-use) |
-| `scheduler: the environment was created before the assistant existed; restart it to add the assistant's mounts` | [Restart the environment](#restart-the-environment) |
+| `assistant: no agent is ready; sign in to Claude Code or Codex in your environment terminal` | [Set up an agent](#first-use) |
+| `scheduler: install Claude Code for the assistant exited 1: ...` | The install in the assistant's container failed; the output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
-| `assistant: open the claude session; stderr: ...` | The adapter failed to start. Fix the agent in `aether terminal`, then **Retry** |
+| `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |
 | `the member did not answer within 10m0s` | The card timed out. Ask again |
 | `<method> was not approved: record the approval: <error>` | The approval could not be saved, so the action did not run. Try again |
 | `the assistant is not configured on this server` | The server runs without the assistant |

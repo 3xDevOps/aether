@@ -378,6 +378,32 @@ until the sending or receiving run is deleted. Every member of the workspace
 can read their bodies, the same audience the **Activity** page has. Do not
 ask agents to pass credentials to each other.
 
+## The assistant
+
+Your [assistant](assistant.md) keeps its conversation on your server under
+`<data-dir>/assistant/<member>/`:
+
+- `items.jsonl` is the transcript the panel shows: your prompts, the agent's
+  replies, its tool calls and their results, and the action cards.
+- `home/` is the agent's home: the session files Claude Code keeps under
+  `.claude/` (projects, history, todos, file history, shell snapshots, debug
+  logs) or Codex under `.codex/` (sessions, history), plus the installed
+  agent in `.local/`.
+- `instructions/` holds the instructions the server gives it, and `sock/` its
+  tool socket.
+
+Only the server process and your assistant's container read them; no run,
+environment or other member can. Anyone with access to the server's data
+directory, such as its administrator, can read them. Your prompts and the
+files the agent reads go to the agent's vendor under your own account, as in
+any run.
+
+**New conversation** deletes `items.jsonl` and everything in `home/` except
+`.local/`. Removing a member deletes the whole directory. Assistant state
+from before the assistant had its own container is in your home;
+[assistant.md](assistant.md#earlier-assistant-state-in-your-home) says how to
+delete it.
+
 ## Team memory
 
 Team memory is a store of short notes per workspace, kept in
