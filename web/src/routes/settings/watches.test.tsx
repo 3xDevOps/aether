@@ -350,6 +350,21 @@ describe('watch answers that arrive late', () => {
     expect(useStore.getState().watchNotices).toEqual({})
   })
 
+  it('keeps the notices of a read sent before the first list of a page', async () => {
+    seed({ watchesFor: null })
+    const got = held<{ watch: Watch; notifications: WatchNotification[] }>()
+    const listed = held<Watch[]>()
+    const client = fakeApi({ watchGet: vi.fn(() => got.promise), watchList: vi.fn(() => listed.promise) })
+    const read = readWatch(useStore, client, 'wat-1')
+    const list = loadWatches(useStore, client)
+    got.release({ watch: watch(), notifications: [notice] })
+    await read
+    listed.release([watch()])
+    await list
+    expect(useStore.getState().watches['wat-1']).toBeDefined()
+    expect(useStore.getState().watchNotices['wat-1']).toEqual([notice])
+  })
+
   it('keeps a deleted watch gone when an older read or list answers after the delete', async () => {
     const got = held<{ watch: Watch; notifications: WatchNotification[] }>()
     const listed = held<Watch[]>()

@@ -43,12 +43,12 @@ export const createWatchesSlice: SliceCreator<WatchesSlice> = (set) => ({
 // A read takes its ticket when it is sent, a change when its answer arrives:
 // an answer only lands over what landed for that watch, or as a list, before
 // its ticket.
-interface Order { next: number; list: number; watch: Map<string, number> }
+interface Order { next: number; list: number; cleared: number; watch: Map<string, number> }
 const orders = new WeakMap<RootStore, Order>()
 
 function order(store: RootStore): Order {
   let o = orders.get(store)
-  if (!o) orders.set(store, (o = { next: 0, list: 0, watch: new Map() }))
+  if (!o) orders.set(store, (o = { next: 0, list: 0, cleared: 0, watch: new Map() }))
   return o
 }
 
@@ -74,14 +74,14 @@ export async function loadWatches(store: RootStore, client: Api): Promise<void> 
   const at = ticket(store)
   const s = store.getState()
   if (!listsWatches(s) || s.watchesFor !== s.identityKey) {
-    order(store).list = at
+    order(store).cleared = at
     s.setWatches([], s.identityKey)
   }
   if (!listsWatches(s)) return
   const watches = await client.watchList()
   const now = store.getState()
   const o = order(store)
-  if (now.identityKey !== s.identityKey || at < o.list) return
+  if (now.identityKey !== s.identityKey || at < Math.max(o.list, o.cleared)) return
   o.list = at
   const changed = (id: string) => (o.watch.get(id) ?? 0) > at
   now.setWatches([
