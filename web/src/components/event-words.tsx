@@ -265,6 +265,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     if (p.children === 'off') return <><Who id={e.actor_id} /> turned child runs off for this run</>
     return p.child_refused ? 'The agent tried to start a child run while child runs were off' : 'Child runs follow the owner’s setting'
   },
+  'run.wait.changed': (p) => `A wait condition is now ${typeof p.state === 'string' ? p.state : 'changed'}`,
   'run.protected': (p, e) => <><Who id={e.actor_id} /> {p.protected ? 'protected the run' : 'removed the run’s protection'}</>,
   'run.controller': (p, e) => {
     if (p.member_id) return <><Who id={p.member_id} /> took control</>

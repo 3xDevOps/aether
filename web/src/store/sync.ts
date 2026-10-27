@@ -628,6 +628,7 @@ export async function applyEvent(
       break
     }
     case 'run.mode':
+    case 'run.wait.changed':
     case 'run.children': {
       if (ev.type === 'run.children') touchChildren(ev.run_id)
       try {

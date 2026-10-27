@@ -1185,6 +1185,18 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.cleanup_error).toBeUndefined()
   })
 
+  it('rereads a run whose wait conditions changed', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const waits = [{ id: 'wait_1', revision: 1, spec: 'run:run_2:finished', kind: 'run_finished' as const, run_id: 'run_2',
+      state: 'resolved' as const, outcome: 'completed', observed: {}, summary: '', consecutive_failures: 0, delivery_attempts: 0,
+      created_at: '2026-08-14T10:00:00Z', expires_at: '2026-08-21T10:00:00Z' }]
+    const runGet = vi.fn().mockResolvedValue(run({ wait_conditions: waits }))
+    await applyEvent(store, statusEvent({ seq: 6, type: 'run.wait.changed', payload: { wait_id: 'wait_1', state: 'resolved' } }), fakeApi({ runGet }))
+    expect(runGet).toHaveBeenCalledWith('run_1')
+    expect(store.getState().runs.run_1?.wait_conditions).toEqual(waits)
+  })
+
   it('hydrates an unknown run before applying its retention metadata', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

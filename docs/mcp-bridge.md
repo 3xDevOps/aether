@@ -97,7 +97,7 @@ integrator-management commands.
 | `aether_inbox` | `coord.inbox` | optional `ack_token`, optional `wait_seconds` | `messages`, `ack_token` |
 | `aether_ask` | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `aether_reply` | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
-| `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, optional `waiting_for`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
+| `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, optional `waiting_for`, optional `until`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 | `aether_memory_search` | `memory.search`, or `memory.show` with `id` | optional `query`, `id`, `kind`, `file`, `all` | up to 10 `items`, best first; with `id`, that note as the one item and its supersede `chain` |
 | `aether_memory_add` | `memory.add` | `kind`, `text`, optional `files`, `supersedes`, `scope` | the stored `item`, `duplicate`, up to 3 `similar` live notes |
 | `aether_child_options` | `child.options` | optional `harness` | `allowed`, the refusal `reason`, `scope`, `limits`, `busy`, `queued`, `total`, each `choice` with its `status` |
@@ -174,7 +174,11 @@ workflows never report. `needs-input` and `waiting` take no `evidence_refs`.
 `waiting` marks a turn the agent ends while work it started goes on; the
 next turn clears it. `waiting_for` is `agents` (the default), `ci` or
 `process`, which the schema enumerates, and is valid only with `waiting`;
-anything else is invalid params. The schema's outcome description is the
+anything else is invalid params. `until`, also only with `waiting`, lists up
+to 4 conditions the server checks and wakes the agent on
+(`pr:<owner>/<repo>#<n>:merged`, `pr:<owner>/<repo>#<n>:checks`,
+`run:<run-id>:finished`; see
+[wait conditions](coordination.md#report-an-outcome)). The schema's outcome description is the
 same for every run; the server refuses outcomes a run's role or launch
 cannot use, and the instructions list the ones that apply. Before the server accepts a report, Aether
 captures the run's evidence, including a private Git evidence commit and a bounded PTY

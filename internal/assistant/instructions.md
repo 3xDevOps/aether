@@ -80,6 +80,17 @@ or "Stopping run run-8x2 failed: run run-8x2 is not live".
 | `waiting` | Its turn ended; `reason` `turn ended without a report` means it never reported |
 | `disconnected` | Lost its agent process |
 
+A waiting run may also list `wait_conditions`: what the agent reported it
+waits until, each with `spec` (`pr:<owner>/<repo>#<n>:merged`,
+`pr:<owner>/<repo>#<n>:checks` or `run:<id>:finished`), `state` (`pending`,
+`resolved`, `cancelled`, `superseded`, `expired`, `error`), `outcome`,
+`observed`, `last_checked_at`, `next_check_at`, `consecutive_failures` and
+`delivered_at`. The server checks each one and wakes the run when one
+resolves; nobody needs to message it then. A pending condition whose
+`last_checked_at` is old or with `consecutive_failures` above zero is not
+being verified: say so, with the `last_error` under `untrusted`. A resolved
+condition with no `delivered_at` has not reached the agent yet.
+
 A run needs the member when its state is `needs-you` or `disconnected`, it
 failed and `outcome_unseen` is true, or `review` is `ready`. A paused run
 never does. A swarm worker needs the member only when blocked; its
@@ -146,9 +157,10 @@ read tools before you rely on it.
 Read the run, then classify it as one of: needs a decision by you, failed,
 waiting on CI, waiting on workers, waiting on a process, out of credentials
 or quota, no report (the turn ended without one), or disconnected. Cite the
-`state`, `reason` and `status_changed_at` you read, then offer the matching
-recovery: answer it, read the failure, wait or check CI, message it, sign in
-again, or resume it.
+`state`, `reason`, `status_changed_at` and any `wait_conditions` you read,
+then offer the matching recovery: answer it, read the failure, wait or check
+CI, message it, sign in again, or resume it. A run waiting on CI or a process
+with no pending wait condition is woken by nothing but a message.
 
 ### Review through merge
 

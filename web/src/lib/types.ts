@@ -48,12 +48,20 @@ export interface RunInputRequest {
 export type WaitKind = 'pr_merged' | 'pr_checks' | 'run_finished'
 export type WaitState = 'pending' | 'resolved' | 'cancelled' | 'superseded' | 'expired' | 'error'
 
-export interface WaitChecks {
+export interface WaitCheckCounts {
   passed: number
   failed: number
   pending: number
   cancelled: number
+}
+
+/** Counts every check on the head commit. */
+export interface WaitChecks extends WaitCheckCounts {
+  /** The outcome is decided by the repo's required checks alone, counted in required. */
   required_only: boolean
+  required?: WaitCheckCounts
+  /** Required checks that never reported. */
+  missing?: string[]
 }
 
 export interface WaitObserved {
@@ -90,6 +98,8 @@ export interface WaitCondition {
   last_delivery_error?: string
   expires_at: string
   ended_cause?: string
+  /** The person who cancelled the condition. */
+  ended_by_member_id?: string
 }
 
 export interface Run {

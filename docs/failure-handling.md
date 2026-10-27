@@ -73,6 +73,15 @@ A CI or process wait keeps its state; an agents wait shows `waiting`, or
 next turn starts it over. A wait Aether infers from a swarm or background
 tasks lasts exactly as long as they do.
 
+A wait reported with `--until`
+([wait conditions](coordination.md#report-an-outcome)) is woken by the
+server when a condition resolves, not by a person. Run details lists each
+condition under **Waiting until** with when the server last verified it,
+when it checks next, its consecutive failures and the source's last error,
+and whether the wake reached the agent, so a condition the server cannot
+read, or a wake it cannot deliver, shows there. **Cancel** ends a pending
+one.
+
 Each `run.status` event for a live run carries a `cause` naming what chose
 its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
 `wait-expired`, `workers`, `tasks-held`, `human`, or `disconnect`. A live

@@ -539,6 +539,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     runChildrenAllow: vi.fn<Api['runChildrenAllow']>(async (_, children) => ({ children })),
     runChildDetach: vi.fn(async () => ({})),
+    runWaitCancel: vi.fn(async () => ({})),
     workspaceChildLimits: vi.fn<Api['workspaceChildLimits']>(async (_, limits) => ({ max_live: 8, max_depth: 3, max_total: 100, ...limits })),
     runRelease: vi.fn(async () => ({})),
     runGitStatus: vi.fn<Api['runGitStatus']>(async () => ({
