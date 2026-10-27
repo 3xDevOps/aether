@@ -403,13 +403,20 @@ func TestAPausedRunGetsItsWakeInItsInbox(t *testing.T) {
 	h.runs.pause(owner.ID, true)
 	h.status(target, domain.RunCompleted, "", "")
 	h.eventually("the message", func() bool { return len(h.inbox.messages(owner.ID)) == 1 })
+	// The message is written before its delivery is recorded.
+	h.eventually("the delivery recorded", func() bool { return h.only(owner.ID).DeliveredAt != "" })
 	notes, err := h.db.ListWatchNotifications(h.ctx, h.only(owner.ID).ID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(notes) != 1 || len(notes[0].Deliveries) != 1 || notes[0].Deliveries[0].Channel != protocol.WatchChannelRunInbox ||
-		!strings.Contains(notes[0].Deliveries[0].Detail, "paused") {
-		t.Fatalf("notices = %+v, want one run_inbox delivery saying the run is paused", notes)
+	var got []string
+	for _, n := range notes {
+		for _, d := range n.Deliveries {
+			got = append(got, d.Channel+" "+d.Status+": "+d.Detail)
+		}
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0], protocol.WatchChannelRunInbox+" "+protocol.WatchStatusDelivered+": ") || !strings.Contains(got[0], "paused") {
+		t.Fatalf("deliveries = %q, want one delivered run_inbox delivery saying the run is paused", got)
 	}
 }
 
