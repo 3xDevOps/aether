@@ -148,7 +148,7 @@ func TestUpdateReturnsPreviousAndNotesChanges(t *testing.T) {
 	if len(listed.Preferences) != 0 || len(all.Preferences) != 1 || all.Preferences[0].WorkspaceID != "" || !listed.Enabled {
 		t.Fatalf("after disabling: enabled list %+v, all %+v", listed, all)
 	}
-	if notes := f.svc.TakeChanges(f.alice); len(notes) != 1 || notes[0] != "preference "+p.ID+" was changed" {
+	if notes := f.svc.TakeChanges(f.alice); len(notes) != 2 || notes[0] != restarted || notes[1] != "preference "+p.ID+" was changed; do not use the old text" {
 		t.Fatalf("changes = %q", notes)
 	}
 	if notes := f.svc.TakeChanges(f.alice); len(notes) != 0 {
@@ -259,5 +259,37 @@ func TestDeleteRacingReads(t *testing.T) {
 		for err := range errs {
 			t.Fatalf("a read racing the delete failed: %v", err)
 		}
+	}
+}
+
+// A crash in the middle of a tombstone line does not corrupt the next one.
+func TestTombstoneAfterAPartialLine(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	p := f.add(t, "Prefer table output")
+	if err := os.WriteFile(filepath.Join(f.dir, "preference-tombstones"), []byte("pref-partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Delete(ctx, f.alice, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	deleted, _, err := f.svc.tombstones.read()
+	if err != nil || len(deleted) != 1 || deleted[0] != p.ID {
+		t.Fatalf("deleted = %q, %v; want only %s", deleted, err, p.ID)
+	}
+}
+
+// A cancelled request cannot roll back a change whose tombstone it wrote,
+// which a restore would later apply.
+func TestCancelledDeleteStillCommits(t *testing.T) {
+	f := newFixture(t)
+	p := f.add(t, "Prefer table output")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := f.svc.Delete(ctx, f.alice, p.ID); err != nil {
+		t.Fatalf("delete cancelled after its tombstone = %v", err)
+	}
+	if _, err := f.svc.Get(context.Background(), f.alice, p.ID); code(err) != protocol.CodeNotFound {
+		t.Fatalf("after the delete: %v", err)
 	}
 }

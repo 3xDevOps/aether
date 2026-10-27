@@ -287,7 +287,7 @@ func TestAutoApprovalNeverPassesAPreference(t *testing.T) {
 	if err := f.db.PutAssistantSettings(t.Context(), f.m.id, store.AssistantSettings{AutoApprove: true, ShareView: true, PreferencesEnabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	carrying := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "Fix the report. I PREFER TABLE OUTPUT."}
+	carrying := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "Fix the report. I PREFER TABLE\n  OUTPUT."}
 	if err := callTool(t, f.sock, f.m, protocol.MethodRunLaunch, carrying, true, true); err != nil {
 		t.Fatal(err)
 	}
@@ -316,5 +316,40 @@ func TestTemporaryIsSetInSettingsAndEndsWithANewConversation(t *testing.T) {
 	}
 	if got, err = f.svc.Settings(t.Context(), f.m.id); err != nil || got.Temporary || got.PreferencesEnabled {
 		t.Fatalf("after a new conversation = %+v, %v; want temporary cleared and preferences still off", got, err)
+	}
+}
+
+// A workspace's preferences apply only while its workspace is in view, and
+// a workspace-scoped save takes the workspace the message was sent from.
+func TestWorkspacePreferencesFollowTheView(t *testing.T) {
+	f := newPrefFixture(t)
+	ctx := t.Context()
+	ws := &domain.Workspace{Name: "api", BaseBranch: domain.DefaultBaseBranch}
+	if err := f.db.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.prefs.Add(ctx, f.m.id, "Prefer pnpm here", string(ws.ID), protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.prefs.Add(ctx, f.m.id, "Prefer table output", "", protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := f.mine(); len(list) != 1 || list[0].Scope != "all" {
+		t.Fatalf("with no workspace in view = %+v; want only the preference for all workspaces", list)
+	}
+	view := &protocol.AssistantViewContext{Version: 1, Route: protocol.AssistantViewEntry{Name: "workspace", WorkspaceID: string(ws.ID)}}
+	f.m.holdView(view, viewFromNavigation, time.Now())
+	if list, _ := f.mine(); len(list) != 2 {
+		t.Fatalf("with api in view = %+v; want both", list)
+	}
+
+	f.say(1, "from now on prefer bun for scripts")
+	if _, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true}); errCode(err) != protocol.CodeInvalidParams {
+		t.Fatalf("workspace_scoped with a navigation view = %v; want refused", err)
+	}
+	f.m.holdView(view, viewFromPrompt, time.Now())
+	saved, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true})
+	if err != nil || saved.Preference.WorkspaceID != string(ws.ID) {
+		t.Fatalf("workspace_scoped with the message's view = %+v, %v", saved, err)
 	}
 }

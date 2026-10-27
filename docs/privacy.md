@@ -455,7 +455,8 @@ remove:
 - copies a connected app or an agent made elsewhere.
 
 Removing a member deletes their preferences. Merging two members moves
-them to the member that remains.
+all of them to the member that remains, even past the 200 limit; new saves
+are then refused until enough are forgotten.
 
 ## Permissions
 

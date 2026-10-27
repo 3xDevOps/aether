@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -109,11 +110,14 @@ func (c *preferenceCaller) memoryOff(ctx context.Context) error {
 }
 
 // workspace is the workspace the member's held view is in, empty for none.
-func (c *preferenceCaller) workspace() string {
-	if v := c.s.View(c.m.id, time.Now()).ViewContext; v != nil {
-		return v.Route.WorkspaceID
+// fromPrompt keeps only the view their latest message carried, not one a
+// later navigation replaced it with.
+func (c *preferenceCaller) workspace(fromPrompt bool) string {
+	held := c.s.View(c.m.id, time.Now())
+	if held.ViewContext == nil || (fromPrompt && held.Source != viewFromPrompt) {
+		return ""
 	}
-	return ""
+	return held.ViewContext.Route.WorkspaceID
 }
 
 func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -133,10 +137,13 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 		out.Preferences = append(out.Preferences, shown(got))
 		return out, nil
 	}
-	listed, err := c.s.cfg.Preferences.List(ctx, c.m.id, protocol.PreferenceListParams{WorkspaceID: c.workspace(), Query: p.Query})
+	ws := c.workspace(false)
+	listed, err := c.s.cfg.Preferences.List(ctx, c.m.id, protocol.PreferenceListParams{WorkspaceID: ws, Query: p.Query})
 	if err != nil {
 		return nil, err
 	}
+	// With no workspace in view only the preferences for all of them apply.
+	listed.Preferences = slices.DeleteFunc(listed.Preferences, func(p protocol.Preference) bool { return ws == "" && p.WorkspaceID != "" })
 	var ids []string
 	size := 0
 	for _, pref := range listed.Preferences {
@@ -180,9 +187,9 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 	}
 	var ws string
 	if p.WorkspaceScoped {
-		if ws = c.workspace(); ws == "" {
-			return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "workspace_scoped needs a workspace in the member's view; " +
-				"save it for all workspaces or ask which workspace"}
+		if ws = c.workspace(true); ws == "" {
+			return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "workspace_scoped needs the workspace the member's message was sent from, " +
+				"and it carried none or they have navigated since; save it for all workspaces or ask which workspace"}
 		}
 	}
 	c.mu.Lock()
@@ -330,13 +337,13 @@ func (s *Service) carriesPreference(ctx context.Context, member domain.MemberID,
 		Message string `json:"message"`
 	}
 	_ = json.Unmarshal(c.Params, &sent)
-	text := strings.ToLower(sent.Task + "\n" + sent.Message)
+	text := fold.String(preference.Normalize(sent.Task + "\n" + sent.Message))
 	listed, err := s.cfg.Preferences.List(ctx, member, protocol.PreferenceListParams{})
 	if err != nil {
 		return true
 	}
 	for _, p := range listed.Preferences {
-		if strings.Contains(text, strings.ToLower(p.Text)) {
+		if strings.Contains(text, fold.String(p.Text)) {
 			return true
 		}
 	}
@@ -354,8 +361,7 @@ func (s *Service) preferenceNotes(member domain.MemberID) (blocks []acp.ContentB
 	if len(notes) == 0 {
 		return nil, func() {}
 	}
-	block := acp.TextBlock("\n\n<aether-preference-changes>\n" + strings.Join(notes, "; do not use the old text\n") +
-		"; do not use the old text\n</aether-preference-changes>")
+	block := acp.TextBlock("\n\n<aether-preference-changes>\n" + strings.Join(notes, "\n") + "\n</aether-preference-changes>")
 	block.Text.Annotations = &acp.Annotations{Audience: []acp.Role{acp.RoleAssistant}}
 	return []acp.ContentBlock{block}, func() { s.cfg.Preferences.RestoreChanges(member, notes) }
 }

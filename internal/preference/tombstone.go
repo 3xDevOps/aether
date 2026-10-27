@@ -32,7 +32,8 @@ func (t *tombstones) edited(id string, at time.Time) error {
 	return t.append(id + " " + strconv.FormatInt(at.UnixMilli(), 10))
 }
 
-// append writes line and syncs it before the change it records commits.
+// append writes line and syncs it before the change it records commits. A
+// leading newline ends a partial line a crash left, which read skips.
 func (t *tombstones) append(line string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -40,7 +41,7 @@ func (t *tombstones) append(line string) error {
 	if err != nil {
 		return fmt.Errorf("preference: record the change: %w", err)
 	}
-	if _, err = f.WriteString(line + "\n"); err == nil {
+	if _, err = f.WriteString("\n" + line + "\n"); err == nil {
 		err = f.Sync()
 	}
 	if cerr := f.Close(); err == nil {

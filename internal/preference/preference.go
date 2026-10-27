@@ -36,12 +36,22 @@ type Service struct {
 
 	mu      sync.Mutex
 	changes map[domain.MemberID][]string
+	// told holds the members whose assistant was told of changes since
+	// this process started; changes made before it are not known.
+	told map[domain.MemberID]bool
 }
+
+// restarted is the first note of each member after a start: changes made
+// before it were not kept, and the conversation may still hold their old
+// text.
+const restarted = "the server restarted, so your preferences may have changed since earlier in this conversation; " +
+	"use only what aether_my_preferences returns now"
 
 // New serves preferences from st. Deletions and text changes are recorded
 // in tombstonePath, which Restore reads.
 func New(st Store, tombstonePath string) *Service {
-	return &Service{store: st, tombstones: &tombstones{path: tombstonePath}, changes: make(map[domain.MemberID][]string)}
+	return &Service{store: st, tombstones: &tombstones{path: tombstonePath}, changes: make(map[domain.MemberID][]string),
+		told: make(map[domain.MemberID]bool)}
 }
 
 // Normalize is the form preferences are stored and compared in: NFKC,
@@ -186,7 +196,9 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 	if err := s.workspace(ctx, p.WorkspaceID); err != nil {
 		return protocol.PreferenceResult{}, err
 	}
-	old, cur, err := s.store.UpdatePreference(ctx, member, p.ID, func(row *store.Preference) error {
+	// Once the tombstone is synced the change must commit: a cancelled
+	// caller would leave a tombstone for a change that never happened.
+	old, cur, err := s.store.UpdatePreference(context.WithoutCancel(ctx), member, p.ID, func(row *store.Preference) error {
 		if p.Text != nil && text != row.Text {
 			row.Text, row.Source, row.SourceRef = text, source, ref
 		}
@@ -220,7 +232,7 @@ func (s *Service) Delete(ctx context.Context, member domain.MemberID, id string)
 	if id == "" {
 		return protocol.PreferenceDeleteResult{}, invalid("id is required")
 	}
-	row, err := s.store.DeletePreference(ctx, member, id, func(row store.Preference) error {
+	row, err := s.store.DeletePreference(context.WithoutCancel(ctx), member, id, func(row store.Preference) error {
 		return s.tombstones.deleted(row.ID)
 	})
 	if errors.Is(err, store.ErrNotFound) {
@@ -252,19 +264,24 @@ func (s *Service) Touch(ctx context.Context, member domain.MemberID, ids []strin
 func (s *Service) changed(member domain.MemberID, id, what string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	note := "preference " + id + " " + what
+	note := "preference " + id + " " + what + "; do not use the old text"
 	if !slices.Contains(s.changes[member], note) {
 		s.changes[member] = append(s.changes[member], note)
 	}
 }
 
 // TakeChanges returns and forgets what changed in the member's preferences
-// since the last call, one line per preference.
+// since the last call, one line per preference, for the assistant's next
+// prompt.
 func (s *Service) TakeChanges(member domain.MemberID) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	notes := s.changes[member]
 	delete(s.changes, member)
+	if !s.told[member] {
+		s.told[member] = true
+		notes = append([]string{restarted}, notes...)
+	}
 	return notes
 }
 
@@ -273,5 +290,8 @@ func (s *Service) TakeChanges(member domain.MemberID) []string {
 func (s *Service) RestoreChanges(member domain.MemberID, notes []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.changes[member] = append(notes, s.changes[member]...)
+	if len(notes) > 0 && notes[0] == restarted {
+		s.told[member], notes = false, notes[1:]
+	}
+	s.changes[member] = append(slices.Clone(notes), s.changes[member]...)
 }
