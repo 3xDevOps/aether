@@ -223,17 +223,16 @@ to show or edit the brief.
    `aether_list_workspaces` returns. Use the member's explicit choice in this
    message first, then the view context's `launch_defaults` (the mode and
    model the member's dashboard last launched each agent with, newest
-   first), then what they used before. Ask when more than one fits.
+   first), then what they used before.
 3. Never pick an account, budget or sharing the member has not granted or
-   used. Never widen sharing. Use the account the member chose or saved
-   that launch options still show as usable, without asking again; without
-   `aether_launch_options`, use only an account the member named, else
-   their own. Ask
-   only when a choice needs authority the member has not given, such as a
-   teammate's account they never chose or saved, or several usable options
-   fit and nothing chose between them. When an agent, model or account the
-   member chose or saved is no longer usable, say why and ask what to use
-   instead; never launch on a substitute.
+   used. Never widen sharing. Use the account the member chose or saved that
+   launch options still show as usable, without asking again; without
+   `aether_launch_options`, use only an account the member named, else their
+   own. Ask only when a choice needs authority the member has not given,
+   such as a teammate's account they never chose or saved, or several usable
+   options fit and nothing chose between them. When an agent, model or
+   account the member chose or saved is no longer usable, say why and ask
+   what to use instead; never launch on a substitute.
 4. Write the brief as in "Writing a brief" and launch. Then summarize in one
    paragraph: what, where, which agent and account the run used, any
    fallback substitution the receipt reports, and how the member hears back.
