@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +19,10 @@ import (
 // ErrAssistantSignInChanged means an agent's sign-in in the assistant home is
 // not the one the member made: only the assistant's own agent writes there.
 var ErrAssistantSignInChanged = errors.New("the assistant's sign-in changed since you signed in. Sign in again")
+
+// ErrAssistantNotSignedIn means the member made no sign-in for the agent
+// that the server recorded.
+var ErrAssistantNotSignedIn = errors.New("not signed in for the assistant. Sign in for the assistant first")
 
 // assistantSignInDir holds what the server recorded of each agent's sign-in:
 // <agent>.json, the identity of the sign-in the member made, and
@@ -33,26 +36,38 @@ func assistantSignInDir(root string, member domain.MemberID) string {
 var assistantSignInRel = map[string]string{"claude": ".claude/.credentials.json", "codex": ".codex/auth.json"}
 
 // assistantSignInIdentity is what of agent's sign-in file must not change
-// between the member's sign-in and a start. Codex names its account in the
-// access token (an OpenAI-signed JWT) or is an API key; the Claude Code file
-// names no account, so its key set and the fields a token refresh leaves
-// alone stand in for one.
+// between the member's sign-in and a start.
+//
+// Codex 0.159.3 uses auth_mode when it is set, else an API key over tokens;
+// a ChatGPT sign-in may hold an API key from its token exchange too. The
+// identity is that mode, the ChatGPT account its access token (an
+// OpenAI-signed JWT) names, and a hash of any API key.
+//
+// The Claude Code file names no account. Its refresh rewrites claudeAiOauth
+// with scopes from the response and the previous subscriptionType and
+// rateLimitTier, else null, and drops clientId or refreshTokenExpiresAt when
+// unknown; those three values stand in for an account.
 func assistantSignInIdentity(agent string, data []byte) (string, error) {
 	switch agent {
 	case "claude":
 		var file struct {
-			OAuth map[string]json.RawMessage `json:"claudeAiOauth"`
+			OAuth *struct {
+				Scopes       []string `json:"scopes"`
+				Subscription *string  `json:"subscriptionType"`
+				RateLimit    *string  `json:"rateLimitTier"`
+			} `json:"claudeAiOauth"`
 		}
 		if err := json.Unmarshal(data, &file); err != nil || file.OAuth == nil {
 			return "", errors.New("the Claude Code sign-in holds no claudeAiOauth")
 		}
-		parts := []string{"keys=" + strings.Join(slices.Sorted(maps.Keys(file.OAuth)), ",")}
-		for _, key := range []string{"scopes", "subscriptionType", "rateLimitTier"} {
-			parts = append(parts, key+"="+string(file.OAuth[key]))
+		id, err := json.Marshal([]any{slices.Sorted(slices.Values(file.OAuth.Scopes)), file.OAuth.Subscription, file.OAuth.RateLimit})
+		if err != nil {
+			return "", fmt.Errorf("encode the Claude Code sign-in: %w", err)
 		}
-		return strings.Join(parts, ";"), nil
+		return string(id), nil
 	case "codex":
 		var file struct {
+			Mode   string  `json:"auth_mode"`
 			Key    *string `json:"OPENAI_API_KEY"`
 			Tokens *struct {
 				Access string `json:"access_token"`
@@ -61,18 +76,33 @@ func assistantSignInIdentity(agent string, data []byte) (string, error) {
 		if err := json.Unmarshal(data, &file); err != nil {
 			return "", fmt.Errorf("read the Codex sign-in: %w", err)
 		}
-		if file.Tokens != nil && file.Tokens.Access != "" {
+		hasKey := file.Key != nil && *file.Key != ""
+		mode := file.Mode
+		switch {
+		case mode != "":
+		case hasKey:
+			mode = "apikey"
+		default:
+			mode = "chatgpt"
+		}
+		id := mode
+		if mode == "chatgpt" {
+			if file.Tokens == nil || file.Tokens.Access == "" {
+				return "", errors.New("the Codex sign-in holds no ChatGPT tokens")
+			}
 			account, err := codexAccount(file.Tokens.Access)
 			if err != nil {
 				return "", err
 			}
-			return "chatgpt:" + account, nil
+			id += ":" + account
 		}
-		if file.Key != nil && *file.Key != "" {
+		if hasKey {
 			sum := sha256.Sum256([]byte(*file.Key))
-			return "apikey:" + hex.EncodeToString(sum[:]), nil
+			id += ":key=" + hex.EncodeToString(sum[:])
+		} else if mode == "apikey" {
+			return "", errors.New("the Codex sign-in holds no API key")
 		}
-		return "", errors.New("the Codex sign-in holds neither tokens nor an API key")
+		return id, nil
 	}
 	return "", fmt.Errorf("agent %q cannot run the assistant", agent)
 }
@@ -143,18 +173,22 @@ func (s *Scheduler) pinAssistantSignIns(member domain.MemberID) error {
 		} else if err != nil {
 			return fmt.Errorf("scheduler: read the assistant sign-in record: %w", err)
 		}
-		data, err := s.readAssistantSignIn(member, agent)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
+		// A sign-in that wrote nothing usable leaves the agent not signed in,
+		// and no pending record to fail every later start on.
+		data, idErr := s.readAssistantSignIn(member, agent)
+		record := filepath.Join(dir, agent+".json")
+		var identity string
+		if idErr == nil {
+			identity, idErr = assistantSignInIdentity(agent, data)
 		}
-		if err == nil {
-			identity, idErr := assistantSignInIdentity(agent, data)
-			if idErr != nil {
-				return fmt.Errorf("scheduler: %w", idErr)
-			}
-			if err = os.WriteFile(filepath.Join(dir, agent+".json"), []byte(identity), 0o600); err != nil {
-				return fmt.Errorf("scheduler: record the assistant sign-in: %w", err)
-			}
+		var err error
+		if idErr == nil {
+			err = os.WriteFile(record, []byte(identity), 0o600)
+		} else {
+			err = os.Remove(record)
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("scheduler: record the assistant sign-in: %w", err)
 		}
 		if err = os.Remove(pending); err != nil {
 			return fmt.Errorf("scheduler: record the assistant sign-in: %w", err)
@@ -163,8 +197,9 @@ func (s *Scheduler) pinAssistantSignIns(member domain.MemberID) error {
 	return nil
 }
 
-// checkAssistantSignIn returns ErrAssistantSignInChanged unless agent's
-// sign-in matches the one recorded, or a sign-in is pending a record.
+// checkAssistantSignIn returns ErrAssistantNotSignedIn when agent has no
+// recorded sign-in or no sign-in file, and ErrAssistantSignInChanged when the
+// file does not match the record. A sign-in pending a record passes.
 func (s *Scheduler) checkAssistantSignIn(member domain.MemberID, agent string) error {
 	dir := assistantSignInDir(s.cfg.AssistantDir, member)
 	if _, err := os.Stat(filepath.Join(dir, agent+".pending")); err == nil {
@@ -172,12 +207,15 @@ func (s *Scheduler) checkAssistantSignIn(member domain.MemberID, agent string) e
 	}
 	want, err := os.ReadFile(filepath.Join(dir, agent+".json"))
 	if errors.Is(err, fs.ErrNotExist) {
-		return ErrAssistantSignInChanged
+		return ErrAssistantNotSignedIn
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler: read the assistant sign-in record: %w", err)
 	}
 	data, err := s.readAssistantSignIn(member, agent)
+	if errors.Is(err, fs.ErrNotExist) {
+		return ErrAssistantNotSignedIn
+	}
 	if err != nil {
 		return err
 	}

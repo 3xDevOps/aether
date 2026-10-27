@@ -54,9 +54,14 @@ func TestAssistantSignInPinRefusesAnotherAccount(t *testing.T) {
 		{"codex refresh", "codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"access_token":"` + codexToken("acct-alice") + `","refresh_token":"r2"}}`, false},
 		{"codex foreign account", "codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"access_token":"` + codexToken("acct-mallory") + `","refresh_token":"r3","account_id":"acct-alice"}}`, true},
 		{"codex foreign API key", "codex", ".codex/auth.json", `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-synthetic-mallory"}`, true},
-		{"claude refresh", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a2","refreshToken":"r2","expiresAt":2,"scopes":["user:inference"],"subscriptionType":"max"}}`, false},
+		// Codex picks auth_mode, else an API key over tokens.
+		{"codex API key mode over Alice's tokens", "codex", ".codex/auth.json", `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"access_token":"` + codexToken("acct-alice") + `"}}`, true},
+		{"codex API key beside Alice's tokens", "codex", ".codex/auth.json", `{"OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"access_token":"` + codexToken("acct-alice") + `"}}`, true},
+		{"codex API key added in ChatGPT mode", "codex", ".codex/auth.json", `{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-synthetic-mallory","tokens":{"access_token":"` + codexToken("acct-alice") + `"}}`, true},
+		// The pinned CLI's refresh adds clientId and a null rateLimitTier.
+		{"claude refresh", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a2","refreshToken":"r2","expiresAt":2,"scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":null,"clientId":"c1"}}`, false},
 		{"claude other plan", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a3","refreshToken":"r3","expiresAt":3,"scopes":["user:inference"],"subscriptionType":"pro"}}`, true},
-		{"claude other fields", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a3","refreshToken":"r3","expiresAt":3,"scopes":["user:inference"]}}`, true},
+		{"claude other scopes", "claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a3","refreshToken":"r3","expiresAt":3,"scopes":["user:profile"],"subscriptionType":"max"}}`, true},
 	} {
 		writeHomeFile(t, home, tc.rel, tc.content)
 		err := start(tc.agent)
@@ -132,5 +137,39 @@ func TestAssistantLoginTranscriptsAreRemoved(t *testing.T) {
 	}
 	if want := []ptyhost.SessionKey{ptyhost.AssistantLoginSession(e.member.ID, "claude"), key}; !slices.Equal(e.pty.removedTranscripts, want) {
 		t.Fatalf("RemoveAssistant removed %v, want %v", e.pty.removedTranscripts, want)
+	}
+}
+
+// TestAssistantSignInThatWroteNothingUsable leaves an agent whose sign-in
+// wrote no usable file not signed in, with no pending record to refuse every
+// later start or sign-in on.
+func TestAssistantSignInThatWroteNothingUsable(t *testing.T) {
+	t.Parallel()
+	assistantDir := filepath.Join(t.TempDir(), "assistant")
+	e := newTestEnv(t, func(c *Config) {
+		c.ServerBinary = fakeServerBinary(t, "current build")
+		c.AssistantDir = assistantDir
+	})
+	withCoordination(t, e)
+	home := AssistantHomeDir(assistantDir, e.member.ID)
+	start := func() error {
+		_, err := e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, "")
+		return err
+	}
+	if err := start(); !errors.Is(err, ErrAssistantNotSignedIn) {
+		t.Fatalf("a start with no sign-in = %v, want not signed in", err)
+	}
+	if err := e.sched.markAssistantSignIn(e.member.ID, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFile(t, home, ".claude/.credentials.json", `{}`)
+	if err := start(); !errors.Is(err, ErrAssistantNotSignedIn) {
+		t.Fatalf("a start after an unusable sign-in = %v, want not signed in", err)
+	}
+	if _, err := os.Stat(filepath.Join(assistantSignInDir(assistantDir, e.member.ID), "claude.pending")); !os.IsNotExist(err) {
+		t.Fatalf("the unusable sign-in is still pending: %v", err)
+	}
+	if _, err := e.sched.StartAssistantLogin(t.Context(), e.member.ID, "claude", 80, 24); err != nil {
+		t.Fatalf("a sign-in after the unusable one: %v", err)
 	}
 }

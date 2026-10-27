@@ -54,7 +54,7 @@ func readSignInFile(root *os.Root, rel string) ([]byte, error) {
 // other auth modes from its own.
 var assistantLoginKeys = map[string]map[string][]string{
 	".claude/.credentials.json": {
-		"claudeAiOauth": {"accessToken", "refreshToken", "expiresAt", "refreshTokenExpiresAt", "scopes", "subscriptionType", "rateLimitTier"},
+		"claudeAiOauth": {"accessToken", "refreshToken", "expiresAt", "refreshTokenExpiresAt", "scopes", "subscriptionType", "rateLimitTier", "clientId"},
 	},
 	".codex/auth.json": {
 		"auth_mode":      nil,
@@ -256,7 +256,7 @@ func (s *Scheduler) AssistantLoginFound(member domain.MemberID, agent string) (b
 		}
 		if info.Mode().IsRegular() && info.Size() > 0 {
 			err = s.checkAssistantSignIn(member, agent)
-			if errors.Is(err, ErrAssistantSignInChanged) {
+			if errors.Is(err, ErrAssistantSignInChanged) || errors.Is(err, ErrAssistantNotSignedIn) {
 				return false, nil
 			}
 			return err == nil, err
