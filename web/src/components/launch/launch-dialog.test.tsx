@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
+import { useLaunchDefaults } from '@/store/launch-defaults'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { agentInfo, alice, bob, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
 import { chooseModel, pickModel } from '@/test/model'
@@ -22,6 +23,8 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   vi.mocked(api.agentList).mockResolvedValue([claude()])
   vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
+  vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 0, defaults: {} })
+  useLaunchDefaults.setState({ result: null, error: null })
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
     activeWorkspace: workspace.id,
@@ -443,8 +446,8 @@ describe('extra repos', () => {
 
 describe('swarm', () => {
   beforeEach(() => {
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 1, defaults: { agent: 'claude', agents: { claude: { mode: 'tui' } } } })
     useStore.setState({
-      launchDefaults: { claude: { mode: 'tui', at: 1 } },
       capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
       route: { name: 'missions', params: {} },
     })
@@ -471,18 +474,19 @@ describe('swarm', () => {
     fireEvent.click(createButton())
   }
 
-  it('starts a never-launched integrator in Enhanced and remembers the swarm choice', async () => {
-    useStore.setState({ launchDefaults: {} })
+  it('starts a never-launched integrator in Enhanced and saves the swarm choice on the server', async () => {
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 0, defaults: {} })
     await openSwarm()
     expect(within(screen.getByRole('radiogroup', { name: 'Integrator mode' })).getByRole('radio', { name: 'Enhanced' }).getAttribute('aria-checked')).toBe('true')
     await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Integrator mode' })).getByRole('radio', { name: 'Standard' }))
     await create('coordinate checkout work')
     await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
     expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({ defaults: { agent: 'claude', agents: { claude: { mode: 'tui' } } }, revision: 0 }))
   })
 
   it('sends an Enhanced integrator and Enhanced workers for a never-launched agent', async () => {
-    useStore.setState({ launchDefaults: {} })
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 0, defaults: {} })
     await openSwarm()
     await create('coordinate checkout work')
     await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
@@ -513,7 +517,7 @@ describe('swarm', () => {
     const codex = (over: Parameters<typeof agentInfo>[0] = {}) =>
       agentInfo({ name: 'codex', display_name: 'Codex', enhanced: 'adapter', enhanced_installed: true, swarm_standard_refusal: reason, ...over })
     vi.mocked(api.agentList).mockResolvedValue([claude(), codex(), codex({ name: 'antigravity', display_name: 'Antigravity', enhanced: 'none', enhanced_installed: false })])
-    useStore.setState({ launchDefaults: { codex: { mode: 'tui', at: 2 } } })
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 1, defaults: { agent: 'codex', agents: { codex: { mode: 'tui' } } } })
     render(<LaunchDialog />)
     await waitFor(() => expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true'))
     const integratorMode = (name: string) =>
@@ -825,5 +829,98 @@ describe('swarm', () => {
     await openSwarm()
     await submit('coordinate checkout work', 6)
     expect(key(5)).not.toBe(key(0))
+  })
+})
+
+describe('saved launch defaults', () => {
+  const everyMethod = { gateway: 'remote' as const, methods: ['*'], ws: [] }
+
+  beforeEach(() => {
+    vi.mocked(api.agentList).mockResolvedValue([claude(), agentInfo({ name: 'codex', display_name: 'Codex', login_found: true })])
+    useStore.setState({ capabilities: everyMethod, launchDefaults: { codex: { mode: 'headless', at: 2 } } })
+  })
+
+  it('preselects the server\'s saved agent, mode and model over this browser\'s, and saves the launch there', async () => {
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 3, defaults: { agent: 'claude', agents: { claude: { mode: 'tui', model: 'opus' } }, account_member_id: '' } })
+    await open()
+    expect(agentRow(/^Claude Code/).getAttribute('aria-checked')).toBe('true')
+    expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('opus')
+
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'tui', model: 'opus' }))
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({
+      defaults: { agent: 'claude', agents: { claude: { mode: 'tui', model: 'opus' } }, account_member_id: '' },
+      revision: 3,
+    }))
+  })
+
+  it('uses this browser\'s choices when the server keeps none', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list'], ws: [] } })
+    render(<LaunchDialog />)
+    await waitFor(() => expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true'))
+    expect(modeSegment('Background').getAttribute('aria-checked')).toBe('true')
+    expect(api.launchDefaultsGet).not.toHaveBeenCalled()
+  })
+
+  it('uses this browser\'s choices when the saved ones cannot be read', async () => {
+    vi.mocked(api.launchDefaultsGet).mockRejectedValue(new Error('launch.defaults.get: connection refused'))
+    render(<LaunchDialog />)
+    await waitFor(() => expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true'))
+  })
+
+  it('applies the launch to the choices another device saved meanwhile', async () => {
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 3, defaults: { agent: 'claude' } })
+    vi.mocked(api.launchDefaultsSet).mockRejectedValueOnce(Object.assign(new Error('launch.defaults.set: revision 3 is not current'), {
+      code: -32003,
+      data: { revision: 4, defaults: { agent: 'codex', account_member_id: bob.id } },
+    }))
+    await open()
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.launchDefaultsSet).mock.calls[1][0]).toEqual({
+      defaults: { agent: 'claude', agents: { claude: { mode: 'acp' } }, account_member_id: bob.id },
+      revision: 4,
+    })
+  })
+
+  it('preselects the saved account and fallback, and saves them only when asked', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera], shared_with: [] })
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 2, defaults: { agent: 'claude', account_member_id: bob.id, fallback: { policy: 'off' } } })
+    await open()
+    await waitFor(() => expect(api.agentList).toHaveBeenCalledWith(bob.id))
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', account_member_id: bob.id, no_fallback: true }))
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledTimes(1))
+    const saved = vi.mocked(api.launchDefaultsSet).mock.calls[0][0].defaults
+    expect(saved?.account_member_id).toBe(bob.id)
+    expect(saved?.fallback).toEqual({ policy: 'off' })
+  })
+
+  it('saves the account and fallback with Save as my default', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Options/ }))
+    await pickOption(screen.getByRole('combobox', { name: 'Account' }), `${bob.display_name} (shared)`)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Fall back to another account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save as my default' }))
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({ defaults: { account_member_id: bob.id, fallback: { policy: 'off' } }, revision: 0 }))
+    expect(await screen.findByText('Saved for every device.')).toBeDefined()
+  })
+
+  it('names a saved account that is no longer shared, with the reason, and launches on your own', async () => {
+    const reason = `permission denied: member ${bob.id} has not shared their account with you`
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, vera], shared_with: [] })
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({
+      revision: 2,
+      defaults: { agent: 'claude', account_member_id: bob.id },
+      invalid: [{ field: 'account_member_id', value: bob.id, reason }],
+    })
+    await open()
+    expect(await screen.findByText('Saved defaults not used')).toBeDefined()
+    expect(screen.getByText((_, node) => node?.tagName === 'LI' && node.textContent === `Account ${bob.id}: ${reason}`)).toBeDefined()
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp' }))
   })
 })

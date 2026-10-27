@@ -7,15 +7,25 @@ import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { AgentInfo, LaunchMode } from '@/lib/types'
+import type { AgentInfo, LaunchDefaultsResult, LaunchMode } from '@/lib/types'
 import { useStore } from '@/store'
+import { useLaunchDefaultsRead, useLaunchDefaultsSupported } from '@/store/launch-defaults'
 
-function preselect(list: AgentInfo[], preferred?: string): string {
+/** The mode and model last chosen for `name`: saved on the server when it keeps them, else on this browser. */
+function remembered(name: string, saved: LaunchDefaultsResult | null): { mode?: LaunchMode; model?: string } {
+  if (!saved) return useStore.getState().launchDefaults[name] ?? {}
+  const choice = saved.defaults.agents?.[name]
+  return { ...(choice?.mode ? { mode: choice.mode } : {}), ...(choice?.model ? { model: choice.model } : {}) }
+}
+
+function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, preferred?: string): string {
   const { launchDefaults, runs } = useStore.getState()
   const ok = list.filter(launchable)
   if (preferred && ok.some((agent) => agent.name === preferred)) return preferred
-  const remembered = ok.filter((agent) => launchDefaults[agent.name]).sort((a, b) => launchDefaults[b.name].at - launchDefaults[a.name].at)[0]
-  if (remembered) return remembered.name
+  const last = saved
+    ? ok.find((agent) => agent.name === saved.defaults.agent)
+    : ok.filter((agent) => launchDefaults[agent.name]).sort((a, b) => launchDefaults[b.name].at - launchDefaults[a.name].at)[0]
+  if (last) return last.name
   const recent = Object.values(runs)
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .find((run) => ok.some((agent) => agent.name === run.harness))
@@ -23,7 +33,9 @@ function preselect(list: AgentInfo[], preferred?: string): string {
 }
 
 /** The agent, mode and model a launch uses, reloaded for each account; `preferred`
- * wins the first pick when that agent can launch, with `preferredModel` as its model. */
+ * wins the first pick when that agent can launch, with `preferredModel` as its model.
+ * The first pick waits for the server's saved choices, or uses this browser's
+ * when the server keeps none or cannot be read. */
 export function useAgentChoice({ account, ownAccountID, preferred, preferredModel, client = api }: {
   account: string
   ownAccountID: string
@@ -37,15 +49,18 @@ export function useAgentChoice({ account, ownAccountID, preferred, preferredMode
   const [mode, setMode] = useState<LaunchMode>('tui')
   const [model, setModel] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const choice = useRef({ harness, mode, preferred, preferredModel })
-  choice.current = { ...choice.current, harness, mode }
+  const supported = useLaunchDefaultsSupported()
+  const read = useLaunchDefaultsRead(client)
+  const savedReady = !supported || read.result !== null || read.error !== null
+  const choice = useRef({ harness, mode, preferred, preferredModel, saved: read.result })
+  choice.current = { ...choice.current, harness, mode, saved: read.result }
 
   const choose = useCallback((name: string, list: AgentInfo[]) => {
     setHarness(name)
     const info = list.find((item) => item.name === name)
-    const remembered = useStore.getState().launchDefaults[name]
-    setMode(initialMode(info, name, remembered?.mode))
-    setModel(remembered?.model ?? '')
+    const last = remembered(name, choice.current.saved)
+    setMode(initialMode(info, name, last.mode))
+    setModel(last.model ?? '')
   }, [])
 
   useEffect(() => {
@@ -53,23 +68,26 @@ export function useAgentChoice({ account, ownAccountID, preferred, preferredMode
     setAgents(null)
     setAgentError(null)
     client.agentList(account && account !== ownAccountID ? account : undefined).then((list) => {
-      if (!live) return
-      setAgents(list)
-      const current = choice.current
-      const keep = current.harness === customAgent || list.some((item) => item.name === current.harness && launchable(item))
-      if (!keep) {
-        const name = preselect(list, current.preferred)
-        choose(name, list)
-        if (name === current.preferred && current.preferredModel !== undefined) setModel(current.preferredModel)
-      }
-      else if (modeRefusal(list.find((item) => item.name === current.harness), current.harness, current.mode)) setMode('tui')
+      if (live) setAgents(list)
     }).catch((err) => {
       if (!live) return
       setAgents([])
       setAgentError(message(err))
     })
     return () => { live = false }
-  }, [account, ownAccountID, client, choose, attempt])
+  }, [account, ownAccountID, client, attempt])
+
+  useEffect(() => {
+    if (!agents || agentError !== null || !savedReady) return
+    const current = choice.current
+    const keep = current.harness === customAgent || agents.some((item) => item.name === current.harness && launchable(item))
+    if (!keep) {
+      const name = preselect(agents, current.saved, current.preferred)
+      choose(name, agents)
+      if (name === current.preferred && current.preferredModel !== undefined) setModel(current.preferredModel)
+    }
+    else if (modeRefusal(agents.find((item) => item.name === current.harness), current.harness, current.mode)) setMode('tui')
+  }, [agents, agentError, savedReady, choose])
 
   const agent = agents?.find((item) => item.name === harness)
   const noAgents = agents !== null && agentError === null && !agents.some((item) => item.installed)

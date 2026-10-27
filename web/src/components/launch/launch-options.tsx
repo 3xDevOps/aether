@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { ChevronDown, ChevronUp, GitBranch } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -97,6 +98,7 @@ export function AccountOptions({
   fallback,
   onFallback,
   swarm = false,
+  save,
 }: {
   label: string
   accounts: Member[]
@@ -106,6 +108,7 @@ export function AccountOptions({
   fallback: Fallback
   onFallback: (fallback: Fallback) => void
   swarm?: boolean
+  save?: ReactNode
 }) {
   // A swarm's list is every worker's policy too; the server skips each run's current account.
   const skip = swarm ? '' : account
@@ -138,6 +141,7 @@ export function AccountOptions({
             : 'A teammate who shares their agent account appears here.'}
         </p>
         <FallbackList accounts={accounts} account={account} skip={skip} accountName={accountName} fallback={fallback} onChange={onFallback} />
+        {save}
       </CollapsibleContent>
     </Collapsible>
   )

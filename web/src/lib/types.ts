@@ -5,6 +5,7 @@ import type { DevArtifact } from '@/lib/development-types'
 export * from '@/lib/development-types'
 export * from '@/lib/run-repository-types'
 export * from '@/lib/child-types'
+export * from '@/lib/launch-defaults-types'
 
 export type RunStatus =
   | 'queued'
