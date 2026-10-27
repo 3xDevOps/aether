@@ -124,6 +124,8 @@ type WaitCondition struct {
 	LastDeliveryError   string       `json:"last_delivery_error,omitempty"`
 	ExpiresAt           string       `json:"expires_at"`
 	EndedCause          string       `json:"ended_cause,omitempty"`
+	// EndedByMemberID is the member who cancelled it with run.wait.cancel.
+	EndedByMemberID string `json:"ended_by_member_id,omitempty"`
 }
 
 type RunWaitCancelParams struct {

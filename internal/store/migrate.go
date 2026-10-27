@@ -2231,6 +2231,7 @@ ALTER TABLE watches ADD COLUMN wait_state TEXT NOT NULL DEFAULT '';
 ALTER TABLE watches ADD COLUMN wait_outcome TEXT NOT NULL DEFAULT '';
 ALTER TABLE watches ADD COLUMN wait_summary TEXT NOT NULL DEFAULT '';
 ALTER TABLE watches ADD COLUMN wait_cause TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_ended_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE watches ADD COLUMN wait_source_checked_at INTEGER;
 ALTER TABLE watches ADD COLUMN wait_error_at INTEGER;
 ALTER TABLE watches ADD COLUMN wait_resolved_at INTEGER;

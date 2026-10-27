@@ -42,6 +42,7 @@ var memberRefs = map[string]bool{
 	"watches.member_id":                                    true,
 	"notify_prefs.member_id":                               true,
 	"watch_pr_snapshots.member_id":                         false,
+	"watches.wait_ended_by":                                false,
 	"assistant_settings.member_id":                         false,
 	"launch_defaults.member_id":                            false,
 	"launch_defaults.account_member_id":                    true,

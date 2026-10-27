@@ -179,10 +179,10 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait) error {
 		return err
 	}
 	if owner.Status.Terminal() {
-		return s.endWaits(ctx, w.OwnerRunID, "", protocol.WaitCancelled, "the run ended "+string(owner.Status))
+		return s.endWaits(ctx, w.OwnerRunID, "", "the run ended "+string(owner.Status), "")
 	}
-	if err := s.allowed(ctx, &w.Watch); errors.Is(err, errRevoked) {
-		return s.endWaits(ctx, w.OwnerRunID, "", protocol.WaitCancelled, "the run's member lost access: "+err.Error())
+	if err = s.allowed(ctx, &w.Watch); errors.Is(err, errRevoked) {
+		return s.endWaits(ctx, w.OwnerRunID, "", "the run's member lost access: "+err.Error(), "")
 	} else if err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait) error {
 		}
 		next = minTime(next, w.ExpiresAt)
 		w.NextCheckAt = &next
-		_, err := s.store.CommitRunWait(ctx, w, nil)
+		_, err = s.store.CommitRunWait(ctx, w, nil)
 		if err == nil && (before.Error != w.Error || before.State != w.State) {
 			s.waitChanged(ctx, w)
 		}
@@ -315,9 +315,9 @@ func runEnd(run *domain.Run) (outcome string, ended bool) {
 	return "", false
 }
 
-// endWaits ends run's pending waits, or only wait, and announces them.
-func (s *Service) endWaits(ctx context.Context, run domain.RunID, wait, state, cause string) error {
-	ended, err := s.store.EndRunWaits(ctx, run, wait, state, cause, s.now())
+// endWaits cancels run's pending waits, or only wait, and announces them.
+func (s *Service) endWaits(ctx context.Context, run domain.RunID, wait, cause string, by domain.MemberID) error {
+	ended, err := s.store.EndRunWaits(ctx, run, wait, protocol.WaitCancelled, cause, by, s.now())
 	if err != nil {
 		return err
 	}
@@ -330,7 +330,7 @@ func (s *Service) endWaits(ctx context.Context, run domain.RunID, wait, state, c
 // EndRunWaits cancels run's pending wait conditions and their undelivered
 // wakes, for cause: another report, a person's prompt or a relaunch.
 func (s *Service) EndRunWaits(ctx context.Context, run domain.RunID, cause string) error {
-	return s.endWaits(ctx, run, "", protocol.WaitCancelled, cause)
+	return s.endWaits(ctx, run, "", cause, "")
 }
 
 // CancelRunWait cancels one of run's wait conditions for actor. The caller
@@ -346,7 +346,7 @@ func (s *Service) CancelRunWait(ctx context.Context, run domain.RunID, wait stri
 	if w.OwnerRunID != run {
 		return protocol.WaitCondition{}, fmt.Errorf("store: wait %s: %w", wait, store.ErrNotFound)
 	}
-	if err := s.endWaits(ctx, run, wait, protocol.WaitCancelled, "cancelled by "+string(actor)); err != nil {
+	if err = s.endWaits(ctx, run, wait, protocol.WaitCancelled, actor); err != nil {
 		return protocol.WaitCondition{}, err
 	}
 	if w, err = s.store.GetRunWait(ctx, wait); err != nil {
@@ -379,7 +379,7 @@ func waitProto(w *store.RunWait) (protocol.WaitCondition, error) {
 		LastCheckedAt: stamp(w.LastCheckAt), SourceCheckedAt: stamp(w.SourceCheckedAt), NextCheckAt: stamp(w.NextCheckAt),
 		ConsecutiveFailures: w.Failures, LastError: w.Error, LastErrorAt: stamp(w.ErrorAt), ResolvedAt: stamp(w.ResolvedAt),
 		DeliveredAt: stamp(w.DeliveredAt), DeliveryAttempts: w.DeliveryAttempts, LastDeliveryError: w.DeliveryError,
-		ExpiresAt: stamp(&w.ExpiresAt), EndedCause: w.Cause,
+		ExpiresAt: stamp(&w.ExpiresAt), EndedCause: w.Cause, EndedByMemberID: string(w.EndedBy),
 	}
 	if err := json.Unmarshal(w.Observed, &out.Observed); err != nil {
 		return protocol.WaitCondition{}, fmt.Errorf("wait %s observed: %w", w.ID, err)

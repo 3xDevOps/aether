@@ -17,15 +17,17 @@ import (
 // Revision. DeliveryNextAt is set while the wake is due to the run's inbox.
 type RunWait struct {
 	Watch
-	Revision         int64
-	ReportKey        string
-	Spec             string
-	Kind             string
-	TargetRun        domain.RunID
-	WaitState        string
-	Outcome          string
-	Summary          string
-	Cause            string
+	Revision  int64
+	ReportKey string
+	Spec      string
+	Kind      string
+	TargetRun domain.RunID
+	WaitState string
+	Outcome   string
+	Summary   string
+	Cause     string
+	// EndedBy is the member who cancelled the wait, if one did.
+	EndedBy          domain.MemberID
 	SourceCheckedAt  *time.Time
 	ErrorAt          *time.Time
 	ResolvedAt       *time.Time
@@ -49,7 +51,7 @@ func (w *RunWait) Woke() bool {
 }
 
 const runWaitColumns = watchColumns + `, wait_revision, wait_report_key, wait_spec, wait_kind, wait_target_run, wait_state,
-	wait_outcome, wait_summary, wait_cause, wait_source_checked_at, wait_error_at, wait_resolved_at, wait_delivered_at,
+	wait_outcome, wait_summary, wait_cause, wait_ended_by, wait_source_checked_at, wait_error_at, wait_resolved_at, wait_delivered_at,
 	wait_delivery_attempts, wait_delivery_next_at, wait_delivery_error`
 
 // trailingScan scans a row's trailing columns into extra after the ones its
@@ -67,7 +69,7 @@ func scanRunWait(row interface{ Scan(...any) error }) (*RunWait, error) {
 		checked, errAt, resolved, delivered, next *int64
 	)
 	w, err := scanWatch(trailingScan{row: row, extra: []any{&r.Revision, &r.ReportKey, &r.Spec, &r.Kind, &r.TargetRun,
-		&r.WaitState, &r.Outcome, &r.Summary, &r.Cause, &checked, &errAt, &resolved, &delivered,
+		&r.WaitState, &r.Outcome, &r.Summary, &r.Cause, &r.EndedBy, &checked, &errAt, &resolved, &delivered,
 		&r.DeliveryAttempts, &next, &r.DeliveryError}})
 	if err != nil {
 		return nil, err
@@ -97,8 +99,9 @@ type RunWaitStore interface {
 	// cancelled instead. ended lists the others it ended.
 	CommitRunWait(ctx context.Context, w *RunWait, n *WatchNotification) (ended []*RunWait, err error)
 	// EndRunWaits ends run's pending conditions, or only wait when it is
-	// set, in state with cause, and drops their undelivered wakes.
-	EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cause string, now time.Time) ([]*RunWait, error)
+	// set, in state with cause, by the member who cancelled them if one
+	// did, and drops their undelivered wakes.
+	EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error)
 	// DueRunWaitDeliveries lists the waits whose wake is due by now.
 	DueRunWaitDeliveries(ctx context.Context, now time.Time) ([]*RunWait, error)
 	// SetRunWaitDelivery records one delivery attempt of w's wake: its
@@ -117,7 +120,7 @@ func (d *DB) RecordWaitingReport(ctx context.Context, report *CoordStateReport, 
 	if err != nil || !inserted {
 		return false, nil, err
 	}
-	ended, err := endRunWaits(ctx, tx, report.RunID, "", waitSuperseded, "replaced by the report "+report.IdempotencyKey, report.CreatedAt)
+	ended, err := endRunWaits(ctx, tx, report.RunID, "", waitSuperseded, "replaced by the report "+report.IdempotencyKey, "", report.CreatedAt)
 	if err != nil {
 		return false, nil, err
 	}
@@ -197,15 +200,15 @@ func (d *DB) CommitRunWait(ctx context.Context, w *RunWait, n *WatchNotification
 	var ended []*RunWait
 	if w.Woke() {
 		var woken int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM watches WHERE owner_run_id = ? AND wait_revision = ? AND id <> ?
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM watches WHERE owner_run_id = ? AND wait_revision = ? AND id <> ?
 			AND wait_state IN ('resolved', 'expired', 'error')`, w.OwnerRunID, w.Revision, w.ID).Scan(&woken); err != nil {
 			return nil, fmt.Errorf("store: commit wait: %w", err)
 		}
 		if woken > 0 {
-			w.WaitState, w.Cause, w.DeliveryNextAt, n = "cancelled", "another condition of this wait already woke the run", nil, nil
+			w.WaitState, w.Cause, w.DeliveryNextAt = "cancelled", "another condition of this wait already woke the run", nil
 		} else {
 			if ended, err = endRunWaitsWhere(ctx, tx, `owner_run_id = ? AND wait_revision = ? AND id <> ?`,
-				[]any{w.OwnerRunID, w.Revision, w.ID}, "cancelled", w.Spec+" resolved first", w.UpdatedAt); err != nil {
+				[]any{w.OwnerRunID, w.Revision, w.ID}, "cancelled", w.Spec+" resolved first", "", w.UpdatedAt); err != nil {
 				return nil, err
 			}
 			if n != nil {
@@ -234,9 +237,9 @@ func updateRunWait(ctx context.Context, db execer, w *RunWait) error {
 	}
 	times := make([]any, 0, 5)
 	for _, t := range []*time.Time{w.SourceCheckedAt, w.ErrorAt, w.ResolvedAt, w.DeliveredAt, w.DeliveryNextAt} {
-		v, err := encodeTimePtr(t)
-		if err != nil {
-			return fmt.Errorf("store: update wait: %w", err)
+		v, encodeErr := encodeTimePtr(t)
+		if encodeErr != nil {
+			return fmt.Errorf("store: update wait: %w", encodeErr)
 		}
 		times = append(times, v)
 	}
@@ -257,13 +260,13 @@ func updateRunWait(ctx context.Context, db execer, w *RunWait) error {
 	return nil
 }
 
-func (d *DB) EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cause string, now time.Time) ([]*RunWait, error) {
+func (d *DB) EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: end waits: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
-	ended, err := endRunWaits(ctx, tx, run, wait, state, cause, now)
+	ended, err := endRunWaits(ctx, tx, run, wait, state, cause, by, now)
 	if err != nil {
 		return nil, err
 	}
@@ -273,29 +276,29 @@ func (d *DB) EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cau
 	return ended, nil
 }
 
-func endRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, wait, state, cause string, now time.Time) ([]*RunWait, error) {
+func endRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, wait, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error) {
 	where, args := `owner_run_id = ?`, []any{run}
 	if wait != "" {
 		where, args = where+` AND id = ?`, append(args, wait)
 	}
-	return endRunWaitsWhere(ctx, tx, where, args, state, cause, now)
+	return endRunWaitsWhere(ctx, tx, where, args, state, cause, by, now)
 }
 
 // endRunWaitsWhere ends the pending waits that match where, and drops the
 // undelivered wakes of the woken ones.
-func endRunWaitsWhere(ctx context.Context, tx *sql.Tx, where string, args []any, state, cause string, now time.Time) ([]*RunWait, error) {
+func endRunWaitsWhere(ctx context.Context, tx *sql.Tx, where string, args []any, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error) {
 	at, err := encodeTime(now)
 	if err != nil {
 		return nil, fmt.Errorf("store: end waits: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE watch_deliveries SET status = 'cleared', detail = ?, at = ?
+	if _, err = tx.ExecContext(ctx, `UPDATE watch_deliveries SET status = 'cleared', detail = ?, at = ?
 		WHERE channel = 'run_inbox' AND status = 'pending' AND notification_id IN (
 		  SELECT id FROM watch_notifications WHERE watch_id IN (
 		    SELECT id FROM watches WHERE wait_delivery_next_at IS NOT NULL AND `+where+`))`,
 		append([]any{"Not delivered: " + cause, at}, args...)...); err != nil {
 		return nil, fmt.Errorf("store: end waits: drop wakes: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE watches SET wait_delivery_next_at = NULL, wait_delivery_error = ?, version = version + 1
+	if _, err = tx.ExecContext(ctx, `UPDATE watches SET wait_delivery_next_at = NULL, wait_delivery_error = ?, version = version + 1
 		WHERE wait_delivery_next_at IS NOT NULL AND `+where, append([]any{"Not delivered: " + cause}, args...)...); err != nil {
 		return nil, fmt.Errorf("store: end waits: drop wakes: %w", err)
 	}
@@ -303,10 +306,10 @@ func endRunWaitsWhere(ctx context.Context, tx *sql.Tx, where string, args []any,
 	if state == waitExpired {
 		finalState = "expired"
 	}
-	rows, err := tx.QueryContext(ctx, `UPDATE watches SET state = ?, wait_state = ?, wait_cause = ?, ended_at = ?, updated_at = ?,
+	rows, err := tx.QueryContext(ctx, `UPDATE watches SET state = ?, wait_state = ?, wait_cause = ?, wait_ended_by = ?, ended_at = ?, updated_at = ?,
 		next_check_at = NULL, version = version + 1
 		WHERE wait_state = 'pending' AND `+where+` RETURNING `+runWaitColumns,
-		append([]any{finalState, state, cause, at, at}, args...)...)
+		append([]any{finalState, state, cause, by, at, at}, args...)...)
 	if err != nil {
 		return nil, fmt.Errorf("store: end waits: %w", err)
 	}
@@ -332,7 +335,7 @@ func (d *DB) SetRunWaitDelivery(ctx context.Context, w *RunWait, del WatchDelive
 		return fmt.Errorf("store: set wait delivery: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
-	if err := updateRunWait(ctx, tx, w); err != nil {
+	if err = updateRunWait(ctx, tx, w); err != nil {
 		return err
 	}
 	var notification string

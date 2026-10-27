@@ -11,7 +11,9 @@ them on in a browser).
 A notice is information only. A watch never answers, approves, merges or
 grants anything.
 
-Only you see and change your watches. Admins see only their own.
+Only you see and change your watches. Admins see only their own. The
+conditions an agent waits on are watches its run owns; they are described in
+[Run waits](#run-waits) and never appear in `watch.list`.
 
 ## Targets and conditions
 
@@ -227,3 +229,63 @@ The `watch.changed` event `{watch_id, member_id, notification_id}` tells the
 owner to read the watch again; `notification_id` is set when it recorded a
 notice. It is published under the server scope, so no workspace timeline
 shows it, and the event stream sends it only to the owner.
+
+## Run waits
+
+An agent that ends its turn waiting on a pull request, its checks or another
+run names what it waits on:
+
+```sh
+aether-internal report --outcome waiting --for ci \
+  --until pr:acme/app#7:checks --summary 'Waiting for CI on #7'
+```
+
+Each `--until` (at most 4) becomes a watch the run owns: `source` `agent`,
+`owner_run_id` the reporting run, and the run member's GitHub login and
+workspace access. The server evaluates it as it does every watch, without
+taking the state it already stands in as seen: a pull request that already
+merged or a run that already ended resolves it at once.
+
+| Condition | Resolves | Outcome |
+| --- | --- | --- |
+| `pr:<owner>/<repo>#<n>:merged` | The pull request merged, or closed without merging. | `merged`, or `closed` |
+| `pr:<owner>/<repo>#<n>:checks` | Every check on the head commit finished, or the pull request closed unmerged first. All checks count; `observed.checks.required_only` is `false`. | `passed`, `failed`, `cancelled`, or `closed` |
+| `run:<run-id>:finished` | That run, in the same workspace, ended or reported success. | `completed`, `merged`, `failed`, `abandoned`, `interrupted`, or `reported-success` |
+
+Pull requests are read as [Pull requests and CI](#pull-requests-and-ci)
+describes, every minute while checks run and every 5 minutes otherwise. A
+run target is read on each of its events and every 10 minutes.
+
+The first condition to resolve wakes the run once. In the same commit the
+other conditions of that report end `cancelled`, and a delivery on the
+`run_inbox` channel is queued. The server writes one message into the run's
+inbox (`from_run_id` is the run itself) naming the condition, the outcome,
+what it read, a link, and what to do next. The existing inbox wake resumes
+the session. Delivery is retried with the same backoff as evaluation and is
+keyed by the wait, so a retry, a restart or a late event never wakes the run
+twice. A paused run gets the message, and resuming it wakes it. A run that
+ended gets nothing. Web Push is never sent for run waits.
+
+| `state` | Meaning |
+| --- | --- |
+| `pending` | Evaluated as above. A failing read keeps it pending: `consecutive_failures`, `last_error` and `last_error_at` record it, and it retries with backoff. |
+| `resolved` | A condition resolved; `outcome` says how. Wakes the run. |
+| `error` | The target can never be read: GitHub answers 404 or moved, the member has no usable GitHub login, or the run was deleted. `last_error` says which. Wakes the run. |
+| `expired` | Nothing resolved within 7 days. Wakes the run. |
+| `superseded` | A newer waiting report with `--until` replaced it. |
+| `cancelled` | `ended_cause` says why: another condition of the same report resolved first, the run reported another outcome, a person sent a prompt, the run was relaunched or ended, or its member lost access. `run.wait.cancel` sets it to `cancelled` and `ended_by_member_id` to the member who cancelled. An undelivered wake is dropped with it. |
+
+A waiting report without `--until` keeps the current conditions. Deleting the
+run deletes its waits. The receipt and the conditions commit in one
+transaction, and each condition is due for a check at once, so a server that
+stops before reading it reads it when it starts. A retry of the report with
+the same idempotency key registers nothing new, and the same key with other
+conditions is refused.
+
+`run.get` and `run.list` return the run's latest report's conditions as
+`wait_conditions`, with `delivered_at`, `delivery_attempts` and
+`last_delivery_error`. Every change publishes `run.wait.changed` `{run_id,
+workspace_id, wait_id, state}` on the run's workspace. `run.wait.cancel`
+`{run_id, wait_id}` cancels one condition and returns `{wait}`; it needs the
+permission `run.pause` needs.
+
