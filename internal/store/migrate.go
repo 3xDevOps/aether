@@ -2144,7 +2144,7 @@ CREATE TABLE watch_cursor (
 	seq INTEGER NOT NULL
 );
 `,
-	// v88: the last read of each pull request a member's watches follow,
+	// v89: the last read of each pull request a member's watches follow,
 	// with its ETags, so a restart asks GitHub conditionally.
 	`
 CREATE TABLE watch_pr_snapshots (
