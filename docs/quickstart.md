@@ -237,7 +237,7 @@ vendor's own login. Your **home** there persists, so this is done once.
 3. Click **Install `<agent>`**. It runs the vendor's install command in your
    environment. A failure shows **Install failed** and the command's output.
 4. Log in, in the terminal that opens. The login command is already typed, for
-   example `claude` (then `/login`) or `codex login`.
+   example `claude` (then `/login`) or `codex login --device-auth`.
 5. Click **Check**.
 
 It worked if the dialog shows **Installed** and **Login found**, and after
