@@ -1763,8 +1763,9 @@ request shown as "Waiting for *name*".
 A run that shows a reported wait carries `wait`, what Aether verified about
 the conditions the agent named ([Waits Aether can
 check](failure-handling.md#waits-aether-can-check)). `waitLine` words it,
-and `stateWords` puts that in place of the agent's summary, which moves to
-the tooltip as "The agent reported: *summary*":
+and `stateWords` puts that in place of the agent's summary, even one that
+reads "Waiting for ...", which moves to the tooltip as "The agent reported:
+*summary*":
 
 | `wait.kind` | Detail | Dot |
 | --- | --- | --- |
@@ -1777,7 +1778,11 @@ the tooltip as "The agent reported: *summary*":
 `toneOf` picks the dot, and the tooltip gives the exact time of the last
 read. Only the server's `needs-you` state lists a broken wait in Needs you;
 a wait's kind never does. A phone's run header adds the wait's line, wrapped,
-under the header, since its state line truncates. A reported wait that went
+under the header, since its state line truncates; for a broken wait that
+line is the Needs you reason with the error. A swarm card, which shows the
+swarm's progress instead, keeps the state tooltip while it shows a wait.
+Rereads (`reread: true` events) update `wait` in the run store but never
+count as a state change in the lanes or trace bars. A reported wait that went
 stale (`cause` `wait-expired`) reads "Reported waiting on *summary*, no
 update for 30m", and `stateName` labels it **Stale wait** rather than Turn
 ended.
