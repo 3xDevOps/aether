@@ -215,7 +215,7 @@ one file each (`server`, `agent-models`, `workspaces`, `runs`, `members`, `env-t
 may read another's data. Only view preferences and local progress (theme,
 text size, sidebar width and collapse state, dock height, Details open,
 terminal zoom, single-key shortcuts, diff wrap, `activeWorkspace`, the
-**Mine** toggle, launch defaults, dismissed update versions, onboarding
+**Mine** toggle, each member's launch defaults, dismissed update versions, onboarding
 progress) are persisted under the `aether.ui` key; `persistedUi` in
 `store/index.ts` is the list that decides. Server data is always re-fetched.
 
@@ -545,7 +545,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
   runs and reads **Stopping…** while `assistant.cancel` is in flight, so a
   double click cancels once and an agent that ignores it can be stopped
-  again). An empty conversation offers four example prompts that fill the
+  again; the call aborts after 10 seconds with `assistant.cancel got no
+  answer within 10 seconds`). An empty conversation offers four example prompts that fill the
   composer, led by the page's own: a failed run offers **Fix this**, one that
   needs you or waits **Why is this stuck?**, one with an open pull request
   (`useOpenPullRequest`) **Review and merge when checks pass**; the board
@@ -555,13 +556,18 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   view's request cards, answered with `assistant.answer`; each pending
   confirmation renders as a card titled with the summary, the method as its
   source line, a **Details** section with the exact params (three, then
-  **N more**), a relative deadline with a bar draining toward it, **Decline**
+  **N more**), or for `run.launch` and `mission.create` a **What starts**
+  list (`components/assistant/launch-summary.tsx`; the title then stops
+  before the quoted task) of kind, workspace,
+  agent with model and mode, account (`Yours` or `<name>'s, shared with
+  you`), fallback, task or objective, and how the member hears back, a
+  relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a
   `confirmations` frame stops listing it. While `auto_approve` is off a card
   links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the run, so it asks
-  even with auto-approval on.
+  even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
   `lib/assistant-actions.ts`): `assistantView` takes each Aether tool call out
   of its step block as a card: one whose `tool_name` ends in an `aether_*`
@@ -572,19 +578,32 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   ran; a part left with no work becomes the rows its prose and notices would
   have been. The card names the verb and target from the inputs and the
   store's names ("Launched run on api with Claude Code", "Messaged run
-  fix-login", "Merged PR #42"; a run is named by `runLabel`), a state
+  fix-login", "Merged PR #42"; a run is named by `runLabel`; a tool with
+  several actions, such as `aether_run_lifecycle` or `aether_swarm_manage`,
+  takes its verb and the method its card waits on from its `action` input),
+  a state
   (`Running`, `Done`, `Failed`, `You declined`, `No answer in 10 minutes`,
-  `Withdrawn: the turn ended before you answered`, or `Did not finish: the
+  `Withdrawn: the turn ended before you answered`, `Did not finish: the
   turn ended first` for a call still open when its turn ended, approved or
-  not) with `approved by you` or `auto-approved`, and its time. A call
+  not, or `Not confirmed: check status before retrying` for an
+  `aether_pr_create` whose result says `write: "pending"`) with `approved by you` or `auto-approved`, and its time. A call
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
-  error for **Details**. A launch receipt (`result.launch`) or a watch result
-  gets one more line. A done launch whose run or swarm is still active reads
-  **Working in the background**; a launched swarm the store has not loaded
-  counts as working while the card reads it with `mission.show`, and a read
-  that fails shows its error. The header calls the assistant's own turn
+  error for **Details**. A launch receipt, when the result has one (`result.launch`: the account by
+  `access` own, shared or other, the integrator's for a swarm, `fell back
+  from` its `requested_account`, `no fallback` for policy `off` or the
+  `ordered` accounts) or a watch result gets one more line; a done launch without a receipt gets the same line from
+  the returned run and its inputs (kind, workspace, agent and model, the
+  account only when the call named one, `no fallback`). A done launch whose
+  run or swarm is still active reads **Working in the background** and says
+  how the member hears back; `useBackground`, shared with the **Actions**
+  list, reads a launched swarm with `mission.show` and again on each
+  `mission.changed` for it (`missionSeq`), since the store refreshes swarms
+  only for the active workspace. The swarm counts as working until read, and
+  a read that fails shows its error; the phase read is kept, so another
+  workspace's swarm list replacing the store's cannot turn a finished swarm
+  back to working. The header calls the assistant's own turn
   **Generating…**. The target comes from the result's `link` or
   `url`: a dashboard link (`?run=<id>`, `?page=missions&id=<id>`, a watch's
   settings link) opens in the app whatever its host, and any other `http(s)`
@@ -686,7 +705,9 @@ open and sharing is on, `syncViewContext` sends `syncedViewContext`, the
 page the chips show, as `assistant.view` at most once a second when it
 changed, one call at a time, retrying a failed one with backoff and sending
 it again after each prompt. While the draft's page is removed it sends a
-context without `route`, which makes the server forget the page; while a
+context without `route` at once, which makes the server forget the page, and
+Send awaits that call (`flushViewSync`, at most 10 seconds, then
+`assistant.view got no answer within 10 seconds`) before `assistant.prompt`; while a
 navigation conflict is unanswered it sends nothing; after **where you
 started** it keeps the pinned page until the prompt is sent.
 
@@ -712,18 +733,29 @@ and also takes Delete or Backspace. **Add this page** undoes a removed page.
 assistant** checkbox, a list of every field the next message sends, and
 **Raw JSON**, the exact payload (`nextViewContext`).
 
-`assistantAttempt` holds the prompt's text, key and context; changing the
-text, any chip or the share choice drops it, and a retry of the same text
-reuses both. A new key comes from `promptKey`: while another tab's send of
+`assistantAttempt` holds the prompt's text, key, context and chips; changing
+the text, any chip or the share choice drops it, and a retry of the same text
+reuses both. When `assistant.prompt` succeeds, `settleAssistantSend` clears
+the sent text and chips and keeps only chips added while it was in flight,
+so a chip edit during the send cannot leave the sent message to be sent
+again. `assistant.prompt` aborts after 60 seconds with `assistant.prompt got
+no answer within 60 seconds`, keeping the draft and its key for a retry. A new key comes from `promptKey`: while another tab's send of
 the same text and context under the same member is still in flight (at
 most 10 seconds), it reuses that tab's key, so the server runs the prompt
 once; `settlePromptKey` clears the record when a send settles, so a second
 "yes" after the agent asks again is a new message. Only a SHA-256 of the
 draft is stored, in `localStorage` under `aether.assistant.sent`. Over plain
 HTTP, where `crypto.subtle` and `crypto.randomUUID` are missing, keys fall
-back to a timestamp and random suffix and tabs do not share them. Client
+back to a timestamp and random suffix and tabs do not share them. The page part
+also carries `launch_defaults`, `launchDefaults` from the UI slice as
+`{agent, mode, model}`, newest first, at most 4, and **Inspect** lists them
+as **Launch choices**. `launchDefaults` is the signed-in member's:
+`savedLaunchDefaults` persists each member's by identity key, and
+`setIdentityKey` loads the incoming member's, so another member on the same
+browser never sends them. A model with both `:` and `@`, shaped like
+`user:token@host`, is dropped on both sides. Client
 `fit` and `sendableAttachment` trim as the server does (recent pages, then
-the open file, then the last attachments, counting bytes as Go's
+the open file, then the launch defaults, then the last attachments, counting bytes as Go's
 `json.Marshal` writes them; a check name over 128 bytes or with a control or
 format character is dropped), so **Inspect** never shows what the server
 drops. A draft or chip changed while the key is being made cancels that
@@ -2267,8 +2299,10 @@ including for agents with no discovery. A saved model missing from the list
 stays selected. A model that is not a single argument is
 refused by `run.launch` and shown under "Launch failed".
 
-The form remembers a mode and a model per agent in the persisted
-`launchDefaults` slice (`{mode, model, at}` keyed by agent name). It
+The form remembers a mode and a model per agent in the `launchDefaults`
+slice (`{mode, model, at}` keyed by agent name), persisted per member in
+`savedLaunchDefaults`; defaults saved before persist version 10 had no
+owner and are dropped. It
 preselects the launchable agent launched most recently, then the agent of
 the newest run, then the first launchable one, and starts in that agent's
 remembered mode, else Enhanced, with its remembered model; an Enhanced or
@@ -2831,7 +2865,12 @@ A path the agent names opens that file in the run's
 [Files view](#files-in-a-run): in an answer's, narration's or thought's prose
 and inline code, in a tool step's command and output tail, and in a
 `DiffBlock`'s caption. A Markdown link whose target is a repository path
-opens there as well, where it used to open a dead address in a new tab.
+opens there as well, where it used to open a dead address in a new tab. A link to a
+same-origin dashboard route (`?run=<id>`, `?page=...`) opens in the app
+(`OpenRoute`, which the assistant panel supplies so its phone sheet closes
+too); any other link opens in a new tab. A notice's description is plain
+text except `[text](?<query>)` dashboard links (`LinkedText`), which open
+the same way.
 Fenced code blocks, a person's own messages and the entry labels, which
 toggle their detail, are left as text.
 
@@ -5159,8 +5198,9 @@ tree and editor are a view of each run, scoped to that run's checkout: see
 Folder chevrons turn as a folder opens, and the empty editor pane is an
 `EmptyState` with a folder-tree icon. The tree lists each workspace's `base: <branch>` first, then its live runs
 under **Run checkouts**, then one **Home** row; both start folded, so a
-run's tree or the home is read only when it is opened. Folder expansion is
-kept per view. The tree sits beside the
+run's tree or the home is read only when it is opened. For an admin, each
+workspace ends with a muted **Add .env files for runs** that opens its
+**Environment** section. Folder expansion is kept per view. The tree sits beside the
 editor from `md` up. On a phone it is the first view; once a file is open the
 editor fills the screen and **Browse** opens the tree as a side sheet.
 CodeMirror provides syntax highlighting for JSON/JSONC, JavaScript/TypeScript,
@@ -6011,7 +6051,7 @@ server-side permission; a member without it reads the same facts. The page
 lists no runs: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
-setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
+setup script, variables, files and egress control ([environments.md](environments.md#workspace-environment)),
 read with `workspace.environment.get` when the page opens. Opening the page
 through an **Environment** menu item passes `section: 'environment'`, and the
 section scrolls into view once it has loaded.
@@ -6034,6 +6074,15 @@ section scrolls into view once it has loaded.
   plain; over a saved secret it stays a secret with no value, which **Save**
   refuses, so the saved one is not removed unnoticed. **Add _n_ variables**
   puts them in the list; nothing is sent yet.
+- **Files** lists each workspace file's path and size with **Remove**; the
+  page never holds a saved file's content. **Add file…**, or a file dropped
+  on the list, adds a row whose path starts as the file's name and stays
+  editable until saved. While an added row has a saved file's path, the
+  saved row is hidden and the save replaces it; a saved file is removed only
+  by its own **Remove**. A file
+  over 64 KB is refused before it is read, and one that is not UTF-8 text
+  before anything is sent. A server from before workspace files gets no such
+  row.
 - **Limit outbound traffic** is a checkbox. While it is ticked, the allowed
   hosts show, each with **Remove**, over a field with **Allow** that refuses a
   URL, a port or a repeat before anything is sent. Its help says that on and
@@ -6044,11 +6093,12 @@ section scrolls into view once it has loaded.
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it
   the page says what a save reaches: runs launched afterwards, not containers
   that exist. A row that cannot be saved - no name, a name used twice, `=` in
-  a name, a secret with no value - is marked on **Save**, which focuses it and
+  a name, a secret with no value, a file with no path or one used twice - is
+  marked on **Save**, which focuses it and
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
   the edits stay. A result's `warning` shows under **Saved**.
 - Any other member reads the script, each name and each plain value, with
-  **Secret** in place of a secret's value, whether egress is limited and to
+  **Secret** in place of a secret's value, each file's path and size, whether egress is limited and to
   which hosts, and **Only an admin can change this.** A failed read shows the server's error with **Retry**.
 
 When the setup script fails a launch, the New run and template launch
@@ -7458,8 +7508,8 @@ delivery lines, pause, resume and delete, the Watch form, the watch
 notification preferences, the phone sheet and `watch.changed` toasts.
 `src/components/workspace-environment.test.tsx` covers the workspace
 Environment section: the change a save sends, replacing a secret, the `.env`
-preview, rows that cannot be saved, egress control, the server's refusal and
-the read-only view.
+preview, adding, replacing and removing files, rows that cannot be saved,
+egress control, the server's refusal and the read-only view.
 
 Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.

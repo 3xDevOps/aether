@@ -143,8 +143,8 @@ ANDROID_JNILIBS  := android/app/src/main/jniLibs
 # crashes running Next's TypeScript step, so Next runs on Node like the CI
 # dashboard job: the Bun binary is copied out of its image into the Node one.
 # Their module and build caches live outside the tree, like Gradle's.
-ANDROID_GO_VERSION  := 1.26.9
-ANDROID_GO_IMAGE    := golang:$(ANDROID_GO_VERSION)@sha256:d7722066f0b60ceccb6c0643cbed1f5f9e15506ac237146c95333504d7805d89
+ANDROID_GO_VERSION  := 1.26.10
+ANDROID_GO_IMAGE    := golang:$(ANDROID_GO_VERSION)@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9
 ANDROID_BUN_VERSION := 1.3.14
 ANDROID_BUN_IMAGE   := oven/bun:$(ANDROID_BUN_VERSION)@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
 ANDROID_NODE_IMAGE  := node:22@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8

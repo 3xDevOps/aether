@@ -400,7 +400,9 @@ Every member of the server, viewers included, can read every note, and
 every run in the workspace can search them. The first line of each pinned
 note also goes into the brief each new run in the workspace receives at
 launch; a note a member pinned for themselves goes only into their own runs'
-briefs.
+briefs. That limits whose briefs carry the note, not who reads it: team
+memory is never private. Only the note's owner or an admin may change a
+member note, and only an admin may read another member's brief.
 
 Team memory never reads transcripts, terminal recordings, messages between
 runs, run-room chat, the files in a checkout, or an agent's own memory
@@ -455,8 +457,8 @@ never compacted. Forgetting does not remove:
 - backups an operator made of the data directory;
 - runs already launched with the text in their task;
 - the assistant transcript (`<data-dir>/assistant/<member>/items.jsonl`)
-  until you start a **New conversation**, and the agent's own session files,
-  which New conversation does not delete on every server version;
+  until you start a **New conversation**, and the agent's session files in
+  the assistant's home until you start a **New conversation**;
 - copies a connected app or an agent made elsewhere.
 
 Removing a member deletes their preferences in the same transaction and

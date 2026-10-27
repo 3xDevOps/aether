@@ -8,8 +8,10 @@ A coding agent can do these steps from the CLI: paste the prompt in
 
 You need:
 
-- A Linux machine (amd64 or arm64) with Docker and git: the **server**, where
-  agents run. It needs no desktop and no open port.
+- A Linux machine (amd64 or arm64) with Docker Engine and git, and at least
+  2.5 GiB of available memory and 6 GiB of free disk: the **server**, where
+  agents run. It needs no desktop and no open port
+  ([prerequisites](install.md#server-prerequisites)).
 - Your own computer (Linux, macOS or Windows): the **client**.
 - A GitHub account, and a login for at least one coding agent, such as a Claude
   or ChatGPT subscription.
@@ -101,13 +103,14 @@ there must not ask for a password), run the steps non-interactively:
 ssh <user>@<server> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role none'
 ssh <user>@<server> 'sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>'
 ssh <user>@<server> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
-ssh <user>@<server> 'sudo aether-server edge status'   # repeat until it exits 0: connected
+ssh <user>@<server> "timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'"
 ssh <user>@<server> 'sudo aether-server edge claim-code'
 ```
 
 The access policy is the owner's choice (`account` or `approved-devices`, as
-in the table above). The claim code goes to step 3: `aether login`, then
-`aether link --claim <code>`.
+in the table above). If the wait times out, `sudo aether-server edge status`
+prints the `connection` line that says why; fix that before you claim. The
+claim code goes to step 3: `aether login`, then `aether link --claim <code>`.
 
 ## 3. Link from your machine
 
@@ -160,7 +163,9 @@ start from), and the runs started from it. Only an admin can create one.
 Open the **dashboard**, the web app where you work with Aether: the desktop
 app, or `aether gui`, which serves it in a browser tab from your computer. It
 shows **Onboarding** (**Connect**, **Repository**, **Agent**, **First run**)
-until you finish; **Settings → Onboarding → Open guide** reopens it.
+until you finish. If you linked in a terminal, it opens at the **Board**
+instead; click **Add your repository** there. **Settings → General → Setup
+guide → Open guide** reopens onboarding.
 
 ### GitHub repository
 
@@ -196,8 +201,8 @@ repository** adds another repository later.
 | A clone on your computer | **From a local clone → Create from local clone**, then push the base branch. Needs the desktop app or `aether gui` on that computer. Or [from the CLI](#from-the-cli). |
 
 [teams.md](teams.md) covers each source. A workspace can also run a setup script
-(such as `npm ci`) and set variables in new runs: **Environment** on its
-**Repository** page, or `aether workspace env`
+(such as `npm ci`), set variables and put files such as `.env` in new runs:
+**Environment** on its **Repository** page, or `aether workspace env`
 ([environments.md](environments.md#workspace-environment)).
 
 ### From the CLI
@@ -232,7 +237,7 @@ vendor's own login. Your **home** there persists, so this is done once.
 3. Click **Install `<agent>`**. It runs the vendor's install command in your
    environment. A failure shows **Install failed** and the command's output.
 4. Log in, in the terminal that opens. The login command is already typed, for
-   example `claude` (then `/login`) or `codex login`.
+   example `claude` (then `/login`) or `codex login --device-auth`.
 5. Click **Check**.
 
 It worked if the dialog shows **Installed** and **Login found**, and after
@@ -291,8 +296,9 @@ Enter the **Task**, pick the **Agent** and the **Mode**, and click **Launch**.
 aether run "add a health check endpoint" --workspace myproject --agent claude
 ```
 
-It prints `run run-d6ay38tj8j running`. `--mode` picks `enhanced` or
-`background` (the CLI default is `standard`), and `--model` picks the model.
+It prints `run run-d6ay38tj8j running`. `--mode` picks `standard`, `enhanced`
+or `background`; without it, the run is Enhanced when the agent's Enhanced
+mode is installed, and Standard otherwise. `--model` picks the model.
 The first run on a server pulls the environment image, so it starts slower. To
 give one objective to a group of agents, see swarms in [teams.md](teams.md).
 
@@ -355,8 +361,10 @@ Open a run to see its views:
 `aether message <run-id> "also update the README"` messages the agent and
 prints the receipt (`delivered`, or `queued` for the member in control),
 `aether logs <run-id>` prints what the agent did as plain text, and
-`aether attach <run-id>` attaches your terminal to a Standard run's agent
-(detaching leaves it running). For VS Code, Cursor or Zed, run `aether
+`aether attach <run-id>` attaches your terminal to a Standard run's agent.
+Every key, Ctrl-C included, goes to the agent; close the terminal to detach,
+and the run keeps going. `aether attach --read-only <run-id>` only watches. For
+VS Code, Cursor or Zed, run `aether
 ssh-config` once, then **Open in editor…** in the run's **More** menu
 ([terminal.md](terminal.md)). On a phone, use the
 [Android app](install.md#android-app) or the tailnet dashboard

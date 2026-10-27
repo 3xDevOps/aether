@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { FilesRoute } from '@/routes/files'
 import { useStore } from '@/store'
 import { filesKey } from '@/store/files'
-import { fakeApi, run, workspace } from '@/test/fixtures'
+import { fakeApi, run, serverInfo, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 
 type Entries = { entries: Array<{ name: string; kind: 'file' | 'dir'; size: number }> }
@@ -94,6 +94,17 @@ describe('Files tree', () => {
     await openCheckout()
     expect(await tree().findByRole('button', { name: 'current.txt' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'stale.txt' })).toBeNull()
+  })
+
+  it('sends an admin to the workspace Environment for files every run gets', async () => {
+    seed(['files.tree', 'workspace.environment.set'])
+    render(<FilesRoute params={{}} client={fakeApi()} />)
+    expect(tree().queryByRole('button', { name: 'Add .env files for runs' })).toBeNull()
+
+    act(() => useStore.setState({ info: serverInfo }))
+    fireEvent.click(tree().getByRole('button', { name: 'Add .env files for runs' }))
+    expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id, section: 'environment' } })
+    useStore.setState({ info: null })
   })
 })
 
