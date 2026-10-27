@@ -146,7 +146,7 @@ func TestAssistantTools(t *testing.T) {
 		}
 		names = append(names, tool.Name)
 	}
-	for _, name := range []string{"aether_needs_attention", "aether_answer", "aether_decide_approval", "aether_list_swarms", "aether_get_swarm",
+	for _, name := range []string{"aether_needs_attention", "aether_answer", "aether_decide_approval", "aether_get_swarm",
 		"aether_run_changes", "aether_pr_status", "aether_overlaps", "aether_activity_summary", "aether_run_history", "aether_docs", "aether_view_context",
 		"aether_usage", "aether_environment_status", "aether_save_environment", "aether_stop_run"} {
 		if !slices.Contains(names, name) {
@@ -169,7 +169,6 @@ func TestAssistantTools(t *testing.T) {
 		args map[string]any
 	}{
 		{"aether_needs_attention", nil},
-		{"aether_list_swarms", nil},
 		{"aether_get_swarm", map[string]any{"swarm_id": "mis-1"}},
 		{"aether_run_changes", map[string]any{"run_id": "run-1"}},
 		{"aether_pr_status", map[string]any{"run_id": "run-1"}},

@@ -136,6 +136,15 @@ export function usePullRequest(run: ScopedRun, watch: boolean): TrackedPR {
   return tracked
 }
 
+/** The open pull request a surface watching the run has found for it, in any of its repositories. */
+export function useOpenPullRequest(runID: string | undefined): RunPullRequest | undefined {
+  return usePullRequests((all) => {
+    if (runID === undefined) return undefined
+    const found = Object.entries(all).find(([key, tracked]) => (key === runID || key.startsWith(`${runID}:`)) && tracked.feedback?.pull_request?.state === 'open')
+    return found?.[1].feedback?.pull_request ?? undefined
+  })
+}
+
 export function usePullRequestList(runs: ScopedRun[], watch: boolean): TrackedPR[] {
   const keys = runs.map(prKey)
   const tracked = usePullRequests(useShallow((all) => keys.map((key) => all[key] ?? none)))
