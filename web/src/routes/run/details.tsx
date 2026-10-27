@@ -26,6 +26,7 @@ import { NoteThread } from '@/routes/run/note-thread'
 import { NeedsYouCards, useRunRequests } from '@/routes/run/requests'
 import type { RunRoom } from '@/routes/run/room'
 import type { RunView } from '@/routes/run/views'
+import { WaitConditions } from '@/routes/run/wait-conditions'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { isNote } from '@/store/collaboration'
@@ -211,6 +212,7 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
           ? <NeedsYouCards run={run} agent={agent} room={room} nav={nav} docked={view === 'session'} />
           : <ConditionCard run={run} view={view} agent={agent} nav={nav} />}
       </Section>
+      <WaitConditions run={run} inset={inset} />
       <ChildRuns run={run} inset={inset} />
       <AgentMessages run={run} inset={inset} />
       <Notes run={run} room={room} nav={nav} inset={inset} focus={noteFocus} />

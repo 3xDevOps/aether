@@ -559,6 +559,7 @@ export const api = {
   runChildrenAllow: (runID: string, children: RunChildrenSetting) =>
     call<{ children: RunChildrenSetting }>('run.children.allow', { run_id: runID, children }),
   runChildDetach: (runID: string) => call<unknown>('run.child.detach', { run_id: runID }),
+  runWaitCancel: (runID: string, waitID: string) => call<unknown>('run.wait.cancel', { run_id: runID, wait_id: waitID }),
   /** Without limits it reads them; an admin's limits change them. */
   workspaceChildLimits: (workspaceID: string, limits: Partial<ChildLimits> = {}) =>
     call<ChildLimits>('workspace.child_limits', { workspace_id: workspaceID, ...limits }),
