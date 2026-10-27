@@ -72,6 +72,8 @@ export interface Child {
   output: () => string
   /** SIGTERM, then SIGKILL if it is still there, and wait for the exit. */
   stop: () => Promise<void>
+  /** SIGKILL, as a crash would, and wait for the exit. */
+  kill: () => Promise<void>
 }
 
 /**
@@ -108,6 +110,11 @@ export function start(
       const killer = setTimeout(() => child.kill('SIGKILL'), 10_000)
       await exited
       clearTimeout(killer)
+    },
+    kill: async () => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      child.kill('SIGKILL')
+      await exited
     },
   }
 }

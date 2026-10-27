@@ -22,13 +22,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
-func TestIntegrationAssistantFollowsRun(t *testing.T) {
+// The assistant watches every run it launches: the watch is listed and
+// stoppable like any other, and its notices reach the assistant
+// conversation as well as the watch's own record.
+func TestIntegrationAssistantWatchesRun(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	t.Setenv("AETHER_FAKE_AGENT", "fake-agent {task}")
 	env := startAssistantServer(t, ctx, nil)
-	defer env.stop()
+	defer func() { env.stop() }()
 	store := env.srv.Store()
 
 	ws := seedAssistantWorkspace(t, ctx, env, "follow")
@@ -81,9 +84,15 @@ func TestIntegrationAssistantFollowsRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := &domain.Run{ID: domain.RunID(launched.Run.ID), WorkspaceID: ws.ID}
-	if follows, err := store.ListAssistantFollows(ctx, run.ID); err != nil || len(follows) != 1 || follows[0].MemberID != env.member.ID {
-		t.Fatalf("follows after the launch = %+v, %v, want the member's", follows, err)
+	var watches protocol.WatchListResult
+	if perr := env.call(protocol.MethodWatchList, protocol.WatchListParams{RunID: string(run.ID)}, &watches); perr != nil {
+		t.Fatalf("watch.list: %v", perr)
 	}
+	if len(watches.Watches) != 1 || watches.Watches[0].Source != protocol.WatchSourceAssistant ||
+		watches.Watches[0].State != protocol.WatchActive || strings.Join(watches.Watches[0].Conditions, ",") != "needs_you,finished" {
+		t.Fatalf("watches after the launch = %+v, want one active assistant watch on needs_you and finished", watches.Watches)
+	}
+	watchID := watches.Watches[0].ID
 
 	noticeOf := func(kind string) func(events.Event) bool {
 		return func(e events.Event) bool {
@@ -102,6 +111,17 @@ func TestIntegrationAssistantFollowsRun(t *testing.T) {
 	}
 	waitRunStatus(t, sub, &seen, string(run.ID), domain.RunRunning)
 
+	// The watch outlives a restart of the server.
+	_ = conn.Close()
+	_ = sub.Close()
+	env.stop()
+	env = startAssistantServer(t, ctx, env)
+	store = env.srv.Store()
+	if sub, err = env.srv.Bus().Subscribe(ctx, events.SubscribeOptions{Buffer: 4096}); err != nil {
+		t.Fatal(err)
+	}
+	seen = nil
+
 	if _, err = store.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, "needs input: pick a database", domain.ActivityNeedsYou, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +134,25 @@ func TestIntegrationAssistantFollowsRun(t *testing.T) {
 	publishStatus()
 	attention := waitEvent(t, sub, &seen, "the needs-attention notice", noticeOf(events.AssistantNoticeNeedsAttention))
 	if p := attention.Payload.(events.AssistantNoticePayload); attention.WorkspaceID != ws.ID || attention.ActorID != env.member.ID ||
-		p.MemberID != env.member.ID || !strings.Contains(p.Title, "needs your attention") || p.Body != "pick a database" {
+		p.MemberID != env.member.ID || p.WatchID != watchID || !strings.Contains(p.Title, "needs your attention") || p.Body != "pick a database" {
 		t.Fatalf("needs-attention notice = %+v on %+v", p, attention)
+	}
+	var got protocol.WatchGetResult
+	if perr := env.call(protocol.MethodWatchGet, protocol.WatchIDParams{WatchID: watchID}, &got); perr != nil {
+		t.Fatalf("watch.get: %v", perr)
+	}
+	if len(got.Notifications) != 1 || got.Notifications[0].Condition != protocol.WatchNeedsYou || got.Notifications[0].Body != "pick a database" {
+		t.Fatalf("watch notifications = %+v, want the one need", got.Notifications)
+	}
+	statuses := map[string]string{}
+	for _, d := range got.Notifications[0].Deliveries {
+		statuses[d.Channel] = d.Status
+	}
+	// The owner has no push device, so nothing pushed the need; skipped is
+	// only for a push the run's own notification already made.
+	if statuses[protocol.WatchChannelInApp] != protocol.WatchStatusDelivered || statuses[protocol.WatchChannelAssistant] != protocol.WatchStatusDelivered ||
+		statuses[protocol.WatchChannelPush] != protocol.WatchStatusNoDestination {
+		t.Fatalf("deliveries = %+v, want in-app and assistant delivered, push no_destination", got.Notifications[0].Deliveries)
 	}
 	publishStatus()
 	waitEvent(t, sub, &seen, "the second status event", func(e events.Event) bool {
@@ -135,19 +172,11 @@ func TestIntegrationAssistantFollowsRun(t *testing.T) {
 	if p := finished.Payload.(events.AssistantNoticePayload); !strings.Contains(p.Title, "finished") && !strings.Contains(p.Title, "failed") {
 		t.Fatalf("finished notice = %+v", p)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		follows, err := store.ListAssistantFollows(ctx, run.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(follows) == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the follow outlived the run: %+v", follows)
-		}
-		time.Sleep(20 * time.Millisecond)
+	if perr := env.call(protocol.MethodWatchGet, protocol.WatchIDParams{WatchID: watchID}, &got); perr != nil {
+		t.Fatalf("watch.get: %v", perr)
+	}
+	if len(got.Notifications) != 2 || got.Notifications[0].Condition != protocol.WatchFinished {
+		t.Fatalf("watch notifications after the run ended = %+v, want the finish on top of the need", got.Notifications)
 	}
 
 	var history protocol.RunACPHistoryResult
@@ -160,7 +189,7 @@ func TestIntegrationAssistantFollowsRun(t *testing.T) {
 		if !strings.Contains(item, `"kind":"notice"`) {
 			continue
 		}
-		if strings.Contains(item, "needs your attention") && strings.Contains(item, "pick a database") {
+		if strings.Contains(item, "needs your attention") && strings.Contains(item, "pick a database") && strings.Contains(item, "watch="+watchID) {
 			attentionNotices++
 		}
 		if strings.Contains(item, `Run \"`+task+`\"`) && (strings.Contains(item, "finished") || strings.Contains(item, "failed")) {

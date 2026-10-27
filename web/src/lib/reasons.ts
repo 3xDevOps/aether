@@ -1,6 +1,8 @@
 // Mirrors needsInputReasonPrefix in internal/scheduler/reported.go.
 export const needsInputPrefix = 'needs input: '
 export const stalledPrefix = 'stalled:'
+// Mirrors stalledReason in internal/scheduler/liveness.go.
+export const possibleStallPrefix = 'stalled: possibly — '
 
 // Mirrors the reason strings internal/scheduler, internal/agentstatus and internal/coord write.
 const stopReasons: Record<string, string> = {
@@ -14,6 +16,16 @@ const stoppedBecause = (stop: string) => `Stopped: ${stopReasons[stop] ?? stop}`
 const turnEnds: Record<string, string> = {
   end_turn: 'The agent finished its turn',
   cancelled: 'The turn was cancelled',
+}
+
+// Phases as stalledReason writes them, dashes spaced: domain.TurnPhase in internal/domain/liveness.go.
+const stallPhases: Record<string, string> = {
+  setup: 'while the run was starting',
+  'awaiting first event': "while awaiting the model's first reply",
+  streaming: 'since the agent last replied',
+  'tool running': 'while a tool was running',
+  'awaiting input': 'while a request waited for an answer',
+  'between turns': 'between turns',
 }
 
 const savedResults = "the worker's saved results"
@@ -41,6 +53,7 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^agent resumed$/, () => 'Agent resumed'],
   [/^agent failed$/, () => 'Agent failed'],
   [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
+  [/^stalled: possibly — no progress for (\S+), (.+), transport (\w+)$/, (span, phase, transport) => `No progress for ${span.replace(/([hm])0s$/, '$1').replace(/h0m$/, 'h')} ${stallPhases[phase] ?? phase}; connection ${transport}`],
   [/^blocked: (.*)$/s, (why) => `Blocked: ${why}`],
   [/^needs input: (.*)$/s, (question) => `Agent asks: ${question}`],
   [/^working in background(: \d+ tasks?)?$/, (count = '') => `Working in background${count}`],

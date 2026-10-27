@@ -61,10 +61,9 @@ type Config struct {
 	Store store.AssistantStore
 	Runs  *scheduler.Scheduler
 	// Host runs the assistant's container and adapter.
-	Host    Host
-	Caller  func(domain.MemberID) tools.Caller
-	Bus     events.Bus
-	Follows FollowStore
+	Host   Host
+	Caller func(domain.MemberID) tools.Caller
+	Bus    events.Bus
 }
 
 // Host is the scheduler's side of the assistant: its container and the
@@ -86,30 +85,13 @@ type Service struct {
 
 	mu      sync.Mutex
 	members map[domain.MemberID]*member
-	sub     events.Subscription
 
-	follower   *follower
-	notify     Notifier
-	dmu        sync.Mutex
-	queues     map[domain.MemberID][]notice
-	delivering map[domain.MemberID]bool
-	pushing    int
-	flush      chan struct{}
-	flushOnce  sync.Once
-	pushCtx    context.Context
-	pushCancel context.CancelFunc
+	watches Watches
 }
 
 func New(cfg Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{cfg: cfg, ctx: ctx, cancel: cancel, members: make(map[domain.MemberID]*member)}
-	s.queues, s.delivering = make(map[domain.MemberID][]notice), make(map[domain.MemberID]bool)
-	s.flush = make(chan struct{})
-	s.pushCtx, s.pushCancel = context.WithCancel(context.Background())
-	if cfg.Bus != nil && cfg.Follows != nil && cfg.Runs != nil {
-		s.follower = &follower{store: cfg.Follows, runs: cfg.Runs, deliver: s.enqueue, queued: make(map[[2]string]string)}
-	}
-	return s
+	return &Service{cfg: cfg, ctx: ctx, cancel: cancel, members: make(map[domain.MemberID]*member)}
 }
 
 type member struct {
@@ -238,13 +220,6 @@ func (s *Service) logPath(id domain.MemberID) string {
 }
 
 func (s *Service) Close() error {
-	s.mu.Lock()
-	sub := s.sub
-	s.mu.Unlock()
-	if sub != nil {
-		_ = sub.Close()
-	}
-	s.shutdownNotices()
 	s.cancel()
 	s.mu.Lock()
 	members := make([]*member, 0, len(s.members))
@@ -457,8 +432,15 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 	}
 	srv := &tools.Server{Caller: actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}, Confirm: s.approver(m), Member: string(m.id),
 		View: func() protocol.AssistantViewContextResult { return s.View(m.id, time.Now()) }}
-	if s.follower != nil {
-		srv.Follow = func(ctx context.Context, run string) { s.follow(ctx, m.id, domain.RunID(run)) }
+	if s.watches != nil {
+		srv.Follow = func(ctx context.Context, run string) {
+			if _, followErr := s.watches.Follow(ctx, m.id, domain.RunID(run)); followErr != nil {
+				body := "Watching it failed: " + followErr.Error() + "\n\nYou will not be notified when it needs you or finishes."
+				if noteErr := s.note(ctx, m, acphost.Notice{Severity: "warning", Title: "Run " + run + " is not watched", Description: body}); noteErr != nil {
+					slog.Warn("assistant: watch the run", "run", run, "member", m.id, "error", errors.Join(followErr, noteErr))
+				}
+			}
+		}
 	}
 	s.wg.Go(func() {
 		if serveErr := srv.Serve(sessCtx, ln); serveErr != nil {

@@ -297,20 +297,26 @@ agent asks you still appears as a card.
 
 ## Notifications
 
-Aether follows every run the assistant launches or messages for you. You do not
-ask for updates. You are told when the run:
+Aether watches every run the assistant launches or messages for you: it
+creates a [watch](watches.md#assistant-watches) with source `assistant`,
+listed in **Settings > Watches**, where you pause it to stop the notices. If
+the watch cannot be created, the conversation says so with the error. You do
+not ask for updates. You are told when the run:
 
 | Notice | When |
 | --- | --- |
-| Finished | The run completed, merged, failed, stopped or was interrupted, or a live run's reported success is ready for review |
-| Needs input | The agent asks a question, a permission or a form |
+| Finished | The run's agent reported done, the run completed, failed or was stopped, or a member closed it as merged or abandoned |
+| Needs input | The agent asks for a permission, or asks a question or a form in a run that is not Background |
 | Needs attention | The run [needs you](failure-handling.md#needs-you) with no question pending: it reports `needs-input` or `blocked`, hit a usage limit, had its turn interrupted, disconnected, or failed and you have not seen it. Waiting on agents, CI or a process never notifies. The reason is worded as in [push notifications](networking.md#notifications) |
 
-A notice appears in the assistant's transcript, as a toast with a badge on the
-**Assistant** button, as an OS notification in the desktop app, and as a phone
-push. On the phone, a finished run always notifies you. The other three notify
-only for runs you do not own, since your own runs already notify you. Each state
-is announced once, and the follow ends when the run finishes or is deleted.
+A notice appears in the assistant's transcript with a link to its watch, as a
+toast with a badge on the **Assistant** button, as an OS notification in the
+desktop app, and as a phone push. Your own runs already push you when they need
+you, so the watch does not push those again
+([no double pushes](watches.md#no-double-pushes)). Each state is announced
+once; a need the run stood in when the assistant acted on it is not
+announced. The watch ends when the run reaches its final state, expires after
+14 days, or goes with the run when it is deleted.
 
 ## Conversations
 
