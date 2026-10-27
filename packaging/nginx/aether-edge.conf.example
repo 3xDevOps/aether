@@ -11,12 +11,25 @@ map $http_upgrade $aether_edge_connection {
     ''      close;
 }
 
+# The access log keeps the path of a connector authorization request and
+# of the sign-in pages it passes, never their query, which carries the
+# OAuth request's state and PKCE challenge and GitHub's code.
+map $uri $aether_edge_logged_uri {
+    ~^/(mcp/authorize|connectors/choose|signin(/.*)?)$ $uri;
+    default                                            $request_uri;
+}
+
+log_format aether_edge '$remote_addr - $remote_user [$time_local] '
+                       '"$request_method $aether_edge_logged_uri $server_protocol" '
+                       '$status $body_bytes_sent "$http_user_agent"';
+
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
     server_name <signin-host>;
     ssl_certificate     /etc/letsencrypt/live/<signin-host>/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/<signin-host>/privkey.pem;
+    access_log /var/log/nginx/access.log aether_edge;
 
     location / {
         proxy_pass http://127.0.0.1:8443;
@@ -36,6 +49,7 @@ server {
     server_name <relay-host>;
     ssl_certificate     /etc/letsencrypt/live/<relay-host>/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/<relay-host>/privkey.pem;
+    access_log /var/log/nginx/access.log aether_edge;
 
     location / {
         proxy_pass http://127.0.0.1:8443;
