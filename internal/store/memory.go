@@ -60,7 +60,8 @@ const (
 
 // Memory is one team-memory note. AuthorName, PinnedByName and the PR
 // fields are read-only joins: the members' display names and the latest
-// pull request of the note's run.
+// pull request of the note's run. AuthorNow is AuthorID followed through
+// a member merge.
 type Memory struct {
 	ID           string
 	WorkspaceID  domain.WorkspaceID
@@ -73,6 +74,7 @@ type Memory struct {
 	Files        []string
 	AuthorID     domain.MemberID
 	AuthorName   string
+	AuthorNow    domain.MemberID
 	RunID        domain.RunID
 	Harness      string
 	Commit       string
@@ -90,6 +92,15 @@ type Memory struct {
 
 // Live reports whether the note is neither replaced nor invalidated.
 func (m *Memory) Live() bool { return m.InvalidAt == nil && m.SupersededBy == "" }
+
+// Owner is the member a member note belongs to: its pinner, or unpinned
+// its author.
+func (m *Memory) Owner() domain.MemberID {
+	if m.PinnedAt != nil {
+		return m.PinnedBy
+	}
+	return m.AuthorNow
+}
 
 // MemoryPinBudgetError refuses a pin that would push the pinned notes of
 // its scope past their byte budget.
@@ -109,7 +120,7 @@ func (e *MemoryPinBudgetError) Error() string {
 }
 
 const memoryCols = `m.id, m.workspace_id, m.kind, m.scope, m.source, m.source_ref, m.title, m.body, m.files,
-	m.author_member_id, COALESCE(author.display_name, ''), m.run_id, m.harness, m.commit_sha,
+	m.author_member_id, COALESCE(author.display_name, ''), COALESCE(NULLIF(author.merged_into, ''), m.author_member_id), m.run_id, m.harness, m.commit_sha,
 	COALESCE(pr.number, 0), COALESCE(pr.state, ''), COALESCE(pr.url, ''), m.superseded_by, m.invalid_at,
 	m.pinned_by, COALESCE(pinner.display_name, ''), m.pinned_at, m.created_at, m.updated_at`
 
@@ -129,7 +140,7 @@ func scanMemory(row interface{ Scan(...any) error }) (*Memory, error) {
 		created, updated int64
 	)
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.Kind, &m.Scope, &m.Source, &m.SourceRef, &m.Title, &m.Body, &files,
-		&m.AuthorID, &m.AuthorName, &m.RunID, &m.Harness, &m.Commit, &m.PRNumber, &m.PRState, &m.PRURL,
+		&m.AuthorID, &m.AuthorName, &m.AuthorNow, &m.RunID, &m.Harness, &m.Commit, &m.PRNumber, &m.PRState, &m.PRURL,
 		&m.SupersededBy, &invalid, &m.PinnedBy, &m.PinnedByName, &pinned, &created, &updated); err != nil {
 		return nil, err
 	}
@@ -207,7 +218,8 @@ func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
 // repeat its text; when m duplicates another live note, old points at
 // that note. A pin on old moves to the replacement in old's scope, even
 // when the replacement is someone else's duplicate, and must fit that
-// scope's budget without old. A member pin stays its member's; a
+// scope's budget without old. A pin is refused on a duplicate of the other
+// scope, and on one vet refuses. A member pin stays its member's; a
 // workspace pin is pinned by the author m arrived with. It reports
 // whether m duplicated a live note and whether old's pin moved.
 func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent bool, vet func(old *Memory) error) (duplicate, movedPin bool, err error) {
@@ -249,6 +261,17 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, agent b
 	if duplicate && agent {
 		return false, false, fmt.Errorf("%w: memory note %s already holds this text; ask a member to replace %s with it (aether memory add --supersedes %s)",
 			ErrConflict, m.ID, old, old)
+	}
+	if duplicate && prior.PinnedAt != nil {
+		if m.Scope != prior.Scope {
+			return false, false, fmt.Errorf("%w: memory note %s already holds this text as a %s note; the %s pin on %s cannot move to it",
+				ErrConflict, m.ID, m.Scope, prior.Scope, old)
+		}
+		if vet != nil {
+			if err = vet(m); err != nil {
+				return false, false, err
+			}
+		}
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE memory SET superseded_by = ? WHERE id = ?`, m.ID, old); err != nil {
 		return false, false, fmt.Errorf("store: supersede memory %s: %w", old, err)
@@ -575,25 +598,43 @@ func (d *DB) DeleteMemoryByRun(ctx context.Context, workspace domain.WorkspaceID
 }
 
 // vetThenDeleteMemory deletes the notes where selects once vet, when set,
-// passes every one of them.
+// passes every one of them. A note they replaced that vet refuses stays
+// replaced instead of coming back.
 func vetThenDeleteMemory(ctx context.Context, tx *sql.Tx, vet func(*Memory) error, where string, args ...any) ([]string, error) {
-	if vet != nil {
-		rows, err := tx.QueryContext(ctx, `SELECT `+memoryCols+` FROM memory m`+memoryJoins+
-			` WHERE m.rowid IN (SELECT rowid FROM memory WHERE `+where+`) ORDER BY m.id`, args...)
-		if err != nil {
+	if vet == nil {
+		return deleteMemory(ctx, tx, where, args...)
+	}
+	selected := `SELECT id FROM memory WHERE ` + where
+	doomed, err := readMemoryWhere(ctx, tx, `m.id IN (`+selected+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range doomed {
+		if err = vet(n); err != nil {
 			return nil, err
 		}
-		notes, err := collect(rows, scanMemory)
-		if err != nil {
-			return nil, err
+	}
+	replaced, err := readMemoryWhere(ctx, tx, `m.superseded_by IN (`+selected+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range replaced {
+		if vet(n) == nil {
+			continue
 		}
-		for _, n := range notes {
-			if err = vet(n); err != nil {
-				return nil, err
-			}
+		if _, err = tx.ExecContext(ctx, `UPDATE memory SET superseded_by = '' WHERE id = ?`, n.ID); err != nil {
+			return nil, fmt.Errorf("keep %s replaced: %w", n.ID, err)
 		}
 	}
 	return deleteMemory(ctx, tx, where, args...)
+}
+
+func readMemoryWhere(ctx context.Context, tx *sql.Tx, where string, args ...any) ([]*Memory, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT `+memoryCols+` FROM memory m`+memoryJoins+` WHERE `+where+` ORDER BY m.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows, scanMemory)
 }
 
 // deleteMemory deletes the notes where selects and returns their IDs in

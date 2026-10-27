@@ -23,10 +23,10 @@ instruction.
 Adding text that a live note already holds, ignoring case and whitespace,
 returns that note instead of a copy. `--supersedes <id>` replaces a note: the
 old one disappears from search unless you pass `--all`, and a pin moves to the
-new note. A member pin stays with the member who pinned it. If a live note already holds the replacement's text, that note
-becomes the replacement. `aether memory show` lists the chain in replacement
-order: the notes this one replaced, farthest first, then the notes that
-replaced it.
+new note. A member pin stays with the member who pinned it. If a live note
+already holds the replacement's text, that note becomes the replacement.
+`aether memory show` lists the chain in replacement order: the notes this one
+replaced, farthest first, then the notes that replaced it.
 
 ## What runs see automatically
 
@@ -84,11 +84,22 @@ aether: rpc error -32003: memory.pin: pinned workspace notes use 949 of 1024 byt
 ### Who may change a note
 
 A **workspace note** belongs to the team: any collaborator or admin may pin,
-unpin, replace or remove it. A **member note** (`--me`, or **Pin to my runs
-only** in the dashboard) belongs to its owner: the member who pinned it, or
-while unpinned the member who wrote it. Only the owner or an admin may pin,
-unpin, replace or remove it, and `memory rm --run` refuses a run whose notes
-include another member's member note. Everyone else gets:
+unpin, replace or remove it. A **member note** (`--me`, or **Only for my
+runs' briefs** in the dashboard) belongs to its owner: the member who pinned
+it, or while it is unpinned the member who wrote it, or the member they were
+merged into. Only the owner or an admin may pin, unpin, replace or remove it.
+
+- `memory rm --run` refuses a run whose notes include another member's
+  member note.
+- Removing a note does not bring back another member's member note it
+  replaced; that note stays replaced.
+- `pin --me` makes a note yours. On a workspace note only its author or an
+  admin may use it, and no one, admins included, may use it on another
+  member's member note.
+- A pin never moves onto a duplicate of the other scope or onto another
+  member's member note.
+
+A refused change names the rule:
 
 ```
 aether: rpc error -32001: memory.pin: permission denied: note-z7c6ep47d5 is a member note of Alice; only they or an admin may pin it
@@ -168,6 +179,7 @@ The CLI prints errors as `aether: rpc error <code>: <message>`. Agents see
 | 20 agent notes per run | `memory.add: run run-7wjaa6aa6k already wrote 20 notes, the most one run may write; ask a member to add more (aether memory add)` |
 | Agents replace only unpinned agent notes | `memory.add: note-n329aazhqn is pinned by Dana; ask a member to replace it (aether memory add --supersedes note-n329aazhqn)` |
 | Only a member note's owner or an admin changes it | `memory.rm: permission denied: note-z7c6ep47d5 is a member note of Alice; only they or an admin may remove it` (also `pin`, `unpin`, `replace`) |
+| Only a workspace note's author or an admin pins it with `--me` | `memory.pin: permission denied: note-hwwtypyr97 is a workspace note by Alice; only they or an admin may pin it for themselves` |
 | Another member's brief is admin only | `memory.brief: another member's brief: permission denied: workspace administration requires the admin role` |
 | A replaced note cannot be pinned | `memory.pin: store: conflict: memory note note-en269je442 is replaced; pin the note that replaced it` |
 | Search returns 1 to 100 notes | `memory.search: limit must be between 1 and 100; got 101` |

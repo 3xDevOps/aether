@@ -337,8 +337,10 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 	}
 }
 
-// A replacement whose text another live note holds moves the pin to that
-// note, pinned by the member who replaced, not by that note's author.
+// A replacement whose text another live note of the same scope holds moves
+// the pin to that note, pinned by the member who replaced, not by that
+// note's author. A pin never moves onto a duplicate of the other scope, so
+// a member pin cannot take over a workspace note.
 func TestMemorySupersedeOntoDuplicatePinsAsReplacer(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -346,20 +348,28 @@ func TestMemorySupersedeOntoDuplicatePinsAsReplacer(t *testing.T) {
 	alice, dana := mustCreateMember(t, db), mustCreateTeammate(t, db)
 	agents := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, AuthorID: alice.ID, Body: "Use pnpm"})
 	danas := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "Use npm"})
-	if _, err := db.PinMemory(ctx, w.ID, danas.ID, dana.ID, MemoryScopeMember, nil); err != nil {
+	mine := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "Use yarn"})
+	if _, err := db.PinMemory(ctx, w.ID, mine.ID, dana.ID, MemoryScopeMember, nil); err != nil {
+		t.Fatal(err)
+	}
+	crossing := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "use PNPM"}
+	if _, _, err := db.SupersedeMemory(ctx, mine.ID, crossing, false, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("moving a member pin onto a workspace duplicate = %v, want ErrConflict", err)
+	}
+	if _, err := db.PinMemory(ctx, w.ID, danas.ID, dana.ID, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "use PNPM"}
 	if duplicate, moved, err := db.SupersedeMemory(ctx, danas.ID, replacement, false, nil); err != nil || !duplicate || !moved || replacement.ID != agents.ID {
 		t.Fatalf("SupersedeMemory = %s duplicate %v moved %v, %v; want %s", replacement.ID, duplicate, moved, err, agents.ID)
 	}
-	if replacement.PinnedBy != dana.ID || replacement.Scope != MemoryScopeMember {
-		t.Fatalf("pinned duplicate = %+v, want it pinned for Dana only", replacement)
+	if replacement.PinnedBy != dana.ID || replacement.Scope != MemoryScopeWorkspace {
+		t.Fatalf("pinned duplicate = %+v, want it pinned by Dana for the workspace", replacement)
 	}
 	for _, who := range []struct {
 		member *domain.Member
 		pins   int
-	}{{alice, 0}, {dana, 1}} {
+	}{{alice, 1}, {dana, 2}} {
 		brief, err := db.ReadMemoryBrief(ctx, MemoryBriefQuery{Workspace: w.ID, Member: who.member.ID, Since: time.Now(), Runs: 5})
 		if err != nil || len(brief.Pinned) != who.pins {
 			t.Fatalf("%s's brief pins = %+v, %v; want %d", who.member.DisplayName, brief, err, who.pins)
@@ -862,5 +872,21 @@ func TestMemoryMigrationFromV74(t *testing.T) {
 	note := mustAddNote(t, db, &Memory{WorkspaceID: "w1", Body: "Migrated databases index notes."})
 	if got := noteIDs(t, db, MemoryQuery{Workspace: "w1", Words: "index"}); !slices.Equal(got, []string{note.ID}) {
 		t.Fatalf("search after migration = %v, want %s", got, note.ID)
+	}
+}
+
+// A member note belongs to its author's survivor after a member merge.
+func TestMemoryOwnerFollowsMerge(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	ada, bob := mustCreateMember(t, db), mustCreateTeammate(t, db)
+	note := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Scope: MemoryScopeMember, Source: MemoryFromMember, AuthorID: ada.ID, Body: "Prefer table output."})
+	if _, err := db.db.ExecContext(ctx, `UPDATE members SET merged_into = ? WHERE id = ?`, bob.ID, ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := db.GetMemory(ctx, w.ID, note.ID)
+	if err != nil || got.AuthorID != ada.ID || got.Owner() != bob.ID {
+		t.Fatalf("note after merging Ada into Bob = author %s owner %s, %v; want author Ada, owner Bob", got.AuthorID, got.Owner(), err)
 	}
 }

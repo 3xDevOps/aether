@@ -182,7 +182,8 @@ func newMemoryEnv(t *testing.T) (*testEnv, *memory.Service, *events.SQLiteLog) {
 // TestMemoryMemberNotesStayTheirOwners checks that every member reads a
 // member note but only its owner or an admin reads the owner's brief or
 // pins, unpins, removes or replaces the note, from a member or an agent,
-// while workspace notes stay everyone's to change and undo.
+// while workspace notes stay everyone's to change and undo but not to take
+// for oneself.
 func TestMemoryMemberNotesStayTheirOwners(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -257,6 +258,10 @@ func TestMemoryMemberNotesStayTheirOwners(t *testing.T) {
 	if err := aliceC.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws, ID: note}, nil); err != nil {
 		t.Fatalf("alice memory.pin: %v", err)
 	}
+	for _, scope := range []string{"", protocol.MemoryScopeMember} {
+		denied("admin memory.pin --me of alice's member note", adminC.Call(protocol.MethodMemoryPin,
+			protocol.MemoryPinParams{WorkspaceID: ws, ID: note, Scope: scope}, nil), rule(protocol.MethodMemoryPin, "pin"))
+	}
 	if err := adminC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, ID: note}, nil); err != nil {
 		t.Fatalf("admin memory.rm: %v", err)
 	}
@@ -308,8 +313,40 @@ func TestMemoryMemberNotesStayTheirOwners(t *testing.T) {
 		found.Item.SupersededBy != "" || found.Item.InvalidAt != nil {
 		t.Fatalf("alice's workspace note after bob removed its replacement = %+v, %v; want it live again", found.Item, err)
 	}
+	denied("bob memory.pin --me of alice's workspace note", bobC.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws,
+		ID: shared.Item.ID, Scope: protocol.MemoryScopeMember}, nil),
+		"memory.pin: permission denied: "+shared.Item.ID+" is a workspace note by Alice; only they or an admin may pin it for themselves")
 	if err = bobC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, ID: shared.Item.ID}, nil); err != nil {
 		t.Fatalf("bob removing alice's workspace note: %v", err)
+	}
+
+	var hers, his protocol.MemoryAddResult
+	if err = aliceC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Scope: protocol.MemoryScopeMember, Text: "Prefer short commit subjects."}, &hers); err != nil {
+		t.Fatalf("alice memory.add --me: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Scope: protocol.MemoryScopeMember, Text: "Prefer long commit subjects.", Pin: true}, &his); err != nil {
+		t.Fatalf("bob memory.add --me --pin: %v", err)
+	}
+	denied("bob moving his pin onto alice's note by its text", bobC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws,
+		Kind: protocol.MemoryKindPreference, Scope: protocol.MemoryScopeMember, Text: "Prefer short commit subjects.", Supersedes: his.Item.ID}, nil),
+		"memory.add: permission denied: "+hers.Item.ID+" is a member note of Alice; only they or an admin may replace it")
+
+	var bobs protocol.MemoryAddResult
+	if err = bobC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Text: "Prefer squash merges."}, &bobs); err != nil {
+		t.Fatalf("bob memory.add: %v", err)
+	}
+	if err = aliceC.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: ws, Kind: protocol.MemoryKindPreference,
+		Scope: protocol.MemoryScopeMember, Text: "Prefer squash merges.", Supersedes: hers.Item.ID}, nil); err != nil {
+		t.Fatalf("alice replacing her note with bob's text: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, ID: bobs.Item.ID}, nil); err != nil {
+		t.Fatalf("bob removing his note: %v", err)
+	}
+	if err = bobC.Call(protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: ws, ID: hers.Item.ID}, &found); err != nil || found.Item.InvalidAt == nil {
+		t.Fatalf("alice's note after bob removed its replacement = %+v, %v; want it still replaced", found.Item, err)
 	}
 }
 

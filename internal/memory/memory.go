@@ -5,6 +5,7 @@
 package memory
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -82,7 +83,7 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		return protocol.MemoryAddResult{}, fail(method, err)
 	}
 	text := strings.TrimSpace(p.Text)
-	if err := checkNote(p.Kind, p.Scope, text, p.Files); err != nil {
+	if err = checkNote(p.Kind, p.Scope, text, p.Files); err != nil {
 		return protocol.MemoryAddResult{}, err
 	}
 	if run != nil && p.Pin {
@@ -104,8 +105,8 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 	if run != nil {
 		s.agentWrites.Lock()
 		defer s.agentWrites.Unlock()
-		written, err := s.cfg.Store.CountAgentNotesByRun(ctx, run.ID)
-		if err != nil {
+		var written int
+		if written, err = s.cfg.Store.CountAgentNotesByRun(ctx, run.ID); err != nil {
 			return protocol.MemoryAddResult{}, fail(method, err)
 		}
 		if written >= protocol.MemoryMaxAgentNotesPerRun {
@@ -113,8 +114,8 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 				"memory.add: run %s already wrote %d notes, the most one run may write; ask a member to add more (aether memory add)",
 				run.ID, written)}
 		}
-		head, err := s.head(ctx, run)
-		if err != nil {
+		var head string
+		if head, err = s.head(ctx, run); err != nil {
 			return protocol.MemoryAddResult{}, fail(method, err)
 		}
 		note.Source, note.RunID, note.Harness, note.Commit = store.MemoryFromAgent, run.ID, run.Harness, head
@@ -228,24 +229,48 @@ func agentMayReplace(run *domain.Run) func(*store.Memory) error {
 	}
 }
 
-// mayChange lets actor change a member note only when it is theirs: pinned
-// by them, or unpinned and written by them. Admins and workspace notes are
-// unrestricted.
+// mayChange lets actor change a member note only when it is theirs (see
+// store.Memory.Owner). Admins and workspace notes are unrestricted.
 func mayChange(method, verb string, actor *domain.Member) func(*store.Memory) error {
 	return func(n *store.Memory) error {
-		if n.Scope != store.MemoryScopeMember || actor.Role == domain.RoleAdmin {
+		if n.Scope != store.MemoryScopeMember || actor.Role == domain.RoleAdmin || n.Owner() == actor.ID {
 			return nil
 		}
-		owner, ownerName := n.AuthorID, n.AuthorName
-		if n.PinnedAt != nil {
-			owner, ownerName = n.PinnedBy, n.PinnedByName
-		}
-		if owner == actor.ID {
-			return nil
-		}
-		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
-			"%s: permission denied: %s is a member note of %s; only they or an admin may %s it", method, n.ID, name(ownerName, string(owner)), verb)}
+		return denyOwner(method, verb, n)
 	}
+}
+
+// mayPin is mayChange for a pin into scope, which makes a member-scope
+// pin the actor's: only a workspace note's author may take it for
+// themselves, and no one, admins included, takes another member's note.
+func mayPin(method, scope string, actor *domain.Member) func(*store.Memory) error {
+	owns := mayChange(method, "pin", actor)
+	return func(n *store.Memory) error {
+		if cmp.Or(scope, string(n.Scope)) != protocol.MemoryScopeMember {
+			return owns(n)
+		}
+		switch {
+		case n.Scope == store.MemoryScopeMember && n.Owner() != actor.ID:
+			return denyOwner(method, "pin", n)
+		case n.Scope == store.MemoryScopeWorkspace && n.AuthorNow != actor.ID && actor.Role != domain.RoleAdmin:
+			return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+				"%s: permission denied: %s is a workspace note by %s; only they or an admin may pin it for themselves",
+				method, n.ID, name(n.AuthorName, string(n.AuthorID)))}
+		}
+		return nil
+	}
+}
+
+func denyOwner(method, verb string, n *store.Memory) error {
+	var ownerName string
+	switch {
+	case n.PinnedAt != nil:
+		ownerName = n.PinnedByName
+	case n.AuthorNow == n.AuthorID:
+		ownerName = n.AuthorName
+	}
+	return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+		"%s: permission denied: %s is a member note of %s; only they or an admin may %s it", method, n.ID, name(ownerName, string(n.Owner())), verb)}
 }
 
 func name(display, id string) string {
@@ -363,7 +388,7 @@ func (s *Service) Pin(ctx context.Context, member domain.MemberID, p protocol.Me
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
-	note, err := s.cfg.Store.PinMemory(ctx, workspace, p.ID, member, store.MemoryScope(p.Scope), mayChange(method, "pin", actor))
+	note, err := s.cfg.Store.PinMemory(ctx, workspace, p.ID, member, store.MemoryScope(p.Scope), mayPin(method, p.Scope, actor))
 	if err != nil {
 		return protocol.MemoryPinResult{}, fail(method, err)
 	}
