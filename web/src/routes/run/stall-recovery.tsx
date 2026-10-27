@@ -96,7 +96,6 @@ export function StallCallout({ run, agent, lastPrompt, nav }: {
       <Callout
         tone="waiting"
         title="Possibly stalled"
-        aria-label="Possibly stalled"
         actions={
           <>
             <Button size="sm" variant="secondary" disabled={busy || !control.canAct} hint={control.canAct ? 'Cancels the agent’s turn. Costs nothing.' : 'Take control of the session to stop its turn'} onClick={stop}>
