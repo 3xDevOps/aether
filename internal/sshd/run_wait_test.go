@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -13,9 +14,13 @@ import (
 type fakeRunWaits struct {
 	WatchService
 	waits []protocol.WaitCondition
+	err   error
 }
 
 func (f fakeRunWaits) RunWaitsOf(_ context.Context, runs []domain.RunID) (map[domain.RunID][]protocol.WaitCondition, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	out := map[domain.RunID][]protocol.WaitCondition{}
 	for _, r := range runs {
 		out[r] = append([]protocol.WaitCondition(nil), f.waits...)
@@ -62,7 +67,9 @@ func TestWaitConditionsLeaveOutTheOwnersReadsForOthers(t *testing.T) {
 	}
 	read := func(member string) protocol.WaitCondition {
 		out := []protocol.Run{{}}
-		s.fillWaitConditions(t.Context(), members[member].ID, []*domain.Run{run}, out)
+		if err := s.fillWaitConditions(t.Context(), members[member].ID, []*domain.Run{run}, out); err != nil {
+			t.Fatal(err)
+		}
 		if len(out[0].WaitConditions) != 1 {
 			t.Fatalf("%s sees %+v, want one condition", member, out[0].WaitConditions)
 		}
@@ -89,5 +96,9 @@ func TestWaitConditionsLeaveOutTheOwnersReadsForOthers(t *testing.T) {
 	}
 	if got := cancel("owner"); got.Detail != w.Detail {
 		t.Fatalf("run.wait.cancel by the owner returned %+v, want everything", got)
+	}
+	s.cfg.Services.Watches = fakeRunWaits{err: errors.New("database is locked")}
+	if _, perr := s.runGet(t.Context(), members["owner"].ID, []byte(`{"run_id":"`+string(run.ID)+`"}`)); perr == nil {
+		t.Fatal("run.get with an unreadable wait store succeeded, want its error")
 	}
 }

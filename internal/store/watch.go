@@ -141,7 +141,8 @@ type WatchStore interface {
 	// dropped as cleared.
 	ExpireWatches(ctx context.Context, now time.Time) ([]*Watch, error)
 	// PurgeWatches deletes the done and expired watches that ended before
-	// cutoff, with their notifications.
+	// cutoff, with their notifications, but for a run's wait whose wake is
+	// still due.
 	PurgeWatches(ctx context.Context, cutoff time.Time) (int64, error)
 
 	ListWatchNotifications(ctx context.Context, watch string, limit int) ([]*WatchNotification, error)
@@ -538,7 +539,7 @@ func (d *DB) PurgeWatches(ctx context.Context, cutoff time.Time) (int64, error) 
 	if err != nil {
 		return 0, fmt.Errorf("store: purge watches: %w", err)
 	}
-	res, err := d.db.ExecContext(ctx, `DELETE FROM watches WHERE state IN ('done', 'expired') AND ended_at < ?`, at)
+	res, err := d.db.ExecContext(ctx, `DELETE FROM watches WHERE state IN ('done', 'expired') AND ended_at < ? AND wait_delivery_next_at IS NULL`, at)
 	if err != nil {
 		return 0, fmt.Errorf("store: purge watches: %w", err)
 	}

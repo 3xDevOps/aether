@@ -2,10 +2,12 @@ package coord
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -23,6 +25,8 @@ type recordingWaits struct {
 	receipt []string
 	read    []domain.RunID
 	ended   []string
+	cutoffs []time.Time
+	failEnd error
 	settled []protocol.WaitCondition
 }
 
@@ -51,10 +55,13 @@ func (r *recordingWaits) SettleRunWaits(_ context.Context, run domain.RunID) ([]
 	return r.settled, nil
 }
 
-func (r *recordingWaits) EndRunWaits(_ context.Context, run domain.RunID, cause string) error {
+func (r *recordingWaits) EndRunWaits(_ context.Context, run domain.RunID, cause string, before time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.ended = append(r.ended, string(run)+": "+cause)
+	if r.failEnd != nil {
+		return r.failEnd
+	}
+	r.ended, r.cutoffs = append(r.ended, string(run)+": "+cause), append(r.cutoffs, before)
 	return nil
 }
 
@@ -129,5 +136,38 @@ func TestUntilRegistersWaitsForTheReportingRunOnly(t *testing.T) {
 	})
 	if rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams || !strings.HasSuffix(rpcErr.Message, waits.refuse) {
 		t.Fatalf("refused target: %+v", rpcErr)
+	}
+}
+
+// A report other than waiting cancels only the conditions registered before
+// it, so a retry of an older report leaves a newer wait alone, and a
+// cancellation that fails fails the report, whose retry cancels again.
+func TestOtherReportsCancelOnlyEarlierWaits(t *testing.T) {
+	outcomes := &recordingOutcomes{}
+	h, _ := newStateReportHarness(t, outcomes)
+	waits := &recordingWaits{db: h.db}
+	h.svc.cfg.Waits = waits
+	run := h.run(0)
+
+	report(t, h, run, protocol.CoordOutcomeBlocked, "need the staging key", "b1")
+	first := waits.cutoffs[0]
+	time.Sleep(10 * time.Millisecond)
+	report(t, h, run, protocol.CoordOutcomeBlocked, "need the staging key", "b1")
+	if len(waits.cutoffs) != 2 || !waits.cutoffs[1].Equal(first) {
+		t.Fatalf("cutoffs = %v, want the retry to cancel up to the original report", waits.cutoffs)
+	}
+
+	waits.failEnd = errors.New("database is locked")
+	if _, rpcErr := h.svc.CoordReport(t.Context(), run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeAnswered, Summary: "replied", IdempotencyKey: "a1",
+	}); rpcErr == nil || rpcErr.Code != protocol.CodeInternal || !strings.Contains(rpcErr.Message, "database is locked") {
+		t.Fatalf("answered with a failed cancel: %+v, want the error", rpcErr)
+	}
+	waits.failEnd = nil
+	if rpcErr := stateReport(h, run, protocol.CoordOutcomeAnswered, "", "replied", "a1"); rpcErr != nil {
+		t.Fatalf("retry: %v", rpcErr)
+	}
+	if got := waits.ended[len(waits.ended)-1]; got != string(run)+": the run reported answered" {
+		t.Fatalf("ended = %v, want the retry to cancel", waits.ended)
 	}
 }

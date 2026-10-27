@@ -614,7 +614,9 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
-	s.endWaits(context.WithoutCancel(ctx), run, p.Outcome)
+	if err = s.endWaits(context.WithoutCancel(ctx), run, p.Outcome, report.CreatedAt); err != nil {
+		return protocol.CoordReportResult{}, internalError(method, err)
+	}
 	if report.State == store.CoordReportFinalized && report.PublishedAt != nil && !missionReconcile {
 		return coordReportResult(report), nil
 	}

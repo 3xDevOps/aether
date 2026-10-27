@@ -7,21 +7,18 @@ import (
 	"strings"
 )
 
-// MethodRunWaitCancel ends one of a run's wait conditions. It needs the
-// run control permission, as run.pause does.
+// MethodRunWaitCancel needs the run control permission, as run.pause does.
 const MethodRunWaitCancel = "run.wait.cancel"
 
-// CoordMaxUntil bounds the conditions one waiting report registers.
 const CoordMaxUntil = 4
 
-// Kinds of a wait condition.
 const (
 	WaitKindPRMerged    = "pr_merged"
 	WaitKindPRChecks    = "pr_checks"
 	WaitKindRunFinished = "run_finished"
 )
 
-// States of a wait condition. Resolved, expired and error wake the run.
+// Resolved, expired and error wake the run.
 const (
 	WaitPending    = "pending"
 	WaitResolved   = "resolved"
@@ -31,20 +28,15 @@ const (
 	WaitError      = "error"
 )
 
-// WatchSourceAgent is the source of a watch a run registered with
-// coord.report until; WatchChannelRunInbox is its delivery to that run's
-// inbox.
 const (
 	WatchSourceAgent     = "agent"
 	WatchChannelRunInbox = "run_inbox"
 )
 
-// WaitGrammar is the accepted form of an until condition.
 const WaitGrammar = "pr:<owner>/<repo>#<n>:merged, pr:<owner>/<repo>#<n>:checks[@<head-sha>] or run:<run-id>:finished"
 
 // WaitSpec is one parsed until condition. Spec is its canonical text.
-// HeadSHA is the commit a checks condition names, a prefix of 7 to 40 hex
-// digits.
+// HeadSHA is a prefix of 7 to 40 hex digits.
 type WaitSpec struct {
 	Spec    string
 	Kind    string
@@ -59,8 +51,7 @@ var (
 	waitRunPattern = regexp.MustCompile(`^run:([a-z0-9][a-z0-9-]{0,63}):finished$`)
 )
 
-// ParseWaitSpec parses one until condition. The error names the condition
-// and the grammar.
+// ParseWaitSpec's error names the condition and the grammar.
 func ParseWaitSpec(raw string) (WaitSpec, error) {
 	if m := waitPRPattern.FindStringSubmatch(raw); m != nil && m[2] != "." && m[2] != ".." {
 		n, err := strconv.Atoi(m[3])
@@ -90,7 +81,6 @@ type WaitChecks struct {
 	RequiredOnly bool `json:"required_only"`
 }
 
-// WaitObserved is what the last read of a wait's target found.
 type WaitObserved struct {
 	PRState   string      `json:"pr_state,omitempty"`
 	HeadSHA   string      `json:"head_sha,omitempty"`

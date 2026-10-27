@@ -56,7 +56,7 @@ type OutcomeSink interface {
 type RunWaits interface {
 	RegisterWait(ctx context.Context, owner *domain.Run, report *store.CoordStateReport, specs []protocol.WaitSpec) (bool, error)
 	SettleRunWaits(ctx context.Context, run domain.RunID) ([]protocol.WaitCondition, error)
-	EndRunWaits(ctx context.Context, run domain.RunID, cause string) error
+	EndRunWaits(ctx context.Context, run domain.RunID, cause string, before time.Time) error
 }
 
 // InvalidWait is until conditions RunWaits refuses as asked, for Reason.
@@ -100,16 +100,18 @@ func specTexts(specs []protocol.WaitSpec) []string {
 	return out
 }
 
-// endWaits cancels the run's wait conditions after a report other than
-// waiting took effect. A failure is logged: the report stands, and the
-// run's end or next report cancels them again.
-func (s *Service) endWaits(ctx context.Context, run domain.RunID, outcome string) {
+// endWaits cancels the run's wait conditions registered before a report
+// other than waiting, made at, took effect. A retry of the report cancels
+// them again; one replayed after a newer waiting report leaves that
+// report's conditions alone.
+func (s *Service) endWaits(ctx context.Context, run domain.RunID, outcome string, at time.Time) error {
 	if s.cfg.Waits == nil {
-		return
+		return nil
 	}
-	if err := s.cfg.Waits.EndRunWaits(ctx, run, "the run reported "+outcome); err != nil {
-		slog.Warn("coord: cancel the run's wait conditions", "run", run, "error", err)
+	if err := s.cfg.Waits.EndRunWaits(ctx, run, "the run reported "+outcome, at); err != nil {
+		return fmt.Errorf("cancel the run's wait conditions: %w", err)
 	}
+	return nil
 }
 
 // reportState hands a needs-input, waiting or answered report straight to the
@@ -215,7 +217,9 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 			nextAction += "; read resolved and act on it now, as no wake follows"
 		}
 	case p.Outcome != protocol.CoordOutcomeWaiting:
-		s.endWaits(ctx, run, p.Outcome)
+		if err = s.endWaits(ctx, run, p.Outcome, receipt.CreatedAt); err != nil {
+			return protocol.CoordReportResult{}, internalError(method, err)
+		}
 	}
 	if p.Outcome == protocol.CoordOutcomeNeedsInput && s.cfg.Children != nil {
 		s.cfg.Children.NeedsInput(ctx, run, summary)

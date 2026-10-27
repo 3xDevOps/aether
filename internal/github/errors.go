@@ -26,7 +26,15 @@ var (
 	// ErrMoved matches an APIError for HTTP 301: the repository was renamed
 	// or transferred, and retrying the old owner/name never succeeds.
 	ErrMoved = errors.New("github: repository moved")
+	// ErrUnreachable matches a request that got no answer from GitHub: the
+	// network failed or it timed out.
+	ErrUnreachable = errors.New("github: unreachable")
 )
+
+type unreachableError string
+
+func (e unreachableError) Error() string        { return string(e) }
+func (e unreachableError) Is(target error) bool { return target == ErrUnreachable }
 
 // APIError is a non-200 GitHub response. Message is GitHub's own error text,
 // bounded and with the request token redacted.

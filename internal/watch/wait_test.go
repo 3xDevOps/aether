@@ -260,7 +260,7 @@ func TestANewReportSupersedesAndAnotherOutcomeCancels(t *testing.T) {
 		t.Fatalf("superseded wait: %v, want it deleted", err)
 	}
 	h.status(a, domain.RunCompleted, "", "")
-	if err := h.svc.EndRunWaits(h.ctx, owner.ID, "the run reported answered"); err != nil {
+	if err := h.svc.EndRunWaits(h.ctx, owner.ID, "the run reported answered", h.clock.now()); err != nil {
 		t.Fatal(err)
 	}
 	h.status(b, domain.RunCompleted, "", "")
@@ -486,10 +486,12 @@ func TestAWaitThatNothingResolvesExpiresAndWakes(t *testing.T) {
 	owner, target := h.run(h.ada, "Integrate"), h.run(h.ada, "Build")
 	h.mustReport(owner, finished(target.ID))
 	h.eventually("the first read", func() bool { return h.only(owner.ID).LastCheckedAt != "" })
+	h.settle()
+	read := h.only(owner.ID)
 	h.clock.advance(WaitExpiry + time.Minute)
 	h.eventually("the wake", func() bool { return len(h.inbox.messages(owner.ID)) == 1 })
-	if w := h.only(owner.ID); w.State != protocol.WaitExpired {
-		t.Fatalf("state = %s, want expired", w.State)
+	if w := h.only(owner.ID); w.State != protocol.WaitExpired || w.SourceCheckedAt != read.SourceCheckedAt || w.Observed.RunStatus != "running" {
+		t.Fatalf("wait = %+v, want expired keeping the last read %s of a running target", w, read.SourceCheckedAt)
 	}
 	if got, err := h.db.GetWatch(h.ctx, h.only(owner.ID).ID); err != nil || got.State != protocol.WatchExpired {
 		t.Fatalf("watch = %+v, %v; want expired, so it is purged", got, err)
@@ -511,7 +513,7 @@ func TestAPersonsPromptCancelsAndWaitsStayOffTheWatchList(t *testing.T) {
 	if _, err = h.svc.Get(h.ctx, h.ada.ID, h.only(owner.ID).ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("watch.get on a wait: %v, want not found", err)
 	}
-	if err = h.svc.EndRunWaits(h.ctx, owner.ID, "a person sent a new prompt"); err != nil {
+	if err = h.svc.EndRunWaits(h.ctx, owner.ID, "a person sent a new prompt", h.clock.now()); err != nil {
 		t.Fatal(err)
 	}
 	if w := h.only(owner.ID); w.State != protocol.WaitCancelled || w.EndedCause != "a person sent a new prompt" {
@@ -683,7 +685,7 @@ func TestAPromptDropsAWakeNotYetWritten(t *testing.T) {
 	h.mustReport(owner, finished(target.ID))
 	h.status(target, domain.RunCompleted, "", "")
 	h.eventually("a failed attempt", func() bool { return h.only(owner.ID).DeliveryAttempts >= 1 })
-	if err := h.svc.EndRunWaits(h.ctx, owner.ID, "a person sent a new prompt"); err != nil {
+	if err := h.svc.EndRunWaits(h.ctx, owner.ID, "a person sent a new prompt", h.clock.now()); err != nil {
 		t.Fatal(err)
 	}
 	h.inbox.fail.Store(false)
@@ -782,4 +784,103 @@ func TestConditionsOfAReportNeverAppliedArePurged(t *testing.T) {
 	}
 	h.clock.advance(registeredRetention + time.Minute)
 	h.eventually("the purge", func() bool { return h.waitRows(owner.ID) == 0 })
+}
+
+// Cancelling a run's waits for a report or a prompt ends only the ones
+// registered before it: a wait the agent registers in answer stays.
+func TestCancellingEndsOnlyEarlierWaits(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	owner, a, b := h.run(h.ada, "Integrate"), h.run(h.ada, "A"), h.run(h.ada, "B")
+	h.mustReport(owner, finished(a.ID))
+	cutoff := h.clock.now()
+	h.clock.advance(time.Second)
+	h.mustReport(owner, finished(b.ID))
+	if err := h.svc.EndRunWaits(h.ctx, owner.ID, "the run reported blocked", cutoff); err != nil {
+		t.Fatal(err)
+	}
+	if w := h.only(owner.ID); w.RunID != string(b.ID) || w.State != protocol.WaitPending {
+		t.Fatalf("wait = %+v, want the later one pending", w)
+	}
+}
+
+// A retry of a recorded report is answered from its receipt even after its
+// target run was deleted.
+func TestARetryOutlivesItsTarget(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	owner, target := h.run(h.ada, "Integrate"), h.run(h.ada, "Build")
+	if _, err := h.report(owner, "k", finished(target.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.DeleteRun(h.ctx, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.register(owner, "k", finished(target.ID)); err != nil {
+		t.Fatalf("retry after the target was deleted: %v", err)
+	}
+}
+
+// A named commit that is still not the head well after the wait began was
+// replaced before it was read: the wait resolves rather than lasting to
+// its expiry.
+func TestANamedCommitNeverSeenResolvesAsSuperseded(t *testing.T) {
+	h, gh := newWaitPRHarness(t)
+	gh.set(func(f *fakeGitHub) { f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "test", Status: "in_progress"}} })
+	owner := h.run(h.ada, "Pushed 2222")
+	h.mustReport(owner, "pr:acme/app#7:checks@"+shaTwo)
+	h.clock.advance(namedHeadGrace + PRPollIdle + PRPollIdle/5)
+	h.eventually("the wake", func() bool { return len(h.inbox.messages(owner.ID)) == 1 })
+	if w := h.only(owner.ID); w.Outcome != "superseded" {
+		t.Fatalf("wait = %+v, want superseded", w)
+	}
+}
+
+// A report never applied loses its conditions after a day with its
+// receipt, so its retry registers them again.
+func TestARetryAfterThePurgeRegistersAgain(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	owner, target := h.run(h.ada, "Integrate"), h.run(h.ada, "Build")
+	h.status(target, domain.RunCompleted, "", "")
+	if err := h.register(owner, "lost", finished(target.ID)); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.advance(registeredRetention + time.Minute)
+	h.eventually("the purge", func() bool { return h.waitRows(owner.ID) == 0 })
+	resolved, err := h.report(owner, "lost", finished(target.ID))
+	if err != nil || len(resolved) != 1 {
+		t.Fatalf("retry = %+v, %v; want the condition registered again and resolved", resolved, err)
+	}
+}
+
+func TestOnlyAGitHubThatAnsweredSaysTheLoginIsMissing(t *testing.T) {
+	t.Parallel()
+	for err, missing := range map[error]bool{
+		github.ErrUnauthorized:                          true,
+		errors.New("github: cannot read creds"):         true,
+		fmt.Errorf("verify: %w", github.ErrUnreachable): false,
+		&github.APIError{Status: 502}:                   false,
+		&github.APIError{Status: 401}:                   true,
+	} {
+		if got := credentialsError(err).noLogin; got != missing {
+			t.Errorf("credentialsError(%v).noLogin = %v, want %v", err, got, missing)
+		}
+	}
+}
+
+// A wake still due is kept past the purge of ended watches.
+func TestAWakeStillDueIsNotPurged(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	owner, target := h.run(h.ada, "Integrate"), h.run(h.ada, "Build")
+	h.inbox.fail.Store(true)
+	h.mustReport(owner, finished(target.ID))
+	h.status(target, domain.RunCompleted, "", "")
+	h.eventually("a failed attempt", func() bool { return h.only(owner.ID).DeliveryAttempts >= 1 })
+	h.clock.advance(Retention + 24*time.Hour)
+	h.settle()
+	if n := h.waitRows(owner.ID); n != 1 {
+		t.Fatalf("%d wait rows after the purge, want the one still due", n)
+	}
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"fmt"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -31,12 +31,11 @@ func (s *Server) runWaits() RunWaitService {
 
 // fillWaitConditions sets each of runs' latest wait conditions on out, the
 // snapshots of runs in the same order, in one read. Unless member owns the
-// run or is an admin, they are redacted. A failed read is logged and leaves
-// them out, as a run response never fails on them.
-func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID, runs []*domain.Run, out []protocol.Run) {
+// run or is an admin, they are redacted.
+func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID, runs []*domain.Run, out []protocol.Run) error {
 	svc := s.runWaits()
 	if svc == nil || len(runs) == 0 {
-		return
+		return nil
 	}
 	ids := make([]domain.RunID, len(runs))
 	for i, r := range runs {
@@ -44,8 +43,7 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 	}
 	byRun, err := svc.RunWaitsOf(ctx, ids)
 	if err != nil {
-		slog.Warn("sshd: read the runs' wait conditions", "error", err)
-		return
+		return fmt.Errorf("read the runs' wait conditions: %w", err)
 	}
 	admin := false
 	if m, err := s.cfg.Store.GetMember(ctx, member); err == nil {
@@ -60,6 +58,7 @@ func (s *Server) fillWaitConditions(ctx context.Context, member domain.MemberID,
 		}
 		out[i].WaitConditions = waits
 	}
+	return nil
 }
 
 // redactWait leaves out of w what only the run's owner and admins read:

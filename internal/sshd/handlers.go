@@ -295,7 +295,9 @@ func (s *Server) runList(ctx context.Context, member domain.MemberID, params jso
 		out = append(out, s.runSnapshot(r))
 		listed = append(listed, r)
 	}
-	s.fillWaitConditions(ctx, member, listed, out)
+	if err := s.fillWaitConditions(ctx, member, listed, out); err != nil {
+		return nil, rpcError(err)
+	}
 	return protocol.RunListResult{Runs: out}, nil
 }
 
@@ -309,7 +311,9 @@ func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json
 		return nil, rpcError(err)
 	}
 	out := []protocol.Run{s.runSnapshot(run)}
-	s.fillWaitConditions(ctx, member, []*domain.Run{run}, out)
+	if err := s.fillWaitConditions(ctx, member, []*domain.Run{run}, out); err != nil {
+		return nil, rpcError(err)
+	}
 	return protocol.RunResult{Run: out[0]}, nil
 }
 

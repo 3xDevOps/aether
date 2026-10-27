@@ -99,19 +99,17 @@ func TestIntegrationRunWaitWakesTheAgent(t *testing.T) {
 		}
 		t.Fatalf("waiter inbox has %d messages, want one to itself saying the target was abandoned", len(msgs))
 	}
-	// Aether also asks each of the mock's turns for a report, as it does
-	// after one that reported waiting without --until: a reminder turn
-	// follows the task's turn and the wake's.
+	// The mock ends the wake's turn without a report, so Aether asks it for
+	// one: that reminder is the only turn after the wake.
 	if inboxes, reminders, turns := countPrompts(t, env.srv, waiter, protocol.CoordInboxContext(1)),
-		countPrompts(t, env.srv, waiter, coordhooks.ReportReminderLead), turnsEnded(t, env.srv, waiter); inboxes != 1 || turns != 2+reminders {
-		t.Fatalf("waiter: %d inbox prompts, %d reminders, %d turns; want one wake and no other turn", inboxes, reminders, turns)
+		countPrompts(t, env.srv, waiter, coordhooks.ReportReminderLead), turnsEnded(t, env.srv, waiter); inboxes != 1 || reminders != 1 || turns != 3 {
+		t.Fatalf("waiter: %d inbox prompts, %d reminders, %d turns; want its task's turn, one wake and its reminder", inboxes, reminders, turns)
 	}
 	if w := get(waiter).WaitConditions; len(w) != 1 || w[0].State != protocol.WaitResolved || w[0].DeliveredAt == "" {
 		t.Fatalf("waiter wait_conditions = %+v, want resolved and delivered", w)
 	}
-	if reminders, turns := countPrompts(t, env.srv, satisfied, coordhooks.ReportReminderLead), turnsEnded(t, env.srv, satisfied); turns != 1+reminders ||
-		len(inbox(satisfied)) != 0 || countPrompts(t, env.srv, satisfied, protocol.CoordInboxContext(1)) != 0 {
-		t.Fatalf("satisfied run: %d turns, %d reminders, %d messages; want its one turn and no wake", turns, reminders, len(inbox(satisfied)))
+	if turns := turnsEnded(t, env.srv, satisfied); turns != 1 || len(inbox(satisfied)) != 0 {
+		t.Fatalf("satisfied run: %d turns, %d messages; want its one turn and no wake", turns, len(inbox(satisfied)))
 	}
 	if w := get(satisfied).WaitConditions; len(w) != 1 || w[0].State != protocol.WaitResolved || w[0].Outcome != "abandoned" || w[0].DeliveredAt == "" {
 		t.Fatalf("satisfied wait_conditions = %+v, want resolved and returned", w)

@@ -260,9 +260,9 @@ func (s *Service) fetch(ctx context.Context, token, path, etag string, dst any) 
 		}
 		var timeout net.Error
 		if errors.As(err, &timeout) && timeout.Timeout() {
-			return nil, false, errors.New("github: API request timed out")
+			return nil, false, unreachableError("github: API request timed out")
 		}
-		return nil, false, errors.New("github: API request failed")
+		return nil, false, unreachableError("github: API request failed")
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode == http.StatusNotModified && etag != "" {

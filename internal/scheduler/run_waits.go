@@ -2,7 +2,8 @@ package scheduler
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -10,7 +11,7 @@ import (
 // RunWaits cancels the conditions a run waits on. Satisfied by
 // *watch.Service.
 type RunWaits interface {
-	EndRunWaits(ctx context.Context, run domain.RunID, cause string) error
+	EndRunWaits(ctx context.Context, run domain.RunID, cause string, before time.Time) error
 }
 
 // UseRunWaits has a person's prompt and a relaunch cancel the run's wait
@@ -21,14 +22,17 @@ func (s *Scheduler) UseRunWaits(w RunWaits) {
 	s.waits = w
 }
 
-func (s *Scheduler) endRunWaits(ctx context.Context, run domain.RunID, cause string) {
+// endRunWaits cancels the conditions run registered before now, so ones
+// it registers in answer to what follows stay.
+func (s *Scheduler) endRunWaits(ctx context.Context, run domain.RunID, cause string) error {
 	s.mu.Lock()
 	w := s.waits
 	s.mu.Unlock()
 	if w == nil {
-		return
+		return nil
 	}
-	if err := w.EndRunWaits(ctx, run, cause); err != nil {
-		slog.Warn("scheduler: cancel the run's wait conditions", "run", run, "cause", cause, "error", err)
+	if err := w.EndRunWaits(ctx, run, cause, time.Now()); err != nil {
+		return fmt.Errorf("scheduler: cancel run %s's wait conditions: %w", run, err)
 	}
+	return nil
 }

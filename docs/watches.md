@@ -254,8 +254,8 @@ an hour; the next is refused with that error.
 A checks condition resolves only on its head commit, `head_sha`. With
 `@<sha>` (7 to 40 lowercase hex digits, the commit you pushed) that is the
 commit named: checks on any other head are ignored, and once the named
-commit was the head, another head replacing it before its checks finish
-resolves the condition as `superseded`. Without it, the first read, made
+commit was the head, or 5 minutes after the condition began while it still
+is not, another head resolves the condition as `superseded`. Without it, the first read, made
 afresh, binds the head it finds; a different head counts only with checks
 that finished after the condition was registered, so a force-push back to
 an older commit is no verdict. GitHub can still show the previous head for
@@ -293,7 +293,7 @@ run that ended gets nothing. Web Push is never sent for run waits.
 | `resolved` | A condition resolved; `outcome` says how. Wakes the run, or is returned in the report. |
 | `error` | The target can never be read: GitHub answers 404 or moved, the member has no usable GitHub login, or the run was deleted. `last_error` says which. Wakes the run, or is returned in the report. |
 | `expired` | Nothing resolved within 7 days. Wakes the run. |
-| `cancelled` | `ended_cause` says why: another condition of the same report resolved first, the run reported another outcome, a person sent a prompt, the run was relaunched or ended, or its member lost access. `run.wait.cancel` sets it to `cancelled` and `ended_by_member_id` to the member who cancelled. An undelivered wake is dropped with it. |
+| `cancelled` | `ended_cause` says why: another condition of the same report resolved first, the run reported another outcome, a person sent a prompt, the run was relaunched or ended, or its member lost access. A report, prompt or relaunch cancels only conditions registered before it, so one the agent registers in answer stays; a prompt cancels them before it reaches the agent, and is refused if that fails. `run.wait.cancel` sets it to `cancelled` and `ended_by_member_id` to the member who cancelled. An undelivered wake is dropped with it. |
 
 A waiting report with `--until` takes effect, and replaces the run's pending
 conditions, only once the scheduler accepts it: a refused report leaves the
@@ -305,11 +305,13 @@ report makes them due at once, so a server that stops before reading them
 reads them when it starts. A retry of the report with the same idempotency
 key registers nothing new, and the same key with other conditions is
 refused. The conditions of a report that never took effect are deleted
-after a day.
+after a day with its receipt, so a later retry registers them again. A
+woken condition whose wake is still due is never purged.
 
 `run.get` and `run.list` return the run's latest report's conditions as
 `wait_conditions`, with `delivered_at`, `delivery_attempts` and
-`last_delivery_error`; other run responses leave them out. What was read
+`last_delivery_error`; other run responses leave them out. A failure to
+read them fails the request. What was read
 with the owner's GitHub login (`observed`, `summary`, `detail`, a read
 `head_sha`, `last_error`) and the free text of `ended_cause` and
 `last_delivery_error` are returned only to the run's owner and admins;

@@ -35,7 +35,7 @@ func (p *PRs) Snapshot(ctx context.Context, member domain.MemberID, repo string,
 // names, else the head at its first read, made afresh. An unnamed wait
 // also resolves on a later head whose checks finished after it began. A
 // named head that a push replaced before its checks finished resolves as
-// superseded; one not yet seen is waited for.
+// superseded; one not yet seen is waited for, up to namedHeadGrace.
 func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, now time.Time, fresh bool) (waitReading, error) {
 	ref := fmt.Sprintf("%s#%d", w.Repo, w.Number)
 	r := waitReading{link: "https://github.com/" + w.Repo + "/pull/" + strconv.Itoa(w.Number)}
@@ -97,9 +97,9 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, now time.Tim
 			r.observation = headSeen
 		}
 		switch {
-		case named && !onBound && w.Observation == headSeen:
+		case named && !onBound && (w.Observation == headSeen || now.Sub(w.CreatedAt) > namedHeadGrace):
 			r.done, r.outcome, r.observation = true, "superseded", "superseded:"+snap.HeadSHA
-			r.summary = "head commit moved from " + short(r.head) + " to " + short(snap.HeadSHA) + " before its checks finished"
+			r.summary = "head commit is " + short(snap.HeadSHA) + ", not " + short(r.head) + ", and its checks are not read"
 		case snap.State == "closed" && !merged && !final:
 			r.done, r.outcome, r.observation = true, "closed", "closed"
 			r.summary = ref + " closed without merging before its checks finished"
@@ -148,8 +148,13 @@ func checkCounts(c *protocol.WaitChecks) string {
 	return "checks " + strings.Join(parts, ", ")
 }
 
-// headSeen marks a named checks wait whose commit was the head.
-const headSeen = "head-seen"
+// headSeen marks a named checks wait whose commit was the head. One whose
+// commit is still not the head namedHeadGrace after it began was replaced
+// before it was read, as GitHub shows a push sooner than that.
+const (
+	headSeen       = "head-seen"
+	namedHeadGrace = 5 * time.Minute
+)
 
 // maxUntrusted bounds the third-party text a wake quotes.
 const maxUntrusted = 300

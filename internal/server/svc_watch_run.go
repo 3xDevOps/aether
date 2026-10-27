@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -67,10 +68,10 @@ func (l lazyWaits) SettleRunWaits(ctx context.Context, run domain.RunID) ([]prot
 	return w.SettleRunWaits(ctx, run)
 }
 
-func (l lazyWaits) EndRunWaits(ctx context.Context, run domain.RunID, cause string) error {
+func (l lazyWaits) EndRunWaits(ctx context.Context, run domain.RunID, cause string, before time.Time) error {
 	w, err := l.service()
 	if errors.Is(err, errNoWatches) {
 		return nil
 	}
-	return w.EndRunWaits(ctx, run, cause)
+	return w.EndRunWaits(ctx, run, cause, before)
 }

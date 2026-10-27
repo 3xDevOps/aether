@@ -107,7 +107,8 @@ type RunWaitStore interface {
 	// read; a run with none has no entry.
 	RunWaitConditionsOf(ctx context.Context, runs []domain.RunID) (map[domain.RunID][]*RunWait, error)
 	// PurgeRegisteredRunWaits deletes the conditions of reports never
-	// applied that were registered before cutoff.
+	// applied that were registered before cutoff, with those reports'
+	// receipts, so a retry registers them again.
 	PurgeRegisteredRunWaits(ctx context.Context, cutoff time.Time) error
 	// CommitRunWait writes w if w.Version is still stored, else returns
 	// ErrConflict. A w that wakes its run ends the revision's other pending
@@ -115,10 +116,11 @@ type RunWaitStore interface {
 	// another condition of the revision already woke it: then w ends
 	// cancelled instead. ended lists the others it ended.
 	CommitRunWait(ctx context.Context, w *RunWait, n *WatchNotification) (ended []*RunWait, err error)
-	// EndRunWaits ends run's pending conditions, or only wait when it is
-	// set, in state with cause, by the member who cancelled them if one
-	// did, and drops their undelivered wakes.
-	EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error)
+	// EndRunWaits ends run's pending conditions registered before before,
+	// or all when it is zero, or only wait when it is set, in state with
+	// cause, by the member who cancelled them if one did, and drops their
+	// undelivered wakes.
+	EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cause string, by domain.MemberID, before, now time.Time) ([]*RunWait, error)
 	// DueRunWaitDeliveries lists the waits whose wake is due by now.
 	DueRunWaitDeliveries(ctx context.Context, now time.Time) ([]*RunWait, error)
 	// SetRunWaitDelivery records one delivery attempt of w's wake: its
@@ -185,7 +187,7 @@ func armRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, key string, 
 	if registered == 0 {
 		return nil
 	}
-	if _, err := endRunWaits(ctx, tx, run, "", waitSuperseded, "replaced by the report "+key, "", now); err != nil {
+	if _, err := endRunWaitsWhere(ctx, tx, `owner_run_id = ?`, []any{run}, waitSuperseded, "replaced by the report "+key, "", now); err != nil {
 		return err
 	}
 	at, err := encodeTime(now)
@@ -282,7 +284,19 @@ func (d *DB) PurgeRegisteredRunWaits(ctx context.Context, cutoff time.Time) erro
 	if err != nil {
 		return fmt.Errorf("store: purge registered waits: %w", err)
 	}
-	if _, err := d.db.ExecContext(ctx, `DELETE FROM watches WHERE wait_state = 'registered' AND created_at < ?`, at); err != nil {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: purge registered waits: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if _, err := tx.ExecContext(ctx, `DELETE FROM coord_state_reports WHERE applied_at IS NULL AND (run_id, idempotency_key) IN (
+		SELECT owner_run_id, wait_report_key FROM watches WHERE wait_state = 'registered' AND created_at < ?)`, at); err != nil {
+		return fmt.Errorf("store: purge registered waits: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM watches WHERE wait_state = 'registered' AND created_at < ?`, at); err != nil {
+		return fmt.Errorf("store: purge registered waits: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: purge registered waits: %w", err)
 	}
 	return nil
@@ -357,13 +371,24 @@ func updateRunWait(ctx context.Context, db execer, w *RunWait) error {
 	return nil
 }
 
-func (d *DB) EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error) {
+func (d *DB) EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cause string, by domain.MemberID, before, now time.Time) ([]*RunWait, error) {
+	where, args := `owner_run_id = ?`, []any{run}
+	if wait != "" {
+		where, args = where+` AND id = ?`, append(args, wait)
+	}
+	if !before.IsZero() {
+		at, err := encodeTime(before)
+		if err != nil {
+			return nil, fmt.Errorf("store: end waits: %w", err)
+		}
+		where, args = where+` AND created_at < ?`, append(args, at)
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: end waits: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
-	ended, err := endRunWaits(ctx, tx, run, wait, state, cause, by, now)
+	ended, err := endRunWaitsWhere(ctx, tx, where, args, state, cause, by, now)
 	if err != nil {
 		return nil, err
 	}
@@ -371,14 +396,6 @@ func (d *DB) EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cau
 		return nil, fmt.Errorf("store: end waits: %w", err)
 	}
 	return ended, nil
-}
-
-func endRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, wait, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error) {
-	where, args := `owner_run_id = ?`, []any{run}
-	if wait != "" {
-		where, args = where+` AND id = ?`, append(args, wait)
-	}
-	return endRunWaitsWhere(ctx, tx, where, args, state, cause, by, now)
 }
 
 // endRunWaitsWhere ends the pending waits that match where, and drops the
