@@ -12,7 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-const attemptColumns = `id, mission_id, task_id, task_revision, number, dispatch_key, harness, mode, model, state, run_id, actor_run_id, authorizing_human_id, run_owner_id, account_owner_id, authority_generation, integrator_generation, created_at, reserved_at, started_at, finished_at, cancel_requested_at, cancellation_actor_run_id, cancellation_generation, last_error, launch_account_id`
+const attemptColumns = `id, mission_id, task_id, task_revision, number, dispatch_key, harness, mode, model, effort, state, run_id, actor_run_id, authorizing_human_id, run_owner_id, account_owner_id, authority_generation, integrator_generation, created_at, reserved_at, started_at, finished_at, cancel_requested_at, cancellation_actor_run_id, cancellation_generation, last_error, launch_account_id`
 
 func scanAttempt(row interface{ Scan(...any) error }) (*domain.Attempt, error) {
 	var a domain.Attempt
@@ -20,7 +20,7 @@ func scanAttempt(row interface{ Scan(...any) error }) (*domain.Attempt, error) {
 	var mode, state string
 	var created, reserved int64
 	var started, finished, cancelRequested *int64
-	if err := row.Scan(&a.ID, &a.MissionID, &a.TaskID, &a.TaskRevision, &a.Number, &a.DispatchKey, &a.Harness, &mode, &a.Model, &state, &runID, &a.ActorRunID, &a.AuthorizingHumanID, &a.RunOwnerID, &a.AccountOwnerID, &a.AuthorityGeneration, &a.IntegratorGeneration, &created, &reserved, &started, &finished, &cancelRequested, &a.CancellationActorRunID, &a.CancellationGeneration, &a.LastError, &a.LaunchAccountID); err != nil {
+	if err := row.Scan(&a.ID, &a.MissionID, &a.TaskID, &a.TaskRevision, &a.Number, &a.DispatchKey, &a.Harness, &mode, &a.Model, &a.Effort, &state, &runID, &a.ActorRunID, &a.AuthorizingHumanID, &a.RunOwnerID, &a.AccountOwnerID, &a.AuthorityGeneration, &a.IntegratorGeneration, &created, &reserved, &started, &finished, &cancelRequested, &a.CancellationActorRunID, &a.CancellationGeneration, &a.LastError, &a.LaunchAccountID); err != nil {
 		return nil, err
 	}
 	a.Mode, a.State = domain.LaunchMode(mode), domain.AttemptState(state)
@@ -44,7 +44,7 @@ func scanAttempt(row interface{ Scan(...any) error }) (*domain.Attempt, error) {
 }
 
 func attemptSemanticallyEqual(a *domain.Attempt, r *domain.AttemptReservation) bool {
-	return a.MissionID == r.MissionID && a.TaskID == r.TaskID && a.TaskRevision == r.TaskRevision && a.Harness == r.Harness && a.Mode == r.Mode && a.Model == r.Model && a.ActorRunID == r.ActorRunID && a.AuthorizingHumanID == r.AuthorizingHumanID && a.RunOwnerID == r.RunOwnerID && a.AccountOwnerID == r.AccountOwnerID && a.AuthorityGeneration == r.AuthorityGeneration && a.IntegratorGeneration == r.IntegratorGeneration && (r.AssignedRunID == "" || a.RunID == r.AssignedRunID)
+	return a.MissionID == r.MissionID && a.TaskID == r.TaskID && a.TaskRevision == r.TaskRevision && a.Harness == r.Harness && a.Mode == r.Mode && a.Model == r.Model && a.Effort == r.Effort && a.ActorRunID == r.ActorRunID && a.AuthorizingHumanID == r.AuthorizingHumanID && a.RunOwnerID == r.RunOwnerID && a.AccountOwnerID == r.AccountOwnerID && a.AuthorityGeneration == r.AuthorityGeneration && a.IntegratorGeneration == r.IntegratorGeneration && (r.AssignedRunID == "" || a.RunID == r.AssignedRunID)
 }
 
 func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (*domain.Attempt, bool, error) {
@@ -52,6 +52,9 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 		return nil, false, errors.New("store: reserve attempt: invalid request")
 	}
 	if err := domain.ValidModel(r.Model); err != nil {
+		return nil, false, fmt.Errorf("store: reserve attempt: %w", err)
+	}
+	if err := domain.ValidEffort(r.Effort); err != nil {
 		return nil, false, fmt.Errorf("store: reserve attempt: %w", err)
 	}
 	// Generate the reserved run ID only after the replay lookup; a retry with
@@ -132,7 +135,7 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	}
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
-	_, err = tx.ExecContext(ctx, `INSERT INTO mission_attempts (id,mission_id,task_id,task_revision,number,dispatch_key,harness,mode,model,state,run_id,actor_run_id,authorizing_human_id,run_owner_id,account_owner_id,authority_generation,integrator_generation,created_at,reserved_at,started_at,finished_at,cancel_requested_at,cancellation_actor_run_id,cancellation_generation,last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,'',0,'')`, id, r.MissionID, r.TaskID, r.TaskRevision, number, r.DispatchKey, r.Harness, r.Mode, r.Model, domain.AttemptReserved, r.AssignedRunID, r.ActorRunID, r.AuthorizingHumanID, r.RunOwnerID, r.AccountOwnerID, r.AuthorityGeneration, m.IntegratorGeneration, n, n)
+	_, err = tx.ExecContext(ctx, `INSERT INTO mission_attempts (id,mission_id,task_id,task_revision,number,dispatch_key,harness,mode,model,effort,state,run_id,actor_run_id,authorizing_human_id,run_owner_id,account_owner_id,authority_generation,integrator_generation,created_at,reserved_at,started_at,finished_at,cancel_requested_at,cancellation_actor_run_id,cancellation_generation,last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,'',0,'')`, id, r.MissionID, r.TaskID, r.TaskRevision, number, r.DispatchKey, r.Harness, r.Mode, r.Model, r.Effort, domain.AttemptReserved, r.AssignedRunID, r.ActorRunID, r.AuthorizingHumanID, r.RunOwnerID, r.AccountOwnerID, r.AuthorityGeneration, m.IntegratorGeneration, n, n)
 	if err != nil {
 		return nil, false, fmt.Errorf("store: reserve attempt: %w", mapConstraint(err, ErrConflict))
 	}

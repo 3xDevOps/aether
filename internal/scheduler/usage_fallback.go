@@ -833,9 +833,9 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	switch {
 	case run.ACP:
 	case run.Mode == domain.LaunchTUI:
-		argv = append(profile.ResumeCommand(session, run.Model), continuationPrompt(fromName, toName))
+		argv = append(profile.ResumeCommand(session, run.Model, run.Effort), continuationPrompt(fromName, toName))
 	default:
-		argv = profile.HeadlessResumeCommand(session, continuationPrompt(fromName, toName), run.Model)
+		argv = profile.HeadlessResumeCommand(session, continuationPrompt(fromName, toName), run.Model, run.Effort)
 	}
 	// As at launch: the replacement authors commits as home is now, and the
 	// co-author list written for it leaves that address out.

@@ -218,14 +218,27 @@ func ValidModel(model string) error {
 	return fmt.Errorf("model %q must be a single argument: no whitespace or control characters, not starting with \"-\", at most 128 bytes", model)
 }
 
+// ValidEffort reports whether effort can reach an agent CLI as one argument.
+// Empty is valid and keeps the agent's default.
+func ValidEffort(effort string) error {
+	bad := len(effort) > 32 || strings.HasPrefix(effort, "-") || strings.ContainsFunc(effort, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	})
+	if !bad {
+		return nil
+	}
+	return fmt.Errorf("effort %q must be a single argument: no whitespace or control characters, not starting with \"-\", at most 32 bytes", effort)
+}
+
 // LaunchOptions carries launch controls that are not part of the strict
-// Launch seam. Model is the run's agent model; empty keeps the agent's
-// default. CachedBase pins a retry to the exact accepted mirror commit
+// Launch seam. Model is the run's agent model and Effort its effort or
+// thinking level; empty keeps the agent's default. CachedBase pins a retry to the exact accepted mirror commit
 // returned by a prior base-capture failure. AssignedRunID is reserved by
 // durable mission state and is never exposed through generic run.launch.
 type LaunchOptions struct {
 	Limits        RunLimits
 	Model         string
+	Effort        string
 	CachedBase    string
 	AssignedRunID RunID
 	// RequestedAccount is the account the launcher asked for, recorded on the
@@ -716,9 +729,10 @@ type Run struct {
 	Title   string
 	Harness string
 	Mode    LaunchMode
-	// Model is the agent's model for this run; empty keeps the agent's
-	// default.
-	Model string
+	// Model is the agent's model for this run and Effort its effort or
+	// thinking level; empty keeps the agent's default.
+	Model  string
+	Effort string
 	// ACP is true when the server drives the agent over the Agent Client
 	// Protocol: every LaunchACP run, and a LaunchHeadless run whose agent
 	// serves ACP. Such a run has a session item log.

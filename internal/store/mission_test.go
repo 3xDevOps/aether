@@ -89,6 +89,133 @@ func TestMissionAttemptReservationIsIdempotent(t *testing.T) {
 	}); !errors.Is(reserveErr, ErrMissionIdempotencyConflict) {
 		t.Fatalf("replay with another model = %v, want a conflict", reserveErr)
 	}
+	if _, _, reserveErr := db.ReserveAttempt(context.Background(), &domain.AttemptReservation{
+		MissionID: mission.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
+		DispatchKey: admittedKey, Harness: "claude", Mode: domain.LaunchHeadless, Effort: "high",
+		IntegratorGeneration: mission.IntegratorGeneration,
+	}); !errors.Is(reserveErr, ErrMissionIdempotencyConflict) {
+		t.Fatalf("replay with another effort = %v, want a conflict", reserveErr)
+	}
+}
+
+func TestMissionEffortSeparatesChoicesAndBindsTheReceipts(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	newMission := func(integratorEffort, workerEffort string) *domain.Mission {
+		return &domain.Mission{
+			WorkspaceID: workspace.ID, Objective: "ship", AccountableHumanID: member.ID,
+			Integrator: domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI, Effort: integratorEffort},
+			ExecutionChoices: []domain.MissionExecutionChoice{
+				{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI, Effort: "high"},
+				{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI, Effort: workerEffort},
+			},
+			IdempotencyKey: "efforts",
+		}
+	}
+	m := newMission("high", "low")
+	if err := db.CreateMission(ctx, m); err != nil {
+		t.Fatalf("create with choices differing only in effort: %v", err)
+	}
+	got, err := db.GetMission(ctx, m.ID)
+	if err != nil || got.Integrator.Effort != "high" || len(got.ExecutionChoices) != 2 || got.ExecutionChoices[1].Effort != "low" {
+		t.Fatalf("stored mission = %+v, %v", got, err)
+	}
+	if replayErr := db.CreateMission(ctx, newMission("low", "low")); !errors.Is(replayErr, ErrMissionIdempotencyConflict) {
+		t.Fatalf("replay with another integrator effort = %v, want a conflict", replayErr)
+	}
+	if replayErr := db.CreateMission(ctx, newMission("high", "max")); !errors.Is(replayErr, ErrMissionIdempotencyConflict) {
+		t.Fatalf("replay with another worker effort = %v, want a conflict", replayErr)
+	}
+	if dupErr := db.CreateMission(ctx, newMission("high", "high")); dupErr == nil || !strings.Contains(dupErr.Error(), "duplicate mission execution choice") {
+		t.Fatalf("create with two identical choices = %v, want a duplicate refusal", dupErr)
+	}
+
+	replacement := domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI, Effort: "low"}
+	replaced, err := db.ReplaceIntegrator(ctx, m.ID, m.IntegratorGeneration, replacement, member.ID, member.ID, "replace-effort")
+	if err != nil {
+		t.Fatalf("replace integrator: %v", err)
+	}
+	if replaced.Integrator.Effort != "low" {
+		t.Fatalf("replaced integrator effort = %q, want low", replaced.Integrator.Effort)
+	}
+	replacement.Effort = "max"
+	if _, replayErr := db.ReplaceIntegrator(ctx, m.ID, m.IntegratorGeneration, replacement, member.ID, member.ID, "replace-effort"); !errors.Is(replayErr, ErrMissionIdempotencyConflict) {
+		t.Fatalf("replacement replay with another effort = %v, want a conflict", replayErr)
+	}
+
+	task := mustCreateMissionTask(t, db, m.ID, "worker")
+	if _, execErr := db.db.ExecContext(ctx, `UPDATE missions SET phase=? WHERE id=?`, domain.MissionPhaseActive, m.ID); execErr != nil {
+		t.Fatalf("start mission: %v", execErr)
+	}
+	attempt, _, err := db.ReserveAttempt(ctx, &domain.AttemptReservation{
+		MissionID: m.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
+		DispatchKey: "effort", Harness: "claude", Mode: domain.LaunchHeadless, Effort: "high",
+		IntegratorGeneration: replaced.IntegratorGeneration,
+	})
+	if err != nil {
+		t.Fatalf("reserve attempt: %v", err)
+	}
+	if stored, getErr := db.GetAttempt(ctx, attempt.ID); getErr != nil || stored.Effort != "high" {
+		t.Fatalf("stored attempt = %+v, %v; want effort high", stored, getErr)
+	}
+}
+
+// A receipt written before v93 has no integrator_effort and an
+// execution_choices blob without effort keys; a replay without effort must
+// still return its swarm.
+func TestMissionCreateReceiptFromBeforeEffortStillMatches(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, 92)
+	const choices = `[{"account_member_id":"m1","harness":"claude","mode":"tui","model":"opus"},{"account_member_id":"m1","harness":"codex","mode":"headless"}]`
+	for _, seed := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO members (id, display_name, public_key, color, role, created_at) VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1)`, []any{testKey(t, "")}},
+		{`INSERT INTO workspaces (id, name, created_at) VALUES ('w1', 'proj', 1)`, nil},
+		{`INSERT INTO missions (id, workspace_id, objective, accountable_human_id, integrator_account_member_id,
+		                        integrator_harness, integrator_mode, integrator_model, execution_choices,
+		                        current_integrator_run_id, idempotency_key, created_at, updated_at,
+		                        integrator_authorizing_human_id, integrator_run_owner_id)
+			VALUES ('mis1', 'w1', 'ship', 'm1', 'm1', 'claude', 'tui', 'opus', ?, 'run1', 'legacy', 1, 1, 'm1', 'm1')`, []any{choices}},
+		{`INSERT INTO mission_create_receipts (workspace_id, idempotency_key, mission_id, objective, accountable_human_id,
+		                                       integrator_account_member_id, integrator_harness, integrator_mode, integrator_model,
+		                                       execution_choices, initial_run_id, created_at)
+			VALUES ('w1', 'legacy', 'mis1', 'ship', 'm1', 'm1', 'claude', 'tui', 'opus', ?, 'run1', 1)`, []any{choices}},
+	} {
+		if _, err := raw.Exec(seed.query, seed.args...); err != nil {
+			t.Fatalf("seed v92 swarm: %v", err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (v93 migration): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	replay := func(integratorEffort string) *domain.Mission {
+		return &domain.Mission{
+			WorkspaceID: "w1", Objective: "ship", AccountableHumanID: "m1",
+			Integrator: domain.MissionIntegrator{AccountMemberID: "m1", Harness: "claude", Mode: domain.LaunchTUI, Model: "opus", Effort: integratorEffort},
+			ExecutionChoices: []domain.MissionExecutionChoice{
+				{AccountMemberID: "m1", Harness: "claude", Mode: domain.LaunchTUI, Model: "opus", Effort: integratorEffort},
+				{AccountMemberID: "m1", Harness: "codex", Mode: domain.LaunchHeadless},
+			},
+			IdempotencyKey: "legacy",
+		}
+	}
+	m := replay("")
+	if err := db.CreateMission(ctx, m); err != nil || m.ID != "mis1" || m.Integrator.Effort != "" {
+		t.Fatalf("replay of a v92 create = %+v, %v; want swarm mis1 without effort", m, err)
+	}
+	if err := db.CreateMission(ctx, replay("high")); !errors.Is(err, ErrMissionIdempotencyConflict) {
+		t.Fatalf("replay of a v92 create with an effort = %v, want a conflict", err)
+	}
 }
 
 func TestMissionModelSeparatesChoicesAndBindsTheCreateReceipt(t *testing.T) {

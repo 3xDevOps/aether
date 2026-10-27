@@ -23,6 +23,7 @@ type Run struct {
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
 	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
 	// Via is the connector client, such as ChatGPT, the run was launched
 	// through.
 	Via    string `json:"via,omitempty"`
@@ -229,6 +230,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Harness:             r.Harness,
 		Mode:                string(r.Mode),
 		Model:               r.Model,
+		Effort:              r.Effort,
 		Via:                 r.Via,
 		ACP:                 r.ACP,
 		Status:              string(r.Status),
@@ -436,6 +438,9 @@ type RunLaunchParams struct {
 	Mode string `json:"mode,omitempty"`
 	// Model is passed to the agent as is; empty keeps the agent's default.
 	Model string `json:"model,omitempty"`
+	// Effort is one of the agent's effort_levels; empty keeps the agent's
+	// default.
+	Effort string `json:"effort,omitempty"`
 	// Empty means the caller's own account.
 	AccountMemberID string `json:"account_member_id,omitempty"`
 	// CachedBase retries a transient base-capture failure with the accepted
@@ -868,6 +873,9 @@ type AgentInfo struct {
 	// EnhancedDefault: setup offers the enhanced install, and a background
 	// run uses it once installed.
 	EnhancedDefault bool `json:"enhanced_default"`
+	// EffortLevels are the effort or thinking levels a launch may pass;
+	// empty when the agent has no effort setting.
+	EffortLevels []string `json:"effort_levels,omitempty"`
 	// SwarmStandardRefusal is why a swarm integrator or worker cannot run the
 	// agent in Standard mode; empty when it can.
 	SwarmStandardRefusal string `json:"swarm_standard_refusal,omitempty"`

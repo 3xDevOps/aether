@@ -74,7 +74,7 @@ func TestSwarmReplaceIntegratorSendsTheShownGeneration(t *testing.T) {
 		protocol.MethodMissionReplaceIntegrator: replace,
 	})
 	var out bytes.Buffer
-	if err := replaceSwarmIntegrator(c, &out, "m1", protocol.MissionIntegrator{Harness: "codex", Model: "gpt-5-codex"}, "key-1"); err != nil {
+	if err := replaceSwarmIntegrator(c, &out, "m1", protocol.MissionIntegrator{Harness: "codex", Model: "gpt-5-codex", Effort: "xhigh"}, "key-1"); err != nil {
 		t.Fatalf("replaceSwarmIntegrator: %v", err)
 	}
 	if got, wantJSON := string(listed.got), mustJSON(t, protocol.AgentListParams{AccountMemberID: "mem1"}); got != wantJSON {
@@ -82,7 +82,7 @@ func TestSwarmReplaceIntegratorSendsTheShownGeneration(t *testing.T) {
 	}
 	want := protocol.MissionReplaceIntegratorParams{
 		MissionID: "m1", ExpectedGeneration: 2,
-		Integrator:     protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "codex", Mode: "acp", Model: "gpt-5-codex"},
+		Integrator:     protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "codex", Mode: "acp", Model: "gpt-5-codex", Effort: "xhigh"},
 		IdempotencyKey: "key-1",
 	}
 	if got, wantJSON := string(replace.got), mustJSON(t, want); got != wantJSON {
