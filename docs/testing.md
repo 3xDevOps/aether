@@ -100,7 +100,7 @@ Some tests take an image from the environment:
 | `AETHER_BROWSER_TEST_IMAGE` | `TestDockerBrowser*` and the server's browser scenarios | `aether/browser:test`, which `make browser-image` builds ([The browser companion](#the-browser-companion)) |
 | `AETHER_BROWSER_IMAGE` | The companion image a server under test starts | The build's default companion image |
 | `AETHER_NESTED_DOCKER_TEST_IMAGE` | `TestDockerNestedDocker` ([inside a run](#running-the-docker-suites-inside-a-run)) | The test skips |
-| `AETHER_ACP_IMAGE` | Enhanced-mode adapter tests ([Enhanced mode](#enhanced-mode)) | The test skips, or uses busybox only |
+| `AETHER_ACP_IMAGE` | Enhanced-mode adapter tests ([Enhanced mode](#enhanced-mode)) and `TestIntegrationAssistantIgnoresPlantedGatewayDocker`, which installs the assistant's adapters from the npm registry | The test skips, or uses busybox only |
 
 The resource tests check real cgroup limits, PID exhaustion and OOM
 containment. The capacity test starts its own `dockerd` and `containerd` in

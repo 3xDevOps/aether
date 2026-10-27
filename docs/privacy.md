@@ -385,24 +385,24 @@ Your [assistant](assistant.md) keeps its conversation on your server under
 
 - `items.jsonl` is the transcript the panel shows: your prompts, the agent's
   replies, its tool calls and their results, and the action cards.
-- `home/` is the agent's home: the session files Claude Code keeps under
-  `.claude/` (projects, history, todos, file history, shell snapshots, debug
-  logs) or Codex under `.codex/` (sessions, history).
+- `home/` is the agent's home: the sign-in you made for the assistant
+  (`.claude/.credentials.json` or `.codex/auth.json`) and the session files
+  Claude Code keeps under `.claude/` (projects, history, todos, file history,
+  shell snapshots, debug logs) or Codex under `.codex/` (sessions, history).
 - `install/` holds each agent's installed adapter, and `install/<agent>.installed`
   its version.
 - `instructions/` holds the instructions the server gives it, and `tools/` its
   tool socket.
 
-Only the server process and your assistant's container read them; no run,
-environment or other member can. Anyone with access to the server's data
-directory, such as its administrator, can read them. Your prompts and the
-files the agent reads go to the agent's vendor under your own account, as in
-any run: to whichever account your login file holds. Your runs, and the runs
-of anyone you [share your account](security.md#account-sharing) with, can
-replace that file with another account's login, and the assistant then sends
-your prompts to that account.
+Only the server process and your assistant's container read or write them;
+no run, environment or other member can, including members you
+[share your account](security.md#account-sharing) with. Anyone with access to
+the server's data directory, such as its administrator, can read them. Your
+prompts and the files the agent reads go to the agent's vendor under the
+account you signed the assistant in to.
 
-**New conversation** deletes `items.jsonl` and `home/`. Removing a member deletes the whole directory. Assistant state
+**New conversation** deletes `items.jsonl` and everything in `home/` but the
+sign-in. Removing a member deletes the whole directory. Assistant state
 from before the assistant had its own container is in your home;
 [assistant.md](assistant.md#earlier-assistant-state-in-your-home) says how to
 delete it.

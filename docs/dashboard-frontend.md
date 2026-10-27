@@ -536,7 +536,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   line under it says the assistant acts without asking, with **Change in
   Settings**.
 - **Body:** by `assistant.status` state. `setup` lists each agent with its
-  reason and opens `AgentSetup` in place; `failed`
+  reason, and **Sign in** opens `AssistantSignIn` in place: a terminal on
+  `/ws/terminal?assistant_login=<agent>`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
   the run Session's `TimelineRow` and `useFlatRows`, with the Session's

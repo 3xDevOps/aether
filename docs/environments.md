@@ -23,14 +23,6 @@ also get the software you installed outside it. A run on another member's
 shared agent account still starts from the image of the member who launches
 it ([teams.md](teams.md#agent-accounts)).
 
-Once you share your agent account or start the
-[assistant](assistant.md#where-it-runs), your environment and runs created
-from then on also mount the login files `~/.claude/.credentials.json` and
-`~/.gemini/oauth_creds.json` over themselves, creating an empty file when none
-exists. A CLI that refreshes its login then rewrites the file in place instead
-of replacing it, so the shared run and the assistant, which mount that one
-file, keep the current login.
-
 ## The standard image
 
 When you have saved nothing, your environment and your runs start from the

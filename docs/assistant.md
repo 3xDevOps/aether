@@ -7,8 +7,9 @@ permissions and asks before it launches, messages or stops a run, or saves your
 environment, unless you turn on [auto-approval](#auto-approval).
 
 The assistant is not a run. It is an [Enhanced](enhanced-runs.md) session of
-Claude Code or Codex signed in with your own login, so its usage counts against
-your own subscription. It works before you have a workspace.
+Claude Code or Codex with a sign-in of its own, which you make once for it. Its
+usage counts against the account you sign it in to. It works before you have a
+workspace.
 
 ## Where it runs
 
@@ -17,43 +18,39 @@ Each member's assistant runs in a container of its own,
 runs and your [environment](environments.md) (the persistent container
 `aether terminal` opens) cannot see it:
 
-- Its home is `<data>/assistant/<member>/home` on the server, not your home.
-  Nothing in your home configures it: no `CLAUDE.md`, `AGENTS.md`,
-  `~/.claude/settings.json`, `~/.codex/config.toml` or `~/.local/bin`.
+- Its home is `<data>/assistant/<member>/home` on the server. It mounts
+  nothing from your home or any other member's: no `CLAUDE.md`, `AGENTS.md`,
+  `~/.claude`, `~/.codex`, `~/.local/bin` and no agent login.
 - Its working directory is `/assistant`, which holds the server's
   instructions and is read-only.
-- From your home it mounts only the login file of the agent it runs, as a
-  single read-write file: `~/.claude/.credentials.json` for Claude Code or
-  `~/.codex/auth.json` for Codex. Whichever account that file holds receives
-  the assistant's prompts; see [the login file](#the-login-file).
-- Its Enhanced adapter is in `<data>/assistant/<member>/install/<agent>`, mounted
-  read-only at `/opt/aether-assistant`, first in its `PATH`. The assistant
-  cannot change it, and **New conversation** does not need to reinstall it.
+- Its Enhanced adapter is in `<data>/assistant/<member>/install/<agent>`,
+  mounted read-only under `/opt/aether-assistant` and first in its `PATH`.
+- `/etc/claude-code` and `/etc/codex`, where the agents read managed
+  settings, are empty and read-only.
 - Claude Code's auto-memory is off for it.
+
+Each start of the assistant replaces its container, so nothing the agent
+changed outside its home survives. In the home it keeps only the sign-in file
+and the files that resume the conversation: `~/.claude/projects` for Claude
+Code; `~/.codex/sessions`, `archived_sessions`, `session_index.jsonl` and the
+`state_*.sqlite` files for Codex. Settings, hooks, instructions, MCP servers,
+skills and memories the agent wrote are deleted, and `~/.claude.json` is
+written again with only the onboarding flag.
+
+The sign-in file must hold only what a sign-in writes. Claude Code's
+`.credentials.json` keeps `claudeAiOauth`; Codex's `auth.json` keeps
+`auth_mode` (`chatgpt` or `apikey`), `OPENAI_API_KEY`, `tokens` and
+`last_refresh`. Anything else, such as a gateway URL that would receive your
+prompts, is removed, and that start fails with the keys it removed. **Retry**
+starts with the rest.
 
 On the first start, and after a server upgrade that pins a newer adapter, the
 panel shows **Installing** while a short-lived container,
-`aether-assistant-install-<member>`, runs `npm install -g` of the pinned
-adapter into that directory. It needs network access to the npm registry. The
-adapter carries the agent itself: the Claude Code binary of its Agent SDK, or
-the Codex version its package depends on. Neither updates on its own; both move
-when a server upgrade pins a newer adapter.
-
-### The login file
-
-The login file is bound into the assistant container when the container is
-created, at the assistant's start. What reaches the other side:
-
-- A file rewritten in place reaches both sides at once. Codex rewrites
-  `auth.json` in place. Claude Code in the assistant rewrites its file in
-  place, because the file is a mountpoint there.
-- A file replaced by rename, as Claude Code does in your runs and environment,
-  is a new file. The running assistant keeps the old one until its next start.
-  Your containers created after your first assistant start, or while you share
-  your account, mount the login the same way, so Claude Code rewrites it in
-  place there too; older ones replace it.
-- Signing in again replaces the file; the assistant uses the new login from
-  its next start.
+`aether-assistant-install-<member>`, runs `npm install` of the pinned adapter
+into that directory. It needs network access to the npm registry. The adapter
+carries the agent itself: the Claude Code binary of its Agent SDK, or Codex,
+which the install pins to 0.159.3. Neither updates on its own; both move when a
+server upgrade pins a newer version.
 
 ## Open it
 
@@ -71,24 +68,24 @@ it. On a phone it is a side sheet. Closing it keeps your unsent message.
 ## First use
 
 With no ready agent the panel shows **Needs setup** and lists Claude Code and
-Codex. An agent is ready when its login file exists in your home. A row that is
-not ready says `No sign-in found` and has **Set up**, which runs the same flow
-as the **Agents** page. From the CLI:
+Codex. An agent is ready when you signed it in for the assistant; a sign-in in
+your environment does not count, because your runs can change it. A row that
+is not ready says `Not signed in for the assistant` and has **Sign in**.
 
-```sh
-aether agent add claude --enhanced
-aether terminal
-```
-
-Sign in to the agent inside `aether terminal`. The full flow is in
-[quickstart.md](quickstart.md#5-set-up-your-agent). The panel updates when
-setup finishes.
+**Sign in** opens a terminal running the agent's sign-in in the assistant's
+container: `claude-agent-acp --cli auth login` for Claude Code, which prints a
+URL and asks for the code the page shows, or `codex login --device-auth` for
+Codex, which prints a URL and a code to enter there. It installs the adapter
+first if needed. The sign-in is written to the assistant's home only. Starting
+it stops a running assistant session; the next prompt starts it again. Select
+**Done** when it exits.
 
 The first conversation uses the first ready agent, Claude Code before Codex. A
 conversation keeps its agent, because another agent cannot continue it. If that
 agent stops being ready, a prompt fails with, for example, `Claude Code is not
-ready: No sign-in found; sign in again or start with another agent`. Sign in
-again, or select **New conversation**, which picks the first ready agent.
+ready: Not signed in for the assistant; sign in again or start with another
+agent`. Sign in again, or select **New conversation**, which picks the first
+ready agent.
 
 ## What it can do
 
@@ -280,15 +277,17 @@ cannot send another prompt.
 There is one conversation per member. It survives page reloads and server
 restarts. If the agent stops, the next prompt starts it again. **New
 conversation** asks **Start a new conversation?**, then deletes the transcript,
-removes the assistant's container and deletes its whole home: sessions,
-history, todos, file history, shell snapshots and logs. The installed adapter
-is outside the home and stays. What the assistant already did stays done.
+removes the assistant's container and deletes everything in its home but the
+sign-in files: sessions, history, todos, file history, shell snapshots and
+logs. The installed adapter is outside the home and stays. What the assistant
+already did stays done.
 
 ### Earlier assistant state in your home
 
 Before the assistant had its own container it ran in your environment, in
-`~/.aether/assistant`, and kept its sessions in your home. That state is not
-moved, because any run could have changed it. Delete it from `aether terminal`:
+`~/.aether/assistant`, and kept its sessions in your home. That state, and the
+login it borrowed from your home, are not moved, because any run could have
+changed them. Delete the old state from `aether terminal`:
 
 ```sh
 rm -rf ~/.aether/assistant ~/.claude/projects/-root--aether-assistant
@@ -300,8 +299,8 @@ runs' sessions.
 ## Limits
 
 - One assistant per member, acting only for that member.
-- It uses your own agent account. [Account sharing](security.md#account-sharing)
-  does not apply to it.
+- It uses the account you signed it in to.
+  [Account sharing](security.md#account-sharing) does not apply to it.
 - Sending a prompt needs the permission to launch runs (collaborator or
   admin).
 - Nothing enforces that it treats text from runs, files and web pages as data.
@@ -312,7 +311,8 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 
 | Message | Fix |
 | --- | --- |
-| `assistant: no agent is ready; sign in to Claude Code or Codex in your environment terminal` | [Set up an agent](#first-use) |
+| `assistant: no agent is ready; sign in to Claude Code or Codex for the assistant` | [Sign in for the assistant](#first-use) |
+| `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
 | `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
 | `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |

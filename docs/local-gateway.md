@@ -318,7 +318,7 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/acp/<run_id>` | the session item stream of a run with `acp: true` (WebSocket) |
 | `GET` | `/ws/assistant` | the caller's assistant session: `AssistantFrame` lines, each an item, a reset, or the whole `AssistantStatus` (WebSocket). A status frame follows the ack and every change of the state or the pending confirmations. Header `{"after_seq":0}`; the ack is an `ACPStreamResponse`. There is no control lease. Every end other than a revocation closes 1012 and the client resubscribes from its last seq |
-| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
+| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket); with `assistant_login=<agent>` instead, that agent's sign-in for the caller's assistant |
 | `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
 | `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
 | `GET` | `/api/v1/run/<run_id>/messages/<message_id>/attachments/<index>` | persisted chat image bytes; zero-based attachment index, requires View on the run |
@@ -2877,6 +2877,12 @@ open as a viewer. A run accepts at most 32 of these sockets at once; the next is
 The member environment terminal uses the same binary-output and JSON-control
 framing as run attaches. The `tab` query is `main` or a client-selected name
 matching `^[a-z0-9-]{1,32}$`.
+
+With `assistant_login=claude` or `assistant_login=codex` the stream is that
+agent's sign-in, run in the caller's assistant container
+([assistant.md](assistant.md#first-use)), and `tab` is ignored. The server
+installs the adapter first if needed, so the ack can take a minute. The stream
+ends when the sign-in exits; there is no replay of an earlier sign-in.
 
 1. Client sends one text header with `cols` and `rows`, and `follow` where
    it means the same as it does for an attach. The gateway ensures the
