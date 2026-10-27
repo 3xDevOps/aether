@@ -184,7 +184,7 @@ others:
 | Tools | What they do | Scope |
 | --- | --- | --- |
 | `aether_list_workspaces`, `aether_list_agents` | Workspaces; agents (installed, signed in, Enhanced) | `read` |
-| `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its latest report and its pull request | `read` |
+| `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its `wait_conditions`, its latest report and its pull request | `read` |
 | `aether_run_history` | A page of a run's conversation (Enhanced) or terminal, with its reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your runs did today, yesterday or this week, in your time zone | `read` |
@@ -216,7 +216,11 @@ GitHub users wrote, run titles, swarm goals, failing check names and the
 reasons runs wait included, comes back under an `untrusted` field; outside it
 are only fixed labels such as `The agent asks a question`, ids, states, counts,
 times, links, workspace and agent names, branch names, file paths and the
-server's own errors. Untrusted text is cut to 200 characters for titles, check
+server's own errors. A run's `wait_conditions` keep the parsed spec, kind,
+repository, number, target run, state, outcome, observed checks and times
+outside it; each condition's summary and the errors GitHub or delivery
+returned sit under `untrusted.wait_conditions`, by id. A list row's
+`waiting_until` holds the specs still pending. Untrusted text is cut to 200 characters for titles, check
 names, commit subjects, a swarm task's blockers, a list row's reason, last
 report or swarm goal; 300 for each pull request review or comment; 2000 for a
 conversation item; 12000 for a diff; and 600 for everything else, such as

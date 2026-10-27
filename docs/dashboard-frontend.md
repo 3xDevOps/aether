@@ -4169,6 +4169,22 @@ whatever opened it. Sections (`details.tsx`):
   decision or reply locks only its own card ([Actions](#actions)). With none of
   these, one card with the needs-you reason and the header's action as a
   secondary button, or "Nothing is waiting on you."
+- **Waiting until**, when the run carries `wait_conditions`: what its agent
+  reported waiting `--until` ([wait conditions](coordination.md#report-an-outcome)),
+  pending first, then the last resolved list. Each row has the pull request
+  link (`<owner>/<repo>#<n>`, to GitHub) or the run link, "merged",
+  "checks final" or "finished", and a badge with the state (Pending,
+  Resolved, Cancelled, Replaced, Expired, Unreadable) and outcome. Under it:
+  the condition's summary; the pull request state, head commit and checks
+  the server last read: **Required checks** when only they decide, **Not
+  reported** for required checks that never reported, every check ("14
+  passed, 0 failed, 3 running"), or "None reported yet"; **Last verified**; **Next check**, red with "Overdue since" once a
+  minute past due; **Failures** ("3 in a row: <error>") with the source's
+  own error; **Resolved**; **Delivery** ("Delivered to the agent", "Waiting
+  to be delivered", or "Not delivered after N attempts: <error>"); why it
+  ended; and when a pending one gives up. **Cancel** (`run.wait.cancel`, for
+  whoever may steer the run) ends a pending condition and rereads the run.
+  The section rereads the run on every `run.wait.changed` event.
 - **Child runs**, where the server offers `run.children` and the run has
   any: every descendant, nearest first and indented by depth, with its
   purpose, state, agent and model, "On `<name>`'s account" plus "(fallback

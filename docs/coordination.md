@@ -641,7 +641,7 @@ run's card:
 You are Aether run <run-id> (role: interactive). Before acting, run the shell command `aether-internal skill` (not a harness skill) for your live identity, capabilities, assignment and rules; `aether-internal status` or aether_status shows live state. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities.
 END EVERY TURN WITH EXACTLY ONE REPORT, as your last action: `aether-internal report --outcome <o> [--for agents|ci|process] --summary "<one line>"` (or aether_report with a new idempotency_key each turn).
 - answered: you replied or discussed, nothing pending.
-- waiting: work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. Mail or your next prompt resumes you, never CI or a process finishing. Not while aether_status shows protected: mail never wakes a protected run, so wait in your turn.
+- waiting: work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. Mail or your next prompt resumes you. Waiting on a PR, its checks or another run? Add --until (until in aether_report), up to 4: pr:<owner>/<repo>#<n>:merged, pr:<owner>/<repo>#<n>:checks or run:<run-id>:finished; the server wakes you when one resolves. Nothing else wakes you when CI or a process finishes; never ask people to message you when it lands. Not while aether_status shows protected: mail never wakes a protected run, so wait in your turn.
 - needs-input: only a question a human must answer; the reply comes as your next prompt.
 - blocked: a human must act, such as missing access or a broken environment; not a way to wait.
 - success | failure: the work you own is verified done or cannot be done; the session stays open for follow-up. Success shows the run as Ready for review until the user marks it complete or later.
@@ -1854,12 +1854,29 @@ What a report does depends on the run:
   native pi, omp or OpenCode integrations); elsewhere nothing wakes the
   agent when a reply arrives, so it waits inside its turn with
   `inbox --wait 30`, and a Background run's turn end finishes the run.
-  Nothing re-prompts the agent when CI or a process finishes. An integrator
+  Nothing re-prompts the agent when CI or a process finishes unless the
+  report names it with `--until`. An integrator
   of an open mission with a live worker attempt, or worker mail since its
   last turn started that it has not acknowledged, shows `waiting-agents` at
   turn end without reporting it, with the reason `waiting for <n> workers`
   or `<n> unread worker messages`, and its wait does not go stale while
   that lasts ([run activity](failure-handling.md#run-activity)).
+- **Wait conditions.** `aether-internal report waiting --for ci --until
+  pr:<owner>/<repo>#<n>:checks --summary '<why>'` (`until` in
+  `aether_report`, up to 4) names what the server checks for the agent:
+  `pr:<owner>/<repo>#<n>:merged` (merged; closed unmerged fails it),
+  `pr:<owner>/<repo>#<n>:checks` (the head commit's checks are final:
+  `passed`, `failed` or `cancelled`, counting required checks when the
+  repository has them) or `run:<run-id>:finished` (that run ended). The
+  server parses only `--until`, never the summary, and refuses `--until`
+  with any other outcome. When any condition resolves, expires or becomes
+  unreadable (a 404 or revoked access), the agent's inbox gets one message
+  for that report, which wakes the idle session like any mail. A new
+  `--until` list replaces the earlier one, `waiting` without `--until`
+  keeps it, and any other report, a person's prompt, a relaunch or the
+  run's end cancels it. The run's `wait_conditions` and the dashboard's
+  **Waiting until** section show each condition's state, what the server
+  last read, when it checks next and whether the wake was delivered.
 - **Answered report.** `aether-internal report answered --summary '<what you
   replied>'` ends a turn that replied or discussed with nothing pending. At
   turn end the run shows the summary as its reason with state `answered`
