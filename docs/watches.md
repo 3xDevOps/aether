@@ -222,7 +222,9 @@ or `assistant`; neither offers the preferences methods.
 
 `watch.create` with an `idempotency_key` you used before returns that watch.
 Without one, an existing live watch on the same target with the same
-conditions is returned, and resumed if paused. `receipt` is one line such as
+conditions is returned, and resumed if paused; with `source` `assistant` it
+becomes an assistant watch, so its notices also reach your assistant
+conversation. `receipt` is one line such as
 `Watching run fix-login for: needs you, finished. Push: 2 devices. Expires
 Nov 9.`, and says `in-app only` when push is off or no device is subscribed.
 

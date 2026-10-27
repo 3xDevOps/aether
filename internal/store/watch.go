@@ -241,11 +241,11 @@ func watchArgs(w *Watch) ([]any, error) {
 		return nil, err
 	}
 	return []any{w.TargetTitle, string(conditions), w.Label, w.State, w.Error, w.Failures, observed, string(fired),
-		updated, expires, last, next, ended}, nil
+		updated, expires, last, next, ended, w.Source}, nil
 }
 
 const watchSet = `target_title = ?, conditions = ?, label = ?, state = ?, error = ?, failures = ?, observed = ?, fired = ?,
-	updated_at = ?, expires_at = ?, last_check_at = ?, next_check_at = ?, ended_at = ?`
+	updated_at = ?, expires_at = ?, last_check_at = ?, next_check_at = ?, ended_at = ?, source = ?`
 
 func nullable[T comparable](v T) any {
 	var zero T
@@ -270,11 +270,11 @@ func (d *DB) CreateWatch(ctx context.Context, w *Watch) error {
 	}
 	_, err = d.db.ExecContext(ctx,
 		`INSERT INTO watches (id, member_id, workspace_id, target_kind, run_id, mission_id, repo, pr_number,
-		   source, idempotency_key, created_at, target_title, conditions, label, state, error, failures, observed, fired,
-		   updated_at, expires_at, last_check_at, next_check_at, ended_at)
+		   idempotency_key, created_at, target_title, conditions, label, state, error, failures, observed, fired,
+		   updated_at, expires_at, last_check_at, next_check_at, ended_at, source)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		append([]any{id, w.MemberID, nullable(w.WorkspaceID), w.TargetKind, nullable(w.RunID), nullable(w.MissionID), w.Repo,
-			w.Number, w.Source, nullable(w.IdempotencyKey), created}, args...)...)
+			w.Number, nullable(w.IdempotencyKey), created}, args...)...)
 	if err != nil {
 		return fmt.Errorf("store: create watch: %w", mapConstraint(err, ErrNotFound))
 	}
