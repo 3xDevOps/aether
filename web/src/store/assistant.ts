@@ -28,6 +28,8 @@ export interface AssistantAttempt {
   text: string
   key: string
   viewContext?: ViewContext
+  /** The chips the prompt carries, so a send that lands clears only them. */
+  attachments: AttachedTarget[]
 }
 
 /** What an entry point such as **Fix this** puts in the panel. */
@@ -128,6 +130,8 @@ export interface AssistantSlice {
   chooseAssistantPage: (current: boolean) => void
   /** The prompt was accepted: the next one starts empty. */
   clearAssistantDraft: () => void
+  /** `attempt` was accepted: clears its text and chips, keeping chips added while it was sent. */
+  settleAssistantSend: (attempt: AssistantAttempt) => void
   restartAssistantConversation: () => void
   /** A different signed-in member must not see the previous one's assistant. */
   resetAssistant: () => void
@@ -202,6 +206,13 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
     }),
   clearAssistantDraft: () =>
     set({ assistantDraft: '', assistantAttempt: null, assistantAttachments: [], assistantPin: null, assistantPageRemoved: false, assistantError: null }),
+  settleAssistantSend: (attempt) => {
+    const s = get()
+    const draft = s.assistantDraft.trim() === attempt.text ? '' : s.assistantDraft
+    const kept = s.assistantAttachments.filter((held) => !attempt.attachments.some((sent) => sameAttachment(held, sent)))
+    if (!draft.trim() && !kept.length) return get().clearAssistantDraft()
+    set({ assistantDraft: draft, assistantAttachments: kept, assistantAttempt: null, assistantPin: pinPage(s), assistantPageRemoved: false, assistantError: null })
+  },
   restartAssistantConversation: () =>
     set((s) => {
       const { [assistantSessionID]: _dropped, ...rest } = s.acpSessions

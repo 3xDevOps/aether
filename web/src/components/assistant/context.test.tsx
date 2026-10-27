@@ -193,7 +193,7 @@ describe('attachments', () => {
     vi.mocked(api.assistantView).mockImplementation(async () => ({}))
   })
 
-  it('keeps a check attached while the previous send was in flight', async () => {
+  it('clears the sent message and keeps a check attached while it was in flight', async () => {
     let reply!: () => void
     vi.mocked(api.assistantPrompt).mockImplementationOnce(() => new Promise((resolve) => { reply = () => resolve({}) }))
     const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
@@ -203,6 +203,31 @@ describe('attachments', () => {
     act(() => reply())
     await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
     expect(within(aside).getByRole('button', { name: 'Remove check lint from the message' })).toBeDefined()
+    expect(box(aside).value).toBe('')
+  })
+
+  it('sends a message once when a chip changes while it is in flight', async () => {
+    let reply!: () => void
+    vi.mocked(api.assistantPrompt).mockImplementationOnce(() => new Promise((resolve) => { reply = () => resolve({}) }))
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    await userEvent.type(box(aside), '{Enter}')
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    act(() => reply())
+    await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
+    expect(box(aside).value).toBe('')
+    expect(within(aside).queryByRole('button', { name: 'Remove check lint from the message' })).toBeNull()
+    await userEvent.type(box(aside), '{Enter}')
+    expect(api.assistantPrompt).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a prompt that got no answer and gives Send back', async () => {
+    vi.mocked(api.assistantPrompt).mockRejectedValueOnce(new DOMException('signal timed out', 'TimeoutError'))
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.type(box(aside), 'Why is this stuck?{Enter}')
+    expect(await within(aside).findByRole('alert')).toHaveProperty('textContent', 'assistant.prompt got no answer within 60 seconds')
+    expect(within(aside).getByRole('button', { name: /Send/ })).toHaveProperty('disabled', false)
     expect(box(aside).value).toBe('Why is this stuck?')
   })
 

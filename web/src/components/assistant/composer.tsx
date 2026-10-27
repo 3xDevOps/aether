@@ -15,6 +15,12 @@ import { assistantShareView, draftConflict, draftViewContext, flushViewSync, uns
 
 /** How long Stop waits on assistant.cancel before it gives the button back. */
 export const stopTimeout = 10_000
+/** How long Send waits on assistant.prompt, which may first start the assistant's agent; a retry reuses the key. */
+export const promptTimeout = 60_000
+
+function timedOut(err: unknown, method: string, ms: number): string {
+  return err instanceof DOMException && err.name === 'TimeoutError' ? `${method} got no answer within ${ms / 1000} seconds` : message(err)
+}
 
 export function AssistantComposer({ textarea, running, dock }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
@@ -59,7 +65,7 @@ export function AssistantComposer({ textarea, running, dock }: {
       if (!attempt) {
         const viewContext = draftViewContext(state)
         const fingerprint = viewContext && viewContextKey(viewContext)
-        attempt = { text, viewContext, key: await promptKey(JSON.stringify([state.identityKey, text, fingerprint])) }
+        attempt = { text, viewContext, attachments: state.assistantAttachments, key: await promptKey(JSON.stringify([state.identityKey, text, fingerprint])) }
         const now = useStore.getState()
         const next = draftViewContext(now)
         const changed = now.assistantDraft.trim() !== text || (next && viewContextKey(next)) !== fingerprint
@@ -80,17 +86,14 @@ export function AssistantComposer({ textarea, running, dock }: {
         }
       }
       try {
-        await api.assistantPrompt(text, attempt.key, assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext))
+        const context = assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext)
+        await api.assistantPrompt(text, attempt.key, context, AbortSignal.timeout(promptTimeout))
       } finally {
         settlePromptKey(attempt.key)
       }
-      const now = useStore.getState()
-      if (now.assistantGeneration !== generation) return
-      // A chip changed during the send drops the attempt; that draft was not sent and stays.
-      if (now.assistantDraft.trim() === text && now.assistantAttempt === attempt) now.clearAssistantDraft()
-      else now.setAssistantAttempt(null)
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().settleAssistantSend(attempt)
     } catch (err) {
-      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantError(message(err))
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantError(timedOut(err, 'assistant.prompt', promptTimeout))
     } finally {
       if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantSending(false)
     }
@@ -105,10 +108,7 @@ export function AssistantComposer({ textarea, running, dock }: {
     try {
       await api.assistantCancel(AbortSignal.timeout(stopTimeout))
     } catch (err) {
-      const timedOut = err instanceof DOMException && err.name === 'TimeoutError'
-      if (useStore.getState().assistantGeneration === generation) {
-        useStore.getState().setAssistantError(timedOut ? `assistant.cancel got no answer within ${stopTimeout / 1000} seconds` : message(err))
-      }
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantError(timedOut(err, 'assistant.cancel', stopTimeout))
     } finally {
       if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantStopping(false)
     }

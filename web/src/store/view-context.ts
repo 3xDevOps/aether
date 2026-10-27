@@ -14,6 +14,8 @@ export const maxLaunchDefaults = 4
 /** Navigation sends at most one view context per second. */
 export const viewSyncDelay = 1000
 export const shareRetryDelay = 3000
+/** How long a send waits for the view context to reach the server. */
+export const viewFlushTimeout = 10_000
 const maxRetryDelay = 60_000
 
 /** The server refused the call for good (unavailable, invalid params): retrying cannot help. */
@@ -242,11 +244,17 @@ const syncs = new WeakMap<RootStore, () => Promise<void>>()
 /**
  * Sends the view context now, once any send in flight lands, so a prompt
  * sent next cannot reach an agent that still reads a page the member just
- * removed. Rejects with the server's error when it is not sent. Resolves at
- * once while no sync runs.
+ * removed. Rejects with the server's error when it is not sent, or after
+ * `timeout`. Resolves at once while no sync runs.
  */
-export function flushViewSync(store: RootStore): Promise<void> {
-  return syncs.get(store)?.() ?? Promise.resolve()
+export function flushViewSync(store: RootStore, timeout = viewFlushTimeout): Promise<void> {
+  const settled = syncs.get(store)
+  if (!settled) return Promise.resolve()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`assistant.view got no answer within ${timeout / 1000} seconds`)), timeout)
+  })
+  return Promise.race([settled(), late]).finally(() => clearTimeout(timer))
 }
 
 /** While it runs, sends the server each changed view context, one at a time and debounced, retrying a failed one with backoff. */
