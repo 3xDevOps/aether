@@ -197,6 +197,23 @@ describe('new run', () => {
     expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('opus')
   })
 
+  it('sends a picked effort, and offers none and forgets it for an agent without effort levels', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([claude({ effort_levels: ['low', 'high', 'max'] }), agentInfo({ name: 'codex', display_name: 'Codex', login_found: true })])
+    await open()
+    const effort = () => screen.getByRole('combobox', { name: 'Effort' })
+    expect(effort().textContent).toBe('Agent default')
+    await pickOption(effort(), 'max')
+    fireEvent.click(agentRow(/^Codex/))
+    expect(screen.queryByRole('combobox', { name: 'Effort' })).toBeNull()
+    fireEvent.click(agentRow(/^Claude Code/))
+    expect(effort().textContent).toBe('Agent default')
+
+    await pickOption(effort(), 'high')
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', effort: 'high' }))
+    expect(useStore.getState().launchDefaults.claude).not.toHaveProperty('effort')
+  })
+
   it('preselects the most recently launched agent in its remembered mode', async () => {
     vi.mocked(api.agentList).mockResolvedValue([claude(), agentInfo({ name: 'codex', display_name: 'Codex' })])
     useStore.setState({ launchDefaults: { claude: { mode: 'tui', at: 1 }, codex: { mode: 'headless', at: 2 } } })
@@ -641,6 +658,23 @@ describe('swarm', () => {
     expect(params.execution_choices).toEqual([
       { account_member_id: alice.id, harness: 'claude', mode: 'tui', model: 'haiku' },
       { account_member_id: alice.id, harness: 'claude', mode: 'tui', model: 'opus' },
+    ])
+  })
+
+  it('sends the integrator and worker efforts, keeping a worker that differs only by effort', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([claude({ effort_levels: ['low', 'high'] })])
+    await openSwarm()
+    await userEvent.click(workerMode('Standard'))
+    await pickOption(screen.getByRole('combobox', { name: 'Integrator effort' }), 'high')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Integrator effort' })))
+    await pickOption(screen.getByRole('combobox', { name: 'Effort for Claude Code' }), 'low')
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+    expect(params.integrator).toEqual({ account_member_id: alice.id, harness: 'claude', mode: 'tui', effort: 'high' })
+    expect(params.execution_choices).toEqual([
+      { account_member_id: alice.id, harness: 'claude', mode: 'tui', effort: 'high' },
+      { account_member_id: alice.id, harness: 'claude', mode: 'tui', effort: 'low' },
     ])
   })
 

@@ -91,6 +91,7 @@ export interface Run {
   harness: string
   mode: string
   model?: string
+  effort?: string
   /** The connector client, such as ChatGPT, the run was launched through. */
   via?: string
   /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
@@ -183,6 +184,7 @@ export interface MissionExecutionChoice {
   harness: string
   mode: string
   model?: string
+  effort?: string
 }
 
 export type MissionIntegrator = MissionExecutionChoice
@@ -1091,6 +1093,9 @@ export interface RunTitlePayload {
 export interface RunModelPayload {
   model: string
 }
+export interface RunEffortPayload {
+  effort: string
+}
 export interface RunProtectedPayload {
   protected: boolean
 }
@@ -1306,6 +1311,7 @@ export interface Template {
   harness: string
   mode: string
   model?: string
+  effort?: string
   params?: Record<string, string>
   budget_usd?: number
   created_at: string
@@ -1386,6 +1392,8 @@ export interface AgentInfo {
   install_script?: string
   /** install_script followed by the pinned enhanced-mode adapter's install. */
   enhanced_install_script?: string
+  /** The levels a launch may send as `effort`, lowest first; absent when the agent has no effort setting. */
+  effort_levels?: string[]
 }
 
 /** One model agent.models discovered; `id` is what a launch sends as `model`. */

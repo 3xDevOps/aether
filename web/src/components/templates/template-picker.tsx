@@ -120,7 +120,7 @@ export function TemplatePicker({
                 </div>
                 <p className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
                   <AgentGlyph agent={selected.harness} />
-                  <span className="truncate">{names[selected.harness] ?? selected.harness} · {selected.model || 'agent default'}</span>
+                  <span className="truncate">{names[selected.harness] ?? selected.harness} · {selected.model || 'agent default'}{selected.effort && ` · ${selected.effort}`}</span>
                 </p>
               </div>
               <PromptFill

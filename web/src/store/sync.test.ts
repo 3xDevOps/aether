@@ -1325,6 +1325,16 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.model).toBe('opus')
     expect(store.getState().lastSeq).toBe(6)
   })
+
+  it('updates a run effort from a run.effort event', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    await applyEvent(store, titleEvent({ id: 'evt_effort', type: 'run.effort', payload: { effort: 'high' } }), fakeApi())
+
+    expect(store.getState().runs.run_1.effort).toBe('high')
+    expect(store.getState().lastSeq).toBe(6)
+  })
   it('removes a run when the server publishes its deletion', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
