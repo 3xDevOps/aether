@@ -18,6 +18,7 @@ pull request runs are in
 | `.github/workflows/` | `make lint-workflows` | ShellCheck |
 | How an agent CLI is launched (`internal/harness`) | [Real-agent smoke tests](#real-agent-smoke-tests) | Docker |
 | How a run drives, reads or wakes its agent | [Real agents against a mock model](#real-agents-against-a-mock-model) | Docker, git |
+| The assistant's instructions or tools (`internal/assistant/instructions.md`, `internal/ops`) | [Assistant eval](#assistant-eval) | Claude Code signed in, spends tokens |
 | Native hook adapters (the `.mjs` files in `internal/coordhooks` and `internal/agentstatus`) | `make test-native-hooks` | Node 22.13+ |
 | `cmd/aether-edge`, `internal/edge` | `go test -race ./internal/edge/edgetest/` | Go |
 | `images/edge/Dockerfile` | [The edge image](#the-edge-image) | Docker, curl |
@@ -308,6 +309,69 @@ moving either, run:
 AETHER_ACP_IMAGE=aether-standard:local \
   go test -tags integration -run TestIntegrationAssistantIssuerMatchesTheBundledCLIs -v ./internal/scheduler/
 ```
+
+## Assistant eval
+
+`internal/assistant/eval` measures what the built-in assistant does with
+`internal/assistant/instructions.md`. It runs the real Claude Code CLI (`claude -p`)
+in a directory whose `CLAUDE.md` is those instructions. The agent's only tools
+are the assistant's own, `ops.RegisterAssistant`, served over HTTP MCP by a fake
+control surface that answers from synthetic scenario state. The fake records
+every tool call. A confirmed-tier call (launch, message, merge) is recorded and
+answered with a made-up success, so nothing is ever started, sent or merged;
+the eval scores the parameters the agent proposed.
+
+It spends model tokens, so it is behind the `assistanteval` build tag and no CI
+job runs it. Claude Code must be on `PATH` and signed in:
+
+```sh
+AETHER_ASSISTANT_EVAL_LABEL=main \
+  go test -count=1 -tags assistanteval -run TestAssistantEval -timeout 40m ./internal/assistant/eval
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AETHER_ASSISTANT_EVAL_LABEL` | `unlabeled` | Names the output files; use the commit or branch under test |
+| `AETHER_ASSISTANT_EVAL_RUNS` | `3` | Runs per scenario |
+| `AETHER_ASSISTANT_EVAL_MODEL` | Claude Code's default | Passed to `claude --model`; the report names the model the harness reports |
+| `AETHER_ASSISTANT_EVAL_ONLY` | all | Comma-separated scenario ids |
+| `AETHER_ASSISTANT_EVAL_PARALLEL` | `4` | Concurrent agent runs |
+| `AETHER_ASSISTANT_EVAL_OUT` | `$TMPDIR/assistant-eval` | Where `<label>.md` and `<label>.json` go |
+
+The scenarios and their expected checks are in
+`internal/assistant/eval/testdata/scenarios.json`: a rough voice request, a
+question, a research-only request, a prohibition, hostile pasted text, a saved
+preference against a one-off override, two members with different defaults, a
+launch with no dashboard view, a shared account, an unavailable saved target,
+merged against released, a failing PR behind a success report, an open task in
+a completed swarm, and a reopened session. The checks are keyword and
+tool-call tests, so they are deterministic but coarse: text matches are whole
+words (so `bo` does not match `both`), an invented-scope keyword does not count
+when the brief negates it ("no refactors"), and the same holds for words a brief must omit ("do not delete staging" does not copy the hostile instruction), and a question counts only when it
+is a sentence addressed to the member, not a `?run=` link or inline code. A
+question after a completed launch that offers to show or edit the brief is
+reported in its own column, not as unnecessary. The Markdown report ends
+with a manual-review list per scenario, with each launch brief and reply.
+
+The report has a row per scenario: runs passed, unnecessary questions, brief offers, launches
+that should not have happened, dropped prohibitions, invented-scope keywords,
+tool calls and latency per run, and cost. Cost is the figure `claude` reports,
+and "not measured" when it reports none. Results are rewritten after every
+run, and each run's timeout is capped by the test's `-timeout`, so a run that
+hits the limit still leaves a report.
+
+A scenario marked `pending: <tool>` needs a tool the registry does not offer
+yet, such as the saved launch choices. The eval serves an eval-only stub of the
+tool from the scenario's contract so the baseline is honest about what the
+agent does without it. Its rate is not product behavior. When the registry
+offers the tool, the real one is served instead, and the scenario's `answers`
+need an entry for each RPC method it calls; a missing one shows up as
+"is not available in this synthetic scenario" in the reply.
+
+Compare a change with `main` by running the command on both commits with
+different labels. Model output varies between runs, so a few runs per scenario
+shows a direction, not a proof. Scripted tests of the scorer itself,
+`go test ./internal/assistant/eval`, run in `make test`.
 
 ## Native hook tests
 
