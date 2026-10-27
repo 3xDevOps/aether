@@ -201,6 +201,8 @@ type serveOptions struct {
 	conflictCoordination *bool
 	agentUpdate          *bool
 	stallThreshold       *time.Duration
+	firstEventGrace      *time.Duration
+	streamQuietGrace     *time.Duration
 	pollInterval         *time.Duration
 	checkoutTTL          *time.Duration
 	runContainerTTL      *time.Duration
@@ -245,6 +247,10 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.agentUpdate = fs.Bool("agent-update", true, "update a shipped agent installed in the member home before launching it")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
 		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
+	o.firstEventGrace = fs.Duration("first-event-grace", 0,
+		"how long an Enhanced turn may wait for the agent's first update before it parks as a possible stall, at most -stall-threshold (0 = 3m)")
+	o.streamQuietGrace = fs.Duration("stream-quiet-grace", 0,
+		"how long an Enhanced turn with no tool running may go without agent progress before it parks as a possible stall, at most -stall-threshold (0 = 5m)")
 	o.pollInterval = fs.Duration("poll-interval", 0, "how often stalls are checked (0 = 30s)")
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
 		"how long a finished run's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
@@ -329,6 +335,8 @@ func serve(args []string) error {
 		SelfUpdate: serverupdate.Config{Host: host, Drain: drain},
 
 		StallThreshold:   *o.stallThreshold,
+		FirstEventGrace:  *o.firstEventGrace,
+		StreamQuietGrace: *o.streamQuietGrace,
 		PollInterval:     *o.pollInterval,
 		CheckoutTTL:      *o.checkoutTTL,
 		RunContainerTTL:  *o.runContainerTTL,

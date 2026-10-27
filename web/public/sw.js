@@ -25,11 +25,11 @@ self.addEventListener('push', (event) => {
 })
 
 async function display(message) {
-  const cleared = message.run || message.url
+  const cleared = message.tag || message.run || message.url
   if (message.clear && cleared) {
-    // The need of the run, or of the page a swarm's need opens, ended. A
-    // push that shows nothing would cost the subscription on Safari, so the
-    // notification is replaced quietly instead of closed.
+    // The need of a watch, of the run, or of the page a swarm's need opens,
+    // ended. A push that shows nothing would cost the subscription on
+    // Safari, so the notification is replaced quietly instead of closed.
     const [current] = await self.registration.getNotifications({ tag: cleared })
     // An assistant's newer notice about the run stays, shown again as it was.
     const notice = current?.data?.notice === true
@@ -44,9 +44,9 @@ async function display(message) {
   }
   await self.registration.showNotification(message.title || 'Aether', {
     body: message.body || 'A run needs you.',
-    // One notification per run, workspace budget or page: a newer one
-    // replaces the older and alerts again.
-    tag: message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
+    // One notification per watch notice, run, workspace budget or page: a
+    // newer one replaces the older and alerts again.
+    tag: message.tag || message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
     renotify: true,
     icon: '/icons/icon-192.png',
     data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url },
@@ -67,14 +67,27 @@ self.addEventListener('notificationclick', (event) => {
         await self.clients.openWindow(path)
         return
       }
+      // The page routes itself: reloading it would lose its unsent drafts.
       if (run) open.postMessage({ type: 'aether:open-run', run })
-      else if (url) {
-        await open.focus()
-        // navigate() rejects for a window this worker does not control.
-        await open.navigate(url).catch(() => self.clients.openWindow(url))
-        return
-      } else if (workspace) open.postMessage({ type: 'aether:open-workspace', workspace })
+      else if (workspace) open.postMessage({ type: 'aether:open-workspace', workspace })
       await open.focus()
+      if (url && !(await acknowledged(open, { type: 'aether:open-url', url }))) {
+        await open.navigate(url).catch(() => self.clients.openWindow(url))
+      }
     })(),
   )
 })
+
+// A dashboard built before aether:open-url ignores it, so one that does not
+// answer within a second is sent to the page instead.
+function acknowledged(client, message) {
+  const channel = new MessageChannel()
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 1000)
+    channel.port1.onmessage = () => {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    client.postMessage(message, [channel.port2])
+  }).finally(() => channel.port1.close())
+}

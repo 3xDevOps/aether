@@ -5,7 +5,7 @@ const fs = require('node:fs')
 const Module = require('node:module')
 const os = require('node:os')
 const path = require('node:path')
-const { test, beforeEach, after } = require('node:test')
+const { test, beforeEach, after, mock } = require('node:test')
 
 const shown = []
 let badge = 0
@@ -58,8 +58,13 @@ globalThis.WebSocket = class {
 
 const runs = new Map()
 let readFails = false
+const watches = new Map()
 globalThis.fetch = async (url, init) => {
   if (url.endsWith('/server.info')) return { ok: true, json: async () => ({ member: { id: 'me' } }) }
+  if (url.endsWith('/watch.get')) {
+    const got = watches.get(JSON.parse(init.body).watch_id)
+    return { ok: Boolean(got), status: 404, json: async () => got }
+  }
   const run = readFails ? undefined : runs.get(JSON.parse(init.body).run_id)
   return { ok: Boolean(run), status: 500, json: async () => ({ run }) }
 }
@@ -90,12 +95,16 @@ function lead(id) {
   return { id, member_id: 'me', title: `run ${id}`, status: 'running', state: 'working', reason: '', status_changed_at: '2026-10-16T00:00:00Z' }
 }
 
+let linked = []
+
 beforeEach(() => {
+  linked = []
+  watches.clear()
   shown.length = 0
   readFails = false
   supported = true
   focused = null
-  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
+  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {}, (link) => linked.push(link))
 })
 
 async function review(run, value) {
@@ -279,4 +288,195 @@ test('no update notification where notifications are unsupported', () => {
   supported = false
   notify.showUpdate({ key: 'cli:v3.0.0', title: 'Aether 3.0.0 is available', body: '' }, () => {})
   assert.equal(shown.length, 0)
+})
+
+async function watchChanged(payload) {
+  socket.onmessage({ data: JSON.stringify({ type: 'watch.changed', payload }) })
+  await new Promise((resolve) => setImmediate(resolve))
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
+function watchWith(id, target, notice) {
+  watches.set(id, {
+    watch: { id, target, link: '/?page=settings&id=watches&watch=' + id },
+    notifications: [{ id: 'not-1', watch_id: id, title: 'PR #12 merged on GitHub', body: 'acme/app', link: 'https://github.com/acme/app/pull/12', ...notice }],
+  })
+}
+
+test("a watch notice shows natively and opens its link; another member's never does", async () => {
+  watchWith('wat-1', { kind: 'pr', repo: 'acme/app', number: 12 }, { condition: 'merged' })
+  await watchChanged({ watch_id: 'wat-1', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 1)
+  assert.equal(shown[0].options.title, 'PR #12 merged on GitHub')
+  assert.equal(shown[0].options.body, 'acme/app')
+  shown[0].handlers.click()
+  assert.deepEqual(linked, ['https://github.com/acme/app/pull/12'])
+
+  await watchChanged({ watch_id: 'wat-1', member_id: 'someone-else', notification_id: 'not-1' })
+  await watchChanged({ watch_id: 'wat-1', member_id: 'me' })
+  assert.equal(shown.length, 1, 'only a new notice for this member shows')
+})
+
+test('a watched need and the same run.status need show once', async () => {
+  const run = lead('r9')
+  watchWith('wat-2', { kind: 'run', run_id: 'r9' }, { condition: 'needs_you', title: 'run r9 needs you', link: '/?run=r9' })
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  await watchChanged({ watch_id: 'wat-2', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 1)
+})
+
+test('a live failure and its watched need show once, in either order', async () => {
+  const first = lead('r17')
+  watchWith('wat-7', { kind: 'run', run_id: 'r17' }, { condition: 'needs_you', title: 'run r17 failed', link: '/?run=r17' })
+  await status(first, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
+  await watchChanged({ watch_id: 'wat-7', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 1)
+
+  const second = lead('r18')
+  watchWith('wat-8', { kind: 'run', run_id: 'r18' }, { condition: 'needs_you', title: 'run r18 failed', link: '/?run=r18' })
+  await watchChanged({ watch_id: 'wat-8', member_id: 'me', notification_id: 'not-1' })
+  await status(second, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
+  assert.equal(shown.length, 2)
+})
+
+test('a success ready for review and its watched finish show once, in either order', async () => {
+  const first = lead('r13')
+  watchWith('wat-3', { kind: 'run', run_id: 'r13' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r13' })
+  await status(first, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
+  await watchChanged({ watch_id: 'wat-3', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 1)
+
+  const second = lead('r16')
+  watchWith('wat-6', { kind: 'run', run_id: 'r16' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r16' })
+  await watchChanged({ watch_id: 'wat-6', member_id: 'me', notification_id: 'not-1' })
+  await status(second, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
+  assert.equal(shown.length, 2)
+  assert.equal(shown[1].options.title, 'Agent reported done')
+})
+
+test('a watched need shown before its run.status closes when the need is answered', async () => {
+  const run = lead('r14')
+  watchWith('wat-4', { kind: 'run', run_id: 'r14' }, { condition: 'needs_you', title: 'run r14 needs you', link: '/?run=r14' })
+  await watchChanged({ watch_id: 'wat-4', member_id: 'me', notification_id: 'not-1' })
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  assert.equal(shown.length, 1)
+  assert.equal(badge, 1)
+
+  await status(run, { status: 'running', state: 'working', reason: '' })
+  assert.ok(shown[0].closed)
+  assert.equal(badge, 0)
+})
+
+test('a watched need shown after its run.status closes with it', async () => {
+  const run = lead('r15')
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  watchWith('wat-5', { kind: 'run', run_id: 'r15' }, { condition: 'needs_you', title: 'run r15 needs you', link: '/?run=r15' })
+  const now = Date.now()
+  mock.method(Date, 'now', () => now + 6000)
+  await watchChanged({ watch_id: 'wat-5', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 2)
+
+  await status(run, { status: 'running', state: 'working', reason: '' })
+  assert.ok(shown.every((n) => n.closed))
+  mock.restoreAll()
+})
+
+test('a finish right after a need still shows, and stays until its outcome is seen', async () => {
+  const run = lead('r17')
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  watchWith('wat-7', { kind: 'run', run_id: 'r17' }, { condition: 'finished', title: 'Stopped', link: '/?run=r17' })
+  await watchChanged({ watch_id: 'wat-7', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 2)
+  await status(run, { status: 'killed', state: 'finished', reason: 'killed' })
+  assert.ok(shown[0].closed, 'the need ended')
+  assert.ok(!shown[1].closed, 'the finish stays')
+  socket.onmessage({ data: JSON.stringify({ type: 'run.outcome_seen', run_id: 'r17', payload: {} }) })
+  assert.ok(shown[1].closed)
+})
+
+test('a watched finish shown before its run.status closes when the success is put off', async () => {
+  const run = lead('r18')
+  watchWith('wat-8', { kind: 'run', run_id: 'r18' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r18' })
+  await watchChanged({ watch_id: 'wat-8', member_id: 'me', notification_id: 'not-1' })
+  await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
+  assert.equal(shown.length, 1)
+  await review(run, 'later')
+  assert.ok(shown[0].closed)
+})
+
+test("an assistant-made watch's notice is left to its assistant.notice", async () => {
+  watches.set('wat-9', {
+    watch: { id: 'wat-9', source: 'assistant', target: { kind: 'run', run_id: 'r19' }, link: '/?run=r19' },
+    notifications: [{ id: 'not-1', watch_id: 'wat-9', condition: 'finished', title: 'Agent reported done', body: '', link: '/?run=r19' }],
+  })
+  await watchChanged({ watch_id: 'wat-9', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 0)
+})
+
+test('a lost connection or a stop closes the watch notices it can no longer end', async () => {
+  watchWith('wat-10', { kind: 'run', run_id: 'r20' }, { condition: 'needs_you', title: 'run r20 needs you', link: '/?run=r20' })
+  await watchChanged({ watch_id: 'wat-10', member_id: 'me', notification_id: 'not-1' })
+  watchWith('wat-11', { kind: 'run', run_id: 'r21' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r21' })
+  await watchChanged({ watch_id: 'wat-11', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 2)
+  socket.onclose()
+  assert.ok(shown.every((n) => n.closed))
+
+  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {}, () => {})
+  watchWith('wat-12', { kind: 'run', run_id: 'r22' }, { condition: 'needs_you', title: 'run r22 needs you', link: '/?run=r22' })
+  await watchChanged({ watch_id: 'wat-12', member_id: 'me', notification_id: 'not-1' })
+  notify.stop()
+  assert.ok(shown[2].closed)
+})
+
+test('a watched need or finish that ends while its watch is read never shows', async () => {
+  const fetched = globalThis.fetch
+  let release
+  const held = new Promise((resolve) => { release = resolve })
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/watch.get')) await held
+    return fetched(url, init)
+  }
+  try {
+    const run = lead('r23')
+    await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+    watchWith('wat-13', { kind: 'run', run_id: 'r23' }, { condition: 'needs_you', title: 'run r23 needs you', link: '/?run=r23' })
+    watchWith('wat-14', { kind: 'run', run_id: 'r24' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r24' })
+    const now = Date.now()
+    mock.method(Date, 'now', () => now + 6000)
+    const pending = Promise.all([
+      watchChanged({ watch_id: 'wat-13', member_id: 'me', notification_id: 'not-1' }),
+      watchChanged({ watch_id: 'wat-14', member_id: 'me', notification_id: 'not-1' }),
+    ])
+    await status(run, { status: 'running', state: 'working', reason: '' })
+    socket.onmessage({ data: JSON.stringify({ type: 'run.outcome_seen', run_id: 'r24', payload: {} }) })
+    release()
+    await pending
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(shown.length, 1, 'only the run.status need showed')
+  } finally {
+    globalThis.fetch = fetched
+    mock.restoreAll()
+  }
+})
+
+test('a watch notice read when the connection drops never shows', async () => {
+  const fetched = globalThis.fetch
+  let release
+  const held = new Promise((resolve) => { release = resolve })
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/watch.get')) await held
+    return fetched(url, init)
+  }
+  try {
+    watchWith('wat-15', { kind: 'pr', repo: 'acme/app', number: 12 }, { condition: 'merged' })
+    const pending = watchChanged({ watch_id: 'wat-15', member_id: 'me', notification_id: 'not-1' })
+    socket.onclose()
+    release()
+    await pending
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(shown.length, 0)
+  } finally {
+    globalThis.fetch = fetched
+  }
 })

@@ -99,6 +99,27 @@ func TestPublishRefusesAFinishedRunAndNamesReopen(t *testing.T) {
 	}
 }
 
+func TestPublishWithNoCommitBeyondBaseNamesUncommittedChanges(t *testing.T) {
+	for _, tc := range []struct {
+		changes []protocol.RunGitChange
+		want    string
+	}{
+		{[]protocol.RunGitChange{{Path: "a.go", Worktree: "M"}, {Path: "notes.txt", Untracked: true}},
+			`run r1's branch aether/run-x has no commit beyond its base base000, and 2 changes are uncommitted; publish pushes commits only. Ask the agent to commit (aether message r1 "commit your changes"), then run aether publish r1 again`},
+		{nil, "run r1's branch aether/run-x has no commit beyond its base base000; nothing to publish"},
+	} {
+		c, replies := publishControl(t, nil)
+		replies[protocol.MethodRunGitStatus].answer(protocol.RunGitStatusResult{Branch: "aether/run-x", Head: "base000", Changes: tc.changes})
+		err := publish(c, &bytes.Buffer{}, &bytes.Buffer{}, "r1", "")
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("publish error = %v\nwant %s", err, tc.want)
+		}
+		if replies[protocol.MethodRunGitPush].params() != nil {
+			t.Error("run.git.push was called with no commit to push")
+		}
+	}
+}
+
 // An extra repository opens its pull request into the base branch the run
 // captured for it, not its workspace's current base.
 func TestPublishExtraRepoTargetsItsCapturedBase(t *testing.T) {

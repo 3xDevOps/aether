@@ -164,6 +164,33 @@ func (d *DB) WithdrawWatchNeeds(ctx context.Context, watch string, now time.Time
 	return n, nil
 }
 
+func (d *DB) DropWatchNeedPushes(ctx context.Context, watch string, now time.Time, detail string) error {
+	at, err := encodeTime(now)
+	if err != nil {
+		return fmt.Errorf("store: drop watch need pushes: %w", err)
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: drop watch need pushes: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	const queued = `SELECT id FROM watch_notifications
+		WHERE watch_id = ?1 AND condition = 'needs_you' AND push_state IN ('pending', 'held')`
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE watch_deliveries SET status = 'cleared', detail = ?2, at = ?3
+		 WHERE channel = 'push' AND notification_id IN (`+queued+`)`, watch, detail, at); err != nil {
+		return fmt.Errorf("store: drop watch need pushes: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE watch_notifications SET push_state = 'none', push_next_at = NULL WHERE id IN (`+queued+`)`, watch); err != nil {
+		return fmt.Errorf("store: drop watch need pushes: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: drop watch need pushes: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error) {
 	p := NotifyPrefs{Push: true}
 	err := d.db.QueryRowContext(ctx,

@@ -1,4 +1,4 @@
-import type { MemoryItem, MemoryKind, MemorySearchParams, MemorySource } from '@/lib/types'
+import type { Member, MemoryItem, MemoryKind, MemorySearchParams, MemorySource } from '@/lib/types'
 
 /** protocol.MemoryBriefMaxBytes */
 export const briefMaxBytes = 3 << 10
@@ -28,6 +28,26 @@ export const kindLabel: Record<MemoryKind, string> = {
   gotcha: 'Gotcha',
   preference: 'Preference',
   outcome: 'Outcome',
+}
+
+type Self = { id: string | null; role: Member['role'] | null }
+
+/** The author, followed through a member merge as the server does. */
+function author(item: MemoryItem, mergedInto: Record<string, string>): string | undefined {
+  return item.author_id && (mergedInto[item.author_id] ?? item.author_id)
+}
+
+/** Mirrors the server: a member note is its pinner's, or unpinned its author's; only they or an admin change it. */
+export function mayChange(item: MemoryItem, self: Self, mergedInto: Record<string, string>): boolean {
+  if (item.scope !== 'member' || self.role === null || self.role === 'admin') return true
+  return (item.pinned_at ? item.pinned_by : author(item, mergedInto)) === self.id
+}
+
+/** A member pin makes the note the pinner's: a member note only its owner's, a workspace note only its author's or an admin's. */
+export function mayPinForSelf(item: MemoryItem, self: Self, mergedInto: Record<string, string>): boolean {
+  if (self.role === null) return true
+  if (item.scope === 'member') return (item.pinned_at ? item.pinned_by : author(item, mergedInto)) === self.id
+  return self.role === 'admin' || author(item, mergedInto) === self.id
 }
 
 export const writableKinds = ['decision', 'convention', 'gotcha', 'preference'] as const
