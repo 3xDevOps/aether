@@ -103,6 +103,19 @@ describe('new run', () => {
     expect(useStore.getState().paletteDialog).toBeNull()
   })
 
+  it('refuses limits the server has not confirmed it supports', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    vi.mocked(api.serverRunLimits).mockRejectedValue(new Error('server.run_limits: method not found'))
+    await open()
+    await userEvent.click(screen.getByRole('button', { name: /Resource limits/ }))
+    await userEvent.type(screen.getByLabelText('Processes'), '256')
+    await userEvent.type(screen.getByLabelText('Task'), 'write the changelog')
+    await userEvent.click(launchButton())
+    expect((await screen.findByRole('alert')).textContent).toContain('server.run_limits: method not found')
+    expect(api.runLaunch).not.toHaveBeenCalled()
+    vi.mocked(api.serverRunLimits).mockResolvedValue({ limits: {}, default: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 }, effective: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 } })
+  })
+
   it('sends the run limits the launcher fills in, and nothing when none are', async () => {
     useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
     await open()
