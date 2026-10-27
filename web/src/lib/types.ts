@@ -2264,7 +2264,7 @@ export interface Connector {
   id: string
   member_id: string
   /** The OAuth client_id metadata URL, such as `https://chatgpt.com/...`; Claude Code's is on claude.ai and returns to a loopback port. */
-  client_id: string
+  client_id?: string
   client_name: string
   redirect_host: string
   device_id?: string

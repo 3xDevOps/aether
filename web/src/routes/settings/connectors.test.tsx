@@ -106,11 +106,12 @@ it('tells an admin to update a server too old for connectors', async () => {
   expect(screen.queryByRole('button', { name: 'Get a code' })).toBeNull()
 })
 
-it('reconnects by minting a code on the connector’s own tab before revoking it', async () => {
+it('reconnects by minting a code on the connector’s own tab before revoking it, from a server that lists no client_id', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
   let revoked = () => {}
+  const older = { ...claude, client_id: undefined }
   const client = show({
-    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [claude] }).mockResolvedValueOnce({ connectors: [claude] }).mockResolvedValue({ connectors: [] }),
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [older] }).mockResolvedValueOnce({ connectors: [older] }).mockResolvedValue({ connectors: [] }),
     connectorRevoke: vi.fn(() => new Promise<{ connector: Connector }>((resolve) => {
       revoked = () => resolve({ connector: claude })
     })),
@@ -280,4 +281,34 @@ it('moves a Claude Code connector by its client, whatever loopback port it retur
   expect(client.connectorRevoke).not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(3000)
   await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-claude00001'))
+})
+
+it('takes a replacement that called Aether over an earlier one that never did', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const old = { ...chatgpt, resource: own }
+  const lost = { ...chatgpt, id: 'con-universal01', resource: universal }
+  const working = { ...chatgpt, id: 'con-universal02', resource: universal, last_used_at: '2026-10-25T12:00:05Z' }
+  const client = show({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [old], ...signedIn }).mockResolvedValueOnce({ connectors: [old], ...signedIn })
+      .mockResolvedValueOnce({ connectors: [old, lost], ...signedIn }).mockResolvedValue({ connectors: [old, lost, working], ...signedIn }),
+  })
+  await move('ChatGPT (chatgpt.com)')
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(3000)
+  await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-7k2m9q4xbd'))
+  expect(JSON.parse(localStorage.getItem('aether:connector-move-claims') ?? '{}')).toEqual({ 'con-universal02': expect.any(String) })
+})
+
+it('says when a move or a watch saw nothing connect in 10 minutes, and keeps the old connector', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const old = { ...chatgpt, resource: own }
+  const client = show({ connectorList: vi.fn().mockResolvedValue({ connectors: [old], ...signedIn }) })
+  await move('ChatGPT (chatgpt.com)')
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(600_000)
+  expect((await screen.findByRole('alert')).textContent).toContain(`No new ChatGPT connection appeared at ${universal}, so ChatGPT (chatgpt.com) was kept.`)
+  expect(screen.getByText(/Nothing connected in the last 10 minutes\./)).toBeTruthy()
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
 })

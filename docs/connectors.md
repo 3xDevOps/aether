@@ -172,7 +172,7 @@ A connector keeps the URL it was added at. Settings marks each one
 **Move to the universal URL** next to a connector on the server's own URL
 starts a new connection: add Aether again in the app with the universal URL.
 Settings revokes the old connector once a new one from the same client, such as
-ChatGPT or Claude Code, connects at the universal URL and calls Aether. If none
+ChatGPT or Claude, connects at the universal URL and calls Aether. If none
 calls within 10 minutes, it leaves the old one and says so. Remove the old
 Aether connector in ChatGPT or Claude yourself. From a terminal, connect again at the
 universal URL, then run `aether mcp revoke <old id>`.

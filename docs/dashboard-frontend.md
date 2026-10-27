@@ -6019,7 +6019,8 @@ Categories:
   its member. A ChatGPT / Claude segmented control picks numbered steps.
   `connector.list` gives the URL to show at once (`url`), the edge's
   `universal_url` and `sign_in`. With `sign_in` the third step mints no code
-  and **Watch for the connection** polls for 10 minutes; otherwise **Get a
+  and **Watch for the connection** polls for 10 minutes, then says nothing
+  connected; otherwise **Get a
   code** calls `connector.code` and shows its code with `useCountdown`. A
   `url` other than `universal_url` adds how to link a GitHub account. Without
   a `url`, `server.edge` only says whether the server has an edge or is
@@ -6033,12 +6034,14 @@ Categories:
   connector's scopes, its `resource` as **Universal URL** or the server's own
   URL, added and last-used times, **Move to the universal URL** (where `url`
   is universal and the connector's is not: confirm, start watching for a
-  connector at `universal_url` with the old one's `client_id`, and
-  `connector.revoke` the old connector only once that one has a
-  `last_used_at`; `localStorage` key `aether:connector-move-claims` records
-  which move took which new connector, so two tabs never revoke two
-  connectors for one), **Reconnect** (confirm, a new code on that client's
-  tab, the tab from the `client_id` host, then `connector.revoke`; a failed
+  connector at `universal_url` with the old one's `client_id`, preferring
+  one with a `last_used_at`, and `connector.revoke` the old connector only
+  once it has one; `localStorage` key `aether:connector-move-claims`
+  records which move took which new connector, so two tabs never revoke two
+  connectors for one; a move that ends without one says the old connector
+  was kept), **Reconnect** (confirm, a new code on that client's tab, the
+  tab from the `client_id` host or, from an older server, the
+  `redirect_host`, then `connector.revoke`; a failed
   mint revokes nothing; a connector at the server's own URL reconnects there
   with a code even under `sign_in`) and **Revoke**
   (confirm). Errors show verbatim with a fix:

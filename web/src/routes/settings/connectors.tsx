@@ -61,19 +61,20 @@ function label(c: Connector): string {
 }
 
 // Claude Code's client id is on claude.ai too, so it opens the Claude tab.
+// A server before client_id names only the redirect host.
 function appOf(c: Connector): App {
-  return c.client_id.startsWith('https://chatgpt.com/') ? 'chatgpt' : 'claude'
+  return (c.client_id ? c.client_id.startsWith('https://chatgpt.com/') : c.redirect_host === 'chatgpt.com') ? 'chatgpt' : 'claude'
 }
 
 // moveClaims maps a new connector's id to the move that took it as its
 // replacement, across tabs, so two moves of the same app never both take
-// one connector and revoke two.
+// one connector and revoke two. A move holds one claim at a time.
 const moveClaims = 'aether:connector-move-claims'
 
 function claimMove(id: string, move: string, live: Connector[]): boolean {
   const ids = new Set(live.map((c) => c.id))
-  const claims = Object.fromEntries(Object.entries(JSON.parse(localStorage.getItem(moveClaims) ?? '{}') as Record<string, string>).filter(([c]) => ids.has(c)))
-  if (claims[id] && claims[id] !== move) return false
+  const claims = Object.fromEntries(Object.entries(JSON.parse(localStorage.getItem(moveClaims) ?? '{}') as Record<string, string>).filter(([c, m]) => ids.has(c) && m !== move))
+  if (claims[id]) return false
   claims[id] = move
   localStorage.setItem(moveClaims, JSON.stringify(claims))
   return true
@@ -126,14 +127,14 @@ const guides: Record<App, { open: ReactNode; paste: ReactNode; note: string }> =
   },
 }
 
-function SignInStep({ watching, busy, onWatch }: { watching: boolean; busy: boolean; onWatch: () => void }) {
+function SignInStep({ watching, busy, expired, onWatch }: { watching: boolean; busy: boolean; expired: boolean; onWatch: () => void }) {
   return (
     <>
       <p>On the Aether pages that open, sign in to the edge with GitHub, select <strong>Continue</strong> next to this server, choose its scopes and select <strong>Allow</strong>. No code is needed.</p>
       {!watching && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <Button size="sm" variant="secondary" disabled={busy} onClick={onWatch}>Watch for the connection</Button>
-          <span className="text-muted">Shows it here once it connects, for 10 minutes.</span>
+          <span className="text-muted">{expired ? 'Nothing connected in the last 10 minutes. ' : ''}Shows it here once it connects, for 10 minutes.</span>
         </div>
       )}
     </>
@@ -181,7 +182,7 @@ function Setup({
         </Step>
         <Step n={3}>
           {info.sign_in && !at
-            ? <SignInStep watching={watching} busy={busy} onWatch={onMint} />
+            ? <SignInStep watching={watching} busy={busy} expired={expired} onWatch={onMint} />
             : (
                 <>
                   <p>On the Aether page that opens, choose its scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
@@ -292,11 +293,18 @@ function Connectors({ client }: { client: Api }) {
         else if (final) setExpired(true)
         return
       }
-      const added = next.find((c) => !attempt.known.has(c.id) && c.resource === attempt.into && c.client_id === old.client_id && claimMove(c.id, attempt.id, next))
+      // A replacement that called Aether wins over one whose tokens may
+      // never have arrived.
+      const candidates = next.filter((c) => !attempt.known.has(c.id) && c.resource === attempt.into && c.client_id === old.client_id)
+      const added = [...candidates.filter((c) => c.last_used_at), ...candidates.filter((c) => !c.last_used_at)].find((c) => claimMove(c.id, attempt.id, next))
       if (!added) {
         if (final) {
           finish()
           setExpired(true)
+          setPollError({
+            text: `No new ${old.client_name} connection appeared at ${attempt.into}, so ${label(old)} was kept.`,
+            fix: <Link href={`${docs}/connectors.md#move-a-connector-to-the-universal-url`}>Moving a connector</Link>,
+          })
         }
         return
       }
