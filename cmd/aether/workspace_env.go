@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
-	"path/filepath"
 	"strings"
-	"unicode/utf8"
 
 	"golang.org/x/term"
 
@@ -17,16 +14,12 @@ import (
 )
 
 const (
-	workspaceEnvUsage       = "usage: aether workspace env <list|set|unset|import|script|file|egress>"
+	workspaceEnvUsage       = "usage: aether workspace env <list|set|unset|import|script|egress>"
 	workspaceEnvListUsage   = "usage: aether workspace env list [--workspace <name-or-id>]"
 	workspaceEnvSetUsage    = "usage: aether workspace env set [--workspace <name-or-id>] <NAME>=<value> [<NAME>=<value> ...]\n   or: aether workspace env set [--workspace <name-or-id>] --secret <NAME>   (the value is read from stdin)"
 	workspaceEnvUnsetUsage  = "usage: aether workspace env unset [--workspace <name-or-id>] <NAME> [<NAME> ...]"
 	workspaceEnvImportUsage = "usage: aether workspace env import [--workspace <name-or-id>] [--plain] <file|->"
 	workspaceEnvScriptUsage = "usage: aether workspace env script [--workspace <name-or-id>] [--file <path|->|--clear]"
-
-	workspaceEnvFileUsage    = "usage: aether workspace env file <put|rm>"
-	workspaceEnvFilePutUsage = "usage: aether workspace env file put [--workspace <name-or-id>] <local file> [--path <repo path>]"
-	workspaceEnvFileRmUsage  = "usage: aether workspace env file rm [--workspace <name-or-id>] <repo path>"
 
 	workspaceEnvScope = "new runs get this; containers that already exist keep what they started with"
 )
@@ -46,8 +39,6 @@ func workspaceEnv(args []string) error {
 		return workspaceEnvImport(args[1:], os.Stdin)
 	case "script":
 		return workspaceEnvScript(args[1:], os.Stdin)
-	case "file":
-		return workspaceEnvFile(args[1:])
 	case "egress":
 		return workspaceEnvEgress(args[1:])
 	default:
@@ -96,11 +87,6 @@ func sendWorkspaceEnv(c *protocol.Client, ws protocol.Workspace, change protocol
 	var res protocol.WorkspaceEnvironmentResult
 	if err := c.Call(protocol.MethodWorkspaceEnvironmentSet, change, &res); err != nil {
 		return err
-	}
-	// A server from before workspace files ignores them and answers without
-	// the list.
-	if (len(change.Files) > 0 || len(change.RemoveFiles) > 0) && res.Files == nil {
-		return errors.New("this server has no workspace files; update aether-server, then run the command again")
 	}
 	if err := printWorkspaceVariables(os.Stdout, ws, res); err != nil {
 		return err
@@ -232,77 +218,6 @@ func workspaceEnvImport(args []string, stdin io.Reader) error {
 	return changeWorkspaceEnv(workspace, protocol.WorkspaceEnvironmentSetParams{Set: variables})
 }
 
-func workspaceEnvFile(args []string) error {
-	if len(args) < 1 {
-		return errors.New(workspaceEnvFileUsage)
-	}
-	switch args[0] {
-	case "put":
-		workspace, file, err := parseWorkspaceEnvFilePut(args[1:])
-		if err != nil {
-			return err
-		}
-		return changeWorkspaceEnv(workspace, protocol.WorkspaceEnvironmentSetParams{Files: []protocol.WorkspaceFile{file}})
-	case "rm":
-		fs, workspace := workspaceEnvFlags("workspace env file rm")
-		if err := fs.Parse(args[1:]); err != nil {
-			return fmt.Errorf("%w\n%s", err, workspaceEnvFileRmUsage)
-		}
-		if fs.NArg() != 1 {
-			return errors.New(workspaceEnvFileRmUsage)
-		}
-		return changeWorkspaceEnv(*workspace, protocol.WorkspaceEnvironmentSetParams{RemoveFiles: fs.Args()})
-	default:
-		return fmt.Errorf("unknown workspace env file command %q", args[0])
-	}
-}
-
-func parseWorkspaceEnvFilePut(args []string) (string, protocol.WorkspaceFile, error) {
-	fs, workspace := workspaceEnvFlags("workspace env file put")
-	repoPath := fs.String("path", "", "the file's path in the repository (default: <local file>, when it is a clean relative path)")
-	if err := fs.Parse(args); err != nil {
-		return "", protocol.WorkspaceFile{}, fmt.Errorf("%w\n%s", err, workspaceEnvFilePutUsage)
-	}
-	if fs.NArg() == 0 {
-		return "", protocol.WorkspaceFile{}, errors.New(workspaceEnvFilePutUsage)
-	}
-	// flag stops at the first argument that is not one, so --path after the
-	// local file needs a second Parse.
-	local := fs.Arg(0)
-	if err := fs.Parse(fs.Args()[1:]); err != nil {
-		return "", protocol.WorkspaceFile{}, fmt.Errorf("%w\n%s", err, workspaceEnvFilePutUsage)
-	}
-	if fs.NArg() != 0 {
-		return "", protocol.WorkspaceFile{}, errors.New(workspaceEnvFilePutUsage)
-	}
-	if *repoPath == "" {
-		rel := filepath.ToSlash(local)
-		if !filepath.IsLocal(local) || path.Clean(rel) != rel {
-			return "", protocol.WorkspaceFile{}, fmt.Errorf("%s is not a clean relative path; name the file's path in the repository with --path, such as --path .env", local)
-		}
-		*repoPath = rel
-	}
-	file, err := os.Open(local)
-	if err != nil {
-		return "", protocol.WorkspaceFile{}, err
-	}
-	data, err := io.ReadAll(io.LimitReader(file, protocol.MaxWorkspaceVariableValueBytes+1))
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return "", protocol.WorkspaceFile{}, fmt.Errorf("read %s: %w", local, err)
-	}
-	if len(data) > protocol.MaxWorkspaceVariableValueBytes {
-		return "", protocol.WorkspaceFile{}, fmt.Errorf("%s is larger than %d bytes, the most a workspace file holds", local, protocol.MaxWorkspaceVariableValueBytes)
-	}
-	// JSON would carry other bytes as U+FFFD, changing the file.
-	if !utf8.Valid(data) {
-		return "", protocol.WorkspaceFile{}, fmt.Errorf("%s is not UTF-8 text; a workspace file must be", local)
-	}
-	return *workspace, protocol.WorkspaceFile{Path: *repoPath, Content: string(data)}, nil
-}
-
 func workspaceEnvScript(args []string, stdin io.Reader) error {
 	fs, workspace := workspaceEnvFlags("workspace env script")
 	file := fs.String("file", "", "set the setup script from this file (- for stdin)")
@@ -377,21 +292,15 @@ func printWorkspaceVariables(w io.Writer, ws protocol.Workspace, res protocol.Wo
 	if _, err := fmt.Fprintf(w, "workspace %s %s\n", ws.ID, ws.Name); err != nil {
 		return err
 	}
-	lines := make([]string, 0, len(res.Variables)+len(res.Files))
+	if len(res.Variables) == 0 {
+		_, err := fmt.Fprintln(w, "no variables")
+		return err
+	}
 	for _, v := range res.Variables {
 		line := v.Name + "=" + v.Value
 		if v.Secret {
 			line = v.Name + " (secret)"
 		}
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		lines = append(lines, "no variables")
-	}
-	for _, f := range res.Files {
-		lines = append(lines, fmt.Sprintf("file %s (%d bytes)", f.Path, f.Size))
-	}
-	for _, line := range lines {
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}

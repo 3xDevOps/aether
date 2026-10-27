@@ -411,15 +411,6 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 			return fmt.Errorf("record extra repositories: %w", updateErr)
 		}
 	}
-	if s.cfg.Secrets != nil {
-		files, readErr := s.cfg.Secrets.Files(ws.ID)
-		if readErr != nil {
-			return fmt.Errorf("read workspace files: %w", readErr)
-		}
-		if writeErr := s.cfg.Git.WriteRunFiles(ctx, run.ID, files); writeErr != nil {
-			return fmt.Errorf("write workspace files: %w", writeErr)
-		}
-	}
 	if pinErr := s.pinLatestProfile(ctx, run); pinErr != nil {
 		return fmt.Errorf("pin profile: %w", pinErr)
 	}
