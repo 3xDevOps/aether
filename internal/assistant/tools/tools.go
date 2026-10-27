@@ -285,7 +285,7 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 
 func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 	switch req.Method {
-	case protocol.MethodRunLaunch, protocol.MethodTemplateLaunch:
+	case protocol.MethodRunLaunch, protocol.MethodTemplateLaunch, protocol.MethodRunRelaunch:
 		launched, err := protocol.DecodeParams[protocol.RunResult](result)
 		if err != nil {
 			slog.Warn("assistant tools: read the launched run", "error", err)
@@ -299,6 +299,13 @@ func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 			return ""
 		}
 		return created.Mission.CurrentIntegratorRunID
+	case protocol.MethodMissionReplaceIntegrator:
+		replaced, err := protocol.DecodeParams[protocol.MissionReplaceIntegratorResult](result)
+		if err != nil {
+			slog.Warn("assistant tools: read the replacement integrator", "error", err)
+			return ""
+		}
+		return replaced.RunID
 	case protocol.MethodRunInject:
 		p, err := protocol.DecodeParams[protocol.RunInjectParams](req.Params)
 		if err != nil {

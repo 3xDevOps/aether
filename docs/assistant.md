@@ -192,8 +192,9 @@ agent asks you still appears as a card.
 
 ## Notifications
 
-Aether follows every run the assistant launches or messages for you. You do not
-ask for updates. You are told when the run:
+Aether follows every run the assistant launches, relaunches or messages for
+you, and the integrator of every swarm it starts or gives a new integrator. You
+do not ask for updates. You are told when the run:
 
 | Notice | When |
 | --- | --- |
