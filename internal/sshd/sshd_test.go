@@ -357,6 +357,8 @@ type fakeRuns struct {
 	terminalRelease <-chan struct{}
 	launchStarted   chan<- struct{}
 	launchRelease   <-chan struct{}
+	// reviewFrom, when set, is where Review reads the run it judges.
+	reviewFrom store.Store
 	// admitInto, when set, is where a launch writes its run row before it
 	// reports the run admitted and blocks, as the scheduler does.
 	admitInto store.Store
@@ -631,9 +633,20 @@ func (f *fakeRuns) Seen(_ context.Context, run domain.RunID, actor domain.Member
 	}, nil
 }
 
-func (f *fakeRuns) Review(_ context.Context, run domain.RunID, actor domain.MemberID, action string) (*domain.Run, error) {
-	if err := f.record(fmt.Sprintf("review:%s:%s:%s", run, actor, action)); err != nil {
+// Review refuses a reportedOnly complete of a live run whose success does
+// not await review, reading the run from reviewFrom as the scheduler does.
+func (f *fakeRuns) Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string, reportedOnly bool) (*domain.Run, error) {
+	if err := f.record(fmt.Sprintf("review:%s:%s:%s:%t", run, actor, action, reportedOnly)); err != nil {
 		return nil, err
+	}
+	if reportedOnly && action == protocol.RunReviewComplete && f.reviewFrom != nil {
+		r, err := f.reviewFrom.GetRun(ctx, run)
+		if err != nil {
+			return nil, err
+		}
+		if r.Status.Live() && r.Review != domain.ReviewReady {
+			return nil, scheduler.ErrReviewNotReported
+		}
 	}
 	return &domain.Run{
 		ID: run, WorkspaceID: "ws", MemberID: actor,

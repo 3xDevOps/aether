@@ -45,7 +45,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	if parked.Activity != domain.ActivityWaiting || parked.Reason != turnEndedReason || parked.Review != "" || parked.NeedsAttention(false) {
 		t.Fatalf("turn end without a report = %s %q review %q, want waiting, no review and no need", parked.Activity, parked.Reason, parked.Review)
 	}
-	if _, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewLater); !errors.Is(err, ErrInvalidTransition) {
+	if _, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewLater, false); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("later with no reported success = %v, want ErrInvalidTransition", err)
 	}
 
@@ -76,7 +76,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	}
 	first := reportSuccess(e.sched, "report-1")
 
-	later, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewLater)
+	later, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewLater, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +85,11 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	}
 	if later.Review != domain.ReviewLater || later.Status != domain.RunNeedsAttention || later.NeedsAttention(false) {
 		t.Fatalf("after later = %s review %q, want still parked and not needing anyone", later.Status, later.Review)
+	}
+	// A reportedOnly complete closes a live run only while its success
+	// awaits review; put off, it no longer does.
+	if _, err = e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, true); !errors.Is(err, ErrReviewNotReported) {
+		t.Fatalf("reportedOnly complete of a put-off live run = %v, want ErrReviewNotReported", err)
 	}
 
 	// A restart re-derives the activity and keeps the review; the outbox
@@ -116,7 +121,7 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 		t.Fatal("a new success report kept the first one's need key, so it would not be announced")
 	}
 
-	completed, err := s2.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete)
+	completed, err := s2.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,10 +137,10 @@ func TestReviewFollowsTheReportedSuccess(t *testing.T) {
 	if sc, err := s2.readSidecar(run.ID); err != nil || !sc.Retained || !retainedReason(completed.Status, completed.Reason) {
 		t.Fatalf("completed run retention = %+v, %v, reason %q; want the container retained as run.close retains it", sc, err, completed.Reason)
 	}
-	if again, err := s2.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete); err != nil || again.Review != domain.ReviewAccepted {
+	if again, err := s2.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, false); err != nil || again.Review != domain.ReviewAccepted {
 		t.Fatalf("second complete = %+v, %v; want accepted again", again, err)
 	}
-	if _, err := s2.Review(ctx, run.ID, e.member.ID, protocol.RunReviewLater); !errors.Is(err, ErrInvalidTransition) {
+	if _, err := s2.Review(ctx, run.ID, e.member.ID, protocol.RunReviewLater, false); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("later on an accepted run = %v, want ErrInvalidTransition", err)
 	}
 }
@@ -159,7 +164,7 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 	if row.Review != domain.ReviewReady || !row.NeedsAttention(false) {
 		t.Fatalf("background success = review %q, want ready and needing its owner", row.Review)
 	}
-	accepted, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete)
+	accepted, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +181,7 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 	if row := e.waitStoreStatus(t, failed.ID, domain.RunFailed); row.Review != "" {
 		t.Fatalf("exit without a success report = review %q, want none", row.Review)
 	}
-	if _, err := e.sched.Review(ctx, failed.ID, e.member.ID, protocol.RunReviewComplete); !errors.Is(err, ErrInvalidTransition) {
+	if _, err := e.sched.Review(ctx, failed.ID, e.member.ID, protocol.RunReviewComplete, false); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("complete on a failed run = %v, want ErrInvalidTransition", err)
 	}
 }
@@ -194,6 +199,14 @@ func TestAcceptRefusesAReopenedRun(t *testing.T) {
 	}
 	if row, err := e.db.GetRun(ctx, run.ID); err != nil || row.Review != "" {
 		t.Fatalf("running run review = %q, %v; want none", row.Review, err)
+	}
+	// A reportedOnly complete judged before the run reopened is judged
+	// again here, on the running run, and closes nothing.
+	if _, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, true); !errors.Is(err, ErrReviewNotReported) {
+		t.Fatalf("reportedOnly complete of a reopened run = %v, want ErrReviewNotReported", err)
+	}
+	if row, err := e.db.GetRun(ctx, run.ID); err != nil || row.Status != domain.RunRunning {
+		t.Fatalf("reopened run after a refused complete = %s, %v; want still running", row.Status, err)
 	}
 }
 

@@ -26,6 +26,7 @@ func TestConnectorMethodScopesNameRegisteredMethods(t *testing.T) {
 func TestConnectorScopesGateEachMethod(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	e.runs.reviewFrom = e.store
 	ctx := context.Background()
 	run := json.RawMessage(`{"run_id":"` + string(e.run.ID) + `"}`)
 	ready := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "reported", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
@@ -141,54 +142,29 @@ func TestConnectorAnswerNeedsTheRequestsScope(t *testing.T) {
 	}
 }
 
-// A write-scope connector's complete of a finished run waits for a relaunch
-// in progress, then sees the run live again and is refused, instead of
-// closing the reopened run.
-func TestConnectorReviewWaitsForARelaunch(t *testing.T) {
+// A connector without control asks the scheduler to complete a run only if
+// its reported success awaits review, so the scheduler judges the state it
+// acts on; a connector with control and the dashboard ask without that
+// limit.
+func TestConnectorReviewLimitReachesTheScheduler(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	ctx := context.Background()
-	if _, err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	started, release := e.runs.blockRelaunch()
-	relaunched := make(chan *protocol.Error, 1)
-	go func() {
-		_, perr := e.srv.Local(e.member.ID).Call(ctx, protocol.MethodRunRelaunch, json.RawMessage(`{"run_id":"`+string(e.run.ID)+`"}`))
-		relaunched <- perr
-	}()
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		close(release)
-		t.Fatal("relaunch did not reach the scheduler")
-	}
-	reviewed := make(chan *protocol.Error, 1)
-	connector := e.srv.ConnectorLocal(ConnectorGrant{Member: e.member.ID}, "con-test", "ChatGPT", []string{ConnectorScopeRead, ConnectorScopeWrite})
-	go func() {
-		_, perr := connector.Call(ctx, protocol.MethodRunReview, json.RawMessage(`{"run_id":"`+string(e.run.ID)+`","action":"complete"}`))
-		reviewed <- perr
-	}()
-	select {
-	case perr := <-reviewed:
-		close(release)
-		t.Fatalf("run.review during a relaunch = %v, want it to wait", perr)
-	case <-time.After(200 * time.Millisecond):
-	}
-	if _, err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunRunning, "", "", nil, nil); err != nil {
-		close(release)
-		t.Fatal(err)
-	}
-	close(release)
-	if perr := <-relaunched; perr != nil {
-		t.Fatalf("run.relaunch = %v", perr)
-	}
-	if perr := <-reviewed; perr == nil || perr.Code != protocol.CodeDenied || !strings.Contains(perr.Message, "needs the control scope") {
-		t.Fatalf("run.review after the relaunch = %v, want refused without control", perr)
-	}
-	for _, call := range e.runs.Calls() {
-		if strings.HasPrefix(call, "review:") {
-			t.Fatalf("the reopened run was reviewed: %v", e.runs.Calls())
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	params := json.RawMessage(`{"run_id":"` + string(e.run.ID) + `","action":"complete"}`)
+	for _, tc := range []struct {
+		caller *Local
+		want   string
+	}{
+		{e.srv.ConnectorLocal(ConnectorGrant{Member: e.member.ID}, "con-test", "ChatGPT", []string{ConnectorScopeRead, ConnectorScopeWrite}), ":true"},
+		{e.srv.ConnectorLocal(ConnectorGrant{Member: e.member.ID}, "con-test", "ChatGPT", []string{ConnectorScopeWrite, ConnectorScopeControl}), ":false"},
+		{e.srv.Local(e.member.ID), ":false"},
+	} {
+		before := len(e.runs.Calls())
+		_, _ = tc.caller.Call(ctx, protocol.MethodRunReview, params)
+		calls := e.runs.Calls()
+		if len(calls) != before+1 || !strings.HasPrefix(calls[before], "review:"+string(e.run.ID)) || !strings.HasSuffix(calls[before], tc.want) {
+			t.Fatalf("run.review reached the scheduler as %v, want one review ending %s", calls[before:], tc.want)
 		}
 	}
 }

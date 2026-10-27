@@ -13,7 +13,11 @@ import (
 // a live run closes as completed the way CloseRun closes one, and a
 // completed run only records the acceptance. later puts a reported success
 // off and leaves the run where it is; a new success report asks again.
-func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string) (*domain.Run, error) {
+// reportedOnly completes a live run only when its reported success awaits
+// review, judged on the state Review acts on: a run reopened after a check
+// elsewhere is live again here, and a completed run's acceptance requires it
+// still completed under s.mu.
+func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string, reportedOnly bool) (*domain.Run, error) {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
 		return nil, err
@@ -31,6 +35,8 @@ func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.M
 	switch {
 	case r.Review == domain.ReviewAccepted:
 		return r, nil
+	case r.Status.Live() && reportedOnly && r.Review != domain.ReviewReady:
+		return nil, fmt.Errorf("%w: run %s", ErrReviewNotReported, run)
 	case r.Status.Live() && r.MissionRole == "worker":
 		return nil, fmt.Errorf("%w: swarm worker %s completes through its integrator", ErrInvalidTransition, run)
 	case r.Status.Live():
