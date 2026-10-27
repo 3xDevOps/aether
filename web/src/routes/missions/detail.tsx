@@ -169,6 +169,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   const canReplace = !final && cap.hasMethod('mission.replace-integrator') && launcher
   const canCancel = !final && cap.hasMethod('mission.cancel') && humanAuthority
   const canRelease = cap.hasMethod('mission.worker.release') && launcher
+  const canWatch = !final && cap.hasMethod('watch.create')
   const archived = Boolean(mission.archived_at)
   const canArchive = final && !archived && cap.hasMethod('mission.archive') && humanAuthority
   const canUnarchive = archived && cap.hasMethod('mission.unarchive') && humanAuthority
@@ -205,7 +206,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   const actions = (
     <>
       {openQuestion && !mobile && <Button size="sm" onClick={answer}>Answer</Button>}
-      {(canReplace || canCancel || canArchive || canUnarchive || canDelete) && (
+      {(canWatch || canReplace || canCancel || canArchive || canUnarchive || canDelete) && (
         <Menu>
           <MenuTrigger asChild>
             <Button variant="ghost" size="icon-sm" label="More swarm actions">
@@ -213,6 +214,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
             </Button>
           </MenuTrigger>
           <MenuContent align="end">
+            {canWatch && <MenuItem onSelect={() => useStore.getState().openWatchDialog({ kind: 'mission', mission_id: mission.id })}>Watch…</MenuItem>}
             {canReplace && <MenuItem onSelect={() => setDialog('replace')}>Replace integrator…</MenuItem>}
             {canArchive && <MenuItem onSelect={() => setDialog('archive')}>Archive swarm…</MenuItem>}
             {canUnarchive && <MenuItem onSelect={() => void unarchive()}>Unarchive swarm</MenuItem>}

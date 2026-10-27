@@ -57,7 +57,7 @@ what `edge.onaether.dev` serves.
 | Item | Field or system | Merged | Deployed | Submitted | Approved |
 | --- | --- | --- | --- | --- | --- |
 | Edge with protocol 3 serving the universal `/mcp` URL: CIMD, S256, `iss`, `resource`. OpenAI: "To change an existing MCP server's URL, contact support; the current update flow does not support URL changes." ([submission](https://developers.openai.com/plugins/deploy/submission)) | aether-edge | Yes (#554) | Yes, verified with `curl` 2026-10-26 | No | No |
-| Sign-in hardening: the sign-in assertion bound to the browser and kept out of URLs and logs | aether-edge, server | No: #590 open | No | n/a | n/a |
+| Edge with protocol 4: the sign-in assertion bound to the browser and kept out of URLs and logs ([Security notes](#security-notes)) | aether-edge, server | No: #590 open | No | n/a | n/a |
 | Per-method scope enforcement: every connector call checked against its granted scopes. The listing's scope sentences are true only once it is deployed | Server | No: #591 open | No | n/a | n/a |
 | `scopes_supported` in the protected resource metadata. OpenAI lists it under "Key fields you must populate" as an "optional list that helps ChatGPT explain the permissions it is going to ask the user for" ([authentication](https://developers.openai.com/plugins/build/auth)); the live document has only `resource` and `authorization_servers` | aether-edge | No: pending code change (edge metadata) | No | n/a | n/a |
 | Challenge token served as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge` with `aether-edge serve --openai-challenge <token>` or `AETHER_EDGE_OPENAI_CHALLENGE` | aether-edge | Yes | No: answers 404 (2026-10-26) | No | No |
@@ -293,7 +293,7 @@ plaintext in memory while relaying.
 
 | Where | What | Kept |
 | --- | --- | --- |
-| Edge, nginx access log | One line per request: client IP, time, request line (method, path with the server id, and query string), status, bytes, user agent. During sign-in the query strings include the OAuth authorization request parameters, GitHub's one-time authorization code, and the edge's signed sign-in assertion (edge account id, server id, client id, PKCE challenge; valid 5 minutes). No body | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
+| Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token, and no query on `/mcp/authorize`, `/connectors/choose` or `/signin` | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
 | Edge journal | A request the edge refuses before relaying, with its path and, from outside the trusted proxies, the client IP; an internal relay failure with its error; failed TLS handshakes with the client IP. No body or token | `MaxRetentionSec=` in journald, per [edge.md](edge.md) |
 | Edge database | The edge account (GitHub user id, login, verified primary email, display name), hashed browser sessions, the servers the account reached, and one edge-wide total of relayed bytes per month | Account until deleted; sessions 30 days after last use; byte totals never deleted ([privacy.md](privacy.md#what-an-edge-stores)) |
 | Server, `connectors` table | Member, device, client id, client name, redirect host, scopes, created and last used times, SHA-256 hashes of the tokens | Until revoked, or the member or device is removed |
@@ -306,6 +306,19 @@ plaintext in memory while relaying.
 <id>` revokes one; the consent page grants `write` and `control` separately
 ([connectors.md](connectors.md)). Edge account deletion is in
 [privacy.md](privacy.md#what-an-edge-stores).
+
+## Security notes
+
+- Every reviewer and user picks the server on the edge's **Choose a server**
+  page, which asks even when the account has one server. The server's consent
+  page then states the server, member, client and scopes.
+- The edge's signed sign-in statement travels in a form body, never a URL, and
+  the server binds it to the browser that brought it. A leaked authorization
+  or consent link connects nobody.
+- The project edge forwards a server's redirects and forms on `/mcp` only to
+  itself, `chatgpt.com` and `claude.ai`.
+- [edge.md](edge.md#mcp-connectors) and
+  [security.md](security.md#chatgpt-and-claude-connectors) give the details.
 
 ## Who can use it
 

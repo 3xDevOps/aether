@@ -2,7 +2,7 @@
   "store_schema": 1,
   "store_compat_floor": 1,
   "protocol": {
-    "version": 3,
+    "version": 4,
     "min_version": 1
   },
   "files": {

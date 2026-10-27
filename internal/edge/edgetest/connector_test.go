@@ -222,12 +222,14 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 			}
 			var prm, asm map[string]any
 			if resp, body = mcpRequest(t, http.MethodGet, metadata, nil, nil); resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &prm) != nil ||
-				prm["resource"] != base || fmt.Sprint(prm["authorization_servers"]) != "["+base+"]" {
+				prm["resource"] != base || fmt.Sprint(prm["authorization_servers"]) != "["+base+"]" ||
+				fmt.Sprint(prm["scopes_supported"]) != "[offline_access]" {
 				t.Fatalf("protected resource metadata: %s %s", resp.Status, body)
 			}
 			if resp, body = mcpRequest(t, http.MethodGet, h.relayURL+"/.well-known/oauth-authorization-server"+edgeproto.MCPPath(s.id), nil, nil); resp.StatusCode != http.StatusOK ||
 				json.Unmarshal([]byte(body), &asm) != nil || asm["issuer"] != base || asm["authorization_endpoint"] != base+"/authorize" ||
-				asm["token_endpoint"] != base+"/token" || asm["client_id_metadata_document_supported"] != true || asm["registration_endpoint"] != nil {
+				asm["token_endpoint"] != base+"/token" || asm["client_id_metadata_document_supported"] != true || asm["registration_endpoint"] != nil ||
+				fmt.Sprint(asm["scopes_supported"]) != "[offline_access]" {
 				t.Fatalf("authorization server metadata: %s %s", resp.Status, body)
 			}
 

@@ -81,10 +81,19 @@ func (s *Server) UniversalConnectorURL() string {
 
 func (s *Server) EdgeAccess() edgeproto.AccessPolicy { return s.cfg.EdgeAccess }
 
+// EdgeBindsSignIn reports whether the edge speaks
+// edgeproto.VersionConnectorSignIn: it posts a ConnectorAssertion bound to
+// the browser and the redirect URI. An older edge puts it in the URL.
+func (s *Server) EdgeBindsSignIn() bool {
+	edge := s.currentEdgeOwner()
+	return edge != nil && edge.EdgeVersion() >= edgeproto.VersionConnectorSignIn
+}
+
 // VerifyConnectorAssertion checks an edge's assertion that an account
 // chose this server for the authorization request of clientID with
-// challenge, against the key of the edge the server is connected to.
-func (s *Server) VerifyConnectorAssertion(signed, clientID, challenge string, now time.Time) (edgeproto.ConnectorAssertion, error) {
+// challenge and redirectURI, against the key of the edge the server is
+// connected to.
+func (s *Server) VerifyConnectorAssertion(signed, clientID, challenge, redirectURI string, now time.Time) (edgeproto.ConnectorAssertion, error) {
 	edge := s.currentEdgeOwner()
 	if edge == nil {
 		return edgeproto.ConnectorAssertion{}, errors.New("this server has no edge")
@@ -93,7 +102,7 @@ func (s *Server) VerifyConnectorAssertion(signed, clientID, challenge string, no
 	if key == nil {
 		return edgeproto.ConnectorAssertion{}, fmt.Errorf("this server is not connected to its edge at %s", edge.Origin())
 	}
-	return edgeproto.VerifyConnectorAssertion(key, signed, edge.Origin(), edgeproto.ServerID(s.hostKey.PublicKey()), clientID, challenge, now)
+	return edgeproto.VerifyConnectorAssertion(key, signed, edge.Origin(), edgeproto.ServerID(s.hostKey.PublicKey()), clientID, challenge, redirectURI, now)
 }
 
 // ConnectorAccountGrant is the grant of a connector authorized by

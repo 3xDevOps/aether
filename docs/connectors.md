@@ -73,10 +73,10 @@ Custom MCP servers are added on the web only, at chatgpt.com
 3. Name it `Aether`, paste the URL from `aether mcp` as the server URL, and
    choose **OAuth**.
 4. Select **Create as a plugin**, then install it.
-5. A page from your server opens: **Connect ChatGPT (chatgpt.com) to
-   <server>**, after the edge's sign-in page on the
-   [universal URL](#the-universal-url). Paste the code if it asks for one,
-   choose its [scopes](#scopes) and select **Allow**.
+5. On the [universal URL](#the-universal-url), the edge's page opens: sign in
+   with GitHub and select **Continue with <server>**. A page from your server
+   opens: **Connect ChatGPT (chatgpt.com) to <server>**. Paste the code if it
+   asks for one, choose its [scopes](#scopes) and select **Allow**.
 
 As of October 2026, OpenAI says write tools need ChatGPT Business or
 Enterprise/Edu. Pro gets the read tools only
@@ -95,10 +95,11 @@ On claude.ai
 2. Team and Enterprise: an Owner opens **Organization settings → Connectors**,
    selects **Add**, **Custom**, then **Web**, and pastes the URL. Each member
    then selects **Connect** under **Customize → Connectors**.
-3. Select **Connect**. A page from your server opens: **Connect Claude
-   (claude.ai) to <server>**, after the edge's sign-in page on the
-   [universal URL](#the-universal-url). Paste the code if it asks for one,
-   choose its [scopes](#scopes) and select **Allow**.
+3. Select **Connect**. On the [universal URL](#the-universal-url), the
+   edge's page opens: sign in with GitHub and select **Continue with
+   <server>**. A page from your server opens: **Connect Claude (claude.ai) to
+   <server>**. Paste the code if it asks for one, choose its [scopes](#scopes)
+   and select **Allow**.
 
 The connector then works in Claude on the web, desktop and mobile.
 
@@ -111,16 +112,25 @@ directory ([claude-connector.md](claude-connector.md)), install it from there
 instead of adding a custom MCP server; connecting then works as described here.
 
 When you connect, the edge's sign-in page opens: sign in with GitHub if you
-have not. It lists your servers that are online and new enough, with why the
-others cannot be picked. Pick one; with only one, it goes straight on. That
-server's consent page opens, depending on its
-[`edge-access`](edge.md#access-policies) policy:
+have not. **Choose a server** names the app you are connecting and lists your
+servers with their names, ids, your role and whether each asks for a code,
+each with **Continue with <server>**, and the servers that cannot take the
+connection with why. It asks even when you have only one server, so you always
+see which server you connect. That server's consent page opens and states the
+server, its id, the client and, under `account`, the member. Then, depending on
+the server's [`edge-access`](edge.md#access-policies) policy:
 
 - `account`: **Connect ChatGPT (chatgpt.com) to <server> as <member>**,
   with the [scopes](#scopes) and no code. Signing in at the edge already
   admits you there.
 - `approved-devices`: the page asks for the code. Paste the code from
   **Settings → ChatGPT and Claude** in the app, or `aether mcp`.
+
+**Continue** posts the edge's signed statement that your GitHub account chose
+this server to the edge, never in a URL. The server binds it to the first
+browser that brings it, and only that browser's consent page can use it, once,
+within 5 minutes. A link copied out of your browser, history or a log connects
+nobody. [edge.md](edge.md#mcp-connectors) has the details.
 
 The sign-in page lists a server only to the GitHub accounts bound to its
 members. So the app and `aether mcp` show the universal URL only to a member with a
@@ -135,11 +145,27 @@ refuses it, as it refuses a device no person approved, and it cannot mint a
 pairing code or a Slack link code. Connectors added at
 `<edge>/mcp/<server id>` keep working there.
 
+### Self-hosted and custom edges
+
+The universal URL is `https://<relay host>/mcp` of whichever edge the server
+uses, so an operator's own edge has its own. `<edge>/mcp/<server id>` with a
+pairing code works on every edge from protocol 2 and under either policy.
+
+### Claude Code
+
+Claude Code is not a supported client. The consent page trusts only client
+metadata documents on `chatgpt.com` and `claude.ai` whose redirect URI is an
+HTTPS URL on the same host. A loopback redirect such as
+`http://localhost:<port>/callback` proves nothing about who receives the code,
+and the edge forwards a browser only to those two hosts. From Claude Code, run
+the `aether` CLI instead.
+
 ## Scopes
 
 The consent page also sets the connector's scopes. ChatGPT and
 Claude do not choose them; the server ignores any scope they request other
-than `offline_access`.
+than `offline_access`, the only one the OAuth metadata lists in
+`scopes_supported`.
 
 | Scope | On the page | Grants |
 | --- | --- | --- |
@@ -513,10 +539,12 @@ On the page that opens when you connect:
 | `10 wrong codes came from your address in the last minute. Wait a minute, then paste the code again.` | 10 wrong codes in a minute from your address (your IPv6 /64). Other addresses are not affected |
 | `300 wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.` | Someone is guessing codes from many addresses. Pairing resumes a minute after the guessing stops |
 | `Aether connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
-| `None of your servers can take this connection.` (edge sign-in page) | Each server listed under **Not available** says why: not connected, too old for the universal URL, or an invitation you have not joined |
+| `None of your servers can take this connection.` (edge sign-in page) | Each server listed under **Not available** says why: not connected, too old for the universal URL (an admin runs `sudo aether-server update`), or an invitation you have not joined |
 | The edge sign-in page does not list your server | Your GitHub account is not bound to a member there. Bind it (`aether member identities`) or use the `<edge>/mcp/<server id>` URL `aether mcp` prints |
 | `Cannot connect as your GitHub account: <account> is not a member of <server>; ...` | That GitHub account is not bound to a member. Sign in at the edge as the right account, or connect with a code |
-| `Cannot connect as your GitHub account: the edge's sign-in for it was already used.`, `... expired at <time>` or `... was issued at <time>, before this server last started at <time>` | Start again from ChatGPT or Claude |
+| `Cannot connect as your GitHub account: the edge's sign-in for it was already used.`, `... expired at <time>` or `... was issued at <time>, and this server takes only sign-ins issued from <time>, 30s after it last started` | Start again from ChatGPT or Claude |
+| `Cannot connect as your GitHub account: the edge's sign-in for it was already opened in another browser.` or `... this consent page was opened in another browser than the one that signed in at the edge.` | The page was opened or posted from a browser other than the one that chose the server. Start again from ChatGPT or Claude in one browser |
+| `The edge put its sign-in in the URL, where logs and browser history keep it, so it is refused.` | The server's edge speaks protocol 4, but something sent the old hand-off. Start again from ChatGPT or Claude |
 
 If an app asks you to sign in again, the connector was revoked or cut off.
 Connect again from the app; `aether mcp` prints the URL and a code if the page
