@@ -12,7 +12,7 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import type { MemoryItem, MemoryShowResult } from '@/lib/types'
-import { kindLabel, mayChange, sourceLabel, superseded } from '@/routes/memory/model'
+import { kindLabel, mayChange, mayPinForSelf, sourceLabel, superseded } from '@/routes/memory/model'
 import { useStore } from '@/store'
 import { useSelf } from '@/store/hooks'
 
@@ -200,7 +200,7 @@ export function NoteDialog({
               <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryUnpin(workspaceID, item.id))}>Unpin</Button>
             ) : !superseded(item) && (
               <>
-                <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id, 'member'))}>Pin for me only</Button>
+                {mayPinForSelf(item, self) && <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id, 'member'))}>Pin for me only</Button>}
                 {item.scope === 'workspace' && <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id))}>Pin</Button>}
               </>
             )}

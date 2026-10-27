@@ -7,7 +7,7 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { IconSwap } from '@/components/ui/text-swap'
 import type { MemoryItem } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { kindLabel, mayChange, sourceLabel, superseded } from '@/routes/memory/model'
+import { kindLabel, mayChange, mayPinForSelf, sourceLabel, superseded } from '@/routes/memory/model'
 import { Byline, PinBadge, PRLink, RunLink } from '@/routes/memory/note'
 import { useSelf } from '@/store/hooks'
 
@@ -41,7 +41,8 @@ export const NoteRow = memo(function NoteRow({
   onRemove: (item: MemoryItem) => void
 }) {
   const [pinning, setPinning] = useState(false)
-  const writable = canWrite && mayChange(item, useSelf())
+  const self = useSelf()
+  const writable = canWrite && mayChange(item, self)
   const replaced = superseded(item)
   const pinned = Boolean(item.pinned_at)
   const pinLabel = pinned ? 'Unpin' : item.scope === 'member' ? 'Pin for your new runs' : 'Pin for every new run'
@@ -96,7 +97,7 @@ export const NoteRow = memo(function NoteRow({
             'group-hover/row:opacity-100 group-hover/row:delay-50 group-focus-within/row:opacity-100',
           )}
         >
-          {!replaced && (
+          {!replaced && (pinned || item.scope !== 'member' || mayPinForSelf(item, self)) && (
             <Button variant="ghost" size="icon-sm" label={pinLabel} disabled={pinning} onClick={() => void togglePin()}>
               <IconSwap swapped={pinned} from={<Pin />} to={<PinOff />} />
             </Button>
