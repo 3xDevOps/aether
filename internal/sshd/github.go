@@ -1,9 +1,12 @@
 package sshd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	githubservice "github.com/3xDevOps/Aether/internal/github"
@@ -70,6 +73,39 @@ type GitHubService interface {
 	Repositories(context.Context, domain.MemberID, int) (githubservice.RepositoryPage, error)
 	Repository(context.Context, domain.MemberID, string) (githubservice.Account, githubservice.Repository, error)
 	PullRequest(context.Context, domain.MemberID, string, int) (githubservice.Account, githubservice.PullRequest, error)
+	MemberPullRequestSnapshot(context.Context, domain.MemberID, string, int) (githubservice.Account, githubservice.Snapshot, error)
+}
+
+// snapshotFeedback is run.pr.feedback's checks and reviews from a snapshot,
+// at most limit of each: the check runs and waiting suites Checks counts,
+// and the commit statuses, with gh's spelling of their conclusions.
+func snapshotFeedback(snap githubservice.Snapshot, limit int) (checks []protocol.RunPRCheck, reviews []protocol.RunPRReview, truncated bool) {
+	checks, reviews = []protocol.RunPRCheck{}, []protocol.RunPRReview{}
+	for _, run := range snap.CurrentCheckRuns() {
+		checks = append(checks, protocol.RunPRCheck{Name: run.Name, Status: strings.ToUpper(run.Status), Conclusion: strings.ToUpper(run.Conclusion), URL: run.URL})
+	}
+	for _, suite := range snap.WaitingSuites() {
+		checks = append(checks, protocol.RunPRCheck{Name: cmp.Or(suite.App, suite.AppSlug), Status: strings.ToUpper(suite.Status)})
+	}
+	for _, status := range snap.Statuses {
+		conclusion := strings.ToUpper(status.State)
+		if status.State == "pending" {
+			conclusion = ""
+		}
+		checks = append(checks, protocol.RunPRCheck{Name: status.Context, Status: strings.ToUpper(status.State), Conclusion: conclusion, URL: status.TargetURL})
+	}
+	for _, review := range snap.Reviews {
+		submitted := ""
+		if review.SubmittedAt != nil {
+			submitted = review.SubmittedAt.UTC().Format(time.RFC3339)
+		}
+		reviews = append(reviews, protocol.RunPRReview{ID: strconv.FormatInt(review.ID, 10), Author: review.User, Body: review.Body, State: review.State, SubmittedAt: submitted})
+	}
+	if limit > 0 {
+		truncated = len(checks) > limit || len(reviews) > limit
+		checks, reviews = checks[:min(len(checks), limit)], reviews[:min(len(reviews), limit)]
+	}
+	return checks, reviews, truncated
 }
 
 func (s *Server) githubOAuthStart(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

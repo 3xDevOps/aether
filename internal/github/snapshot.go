@@ -359,6 +359,31 @@ type Checks struct {
 	Key string `json:"key"`
 }
 
+// CurrentCheckRuns are the check runs Checks counts.
+func (s Snapshot) CurrentCheckRuns() []CheckRun {
+	return slices.DeleteFunc(slices.Clone(s.CheckRuns), func(run CheckRun) bool {
+		return slices.ContainsFunc(s.CheckRuns, func(newer CheckRun) bool {
+			return newer.ID > run.ID && newer.App == run.App && newer.Name == run.Name &&
+				(newer.SuiteID == run.SuiteID || run.Conclusion == "cancelled")
+		})
+	})
+}
+
+// WaitingSuites are the suites Checks counts as one pending check each.
+func (s Snapshot) WaitingSuites() []CheckSuite {
+	running := map[int64]bool{}
+	for _, run := range s.CurrentCheckRuns() {
+		if run.Status != "completed" {
+			running[run.SuiteID] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(s.Suites), func(suite CheckSuite) bool { return !s.waiting(suite, running) })
+}
+
+func (s Snapshot) waiting(suite CheckSuite, running map[int64]bool) bool {
+	return suite.Status != "completed" && !running[suite.ID] && (suite.AppSlug == "github-actions" || suite.Runs > 0)
+}
+
 // Checks drops a check run when a newer one with the same app and name is in
 // the same suite (a rerun) or the older one was cancelled (superseded by
 // concurrency); separate workflows can share a job name. An
@@ -367,12 +392,7 @@ type Checks struct {
 // zero-run suite queued forever.
 func (s Snapshot) Checks() Checks {
 	var c Checks
-	current := slices.DeleteFunc(slices.Clone(s.CheckRuns), func(run CheckRun) bool {
-		return slices.ContainsFunc(s.CheckRuns, func(newer CheckRun) bool {
-			return newer.ID > run.ID && newer.App == run.App && newer.Name == run.Name &&
-				(newer.SuiteID == run.SuiteID || run.Conclusion == "cancelled")
-		})
-	})
+	current := s.CurrentCheckRuns()
 	ids := make([]string, 0, len(current)+len(s.Statuses))
 	running := map[int64]bool{}
 	for _, run := range current {
@@ -388,7 +408,7 @@ func (s Snapshot) Checks() Checks {
 		}
 	}
 	for _, suite := range s.Suites {
-		if suite.Status != "completed" && !running[suite.ID] && (suite.AppSlug == "github-actions" || suite.Runs > 0) {
+		if s.waiting(suite, running) {
 			c.Pending++
 			ids = append(ids, "q"+strconv.FormatInt(suite.ID, 10))
 		}

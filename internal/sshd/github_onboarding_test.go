@@ -26,6 +26,7 @@ type githubRepositoryFixture struct {
 	members []domain.MemberID
 	pages   []int
 	pr      githubservice.PullRequest
+	snap    githubservice.Snapshot
 	lookups []string
 }
 
@@ -59,6 +60,13 @@ func (f *githubRepositoryFixture) PullRequest(_ context.Context, member domain.M
 	defer f.mu.Unlock()
 	f.lookups = append(f.lookups, fmt.Sprintf("%s %s#%d", member, fullName, number))
 	return f.account, f.pr, f.err
+}
+
+func (f *githubRepositoryFixture) MemberPullRequestSnapshot(_ context.Context, member domain.MemberID, fullName string, number int) (githubservice.Account, githubservice.Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lookups = append(f.lookups, fmt.Sprintf("snapshot %s %s#%d", member, fullName, number))
+	return f.account, f.snap, f.err
 }
 
 func (f *githubRepositoryFixture) setup(c *Config, mirrorConfig *mirrorservice.Config) {

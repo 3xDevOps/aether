@@ -1012,8 +1012,10 @@ push remote answers `error` saying to pass `target`, and one on a detached HEAD
 answers `error` saying to pass both. `run.pr.status` returns the `expected` and
 `target` it used, to pass to `run.pr.create`. Once a finished run's container is
 gone, both report the pull request the run last recorded (`number`, `url`,
-`state`); `run.pr.feedback` then has no checks or comments, and `error` says
-why.
+`state`). `run.pr.feedback` then reads its checks and reviews from GitHub with
+the GitHub login of the run's home, as `gh` in the run did, and has no
+comments, `mergeable` or `merge_state_status`; `error` says why when that read
+fails.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the

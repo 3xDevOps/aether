@@ -400,7 +400,10 @@ workspace's base branch on its source repository as the dashboard proposes, and
 passes both to `run.pr.create`, so neither changes after you approve; the branch
 must be pushed. When GitHub's answer is lost but the pull request is found
 afterwards, the result is that pull request. `aether_pr_status` and
-`aether_pr_merge` take the same `repo` as `aether_run_changes`.
+`aether_pr_merge` take the same `repo` as `aether_run_changes`. Once a finished
+run's container is gone, `aether_pr_status` still reports its recorded pull
+request's checks and reviews, read from GitHub, without comments or merge
+state.
 `aether_handoff_run` takes the teammate's member id or exact display name; an
 unknown or ambiguous one fails with the teammates' ids and roles, and the server
 refuses a viewer. `aether_switch_run_mode` holds no control lease, so it fails

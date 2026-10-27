@@ -443,11 +443,23 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		if perr != nil {
 			return nil, perr
 		}
-		message := "checks and review feedback need the run's environment, which is gone: " + err.Error()
-		if status.Error != "" {
-			message += "; " + status.Error
+		out := protocol.RunPRFeedbackResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest,
+			Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Error: status.Error}
+		if s.cfg.Services.GitHub == nil {
+			out.Error = strings.TrimSuffix("checks and review feedback need the run's environment, which is gone: "+err.Error()+"; "+status.Error, "; ")
+			return out, nil
 		}
-		return protocol.RunPRFeedbackResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest, Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Error: message}, nil
+		// With the run's environment gone, the server reads GitHub with the
+		// login of the run's home, as gh in it did; comments need the run.
+		pr := status.PullRequest
+		account, snap, snapErr := s.cfg.Services.GitHub.MemberPullRequestSnapshot(ctx, call.home, pr.Repository, pr.Number)
+		if snapErr != nil {
+			out.Error = strings.TrimSuffix("read checks and reviews from GitHub: "+repoError(snapErr)+"; "+status.Error, "; ")
+			return out, nil
+		}
+		out.Identity = account.Login
+		out.Checks, out.Reviews, out.Truncated = snapshotFeedback(snap, p.Limit)
+		return out, nil
 	}
 	if err != nil {
 		return nil, rpcError(err)

@@ -161,6 +161,17 @@ type PullRequest struct {
 	MergedAt   *time.Time
 }
 
+// MemberPullRequestSnapshot is PullRequestSnapshot read with member's native
+// gh login.
+func (s *Service) MemberPullRequestSnapshot(ctx context.Context, member domain.MemberID, fullName string, number int) (Account, Snapshot, error) {
+	token, account, err := s.Credentials(ctx, member)
+	if err != nil {
+		return Account{}, Snapshot{}, err
+	}
+	snap, err := s.PullRequestSnapshot(ctx, token, fullName, number, nil)
+	return account, snap, err
+}
+
 func (s *Service) PullRequest(ctx context.Context, member domain.MemberID, fullName string, number int) (Account, PullRequest, error) {
 	if !validFullName(fullName) || number <= 0 {
 		return Account{}, PullRequest{}, errors.New("github: pull request must be an owner/name on github.com and a positive number")
