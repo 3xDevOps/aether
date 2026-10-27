@@ -57,13 +57,15 @@ export function RunPopover({ lane, at, agentName, now, onReply, onAgents }: {
   const segment = at === undefined ? undefined : lane.segments.find((s) => at >= s.start && at <= s.end)
   const unread = unreadMail(run, now)
   const pending = run.pending_inputs?.length ?? 0
+  const words = stateWords(card, undefined, now)
   return (
     <>
       <Header>{[lane.handle ?? agentName ?? run.harness, stateName(card), elapsed(run.created_at, lane.end)].join(' · ')}</Header>
       <p className="mt-0.5 text-ui font-medium break-words">{lane.title}</p>
       <Facts
         items={[
-          stateWords(card, undefined, now).detail,
+          words.label !== stateName(card) && words.label,
+          words.detail,
           card.next,
           run.branch && `${run.branch}${totals ? ` +${totals.additions} −${totals.deletions}` : ''}`,
           unread > 0 && unreadReason(unread, run.oldest_unacked_at!, now),
