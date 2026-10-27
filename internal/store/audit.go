@@ -10,11 +10,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// AuditKeep is how many call entries, and separately how many security
+// auditKeep is how many call entries, and separately how many security
 // entries, the store keeps per member; adding one drops that member's
 // oldest of its kind beyond it, so no member's calls evict another's and
-// no flood of calls evicts a security change.
-const AuditKeep = 10_000
+// no flood of calls evicts a security change. A var so tests can flood
+// past it quickly.
+var auditKeep = 10_000
 
 // securityPrefixes are the methods whose entries, once they took effect,
 // are security entries: connector, account-share, member and Slack link
@@ -84,7 +85,7 @@ func (d *DB) AddAudit(ctx context.Context, e *AuditEntry) error {
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM audit WHERE member_id = ? AND security = ? AND seq <= (
 		SELECT seq FROM audit WHERE member_id = ? AND security = ? ORDER BY seq DESC LIMIT 1 OFFSET ?)`,
-		e.Member, security, e.Member, security, AuditKeep); err != nil {
+		e.Member, security, e.Member, security, auditKeep); err != nil {
 		return fmt.Errorf("store: trim audit: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
