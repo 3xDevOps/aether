@@ -58,7 +58,7 @@ export function LaunchDefaultsSection({ client }: { client: Api }) {
   return (
     <SettingsSection title="Saved defaults" id="saved-launch-defaults" scope="Your account">
       <SettingRow
-        label="Saved defaults"
+        label="Last saved"
         help={result === null
           ? readError ? null : 'Reading your saved defaults…'
           : saved
