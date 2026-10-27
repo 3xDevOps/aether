@@ -461,10 +461,10 @@ and a long build or slow tool call looks the same as a hang.
 builds. Lower it to a minute or two for many short scripted runs.
 
 An Enhanced run is judged on its agent's progress: messages, thoughts, tool
-calls, plans, subagents, compaction and permission requests. Aether's own calls
-to the agent, the history a restored session replays, and mode, command and
-usage updates are not progress. How long it may stay quiet depends on where the
-turn is, its phase:
+calls, plans, subagents, compaction, background task progress and permission
+requests. Aether's own calls to the agent, the history a restored session
+replays, and mode, command and usage updates are not progress. How long it may
+stay quiet depends on where the turn is, its phase:
 
 | Phase | Limit |
 | --- | --- |
