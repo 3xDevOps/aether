@@ -27,10 +27,18 @@ var changesOps = []Op{
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodChangesList),
 }
 
+// changeUntrusted adds a message's correlation ID, which for report mail
+// embeds the agent's idempotency key.
+type changeUntrusted struct {
+	protocol.ChangeUntrusted
+	CorrelationID string `json:"correlation_id,omitempty"`
+}
+
 // changeRow is a change with its agent-written text under untrusted.
 type changeRow struct {
 	protocol.Change
-	URL string `json:"url,omitempty"`
+	Untrusted *changeUntrusted `json:"untrusted,omitempty"`
+	URL       string           `json:"url,omitempty"`
 }
 
 func changesFeed(ctx context.Context, c calls, in changesFeedInput) (string, any, error) {
@@ -46,14 +54,23 @@ func changesFeed(ctx context.Context, c calls, in changesFeedInput) (string, any
 	}
 	rows := make([]changeRow, 0, len(res.Changes))
 	for _, ch := range res.Changes {
-		if u := ch.Untrusted; u != nil {
-			ch.Untrusted = &protocol.ChangeUntrusted{ReportID: u.ReportID, Summary: clip(u.Summary, maxReport), Reason: clip(u.Reason, maxReport)}
-		}
-		url := l.run(ch.RunID)
+		row := changeRow{Change: ch, URL: l.run(ch.RunID)}
 		if ch.RunID == "" {
-			url = l.swarm(ch.MissionID)
+			row.URL = l.swarm(ch.MissionID)
 		}
-		rows = append(rows, changeRow{Change: ch, URL: url})
+		if u := ch.Untrusted; u != nil {
+			row.Untrusted = &changeUntrusted{ChangeUntrusted: protocol.ChangeUntrusted{ReportID: u.ReportID, Summary: clip(u.Summary, maxReport),
+				Reason: clip(u.Reason, maxReport)}}
+		}
+		if m := ch.Message; m != nil && m.CorrelationID != "" {
+			message := *m
+			row.Message, message.CorrelationID = &message, ""
+			if row.Untrusted == nil {
+				row.Untrusted = &changeUntrusted{}
+			}
+			row.Untrusted.CorrelationID = clip(m.CorrelationID, maxReport)
+		}
+		rows = append(rows, row)
 	}
 	out := map[string]any{"changes": rows, "next_cursor": res.NextCursor, "more": res.More}
 	summary := fmt.Sprintf("%d changes.", len(rows))
