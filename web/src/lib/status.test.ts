@@ -413,6 +413,13 @@ describe('checked waits', () => {
       .toContain('Why: a condition it waits on resolved or broke, and the agent was not woken.')
   })
 
+  it('shows the evidence of a wait whose summary names what it waits for', () => {
+    const error = 'gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)'
+    const agents = shown({ kind: 'source_unknown', detail: `${spec}: status unknown`, error }, { state: 'waiting-agents', reason: 'Waiting for PR #582' })
+    expect(stateWords(agents, undefined, now)).toEqual({ label: 'Waiting for agents', detail: `Waiting on ${spec}: status unknown — ${error}` })
+    expect(stateTitle(agents, since, now)).toContain(error)
+  })
+
   it('keeps the summary of a wait that names no condition, and says Aether cannot check it', () => {
     const unverified = shown({ kind: 'unverified' })
     expect(stateWords(unverified, undefined, now)).toEqual({ label: 'Waiting for CI', detail: 'CI on #582' })

@@ -184,11 +184,7 @@ export function stateDetail({ state, reason }: Pick<RunPresentation, 'state' | '
   return reason.startsWith(`${label}: `) ? reason.slice(label.length + 2) : reason
 }
 
-/**
- * What Aether verified about a wait, in one line: what it waits on and when its source was last
- * read, or since when its status is unknown, then the source's error verbatim. A wait that names no
- * condition has none. A broken wait that needs the viewer already says what broke in its reason.
- */
+/** A broken wait that needs the viewer already names what broke in its reason, so it adds only the error. */
 export function waitLine(wait: RunWait | undefined, state: PresentationState, now = Date.now()): string | undefined {
   if (!wait?.detail || wait.kind === 'unverified') return undefined
   const error = wait.error ? ` — ${wait.error}` : ''
@@ -203,10 +199,9 @@ const staleWait = /^No update for ([^\s:]+)(?:: (.*))?$/s
 
 /**
  * A state's words: what the run waits on when the reason names it ("Waiting for 2 workers",
- * "Waiting for Ada"), else the state's label, and the detail after it. A wait Aether checks is
- * described by what it last read rather than the agent's summary, and a reported wait that went
- * stale says so instead of calling it a turn that ended. Given `since`, a CI wait's detail starts
- * with how long it has run, for a surface that prints no age of its own, unless it went stale.
+ * "Waiting for Ada") and no checked wait says more, else the state's label, and the detail after
+ * it. Given `since`, a CI wait's detail starts with how long it has run, for a surface that prints
+ * no age of its own, unless it went stale.
  */
 export function stateWords(
   shown: Pick<RunPresentation, 'state' | 'reason' | 'cause' | 'wait'>,
@@ -214,13 +209,13 @@ export function stateWords(
   now = Date.now(),
 ): { label: string; detail?: string } {
   let reason = stateDetail(shown)
-  if ((shown.state === 'waiting-agents' || shown.state === 'waiting') && reason?.startsWith('Waiting for ')) return { label: reason }
+  const waited = waitLine(shown.wait, shown.state, now)
+  if (!waited && (shown.state === 'waiting-agents' || shown.state === 'waiting') && reason?.startsWith('Waiting for ')) return { label: reason }
   const stale = shown.cause === 'wait-expired' ? staleWait.exec(shown.reason) : null
   if (stale) {
     const [, span, summary] = stale
     reason = `Reported waiting${summary ? ` on ${summary}` : ''}, no update for ${span}`
   }
-  const waited = waitLine(shown.wait, shown.state, now)
   if (waited) reason = shown.state === 'needs-you' ? `${reason ?? shown.reason} — ${waited}` : waited
   const label = stateName(shown)
   // A stale wait's reason already says how long nothing happened.
@@ -228,12 +223,10 @@ export function stateWords(
   return { label, detail: [ran, reason].filter(Boolean).join(' · ') || undefined }
 }
 
-/** A state's label; a reported wait that went stale is not a turn that ended. */
 export function stateName({ state, cause }: Pick<RunPresentation, 'state' | 'cause'>): string {
   return state === 'ended' && cause === 'wait-expired' ? 'Stale wait' : stateLabel[state]
 }
 
-/** The dot of a state, or of the wait it shows when Aether cannot vouch for that wait. */
 export function toneOf({ state, wait }: Pick<RunPresentation, 'state' | 'wait'>): Tone {
   if (state !== 'needs-you' && wait?.kind === 'source_unknown') return 'wait-unknown'
   if (state !== 'needs-you' && wait?.kind === 'system_fault') return 'wait-fault'
