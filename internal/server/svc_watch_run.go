@@ -59,10 +59,12 @@ func (l lazyWaits) RegisterWait(ctx context.Context, owner *domain.Run, report *
 	return inserted, err
 }
 
-func (l lazyWaits) EvaluateRunWaits(run domain.RunID) {
-	if w, err := l.service(); err == nil {
-		w.EvaluateRunWaits(run)
+func (l lazyWaits) SettleRunWaits(ctx context.Context, run domain.RunID) ([]protocol.WaitCondition, error) {
+	w, err := l.service()
+	if err != nil {
+		return nil, err
 	}
+	return w.SettleRunWaits(ctx, run)
 }
 
 func (l lazyWaits) EndRunWaits(ctx context.Context, run domain.RunID, cause string) error {

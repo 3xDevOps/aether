@@ -6,19 +6,23 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// An Enhanced agent reports waiting until another run finishes; that run
-// ends, and the server writes the outcome to the agent's inbox and starts
-// its next turn.
+// Enhanced agents report waiting --until from inside their turn. One waits
+// on a run that then ends: the server writes the outcome to its inbox and
+// starts exactly one more turn for it. The other waits on a run that
+// already ended: its report returns the resolution and no turn follows.
 func TestIntegrationRunWaitWakesTheAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -41,61 +45,118 @@ func TestIntegrationRunWaitWakesTheAgent(t *testing.T) {
 		}
 		return domain.RunID(launched.Run.ID)
 	}
-	owner, target := launch("integrate"), launch("build")
-	waitTurns(ctx, t, env.srv, owner, 1)
+	waitOn := func(target domain.RunID, key string) string {
+		return acpmock.PromptRun + coordtransport.CLIPath + " report --outcome waiting --for agents --until run:" + string(target) +
+			":finished --summary 'waiting for the build' --idempotency-key " + key
+	}
+	get := func(run domain.RunID) protocol.Run {
+		t.Helper()
+		var got protocol.RunResult
+		if status := postJSON(t, env.web+"/api/v1/run.get", `{"run_id":"`+string(run)+`"}`, &got); status != http.StatusOK {
+			t.Fatalf("run.get status %d", status)
+		}
+		return got.Run
+	}
+	inbox := func(run domain.RunID) []*store.ListedRunMessage {
+		t.Helper()
+		page, err := env.srv.Store().ListRunMessages(ctx, store.RunMessageFilter{WorkspaceID: env.ws.ID, RunID: run, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page.Items
+	}
+
+	ended := launch("say pong")
+	waitTurns(ctx, t, env.srv, ended, 1)
+	if err := env.srv.sched.Kill(ctx, ended, ada.ID); err != nil {
+		t.Fatalf("kill %s: %v", ended, err)
+	}
+	target := launch("say pong")
 	waitTurns(ctx, t, env.srv, target, 1)
-
-	socket := waitMissionSocket(t, filepath.Join(env.data, "coord", string(owner)))
-	until := "run:" + string(target) + ":finished"
-	var refused error
-	if refused = pacedCall(ctx, socket, protocol.MethodCoordReport, protocol.CoordReportParams{
-		Outcome: protocol.CoordOutcomeWaiting, Summary: "waiting for the build", IdempotencyKey: "bad", Until: []string{"ci finishes"},
-	}, nil); refused == nil || !strings.Contains(refused.Error(), protocol.WaitGrammar) {
-		t.Fatalf("until \"ci finishes\": %v, want the grammar", refused)
+	waiter, satisfied := launch(waitOn(target, "wait-1")), launch(waitOn(ended, "wait-2"))
+	waitTurns(ctx, t, env.srv, waiter, 1)
+	items := waitTurns(ctx, t, env.srv, satisfied, 1)
+	if said := assistantText(items); !strings.Contains(said, `"resolved"`) || !strings.Contains(said, "is already resolved (abandoned)") {
+		t.Fatalf("report output %q, want the resolution returned", said)
 	}
-	var reported protocol.CoordReportResult
-	if err := pacedCall(ctx, socket, protocol.MethodCoordReport, protocol.CoordReportParams{
-		Outcome: protocol.CoordOutcomeWaiting, WaitingFor: protocol.CoordWaitingForAgents, Summary: "waiting for the build",
-		IdempotencyKey: "wait", Until: []string{until},
-	}, &reported); err != nil {
-		t.Fatalf("coord.report waiting until: %v", err)
-	}
-	if !strings.Contains(reported.NextAction, until) {
-		t.Fatalf("next action %q, want it to name %s", reported.NextAction, until)
-	}
-
-	var got protocol.RunResult
-	if status := postJSON(t, env.web+"/api/v1/run.get", `{"run_id":"`+string(owner)+`"}`, &got); status != http.StatusOK {
-		t.Fatalf("run.get status %d", status)
-	}
-	if len(got.Run.WaitConditions) != 1 || got.Run.WaitConditions[0].Spec != until || got.Run.WaitConditions[0].State != protocol.WaitPending {
-		t.Fatalf("wait_conditions = %+v, want %s pending", got.Run.WaitConditions, until)
+	if w := get(waiter).WaitConditions; len(w) != 1 || w[0].State != protocol.WaitPending {
+		t.Fatalf("waiter wait_conditions = %+v, want one pending", w)
 	}
 
 	if err := env.srv.sched.Kill(ctx, target, ada.ID); err != nil {
 		t.Fatalf("kill %s: %v", target, err)
 	}
-	waitTurns(ctx, t, env.srv, owner, 2)
-	waitPrompted(ctx, t, env.srv, owner, protocol.CoordInboxContext(1))
+	waitPrompted(ctx, t, env.srv, waiter, protocol.CoordInboxContext(1))
+	time.Sleep(10 * time.Second)
 
-	page, err := env.srv.Store().ListRunMessages(ctx, store.RunMessageFilter{WorkspaceID: env.ws.ID, RunID: owner, Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if msgs := page.Items; len(msgs) != 1 || msgs[0].FromRun != owner || msgs[0].ToRun != owner ||
-		!strings.Contains(msgs[0].Body, until+" resolved: abandoned") {
+	msgs := inbox(waiter)
+	if len(msgs) != 1 || msgs[0].FromRun != waiter || msgs[0].ToRun != waiter ||
+		!strings.Contains(msgs[0].Body, "run:"+string(target)+":finished resolved: abandoned") {
 		for _, m := range msgs {
 			t.Logf("message %s -> %s: %q", m.FromRun, m.ToRun, m.Body)
 		}
-		t.Fatalf("inbox has %d messages, want one to itself saying %s resolved abandoned", len(msgs), until)
+		t.Fatalf("waiter inbox has %d messages, want one to itself saying the target was abandoned", len(msgs))
 	}
-	if status := postJSON(t, env.web+"/api/v1/run.get", `{"run_id":"`+string(owner)+`"}`, &got); status != http.StatusOK {
-		t.Fatalf("run.get status %d", status)
+	// Aether also asks each of the mock's turns for a report, as it does
+	// after one that reported waiting without --until: a reminder turn
+	// follows the task's turn and the wake's.
+	if inboxes, reminders, turns := countPrompts(t, env.srv, waiter, protocol.CoordInboxContext(1)),
+		countPrompts(t, env.srv, waiter, coordhooks.ReportReminderLead), turnsEnded(t, env.srv, waiter); inboxes != 1 || turns != 2+reminders {
+		t.Fatalf("waiter: %d inbox prompts, %d reminders, %d turns; want one wake and no other turn", inboxes, reminders, turns)
 	}
-	if w := got.Run.WaitConditions; len(w) != 1 || w[0].State != protocol.WaitResolved || w[0].Outcome != "abandoned" || w[0].DeliveredAt == "" {
-		t.Fatalf("wait_conditions = %+v, want resolved abandoned and delivered", w)
+	if w := get(waiter).WaitConditions; len(w) != 1 || w[0].State != protocol.WaitResolved || w[0].DeliveredAt == "" {
+		t.Fatalf("waiter wait_conditions = %+v, want resolved and delivered", w)
 	}
-	if err := env.srv.sched.Kill(ctx, owner, ada.ID); err != nil {
-		t.Fatalf("kill %s: %v", owner, err)
+	if reminders, turns := countPrompts(t, env.srv, satisfied, coordhooks.ReportReminderLead), turnsEnded(t, env.srv, satisfied); turns != 1+reminders ||
+		len(inbox(satisfied)) != 0 || countPrompts(t, env.srv, satisfied, protocol.CoordInboxContext(1)) != 0 {
+		t.Fatalf("satisfied run: %d turns, %d reminders, %d messages; want its one turn and no wake", turns, reminders, len(inbox(satisfied)))
 	}
+	if w := get(satisfied).WaitConditions; len(w) != 1 || w[0].State != protocol.WaitResolved || w[0].Outcome != "abandoned" || w[0].DeliveredAt == "" {
+		t.Fatalf("satisfied wait_conditions = %+v, want resolved and returned", w)
+	}
+	for _, run := range []domain.RunID{waiter, satisfied} {
+		if err := env.srv.sched.Kill(ctx, run, ada.ID); err != nil {
+			t.Fatalf("kill %s: %v", run, err)
+		}
+	}
+}
+
+func assistantText(items []acphost.Item) string {
+	var b strings.Builder
+	for _, it := range items {
+		if it.Kind == acphost.KindMessage && it.Message.Role == "assistant" {
+			b.WriteString(it.Message.Text)
+		}
+	}
+	return b.String()
+}
+
+func turnsEnded(t *testing.T, srv *Server, run domain.RunID) int {
+	t.Helper()
+	page, err := srv.sched.ACPHistory(run, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, it := range page.Items {
+		if it.Kind == acphost.KindTurnEnd {
+			n++
+		}
+	}
+	return n
+}
+
+func countPrompts(t *testing.T, srv *Server, run domain.RunID, instruction string) int {
+	t.Helper()
+	page, err := srv.sched.ACPHistory(run, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, it := range page.Items {
+		if it.Kind == acphost.KindMessage && it.Message.Role == "user" && strings.Contains(it.Message.Text, strings.TrimSpace(instruction)) {
+			n++
+		}
+	}
+	return n
 }

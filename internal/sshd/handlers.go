@@ -252,7 +252,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	return run, nil
 }
 
-func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runList(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.RunListParams](params)
 	if perr != nil {
 		return nil, perr
@@ -291,12 +291,16 @@ func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.Raw
 		if p.ActiveOnly && r.Status.Terminal() {
 			continue
 		}
-		out = append(out, s.runSnapshot(r))
+		snap := s.runSnapshot(r)
+		if len(snap.WaitConditions) > 0 && s.seesWaitDetails(ctx, member, r) {
+			snap.WaitConditions = s.waitConditions(r.ID, true)
+		}
+		out = append(out, snap)
 	}
 	return protocol.RunListResult{Runs: out}, nil
 }
 
-func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := runIDParams(params)
 	if perr != nil {
 		return nil, perr
@@ -305,7 +309,11 @@ func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawM
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	snap := s.runSnapshot(run)
+	if len(snap.WaitConditions) > 0 && s.seesWaitDetails(ctx, member, run) {
+		snap.WaitConditions = s.waitConditions(run.ID, true)
+	}
+	return protocol.RunResult{Run: snap}, nil
 }
 
 // runSnapshot decorates every run response, including mutation results. A
@@ -320,7 +328,7 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 			out.Liveness = protocol.RunLivenessFromDomain(l)
 		}
 		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
-		out.WaitConditions = s.waitConditions(run.ID)
+		out.WaitConditions = s.waitConditions(run.ID, false)
 		out.Switching = string(s.cfg.Runs.Switching(run.ID))
 		retention, err := s.cfg.Runs.Retention(run)
 		if retention.RetainedUntil != nil {

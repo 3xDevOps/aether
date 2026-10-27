@@ -1861,13 +1861,16 @@ What a report does depends on the run:
   Nothing re-prompts the agent when a process finishes. For a pull request,
   its checks or another run, add `--until <condition>` (repeatable, at most
   4; `until` in `aether_report`): `pr:<owner>/<repo>#<n>:merged`,
-  `pr:<owner>/<repo>#<n>:checks` or `run:<run-id>:finished`. The server
-  parses each strictly, never the summary, and refuses a bad one with
-  `CodeInvalidParams` naming it and the grammar. It also refuses `--until`
-  with another outcome, a run that is not in this workspace or is the
-  reporting run itself, and a server that does not read pull requests. When
-  the first condition resolves, fails or expires (7 days), the server writes
-  what it saw and what to do next to the run's inbox once, which wakes it. A
+  `pr:<owner>/<repo>#<n>:checks[@<head-sha>]` or `run:<run-id>:finished`.
+  The server parses each strictly, never the summary, and refuses a bad one
+  with `CodeInvalidParams` naming it and the grammar. It also refuses
+  `--until` with another outcome, a run that is not in this workspace or is
+  the reporting run itself, a server that does not read pull requests, and
+  a run past 30 such reports an hour. A condition already resolved comes
+  back in the result's `resolved` list, and `next_action` says to act on it
+  now. Otherwise, when the first condition resolves, fails or expires (7
+  days), the server writes what it saw and what to do next to the run's
+  inbox once, which wakes it. A
   new waiting report with `--until` replaces the conditions; waiting without
   it keeps them; any other report, a person's prompt or a relaunch cancels
   them ([run waits](watches.md#run-waits)). An integrator

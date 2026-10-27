@@ -13,8 +13,11 @@ import (
 // RunWait is one condition a run registered with coord.report until: a
 // watch its owner run owns. Watch.Failures, Error and Observed hold the
 // consecutive failed reads, the last error and the last read; WaitState is
-// the state the run is told about. The conditions of one report share a
-// Revision. DeliveryNextAt is set while the wake is due to the run's inbox.
+// the state the run is told about: registered until its report is
+// applied. The conditions of one report share a Revision. HeadSHA is the
+// commit a checks condition resolves on, Observation what it resolved on,
+// and Detail text from GitHub or another agent. DeliveryNextAt is set while
+// the wake is due to the run's inbox.
 type RunWait struct {
 	Watch
 	Revision  int64
@@ -28,6 +31,9 @@ type RunWait struct {
 	Cause     string
 	// EndedBy is the member who cancelled the wait, if one did.
 	EndedBy          domain.MemberID
+	HeadSHA          string
+	Observation      string
+	Detail           string
 	SourceCheckedAt  *time.Time
 	ErrorAt          *time.Time
 	ResolvedAt       *time.Time
@@ -37,12 +43,14 @@ type RunWait struct {
 	DeliveryError    string
 }
 
-// Wait states, as protocol.Wait* names them.
+// Wait states, as protocol.Wait* names them, and the state of a condition
+// whose report is not applied yet.
 const (
-	waitPending  = "pending"
-	waitResolved = "resolved"
-	waitExpired  = "expired"
-	waitError    = "error"
+	waitRegistered = "registered"
+	waitPending    = "pending"
+	waitResolved   = "resolved"
+	waitExpired    = "expired"
+	waitError      = "error"
 )
 
 // Woke reports whether the wait's state wakes its run.
@@ -51,7 +59,7 @@ func (w *RunWait) Woke() bool {
 }
 
 const runWaitColumns = watchColumns + `, wait_revision, wait_report_key, wait_spec, wait_kind, wait_target_run, wait_state,
-	wait_outcome, wait_summary, wait_cause, wait_ended_by, wait_source_checked_at, wait_error_at, wait_resolved_at, wait_delivered_at,
+	wait_outcome, wait_summary, wait_cause, wait_ended_by, wait_head_sha, wait_observation, wait_detail, wait_source_checked_at, wait_error_at, wait_resolved_at, wait_delivered_at,
 	wait_delivery_attempts, wait_delivery_next_at, wait_delivery_error`
 
 // trailingScan scans a row's trailing columns into extra after the ones its
@@ -69,7 +77,7 @@ func scanRunWait(row interface{ Scan(...any) error }) (*RunWait, error) {
 		checked, errAt, resolved, delivered, next *int64
 	)
 	w, err := scanWatch(trailingScan{row: row, extra: []any{&r.Revision, &r.ReportKey, &r.Spec, &r.Kind, &r.TargetRun,
-		&r.WaitState, &r.Outcome, &r.Summary, &r.Cause, &r.EndedBy, &checked, &errAt, &resolved, &delivered,
+		&r.WaitState, &r.Outcome, &r.Summary, &r.Cause, &r.EndedBy, &r.HeadSHA, &r.Observation, &r.Detail, &checked, &errAt, &resolved, &delivered,
 		&r.DeliveryAttempts, &next, &r.DeliveryError}})
 	if err != nil {
 		return nil, err
@@ -83,12 +91,14 @@ func scanRunWait(row interface{ Scan(...any) error }) (*RunWait, error) {
 // RunWaitStore keeps the conditions runs wait on.
 type RunWaitStore interface {
 	// RecordWaitingReport stores a waiting report's receipt and, when it is
-	// new, its conditions in one transaction: they replace the run's
-	// pending conditions, which end superseded, as a new revision. A retry
-	// of the same report loads its receipt and records nothing; the same
-	// key with other inputs fails ErrCoordReportIdempotencyConflict. The
-	// conditions get their IDs; ended lists the ones superseded.
-	RecordWaitingReport(ctx context.Context, report *CoordStateReport, waits []*RunWait) (inserted bool, ended []*RunWait, err error)
+	// new, its conditions in one transaction, registered: nothing reads
+	// them until MarkCoordStateReportApplied arms them, and releasing the
+	// report deletes them. A retry of the same report loads its receipt and
+	// records nothing; the same key with other inputs fails
+	// ErrCoordReportIdempotencyConflict. A run that registered
+	// MaxWaitReportsPerHour reports with conditions in the last hour fails
+	// ErrRunWaitLimit.
+	RecordWaitingReport(ctx context.Context, report *CoordStateReport, waits []*RunWait) (inserted bool, err error)
 	GetRunWait(ctx context.Context, id string) (*RunWait, error)
 	// RunWaitConditions is the run's latest revision of conditions.
 	RunWaitConditions(ctx context.Context, run domain.RunID) ([]*RunWait, error)
@@ -110,35 +120,83 @@ type RunWaitStore interface {
 	SetRunWaitDelivery(ctx context.Context, w *RunWait, d WatchDelivery) error
 }
 
-func (d *DB) RecordWaitingReport(ctx context.Context, report *CoordStateReport, waits []*RunWait) (bool, []*RunWait, error) {
+// MaxWaitReportsPerHour bounds the waiting reports with conditions one run
+// records in an hour.
+const MaxWaitReportsPerHour = 30
+
+// ErrRunWaitLimit refuses a run's waiting report with conditions past
+// MaxWaitReportsPerHour.
+var ErrRunWaitLimit = fmt.Errorf("store: this run recorded %d waiting reports with conditions in the last hour; wait on the conditions it has, or report waiting without them", MaxWaitReportsPerHour)
+
+func (d *DB) RecordWaitingReport(ctx context.Context, report *CoordStateReport, waits []*RunWait) (bool, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, nil, fmt.Errorf("store: record waiting report: %w", err)
+		return false, fmt.Errorf("store: record waiting report: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if _, err = getCoordStateReport(ctx, tx, report.RunID, report.IdempotencyKey); errors.Is(err, ErrNotFound) {
+		since, encodeErr := encodeTime(report.CreatedAt.Add(-time.Hour))
+		if encodeErr != nil {
+			return false, fmt.Errorf("store: record waiting report: %w", encodeErr)
+		}
+		var recent int
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM coord_state_reports
+			WHERE run_id = ? AND until_conditions <> '' AND created_at > ?`, report.RunID, since).Scan(&recent); err != nil {
+			return false, fmt.Errorf("store: record waiting report: %w", err)
+		}
+		if recent >= MaxWaitReportsPerHour {
+			return false, ErrRunWaitLimit
+		}
+	} else if err != nil {
+		return false, err
+	}
 	inserted, err := recordCoordStateReport(ctx, tx, report)
 	if err != nil || !inserted {
-		return false, nil, err
-	}
-	ended, err := endRunWaits(ctx, tx, report.RunID, "", waitSuperseded, "replaced by the report "+report.IdempotencyKey, "", report.CreatedAt)
-	if err != nil {
-		return false, nil, err
-	}
-	var revision int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(wait_revision), 0) + 1 FROM watches WHERE owner_run_id = ?`,
-		report.RunID).Scan(&revision); err != nil {
-		return false, nil, fmt.Errorf("store: record waiting report: %w", err)
+		return false, err
 	}
 	for _, w := range waits {
-		w.OwnerRunID, w.Revision, w.ReportKey, w.WaitState = report.RunID, revision, report.IdempotencyKey, waitPending
+		w.OwnerRunID, w.ReportKey, w.WaitState, w.State = report.RunID, report.IdempotencyKey, waitRegistered, "paused"
 		if err := insertRunWait(ctx, tx, w); err != nil {
-			return false, nil, err
+			return false, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return false, nil, fmt.Errorf("store: record waiting report: %w", err)
+		return false, fmt.Errorf("store: record waiting report: %w", err)
 	}
-	return true, ended, nil
+	return true, nil
+}
+
+// armRunWaits makes the conditions report key registered pending as the
+// run's next revision, due at once, and supersedes the run's pending ones.
+// Only the new revision and the latest that woke the run are kept.
+func armRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, key string, now time.Time) error {
+	var registered int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM watches WHERE owner_run_id = ? AND wait_report_key = ? AND wait_state = 'registered'`,
+		run, key).Scan(&registered); err != nil {
+		return fmt.Errorf("store: arm waits: %w", err)
+	}
+	if registered == 0 {
+		return nil
+	}
+	if _, err := endRunWaits(ctx, tx, run, "", waitSuperseded, "replaced by the report "+key, "", now); err != nil {
+		return err
+	}
+	at, err := encodeTime(now)
+	if err != nil {
+		return fmt.Errorf("store: arm waits: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE watches SET state = 'active', wait_state = 'pending', next_check_at = ?1, updated_at = ?1,
+		wait_revision = (SELECT COALESCE(MAX(wait_revision), 0) + 1 FROM watches WHERE owner_run_id = ?2), version = version + 1
+		WHERE owner_run_id = ?2 AND wait_report_key = ?3 AND wait_state = 'registered'`, at, run, key); err != nil {
+		return fmt.Errorf("store: arm waits: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM watches WHERE owner_run_id = ?1 AND wait_state <> 'registered'
+		AND wait_revision <> (SELECT MAX(wait_revision) FROM watches WHERE owner_run_id = ?1)
+		AND wait_revision <> COALESCE((SELECT MAX(wait_revision) FROM watches WHERE owner_run_id = ?1
+		  AND wait_state IN ('resolved', 'expired', 'error')), 0)`, run); err != nil {
+		return fmt.Errorf("store: prune waits: %w", err)
+	}
+	return nil
 }
 
 const waitSuperseded = "superseded"
@@ -160,10 +218,10 @@ func insertRunWait(ctx context.Context, tx *sql.Tx, w *RunWait) error {
 		`INSERT INTO watches (id, member_id, workspace_id, target_kind, repo, pr_number, source, created_at,
 		   target_title, conditions, label, state, error, failures, observed, fired, updated_at, expires_at,
 		   last_check_at, next_check_at, ended_at,
-		   owner_run_id, wait_revision, wait_report_key, wait_spec, wait_kind, wait_target_run, wait_state)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   owner_run_id, wait_revision, wait_report_key, wait_spec, wait_kind, wait_target_run, wait_state, wait_head_sha)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		append(append([]any{id, w.MemberID, w.WorkspaceID, w.TargetKind, w.Repo, w.Number, w.Source, created}, args...),
-			w.OwnerRunID, w.Revision, w.ReportKey, w.Spec, w.Kind, w.TargetRun, w.WaitState)...); err != nil {
+			w.OwnerRunID, w.Revision, w.ReportKey, w.Spec, w.Kind, w.TargetRun, w.WaitState, w.HeadSHA)...); err != nil {
 		return fmt.Errorf("store: record wait: %w", mapConstraint(err, ErrNotFound))
 	}
 	w.ID, w.Version = id, 1
@@ -183,7 +241,8 @@ func (d *DB) GetRunWait(ctx context.Context, id string) (*RunWait, error) {
 
 func (d *DB) RunWaitConditions(ctx context.Context, run domain.RunID) ([]*RunWait, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT `+runWaitColumns+` FROM watches
-		WHERE owner_run_id = ?1 AND wait_revision = (SELECT MAX(wait_revision) FROM watches WHERE owner_run_id = ?1)
+		WHERE owner_run_id = ?1 AND wait_state <> 'registered'
+		  AND wait_revision = (SELECT MAX(wait_revision) FROM watches WHERE owner_run_id = ?1 AND wait_state <> 'registered')
 		ORDER BY created_at, id`, run)
 	if err != nil {
 		return nil, fmt.Errorf("store: list waits: %w", err)
@@ -244,10 +303,10 @@ func updateRunWait(ctx context.Context, db execer, w *RunWait) error {
 		times = append(times, v)
 	}
 	res, err := db.ExecContext(ctx, `UPDATE watches SET `+watchSet+`, wait_state = ?, wait_outcome = ?, wait_summary = ?,
-		wait_cause = ?, wait_source_checked_at = ?, wait_error_at = ?, wait_resolved_at = ?, wait_delivered_at = ?,
+		wait_cause = ?, wait_head_sha = ?, wait_observation = ?, wait_detail = ?, wait_source_checked_at = ?, wait_error_at = ?, wait_resolved_at = ?, wait_delivered_at = ?,
 		wait_delivery_next_at = ?, wait_delivery_attempts = ?, wait_delivery_error = ?, version = version + 1
 		WHERE id = ? AND version = ?`,
-		append(append(args, w.WaitState, w.Outcome, w.Summary, w.Cause), append(times, w.DeliveryAttempts, w.DeliveryError, w.ID, w.Version)...)...)
+		append(append(args, w.WaitState, w.Outcome, w.Summary, w.Cause, w.HeadSHA, w.Observation, w.Detail), append(times, w.DeliveryAttempts, w.DeliveryError, w.ID, w.Version)...)...)
 	if err != nil {
 		return fmt.Errorf("store: update wait: %w", err)
 	}

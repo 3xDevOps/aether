@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -26,20 +28,23 @@ const (
 )
 
 // RunNotifier writes a server-authored message into a run's inbox and
-// wakes the run. A retry with the same key adds nothing. Satisfied by
+// wakes the run. A retry with the same key adds nothing and reports it
+// written; written is false for a run that ended. Satisfied by
 // *coord.Service.
 type RunNotifier interface {
-	Notify(ctx context.Context, from, to domain.RunID, body, correlation, key string) error
+	NotifyRun(ctx context.Context, from, to domain.RunID, body, correlation, key string) (written bool, err error)
 }
 
 // UseRunNotifier delivers the wakes of runs' waits. Call it before Start.
 func (s *Service) UseRunNotifier(n RunNotifier) { s.notifier = n }
 
 // RegisterWait records owner's waiting report with its conditions in one
-// transaction, replacing the conditions it waited on. Each is due for a
-// check at once, so the next pass or a restart reads it even when
-// EvaluateRunWaits is never called. inserted is false for a retry of a
-// recorded report, which registers nothing again.
+// transaction. They stay registered, read by nothing, until the report is
+// applied; store.MarkCoordStateReportApplied then arms them in place of
+// the conditions the run waited on, due at once, so the next pass or a
+// restart reads them even when SettleRunWaits does not finish. inserted
+// is false for a retry of a recorded report, which registers nothing
+// again.
 func (s *Service) RegisterWait(ctx context.Context, owner *domain.Run, report *store.CoordStateReport, specs []protocol.WaitSpec) (bool, error) {
 	now := s.now()
 	waits := make([]*store.RunWait, 0, len(specs))
@@ -47,10 +52,10 @@ func (s *Service) RegisterWait(ctx context.Context, owner *domain.Run, report *s
 		w := &store.RunWait{
 			Watch: store.Watch{
 				MemberID: owner.MemberID, WorkspaceID: owner.WorkspaceID, Repo: spec.Repo, Number: spec.Number,
-				TargetTitle: spec.Spec, Conditions: []string{spec.Kind}, Source: protocol.WatchSourceAgent, State: protocol.WatchActive,
+				TargetTitle: spec.Spec, Conditions: []string{spec.Kind}, Source: protocol.WatchSourceAgent,
 				CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(WaitExpiry), NextCheckAt: &now,
 			},
-			Spec: spec.Spec, Kind: spec.Kind, TargetRun: domain.RunID(spec.RunID),
+			Spec: spec.Spec, Kind: spec.Kind, TargetRun: domain.RunID(spec.RunID), HeadSHA: spec.HeadSHA,
 		}
 		w.TargetKind = protocol.WatchTargetPR
 		if spec.Kind == protocol.WaitKindRunFinished {
@@ -66,46 +71,77 @@ func (s *Service) RegisterWait(ctx context.Context, owner *domain.Run, report *s
 	if report.CreatedAt.IsZero() {
 		report.CreatedAt = now
 	}
-	inserted, ended, err := s.store.RecordWaitingReport(ctx, report, waits)
-	if err != nil || !inserted {
-		return inserted, err
+	inserted, err := s.store.RecordWaitingReport(ctx, report, waits)
+	if errors.Is(err, store.ErrRunWaitLimit) {
+		return false, invalid("until: %s", strings.TrimPrefix(err.Error(), "store: "))
 	}
-	ctx = context.WithoutCancel(ctx)
-	for _, w := range ended {
-		s.waitChanged(ctx, w)
-	}
-	for _, w := range waits {
-		s.waitChanged(ctx, w)
-	}
-	return true, nil
+	return inserted, err
 }
 
-// EvaluateRunWaits reads run's pending conditions as they stand, in the
-// background: one already true wakes the run at once.
-func (s *Service) EvaluateRunWaits(run domain.RunID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed || s.loop == nil {
-		return
+// SettleBound is how long SettleRunWaits reads conditions before it
+// leaves the rest to the background.
+const SettleBound = 10 * time.Second
+
+const returnedInReport = "Returned in the report that registered it"
+
+// SettleRunWaits reads run's armed pending conditions as they stand, for
+// at most SettleBound, and returns the ones resolved whose wake it takes:
+// the report that registered them returns those to the agent, so their
+// wake is recorded delivered there and never sent to the inbox. A wake an
+// inbox delivery already started on is left to it. A read cut short is
+// left due for the background.
+func (s *Service) SettleRunWaits(ctx context.Context, run domain.RunID) ([]protocol.WaitCondition, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), SettleBound)
+	defer cancel()
+	waits, err := s.store.RunWaitConditions(ctx, run)
+	if err != nil {
+		return nil, err
 	}
-	ctx := s.loop
-	s.wg.Go(func() {
-		waits, err := s.store.RunWaitConditions(ctx, run)
+	for _, w := range waits {
+		if w.WaitState != protocol.WaitPending {
+			continue
+		}
+		if err = s.evaluateWait(ctx, w.ID, true); err != nil {
+			if ctx.Err() != nil {
+				s.wake()
+				break
+			}
+			return nil, err
+		}
+	}
+	ctx = context.WithoutCancel(ctx)
+	if waits, err = s.store.RunWaitConditions(ctx, run); err != nil {
+		return nil, err
+	}
+	var out []protocol.WaitCondition
+	for _, w := range waits {
+		if !w.Woke() {
+			continue
+		}
+		// A background read can resolve it first: its wake is taken back
+		// unless a delivery attempt started, which counts before it writes.
+		if w.DeliveryNextAt != nil && w.DeliveryAttempts == 0 {
+			now := s.now()
+			w.DeliveredAt, w.DeliveryNextAt = &now, nil
+			d := store.WatchDelivery{Channel: protocol.WatchChannelRunInbox, Status: protocol.WatchStatusDelivered, Detail: returnedInReport, At: now}
+			if err = s.store.SetRunWaitDelivery(ctx, w, d); errors.Is(err, store.ErrConflict) {
+				if w, err = s.store.GetRunWait(ctx, w.ID); err != nil {
+					return nil, err
+				}
+			} else if err != nil {
+				return nil, err
+			}
+		}
+		if w.DeliveredAt == nil || w.DeliveryAttempts > 0 {
+			continue
+		}
+		p, err := waitProto(w)
 		if err != nil {
-			if ctx.Err() == nil {
-				slog.Warn("watch: list a run's new waits", "run", run, "error", err)
-			}
-			return
+			return nil, err
 		}
-		for _, w := range waits {
-			if w.WaitState != protocol.WaitPending {
-				continue
-			}
-			if err := s.evaluate(ctx, w.ID); err != nil && ctx.Err() == nil {
-				slog.Warn("watch: evaluate a new wait", "wait", w.ID, "error", err)
-			}
-		}
-	})
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (s *Service) waitTargetVisible(ctx context.Context, owner *domain.Run, target domain.RunID) error {
@@ -133,22 +169,33 @@ func (s *Service) waitTargetVisible(ctx context.Context, owner *domain.Run, targ
 }
 
 // waitReading is what one read of a wait's target found. done resolves
-// the wait in state with outcome.
+// the wait in state with outcome. summary is server-written; detail is
+// third-party text. observation keys what it resolved on, so the same
+// observation never wakes the run twice. head is the head commit a checks
+// condition is bound to after the read.
 type waitReading struct {
-	done     bool
-	state    string
-	outcome  string
-	summary  string
-	link     string
-	observed protocol.WaitObserved
-	next     time.Time
+	done        bool
+	state       string
+	outcome     string
+	summary     string
+	detail      string
+	observation string
+	head        string
+	link        string
+	observed    protocol.WaitObserved
+	next        time.Time
 }
 
 // errWaitUnreadable marks a target the wait can never read, which
 // resolves it in the error state.
 var errWaitUnreadable = errors.New("unreadable")
 
-func (s *Service) evaluateWait(ctx context.Context, id string) error {
+// evaluateWait reads wait id unless it is not due: a pull request wait in
+// backoff or between polls is left to its next check, as events about the
+// owner run say nothing about it. inline marks the read of the report
+// that registered it, which returns a resolution to the agent itself and
+// reads GitHub afresh.
+func (s *Service) evaluateWait(ctx context.Context, id string, inline bool) error {
 	for range 4 {
 		w, err := s.store.GetRunWait(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
@@ -160,7 +207,7 @@ func (s *Service) evaluateWait(ctx context.Context, id string) error {
 		if w.WaitState != protocol.WaitPending {
 			return nil
 		}
-		err = s.commitWait(ctx, w)
+		err = s.commitWait(ctx, w, inline)
 		if errors.Is(err, store.ErrConflict) {
 			continue
 		}
@@ -169,7 +216,7 @@ func (s *Service) evaluateWait(ctx context.Context, id string) error {
 	return fmt.Errorf("wait %s: changed by every concurrent evaluation", id)
 }
 
-func (s *Service) commitWait(ctx context.Context, w *store.RunWait) error {
+func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool) error {
 	now := s.now()
 	owner, err := s.store.GetRun(ctx, w.OwnerRunID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -181,6 +228,10 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait) error {
 	if owner.Status.Terminal() {
 		return s.endWaits(ctx, w.OwnerRunID, "", "the run ended "+string(owner.Status), "")
 	}
+	expired := !w.ExpiresAt.After(now)
+	if !inline && !expired && w.Kind != protocol.WaitKindRunFinished && w.NextCheckAt != nil && now.Before(*w.NextCheckAt) {
+		return nil
+	}
 	if err = s.allowed(ctx, &w.Watch); errors.Is(err, errRevoked) {
 		return s.endWaits(ctx, w.OwnerRunID, "", "the run's member lost access: "+err.Error(), "")
 	} else if err != nil {
@@ -190,11 +241,14 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait) error {
 	w.LastCheckAt, w.UpdatedAt = &now, now
 	var r waitReading
 	var readErr error
-	if !w.ExpiresAt.After(now) {
-		r = waitReading{done: true, state: protocol.WaitExpired, outcome: "expired",
+	if expired {
+		r = waitReading{done: true, state: protocol.WaitExpired, outcome: "expired", observation: "expired",
 			summary: fmt.Sprintf("nothing resolved within %s", WaitExpiry)}
 	} else {
-		r, readErr = s.readWait(ctx, w, now)
+		r, readErr = s.readWait(ctx, w, now, inline)
+	}
+	if readErr != nil && ctx.Err() != nil {
+		return ctx.Err()
 	}
 	if readErr != nil && !errors.Is(readErr, errWaitUnreadable) {
 		w.Failures++
@@ -213,7 +267,9 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait) error {
 		return err
 	}
 	if readErr != nil {
-		r = waitReading{done: true, state: protocol.WaitError, outcome: "unreadable", summary: readErr.Error(), observed: r.observed, link: r.link}
+		r = waitReading{done: true, state: protocol.WaitError, outcome: "unreadable", observation: "unreadable",
+			summary: "Aether cannot read the target", detail: strings.TrimPrefix(readErr.Error(), errWaitUnreadable.Error()+": "),
+			observed: r.observed, link: r.link}
 		w.Error, w.ErrorAt = readErr.Error(), &now
 	} else {
 		w.SourceCheckedAt = &now
@@ -223,18 +279,27 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait) error {
 	if err != nil {
 		return err
 	}
-	w.Observed, w.Summary, w.Failures = observed, r.summary, 0
+	w.Observed, w.Summary, w.Detail, w.Failures = observed, r.summary, r.detail, 0
+	if r.head != "" {
+		w.HeadSHA = r.head
+	}
 	var n *store.WatchNotification
 	if r.done {
-		w.WaitState, w.Outcome, w.ResolvedAt = r.state, r.outcome, &now
-		w.State, w.EndedAt, w.NextCheckAt, w.DeliveryNextAt = protocol.WatchDone, &now, nil, &now
+		w.WaitState, w.Outcome, w.Observation, w.ResolvedAt = r.state, r.outcome, r.observation, &now
+		w.State, w.EndedAt, w.NextCheckAt = protocol.WatchDone, &now, nil
 		if r.state == protocol.WaitExpired {
 			w.State = protocol.WatchExpired
 		}
+		d := store.WatchDelivery{Channel: protocol.WatchChannelRunInbox, Status: protocol.WatchStatusPending, Detail: "Waking the run", At: now}
+		if inline {
+			w.DeliveredAt = &now
+			d.Status, d.Detail = protocol.WatchStatusDelivered, returnedInReport
+		} else {
+			w.DeliveryNextAt = &now
+		}
 		n = &store.WatchNotification{
 			Condition: w.Kind, Key: w.Outcome, Title: w.Spec, Body: waitBody(w, r.link), Link: cmp.Or(r.link, RunLink(w.OwnerRunID)),
-			CreatedAt: now, PushState: store.WatchPushNone,
-			Deliveries: []store.WatchDelivery{{Channel: protocol.WatchChannelRunInbox, Status: protocol.WatchStatusPending, Detail: "Waking the run", At: now}},
+			CreatedAt: now, PushState: store.WatchPushNone, Deliveries: []store.WatchDelivery{d},
 		}
 	} else {
 		w.State = protocol.WatchActive
@@ -264,11 +329,11 @@ func minTime(a, b time.Time) time.Time {
 	return a
 }
 
-func (s *Service) readWait(ctx context.Context, w *store.RunWait, now time.Time) (waitReading, error) {
+func (s *Service) readWait(ctx context.Context, w *store.RunWait, now time.Time, fresh bool) (waitReading, error) {
 	if w.Kind == protocol.WaitKindRunFinished {
 		return s.readWaitRun(ctx, w, now)
 	}
-	return s.readWaitPR(ctx, w, now)
+	return s.readWaitPR(ctx, w, now, fresh)
 }
 
 func (s *Service) readWaitRun(ctx context.Context, w *store.RunWait, now time.Time) (waitReading, error) {
@@ -291,8 +356,10 @@ func (s *Service) readWaitRun(ctx context.Context, w *store.RunWait, now time.Ti
 	}
 	r.done, r.state, r.outcome = true, protocol.WaitResolved, outcome
 	r.summary = "run " + string(run.ID) + " ended " + outcome
-	if reason := run.Reason; reason != "" {
-		r.summary += ": " + clip(reason, 200)
+	r.detail = run.Reason
+	r.observation = outcome
+	if run.StatusChangedAt != nil {
+		r.observation += "@" + strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
 	}
 	return r, nil
 }
@@ -375,7 +442,7 @@ func (s *Service) RunWaits(ctx context.Context, run domain.RunID) ([]protocol.Wa
 func waitProto(w *store.RunWait) (protocol.WaitCondition, error) {
 	out := protocol.WaitCondition{
 		ID: w.ID, Revision: w.Revision, Spec: w.Spec, Kind: w.Kind, Repo: w.Repo, Number: w.Number, RunID: string(w.TargetRun),
-		State: w.WaitState, Outcome: w.Outcome, Summary: w.Summary, CreatedAt: stamp(&w.CreatedAt),
+		State: w.WaitState, Outcome: w.Outcome, Summary: w.Summary, Detail: w.Detail, HeadSHA: w.HeadSHA, CreatedAt: stamp(&w.CreatedAt),
 		LastCheckedAt: stamp(w.LastCheckAt), SourceCheckedAt: stamp(w.SourceCheckedAt), NextCheckAt: stamp(w.NextCheckAt),
 		ConsecutiveFailures: w.Failures, LastError: w.Error, LastErrorAt: stamp(w.ErrorAt), ResolvedAt: stamp(w.ResolvedAt),
 		DeliveredAt: stamp(w.DeliveredAt), DeliveryAttempts: w.DeliveryAttempts, LastDeliveryError: w.DeliveryError,
@@ -418,31 +485,52 @@ func (s *Service) deliverWait(ctx context.Context, w *store.RunWait, now time.Ti
 	w.DeliveryAttempts++
 	switch {
 	case owner.Status.Terminal():
-		w.DeliveryNextAt, w.DeliveryError = nil, "Not delivered: the run ended "+string(owner.Status)
-		d.Status, d.Detail = protocol.WatchStatusCleared, w.DeliveryError
+		return s.settleWait(ctx, w, d, false, nil)
 	case s.notifier == nil:
-		err = errors.New("this server has no run inboxes")
-	default:
-		var link string
-		var n []*store.WatchNotification
-		if n, err = s.store.ListWatchNotifications(ctx, w.ID, 1); err == nil && len(n) > 0 {
-			link = n[0].Link
-		}
-		if err == nil {
-			err = s.notifier.Notify(ctx, w.OwnerRunID, w.OwnerRunID, waitBody(w, link), w.ID, w.ID+":"+w.Kind+":"+w.Outcome)
-		}
-		if err == nil {
-			w.DeliveredAt, w.DeliveryNextAt, w.DeliveryError = &now, nil, ""
-			d.Status, d.Detail = protocol.WatchStatusDelivered, "Written to the run's inbox"
-			if s.runs.Paused(w.OwnerRunID) {
-				d.Detail += "; the run is paused and is woken when it resumes"
-			}
-		}
+		return s.settleWait(ctx, w, d, false, errors.New("this server has no run inboxes"))
 	}
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	// Claimed before the write: an end or a relaunch that commits first
+	// makes the claim fail, and the run is not woken.
+	lease := now.Add(backoff(w.DeliveryAttempts))
+	w.DeliveryNextAt = &lease
+	d.Status, d.Detail = protocol.WatchStatusPending, "Writing to the run's inbox"
+	if err = s.store.SetRunWaitDelivery(ctx, w, d); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return nil
 		}
+		return err
+	}
+	var link string
+	notes, err := s.store.ListWatchNotifications(ctx, w.ID, 1)
+	if err != nil {
+		return err
+	}
+	if len(notes) > 0 {
+		link = notes[0].Link
+	}
+	key := "wait:" + w.Spec + ":" + w.Outcome + ":" + w.Observation
+	written, err := s.notifier.NotifyRun(ctx, w.OwnerRunID, w.OwnerRunID, waitBody(w, link), w.ID, key)
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return s.settleWait(context.WithoutCancel(ctx), w, store.WatchDelivery{Channel: protocol.WatchChannelRunInbox, At: s.now()}, written, err)
+}
+
+// settleWait records how a claimed wake ended: written to the inbox, not
+// written because the run ended, or failed and due again.
+func (s *Service) settleWait(ctx context.Context, w *store.RunWait, d store.WatchDelivery, written bool, err error) error {
+	now := d.At
+	switch {
+	case written:
+		w.DeliveredAt, w.DeliveryNextAt, w.DeliveryError = &now, nil, ""
+		d.Status, d.Detail = protocol.WatchStatusDelivered, "Written to the run's inbox"
+		if s.runs.Paused(w.OwnerRunID) {
+			d.Detail += "; the run is paused and is woken when it resumes"
+		}
+	case err == nil:
+		w.DeliveryNextAt, w.DeliveryError = nil, "Not delivered: the run ended"
+		d.Status, d.Detail = protocol.WatchStatusCleared, w.DeliveryError
+	default:
 		next := now.Add(backoff(w.DeliveryAttempts))
 		w.DeliveryNextAt, w.DeliveryError = &next, err.Error()
 		d.Status, d.Detail = protocol.WatchStatusPending, "Retrying: "+err.Error()

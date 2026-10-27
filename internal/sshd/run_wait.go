@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -28,9 +29,12 @@ func (s *Server) runWaits() RunWaitService {
 	return w
 }
 
-// waitConditions are run's latest wait conditions. A failed read is
-// logged and leaves them out, as a run response never fails on them.
-func (s *Server) waitConditions(run domain.RunID) []protocol.WaitCondition {
+// waitConditions are run's latest wait conditions. Unless full, what
+// their reads found with the owner's GitHub login is left out: the
+// observation, summary, third-party detail, read head and read errors. A
+// failed read is logged and leaves them out, as a run response never
+// fails on them.
+func (s *Server) waitConditions(run domain.RunID, full bool) []protocol.WaitCondition {
 	svc := s.runWaits()
 	if svc == nil {
 		return nil
@@ -40,7 +44,26 @@ func (s *Server) waitConditions(run domain.RunID) []protocol.WaitCondition {
 		slog.Warn("sshd: read the run's wait conditions", "run", run, "error", err)
 		return nil
 	}
+	if !full {
+		for i := range waits {
+			w := &waits[i]
+			w.Observed, w.Summary, w.Detail, w.LastError, w.LastErrorAt = protocol.WaitObserved{}, "", "", "", ""
+			if !strings.Contains(w.Spec, "@") {
+				w.HeadSHA = ""
+			}
+		}
+	}
 	return waits
+}
+
+// seesWaitDetails reports whether member reads run's wait conditions in
+// full: its owner and admins do.
+func (s *Server) seesWaitDetails(ctx context.Context, member domain.MemberID, run *domain.Run) bool {
+	if member == run.MemberID {
+		return true
+	}
+	m, err := s.cfg.Store.GetMember(ctx, member)
+	return err == nil && m.Role == domain.RoleAdmin
 }
 
 func (s *Server) runWaitCancel(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

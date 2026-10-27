@@ -306,10 +306,12 @@ resumed by mail while idle; elsewhere, in Background runs and while status
 shows protected, never report waiting: wait inside your turn with
 inbox --wait 30 instead.
 --until, only with waiting and at most 4 times, names a condition Aether
-watches for you: pr:<owner>/<repo>#<n>:merged, pr:<owner>/<repo>#<n>:checks
-or run:<run-id>:finished. When the first one resolves, fails or expires (7
-days), Aether writes what it saw and what to do next to your inbox, which
-wakes you once. A new waiting report with --until replaces the conditions;
+watches for you: pr:<owner>/<repo>#<n>:merged,
+pr:<owner>/<repo>#<n>:checks[@<head-sha>] (name the commit you pushed) or
+run:<run-id>:finished. One already resolved comes back in the result's
+resolved list: act on it in this turn. Otherwise, when the first one
+resolves, fails or expires (7 days), Aether writes what it saw and what to
+do next to your inbox, which wakes you once. A new waiting report with --until replaces the conditions;
 waiting without --until keeps them; any other report, a person's prompt or
 a relaunch cancels them.
 Answered is nonterminal, takes no --evidence-ref and is allowed for every

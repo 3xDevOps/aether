@@ -354,6 +354,9 @@ type CoordReportResult struct {
 	NextAction   string   `json:"next_action,omitempty"`
 	EvidenceRef  string   `json:"evidence_ref,omitempty"`
 	EvidenceRefs []string `json:"evidence_refs,omitempty"`
+	// Resolved are until conditions already resolved when the report was
+	// recorded: the agent learns them here, and no wake follows.
+	Resolved []WaitCondition `json:"resolved,omitempty"`
 }
 
 // RunReportParams carries independent execution and correlated input updates.

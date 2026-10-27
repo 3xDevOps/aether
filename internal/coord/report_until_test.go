@@ -23,6 +23,7 @@ type recordingWaits struct {
 	receipt []string
 	read    []domain.RunID
 	ended   []string
+	settled []protocol.WaitCondition
 }
 
 func (r *recordingWaits) RegisterWait(ctx context.Context, owner *domain.Run, report *store.CoordStateReport, specs []protocol.WaitSpec) (bool, error) {
@@ -43,10 +44,11 @@ func (r *recordingWaits) RegisterWait(ctx context.Context, owner *domain.Run, re
 	return inserted, nil
 }
 
-func (r *recordingWaits) EvaluateRunWaits(run domain.RunID) {
+func (r *recordingWaits) SettleRunWaits(_ context.Context, run domain.RunID) ([]protocol.WaitCondition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.read = append(r.read, run)
+	return r.settled, nil
 }
 
 func (r *recordingWaits) EndRunWaits(_ context.Context, run domain.RunID, cause string) error {
@@ -111,6 +113,14 @@ func TestUntilRegistersWaitsForTheReportingRunOnly(t *testing.T) {
 	report(t, h, run, protocol.CoordOutcomeBlocked, "need the staging key", "b2")
 	if !slices.Equal(waits.ended, []string{string(run) + ": the run reported answered", string(run) + ": the run reported blocked"}) {
 		t.Fatalf("ended = %v, want answered then blocked to cancel", waits.ended)
+	}
+
+	waits.settled = []protocol.WaitCondition{{Spec: "run:run-0000000001:finished", State: protocol.WaitResolved, Outcome: "failed"}}
+	res, rpcErr = h.svc.CoordReport(t.Context(), run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeWaiting, Summary: "s", IdempotencyKey: "done", Until: []string{"run:run-0000000001:finished"},
+	})
+	if rpcErr != nil || len(res.Resolved) != 1 || !strings.Contains(res.NextAction, "do not end your turn waiting: run:run-0000000001:finished is already resolved (failed)") {
+		t.Fatalf("already resolved: %+v, %v; want it returned with what to do", res, rpcErr)
 	}
 
 	waits.refuse = "until run:run-x:finished: no such run"

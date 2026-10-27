@@ -22,6 +22,9 @@ func TestParseWaitSpec(t *testing.T) {
 		"", "pr:acme/app#7", "pr:acme/app#07:merged", "pr:acme/app#0:merged", "pr:acme#7:merged", "PR:acme/app#7:merged",
 		"pr:acme/app#7:Merged", "pr:acme/app#7:closed", "run:run-x:done", "run:Run-X:finished", " run:run-x:finished",
 		"pr:acme/app#7:merged\n", "https://github.com/acme/app/pull/7", "ci finishes",
+		"pr:acme/app#7:checks@abc12", "pr:acme/app#7:checks@ABC1234", "pr:acme/app#7:merged@abc1234",
+		"pr:-acme/app#7:merged", "pr:acme-/app#7:merged", "pr:acme/.#7:merged", "pr:acme/..#7:merged",
+		"pr:" + strings.Repeat("a", 40) + "/app#7:merged", "pr:acme/" + strings.Repeat("a", 101) + "#7:merged",
 	} {
 		_, err := ParseWaitSpec(raw)
 		if err == nil || !strings.Contains(err.Error(), WaitGrammar) || !strings.Contains(err.Error(), "until ") {

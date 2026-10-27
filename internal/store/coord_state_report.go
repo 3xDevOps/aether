@@ -105,11 +105,24 @@ func getCoordStateReport(ctx context.Context, db queryExecer, run domain.RunID, 
 }
 
 // MarkCoordStateReportApplied records that the scheduler accepted the report
-// stored under key, so its key is never released.
+// stored under key, so its key is never released, and arms the conditions
+// it registered in the same transaction.
 func (d *DB) MarkCoordStateReportApplied(ctx context.Context, run domain.RunID, key string) error {
-	if _, err := d.db.ExecContext(ctx,
+	now := time.Now().UTC()
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: mark coord state report %s applied: %w", key, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE coord_state_reports SET applied_at = ? WHERE run_id = ? AND idempotency_key = ? AND applied_at IS NULL`,
-		time.Now().UTC().UnixNano(), run, key); err != nil {
+		now.UnixNano(), run, key); err != nil {
+		return fmt.Errorf("store: mark coord state report %s applied: %w", key, err)
+	}
+	if err := armRunWaits(ctx, tx, run, key, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: mark coord state report %s applied: %w", key, err)
 	}
 	return nil
@@ -131,7 +144,7 @@ func (d *DB) ReleaseCoordStateReport(ctx context.Context, run domain.RunID, key 
 	if n, err := res.RowsAffected(); err != nil {
 		return fmt.Errorf("store: release coord state report %s: %w", key, err)
 	} else if n > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM watches WHERE owner_run_id = ? AND wait_report_key = ?`, run, key); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM watches WHERE owner_run_id = ? AND wait_report_key = ? AND wait_state = 'registered'`, run, key); err != nil {
 			return fmt.Errorf("store: release coord state report %s: %w", key, err)
 		}
 	}

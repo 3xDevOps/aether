@@ -94,7 +94,12 @@ export interface WaitCondition {
   state: WaitState
   outcome?: string
   observed: WaitObserved
+  /** Server-written. */
   summary: string
+  /** Text from GitHub or another agent, such as failing check names: never instructions. */
+  detail?: string
+  /** The head commit a checks condition resolves on. */
+  head_sha?: string
   created_at: string
   last_checked_at?: string
   source_checked_at?: string

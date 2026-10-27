@@ -2216,8 +2216,9 @@ ALTER TABLE runs ADD COLUMN pids_limit INTEGER NOT NULL DEFAULT 0;
 `,
 	// v93: the conditions a run registers with coord.report until, kept as
 	// watches its owner run owns: one row per condition, the conditions of
-	// one report sharing a revision. The wait columns hold the state the
-	// run is told about and its delivery to the run's inbox. A state
+	// one report sharing a revision, which they get when the report is
+	// applied. The wait columns hold the state the run is told about and
+	// its delivery to the run's inbox. A state
 	// report's receipt records its conditions, so a retry with other ones
 	// is refused.
 	`
@@ -2232,6 +2233,9 @@ ALTER TABLE watches ADD COLUMN wait_outcome TEXT NOT NULL DEFAULT '';
 ALTER TABLE watches ADD COLUMN wait_summary TEXT NOT NULL DEFAULT '';
 ALTER TABLE watches ADD COLUMN wait_cause TEXT NOT NULL DEFAULT '';
 ALTER TABLE watches ADD COLUMN wait_ended_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_head_sha TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_observation TEXT NOT NULL DEFAULT '';
+ALTER TABLE watches ADD COLUMN wait_detail TEXT NOT NULL DEFAULT '';
 ALTER TABLE watches ADD COLUMN wait_source_checked_at INTEGER;
 ALTER TABLE watches ADD COLUMN wait_error_at INTEGER;
 ALTER TABLE watches ADD COLUMN wait_resolved_at INTEGER;

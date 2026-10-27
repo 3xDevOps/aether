@@ -53,7 +53,7 @@ func (s *Service) evaluate(ctx context.Context, id string) error {
 			return err
 		}
 		if w.OwnerRunID != "" {
-			return s.evaluateWait(ctx, id)
+			return s.evaluateWait(ctx, id, false)
 		}
 		if w.State != protocol.WatchActive && w.State != protocol.WatchError || !w.ExpiresAt.After(s.now()) {
 			return nil

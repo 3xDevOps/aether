@@ -49,12 +49,13 @@ type OutcomeSink interface {
 
 // RunWaits keeps the conditions a run waits on: the watch service.
 // RegisterWait records the waiting report's receipt and its conditions in
-// one transaction; an *InvalidWait error refuses them as asked.
-// EvaluateRunWaits reads the run's pending conditions as they stand.
-// EndRunWaits cancels them.
+// one transaction; an *InvalidWait error refuses them as asked. Applying
+// the report arms them. SettleRunWaits then reads them as they stand, for
+// a bounded time, and returns the ones already resolved, which the report
+// result carries instead of a wake. EndRunWaits cancels them.
 type RunWaits interface {
 	RegisterWait(ctx context.Context, owner *domain.Run, report *store.CoordStateReport, specs []protocol.WaitSpec) (bool, error)
-	EvaluateRunWaits(run domain.RunID)
+	SettleRunWaits(ctx context.Context, run domain.RunID) ([]protocol.WaitCondition, error)
 	EndRunWaits(ctx context.Context, run domain.RunID, cause string) error
 }
 
@@ -194,13 +195,25 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 		}
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
-	if err := s.cfg.Mail.MarkCoordStateReportApplied(ctx, run, p.IdempotencyKey); err != nil {
+	if err = s.cfg.Mail.MarkCoordStateReportApplied(ctx, run, p.IdempotencyKey); err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
+	var resolved []protocol.WaitCondition
 	switch {
 	case len(specs) > 0:
-		s.cfg.Waits.EvaluateRunWaits(run)
 		nextAction = "end your turn; Aether wakes you when " + strings.Join(receipt.Until, " or ") + " resolves, or when mail or a prompt arrives"
+		resolved, err = s.cfg.Waits.SettleRunWaits(ctx, run)
+		if err != nil {
+			slog.Warn("coord: read the run's new wait conditions; the background reads them", "run", run, "error", err)
+		}
+		if len(resolved) > 0 {
+			w := resolved[0]
+			nextAction = fmt.Sprintf("do not end your turn waiting: %s is already %s", w.Spec, w.State)
+			if w.Outcome != "" && w.Outcome != w.State {
+				nextAction += " (" + w.Outcome + ")"
+			}
+			nextAction += "; read resolved and act on it now, as no wake follows"
+		}
 	case p.Outcome != protocol.CoordOutcomeWaiting:
 		s.endWaits(ctx, run, p.Outcome)
 	}
@@ -216,7 +229,7 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 	}); err != nil && !errors.Is(err, events.ErrEventAlreadyExists) {
 		return protocol.CoordReportResult{}, internalError(method, fmt.Errorf("publish report timeline: %w", err))
 	}
-	return protocol.CoordReportResult{Outcome: p.Outcome, Summary: summary, NextAction: nextAction}, nil
+	return protocol.CoordReportResult{Outcome: p.Outcome, Summary: summary, NextAction: nextAction, Resolved: resolved}, nil
 }
 
 // reusedKey refuses a report whose key another report of the run used.
