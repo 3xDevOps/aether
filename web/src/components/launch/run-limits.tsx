@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { type Api } from '@/lib/api'
+import { useStore } from '@/store'
 import type { RunLimits, ServerRunLimits } from '@/lib/types'
 
 const gib = 2 ** 30
@@ -49,7 +50,10 @@ export function useServerRunLimits(client: Api, enabled: boolean): { limits: Ser
   const [limits, set] = useState<ServerRunLimits | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [seq, setSeq] = useState(0)
+  const identityKey = useStore((s) => s.identityKey)
+  const connectionEpoch = useStore((s) => s.connectionEpoch)
   useEffect(() => {
+    set(null)
     if (!enabled) return
     let live = true
     client.serverRunLimits().then(
@@ -63,7 +67,7 @@ export function useServerRunLimits(client: Api, enabled: boolean): { limits: Ser
     return () => {
       live = false
     }
-  }, [client, enabled, seq])
+  }, [client, enabled, seq, identityKey, connectionEpoch])
   return { limits, error, set, reload: () => setSeq((n) => n + 1) }
 }
 

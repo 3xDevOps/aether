@@ -19,29 +19,34 @@ func (s *Server) serverRunLimits(ctx context.Context, member domain.MemberID, ra
 	if perr != nil {
 		return nil, perr
 	}
-	limits, err := s.cfg.Store.ServerRunLimits(ctx)
-	if err != nil {
-		return nil, rpcError(err)
-	}
+	var (
+		limits domain.RunLimits
+		err    error
+	)
 	if p.CPUs != nil || p.MemoryBytes != nil || p.Pids != nil {
 		if perr := s.requireAdmin(ctx, member, protocol.MethodServerRunLimits); perr != nil {
 			return nil, perr
 		}
+		var cpus float64
+		var memory, pids int64
 		if p.CPUs != nil {
-			limits.CPUs = *p.CPUs
+			cpus = *p.CPUs
 		}
 		if p.MemoryBytes != nil {
-			limits.MemoryBytes = *p.MemoryBytes
+			memory = *p.MemoryBytes
 		}
 		if p.Pids != nil {
-			limits.Pids = *p.Pids
+			pids = *p.Pids
 		}
-		if err := scheduler.ValidateRunBudgets(limits.CPUs, limits.MemoryBytes, limits.Pids); err != nil {
+		if err := scheduler.ValidateRunBudgets(cpus, memory, pids); err != nil {
 			return nil, invalidParams(err.Error())
 		}
-		if err := s.cfg.Store.PutServerRunLimits(ctx, limits); err != nil {
-			return nil, rpcError(err)
-		}
+		limits, err = s.cfg.Store.UpdateServerRunLimits(ctx, p.CPUs, p.MemoryBytes, p.Pids)
+	} else {
+		limits, err = s.cfg.Store.ServerRunLimits(ctx)
+	}
+	if err != nil {
+		return nil, rpcError(err)
 	}
 	auto := s.cfg.RunLimits
 	return protocol.ServerRunLimits{

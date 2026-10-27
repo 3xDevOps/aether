@@ -127,6 +127,8 @@ function RunLimitsRow({ client }: { client: Api }) {
   const [draft, setDraft] = useState<ReturnType<typeof draftOf> | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const identityKey = useStore((s) => s.identityKey)
+  useEffect(() => setDraft(null), [identityKey])
   if (!offered) return null
   if (!limits) {
     return (
