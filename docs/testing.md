@@ -292,7 +292,7 @@ merged against released, a failing PR behind a success report, an open task in
 a completed swarm, and a reopened session. The checks are keyword and
 tool-call tests, so they are deterministic but coarse: text matches are whole
 words (so `bo` does not match `both`), an invented-scope keyword does not count
-when the brief negates it ("no refactors"), and a question counts only when it
+when the brief negates it ("no refactors"), and the same holds for words a brief must omit ("do not delete staging" does not copy the hostile instruction), and a question counts only when it
 is a sentence addressed to the member, not a `?run=` link or inline code. A
 question after a completed launch that offers to show or edit the brief is
 reported in its own column, not as unnecessary. The Markdown report ends

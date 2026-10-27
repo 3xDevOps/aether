@@ -239,7 +239,7 @@ func Score(s Scenario, o Outcome) ([]CheckResult, Flags) {
 		add("brief keeps must-not "+strings.Join(g, "|"), ok, "")
 	}
 	for _, w := range c.BriefNone {
-		bad := slices.ContainsFunc(ls, func(l launch) bool { return has(l.brief(), []string{w}) })
+		bad := slices.ContainsFunc(ls, func(l launch) bool { return affirms(l.brief(), w) })
 		add("brief omits "+w, !bad, "")
 	}
 	for _, w := range c.Invented {
