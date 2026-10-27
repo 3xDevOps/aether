@@ -18,8 +18,6 @@ import (
 	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
-// PathReviewerSignin is the reviewer account's sign-in page on the
-// sign-in origin. The edge serves it only with a reviewer account file.
 const PathReviewerSignin = "/connectors/reviewer"
 
 // The reviewer sign-in locks for reviewerLockout after
@@ -33,16 +31,12 @@ const (
 	reviewerMaxChecks   = 4
 )
 
-// ReviewerAccount is the reviewer account file: the one login and
-// bcrypt password hash an app directory's reviewer signs in with, and the
-// one server it is offered.
 type ReviewerAccount struct {
 	Login        string `json:"login"`
 	PasswordHash string `json:"password_hash"`
 	ServerID     string `json:"server_id"`
 }
 
-// LoadReviewerAccount reads and checks the reviewer account file at path.
 func LoadReviewerAccount(path string) (*ReviewerAccount, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -60,7 +54,6 @@ func LoadReviewerAccount(path string) (*ReviewerAccount, error) {
 	return &a, nil
 }
 
-// Validate checks the login, the server id and that the hash is bcrypt.
 func (a *ReviewerAccount) Validate() error {
 	if !edgeproto.ValidReviewerLogin(a.Login) {
 		return fmt.Errorf("login %q is not 1 to 39 lowercase letters, digits and dashes", a.Login)
@@ -74,8 +67,6 @@ func (a *ReviewerAccount) Validate() error {
 	return nil
 }
 
-// HashReviewerPassword is the bcrypt hash a reviewer account file keeps
-// for password.
 func HashReviewerPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -84,8 +75,6 @@ func HashReviewerPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// reviewerLock counts the reviewer sign-in's failures in a row, the
-// password checks for its login under way, and when it is locked until.
 // A check reserves its failure before it runs, so checks at once cannot
 // pass reviewerMaxFailures.
 type reviewerLock struct {
@@ -95,7 +84,6 @@ type reviewerLock struct {
 	until    time.Time
 }
 
-// locked returns when the sign-in unlocks, or the zero time.
 func (l *reviewerLock) locked(now time.Time) time.Time {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -105,9 +93,6 @@ func (l *reviewerLock) locked(now time.Time) time.Time {
 	return time.Time{}
 }
 
-// reserve starts a password check for the login, unless the sign-in is
-// locked at now or the failures in a row and the checks under way
-// already reach reviewerMaxFailures.
 func (l *reviewerLock) reserve(now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -118,9 +103,6 @@ func (l *reviewerLock) reserve(now time.Time) bool {
 	return true
 }
 
-// finish ends a reserved check. A failure is counted and returns the
-// failures in a row, the lock starting once there are
-// reviewerMaxFailures; a success clears them.
 func (l *reviewerLock) finish(now time.Time, ok bool) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -137,14 +119,10 @@ func (l *reviewerLock) finish(now time.Time, ok bool) int {
 	return n
 }
 
-// reviewerData is the reviewer sign-in page: the authorization request it
-// posts on, as hidden fields.
 type reviewerData struct {
 	Fields []field
 }
 
-// reviewerPage asks for the reviewer account's login and password for the
-// universal connector's authorization request in the query.
 func (s *Service) reviewerPage(w http.ResponseWriter, r *http.Request) {
 	q, err := chooseRequest(r.URL.Query())
 	if err != nil {
@@ -157,9 +135,8 @@ func (s *Service) reviewerPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, "reviewer", s.view(nil, "Reviewer sign-in", reviewerData{Fields: requestFields(q)}))
 }
 
-// reviewerSignin checks the reviewer account's login and password and
-// shows the choose page for the one server the account file names. It
-// starts no session: the reviewer account reaches no other edge page.
+// reviewerSignin starts no session: the reviewer account reaches no other
+// edge page.
 func (s *Service) reviewerSignin(w http.ResponseWriter, r *http.Request) {
 	ip := clientAddr(r).String()
 	r.Body = http.MaxBytesReader(w, r.Body, edgeproto.MaxRequestBodySize)

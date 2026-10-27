@@ -22,8 +22,6 @@ const ProviderGitHub = "github"
 // and only a ConnectorAssertion may name it.
 const ProviderReviewer = "reviewer"
 
-// ValidReviewerLogin reports whether login can name the reviewer
-// account: 1 to 39 lowercase letters, digits and dashes.
 func ValidReviewerLogin(login string) bool {
 	if login == "" || len(login) > 39 {
 		return false

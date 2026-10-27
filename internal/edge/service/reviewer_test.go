@@ -12,9 +12,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// TestReviewerLockReservesFailures starts many password checks for the
-// reviewer login at once: only reviewerMaxFailures start, and once they
-// all fail the sign-in is locked.
 func TestReviewerLockReservesFailures(t *testing.T) {
 	t.Parallel()
 	var (
@@ -45,9 +42,6 @@ func TestReviewerLockReservesFailures(t *testing.T) {
 	}
 }
 
-// TestReviewerChecksCap refuses a reviewer sign-in with 429 while
-// reviewerMaxChecks password checks are under way, and checks it once
-// one ends.
 func TestReviewerChecksCap(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

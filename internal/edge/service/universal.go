@@ -297,8 +297,6 @@ func (s *Service) mcpChoose(w http.ResponseWriter, r *http.Request, v visitor) e
 	return nil
 }
 
-// chooseRequest is the authorization request q without the fields the
-// edge adds, refused unless it has what the server checks first.
 func chooseRequest(q url.Values) (url.Values, error) {
 	q = maps.Clone(q)
 	q.Del(edgeproto.ParamServer)
@@ -309,9 +307,6 @@ func chooseRequest(q url.Values) (url.Values, error) {
 	return q, nil
 }
 
-// offer signs c's server a ConnectorAssertion of account for the
-// authorization request q, or sets c.Reason to why the server cannot
-// take it: it is offline or speaks an edge protocol before minVersion.
 func (s *Service) offer(c *choice, account edgeproto.Account, q url.Values, now time.Time, minVersion int) error {
 	switch version := s.link.Version(c.ID); {
 	case version == 0:
@@ -333,7 +328,6 @@ func (s *Service) offer(c *choice, account edgeproto.Account, q url.Values, now 
 	return nil
 }
 
-// renderChoose shows the choose page for the authorization request q.
 // v is nil for the reviewer account, which has no session.
 func (s *Service) renderChoose(w http.ResponseWriter, v *visitor, q url.Values, ready, other []choice) {
 	// The server answers a bad request with a redirect to the client,
@@ -345,7 +339,6 @@ func (s *Service) renderChoose(w http.ResponseWriter, v *visitor, q url.Values, 
 	}))
 }
 
-// requestFields are q's fields in name order, as hidden form fields.
 func requestFields(q url.Values) []field {
 	var fields []field
 	for _, k := range slices.Sorted(maps.Keys(q)) {

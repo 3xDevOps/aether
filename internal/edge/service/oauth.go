@@ -81,9 +81,6 @@ func (s *Service) signinPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, "signin", s.view(nil, "Sign in", data))
 }
 
-// signinData is the sign-in page: its GitHub sign-in link and, when the
-// edge has a reviewer account and the sign-in is for a connector, the
-// reviewer sign-in link.
 type signinData struct {
 	GitHub, Reviewer string
 }
