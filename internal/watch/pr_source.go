@@ -105,6 +105,8 @@ type prError struct {
 	msg       string
 	transient bool
 	retryAt   time.Time
+	// noLogin marks a member without a usable GitHub login.
+	noLogin bool
 }
 
 func (e *prError) Error() string { return e.msg }
@@ -118,7 +120,7 @@ func (e *prError) RetryAt() time.Time { return e.retryAt }
 const connectFix = "run aether github connect on your computer, or use Onboarding → Agent → GitHub → Connect GitHub in the dashboard"
 
 func credentialsError(err error) *prError {
-	return &prError{msg: "no usable GitHub login in your Aether home (" + err.Error() + "); " + connectFix, transient: true}
+	return &prError{msg: "no usable GitHub login in your Aether home (" + err.Error() + "); " + connectFix, transient: true, noLogin: true}
 }
 
 func (p *PRs) member(id domain.MemberID) *prMember {

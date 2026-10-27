@@ -320,6 +320,7 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 			out.Liveness = protocol.RunLivenessFromDomain(l)
 		}
 		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
+		out.WaitConditions = s.waitConditions(run.ID)
 		out.Switching = string(s.cfg.Runs.Switching(run.ID))
 		retention, err := s.cfg.Runs.Retention(run)
 		if retention.RetainedUntil != nil {

@@ -163,6 +163,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if clearErr != nil {
 		return nil, fmt.Errorf("scheduler: relaunch: clear the reported outcome: %w", clearErr)
 	}
+	s.endRunWaits(ctx, run, "the run was relaunched")
 	// archiveMu serializes this re-read-then-promote against SetArchived
 	// so the two can never interleave. s.mu does the same against Seen, so
 	// the flags a rollback restores are the ones this promotion clears.

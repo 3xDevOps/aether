@@ -341,6 +341,7 @@ type CoordReportParams struct {
 	EvidenceRefs   []string `json:"evidence_refs,omitempty" jsonschema:"retained evidence packet ids; not for needs-input, waiting or answered"`
 	IdempotencyKey string   `json:"idempotency_key" jsonschema:"a fresh key you choose for each new report; reuse it only to retry the same report, since the same key with another outcome or summary is refused"`
 	WaitingFor     string   `json:"waiting_for,omitempty" jsonschema:"only with waiting: agents (the default), ci or process"`
+	Until          []string `json:"until,omitempty" jsonschema:"only with waiting: up to 4 conditions that wake you when any resolves: pr:<owner>/<repo>#<n>:merged, pr:<owner>/<repo>#<n>:checks or run:<run-id>:finished"`
 }
 
 // CoordReportResult is the complete durable outcome receipt. EvidenceRef is

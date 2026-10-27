@@ -46,6 +46,7 @@ const (
 type Store interface {
 	store.WatchStore
 	store.WatchAssistantStore
+	store.RunWaitStore
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
@@ -105,6 +106,7 @@ type Service struct {
 	tick     time.Duration
 	now      func() time.Time
 	pr       PRSource
+	notifier RunNotifier
 
 	assistant Assistant
 	amu       sync.Mutex
@@ -130,6 +132,8 @@ type Service struct {
 	// unsaved holds watches whose startup check failed and whose retry
 	// could not be saved; housekeep retries them until one is.
 	unsaved map[string]bool
+	// loop bounds the background work Start began.
+	loop context.Context
 }
 
 // New builds the service; call Start to begin.
@@ -175,7 +179,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	loopCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.mu.Lock()
-	s.cursor, s.stop, s.started = cursor, cancel, time.Now()
+	s.cursor, s.stop, s.started, s.loop = cursor, cancel, time.Now(), loopCtx
 	s.mu.Unlock()
 	s.wg.Go(func() {
 		if s.awaitRecovery(loopCtx) {
@@ -490,6 +494,7 @@ func (s *Service) housekeep(ctx context.Context) {
 	}
 	s.deliverDue(ctx)
 	s.deliverAssistant(ctx)
+	s.deliverWaits(ctx)
 	if _, err := s.store.PurgeWatches(ctx, now.Add(-Retention)); err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("watch: purge ended watches", "error", err)
