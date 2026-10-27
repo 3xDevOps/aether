@@ -2598,24 +2598,29 @@ do not cancel a held gesture. Explicit control choices and revocations stop
 automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
 
-`SessionView` reuses `TerminalControlBorder` along the top of the Enhanced
-timeline, under the frame toolbar. The component is one SVG strip, 5.6rem tall,
-over the top of its parent: a single top-edge path, drawn from right to left
-so the light pours out of the control button, rendered as a blurred wide
-glow, a tight halo and a rim. All three inherit the SVG's animated
-`stroke-dashoffset` and colour, which is what the acquisition, release, hold
-and takeover animations drive. Strength is the SVG's own opacity, a separate
-animation: 70% while the light moves or a hold is under way, then half once
-acquisition settles, breathing on an infinite 8-second loop. Animating the
-`<svg>` element's opacity, not its blurred strokes, lets the compositor run
-the loop without repainting. During a hold the teal copy takes a dash
-pattern that leaves out the span the red copy covers. Its appearance follows
-the acknowledged ACP lease, not the unused agent terminal's history or
-connection state. Voluntary release retracts it; takeover feedback requires
-an explicit revocation matching the held session and generation.
-Disconnects, permission loss and other fencing hide it immediately. The
-shared component supplies acquisition, holder progress, takeover loss and
-reduced-motion behavior.
+`MultiplayerControls` renders `ControlMatrix` as the strip's background,
+and `TerminalPane` renders it behind the agent terminal's toolbar. The
+component is a neutral dot layer, one `radial-gradient` tile, under a
+colored copy of the same dots. The bars give each group of text and
+buttons `.control-matrix-clear`, a 90% `--chrome` fill with a blurred
+shadow of the same colour that hides the dots under the group and fades
+them back in around it. A `:has(> .control-matrix)` rule turns
+`text-muted` on the bar to `--text`. The copy is clipped from the left by
+`--control-reach`, a registered `@property` number (1 empty, 0 full), so it
+is revealed from the right edge, where the control button sits. The
+acquisition, release and takeover animations drive `--control-reach` and
+`color` on the colored layer. Its opacity is a separate animation: 70%
+while the dots move or a hold is under way, then half once acquisition
+settles, breathing on an infinite 8-second loop. During a hold
+`--control-hold` moves a 4rem gradient mask that fades the teal out and a
+red copy in. In
+Enhanced runs its appearance follows the acknowledged ACP lease, not the
+unused agent terminal's history or connection state, and it shows on every
+view that shows the strip. Voluntary release retracts it; takeover
+feedback requires an explicit revocation matching the held session and
+generation. Disconnects, permission loss and other fencing return it to
+neutral immediately. The shared component supplies acquisition, holder
+progress, takeover loss and reduced-motion behavior.
 
 ### Session view
 
@@ -3445,10 +3450,10 @@ and the Environment keep native xterm scrollback.
   mirror shows who controls ("Nobody controls", "<name> controls", "You
   control in another tab", with "(last known)" while the status is stale)
   and **Take control**. Live, acknowledged local control reads "You control"
-  with an accent-filled **Release**, plus the control light along the
-  terminal's top edge while input is writable ([styles.md](styles.md)). It
-  never changes layout, and is hidden during replay or history reading and
-  after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
+  with an accent-filled **Release**, plus teal control dots behind the
+  terminal toolbar while input is writable ([styles.md](styles.md)). They
+  never change layout, and return to neutral during replay or history
+  reading and after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
   ended runs show no control and replay their recording, or say **This run
   has ended and left no recorded terminal to replay.** Whether a member may
   write is the server's answer: `-32001` downgrades the attach to a mirror

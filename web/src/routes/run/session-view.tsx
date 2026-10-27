@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { VList, type VListHandle } from 'virtua'
-import { TerminalControlBorder } from '@/components/terminal-control-border'
 import type { Tone } from '@/components/ui/status-dot'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -352,13 +351,6 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      {run.mode === 'acp' && (
-        <TerminalControlBorder
-          appearance={agent.localControl ? 'active'
-            : agent.controlUnavailable ? 'hidden' : agent.roomControl?.loss ?? 'hidden'}
-          takeoverProgress={agent.takeover.holderProgress}
-        />
-      )}
       {session?.truncatedBefore && (
         <div className={cn(sessionColumn, 'shrink-0 pt-2')}>
           <Callout tone="needs-you" role="status">
