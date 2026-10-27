@@ -267,6 +267,9 @@ func (s *Server) summarizePRMerge(ctx context.Context, req protocol.Request, c *
 	}
 	b := fb.Blockers()
 	blockers := fmt.Sprintf("GitHub reports %d failing checks, %d pending checks and %d reviewers requesting changes", b.FailingChecks, b.PendingChecks, b.ChangesRequested)
+	if b.Partial {
+		blockers = fmt.Sprintf("GitHub reports at least %d failing checks, %d pending checks and %d reviewers requesting changes; its feedback was cut off", b.FailingChecks, b.PendingChecks, b.ChangesRequested)
+	}
 	if fb.Error != "" {
 		blockers = "GitHub's checks and reviews could not be read: " + truncate(fb.Error)
 	}

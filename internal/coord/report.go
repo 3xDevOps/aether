@@ -23,9 +23,12 @@ const maxReportReason = 256
 
 // ReportSink is where run.report lands: the scheduler, which is the single
 // writer of run statuses. Lifecycle traffic has its own bounded transport
-// budget and is not authorized against the radar.
+// budget and is not authorized against the radar. HoldTurnEnd returns the
+// reminder for a stop held back because its turn owes a report, at most once
+// per turn, or "".
 type ReportSink interface {
 	ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error
+	HoldTurnEnd(ctx context.Context, run domain.RunID) (string, error)
 }
 
 // OutcomeSink receives an ordinary run's published coord.report. Success and
@@ -214,6 +217,17 @@ func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunRe
 	if report.SessionID != "" && !domain.ValidAgentSessionID(report.SessionID) {
 		slog.Warn("coord: run.report carries an unusable session id; ignoring it", "run", run, "bytes", len(report.SessionID))
 		report.SessionID = ""
+	}
+	if p.Stop && state == agentstatus.Idle && !report.UsageLimit {
+		// A failed check lets the turn end: a stop Aether cannot judge is
+		// not worth keeping an agent from stopping.
+		reminder, err := s.cfg.Reports.HoldTurnEnd(ctx, run)
+		if err != nil {
+			slog.Warn("coord: check the ending turn's report", "run", run, "error", err)
+		}
+		if reminder != "" {
+			return protocol.RunReportResult{Continue: reminder}, nil
+		}
 	}
 	if err := s.cfg.Reports.ReportAgentState(ctx, run, report); err != nil {
 		return protocol.RunReportResult{}, internalError(protocol.MethodRunReport, err)

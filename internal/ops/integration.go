@@ -155,7 +155,9 @@ func integrationDecide(ctx context.Context, c calls, in integrationDecideInput) 
 	if in.Action == "reject" {
 		want = protocol.DeliveryDenied
 	}
-	if r.State == want {
+	// An approved request may have been delivered since, which an approval
+	// retry must not report as a failure.
+	if r.State == want || (want == protocol.DeliveryApproved && (r.State == protocol.DeliveryDelivering || r.State == protocol.DeliveryDelivered)) {
 		out["request_state"] = r.State
 		return fmt.Sprintf("Candidate %s's delivery request is already %s.", cd.CandidateID, r.State), out, nil
 	}

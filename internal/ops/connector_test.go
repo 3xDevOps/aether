@@ -514,7 +514,7 @@ func TestConnectorReadTools(t *testing.T) {
 			{ID: "att-2", TaskID: "task-1", State: "failed", Harness: "codex", LastError: injection}},
 		Questions: []protocol.MissionQuestion{{ID: "q-1", Body: "Which branch?"}}})
 	if text, out = run(t, cs, "aether_get_swarm", map[string]any{"swarm_id": "swarm:mis-1"}); text != "Swarm mis-1 is active: 1 tasks, 2 workers, 0 open questions." ||
-		strings.Contains(trusted(t, out), injection) {
+		strings.Contains(trusted(t, out), injection) || !strings.Contains(called(f, protocol.MethodMissionShow)[0].params, `"mission_id":"mis-1"`) {
 		t.Fatalf("aether_get_swarm of a search id = %q", text)
 	}
 	// A worker refused before its run existed keeps its attempt and error.

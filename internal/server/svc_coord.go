@@ -45,12 +45,13 @@ func init() {
 			// coord.report captures evidence before accepting the durable
 			// outcome; the coordination service publishes its evidence event
 			// only after finalization.
-			Evidence:        coordEvidenceCapture{service: d.Evidence},
-			EvidencePackets: d.Store,
-			Mission:         lazyMission{ssh: d.SSH, runs: d.Runs},
-			Children:        childAuthority,
-			WakeAdmission:   newCoordWakeAdmission(d),
-			Waker:           d.Runs,
+			Evidence:          coordEvidenceCapture{service: d.Evidence},
+			EvidencePackets:   d.Store,
+			Mission:           lazyMission{ssh: d.SSH, runs: d.Runs},
+			Children:          childAuthority,
+			WakeAdmission:     newCoordWakeAdmission(d),
+			Waker:             d.Runs,
+			ReminderAdmission: newCoordReminderAdmission(d),
 		})
 		if err != nil {
 			return nil, err

@@ -68,6 +68,12 @@ func (s *Scheduler) recordAgentSession(ctx context.Context, entry *supervised) {
 // applyAgentReport returns the run's entry when its agent reported a new
 // session, for the caller to record outside the scheduler lock.
 func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, report agentstatus.Report) (*supervised, error) {
+	return s.applyAgentReportIf(ctx, run, report, nil)
+}
+
+// applyAgentReportIf is applyAgentReport that applies nothing unless
+// current, if set, holds for the run's entry under the same lock.
+func (s *Scheduler) applyAgentReportIf(ctx context.Context, run domain.RunID, report agentstatus.Report, current func(*supervised) bool) (*supervised, error) {
 	if report.State != agentstatus.Working && report.State != agentstatus.Idle &&
 		(report.State != "" || (len(report.InputUpdates) == 0 && !report.Subagent)) {
 		return nil, fmt.Errorf("scheduler: invalid agent execution state %q", report.State)
@@ -80,6 +86,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	entry := s.runs[run]
 	if entry == nil {
 		return nil, fmt.Errorf("scheduler: agent status report for %s: the run has no live container", run)
+	}
+	if current != nil && !current(entry) {
+		return nil, nil
 	}
 	if entry.status == domain.RunProvisioning {
 		return nil, fmt.Errorf("scheduler: agent status report for %s: %w", run, errProvisioning)
@@ -229,6 +238,7 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 			entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
 		}
 	case agentstatus.Idle:
+		entry.stopHeld = false
 		if !finishes {
 			entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
 		}

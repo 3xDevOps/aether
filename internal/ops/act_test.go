@@ -169,6 +169,7 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 	f := newFake(t)
 	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{DashboardURL: "https://aether.example", Member: protocol.Member{ID: "mem-1"}})
 	f.answers[protocol.MethodMissionShow] = returns(protocol.MissionShowResult{Mission: mission})
+	f.answers[protocol.MethodAccountList] = returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-1"}, {ID: "mem-2"}}})
 	replaced := mission
 	replaced.IntegratorGeneration = 4
 	f.answers[protocol.MethodMissionReplaceIntegrator] = returns(protocol.MissionReplaceIntegratorResult{Mission: replaced, RunID: "run-new"})
@@ -203,6 +204,29 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 	if msg, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "harness": "gemini"}); !failed || !strings.Contains(msg, "its agents are claude, codex") {
 		t.Fatalf("an agent the swarm lacks = %q", msg)
 	}
+	// After a second replacement changed the integrator's defaults, a keyless
+	// retry still sends the first request's key.
+	again := replaced
+	again.IntegratorGeneration, again.Integrator = 5, protocol.MissionIntegrator{AccountMemberID: "mem-2", Harness: "codex", Mode: "headless"}
+	f.answers[protocol.MethodMissionShow] = returns(protocol.MissionShowResult{Mission: again})
+	f.calls = nil
+	run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3})
+	var retried protocol.MissionReplaceIntegratorParams
+	if err := json.Unmarshal([]byte(f.acted().params), &retried); err != nil || retried.IdempotencyKey != p.IdempotencyKey || retried.Integrator.Mode != "acp" {
+		t.Fatalf("retry after a second replacement sent %+v, want key %s and acp for a headless integrator", retried, p.IdempotencyKey)
+	}
+	// Only accounts the caller may launch on are chosen.
+	f.answers[protocol.MethodAccountList] = returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-1"}}})
+	f.calls = nil
+	run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 5, "harness": "codex", "mode": "tui"})
+	if got := f.acted(); !strings.Contains(got.params, `"account_member_id":"mem-1"`) {
+		t.Fatalf("codex replacement without mem-2's share sent %s", got.params)
+	}
+	if msg, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 5, "harness": "claude"}); !failed ||
+		!strings.Contains(msg, "offers claude only on accounts that are not yours or shared with you") {
+		t.Fatalf("an agent only on another's account = %q", msg)
+	}
+	f.answers[protocol.MethodAccountList] = returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-1"}, {ID: "mem-2"}}})
 
 	// A replacement made in between is the server's conflict, which says
 	// to read the swarm again rather than retry.
@@ -272,6 +296,12 @@ func TestConnectorIntegrationDecide(t *testing.T) {
 		len(called(f, protocol.MethodIntegrationDecide)) != 0 {
 		t.Fatalf("approving twice = %q", text)
 	}
+	request.State = protocol.DeliveryDelivered
+	if text, _ = run(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-1", "action": "approve"}); text != "Candidate cand-1's delivery request is already delivered." ||
+		len(called(f, protocol.MethodIntegrationDecide)) != 0 {
+		t.Fatalf("approving a delivered request = %q", text)
+	}
+	request.State = protocol.DeliveryApproved
 	f.errs[protocol.MethodIntegrationDeliver] = &protocol.Error{Code: protocol.CodeDenied, Message: "integration.deliver: denied: push permission"}
 	if text, _, failed := try(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-1", "action": "deliver"}); !failed ||
 		text != "integration.deliver: denied: push permission" {
@@ -279,18 +309,18 @@ func TestConnectorIntegrationDecide(t *testing.T) {
 	}
 }
 
-func prFeedback(head string) protocol.RunPRFeedbackResult {
+func prFeedback() protocol.RunPRFeedbackResult {
 	return protocol.RunPRFeedbackResult{Identity: "octo",
-		PullRequest: &protocol.RunPullRequest{Number: 7, URL: "https://github.com/acme/shop/pull/7", State: "open", Repository: "acme/shop", BaseBranch: "main", HeadOID: head},
+		PullRequest: &protocol.RunPullRequest{Number: 7, URL: "https://github.com/acme/shop/pull/7", State: "open", Repository: "acme/shop", BaseBranch: "main", HeadOID: "abcdef0123456789"},
 		Checks:      []protocol.RunPRCheck{{Name: "test", Conclusion: "FAILURE"}, {Name: "lint", Conclusion: "SUCCESS"}, {Name: "e2e"}},
 		Reviews: []protocol.RunPRReview{{Author: "grace", State: "CHANGES_REQUESTED"}, {Author: "ada", State: "CHANGES_REQUESTED"},
-			{Author: "ada", State: "APPROVED"}},
+			{Author: "ada", State: "APPROVED"}, {Author: "grace", State: "COMMENTED"}},
 		MergeStateStatus: "BLOCKED"}
 }
 
 func TestConnectorPRMerge(t *testing.T) {
 	f := newFake(t)
-	f.answers[protocol.MethodRunPRFeedback] = returns(prFeedback("abcdef0123456789"))
+	f.answers[protocol.MethodRunPRFeedback] = returns(prFeedback())
 	f.answers[protocol.MethodRunPRMerge] = returns(protocol.RunPRMergeResult{Merged: true,
 		PullRequest: &protocol.RunPullRequest{Number: 7, State: "merged", HeadOID: "abcdef0123456789"}})
 	cs := connectorSession(t, f, ScopeControl)
@@ -331,8 +361,23 @@ func TestConnectorPRMerge(t *testing.T) {
 		!strings.Contains(text, `GitHub did not merge pull request #7: Required status check "test" is failing; GitHub reports 1 failing checks`) {
 		t.Fatalf("refused merge = %q", text)
 	}
+	// A merge GitHub's lost reply hid but a read-back confirmed is merged.
+	f.answers[protocol.MethodRunPRMerge] = returns(protocol.RunPRMergeResult{Merged: true, Error: "gh: connection reset"})
+	if text, out = run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); text != "Merged pull request #7 into main." ||
+		out["merge_error"] != "gh: connection reset" {
+		t.Fatalf("confirmed merge = %q %v", text, out)
+	}
+	// Cut-off feedback gives lower bounds.
+	partial := prFeedback()
+	partial.Truncated = true
+	f.answers[protocol.MethodRunPRFeedback] = returns(partial)
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "1234567"}); !failed ||
+		!strings.Contains(text, "GitHub reports at least 1 failing checks") || !strings.Contains(text, "cut off") {
+		t.Fatalf("partial feedback = %q", text)
+	}
+	f.answers[protocol.MethodRunPRFeedback] = returns(prFeedback())
 	// A merged pull request is reported merged, so a retry is safe.
-	merged := prFeedback("abcdef0123456789")
+	merged := prFeedback()
 	merged.PullRequest.State = "merged"
 	f.answers[protocol.MethodRunPRFeedback] = returns(merged)
 	f.calls = nil
@@ -427,7 +472,7 @@ func TestConnectorMemoryWrites(t *testing.T) {
 		}
 		return protocol.MemoryShowResult{Item: protocol.MemoryItem{ID: "mem-9", Kind: "gotcha", Body: "CI needs Docker."}}, nil
 	}
-	if text, out = run(t, cs, "aether_memory_add", map[string]any{"workspace_id": "ws-1", "kind": "gotcha", "text": "CI needs Docker.", "supersedes": "mem-1"}); out["id"] != "mem-9" || out["duplicate"] != true {
+	if text, out = run(t, cs, "aether_memory_add", map[string]any{"workspace_id": "ws-1", "kind": "gotcha", "text": "ci  needs\nDocker.", "supersedes": "mem-1"}); out["id"] != "mem-9" || out["duplicate"] != true {
 		t.Fatalf("repeated replacement = %q %v", text, out)
 	}
 	if text, _, failed := try(t, cs, "aether_memory_add", map[string]any{"workspace_id": "ws-1", "kind": "gotcha", "text": "Something else.", "supersedes": "mem-1"}); !failed || !strings.Contains(text, "already replaced") {

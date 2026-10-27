@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 type memoryAddInput struct {
@@ -81,7 +81,7 @@ func memoryAdd(ctx context.Context, c calls, in memoryAddInput) (string, any, er
 		var old, next protocol.MemoryShowResult
 		if c.read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: in.Supersedes}, &old) != nil || old.Item.SupersededBy == "" ||
 			c.read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: old.Item.SupersededBy}, &next) != nil ||
-			next.Item.Kind != in.Kind || strings.TrimSpace(next.Item.Body) != strings.TrimSpace(in.Text) {
+			store.MemoryHash(next.Item.Body) != store.MemoryHash(in.Text) {
 			return "", nil, err
 		}
 		res = protocol.MemoryAddResult{Item: next.Item, Duplicate: true}

@@ -34,6 +34,9 @@ type fakeCoordinator struct {
 	// hold a writer in.
 	beforeWrite func()
 
+	// remind answers RemindReport; nil refuses every report reminder.
+	remind func(context.Context, domain.RunID, string) error
+
 	mu             sync.Mutex
 	onWake         func(domain.RunID)
 	released       []domain.RunID
@@ -123,6 +126,13 @@ func (f *fakeCoordinator) EnhancedSessionOpened(_ context.Context, run domain.Ru
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.opened = append(f.opened, run)
+}
+
+func (f *fakeCoordinator) RemindReport(ctx context.Context, run domain.RunID, prompt string) error {
+	if f.remind == nil {
+		return errors.New("fakeCoordinator: no waker")
+	}
+	return f.remind(ctx, run, prompt)
 }
 
 func (f *fakeCoordinator) ProvisionalReport(_ context.Context, run domain.RunID, since time.Time, message string) error {

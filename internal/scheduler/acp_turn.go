@@ -41,14 +41,28 @@ func heldByTasks(report agentstatus.Report) bool {
 }
 
 func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
+	// A swarm worker's ended turn hands its last message to its integrator.
+	forward, message := false, ""
 	switch acp.StopReason(st.Reason) {
 	case acp.StopReasonEndTurn, acp.StopReasonMaxTokens, acp.StopReasonMaxTurnRequests, acp.StopReasonRefusal, "error":
 		d.s.mu.Lock()
 		assigned := entry.missionAssigned
 		d.s.mu.Unlock()
 		if sess := d.session(entry.runID); assigned && sess != nil {
-			d.s.TurnEnded(entry.runID, acphost.LastMessage(sess.Log()))
+			forward, message = true, acphost.LastMessage(sess.Log())
 		}
+	}
+	if !oneShot && !st.Working {
+		held, asked := d.askReport(entry, st, forward, message)
+		if held {
+			return
+		}
+		if asked != nil {
+			forward, message = asked.forward, asked.message
+		}
+	}
+	if forward {
+		d.s.TurnEnded(entry.runID, message)
 	}
 	if oneShot && !st.Working {
 		// An interrupted session is ended by its connection's end or
@@ -209,4 +223,114 @@ func (d *acpDriver) endOneShot(entry *supervised, ok, untried bool, idle agentst
 			slog.Warn("scheduler: end the background run's container", "run", entry.runID, "code", code, "stderr", stderr, "error", err)
 		}
 	}()
+}
+
+// askedTurn is the turn end a report reminder deferred: the reminder turn's
+// end forwards the asked turn's last message, not its own.
+type askedTurn struct {
+	forward bool
+	message string
+	// start is the Seq of the reminder turn's start, zero until it is
+	// known.
+	start int64
+}
+
+// askReport prompts an agent whose turn ended without a report for one, and
+// reports whether it did. Only a turn that ended on its own is asked, never
+// the turn the reminder starts; that turn's end gets the asked turn back.
+func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState, forward bool, message string) (bool, *askedTurn) {
+	d.mu.Lock()
+	r := d.runs[entry.runID]
+	if r == nil || r.session == nil {
+		d.mu.Unlock()
+		return false, nil
+	}
+	sess, asked := r.session, r.asked
+	var start int64
+	if asked != nil {
+		start = asked.start
+	}
+	r.asked = nil
+	d.mu.Unlock()
+	// A queued prompt runs right after the reminder's turn with no turn end
+	// of its own in between: only the reminder's turn is exempt.
+	if asked != nil && (start == 0 || acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq == start) {
+		return false, asked
+	}
+	if st.Failed != nil || acp.StopReason(st.Reason) != acp.StopReasonEndTurn {
+		return false, nil
+	}
+	// Any later turn start, such as a member's prompt while the check runs,
+	// reports its own end.
+	before := acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq
+	d.s.mu.Lock()
+	heldTurn := entry.turnStartedAt
+	d.s.mu.Unlock()
+	c := d.s.coordinationSeam()
+	if c == nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), acpSteerTimeout)
+	reminder, err := d.s.HoldTurnEnd(ctx, entry.runID)
+	cancel()
+	if err != nil {
+		slog.Warn("scheduler: check the ending turn's report", "run", entry.runID, "error", err)
+	}
+	if reminder == "" {
+		return false, nil
+	}
+	turn := &askedTurn{forward: forward, message: message}
+	d.mu.Lock()
+	r.asked = turn
+	d.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), acpSteerTimeout)
+		defer cancel()
+		err := c.svc.RemindReport(ctx, entry.runID, reminder)
+		started := acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq
+		if err == nil {
+			d.mu.Lock()
+			if turn.start == 0 {
+				turn.start = started
+			}
+			// A reconnect replaced r: the reminder reached its session.
+			if current := d.runs[entry.runID]; current != nil && current != r && current.asked == nil {
+				current.asked = turn
+			}
+			d.mu.Unlock()
+			return
+		}
+		// A turn that started, whether the reminder the agent refused or
+		// another prompt, reports its own end.
+		if started > before || sess.State().TurnInFlight {
+			return
+		}
+		d.mu.Lock()
+		owned := r.asked == turn
+		if owned {
+			r.asked = nil
+		}
+		current := owned && d.runs[entry.runID] == r && r.session == sess
+		d.mu.Unlock()
+		if !owned {
+			return
+		}
+		slog.Info("scheduler: the report reminder was not sent", "run", entry.runID, "error", err)
+		// The asked turn's message is forwarded even when the session went
+		// away; only its idle report needs the live session.
+		if turn.forward {
+			d.s.TurnEnded(entry.runID, turn.message)
+		}
+		if !current {
+			return
+		}
+		// Under the scheduler lock, so a member's prompt that started a turn
+		// meanwhile is never reported idle.
+		ended := func(e *supervised) bool { return e.turnStartedAt.Equal(heldTurn) }
+		if _, err := d.s.applyAgentReportIf(context.Background(), entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}, ended); err != nil {
+			slog.Debug("scheduler: enhanced session report not applied", "run", entry.runID, "error", err)
+		}
+		d.wakeIdle(entry.runID)
+	}()
+	return true, nil
 }
