@@ -80,6 +80,9 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","scope":"member","title":"CI needs Docker","pinned_by":"m2","pinned_by_name":"Grace","pinned_at":"2026-10-26T10:00:00Z"}}`), nil
 	case protocol.MethodRunGet:
 		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t","member_id":"m2","mission_id":"mis-1"}}`), nil
+	case protocol.MethodWatchGet:
+		return json.RawMessage(`{"watch":{"id":"w-1","target":{"kind":"mission","mission_id":"mis-1"},"target_title":"Ship the billing page",
+			"conditions":["needs_you","finished"],"state":"active"},"notifications":[{"id":"n-2"},{"id":"n-1"}]}`), nil
 	case protocol.MethodRunPRFeedback:
 		return json.RawMessage(`{"pull_request":{"number":7},"checks":[{"name":"test","conclusion":"FAILURE"},{"name":"e2e"},{"name":"lint","conclusion":"SUCCESS"}],
 			"reviews":[{"author":"grace","state":"CHANGES_REQUESTED"},{"author":"ada","state":"CHANGES_REQUESTED"},{"author":"ada","state":"APPROVED"}]}`), nil
@@ -119,6 +122,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMemoryAdd:   protocol.MemoryAddParams{WorkspaceID: "ws-1", Kind: "gotcha", Text: "CI needs Docker.", Supersedes: "mem-0"},
 		protocol.MethodMemoryPin:   protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1", Scope: protocol.MemoryScopeMember},
 		protocol.MethodMemoryUnpin: protocol.MemoryUnpinParams{WorkspaceID: "ws-1", ID: "mem-1"},
+		protocol.MethodWatchDelete: protocol.WatchIDParams{WatchID: "w-1"},
 	}
 	want := map[string]string{
 		protocol.MethodRunLaunch:                `Launch claude (default mode) in shop: "fix it"`,
@@ -145,6 +149,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMemoryAdd:                `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0 ("CI needs Docker") and moving its pin`,
 		protocol.MethodMemoryPin:                `Pin, into new runs' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
 		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha), taking it out of Grace's briefs: "CI needs Docker"`,
+		protocol.MethodWatchDelete:              `Delete your watch w-1 on swarm "Ship the billing page" (needs_you, finished) and its 2 notices`,
 	}
 	var got protocol.AssistantConfirmation
 	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {

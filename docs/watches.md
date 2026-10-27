@@ -154,7 +154,10 @@ In-app notices are not affected. Omit `quiet_hours` to turn them off.
 ## Methods
 
 All methods act on the caller's own watches. The dashboard posts them to
-`/api/v1/<method>`.
+`/api/v1/<method>`. ChatGPT, Claude and the built-in assistant call them
+through `aether_watches`, `aether_watch` and `aether_unwatch`
+([connectors.md](connectors.md#what-it-can-do)), which set `source` to `mcp`
+or `assistant`; neither offers the preferences methods.
 
 | Method | Params | Result |
 | --- | --- | --- |

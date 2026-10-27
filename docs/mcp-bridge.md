@@ -261,9 +261,9 @@ member id and the server rejects any param containing `member_id`, except the `r
 
 | Tier | Tools |
 | --- | --- |
-| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_integration`, `aether_list_workspaces`, `aether_get_workspace`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
-| Reversible | `aether_pause_run`, `aether_resume_run` |
-| Confirmed | `aether_launch_run`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin` |
+| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_integration`, `aether_watches`, `aether_list_workspaces`, `aether_get_workspace`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
+| Reversible | `aether_pause_run`, `aether_resume_run`, `aether_watch` |
+| Confirmed | `aether_launch_run`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin`, `aether_unwatch` |
 
 A confirmed call blocks until the member approves it in the dashboard, or
 runs at once when the member turned on
@@ -277,7 +277,7 @@ teammate a run is handed to; the agent and account a replacement integrator
 uses; a delivery's candidate and target branch; a pull request's branch, head
 and title or repository, number, head and base; a memory note's workspace, text, who
 it is for and the note it replaces; that archiving a swarm closes its
-completed runs. A decline, timeout or closed session fails the call with the reason.
+completed runs; a deleted watch's target, conditions and notice count. A decline, timeout or closed session fails the call with the reason.
 `aether_docs` reads the guides in `docs/`, which the server binary embeds.
 Without `--assistant` the bridge serves the coordination tools above,
 unchanged.

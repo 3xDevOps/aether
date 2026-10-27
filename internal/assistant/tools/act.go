@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -50,6 +51,7 @@ var actSummaries = map[string]summarizer{
 	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
 	protocol.MethodMemoryPin:                (*Server).summarizeMemoryPin,
 	protocol.MethodMemoryUnpin:              (*Server).summarizeMemoryUnpin,
+	protocol.MethodWatchDelete:              (*Server).summarizeWatchDelete,
 }
 
 type runParams interface {
@@ -344,6 +346,24 @@ func (s *Server) summarizeMemoryAdd(ctx context.Context, req protocol.Request, c
 			c.Summary += " and moving its pin"
 		}
 	}
+	return nil
+}
+
+func (s *Server) summarizeWatchDelete(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.WatchIDParams](req.Params)
+	if err != nil || p.WatchID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": watch_id is required"}
+	}
+	var got protocol.WatchGetResult
+	if rpcErr := s.call(ctx, protocol.MethodWatchGet, p, &got); rpcErr != nil {
+		return rpcErr
+	}
+	w := got.Watch
+	kind := w.Target.Kind
+	if kind == protocol.WatchTargetMission {
+		kind = "swarm"
+	}
+	c.Summary = fmt.Sprintf("Delete your watch %s on %s %q (%s) and its %d notices", w.ID, kind, truncate(w.TargetTitle), strings.Join(w.Conditions, ", "), len(got.Notifications))
 	return nil
 }
 

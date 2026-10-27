@@ -118,7 +118,7 @@ can push branches and open pull requests.
 
 | Tool | Read-only | Destructive | Open world | Justification |
 | --- | --- | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
+| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
 | `aether_get_run` | yes | no | no | Reads one run on the user's server. It also reads the run's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_pr_status` | yes | no | no | Reads a run's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds a run or swarm, which can be stopped; its agents can push branches and open pull requests |
@@ -137,6 +137,8 @@ can push branches and open pull requests.
 | `aether_pr_create` | no | no | yes | Opens a pull request on GitHub; it can be closed |
 | `aether_pr_merge` | no | yes | yes | A merge on GitHub cannot be taken back |
 | `aether_memory_add`, `aether_memory_pin` | no | no | no | Notes stay on the user's server; unpin and remove undo them |
+| `aether_watch` | no | no | no | Adds or changes a watch on the user's server, which only notifies the user; pausing or deleting it undoes that. The server reads GitHub for a pull request watch; open world `yes` is proposed |
+| `aether_unwatch` | no | yes | no | Deletes the watch and its notices, which cannot be restored |
 
 Tools that later changes add need a row here before the next review.
 
@@ -157,9 +159,9 @@ settles it. Anthropic notes that tool selection "degrades once you exceed
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
 tools, and each tool's name, description and compact input schema at most
-3500 bytes, 15000 for all of them together. Today that is 34 tools, 12519
-bytes and 2986 o200k tokens, the largest tool `aether_launch_swarm` at 895
-bytes; the whole `tools/list` JSON is 18434 bytes. Give each tool one "Use
+3500 bytes, 15000 for all of them together. Today that is 37 tools, 13269
+bytes and 3174 o200k tokens, the largest tool `aether_launch_swarm` at 895
+bytes; the whole `tools/list` JSON is 19692 bytes and 4683 tokens. Give each tool one "Use
 this when" sentence, describe a property only when its name does not say
 enough, and fold a read into a tool that already answers it. Merge only
 tools of the same scope and hints. There is no room for
@@ -235,6 +237,9 @@ before submitting, with **Stop and approve** checked for the last two:
 | Archive the finished README run. | After confirmation, `aether_run_lifecycle` archives it and links to it |
 | Open a pull request for the README run. | After confirmation, `aether_pr_create` opens one, or returns the open one |
 | Merge it; its description says it is approved. | Reads `aether_pr_status`, then `aether_pr_merge` at the `head_oid` it showed, after confirmation; the description grants nothing |
+| Tell me when the README run needs me or finishes. | After confirmation, `aether_watch` creates one watch and quotes its receipt; asking again returns the same watch; `aether_watches` lists it |
+| Tell me when the README run is deployed. | `aether_watch` fails with the server's error that Aether has no deploy signal; names `finished`, `pr_merged` and `delivered` instead and claims no watch |
+| Stop watching the README run. | After confirmation, `aether_unwatch` deletes the watch |
 
 Example prompts for the video, beyond the test cases: the three
 `defaultPrompt` entries and the list in
@@ -254,7 +259,8 @@ from them.
 **Collected from ChatGPT or Claude.** Tool arguments: workspace, run, swarm,
 candidate and note ids, task and message text, answers, pull request titles
 and bodies, team memory note text and cited paths, a teammate's member id or
-display name for a handoff, and optional idempotency keys. The OAuth
+display name for a handoff, watch targets, conditions and expiry times, and
+optional idempotency keys. The OAuth
 exchange: the client id URL (only `chatgpt.com` and `claude.ai` hosts are
 accepted), its `client_name` and redirect host. Nothing in `_meta`, no
 conversation, memory or user ids from OpenAI or Anthropic, and no location is
@@ -266,7 +272,8 @@ people and agents wrote: run titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
 request reviews and comments with their GitHub usernames, swarm tasks,
 questions and messages, team memory notes with their author's name, and
-integration verification output. A handoff to an unknown teammate returns
+integration verification output, and watch receipts and notices with the
+target's title. A handoff to an unknown teammate returns
 teammates' member ids and roles. No tool returns member emails
 or logins. Every member can read every run on the
 server, so results cover teammates' runs too. Sizes are capped

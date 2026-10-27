@@ -318,6 +318,7 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_replace_integrator": {false, true, true}, "aether_integration_decide": {false, true, true},
 		"aether_pr_create": {false, false, true}, "aether_pr_merge": {false, true, true},
 		"aether_memory_add": {false, false, false}, "aether_memory_pin": {false, false, false},
+		"aether_watch": {false, false, false}, "aether_unwatch": {false, true, false},
 	}
 	names := map[Scope][]string{}
 	for _, tool := range all {

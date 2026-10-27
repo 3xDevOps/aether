@@ -451,8 +451,10 @@ func (c actionCaller) Call(ctx context.Context, method string, params json.RawMe
 	if !ok {
 		conv = c.m.conversation()
 		a = newAction(protocol.AssistantConfirmation{Method: method, Params: params, CreatedAt: time.Now()})
-		a.OtherOwner = c.otherOwner(ctx, a.Target.RunID)
-		a.Summary = reversibleSummary(method, a.Target.RunID, a.OtherOwner)
+		if a.Target.RunID != "" {
+			a.OtherOwner = c.otherOwner(ctx, a.Target.RunID)
+		}
+		a.Summary = reversibleSummary(method, params, a.Target.RunID, a.OtherOwner)
 	}
 	result, rpcErr := c.Caller.Call(ctx, method, params)
 	a.FinishedAt = time.Now().UTC()
@@ -508,7 +510,46 @@ func created(result json.RawMessage, target protocol.AssistantActionTarget) *pro
 	return &protocol.AssistantActionTarget{RunID: ids.Run.ID, WorkspaceID: ids.Run.WorkspaceID}
 }
 
-func reversibleSummary(method, run, owner string) string {
+const unreadableWatch = "Watch (unreadable parameters)"
+
+func reversibleSummary(method string, params json.RawMessage, run, owner string) string {
+	switch method {
+	case protocol.MethodWatchCreate:
+		p, err := protocol.DecodeParams[protocol.WatchCreateParams](params)
+		if err != nil {
+			return unreadableWatch
+		}
+		t := p.Target
+		var target string
+		switch {
+		case t.Kind == protocol.WatchTargetRun && t.RunID != "":
+			target = "run " + t.RunID
+		case t.Kind == protocol.WatchTargetMission && t.MissionID != "":
+			target = "swarm " + t.MissionID
+		case t.Kind == protocol.WatchTargetPR && t.Repo != "":
+			target = fmt.Sprintf("pull request %s#%d", t.Repo, t.Number)
+		default:
+			raw, _ := json.Marshal(t)
+			target = "target " + string(raw)
+		}
+		conditions := "its default conditions"
+		if len(p.Conditions) > 0 {
+			conditions = strings.Join(p.Conditions, ", ")
+		}
+		return fmt.Sprintf("Watch %s for %s", target, conditions)
+	case protocol.MethodWatchUpdate:
+		p, err := protocol.DecodeParams[protocol.WatchUpdateParams](params)
+		if err != nil || p.WatchID == "" {
+			return unreadableWatch
+		}
+		switch {
+		case p.Paused == nil || len(p.Conditions) > 0 || p.ExpiresAt != "" || p.Label != nil:
+			return "Change watch " + p.WatchID
+		case *p.Paused:
+			return "Pause watch " + p.WatchID
+		}
+		return "Resume watch " + p.WatchID
+	}
 	verb := "Pause"
 	if method == protocol.MethodRunResume {
 		verb = "Resume"
