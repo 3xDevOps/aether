@@ -177,6 +177,15 @@ describe.each([
     expect(tint).toBeGreaterThan(0)
     expect(contrast(colours.text, over(colours[fill], colours.canvas, tint))).toBeGreaterThanOrEqual(4.5)
   })
+  it.each(['control-light', 'state-failed'])('text over faded %s control dots', (fill) => {
+    const dots = Number(themeBlock(selector).match(/--control-dots:\s*(\d+)%;/)?.[1]) / 100
+    const idle = Number(css.match(/^\.control-matrix \{[^}]*var\(--text\) (\d+)%/m)?.[1]) / 100
+    const clear = Number(css.match(/\.control-matrix-clear \{[^}]*var\(--chrome\) (\d+)%/)?.[1]) / 100
+    expect(dots * idle * clear).toBeGreaterThan(0)
+    // 0.7 is ControlMatrix's strength while the dots move or a hold is under way.
+    const dot = over(colours[fill], over(colours.text, colours.chrome, idle), 0.7 * dots)
+    expect(contrast(colours.text, over(colours.chrome, dot, clear))).toBeGreaterThanOrEqual(4.5)
+  })
 })
 
 describe('primitive colour utilities', () => {

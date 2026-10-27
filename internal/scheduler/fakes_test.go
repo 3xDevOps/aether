@@ -625,10 +625,6 @@ func (g *fakeGit) CreateRunCheckoutAt(_ context.Context, ws domain.WorkspaceID, 
 	return path, branch, nil
 }
 
-func (g *fakeGit) WriteRunFiles(context.Context, domain.RunID, map[string]string) error {
-	return nil
-}
-
 func (g *fakeGit) WorkspaceBranchExists(_ context.Context, ws domain.WorkspaceID, branch string) (bool, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

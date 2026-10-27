@@ -107,7 +107,7 @@ type Definition struct {
 func (d Definition) Validate() error {
 	// The name becomes a host path segment and a store key, so it must never
 	// address another member's credential home.
-	if err := validateName(d.Name); err != nil {
+	if err := ValidateName(d.Name); err != nil {
 		return err
 	}
 	if err := validateExecutable(d.Executable); err != nil {
@@ -157,7 +157,7 @@ func (d Definition) Validate() error {
 	return nil
 }
 
-func validateName(name string) error {
+func ValidateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("harness: definition name is required")
 	}

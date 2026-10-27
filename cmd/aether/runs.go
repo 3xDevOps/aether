@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"golang.org/x/term"
 
@@ -49,15 +50,18 @@ func getRun(c *protocol.Client, runID string) (protocol.Run, error) {
 }
 
 type runView struct {
-	ID            string         `json:"id"`
-	WorkspaceID   string         `json:"workspace_id"`
-	Workspace     string         `json:"workspace"`
-	Status        string         `json:"status"`
-	State         string         `json:"state"`
-	Reason        string         `json:"reason,omitempty"`
-	PendingInputs []pendingInput `json:"pending_inputs"`
-	Branch        string         `json:"branch"`
-	Report        *runReport     `json:"report,omitempty"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Workspace   string `json:"workspace"`
+	Status      string `json:"status"`
+	State       string `json:"state"`
+	Reason      string `json:"reason,omitempty"`
+	// Wait is the evidence behind a reported wait; WaitText is its line.
+	Wait          *domain.RunWait `json:"wait,omitempty"`
+	WaitText      string          `json:"wait_text,omitempty"`
+	PendingInputs []pendingInput  `json:"pending_inputs"`
+	Branch        string          `json:"branch"`
+	Report        *runReport      `json:"report,omitempty"`
 }
 
 // pendingInput.Options are those aether answer accepts; a standard run's
@@ -76,7 +80,7 @@ type runReport struct {
 func viewOf(r protocol.Run, workspace string, items []protocol.AttentionItem, reports map[string]runReport) runView {
 	v := runView{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Workspace: workspace, Status: displayStatus(r), State: r.Status,
-		Reason: r.Reason, Branch: r.Branch, PendingInputs: []pendingInput{},
+		Reason: r.Reason, Wait: r.Wait, WaitText: r.Wait.Text(time.Now()), Branch: r.Branch, PendingInputs: []pendingInput{},
 	}
 	offered := map[string][]protocol.AttentionOption{}
 	for _, it := range items {
@@ -191,6 +195,9 @@ func statusLine(v runView) string {
 	if v.Reason != "" {
 		line += ": " + printable(v.Reason)
 	}
+	if v.WaitText != "" {
+		line += "\n  " + printable(v.WaitText)
+	}
 	return line
 }
 
@@ -200,6 +207,9 @@ func printRunView(w io.Writer, v runView, items []protocol.AttentionItem) error 
 	_, _ = fmt.Fprintf(tw, "status\t%s\n", v.Status)
 	if v.Reason != "" {
 		_, _ = fmt.Fprintf(tw, "reason\t%s\n", printable(v.Reason))
+	}
+	if v.WaitText != "" {
+		_, _ = fmt.Fprintf(tw, "wait\t%s\n", printable(v.WaitText))
 	}
 	_, _ = fmt.Fprintf(tw, "workspace\t%s (%s)\n", v.Workspace, v.WorkspaceID)
 	_, _ = fmt.Fprintf(tw, "branch\t%s\n", v.Branch)
@@ -302,6 +312,9 @@ func displayStatus(r protocol.Run) string {
 		return "Waiting for the integrator"
 	}
 	if label, ok := activityLabels[domain.RunActivity(r.Activity)]; ok {
+		if r.Wait != nil && waitLabels[r.Wait.Kind] != "" {
+			label += " (" + waitLabels[r.Wait.Kind] + ")"
+		}
 		return label
 	}
 	if label, ok := statusLabels[domain.RunStatus(r.Status)]; ok {
@@ -322,6 +335,12 @@ var activityLabels = map[domain.RunActivity]string{
 	domain.ActivityAnswered:      "Answered",
 	domain.ActivityFailed:        "Failed",
 	domain.ActivityDisconnected:  "Disconnected",
+}
+
+// waitLabels qualify a waiting state the conditions behind it do not back.
+var waitLabels = map[domain.WaitEvidence]string{
+	domain.WaitSourceUnknown: "status unknown",
+	domain.WaitFault:         "wait fault",
 }
 
 var statusLabels = map[domain.RunStatus]string{

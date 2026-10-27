@@ -34,7 +34,7 @@ func requestBodyLimit(method string) int64 {
 	switch method {
 	case protocol.MethodTerminalImage:
 		return maxTerminalImageRequestBody
-	case protocol.MethodConfigImport, protocol.MethodHomeUpload, protocol.MethodTerminalFile:
+	case protocol.MethodConfigImport, protocol.MethodHomeUpload, protocol.MethodTerminalFile, protocol.MethodFilesUpload:
 		return maxConfigImportRequestBody
 	case protocol.MethodFilesWrite, protocol.MethodConfigWrite, protocol.MethodHomeWrite:
 		return maxEditorWriteRequestBody

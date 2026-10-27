@@ -60,6 +60,7 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 
 	asks := newRun(e.member.ID, domain.LaunchTUI, domain.RunNeedsAttention, "needs input: which database?", domain.ActivityNeedsYou)
 	interrupted := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "turn interrupted", domain.ActivityNeedsYou)
+	stranded := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "wait broken: pr:o/r#12:checks resolved, but the agent was not woken", domain.ActivityNeedsYou)
 	disconnected := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "enhanced session ended: eof", domain.ActivityDisconnected)
 	blocked := newRun(e.member.ID, domain.LaunchTUI, domain.RunNeedsAttention, "blocked: no credentials", domain.ActivityNeedsYou)
 	paused := newRun(e.member.ID, domain.LaunchTUI, domain.RunNeedsAttention, "needs input: still there?", domain.ActivityNeedsYou)
@@ -80,6 +81,7 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 		permission.ID:   {protocol.AttentionKindPermission, "Permission requested"},
 		asks.ID:         {protocol.AttentionKindNeedsInput, "Agent asks: which database?"},
 		interrupted.ID:  {protocol.AttentionKindNeedsInput, "Turn interrupted · reply to continue"},
+		stranded.ID:     {protocol.AttentionKindNeedsInput, "Wait broken: pr:o/r#12:checks resolved, but the agent was not woken · reply to continue"},
 		disconnected.ID: {protocol.AttentionKindDisconnected, "Agent disconnected: eof"},
 		blocked.ID:      {protocol.AttentionKindBlocked, "Blocked: no credentials"},
 		failed.ID:       {protocol.AttentionKindFailed, "Agent reported failure; review the result. Run remains open for follow-up."},

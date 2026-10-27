@@ -752,6 +752,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       content, truncated: false, binary: false,
       size: new TextEncoder().encode(content).length, revision: 'saved', writable: true,
     })),
+    filesUpload: vi.fn(async () => ({})),
     filesDiff: vi.fn(async () => ({ patch: '', truncated: false })),
     disk: vi.fn(async () => ({
       used_bytes: 512 * 1024 * 1024,

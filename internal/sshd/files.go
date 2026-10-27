@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
@@ -27,6 +28,7 @@ func init() {
 	registerGuarded(protocol.MethodFilesRead, permissions.View, filesTarget, (*Server).filesRead)
 	registerGuarded(protocol.MethodFilesDiff, permissions.View, runTarget, (*Server).filesDiff)
 	registerMethod(protocol.MethodFilesWrite, (*Server).filesWrite)
+	registerMethod(protocol.MethodFilesUpload, (*Server).filesUpload)
 }
 
 // filesTarget chooses the run permission target when a request names a run,
@@ -152,26 +154,59 @@ func (s *Server) filesWrite(ctx context.Context, member domain.MemberID, params 
 	if perr != nil {
 		return nil, perr
 	}
+	if strings.IndexByte(p.Content, 0) >= 0 {
+		return nil, invalidParams("content must be text without NUL bytes; upload other files with files.upload")
+	}
+	result, perr := s.writeRepoFile(ctx, member, protocol.MethodFilesWrite, p, []byte(p.Content))
+	if perr != nil {
+		return nil, perr
+	}
+	return protocol.FilesReadResult{
+		Content:   string(result.Content),
+		Truncated: result.Truncated,
+		Binary:    result.Binary,
+		Size:      result.Size,
+		Revision:  result.Revision,
+		Writable:  true,
+	}, nil
+}
+
+func (s *Server) filesUpload(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.FilesUploadParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.RunID == "" {
+		return nil, invalidParams("run_id is required")
+	}
+	write := protocol.FilesWriteParams{Repo: p.Repo, WorkspaceID: p.WorkspaceID, RunID: p.RunID, Path: p.Path}
+	if _, perr = s.writeRepoFile(ctx, member, protocol.MethodFilesUpload, write, p.Content); perr != nil {
+		return nil, perr
+	}
+	return struct{}{}, nil
+}
+
+func (s *Server) writeRepoFile(ctx context.Context, member domain.MemberID, method string, p protocol.FilesWriteParams, content []byte) (gitengine.FileRead, *protocol.Error) {
 	if p.WorkspaceID == "" {
-		return nil, invalidParams("workspace_id is required")
+		return gitengine.FileRead{}, invalidParams("workspace_id is required")
 	}
 	if err := gitengine.ValidatePath(p.Path); err != nil {
-		return nil, invalidParams(err.Error())
+		return gitengine.FileRead{}, invalidParams(err.Error())
 	}
 	if p.Path == "" {
-		return nil, invalidParams("file path is required")
+		return gitengine.FileRead{}, invalidParams("file path is required")
 	}
 	reader := s.cfg.Services.Files
 	if reader == nil {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "files.write: file editing is not enabled"}
+		return gitengine.FileRead{}, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": file editing is not enabled"}
 	}
 	actor, err := resolveActor(ctx, s.cfg.Store, member)
 	if err != nil {
-		return nil, rpcError(err)
+		return gitengine.FileRead{}, rpcError(err)
 	}
 	checkout, workspace, perr := s.resolveRepo(ctx, p.RunID, p.WorkspaceID, p.Repo)
 	if perr != nil {
-		return nil, perr
+		return gitengine.FileRead{}, perr
 	}
 	lock := s.workspaceLock(workspace)
 	lock.RLock()
@@ -183,43 +218,35 @@ func (s *Server) filesWrite(ctx context.Context, member domain.MemberID, params 
 		cap = permissions.Steer
 		target, err = resolveRunTarget(ctx, s.cfg.Store, domain.RunID(p.RunID))
 		if err != nil {
-			return nil, rpcError(err)
+			return gitengine.FileRead{}, rpcError(err)
 		}
 	} else {
 		ws, workspaceErr := s.cfg.Store.GetWorkspace(ctx, workspace)
 		if workspaceErr != nil {
-			return nil, rpcError(workspaceErr)
+			return gitengine.FileRead{}, rpcError(workspaceErr)
 		}
 		ref = ws.BaseBranch
 		target = permissions.Target{Workspace: workspace}
 	}
 	if err = permissions.Check(cap, actor, target); err != nil {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodFilesWrite + ": " + err.Error()}
+		return gitengine.FileRead{}, &protocol.Error{Code: protocol.CodeDenied, Message: method + ": " + err.Error()}
 	}
 	m, err := s.cfg.Store.GetMember(ctx, member)
 	if err != nil {
-		return nil, rpcError(err)
+		return gitengine.FileRead{}, rpcError(err)
 	}
 	var signingKey []byte
 	if s.cfg.Signing != nil {
 		signingKey, err = s.cfg.Signing.Key(member)
 		if err != nil {
-			return nil, rpcError(err)
+			return gitengine.FileRead{}, rpcError(err)
 		}
 	}
-	result, err := reader.FilesWrite(ctx, workspace, checkout, ref, p.Path, []byte(p.Content), p.Revision, m.GitIdentity(), signingKey)
+	result, err := reader.FilesWrite(ctx, workspace, checkout, ref, p.Path, content, p.Revision, m.GitIdentity(), signingKey)
 	if err != nil {
-		return nil, filesWriteError(p.RunID, err)
+		return gitengine.FileRead{}, filesWriteError(method, p.RunID, err)
 	}
-	result.Writable = true
-	return protocol.FilesReadResult{
-		Content:   string(result.Content),
-		Truncated: result.Truncated,
-		Binary:    result.Binary,
-		Size:      result.Size,
-		Revision:  result.Revision,
-		Writable:  true,
-	}, nil
+	return result, nil
 }
 
 func (s *Server) filesDiff(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -256,8 +283,6 @@ func filesReadError(method, run string, err error) *protocol.Error {
 		return invalidParams("workspace_id does not own run_id")
 	case errors.Is(err, gitengine.ErrRevisionConflict):
 		return &protocol.Error{Code: protocol.CodeConflict, Message: method + ": file changed; reload before saving"}
-	case errors.Is(err, gitengine.ErrWorkspaceFile):
-		return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": " + err.Error()}
 	case errors.Is(err, gitengine.ErrSnapshotStorageLimit):
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": current diff input exceeds 128 MiB or available disk headroom"}
 	}
@@ -270,17 +295,17 @@ func filesReadError(method, run string, err error) *protocol.Error {
 	return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": file could not be read"}
 }
 
-func filesWriteError(run string, err error) *protocol.Error {
+func filesWriteError(method, run string, err error) *protocol.Error {
 	switch {
 	case errors.Is(err, gitengine.ErrInvalidPath):
 		return invalidParams(err.Error())
 	case errors.Is(err, gitengine.ErrWorkspaceMismatch):
 		return invalidParams("workspace_id does not own run_id")
 	case errors.Is(err, gitengine.ErrRevisionConflict):
-		return &protocol.Error{Code: protocol.CodeConflict, Message: "files.write: file changed; reload before saving"}
+		return &protocol.Error{Code: protocol.CodeConflict, Message: method + ": file changed; reload before saving"}
 	}
 	if run != "" {
-		return &protocol.Error{Code: protocol.CodeUnavailable, Message: "files.write: this run's checkout was removed; pull the branch to edit its files"}
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": this run's checkout was removed; pull the branch to edit its files"}
 	}
-	return &protocol.Error{Code: protocol.CodeUnavailable, Message: "files.write: workspace repository is unavailable"}
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": workspace repository is unavailable"}
 }

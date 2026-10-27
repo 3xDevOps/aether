@@ -211,8 +211,8 @@ in `internal/localgw/backend.go`. Their lost response may follow a committed wri
 so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A call with no answer after 60 seconds fails with `-32004`
 `server did not answer <method> within 1m0s` and is not retried;
-`home.upload`, `home.download` and `terminal.file`, which carry up to
-64 MiB, and `workspace.import`, whose first fetch of a large repository is
+`home.upload`, `home.download`, `files.upload` and `terminal.file`, which
+carry up to 64 MiB, and `workspace.import`, whose first fetch of a large repository is
 slow, get 15 minutes. Only that call's channel closes: a slow server
 handler is not a dead connection, so the connection, its streams and its
 other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
@@ -1075,6 +1075,7 @@ unavailable owned source remains the server's protocol error.
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
+| `files.upload` | `{"workspace_id":"...","run_id":"...","path":"assets/logo.png","content_base64":"..."}` | empty result |
 | `files.diff` | `{"run_id":"...","path":"README.md"}` | `{"patch":"...","truncated":false}` |
 | `config.roots` | `{}` | `{"roots":[{"harness":"claude","display_name":"Claude Code","path":"~/.claude","runtime_ignores":["projects/","shell-snapshots/","statsig/","todos/","file-history/","history.jsonl","daemon/","transcripts/",...],"credential_names":[".credentials.json",...]}]}` |
 | `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
@@ -1109,8 +1110,8 @@ unavailable owned source remains the server's protocol error.
 | `assistant.history` | `{"before_seq":0,"limit":1000}` | like `run.acp.history`. A `notice` item may carry an `action` record, below |
 | `assistant.item` | `{"seq":12}` | like `run.acp.item` |
 | `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
-| `workspace.environment.get` | `WorkspaceEnvironmentGetParams` (`{"workspace_id":"..."}`) | Any member. `WorkspaceEnvironmentResult` (`{"workspace_id":"...","setup_script":"npm ci\n","variables":[{"name":"API_URL","value":"https://api.example.test"},{"name":"NPM_TOKEN","secret":true}],"files":[{"path":".env","size":412}]}`), variables sorted by name and files by path; a secret never carries `value` and a file never carries its content |
-| `workspace.environment.set` | `WorkspaceEnvironmentSetParams` (`{"workspace_id":"...","setup_script":"npm ci\n","set":[{"name":"NPM_TOKEN","value":"...","secret":true}],"unset":["OLD_NAME"],"files":[{"path":".env","content":"..."}],"remove_files":["old.env"]}`; every field but `workspace_id` optional). Admin only. `set` adds or replaces, `unset` removes, `remove_files` removes files and then `files` adds or replaces them, a present `setup_script` replaces the script and `""` clears it; whatever is not named is kept. The script, each value and each file are limited to 64 KiB, and a workspace to 20 files. A file path is relative to the repository root, with no `.` or `..` component, no name that starts or ends with whitespace and nothing under `.git` | `WorkspaceEnvironmentResult` after the change, with `warning` when the change is saved and its timeline note was not recorded. A `run.launch` or `template.launch` the setup script fails answers with error data `{"setup_output":"..."}`: the end of what the script printed, secret values masked |
+| `workspace.environment.get` | `WorkspaceEnvironmentGetParams` (`{"workspace_id":"..."}`) | Any member. `WorkspaceEnvironmentResult` (`{"workspace_id":"...","setup_script":"npm ci\n","variables":[{"name":"API_URL","value":"https://api.example.test"},{"name":"NPM_TOKEN","secret":true}]}`), variables sorted by name; a secret never carries `value` |
+| `workspace.environment.set` | `WorkspaceEnvironmentSetParams` (`{"workspace_id":"...","setup_script":"npm ci\n","set":[{"name":"NPM_TOKEN","value":"...","secret":true}],"unset":["OLD_NAME"]}`; every field but `workspace_id` optional). Admin only. `set` adds or replaces, `unset` removes, a present `setup_script` replaces the script and `""` clears it; whatever is not named is kept. The script and each value are limited to 64 KiB | `WorkspaceEnvironmentResult` after the change, with `warning` when the change is saved and its timeline note was not recorded. A `run.launch` or `template.launch` the setup script fails answers with error data `{"setup_output":"..."}`: the end of what the script printed, secret values masked |
 | `workspace.mirror.status` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | Read-only for admitted members. `WorkspaceMirrorResult` reports whether mirroring is enabled, source, branch, status, observed and accepted commits, check times, public key, and safe warning/error fields; no private key or server path |
 | `workspace.mirror.configure` | `WorkspaceMirrorConfigureParams` (`{"workspace_id":"...","source_url":"https://github.com/acme/app.git","branch":"main","auth":"public"\|"deploy-key"\|"github","known_hosts":"...","github_account_id":42}`; last two fields optional and mode-specific) | `WorkspaceMirrorResult`; deploy-key configuration includes only the public key and safe installation warning; GitHub mode binds the authenticated admin and verified numeric account |
 | `workspace.mirror.refresh` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` after fetching the configured source branch |
@@ -1303,15 +1304,15 @@ rebinds to the current admin's verified account (and can check
 ### Files and member configuration
 
 `files.tree` and `files.read` address a workspace's base branch when
-`run_id` is omitted, or a live run checkout when it is present. Complete
+`run_id` is omitted, or a live run checkout when it is present. A run
+checkout's tree lists tracked, untracked and ignored files, but not a folder
+that is ignored as a whole, such as `node_modules/`. Complete
 valid UTF-8 text without NUL bytes is returned with an exact SHA-256
 `revision` and may be writable. Binary content is read-only with an empty
 revision. File reads, diffs, and editor writes carry complete content up to 64
 MiB. Binary or oversized content is read-only; an oversized response sets
 `truncated:true` and omits its `revision`. The `truncated` field remains in
-the wire shape for compatibility. `files.read` of a
-[workspace file](environments.md#files) in a run checkout answers `-32001`
-`files.read: <path>: a workspace file is readable only inside the run, by its agent or in its terminal`.
+the wire shape for compatibility.
 
 `files.write` without `run_id` requires **Push** and creates a one-file commit
 on the workspace base branch; it does not push upstream. With `run_id`, it
@@ -1319,7 +1320,13 @@ requires **Steer** and changes that run's uncommitted checkout. Existing file
 modes are preserved and new files use `0644`. Run-checkout saves recheck the
 revision immediately before atomic rename under Aether's root lock. Base
 commits compare-and-swap the branch head. Aether's locks do not serialize
-arbitrary live-agent filesystem writers.
+arbitrary live-agent filesystem writers. `content` is text without NUL bytes.
+
+`files.upload` adds one new file of any bytes, up to the same 64 MiB, to a
+run's checkout, the dashboard's **Upload files…**. It requires `run_id` and
+**Steer**, like a run-checkout `files.write`, and never replaces a file: a path
+the checkout already has answers `-32003` `files.upload: file changed; reload
+before saving`.
 
 `config.roots`, `config.tree`, `config.read`, `config.stat`, `config.write`,
 and `config.import` always address the authenticated member's own persistent
@@ -1469,7 +1476,7 @@ delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
-and `config.import` and `terminal.file` at 96 MiB. The 64 MiB file and
+and `config.import`, `home.upload`, `files.upload` and `terminal.file` at 96 MiB. The 64 MiB file and
 per-request import limits remain authoritative after JSON decoding. The SSH control-channel line cap is
 96 MiB, allowing base64 import requests without unbounded framing.
 The HTTP gateway admits at most two imports at once, before reading their
@@ -1936,6 +1943,10 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
   (`{"member_id":"..."}`), `member.identity.remove`
   (`{"member_id":"...","provider":"github","subject":"..."}`) and
   `server.owner.transfer` (`{"member_id":"..."}`).
+- `member.reviewer.link` (`{"member_id":"...","login":"..."}`), admins only,
+  binds the edge's [reviewer account](edge.md#reviewer-account) to a member
+  who is no admin while `edge-reviewer` is on, and answers the identity
+  `{"provider":"reviewer","subject":"<login>","login":"<login>","created_at":"..."}`.
 - `member.merge.start` answers `{"code":"XXXX-XXXX-XXXX-XXXX","expires_at":"..."}`,
   shown once. `member.merge.preview` (`{"code":"..."}`), from the other
   sign-in, answers the plan: `minted` and `proposer`, each with `id`,

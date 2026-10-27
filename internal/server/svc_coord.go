@@ -39,6 +39,7 @@ func init() {
 			// The scheduler is the single writer of run statuses, so the
 			// agent's own status reports land on it.
 			Reports:     d.Runs,
+			Waits:       d.Runs,
 			Outcomes:    d.Runs,
 			Development: d.Runs,
 			Memory:      d.Memory,

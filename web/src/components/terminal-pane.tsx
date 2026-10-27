@@ -22,7 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { type TerminalImageController, useTerminalImage } from '@/components/terminal-image'
 import { TerminalKeys } from '@/components/terminal-keys'
-import { TerminalControlBorder, type TerminalControlAppearance } from '@/components/terminal-control-border'
+import { ControlMatrix, type ControlAppearance } from '@/components/control-matrix'
 import { useTerminalPan } from '@/components/terminal-pan'
 import { coarsePointer, phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { copyScreen, copySelection } from '@/lib/term-clipboard'
@@ -268,7 +268,7 @@ export function TerminalPane({
   /** Redirect tools and mute input while the visible surface is recorded output. */
   readingSurface?: React.RefObject<TerminalReadSurface | null>
   /** Acknowledged local lease state; omitted on surfaces without shared control. */
-  controlAppearance?: TerminalControlAppearance
+  controlAppearance?: ControlAppearance
   takeoverProgress?: number
   tabs?: React.ReactNode
   notice?: React.ReactNode
@@ -324,22 +324,34 @@ export function TerminalPane({
       <div
         role="toolbar"
         aria-label="Terminal toolbar"
-        className="relative z-10 flex h-8 shrink-0 items-center gap-1 border-b border-seam bg-chrome px-1 coarse:h-11"
+        className={cn('relative z-10 flex h-8 shrink-0 items-center gap-1 border-b border-seam bg-chrome px-1 coarse:h-11', controlAppearance && 'overflow-clip')}
       >
-        {controller.findOpen ? (
-          <FindBar
-            search={readingSurface ? {
-              findNext: (term) => readingSurface.current?.findNext(term) ?? false,
-              findPrevious: (term) => readingSurface.current?.findPrevious(term) ?? false,
-              cancelFind: () => readingSurface.current?.cancelFind(),
-            } : controller.search}
-            onNavigate={controller.noteViewportInteraction}
-            onClose={closeFind}
+        {controlAppearance && (
+          <ControlMatrix
+            appearance={replaying || readingSurface ? 'hidden' : controlAppearance}
+            takeoverProgress={takeoverProgress}
           />
-        ) : (
+        )}
+        <div className={cn('flex min-w-0 items-center gap-1', controller.findOpen && 'flex-1', controlAppearance && 'control-matrix-clear')}>
+          {controller.findOpen ? (
+            <FindBar
+              search={readingSurface ? {
+                findNext: (term) => readingSurface.current?.findNext(term) ?? false,
+                findPrevious: (term) => readingSurface.current?.findPrevious(term) ?? false,
+                cancelFind: () => readingSurface.current?.cancelFind(),
+              } : controller.search}
+              onNavigate={controller.noteViewportInteraction}
+              onClose={closeFind}
+            />
+          ) : (
+            <>
+              {tabs}
+              <TerminalTools controller={controller} image={image} readingSurface={readingSurface} onCaptures={onCaptures} />
+            </>
+          )}
+        </div>
+        {!controller.findOpen && (
           <>
-            {tabs}
-            <TerminalTools controller={controller} image={image} readingSurface={readingSurface} onCaptures={onCaptures} />
             <div className="min-w-0 flex-1" />
             {toolbarEnd}
           </>
@@ -361,12 +373,6 @@ export function TerminalPane({
         }}
       />
         {surface}
-        {controlAppearance && (
-          <TerminalControlBorder
-            appearance={replaying || readingSurface ? 'hidden' : controlAppearance}
-            takeoverProgress={takeoverProgress}
-          />
-        )}
       </div>
       {coarse && writable && !readingSurface && <TerminalKeys controller={controller} />}
       {children}

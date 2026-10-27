@@ -112,32 +112,63 @@
   visibility: inherit;
 }
 
-.terminal-control-border {
+@property --control-reach {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+
+.control-matrix,
+.control-matrix-light,
+.control-matrix-light > div {
   position: absolute;
-  inset: 0 0 auto;
-  z-index: 40;
+  inset: 0;
+}
+
+.control-matrix,
+.control-matrix-light > div {
+  background: radial-gradient(circle, currentColor 0.75px, transparent 1.25px) 0 0 / 6px 6px;
+}
+
+.control-matrix {
+  z-index: -1;
   pointer-events: none;
-  width: 100%;
-  height: min(5.6rem, 100%);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1;
+  color: color-mix(in srgb, var(--text) 24%, transparent);
+}
+
+:has(> .control-matrix) .text-muted {
+  color: var(--text);
+}
+
+/* In the components layer, so a ghost button's hover fill still wins. */
+@layer components {
+  .control-matrix-clear {
+    border-radius: var(--radius-control);
+    background-color: color-mix(in srgb, var(--chrome) 90%, transparent);
+    box-shadow: 0 0 20px 10px color-mix(in srgb, var(--chrome) 90%, transparent);
+  }
+}
+
+.control-matrix-light {
+  --control-edge: calc(var(--control-hold, 0) * (100% + 4rem));
   color: var(--control-light);
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
 }
 
-.terminal-control-border .control-glow {
-  stroke-width: 28;
-  opacity: var(--control-glow);
+.control-matrix-light > div {
+  opacity: var(--control-dots);
 }
 
-.terminal-control-border .control-halo {
-  stroke-width: 4.2;
+/* Revealed from the right edge, where Take control and Release sit, so the
+   color pours out of the button and drains back into it. During a hold, red
+   spreads from the same edge and blends into the teal over 4rem. */
+.control-matrix-reach {
+  clip-path: inset(0 0 0 calc(var(--control-reach) * 100%));
+  mask-image: linear-gradient(to left, transparent calc(var(--control-edge) - 4rem), #000 var(--control-edge));
 }
 
-.terminal-control-border .control-rim {
-  stroke-width: 1.5;
+.control-matrix-hold {
+  color: var(--state-failed);
+  mask-image: linear-gradient(to left, #000 calc(var(--control-edge) - 4rem), transparent var(--control-edge));
 }
 
 /* Design tokens, v2. docs/styles.md lists each role. The contrast pairs are
@@ -166,7 +197,7 @@
   --icon-faint: #8a8a8a;
   --accent-fill: #367f77;
   --control-light: #367f77;
-  --control-glow: 0.3;
+  --control-dots: 100%;
   --accent-text: #306f69;
   --on-accent: #ffffff;
   --selection: #dfebe9;
@@ -231,7 +262,7 @@
   --icon-faint: #7a7a7a;
   --accent-fill: #367f77;
   --control-light: #4cc2b3;
-  --control-glow: 0.6;
+  --control-dots: 70%;
   --accent-text: #5fb3a8;
   --on-accent: #ffffff;
   --selection: #17413d;

@@ -467,6 +467,13 @@ func (f *fakeRuns) AgentModels(_ context.Context, member, account domain.MemberI
 	return protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: harness}}}, nil
 }
 
+func (f *fakeRuns) CachedAgentModels(_ domain.MemberID, harness string) (protocol.AgentModelsResult, bool) {
+	if harness != "claude" && harness != "codex" {
+		return protocol.AgentModelsResult{}, false
+	}
+	return protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: harness}, {ID: "opus"}}}, true
+}
+
 func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {
 	return true, nil
 }
@@ -674,6 +681,7 @@ func (f *fakeRuns) Paused(run domain.RunID) bool {
 }
 
 func (f *fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
+func (f *fakeRuns) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
 
 func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	f.mu.Lock()

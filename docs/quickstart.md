@@ -201,8 +201,8 @@ repository** adds another repository later.
 | A clone on your computer | **From a local clone → Create from local clone**, then push the base branch. Needs the desktop app or `aether gui` on that computer. Or [from the CLI](#from-the-cli). |
 
 [teams.md](teams.md) covers each source. A workspace can also run a setup script
-(such as `npm ci`), set variables and put files such as `.env` in new runs:
-**Environment** on its **Repository** page, or `aether workspace env`
+(such as `npm ci`) and set variables in new runs: **Environment** on its
+**Repository** page, or `aether workspace env`
 ([environments.md](environments.md#workspace-environment)).
 
 ### From the CLI
@@ -355,7 +355,7 @@ Open a run to see its views:
 | **Session** | An Enhanced run's messages, tool calls and approvals, with a message box |
 | **Terminal** | A Standard run's agent terminal, and extra shells in its container |
 | **Changes** | The diff against the base branch |
-| **Files** | The run's checkout; **Save** writes your edit into it |
+| **Files** | The run's checkout; **Save** writes your edit into it, and **Upload files…** or dropping files adds files to it |
 | **Browser** | A Chromium on the server beside the run, where `localhost` is the run's own app |
 
 `aether message <run-id> "also update the README"` messages the agent and
@@ -417,10 +417,14 @@ you by the [Needs you](failure-handling.md#needs-you) rule (a question, a
 permission request, a `needs-input` or `blocked` report, or a disconnected
 agent), 4 when it is parked with nothing pending, because its turn ended with
 an `answered` report or no report or it went silent, and a message continues it (`aether message
-<run-id> "<reply>"`), and 124 on timeout. Before exiting it prints `run
+<run-id> "<reply>"`), 5 when its wait broke (a condition it waited on resolved
+and the wake never reached the agent, or its source went unread for an hour; see [Waits Aether can
+check](failure-handling.md#waits-aether-can-check)), and 124 on timeout. Before exiting it prints `run
 <run-id> <state>: <reason>`, with the state as `aether runs` labels it. It keeps waiting
 while the run waits on agents, CI or a process, and on a swarm worker's
-question, which its integrator answers. It also exits 1 on its
+question, which its integrator answers. When Aether cannot vouch for that wait
+it says so once on stderr: `run <run-id> still waits, but <condition>: status
+unknown (last read 12m ago): <error>`. It also exits 1 on its
 own error, such as an unknown run id, with the error on stderr and nothing on
 stdout. `aether runs --needs-you` lists the runs waiting on you, and `aether
 runs <run-id>` shows what one needs with the command that answers it. `aether

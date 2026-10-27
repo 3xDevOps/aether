@@ -24,39 +24,26 @@ func TestStoreKeepsSecretsInOwnerOnlyFiles(t *testing.T) {
 	if got, err = s.Get("ws_1"); err != nil || !maps.Equal(got, want) {
 		t.Fatalf("Get = %v, %v, want %v", got, err, want)
 	}
-	if got, err = s.Get("ws_2"); err != nil || len(got) != 0 {
-		t.Fatalf("another workspace reads %v, %v, want empty", got, err)
+	if other, err := s.Get("ws_2"); err != nil || len(other) != 0 {
+		t.Fatalf("another workspace reads %v, %v, want empty", other, err)
 	}
-	files := map[string]string{".env": "NPM_TOKEN=value-one\n"}
-	if err = s.PutFiles("ws_1", files); err != nil {
-		t.Fatalf("PutFiles: %v", err)
-	}
-	if got, err = s.Files("ws_1"); err != nil || !maps.Equal(got, files) {
-		t.Fatalf("Files = %v, %v, want %v", got, err, files)
-	}
-	for path, mode := range map[string]os.FileMode{dir: 0o700, filepath.Join(dir, "ws_1.json"): 0o600, filepath.Join(dir, "ws_1.files.json"): 0o600} {
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			t.Fatalf("stat %s: %v", path, statErr)
+	for path, mode := range map[string]os.FileMode{dir: 0o700, filepath.Join(dir, "ws_1.json"): 0o600} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
 		}
 		if info.Mode().Perm() != mode {
 			t.Errorf("%s mode = %o, want %o", path, info.Mode().Perm(), mode)
 		}
 	}
 
-	if err = s.Put("ws_1", nil); err != nil {
+	if err := s.Put("ws_1", nil); err != nil {
 		t.Fatalf("Put empty: %v", err)
 	}
-	if got, err = s.Files("ws_1"); err != nil || !maps.Equal(got, files) {
-		t.Fatalf("Files after removing every secret = %v, %v, want %v", got, err, files)
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("directory after removing every secret = %v, %v, want empty", entries, err)
 	}
-	if err = s.Delete("ws_1"); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if entries, readErr := os.ReadDir(dir); readErr != nil || len(entries) != 0 {
-		t.Fatalf("directory after Delete = %v, %v, want empty", entries, readErr)
-	}
-	if err = s.Delete("ws_1"); err != nil {
+	if err := s.Delete("ws_1"); err != nil {
 		t.Fatalf("Delete with nothing stored: %v", err)
 	}
 }

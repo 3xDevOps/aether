@@ -18,7 +18,7 @@ import (
 func init() {
 	register(command{
 		name:    "wait",
-		short:   "wait until a run finishes, needs you or ends its turn (exit 0 finished, 1 failed, 3 needs you, 4 parked until a message, 124 timed out)",
+		short:   "wait until a run finishes, needs you or ends its turn (exit 0 finished, 1 failed, 3 needs you, 4 parked until a message, 5 its wait broke, 124 timed out)",
 		usage:   "aether wait <run-id> [--timeout <duration>] [--json]",
 		example: "aether wait run-d6ay38tj8j --timeout 30m --json",
 		flags:   true,
@@ -31,6 +31,7 @@ const (
 	waitFailed   = 1
 	waitNeedsYou = 3
 	waitWaiting  = 4
+	waitBroken   = 5
 	waitTimedOut = 124
 )
 
@@ -95,7 +96,7 @@ func runWait(args []string) error {
 		go signalLines(stream, changed)
 		every = waitRecheck
 	}
-	err = waitRun(c, os.Stdout, runID, *asJSON, changed, every, deadline, *timeout)
+	err = waitRun(c, os.Stdout, os.Stderr, runID, *asJSON, changed, every, deadline, *timeout)
 	return timedOutAfterCut(err, cutOff.Load(), *timeout, runID)
 }
 
@@ -121,13 +122,23 @@ func signalLines(stream io.Reader, changed chan<- struct{}) {
 	}
 }
 
-func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed <-chan struct{}, every time.Duration, deadline <-chan time.Time, timeout time.Duration) error {
+func waitRun(c *protocol.Client, w, stderr io.Writer, runID string, asJSON bool, changed <-chan struct{}, every time.Duration, deadline <-chan time.Time, timeout time.Duration) error {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
+	var doubt string
 	for {
 		r, err := getRun(c, runID)
 		if err != nil {
 			return err
+		}
+		// A wait Aether cannot vouch for keeps waiting, said once on stderr.
+		// The source's error text can change on every read, so it does not
+		// make the doubt new.
+		if r.Wait != nil && (r.Wait.Kind == domain.WaitSourceUnknown || r.Wait.Kind == domain.WaitFault) {
+			if key := string(r.Wait.Kind) + "|" + r.Wait.Detail; key != doubt {
+				doubt = key
+				_, _ = fmt.Fprintf(stderr, "run %s still waits, but %s\n", r.ID, printable(r.Wait.Text(time.Now())))
+			}
 		}
 		items, err := attentionItems(c, r.WorkspaceID)
 		if err != nil {
@@ -165,6 +176,8 @@ func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed
 			return &exitStatusError{code: code, err: fmt.Errorf("run %s needs you", r.ID)}
 		case code == waitWaiting:
 			return &exitStatusError{code: code, err: fmt.Errorf("run %s is parked and waits for a message", r.ID)}
+		case code == waitBroken:
+			return &exitStatusError{code: code, err: fmt.Errorf("run %s will not wake on its own: %s", r.ID, printable(r.Reason))}
 		}
 		return nil
 	}
@@ -174,7 +187,9 @@ func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed
 // holds one of its requests for you, or by the rule aether runs --needs-you
 // shares; one parked with nothing pending waits for a message, which is not a
 // request for a person. Waiting on agents, CI or a process, or a swarm
-// worker's request its integrator answers, keeps the wait going.
+// worker's request its integrator answers, keeps the wait going. A wait
+// whose condition resolved but whose wake never reached the agent, or whose
+// source went unread for an hour, is broken.
 func waitOutcome(r protocol.Run, items []protocol.AttentionItem) (int, bool) {
 	status := domain.RunStatus(r.Status)
 	switch {
@@ -184,6 +199,8 @@ func waitOutcome(r protocol.Run, items []protocol.AttentionItem) (int, bool) {
 		return waitFinished, true
 	case !status.Live() || r.Paused:
 		return 0, false
+	case r.Activity == string(domain.ActivityNeedsYou) && r.Cause == string(events.CauseWaitFault):
+		return waitBroken, true
 	}
 	for _, it := range items {
 		if it.RunID == r.ID && it.Kind != protocol.AttentionKindReady && it.Kind != protocol.AttentionKindFailed {
@@ -211,7 +228,7 @@ func printWaited(w io.Writer, v runView, r protocol.Run, items []protocol.Attent
 		return err
 	}
 	switch code {
-	case waitWaiting:
+	case waitWaiting, waitBroken:
 		_, err := fmt.Fprintf(w, "  aether message %s \"<reply>\"\n", r.ID)
 		return err
 	case waitNeedsYou:
