@@ -104,6 +104,61 @@ func TestDroppingNeedsYouSettlesItsPushes(t *testing.T) {
 	}
 }
 
+// failingDrop fails dropping a watch's need pushes while fail is set.
+type failingDrop struct {
+	*store.DB
+	fail atomic.Bool
+}
+
+func (f *failingDrop) DropWatchNeedPushes(ctx context.Context, watch string, now time.Time, detail string) error {
+	if f.fail.Load() {
+		return errors.New("database is locked")
+	}
+	return f.DB.DropWatchNeedPushes(ctx, watch, now, detail)
+}
+
+func TestRetryingAnUpdateThatFailedCleanupSettlesAPausedWatchsNeeds(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	_ = h.svc.Close()
+	st := &failingDrop{DB: h.db}
+	svc, err := New(Config{
+		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	paused := true
+	if _, err := svc.Update(h.ctx, h.bob.ID, protocol.WatchUpdateParams{WatchID: w.ID, Paused: &paused}); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	drop := protocol.WatchUpdateParams{WatchID: w.ID, Conditions: []string{protocol.WatchFinished}}
+	st.fail.Store(true)
+	if _, err := svc.Update(h.ctx, h.bob.ID, drop); err == nil {
+		t.Fatal("Update succeeded while its cleanup failed")
+	}
+	st.fail.Store(false)
+	if _, err := svc.Update(h.ctx, h.bob.ID, drop); err != nil {
+		t.Fatalf("retried Update: %v", err)
+	}
+	h.eventually("the need withdrawn", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusWithdrawn })
+	if n := phone.received.Load(); n != 2 {
+		t.Fatalf("device received %d pushes, want the question and its withdrawal", n)
+	}
+}
+
 func TestANeedSentWhileNeedsYouIsDroppedIsWithdrawn(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

@@ -541,7 +541,6 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 			return protocol.WatchResult{}, invalid("watch %s is done: its target reached its final state", w.ID)
 		}
 		now := s.now()
-		watchedNeeds := slices.Contains(w.Conditions, protocol.WatchNeedsYou)
 		if len(p.Conditions) > 0 {
 			if w.Conditions, err = s.normalize(w.TargetKind, p.Conditions); err != nil {
 				return protocol.WatchResult{}, err
@@ -584,7 +583,9 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 			return protocol.WatchResult{}, err
 		}
 		ctx = context.WithoutCancel(ctx)
-		if watchedNeeds && !slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
+		// Also when needs_you was already absent: an earlier update may
+		// have saved the conditions and failed before this cleanup.
+		if !slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
 			if err := s.store.DropWatchNeedPushes(ctx, w.ID, now, stoppedNeeds); err != nil {
 				return protocol.WatchResult{}, err
 			}
