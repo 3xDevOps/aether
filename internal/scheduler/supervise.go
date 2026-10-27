@@ -608,9 +608,17 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		s.mu.Lock()
 		live := s.runs[e.runID] == e && !e.finalizing
 		paused, status, started, acp := e.paused, e.status, e.startedAt, e.acp
+		if e.quietFrom.After(started) {
+			started = e.quietFrom
+		}
 		s.mu.Unlock()
 		if !live || paused || (status != domain.RunRunning && status != domain.RunNeedsAttention) {
 			continue
+		}
+		liveness, enhanced := s.Liveness(e.runID)
+		reminder := enhanced && s.acp.reminding(e.runID)
+		if liveness.Since.After(started) {
+			started = liveness.Since
 		}
 		activity, observed := started, false
 		if t := s.driver(acp).LastActivity(e.runID); t.After(activity) {
@@ -632,19 +640,17 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			// by anything on the terminal.
 			heldForTheMember := (e.agentReport.State == agentstatus.Idle &&
 				e.reporter == harness.ReporterFull) || e.questionHeld(e.agentReport)
+			limit := s.cfg.stallLimit(liveness.Phase, heldByTasks(e.agentReport), reminder)
+			// Released only by activity newer than what parked it.
 			released := e.status == domain.RunNeedsAttention && observed &&
-				idle <= s.cfg.StallThreshold && !heldForTheMember
+				idle <= min(limit, s.cfg.StallThreshold) && !heldForTheMember
 			if released && (e.agentReport.State == agentstatus.Idle || e.idleShown) {
 				released = e.unparks(activity, s.cfg.turnTail)
-			}
-			limit := s.cfg.StallThreshold
-			if heldByTasks(e.agentReport) {
-				limit *= heldStallFactor
 			}
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > limit:
-				reason := fmt.Sprintf("%sno output or file changes for %s", stalledReasonPrefix, idle.Truncate(time.Second))
+				reason := stalledReason(liveness, enhanced, idle)
 				// The stall is the turn end only on a harness that cannot
 				// report one; elsewhere the agent is quiet mid-turn and the
 				// idle outcome waits for its turn-end report.
