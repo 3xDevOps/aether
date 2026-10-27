@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useAssistantAvailable } from '@/components/assistant/button'
 import { Brain } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { Api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import { prefersReducedMotion, useDelayed } from '@/lib/hooks'
+import { restorePreference } from '@/lib/preferences'
 import type { Preference } from '@/lib/types'
 import { forgetWarning, PreferenceRow, type Scope, ScopePills } from '@/routes/settings/memory-row'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
@@ -26,8 +27,13 @@ function newest(list: Preference[]): Preference[] {
   return [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
 }
 
-/** Settings › Memory: the member's private assistant preferences. */
+/** Settings › Memory: the member's private assistant preferences. Keyed by identity, so another member never inherits the list. */
 export function MemorySection({ client }: { client: Api }) {
+  const identity = useStore((s) => s.identityKey)
+  return <MemoryBody key={identity} client={client} />
+}
+
+function MemoryBody({ client }: { client: Api }) {
   const assistant = useAssistantAvailable()
   const entry = useStore((s) => (s.route.name === 'settings' ? s.route.params.entry : undefined))
   const workspaces = useStore((s) => s.workspaces)
@@ -44,6 +50,8 @@ export function MemorySection({ client }: { client: Api }) {
   const [toggleError, setToggleError] = useState<string | null>(null)
   const [forgotten, setForgotten] = useState<Preference | null>(null)
   const [undoError, setUndoError] = useState<string | null>(null)
+  const [undoing, setUndoing] = useState(false)
+  const reloaded = useRef<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)
   const skeleton = useDelayed(load.kind === 'loading')
   const textID = useId()
@@ -67,6 +75,12 @@ export function MemorySection({ client }: { client: Api }) {
   }, [client, attempt])
 
   const found = entry !== undefined && list.some((p) => p.id === entry)
+  // The assistant may have saved it since the list was read.
+  useEffect(() => {
+    if (!entry || found || load.kind !== 'ready' || reloaded.current === entry) return
+    reloaded.current = entry
+    setAttempt((n) => n + 1)
+  }, [entry, found, load.kind])
   useEffect(() => {
     if (!entry || !found) return
     document.getElementById(`preference-${entry}`)?.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
@@ -109,14 +123,16 @@ export function MemorySection({ client }: { client: Api }) {
   }
 
   const undoForget = async () => {
-    if (!forgotten) return
+    if (!forgotten || undoing) return
     setUndoError(null)
+    setUndoing(true)
     try {
-      const result = await client.preferenceAdd({ text: forgotten.text, ...(forgotten.workspace_id ? { workspace_id: forgotten.workspace_id } : {}) })
-      put(result.preference)
+      put(await restorePreference(client, forgotten))
       setForgotten(null)
     } catch (err) {
       setUndoError(errorSentence(err))
+    } finally {
+      setUndoing(false)
     }
   }
 
@@ -170,7 +186,7 @@ export function MemorySection({ client }: { client: Api }) {
             title={`Forgotten: ${forgotten.text}`}
             actions={(
               <>
-                <Button size="sm" variant="secondary" onClick={() => void undoForget()}>Undo</Button>
+                <Button size="sm" variant="secondary" disabled={undoing} onClick={() => void undoForget()}>Undo</Button>
                 <Button size="sm" variant="ghost" onClick={() => setForgotten(null)}>Dismiss</Button>
               </>
             )}

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import type { AssistantAction, PreferenceFacts } from '@/lib/assistant-actions'
 import { errorSentence } from '@/lib/format'
+import { restorePreference } from '@/lib/preferences'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
@@ -12,8 +13,10 @@ type Facts = Exclude<PreferenceFacts, { kind: 'used' }>
 
 async function undo(facts: Facts): Promise<void> {
   if (facts.kind === 'saved') await api.preferenceDelete(facts.id)
-  else if (facts.kind === 'updated') await api.preferenceUpdate({ id: facts.id, text: facts.previous.text })
-  else await api.preferenceAdd({ text: facts.text, ...(facts.workspace_id ? { workspace_id: facts.workspace_id } : {}) })
+  else if (facts.kind === 'updated') {
+    const { text, workspace_id } = facts.previous
+    await api.preferenceUpdate({ id: facts.id, text, ...(workspace_id ? { workspace_id } : { clear_workspace: true }) })
+  } else await restorePreference(api, facts)
 }
 
 /** Undo for a saved, updated or forgotten preference, with the server's refusal shown as it came. */

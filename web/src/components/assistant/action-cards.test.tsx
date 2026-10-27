@@ -476,7 +476,7 @@ describe('preference cards', () => {
     const notice = await card(aside, /^Updated: Prefer JSON output\. Done$/)
     expect(within(notice).getByText('was: Prefer table output')).toBeDefined()
     await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
-    expect(api.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-1', text: 'Prefer table output' })
+    expect(api.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-1', text: 'Prefer table output', clear_workspace: true })
   })
 
   it('shows a forgotten preference, undoes it by adding the text again and shows a refusal verbatim', async () => {

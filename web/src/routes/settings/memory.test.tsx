@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
 import type { Preference } from '@/lib/types'
@@ -199,5 +199,25 @@ describe('memory in settings', () => {
     seed('pref-gone')
     show([pref()])
     expect(await screen.findByText(/That preference no longer exists/)).toBeDefined()
+  })
+
+  it('puts a forgotten, turned-off preference back turned off', async () => {
+    const user = userEvent.setup()
+    const client = show([pref({ enabled: false })], {
+      preferenceDelete: vi.fn(async () => ({ deleted: pref({ enabled: false }) })),
+      preferenceAdd: vi.fn(async () => ({ preference: pref({ id: 'pref-2' }) })),
+      preferenceUpdate: vi.fn(async () => ({ preference: pref({ id: 'pref-2', enabled: false }) })),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    await user.click(await screen.findByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-2', enabled: false }))
+  })
+
+  it('drops another member\'s list when the identity changes', async () => {
+    show([pref()])
+    expect(await screen.findByText('Prefer table output')).toBeDefined()
+    act(() => useStore.setState({ identityKey: 'someone-else' }))
+    await waitFor(() => expect(screen.queryByText('Prefer table output')).toBeNull())
   })
 })

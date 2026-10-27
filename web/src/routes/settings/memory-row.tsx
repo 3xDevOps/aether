@@ -97,7 +97,7 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
             <Textarea aria-label="Preference text" value={text} rows={2} onChange={(event) => setText(event.target.value)} />
             <ScopePills label="Applies to" value={scope} onChange={setScope} />
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" disabled={busy || text.trim() === '' || !changed} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>
+              <Button size="sm" disabled={busy || text.trim() === '' || !changed || (scope === 'workspace' && !preference.workspace_id && !activeWorkspace)} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setError(null); setMode('view') }}>Cancel</Button>
             </div>
           </div>
