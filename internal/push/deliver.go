@@ -27,8 +27,10 @@ type DeviceResult struct {
 // Message is a notification Deliver sends. URL is the dashboard path a
 // click opens; Run names the run it is about, when it is about one.
 // Notice keeps it shown when the run's need later ends and its
-// notification is cleared. Clear quietly replaces the need shown under the
-// same run, or URL when there is no run, as a need that ended is.
+// notification is cleared. Topic, when set, also tags the notification on
+// the device, so it is shown and cleared apart from the run's own: a clear
+// of the run never replaces it. Clear quietly replaces the notification
+// shown under the same tag, as a need that ended is.
 type Message struct {
 	Title, Body, URL string
 	Run              domain.RunID
@@ -41,6 +43,7 @@ type Message struct {
 type message struct {
 	notification
 	URL string `json:"url,omitempty"`
+	Tag string `json:"tag,omitempty"`
 }
 
 // Deliver sends m to every device member subscribed now, without waiting
@@ -51,7 +54,7 @@ func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message
 	if m.Clear {
 		n.Body, n.Clear = clearedBody, true
 	}
-	payload, err := json.Marshal(message{notification: n, URL: m.URL})
+	payload, err := json.Marshal(message{notification: n, URL: m.URL, Tag: m.Topic})
 	if err != nil {
 		return nil, fmt.Errorf("push: encode notification: %w", err)
 	}

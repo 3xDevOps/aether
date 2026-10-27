@@ -95,6 +95,20 @@ describe('service worker', () => {
     })
   })
 
+  it("keeps a watch's need apart from the run's, so the run's clear never replaces it", async () => {
+    const run = 'run-7k2m9q4xbd'
+    const tag = 'wat-3m8q2k7v4c|needs_you'
+    const { self, dispatch } = worker()
+    await dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'which region?', run, url: `/?run=${run}`, tag }) } })
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Fix it', expect.objectContaining({ tag, renotify: true }))
+    await dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'No longer needs you', run, clear: true }) } })
+    expect(self.registration.getNotifications).toHaveBeenLastCalledWith({ tag: run })
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Fix it', expect.objectContaining({ tag: run, silent: true }))
+    await dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'No longer needs you', run, url: `/?run=${run}`, tag, clear: true }) } })
+    expect(self.registration.getNotifications).toHaveBeenLastCalledWith({ tag })
+    expect(self.registration.showNotification).toHaveBeenLastCalledWith('Fix it', expect.objectContaining({ tag, silent: true }))
+  })
+
   it('still shows a cleared need the user already dismissed, without alerting', async () => {
     const { self, dispatch } = worker()
     await dispatch('push', {

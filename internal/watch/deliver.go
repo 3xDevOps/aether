@@ -186,8 +186,10 @@ func (s *Service) withdraw(ctx context.Context, member domain.MemberID, n *store
 }
 
 // topicOf is the push topic of n, under which a push service keeps only
-// the newest message a device has yet to receive. A watch's needs have one
-// of their own, so withdrawing one never displaces its other notices.
+// the newest message a device has yet to receive, and the tag of its
+// notification there. A watch's needs have one of their own, so
+// withdrawing one never displaces its other notices, and the run's own
+// clears never replace them.
 func topicOf(n *store.WatchNotification) string {
 	if n.Condition == protocol.WatchNeedsYou {
 		return n.WatchID + "|" + protocol.WatchNeedsYou

@@ -25,11 +25,11 @@ self.addEventListener('push', (event) => {
 })
 
 async function display(message) {
-  const cleared = message.run || message.url
+  const cleared = message.tag || message.run || message.url
   if (message.clear && cleared) {
-    // The need of the run, or of the page a swarm's need opens, ended. A
-    // push that shows nothing would cost the subscription on Safari, so the
-    // notification is replaced quietly instead of closed.
+    // The need of a watch, of the run, or of the page a swarm's need opens,
+    // ended. A push that shows nothing would cost the subscription on
+    // Safari, so the notification is replaced quietly instead of closed.
     const [current] = await self.registration.getNotifications({ tag: cleared })
     // An assistant's newer notice about the run stays, shown again as it was.
     const notice = current?.data?.notice === true
@@ -44,9 +44,9 @@ async function display(message) {
   }
   await self.registration.showNotification(message.title || 'Aether', {
     body: message.body || 'A run needs you.',
-    // One notification per run, workspace budget or page: a newer one
-    // replaces the older and alerts again.
-    tag: message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
+    // One notification per watch notice, run, workspace budget or page: a
+    // newer one replaces the older and alerts again.
+    tag: message.tag || message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
     renotify: true,
     icon: '/icons/icon-192.png',
     data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url },
