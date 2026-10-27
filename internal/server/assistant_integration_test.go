@@ -65,7 +65,7 @@ func (r *assistantRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec 
 	return e, nil
 }
 
-// Exec answers the assistant's install check: the agent is installed.
+// Exec answers the adapter's install: it succeeds.
 func (r *assistantRuntime) Exec(context.Context, runtime.ID, []string, string) (int, string, string, error) {
 	return 0, "", "", nil
 }

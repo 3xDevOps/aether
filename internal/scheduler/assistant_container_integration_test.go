@@ -84,10 +84,12 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	})
 	assistant := shareRun{docker: docker, id: cid}
 	assistant.want(t, `printf '%s|%s|%s' "$HOME" "$(pwd)" "$PATH"`,
-		"/root|/assistant|/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+		"/root|/assistant|/opt/aether-assistant/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	assistant.want(t, "cat /assistant/CLAUDE.md", "server instructions")
-	if code, _ := assistant.sh(t, "echo run-planted-7c1 > /assistant/CLAUDE.md"); code == 0 {
-		t.Fatal("the assistant's instructions are writable")
+	for _, p := range []string{"/assistant/CLAUDE.md", AssistantInstallPath + "/bin/node"} {
+		if code, _ := assistant.sh(t, "echo run-planted-7c1 > "+p); code == 0 {
+			t.Fatalf("the assistant can write %s", p)
+		}
 	}
 	for _, p := range []string{"/root/CLAUDE.md", "/root/.claude/CLAUDE.md", "/root/.claude/settings.json", "/root/.codex", "/root/.bashrc", "/root/.local/bin/claude-agent-acp"} {
 		if code, out := assistant.sh(t, "[ -e "+p+" ]"); code == 0 {
@@ -127,16 +129,13 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 		}
 	}
 
-	assistantHome := AssistantHomeDir(assistantDir, member)
-	seedHome(t, assistantHome, map[string]string{
-		".local/bin/claude":           "#!/bin/sh\n",
-		".local/bin/node":             "#!/bin/sh\necho " + claude.ACPInstall.Version + "\n",
-		".local/bin/claude-agent-acp": "#!/bin/sh\necho \"adapter in $(pwd) as $IS_SANDBOX\"\nexec cat\n",
-	})
-	for _, name := range []string{"claude", "node", "claude-agent-acp"} {
-		if err := os.Chmod(filepath.Join(assistantHome, ".local", "bin", name), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	install := AssistantInstallDir(assistantDir, member)
+	seedHome(t, install, map[string]string{"bin/claude-agent-acp": "#!/bin/sh\necho \"adapter in $(pwd) as $IS_SANDBOX\"\nexec cat\n"})
+	if err := os.Chmod(filepath.Join(install, "bin", "claude-agent-acp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(assistantInstalled(assistantDir, member), []byte(claude.ACPInstall.Package+"@"+claude.ACPInstall.Version), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	exec, err := e.sched.StartAssistantExec(ctx, member, "claude", runtime.ExecSpec{
 		Argv: claude.ACPArgs, CreationKey: "assistant-integration", Env: []string{"IS_SANDBOX=1"},

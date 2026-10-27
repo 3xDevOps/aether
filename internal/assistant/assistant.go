@@ -75,6 +75,7 @@ type Host interface {
 	StopAssistantExec(ctx context.Context, identity runtime.ExecIdentity) error
 	DiscardAssistantState(ctx context.Context, member domain.MemberID) error
 	RemoveAssistant(ctx context.Context, member domain.MemberID) error
+	AssistantLoginFound(member domain.MemberID, agent string) (bool, error)
 }
 
 type Service struct {
@@ -272,7 +273,7 @@ func (s *Service) agents(ctx context.Context, id domain.MemberID) ([]protocol.As
 	if err := json.Unmarshal(raw, &listed); err != nil {
 		return nil, fmt.Errorf("assistant: decode the agent list: %w", err)
 	}
-	return readiness(listed.Agents), nil
+	return readiness(listed.Agents, func(agent string) (bool, error) { return s.cfg.Host.AssistantLoginFound(id, agent) })
 }
 
 func (s *Service) stored(ctx context.Context, id domain.MemberID) (*store.AssistantSession, error) {

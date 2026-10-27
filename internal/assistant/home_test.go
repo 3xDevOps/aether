@@ -31,3 +31,5 @@ func (h *fakeHost) RemoveAssistant(_ context.Context, member domain.MemberID) er
 	h.removed = append(h.removed, member)
 	return nil
 }
+
+func (*fakeHost) AssistantLoginFound(domain.MemberID, string) (bool, error) { return false, nil }

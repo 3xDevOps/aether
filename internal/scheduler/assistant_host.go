@@ -26,7 +26,7 @@ type AssistantLaunch struct {
 // the assistant's tool socket.
 func (s *Scheduler) AssistantAdapter(agent string) (AssistantLaunch, error) {
 	profile, ok := harness.Lookup(agent)
-	if !ok || profile.ACPInstall == nil || profile.InstallScript == "" || len(profile.TUIArgs) == 0 {
+	if !ok || profile.ACPInstall == nil {
 		return AssistantLaunch{}, fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
 	if profile.ACPMode == "" {
@@ -50,15 +50,15 @@ func (s *Scheduler) AssistantAdapter(agent string) (AssistantLaunch, error) {
 var assistantEnv = map[string]string{"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
 
 // StartAssistantExec starts spec in the member's assistant container,
-// starting the container and installing agent there first when needed, and
-// calls installing before an install. The exec runs in AssistantCwd.
+// installing agent's adapter and starting the container first when needed,
+// and calls installing before an install. The exec runs in AssistantCwd.
 func (s *Scheduler) StartAssistantExec(ctx context.Context, member domain.MemberID, agent string, spec runtime.ExecSpec, installing func()) (runtime.ManagedExec, error) {
 	managed, ok := s.cfg.Runtime.(runtime.ManagedExecRuntime)
 	if !ok {
 		return nil, fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
 	}
 	profile, ok := harness.Lookup(agent)
-	if !ok {
+	if !ok || profile.ACPInstall == nil {
 		return nil, fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
 	release, err := s.tryReserveCapacity(ctx)
@@ -66,11 +66,11 @@ func (s *Scheduler) StartAssistantExec(ctx context.Context, member domain.Member
 		return nil, err
 	}
 	defer release()
-	cid, err := s.ensureAssistantContainer(ctx, member, profile)
-	if err != nil {
+	if err = s.installAssistant(ctx, member, profile, installing); err != nil {
 		return nil, err
 	}
-	if err := s.installAssistant(ctx, cid, profile, installing); err != nil {
+	cid, err := s.ensureAssistantContainer(ctx, member, profile)
+	if err != nil {
 		return nil, err
 	}
 	spec.WorkingDir = AssistantCwd
