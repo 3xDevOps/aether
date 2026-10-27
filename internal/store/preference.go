@@ -48,8 +48,10 @@ type PreferenceStore interface {
 	DeletePreference(ctx context.Context, member domain.MemberID, id string, commit func(Preference) error) (Preference, error)
 	// TouchPreferences sets the last use of the member's preferences ids.
 	TouchPreferences(ctx context.Context, member domain.MemberID, ids []string, at time.Time) error
-	// DeleteMemberPreferences removes all of the member's preferences.
-	DeleteMemberPreferences(ctx context.Context, member domain.MemberID) error
+	// DeleteMemberWithPreferences deletes the member, and with it their
+	// preferences; commit runs with the preferences' ids before the
+	// transaction commits, and its error aborts it.
+	DeleteMemberWithPreferences(ctx context.Context, member domain.MemberID, commit func(ids []string) error) error
 	// PreferenceTimes returns when each of the preferences ids that exist
 	// was last updated, whoever owns it.
 	PreferenceTimes(ctx context.Context, ids []string) (map[string]time.Time, error)
@@ -207,9 +209,39 @@ func (d *DB) DeletePreference(ctx context.Context, member domain.MemberID, id st
 	return p, nil
 }
 
-func (d *DB) DeleteMemberPreferences(ctx context.Context, member domain.MemberID) error {
-	if _, err := d.db.ExecContext(ctx, `DELETE FROM member_preferences WHERE member_id = ?`, member); err != nil {
-		return fmt.Errorf("store: delete member preferences: %w", err)
+func (d *DB) DeleteMemberWithPreferences(ctx context.Context, member domain.MemberID, commit func(ids []string) error) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: delete member: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM member_preferences WHERE member_id = ?`, member)
+	if err != nil {
+		return fmt.Errorf("store: delete member: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("store: delete member: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return fmt.Errorf("store: delete member: %w", err)
+	}
+	if err = commit(ids); err != nil {
+		return err
+	}
+	if err = notFoundOnZeroRows(tx.ExecContext(ctx, `DELETE FROM members WHERE id = ?`, member)); err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			err = fmt.Errorf("store: delete member: %w", mapConstraint(err, ErrInUse))
+		}
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("store: delete member: %w", err)
 	}
 	return nil
 }

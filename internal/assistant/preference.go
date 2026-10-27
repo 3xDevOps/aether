@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -287,7 +288,7 @@ func quoted(message, text string) (string, error) {
 		seg = preference.Normalize(seg)
 		words := preference.Words(seg)
 		if i := preference.Index(words, want); i >= 0 {
-			span := seg[words[i].Start:words[i+len(want)-1].End]
+			span := attached(seg, words[i].Start, words[i+len(want)-1].End)
 			if utf8.RuneCountInString(span) < preference.MinChars {
 				return "", tooShort
 			}
@@ -296,6 +297,28 @@ func quoted(message, text string) (string, error) {
 	}
 	return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "text must quote the member's own words from their latest message, " +
 		"outside quoted lines and code blocks; quote them exactly or ask what to remember"}
+}
+
+// attached widens seg[start:end] to the symbols joined to its first and
+// last words, such as the "++" of "C++" or the "#" of "#ops", without the
+// quotes, brackets and sentence punctuation around them.
+func attached(seg string, start, end int) string {
+	symbol := func(r rune) bool { return !unicode.IsSpace(r) && !unicode.IsLetter(r) && !unicode.IsDigit(r) }
+	for start > 0 {
+		r, size := utf8.DecodeLastRuneInString(seg[:start])
+		if !symbol(r) || strings.ContainsRune(`"'([{«“‘`, r) {
+			break
+		}
+		start -= size
+	}
+	for end < len(seg) {
+		r, size := utf8.DecodeRuneInString(seg[end:])
+		if !symbol(r) {
+			break
+		}
+		end += size
+	}
+	return strings.TrimRightFunc(seg[start:end], func(r rune) bool { return strings.ContainsRune(`.,;:!?…"')]}»”’`, r) })
 }
 
 // typedSegments splits message into runs of lines the member wrote

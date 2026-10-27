@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -35,11 +34,12 @@ type Store interface {
 type Service struct {
 	store      Store
 	tombstones *tombstones
-	// scrubbing is set while a checkpoint the log refused is retried, every
-	// retry, until it succeeds or scrubTries ran out.
-	scrubbing  atomic.Bool
 	retry      time.Duration
 	scrubTries int
+	scrubMu    sync.Mutex
+	// scrubbing is set while a worker retries a checkpoint that failed;
+	// scrubPending, while one failed since the worker's last attempt began.
+	scrubbing, scrubPending bool
 
 	mu      sync.Mutex
 	changes map[domain.MemberID][]string
@@ -228,16 +228,15 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 	if err != nil {
 		return protocol.PreferenceResult{}, fmt.Errorf("preference: %w", err)
 	}
-	if cur.Text != old.Text {
-		// Restore finds the change committed without this line too, as
-		// long as the database holds the new row.
-		if err = s.tombstones.edited(cur.ID, old.UpdatedAt); err != nil {
-			slog.Warn("preference: record the committed change", "preference", cur.ID, "error", err)
-		}
-		s.scrub()
-	}
 	if cur.Text != old.Text || cur.WorkspaceID != old.WorkspaceID || cur.Enabled != old.Enabled {
 		s.changed(member, cur.ID, "was changed")
+	}
+	if cur.Text != old.Text {
+		s.scrub()
+		if err = s.tombstones.edited(cur.ID, old.UpdatedAt); err != nil {
+			return protocol.PreferenceResult{}, fmt.Errorf("preference %s: the text changed, but until the server restarts "+
+				"a restored older database could bring the old text back: %w", cur.ID, err)
+		}
 	}
 	previous := wire(old)
 	return protocol.PreferenceResult{Preference: wire(cur), Previous: &previous}, nil
@@ -263,25 +262,18 @@ func (s *Service) Delete(ctx context.Context, member domain.MemberID, id string)
 	return protocol.PreferenceDeleteResult{Deleted: wire(row)}, nil
 }
 
-// Erase deletes all of the member's preferences, ahead of removing the
-// member, recording each as deleted so that no restored copy of the
-// database brings them back.
-func (s *Service) Erase(ctx context.Context, member domain.MemberID) error {
-	rows, err := s.store.ListPreferences(ctx, member)
+// DeleteMember deletes the member and their preferences in one
+// transaction, recording each preference as deleted before it commits, so
+// that no restored copy of the database brings them back.
+func (s *Service) DeleteMember(ctx context.Context, member domain.MemberID) error {
+	// Once the tombstones are synced the delete must commit, as in Delete.
+	err := s.store.DeleteMemberWithPreferences(context.WithoutCancel(ctx), member, func(ids []string) error {
+		return s.tombstones.deleted(ids...)
+	})
 	if err != nil {
-		return fmt.Errorf("preference: %w", err)
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	ids := make([]string, len(rows))
-	for i, row := range rows {
-		ids[i] = row.ID
-	}
-	if err = s.tombstones.deleted(ids...); err != nil {
-		return err
-	}
-	if err = s.store.DeleteMemberPreferences(context.WithoutCancel(ctx), member); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return err
+		}
 		return fmt.Errorf("preference: %w", err)
 	}
 	s.scrub()
@@ -289,24 +281,46 @@ func (s *Service) Erase(ctx context.Context, member domain.MemberID) error {
 }
 
 // scrub clears deleted or replaced text from the write-ahead log. The
-// change is done either way: while a reader holds the log, it retries in
-// the background.
+// change is done either way: while a reader holds the log, a single
+// worker retries until a checkpoint succeeds after the last one that
+// failed, or scrubTries ran out.
 func (s *Service) scrub() {
 	err := s.store.CheckpointWAL(context.Background())
-	if err == nil || !s.scrubbing.CompareAndSwap(false, true) {
+	if err == nil {
 		return
 	}
+	s.scrubMu.Lock()
+	defer s.scrubMu.Unlock()
+	s.scrubPending = true
+	if s.scrubbing {
+		return
+	}
+	s.scrubbing = true
 	slog.Warn("preference: clear the write-ahead log, retrying", "error", err)
-	go func() {
-		defer s.scrubbing.Store(false)
-		for range s.scrubTries {
-			time.Sleep(s.retry)
-			if err = s.store.CheckpointWAL(context.Background()); err == nil {
-				return
-			}
+	go s.retryScrub()
+}
+
+func (s *Service) retryScrub() {
+	for try := 1; ; try++ {
+		time.Sleep(s.retry)
+		s.scrubMu.Lock()
+		s.scrubPending = false
+		s.scrubMu.Unlock()
+		err := s.store.CheckpointWAL(context.Background())
+		s.scrubMu.Lock()
+		if err != nil {
+			s.scrubPending = true
 		}
-		slog.Warn("preference: clear the write-ahead log; the next forget or edit tries again", "error", err)
-	}()
+		if !s.scrubPending || try >= s.scrubTries {
+			s.scrubbing = false
+			s.scrubMu.Unlock()
+			if err != nil {
+				slog.Warn("preference: clear the write-ahead log; the next forget or edit tries again", "error", err)
+			}
+			return
+		}
+		s.scrubMu.Unlock()
+	}
 }
 
 // Touch records that the assistant just read the member's preferences ids.

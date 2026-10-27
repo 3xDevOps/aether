@@ -374,9 +374,9 @@ func TestRestoreRecordsAnEditThatCommitted(t *testing.T) {
 	}
 }
 
-// Erasing a removed member's preferences records them, so restoring a copy
-// of the database taken before does not bring them back.
-func TestEraseSurvivesARestoredDatabase(t *testing.T) {
+// Deleting a member records their preferences as deleted, so restoring a
+// copy of the database taken before does not bring them back.
+func TestDeletedMemberStaysDeletedInARestoredDatabase(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	f.add(t, "Prefer table output")
@@ -392,10 +392,7 @@ func TestEraseSurvivesARestoredDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
-	if err = f.svc.Erase(ctx, f.alice); err != nil {
-		t.Fatal(err)
-	}
-	if err = f.db.DeleteMember(ctx, f.alice); err != nil {
+	if err = f.svc.DeleteMember(ctx, f.alice); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.db.Close(); err != nil {
@@ -474,5 +471,102 @@ func TestRestartNoteOnlyForMembersWithPreferences(t *testing.T) {
 	}
 	if notes := f.svc.TakeChanges(ctx, f.alice); len(notes) != 1 || notes[0] != restarted {
 		t.Fatalf("notes with a preference = %q; want the restart note", notes)
+	}
+}
+
+// A member delete that fails leaves their preferences in place and records
+// none of them as deleted.
+func TestFailedMemberDeleteKeepsPreferences(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.add(t, "Prefer table output")
+	if err := f.svc.DeleteMember(ctx, "mem-missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("DeleteMember of a missing member = %v", err)
+	}
+	failing := New(f.db, filepath.Join(f.dir, "no-such-dir", "preference-tombstones"))
+	if err := failing.DeleteMember(ctx, f.alice); err == nil {
+		t.Fatal("DeleteMember with no tombstone file succeeded")
+	}
+	if got, _ := f.svc.List(ctx, f.alice, protocol.PreferenceListParams{}); len(got.Preferences) != 1 {
+		t.Fatalf("after a failed member delete: %+v", got.Preferences)
+	}
+	if _, err := f.db.GetMember(ctx, f.alice); err != nil {
+		t.Fatalf("the member is gone after a failed delete: %v", err)
+	}
+}
+
+// lostEdited commits the edit, then makes the tombstone file unwritable.
+type lostEdited struct {
+	*store.DB
+	tombs string
+}
+
+func (l lostEdited) UpdatePreference(ctx context.Context, member domain.MemberID, id string, edit func(*store.Preference) error,
+	commit func(old, cur store.Preference) error) (store.Preference, store.Preference, error) {
+	old, cur, err := l.DB.UpdatePreference(ctx, member, id, edit, commit)
+	if err == nil {
+		err = errors.Join(os.Remove(l.tombs), os.Mkdir(l.tombs, 0o700))
+	}
+	return old, cur, err
+}
+
+// A committed edit whose record could not be written is reported, not
+// passed off as durable.
+func TestEditWhoseRecordFailsIsReported(t *testing.T) {
+	f := newFixture(t)
+	p := f.add(t, "Prefer table output")
+	tombs := filepath.Join(f.dir, "preference-tombstones")
+	svc := New(lostEdited{f.db, tombs}, tombs)
+	text := "Prefer short answers"
+	_, err := svc.Update(context.Background(), f.alice, protocol.PreferenceUpdateParams{ID: p.ID, Text: &text}, protocol.PreferenceSourceSettings, "")
+	if err == nil || !strings.Contains(err.Error(), "the text changed") {
+		t.Fatalf("Update with its record lost = %v; want the failure reported", err)
+	}
+}
+
+// scriptedCheckpoint fails the first checkpoint and the third, which
+// another change makes while the retry worker's own checkpoint, the
+// second, is running.
+type scriptedCheckpoint struct {
+	*store.DB
+	mu      sync.Mutex
+	calls   int
+	running chan struct{}
+	release chan struct{}
+	fourth  chan struct{}
+}
+
+func (s *scriptedCheckpoint) CheckpointWAL(context.Context) error {
+	s.mu.Lock()
+	s.calls++
+	n := s.calls
+	s.mu.Unlock()
+	switch n {
+	case 1, 3:
+		return errors.New("a reader holds the write-ahead log")
+	case 2:
+		close(s.running)
+		<-s.release
+	case 4:
+		close(s.fourth)
+	}
+	return nil
+}
+
+// A checkpoint that fails while the retry worker is finishing is retried
+// too.
+func TestScrubRetriesAFailureDuringItsLastAttempt(t *testing.T) {
+	f := newFixture(t)
+	fake := &scriptedCheckpoint{DB: f.db, running: make(chan struct{}), release: make(chan struct{}), fourth: make(chan struct{})}
+	svc := New(fake, filepath.Join(f.dir, "preference-tombstones"))
+	svc.retry = time.Millisecond
+	svc.scrub()
+	<-fake.running
+	svc.scrub()
+	close(fake.release)
+	select {
+	case <-fake.fourth:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the checkpoint that failed during the worker's last attempt was not retried")
 	}
 }

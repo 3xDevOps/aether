@@ -202,14 +202,13 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 					return &protocol.Error{Code: protocol.CodeUnavailable, Message: "member.remove: cleanup ownership could not be preserved; member was not removed"}
 				}
 			}
-			// The cascade alone would leave them in a restored copy of the
-			// database.
+			// The cascade alone would leave preferences in a restored copy of
+			// the database.
+			deleteMember := s.cfg.Store.DeleteMember
 			if prefs := s.cfg.Services.Preferences; prefs != nil {
-				if err := prefs.Erase(ctx, id); err != nil {
-					return fmt.Errorf("member.remove: %w", err)
-				}
+				deleteMember = prefs.DeleteMember
 			}
-			if err := s.cfg.Store.DeleteMember(ctx, id); err != nil {
+			if err := deleteMember(ctx, id); err != nil {
 				return err
 			}
 			deleted = true

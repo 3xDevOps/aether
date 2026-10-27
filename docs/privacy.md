@@ -459,8 +459,8 @@ never compacted. Forgetting does not remove:
   which New conversation does not delete on every server version;
 - copies a connected app or an agent made elsewhere.
 
-Removing a member deletes their preferences and records each as deleted in
-the same file. Merging two members moves all of them to the member that
+Removing a member deletes their preferences in the same transaction and
+records each as deleted in the same file before it commits. Merging two members moves all of them to the member that
 remains, even past the 200 limit; new saves are then refused until enough
 are forgotten.
 
