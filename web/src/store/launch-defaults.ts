@@ -36,13 +36,15 @@ function read(client: Api): Promise<void> {
   )
 }
 
+export interface LaunchDefaultsRead { result: LaunchDefaultsResult | null; error: string | null; fresh: boolean }
+
 /**
  * Reads the saved choices on mount, again after `attempt` changes, and when
  * the signed-in member changes. `fresh` turns true once this mount's read
  * settles, since another device or the assistant may have saved since the
  * cached copy was read.
  */
-export function useLaunchDefaultsRead(client: Api = api, attempt = 0): { result: LaunchDefaultsResult | null; error: string | null; fresh: boolean } {
+export function useLaunchDefaultsRead(client: Api = api, attempt = 0): LaunchDefaultsRead {
   const readable = useLaunchDefaultsSupported()
   const identity = useStore((s) => s.identityKey)
   const result = useLaunchDefaults((s) => s.result)

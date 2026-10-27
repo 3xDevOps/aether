@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
+import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { useLaunchDefaults } from '@/store/launch-defaults'
@@ -863,10 +864,37 @@ describe('saved launch defaults', () => {
     expect(api.launchDefaultsGet).not.toHaveBeenCalled()
   })
 
-  it('uses this browser\'s choices when the saved ones cannot be read', async () => {
+  it('says when the saved choices cannot be read, uses this browser\'s, and presets the saved ones once a retry reads them', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
     vi.mocked(api.launchDefaultsGet).mockRejectedValue(new Error('launch.defaults.get: connection refused'))
     render(<LaunchDialog />)
     await waitFor(() => expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true'))
+    const alert = (await screen.findByText('Your saved launch choices could not be read.')).closest<HTMLElement>('[role="alert"]')!
+    expect(alert.textContent).toContain('connection refused')
+    expect(alert.textContent).toContain('this browser\'s last launch')
+
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 2, defaults: { agent: 'claude', agents: { claude: { mode: 'tui' } }, account_member_id: bob.id } })
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(agentRow(/^Claude Code/).getAttribute('aria-checked')).toBe('true'))
+    expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(api.agentList).toHaveBeenCalledWith(bob.id))
+    expect(screen.queryByText('Your saved launch choices could not be read.')).toBeNull()
+  })
+
+  it('reads the saved choices once per open', async () => {
+    await open()
+    expect(api.launchDefaultsGet).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts over when a different member signs in while it is open', async () => {
+    useStore.setState({ identityKey: 'identity-a', paletteDialog: 'launch' })
+    render(<PaletteDialogs />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('fix the cart')
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 1, defaults: { agent: 'codex', agents: { codex: { mode: 'tui' } } } })
+    act(() => useStore.setState({ identityKey: 'identity-b' }))
+    await waitFor(() => expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true'))
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('')
   })
 
   it('applies the launch to the choices another device saved meanwhile', async () => {
@@ -907,6 +935,8 @@ describe('saved launch defaults', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save as my default' }))
     await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({ defaults: { account_member_id: bob.id, fallback: { policy: 'off' } }, revision: 0 }))
     expect(await screen.findByText('Saved for every device.')).toBeDefined()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Fall back to another account' }))
+    expect(screen.queryByText('Saved for every device.')).toBeNull()
   })
 
   it('names a saved account that is no longer shared, with the reason, and launches on your own', async () => {

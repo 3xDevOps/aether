@@ -172,7 +172,6 @@ export function LaunchDefaultsSection({ client }: { client: Api }) {
           action="Clear"
           pending="Clearing…"
           onConfirm={() => saveLaunchDefaults(() => null, client)}
-          onDone={() => {}}
           onClose={() => setClearing(false)}
         />
       )}

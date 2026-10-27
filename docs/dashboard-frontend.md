@@ -2317,7 +2317,7 @@ saved account is preselected when `account.list` still lists it and `get`
 does not mark it invalid, and the saved fallback policy fills the fallback
 list, keeping only listed accounts. A launch never saves the account or the
 fallback; **Save as my default** under **Options** does, and says "Saved
-for every device." On the Run tab it saves the fallback list as the run sends
+for every device." until the account or fallback changes again. On the Run tab it saves the fallback list as the run sends
 it, without the selected account. **Run**, **Default mode** and **Set up** on
 Agents, and the onboarding wizard, save their agent and mode the same way
 (`rememberChoice`); **Default mode** leaves the preselected agent alone. Saves
@@ -2327,13 +2327,20 @@ again. A **Saved defaults not used** note lists each saved
 account, fallback member, agent, and the chosen agent's mode or model that
 `get` reports in `invalid`, with the server's reason.
 
-Where the gateway does not offer `launch.defaults.get`, or the read fails,
-the form uses this browser's copy instead: the `launchDefaults` slice
-(`{mode, model, at}` keyed by agent name), persisted per member in
-`savedLaunchDefaults`; defaults saved before persist version 10 had no
-owner and are dropped. It preselects the launchable agent launched most
-recently, then as above. Every launch also updates this copy; nothing
-copies it to the server. An Enhanced or remembered mode the agent cannot
+Where the gateway does not offer `launch.defaults.get`, the form uses this
+browser's copy instead: the `launchDefaults` slice (`{mode, model, at}`
+keyed by agent name), persisted per member in `savedLaunchDefaults`;
+defaults saved before persist version 10 had no owner and are dropped. It
+preselects the launchable agent launched most recently, then as above. When
+the read fails, the form says "Your saved launch choices could not be read."
+with the server's error and **Try again**, and starts from the copy last
+read from the server, else this browser's; a retry that reads them presets
+the agent, account and fallback from them again. Every launch also updates
+this copy; nothing copies it to the server. On a server that offers
+`launch.defaults.get` but has nothing saved for the member, the form ignores
+this browser's copy and uses the server's defaults, so a new device and an
+old one open on the same choices. The form starts over when a different
+member signs in while it is open. An Enhanced or remembered mode the agent cannot
 use (no Enhanced support, or its adapter not installed) shows as Standard.
 
 **Options** appears when `account.list` returns more than the caller and

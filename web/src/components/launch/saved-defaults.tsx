@@ -44,21 +44,21 @@ export function SavedIssues({ issues, title }: { issues: LaunchDefaultIssue[]; t
   )
 }
 
-/** Saves the account and fallback chosen here; a launch never saves them on its own. */
-export function SaveAccountDefault({ onSave }: { onSave: () => Promise<unknown> }) {
-  const [state, setState] = useState<{ busy: boolean; saved: boolean; error: string | null }>({ busy: false, saved: false, error: null })
+/** Saves the account and fallback chosen here, which `choice` identifies; a launch never saves them on its own. */
+export function SaveAccountDefault({ choice, onSave }: { choice: string; onSave: () => Promise<unknown> }) {
+  const [state, setState] = useState<{ busy: boolean; savedFor: string | null; error: string | null }>({ busy: false, savedFor: null, error: null })
   const save = () => {
-    setState({ busy: true, saved: false, error: null })
+    setState({ busy: true, savedFor: null, error: null })
     onSave().then(
-      () => setState({ busy: false, saved: true, error: null }),
-      (err: unknown) => setState({ busy: false, saved: false, error: errorSentence(err) }),
+      () => setState({ busy: false, savedFor: choice, error: null }),
+      (err: unknown) => setState({ busy: false, savedFor: null, error: errorSentence(err) }),
     )
   }
   return (
     <div className="flex flex-col gap-1 pt-2">
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" variant="secondary" disabled={state.busy} onClick={save}>Save as my default</Button>
-        <span role="status" className="text-ui-sm text-muted">{state.saved ? 'Saved for every device.' : 'Saves this account and fallback for launches on every device.'}</span>
+        <span role="status" className="text-ui-sm text-muted">{state.savedFor === choice ? 'Saved for every device.' : 'Saves this account and fallback for launches on every device.'}</span>
       </div>
       {state.error && <Callout tone="failed" role="alert">{state.error}</Callout>}
     </div>

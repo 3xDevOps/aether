@@ -67,14 +67,18 @@ export function LaunchDialog() {
   const [accountsRead, setAccountsRead] = useState(false)
   const [account, setAccount] = useState(self?.id ?? '')
   const [fallback, setFallback] = useState(automaticFallback)
-  const savedRead = useLaunchDefaultsRead()
+  const [savedAttempt, setSavedAttempt] = useState(0)
+  const savedRead = useLaunchDefaultsRead(api, savedAttempt)
   const saved = savedRead.result
   const savesDefaults = cap.hasMethod('launch.defaults.set')
-  const [presetDone, setPresetDone] = useState(false)
+  // local: preset while the saved choices could not be read, so a later
+  // successful read presets again.
+  const [preset, setPreset] = useState<'pending' | 'local' | 'done'>('pending')
+  const [pick, setPick] = useState(0)
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
   const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
-  const choice = useAgentChoice({ account, ownAccountID, hold: !presetDone })
+  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick })
   const { agents, agentError, agent, harness, mode, model, noAgents } = choice
   const [task, setTask] = useState('')
   const [objective, setObjective] = useState('')
@@ -128,14 +132,16 @@ export function LaunchDialog() {
   }, [])
 
   useEffect(() => {
-    if (presetDone || !savedRead.fresh || !accountsRead) return
-    setPresetDone(true)
+    if (preset === 'done' || !savedRead.fresh || !accountsRead) return
+    if (preset === 'local' && (savedRead.error !== null || !saved)) return
+    if (preset === 'local') setPick((n) => n + 1)
+    setPreset(savedRead.error === null ? 'done' : 'local')
     if (!saved) return
     const { account_member_id: savedAccount, fallback: savedFallback } = saved.defaults
     const refused = saved.invalid?.some((issue) => issue.field === 'account_member_id')
     if (savedAccount && !refused && accounts.some((member) => member.id === savedAccount)) setAccount(savedAccount)
     if (savedFallback) setFallback(fallbackFromSaved(savedFallback, accounts))
-  }, [presetDone, savedRead.fresh, saved, accounts, accountsRead])
+  }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead])
 
   useEffect(() => {
     if (kind !== 'swarm' || !accounts.length) return
@@ -286,11 +292,21 @@ export function LaunchDialog() {
         </Callout>
       )}
       {agents && agentError === null && <RefusalNotes agents={agents} accountName={accountName} accountField={accountField} />}
+      {savedRead.error && (
+        <Callout
+          tone="failed"
+          role="alert"
+          title="Your saved launch choices could not be read."
+          actions={<Button type="button" size="sm" variant="secondary" onClick={() => setSavedAttempt((n) => n + 1)}>Try again</Button>}
+        >
+          {savedRead.error} {saved ? 'The choices shown are the ones last read from the server.' : 'The choices shown are this browser\'s last launch.'}
+        </Callout>
+      )}
       {saved && <SavedIssues title="Saved defaults not used" issues={(saved.invalid ?? []).filter((issue) => !issue.field.startsWith('agents.') || issue.field.split('.')[1] === harness)} />}
     </>
   )
   const options = accounts.length > 1 && (
-    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} swarm={kind === 'swarm'} save={savesDefaults && <SaveAccountDefault onSave={saveAccountDefault} />} />
+    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} swarm={kind === 'swarm'} save={savesDefaults && <SaveAccountDefault choice={JSON.stringify([account, fallback])} onSave={saveAccountDefault} />} />
   )
 
   return (
