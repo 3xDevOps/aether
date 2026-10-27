@@ -363,13 +363,14 @@ type pullRequest struct {
 	Draft      bool   `json:"draft"`
 	BaseBranch string `json:"base_branch,omitempty"`
 	HeadOID    string `json:"head_oid,omitempty"`
+	Repository string `json:"repository,omitempty"`
 }
 
 func prOf(p *protocol.RunPullRequest) *pullRequest {
 	if p == nil {
 		return nil
 	}
-	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft, BaseBranch: p.BaseBranch, HeadOID: p.HeadOID}
+	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft, BaseBranch: p.BaseBranch, HeadOID: p.HeadOID, Repository: p.Repository}
 }
 
 func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {

@@ -391,10 +391,12 @@ existing note for a
 duplicate, and repeating a replacement (`supersedes`) that went through returns
 the note that replaced the old one.
 
-`aether_pr_merge` takes `number` and `expected_head_oid`, the pull request's
-`number` and `head_oid` `aether_pr_status` returns, and refuses when the run's
-pull request is now another one or its head has moved since, before asking
-GitHub. A merge GitHub accepts but has not done, as with a merge queue, returns
+`aether_pr_merge` takes `repository`, `number` and `expected_head_oid`, the
+pull request's `repository`, `number` and `head_oid` `aether_pr_status`
+returns, and refuses when the run's pull request is now another one, in
+another repository, or its head has moved since, before asking GitHub; with
+no head to compare, as for a finished run whose environment is gone, it fails
+with why. A merge GitHub accepts but has not done, as with a merge queue, returns
 `write: "pending"`; follow it with `aether_pr_status`. That refusal and GitHub's
 own count the failing and pending checks and the reviewers requesting changes,
 as lower bounds when GitHub's feedback was cut off, and give the merge state;

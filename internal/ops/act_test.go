@@ -335,7 +335,7 @@ func TestConnectorPRMerge(t *testing.T) {
 
 	// A head that moved is refused before any merge, with what GitHub
 	// reports blocking it.
-	text, _, failed := try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "1234567"})
+	text, _, failed := try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "1234567"})
 	if !failed || !strings.Contains(text, "head moved from 1234567 to abcdef0123456789") ||
 		!strings.Contains(text, "GitHub reports 1 failing checks, 1 pending checks, 1 reviewers requesting changes, merge state BLOCKED") || strings.Contains(text, "grace") {
 		t.Fatalf("moved head = %q", text)
@@ -343,11 +343,11 @@ func TestConnectorPRMerge(t *testing.T) {
 	if len(called(f, protocol.MethodRunPRMerge)) != 0 {
 		t.Fatal("a moved head was merged")
 	}
-	if _, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abc"}); !failed {
+	if _, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "abc"}); !failed {
 		t.Fatal("a 3-character head was accepted")
 	}
 
-	text, out := run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"})
+	text, out := run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "abcdef0"})
 	if text != "Merged pull request #7 into main." || out["merged"] != true || out["merge_state"] != "BLOCKED" ||
 		fmt.Sprint(out["blockers"]) != "map[changes_requested:1 failing_checks:1 pending_checks:1]" {
 		t.Fatalf("merge = %q %v", text, out)
@@ -356,22 +356,36 @@ func TestConnectorPRMerge(t *testing.T) {
 		t.Fatalf("merge sent %+v", got)
 	}
 
-	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 6, "expected_head_oid": "abcdef0"}); !failed || !strings.Contains(text, "now #7, not #6") {
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 6, "expected_head_oid": "abcdef0"}); !failed || !strings.Contains(text, "now acme/shop#7, not acme/shop#6") {
 		t.Fatalf("another pull request = %q", text)
 	}
+	// The same number on another fork is not the pull request reviewed.
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "fork/shop", "number": 7, "expected_head_oid": "abcdef0"}); !failed ||
+		!strings.Contains(text, "now acme/shop#7, not fork/shop#7") {
+		t.Fatalf("another repository = %q", text)
+	}
+	// A recorded pull request with no head says why instead of a moved head.
+	headless := prFeedback()
+	headless.PullRequest.HeadOID, headless.Error = "", "checks and review feedback need the run's environment, which is gone"
+	f.answers[protocol.MethodRunPRFeedback] = returns(headless)
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "abcdef0"}); !failed ||
+		!strings.Contains(text, "head commit could not be read: checks and review feedback need the run's environment, which is gone") {
+		t.Fatalf("headless pull request = %q", text)
+	}
+	f.answers[protocol.MethodRunPRFeedback] = returns(prFeedback())
 	f.answers[protocol.MethodRunPRMerge] = returns(protocol.RunPRMergeResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "open"}})
-	if _, queued := run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); queued["write"] != writePending || queued["merged"] != false {
+	if _, queued := run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "abcdef0"}); queued["write"] != writePending || queued["merged"] != false {
 		t.Fatalf("queued merge = %v", queued)
 	}
 	// GitHub's refusal carries the blockers too.
 	f.answers[protocol.MethodRunPRMerge] = returns(protocol.RunPRMergeResult{Error: "Required status check \"test\" is failing"})
-	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); !failed ||
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "abcdef0"}); !failed ||
 		!strings.Contains(text, `GitHub did not merge pull request #7: Required status check "test" is failing; GitHub reports 1 failing checks`) {
 		t.Fatalf("refused merge = %q", text)
 	}
 	// A merge GitHub's lost reply hid but a read-back confirmed is merged.
 	f.answers[protocol.MethodRunPRMerge] = returns(protocol.RunPRMergeResult{Merged: true, Error: "gh: connection reset"})
-	if text, out = run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); text != "Merged pull request #7 into main." ||
+	if text, out = run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "abcdef0"}); text != "Merged pull request #7 into main." ||
 		out["merge_error"] != "gh: connection reset" {
 		t.Fatalf("confirmed merge = %q %v", text, out)
 	}
@@ -379,7 +393,7 @@ func TestConnectorPRMerge(t *testing.T) {
 	partial := prFeedback()
 	partial.Truncated = true
 	f.answers[protocol.MethodRunPRFeedback] = returns(partial)
-	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "1234567"}); !failed ||
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "1234567"}); !failed ||
 		!strings.Contains(text, "GitHub reports at least 1 failing checks") || !strings.Contains(text, "cut off") {
 		t.Fatalf("partial feedback = %q", text)
 	}
@@ -389,11 +403,11 @@ func TestConnectorPRMerge(t *testing.T) {
 	merged.PullRequest.State = "merged"
 	f.answers[protocol.MethodRunPRFeedback] = returns(merged)
 	f.calls = nil
-	if text, _ = run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); text != "Pull request #7 is already merged." || len(called(f, protocol.MethodRunPRMerge)) != 0 {
+	if text, _ = run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "abcdef0"}); text != "Pull request #7 is already merged." || len(called(f, protocol.MethodRunPRMerge)) != 0 {
 		t.Fatalf("merging twice = %q", text)
 	}
 	f.errs[protocol.MethodRunPRFeedback] = &protocol.Error{Code: protocol.CodeDenied, Message: "run.pr.feedback: denied"}
-	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); !failed || text != "run.pr.feedback: denied" {
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "repository": "acme/shop", "number": 7, "expected_head_oid": "abcdef0"}); !failed || text != "run.pr.feedback: denied" {
 		t.Fatalf("denied feedback = %q", text)
 	}
 }
