@@ -1088,14 +1088,14 @@ unavailable owned source remains the server's protocol error.
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 | `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `needs_restart`, `idle`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the run belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `needs_restart` means the environment was created before the assistant existed and lacks its mounts |
 | `assistant.start` | `{"agent":"claude","restart_environment":false}` (both optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their own agent in their environment, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation. `restart_environment` stops and recreates the environment first |
-| `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[]}`; malformed ids and paths are dropped, `recent` is cut to 8 pages, the oldest pages and then `open_file` go until it fits 4096 bytes, and an unknown `version` is dropped. Unless `share_view` is off, it reaches the agent as an `aether://view-context` resource and becomes the caller's latest view context |
-| `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's latest view context, which the assistant reads with `aether_view_context`, unless `share_view` is off. The last one received wins. Kept in memory only |
+| `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[]}`; malformed ids and paths are dropped, `recent` is cut to 8 pages, the oldest pages and then `open_file` go until it fits 4096 bytes, and an unknown `version` is dropped. Unless `share_view` is off, it reaches the agent as an `aether://view-context` resource and becomes the caller's held view context, with `source` `prompt`. A retry of a key already accepted leaves the held view alone |
+| `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's held view context, which the assistant reads with `aether_view_context` along with its `source` (`prompt` or `navigation`) and `age_seconds`, unless `share_view` is off. An update whose `captured_at` is before the held view's is dropped while that view is under 10 seconds old, so a late update never replaces the view a prompt just carried; after that the last one received wins, whatever the device's clock. Kept in memory only |
 | `assistant.cancel` | none | empty result; cancels the turn in flight |
 | `assistant.answer` | `{"request_id":"...","option_id":"...","values":{}}` | empty result; answers one of the harness's permission prompts or questions |
 | `assistant.confirm` | `{"confirmation_id":"...","approve":true}` | empty result; answers a tool call waiting for approval. A confirmation expires after 10 minutes |
 | `assistant.reset` | none | `AssistantStatus` - stops the session and discards the conversation |
 | `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false}`) - the caller's own assistant settings. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's run. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
-| `assistant.history` | `{"before_seq":0,"limit":1000}` | like `run.acp.history` |
+| `assistant.history` | `{"before_seq":0,"limit":1000}` | like `run.acp.history`. A `notice` item may carry an `action` record, below |
 | `assistant.item` | `{"seq":12}` | like `run.acp.item` |
 | `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
 | `workspace.environment.get` | `WorkspaceEnvironmentGetParams` (`{"workspace_id":"..."}`) | Any member. `WorkspaceEnvironmentResult` (`{"workspace_id":"...","setup_script":"npm ci\n","variables":[{"name":"API_URL","value":"https://api.example.test"},{"name":"NPM_TOKEN","secret":true}]}`), variables sorted by name; a secret never carries `value` |
@@ -2827,6 +2827,26 @@ does not run its agent over ACP`. Every frame is JSON text.
    `background` carry the fields for autonomous turns and Claude's
    background tasks, and the ack `state` carries `background` and `tasks`;
    [`internal/acphost/items.go`](../internal/acphost/items.go) defines them.
+   In the assistant's log a `notice` can carry `action`
+   (`protocol.AssistantAction`), one record of an action the assistant took
+   or asked to take:
+
+   ```json
+   {"id":"...","method":"run.launch","summary":"Launch claude (acp) in api: \"Fix the flaky login test\"",
+    "target":{"workspace_id":"..."},"outcome":"succeeded","approval":"card","confirmation_id":"...",
+    "result":{"workspace_id":"...","run_id":"run-..."},
+    "created_at":"...","decided_at":"...","finished_at":"..."}
+   ```
+
+   `outcome` is `approved` or `auto_approved`, written before the call
+   runs, then `succeeded` or `failed` under the same `id`; or `declined`,
+   `expired`, `withdrawn`, or `failed` when the approval could not be read
+   or counted, alone. The latest record of an `id` replaces the earlier
+   ones. `approval` is `card`, `auto`, or absent for a pause or resume.
+   `target` has the `workspace_id` and `run_id` the call named, none for
+   `env.save`; `other_owner` names the run's owner when it is another
+   member's; `error` is the failure's exact text; `result` holds the
+   `run_id` and `workspace_id` of a launched run.
 4. Lease frames are the attach's: the client sends
    `{"type":"control","request_id":1,"write":true}` to take control or
    `{"type":"control","request_id":2,"control_generation":7}` to release it,

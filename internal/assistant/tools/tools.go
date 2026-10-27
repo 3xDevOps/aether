@@ -76,6 +76,10 @@ var tiers = map[string]string{
 	protocol.MethodRunRoomPost:           tierConfirmed,
 }
 
+// Reversible reports whether the assistant may call method without a card
+// although it changes state.
+func Reversible(method string) bool { return tiers[method] == tierReversible }
+
 type Caller interface {
 	Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error)
 }
