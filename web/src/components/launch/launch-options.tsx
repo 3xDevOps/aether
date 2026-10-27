@@ -143,6 +143,41 @@ export function AccountOptions({
   )
 }
 
+export type ChildRunsChoice = '' | 'on' | 'off'
+
+const childRunsWords: Record<ChildRunsChoice, string> = {
+  '': 'Use my setting',
+  on: 'Allow for this run',
+  off: 'Off for this run',
+}
+
+/** Radix Select reserves the empty value, so "Use my setting" travels as `default`. */
+export function ChildRunsOption({ value, onChange, enabled, disabled }: {
+  value: ChildRunsChoice
+  onChange: (value: ChildRunsChoice) => void
+  /** The member setting, unknown until read. */
+  enabled: boolean | undefined
+  disabled?: boolean
+}) {
+  const own = enabled === undefined ? '' : enabled ? ' (on)' : ' (off)'
+  return (
+    <div className="flex flex-col gap-1">
+      <Label htmlFor="launch-child-runs">Child runs</Label>
+      <Select value={value || 'default'} onValueChange={(next) => onChange(next === 'default' ? '' : next as ChildRunsChoice)} disabled={disabled}>
+        <SelectTrigger id="launch-child-runs" aria-describedby="launch-child-runs-help">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {(['', 'on', 'off'] as const).map((choice) => (
+            <SelectItem key={choice || 'default'} value={choice || 'default'}>{childRunsWords[choice]}{choice === '' && own}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p id="launch-child-runs-help" className="text-ui-sm text-muted">Whether the agent may start other agents as child runs. Allowing covers the runs it starts too.</p>
+    </div>
+  )
+}
+
 export function WorkspaceLine({ workspace }: { workspace: Workspace | undefined }) {
   return (
     <p aria-label="Target workspace" className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">

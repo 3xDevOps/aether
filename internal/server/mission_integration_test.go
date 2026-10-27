@@ -65,6 +65,9 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	boCtrl, boClient := srv.control(t, e.bo.key)
 	defer boClient.Close()
 
+	if err := boCtrl.Call(protocol.MethodAccountShare, protocol.AccountMemberParams{MemberID: string(e.ada.id)}, nil); err != nil {
+		t.Fatalf("account.share: %v", err)
+	}
 	choiceAda := protocol.MissionExecutionChoice{AccountMemberID: string(e.ada.id), Harness: "fake", Mode: string(domain.LaunchTUI)}
 	choiceBo := protocol.MissionExecutionChoice{AccountMemberID: string(e.bo.id), Harness: "fake", Mode: string(domain.LaunchTUI)}
 	var created protocol.MissionCreateResult
@@ -653,6 +656,11 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	srv := e.seed(ctx, t, false)
 	adaCtrl, adaClient := srv.control(t, e.ada.key)
 	defer adaClient.Close()
+	boCtrl, boClient := srv.control(t, e.bo.key)
+	defer boClient.Close()
+	if err := boCtrl.Call(protocol.MethodAccountShare, protocol.AccountMemberParams{MemberID: string(e.ada.id)}, nil); err != nil {
+		t.Fatalf("account.share: %v", err)
+	}
 
 	const (
 		integratorObjective = "mission Docker integrator fixture"

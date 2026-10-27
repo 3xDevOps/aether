@@ -18,6 +18,8 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 )
 
 //go:embed fixtures/*.json
@@ -71,6 +73,9 @@ const (
 	// the way Claude's adapter reports them: calls that complete once their
 	// work runs in the background, and the Agent's work after that.
 	PromptWorkflow = "workflow"
+	// ReminderReply is the reply to Aether's report reminder, which the
+	// mock cannot act on.
+	ReminderReply = "nothing to report"
 )
 
 // BackgroundDelay is how long after PromptBackground's turn ends its
@@ -429,6 +434,11 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		case <-ctx.Done():
 		}
 		return map[string]any{"stopReason": "cancelled"}, nil
+	}
+	if strings.HasPrefix(text, coordhooks.ReportReminderLead) {
+		// The mock cannot run aether-internal.
+		a.text(ctx, ReminderReply)
+		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	for _, u := range a.fix.Prompt.Updates {
 		a.update(ctx, u)

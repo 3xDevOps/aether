@@ -114,6 +114,9 @@ const (
 	// CoordPeerMission is a peer authorized by the current mission
 	// membership/assignment even when no file overlap exists.
 	CoordPeerMission = "mission"
+	// CoordPeerLineage is the caller's parent run or one of its child runs,
+	// which it may always message.
+	CoordPeerLineage = "lineage"
 	// CoordPeerWorkspace is a live run in the caller's workspace that the
 	// caller's owner may message without a file overlap or swarm.
 	CoordPeerWorkspace = "workspace"
@@ -201,19 +204,21 @@ const (
 // CoordStatusResult is the result of coord.status: who the caller is,
 // exactly the peers it may message, and how many messages are waiting.
 type CoordStatusResult struct {
-	WireVersion    string                  `json:"wire_version"`
-	RunID          string                  `json:"run_id"`
-	WorkspaceID    string                  `json:"workspace_id"`
-	MemberID       string                  `json:"member_id"`
-	Task           string                  `json:"task,omitempty"`
-	TaskBytes      int                     `json:"task_bytes,omitempty"`
-	TaskTruncated  bool                    `json:"task_truncated,omitempty"`
-	Assignment     *CoordMissionAssignment `json:"assignment,omitempty"`
-	Peers          []CoordPeer             `json:"peers"`
-	PeerTotal      int                     `json:"peer_total,omitempty"`
-	PeersTruncated bool                    `json:"peers_truncated,omitempty"`
-	Unread         int                     `json:"unread"`
-	Capabilities   []string                `json:"capabilities"`
+	WireVersion   string                  `json:"wire_version"`
+	RunID         string                  `json:"run_id"`
+	WorkspaceID   string                  `json:"workspace_id"`
+	MemberID      string                  `json:"member_id"`
+	Task          string                  `json:"task,omitempty"`
+	TaskBytes     int                     `json:"task_bytes,omitempty"`
+	TaskTruncated bool                    `json:"task_truncated,omitempty"`
+	Assignment    *CoordMissionAssignment `json:"assignment,omitempty"`
+	// ParentRunID is the run that started this child run.
+	ParentRunID    string      `json:"parent_run_id,omitempty"`
+	Peers          []CoordPeer `json:"peers"`
+	PeerTotal      int         `json:"peer_total,omitempty"`
+	PeersTruncated bool        `json:"peers_truncated,omitempty"`
+	Unread         int         `json:"unread"`
+	Capabilities   []string    `json:"capabilities"`
 	// Protected runs are never woken when mail arrives while they are idle.
 	Protected        bool           `json:"protected,omitempty"`
 	WaitSupported    bool           `json:"wait_supported,omitempty"`
@@ -366,8 +371,15 @@ type RunReportParams struct {
 	Tools     bool `json:"tools,omitempty"`
 	Subagent  bool `json:"subagent,omitempty"`
 	TurnStart bool `json:"turn_start,omitempty"`
+	// Stop marks the idle report of a main agent's stop that the harness
+	// lets a hook hold back: Aether may refuse it while the turn owes a
+	// report.
+	Stop bool `json:"stop,omitempty"`
 }
 
-// RunReportResult is the result of run.report. It is empty: the caller is
-// a hook inside the container that exits immediately either way.
-type RunReportResult struct{}
+// RunReportResult is the result of run.report. Continue is set when Aether
+// held back a stop: the report was not applied, and Continue is what the
+// agent must do before its turn ends.
+type RunReportResult struct {
+	Continue string `json:"continue,omitempty"`
+}

@@ -64,11 +64,11 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, opts)
 	if cfg.Assistant {
-		registerAssistantTools(srv, func(ctx context.Context, method string, params, out any) error {
-			return coordtransport.Call(ctx, cfg.Socket, method, params, out)
-		})
+		registerAssistantTools(srv, cfg.Socket)
 	} else if err := registerTools(srv, cfg.Socket, g); err != nil {
 		return err
+	} else {
+		registerChildTools(ctx, srv, cfg.Socket)
 	}
 	if err := srv.Run(ctx, &mcp.IOTransport{
 		Reader: g.reader(cfg.In),

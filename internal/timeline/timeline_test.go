@@ -86,6 +86,11 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	if !matcher.Matches(events.Event{RunID: "run-worker", Payload: events.CoordMessagePayload{ToRunID: "run-integrator"}}) {
 		t.Error("a live subscription filtered by run must see mail addressed to it")
 	}
+	swarm := events.Filter{Runs: []domain.RunID{"run-integrator"}, Mission: "mission-1"}
+	if !swarm.Matches(events.Event{Payload: events.MissionChangedPayload{MissionID: "mission-1"}}) ||
+		swarm.Matches(events.Event{Payload: events.IntegrationChangedPayload{MissionID: "mission-2"}}) {
+		t.Error("a live subscription filtered by mission must see that mission's swarm events only")
+	}
 }
 
 func TestBeforeReadsTheNewestHistoryFirst(t *testing.T) {
@@ -139,5 +144,72 @@ func TestDetailEventsAreExcludedFromDefaultFeed(t *testing.T) {
 		if !detailTypes[typ] {
 			t.Fatalf("%s should be a detail event in the default feed", typ)
 		}
+	}
+}
+
+// A read without a workspace has no index to bound it, so a page covers at
+// most scanWindows windows of seqs and resumes from where it stopped.
+func TestMemberWidePagesStepThroughSparseHistory(t *testing.T) {
+	ctx := context.Background()
+	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatalf("event log: %v", err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	far := uint64(3*scanWindow*scanWindows + 5)
+	for _, seq := range []uint64{1, 5, far - 1, far} {
+		e := events.Event{ID: fmt.Sprintf("ev-%d", seq), Seq: seq, Time: time.Unix(int64(seq), 0).UTC(), WorkspaceID: "ws-1", RunID: "run-1", Payload: events.RunStatusPayload{To: domain.RunRunning}}
+		if seq == 1 || seq == far-1 {
+			e.Payload = events.RunDiffPayload{}
+		}
+		e.Type = e.Payload.EventType()
+		if aerr := log.Append(ctx, e); aerr != nil {
+			t.Fatalf("append %d: %v", seq, aerr)
+		}
+	}
+	reader := NewReader(log, fixedMission{})
+	f := Filter{Types: []events.Type{events.TypeRunStatus}}
+
+	var found []uint64
+	pages := 0
+	for cursor := uint64(0); ; pages++ {
+		page, perr := reader.Page(ctx, f, cursor, 10)
+		if perr != nil {
+			t.Fatalf("Page(%d): %v", cursor, perr)
+		}
+		if page.NextSeq <= cursor && page.More {
+			t.Fatalf("Page(%d) did not advance: %+v", cursor, page)
+		}
+		for _, e := range page.Events {
+			found = append(found, e.Seq)
+		}
+		if !page.More {
+			break
+		}
+		cursor = page.NextSeq
+	}
+	if !slices.Equal(found, []uint64{5, far}) || pages < 3 {
+		t.Fatalf("paged %v in %d pages, want [5 %d] over at least 3 bounded pages", found, pages+1, far)
+	}
+
+	found = nil
+	for before := uint64(0); ; {
+		page, perr := reader.Before(ctx, f, before, 10)
+		if perr != nil {
+			t.Fatalf("Before(%d): %v", before, perr)
+		}
+		for i := len(page.Events) - 1; i >= 0; i-- {
+			found = append(found, page.Events[i].Seq)
+		}
+		if !page.More {
+			break
+		}
+		if page.OlderSeq >= before && before != 0 {
+			t.Fatalf("Before(%d) did not move back: %+v", before, page)
+		}
+		before = page.OlderSeq
+	}
+	if !slices.Equal(found, []uint64{far, 5}) {
+		t.Fatalf("read back %v, want [%d 5]", found, far)
 	}
 }

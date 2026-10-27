@@ -47,6 +47,7 @@ func runRun(args []string) error {
 	cachedBase := fs.String("cached-base", "", "retry a launch from an exact accepted base commit")
 	fallbackOrder := fs.String("fallback", "", fallbackHelp)
 	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
+	children := fs.String("children", "", "child runs this run's agent may start: on or off for this run only (default: your setting, aether children)")
 	idempotencyKey := fs.String("idempotency-key", "", "the key a failed or interrupted launch printed: the retry returns that launch's run instead of starting another (default: a new key)")
 	var repos stringList
 	fs.Var(&repos, "repo", "also check out this workspace ID or name at /repos/<name> with its own run branch (repeatable)")
@@ -66,8 +67,8 @@ func runRun(args []string) error {
 		task = fs.Arg(0)
 	}
 	if *template != "" {
-		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 || *idempotencyKey != "" {
-			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, --cached-base, --fallback, --no-fallback, --repo, and --idempotency-key")
+		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 || *idempotencyKey != "" || *children != "" {
+			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, --cached-base, --fallback, --no-fallback, --repo, --children, and --idempotency-key")
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
@@ -82,8 +83,11 @@ func runRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *children != "" && *children != "on" && *children != "off" {
+		return fmt.Errorf("invalid --children %q: want on or off", *children)
+	}
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: aether run [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
 	}
 	fromStdin := task == "-"
 	task, err = stdinText(task, "task", os.Stdin)
@@ -111,6 +115,7 @@ func runRun(args []string) error {
 		var res protocol.RunLaunchResult
 		params := launchParams(wsID, task, *agent, *mode, *model, *account, *cachedBase)
 		params.FallbackAccountMemberIDs, params.NoFallback = fallbacks, *noFallback
+		params.Children = *children
 		params.IdempotencyKey = cmp.Or(*idempotencyKey, cli.NewControlSessionID())
 		for _, repo := range repos {
 			id, err := workspaceIDIn(list.Workspaces, repo)
@@ -187,6 +192,9 @@ func launchCommand(params protocol.RunLaunchParams, fromStdin bool) string {
 	}
 	if params.CachedBase != "" {
 		args = append(args, "--cached-base", shellquote.Quote(params.CachedBase))
+	}
+	if params.Children != "" {
+		args = append(args, "--children", params.Children)
 	}
 	if params.IdempotencyKey != "" {
 		args = append(args, "--idempotency-key", shellquote.Quote(params.IdempotencyKey))

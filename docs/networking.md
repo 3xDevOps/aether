@@ -304,7 +304,9 @@ owner, once per question and once per stopped integrator. A working, waiting
 or stalled run does not notify. A Background run does not notify for a
 question, and a swarm worker notifies only when blocked. One notification per
 run or workspace budget: a newer one replaces the older, and tapping it opens
-the run or the workspace's budget. While you use a dashboard on any device,
+the run or the workspace's budget. When a run stops needing you, its
+notification is replaced, silently, by `No longer needs you`; a push must
+show something or Safari drops the subscription. While you use a dashboard on any device,
 notifications wait until you have left every dashboard alone for a minute and
 the run still needs you, or the budget is still where it was. Runs the
 [assistant](assistant.md#notifications) launched for you also notify you when

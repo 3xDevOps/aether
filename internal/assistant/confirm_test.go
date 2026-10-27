@@ -17,7 +17,7 @@ func ask(t *testing.T, r *confirmations, ctx context.Context) (protocol.Assistan
 	t.Helper()
 	done := make(chan error, 1)
 	go func() {
-		done <- r.confirm(ctx, protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1"})
+		done <- r.confirm(ctx, &protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1"})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

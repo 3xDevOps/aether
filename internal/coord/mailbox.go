@@ -116,7 +116,27 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 			}
 		}
 	}
-	peers, total, err := s.statusPeers(ctx, self, missionPeers)
+	var lineage []domain.RunID
+	parent := ""
+	if s.cfg.Children != nil {
+		var err error
+		if lineage, err = s.cfg.Children.Lineage(ctx, run); err != nil {
+			return protocol.CoordStatusResult{}, internalError(method, err)
+		}
+		if self.MissionRole == "" {
+			parent = string(self.ParentRunID)
+		}
+		if !self.Status.Terminal() {
+			available, err := s.cfg.Children.Capabilities(ctx, run)
+			if err != nil {
+				return protocol.CoordStatusResult{}, missionRPCError(method, err)
+			}
+			for _, capability := range available {
+				capabilities = appendCapability(capabilities, capability)
+			}
+		}
+	}
+	peers, total, err := s.statusPeers(ctx, self, missionPeers, lineage)
 	if err != nil {
 		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
@@ -137,7 +157,7 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		WireVersion: protocol.CoordWireVersion, RunID: string(self.ID),
 		WorkspaceID: string(self.WorkspaceID), MemberID: string(self.MemberID),
 		Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
-		Assignment: assignment, Peers: peers, PeerTotal: total,
+		Assignment: assignment, ParentRunID: parent, Peers: peers, PeerTotal: total,
 		PeersTruncated: total > len(peers), Unread: unread,
 		Capabilities: capabilities, Protected: self.Protected,
 	}, nil
@@ -550,6 +570,13 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 			lock.Unlock()
 		}
 	}()
+	// child.start takes the same lock, so no child is reserved between this
+	// check and the report's finalization.
+	if s.cfg.Children != nil && !existingFinalized {
+		if err := s.cfg.Children.ValidateReport(ctx, run, store.CoordOutcome(p.Outcome)); err != nil {
+			return protocol.CoordReportResult{}, missionRPCError(method, err)
+		}
+	}
 	nextAction := "review retained evidence"
 	switch p.Outcome {
 	case protocol.CoordOutcomeFailure:
@@ -735,12 +762,18 @@ func (s *Service) rememberReportPacket(id string, packet protocol.EvidencePacket
 // requires explicit acknowledgement. The report outbox retries
 // inbox-cap/storage failures without spending a peer or rate slot.
 func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordReport) error {
-	if s.cfg.Mission == nil {
-		return nil
+	var recipient domain.RunID
+	if s.cfg.Mission != nil {
+		var err error
+		if recipient, err = s.cfg.Mission.ReportRecipient(ctx, report.RunID); err != nil {
+			return fmt.Errorf("worker report recipient: %w", err)
+		}
 	}
-	recipient, err := s.cfg.Mission.ReportRecipient(ctx, report.RunID)
-	if err != nil {
-		return fmt.Errorf("worker report recipient: %w", err)
+	if recipient == "" && s.cfg.Children != nil {
+		var err error
+		if recipient, err = s.cfg.Children.ReportRecipient(ctx, report.RunID); err != nil {
+			return fmt.Errorf("child report recipient: %w", err)
+		}
 	}
 	if recipient == "" {
 		return nil
@@ -1154,7 +1187,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 		if rpcErr != nil {
 			return nil, "", rpcErr
 		}
-		openPeer = route != protocol.CoordPeerMission
+		openPeer = route != protocol.CoordPeerMission && route != protocol.CoordPeerLineage
 	}
 	msg := &store.RunMessage{
 		WorkspaceID: sender.WorkspaceID, FromRun: from, ToRun: to, Body: body,

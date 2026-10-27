@@ -137,3 +137,27 @@ func (e *Engine) RemoveRunHistory(ctx context.Context, run domain.RunID) error {
 		return e.removeRunHistory(ctx, key)
 	}))
 }
+
+// FetchRunBranch copies branch of workspace ws into run into's checkout as
+// ref, and returns the commit. The branch outlives the run that made it.
+func (e *Engine) FetchRunBranch(ctx context.Context, ws domain.WorkspaceID, branch string, into domain.RunID, ref string) (string, error) {
+	dst, err := e.readRunMeta(into)
+	if err != nil {
+		return "", err
+	}
+	if dst.Workspace != ws {
+		return "", fmt.Errorf("gitengine: run %s is not in workspace %s", into, ws)
+	}
+	repo, err := e.existingRepoPath(ws)
+	if err != nil {
+		return "", err
+	}
+	checkout, err := e.existingCheckoutPath(into)
+	if err != nil {
+		return "", err
+	}
+	if _, err := e.git(ctx, checkout, "fetch", "--quiet", "--no-tags", repo, "+refs/heads/"+branch+":"+ref); err != nil {
+		return "", fmt.Errorf("gitengine: fetch %s into run %s: %w", branch, into, err)
+	}
+	return e.git(ctx, checkout, "rev-parse", "--verify", ref)
+}

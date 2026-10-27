@@ -1,8 +1,10 @@
 // Wire types mirroring internal/protocol/wire.go and internal/events.
 
+import type { RunChildrenSetting } from '@/lib/child-types'
 import type { DevArtifact } from '@/lib/development-types'
 export * from '@/lib/development-types'
 export * from '@/lib/run-repository-types'
+export * from '@/lib/child-types'
 
 export type RunStatus =
   | 'queued'
@@ -16,6 +18,9 @@ export type RunStatus =
   | 'interrupted'
 
 /** What a live run waits on, from the scheduler; set only while `status` is `running` or `needs-attention`. */
+/** What chose a live run's state; mirrors events.RunStatusCause in internal/events/event.go. */
+export type RunStatusCause = 'turn' | 'report' | 'turn-end' | 'stall' | 'wait-expired' | 'workers' | 'tasks-held' | 'human' | 'disconnect'
+
 export type RunActivity =
   | 'working'
   | 'waiting-agents'
@@ -51,6 +56,17 @@ export interface Run {
   mission_id?: string
   mission_role?: 'integrator' | 'worker'
   integrator_run_id?: string
+  /** The run that started this one, or a worker's current integrator. */
+  parent_run_id?: string
+  /** The top of the run's tree. */
+  root_run_id?: string
+  child_purpose?: string
+  /** A detached child keeps its lineage but no longer counts toward its parent. */
+  detached?: boolean
+  /** The run's own child-run setting; absent follows the owner's. */
+  children?: RunChildrenSetting
+  /** The agent tried to start a child run while child runs were off. */
+  child_refused?: boolean
   task: string
   /** Latest terminal title, omitted by older servers and for empty titles. */
   title?: string
@@ -64,6 +80,8 @@ export interface Run {
   switching?: 'tui' | 'acp'
   status: RunStatus
   state?: RunActivity | ''
+  /** What chose `state`; absent on a run that is not live and from older servers. */
+  cause?: RunStatusCause
   /** Increments on every change of status, state, reason or outcome flags. */
   status_seq: number
   branch: string
@@ -980,6 +998,7 @@ export interface RunStatusPayload {
   to: RunStatus
   reason?: string
   state?: RunActivity | ''
+  cause?: RunStatusCause
   status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean

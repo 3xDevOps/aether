@@ -243,6 +243,36 @@ func TestConnectorScopes(t *testing.T) {
 	e.callTool(t, writer.session, "aether_launch_run", launch)
 }
 
+// connector.revoke ends a connector at once: its open session, its
+// access token and its refresh token all fail on their next use.
+func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
+	e := newEnv(t)
+	c := e.connect(t, allScopes...)
+	e.callTool(t, c.session, "aether_launch_run", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t"})
+	var list protocol.ConnectorListResult
+	if err := e.admin.Call(protocol.MethodConnectorList, struct{}{}, &list); err != nil || len(list.Connectors) != 1 {
+		t.Fatalf("connector.list = %+v %v", list, err)
+	}
+	id := list.Connectors[0].ID
+	if err := e.admin.Call(protocol.MethodConnectorRevoke, protocol.ConnectorRevokeParams{ConnectorID: id}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if res, err := c.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_list_runs"}); err == nil && !res.IsError {
+		t.Fatalf("the open session's call after revoke = %+v, want refused", res)
+	}
+	if status, _, body := e.bearer(c.token.AccessToken); status != http.StatusUnauthorized || !strings.Contains(body, "revoked") {
+		t.Fatalf("access token after revoke = %d %s, want 401", status, body)
+	}
+	if refused := e.refresh(t, c, c.token.RefreshToken, http.StatusBadRequest); refused.Error != "invalid_grant" || !strings.Contains(refused.Description, "revoked") {
+		t.Fatalf("refresh token after revoke = %+v", refused)
+	}
+	if got := e.runs.launches(); len(got) != 1 {
+		t.Fatalf("launches = %v, want only the one before revoke", got)
+	}
+
+}
+
 // Refreshes racing with one refresh token must rotate it once and keep
 // the connector.
 func TestConnectorExpiryAndConcurrentRefresh(t *testing.T) {
@@ -390,6 +420,45 @@ func TestWriteBucketsOfIdleConnectorsDropped(t *testing.T) {
 	}
 	if _, kept := h.writes["con-a"]; kept || len(h.writes) != 1 {
 		t.Fatalf("write buckets a minute later = %v", slices.Collect(maps.Keys(h.writes)))
+	}
+}
+
+// A sign-in issued within ClockSkew of the handler's start, by the edge's
+// clock, may have been issued before it by this one, so it is refused.
+func TestAssertionsBeforeStartRefused(t *testing.T) {
+	started := time.Now()
+	h := &handler{started: started}
+	for _, tt := range []struct {
+		issued time.Time
+		ok     bool
+	}{
+		{started.Add(-time.Second), false},
+		{started, false},
+		{started.Add(edgeproto.ClockSkew - time.Nanosecond), false},
+		{started.Add(edgeproto.ClockSkew), true},
+	} {
+		if err := h.beforeStart(tt.issued); (err == nil) != tt.ok {
+			t.Fatalf("beforeStart(started+%s) = %v, want ok %v", tt.issued.Sub(started), err, tt.ok)
+		}
+	}
+}
+
+// An edge before VersionConnectorSignIn passes a client's own
+// Aether-Edge-Browser through, so the handler binds no sign-in to it.
+func TestBrowserOnlyFromBindingEdge(t *testing.T) {
+	srv := new(sshd.Server)
+	edge := &edgeAt{}
+	srv.SetEdgeOwner(edge)
+	h := &handler{ssh: srv}
+	r := httptest.NewRequest(http.MethodPost, "/mcp/authorize", nil)
+	r.Header.Set(edgeproto.HeaderBrowser, "forged")
+	edge.version.Store(edgeproto.VersionConnectorSignIn - 1)
+	if got := h.edgeBrowser(r); got != "" {
+		t.Fatalf("browser from a protocol %d edge = %q, want none", edge.version.Load(), got)
+	}
+	edge.version.Store(edgeproto.VersionConnectorSignIn)
+	if got := h.edgeBrowser(r); got != "forged" {
+		t.Fatalf("browser from a protocol %d edge = %q, want its header", edge.version.Load(), got)
 	}
 }
 
@@ -833,8 +902,9 @@ func (*fakeRuns) Paused(domain.RunID) bool { return false }
 func (*fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
 }
-func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest { return nil }
-func (*fakeRuns) Switching(domain.RunID) domain.LaunchMode            { return "" }
+func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
+func (*fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
+func (*fakeRuns) Switching(domain.RunID) domain.LaunchMode                     { return "" }
 func (*fakeRuns) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
 	return scheduler.RetentionInfo{}, nil
 }

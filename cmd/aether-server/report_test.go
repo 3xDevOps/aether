@@ -19,6 +19,7 @@ import (
 type fakeCoordSocket struct {
 	path     string
 	requests chan protocol.Request
+	result   string
 }
 
 func newFakeCoordSocket(t *testing.T) *fakeCoordSocket {
@@ -26,6 +27,7 @@ func newFakeCoordSocket(t *testing.T) *fakeCoordSocket {
 	f := &fakeCoordSocket{
 		path:     filepath.Join(t.TempDir(), "coord3.sock"),
 		requests: make(chan protocol.Request, 4),
+		result:   `{}`,
 	}
 	l, err := net.Listen("unix", f.path)
 	if err != nil {
@@ -49,7 +51,7 @@ func newFakeCoordSocket(t *testing.T) *fakeCoordSocket {
 					return
 				}
 				f.requests <- req
-				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"))
+				_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + f.result + `}` + "\n"))
 			}()
 		}
 	}()
@@ -108,6 +110,34 @@ func TestReportHookDoesNotWriteStdout(t *testing.T) {
 	// reporter talking to the agent instead of to the server.
 	if out := stdout(); out != "" {
 		t.Fatalf("the reporter wrote %q to stdout, want nothing", out)
+	}
+}
+
+// A stop the server holds back becomes Claude Code's block decision, the
+// only thing the reporter ever prints. A stop already continuing for a stop
+// hook is never offered to the server to hold.
+func TestReportClaudeBlocksAStopTheServerHolds(t *testing.T) {
+	sock := newFakeCoordSocket(t)
+	sock.result = `{"continue":"report first"}`
+	withStdin(t, `{"hook_event_name":"Stop","session_id":"abc"}`, true)
+	stdout := capture(t, &os.Stdout)
+	report([]string{"claude", "--socket", sock.path})
+	var decision map[string]string
+	if err := json.Unmarshal([]byte(stdout()), &decision); err != nil || decision["decision"] != "block" || decision["reason"] != "report first" {
+		t.Fatalf("stdout decision = %v, %v; want block with the server's reason", decision, err)
+	}
+	var params protocol.RunReportParams
+	if err := json.Unmarshal((<-sock.requests).Params, &params); err != nil || !params.Stop || params.State != "waiting" {
+		t.Fatalf("run.report params = %+v, %v; want a stop Aether may hold", params, err)
+	}
+
+	withStdin(t, `{"hook_event_name":"Stop","session_id":"abc","stop_hook_active":true}`, true)
+	stdout = capture(t, &os.Stdout)
+	report([]string{"claude", "--socket", sock.path})
+	stdout()
+	var continued protocol.RunReportParams
+	if err := json.Unmarshal((<-sock.requests).Params, &continued); err != nil || continued.Stop {
+		t.Fatalf("continued stop params = %+v, %v; want one Aether may not hold", continued, err)
 	}
 }
 

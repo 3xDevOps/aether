@@ -58,7 +58,7 @@ problems=$(jq -r '
 			| "positive test case lacks description, prompt, tools_triggered or expected_behavior: \(.prompt)"),
 		(.test_cases.negative[]? | select(.description == null or .prompt == null) | "negative test case lacks description or prompt"),
 		(.test_cases.positive[]? | select((.description | length) > 4000) | "positive test case description over 4000 characters")),
-	(paths(type == "object") as $p | getpath($p) | keys[] | select(. == "test_credentials" or . == "reviewer_instructions")
+	(.. | objects | keys[] | select(. == "test_credentials" or . == "reviewer_instructions")
 		| "\(.) must be entered in the portal, not the package")
 ' "$src/plugin.json") || fail "$src/plugin.json is not valid JSON"
 problems=$problems$(jq -r '
@@ -75,6 +75,16 @@ $problems"
 jq -r 'paths(type == "string") as $p | select(getpath($p) | startswith("PLACEHOLDER:")) | $p | map(tostring) | join(".")' "$src/plugin.json" |
 	while IFS= read -r field; do
 		echo "chatgpt-plugin: warning: $field is a placeholder; replace it before submitting (docs/chatgpt-plugin.md)" >&2
+	done
+
+# A test case may name a tool another change is still adding; review fails
+# until the server registers it. Connector tools are defined only in these
+# files; the run-side bridge reuses some names.
+jq -r '.extensions["com.openai"].review.test_cases.positive[].tools_triggered | split(", ")[]' "$src/plugin.json" | sort -u |
+	while IFS= read -r tool; do
+		find "$root/internal/mcpbridge" "$root/internal/ops" \( -name 'connector*.go' -o -path '*/ops/*.go' \) \
+			! -name '*_test.go' -exec grep -lF "\"$tool\"" {} + 2>/dev/null | grep -q . ||
+			echo "chatgpt-plugin: warning: a test case triggers $tool, which no connector tool registers yet" >&2
 	done
 
 stage=$(mktemp -d)

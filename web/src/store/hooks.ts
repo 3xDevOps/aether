@@ -3,12 +3,15 @@ import { useShallow } from 'zustand/react/shallow'
 import { useClock } from '@/lib/clock'
 import { deviceNeeds, type DeviceNeed, type StateContext } from '@/lib/needs-you'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
-import type { GatewayCapabilities, Member, Run } from '@/lib/types'
+import type { GatewayCapabilities, Member, Run, RunStatusCause } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
 import { runPeople, runWatchers } from '@/store/presence'
 import type { RunRecord } from '@/store/runs'
 import { useStore } from '@/store'
+import { runLabel } from '@/lib/status'
+import { runFacts, type ChildRunFacts } from '@/store/workflow'
 import {
+  descendantRuns,
   listedRuns,
   needsYouByWorkspace,
   sidebarGroups,
@@ -16,6 +19,19 @@ import {
   type RunRow,
   type SidebarGroup,
 } from '@/store/selectors'
+
+/** The child runs below `rootIDs` as workflow rows. */
+export function useChildRunFacts(rootIDs: string[]): ChildRunFacts[] {
+  const now = useClock()
+  const key = useStore((s) => {
+    const ctx = stateContextOf(s, now)
+    return JSON.stringify(descendantRuns(s.runs, rootIDs).map((run): ChildRunFacts => {
+      const shown = presentRun(run, ctx)
+      return { ...runFacts(run, shown, runLabel(run), shown.needsYou !== undefined), runId: run.id, parentRunId: run.parent_run_id! }
+    }))
+  })
+  return useMemo(() => JSON.parse(key) as ChildRunFacts[], [key])
+}
 
 export function useStateContext(): StateContext {
   const now = useClock()
@@ -54,11 +70,11 @@ export function useRunPresentation(run: RunRecord): RunPresentation {
   const now = useClock()
   const key = useStore((s) => {
     const shown = presentRun(run, stateContextOf(s, now))
-    return JSON.stringify([shown.state, shown.reason, shown.next])
+    return JSON.stringify([shown.state, shown.reason, shown.next, shown.cause])
   })
   return useMemo(() => {
-    const [state, reason, next] = JSON.parse(key) as [PresentationState, string, string | undefined]
-    return next === undefined ? { state, reason } : { state, reason, next }
+    const [state, reason, next, cause] = JSON.parse(key) as [PresentationState, string, string | undefined, RunStatusCause | undefined]
+    return { state, reason, ...(next !== undefined && { next }), ...(cause !== undefined && { cause }) }
   }, [key])
 }
 
