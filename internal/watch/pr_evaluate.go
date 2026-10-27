@@ -18,8 +18,8 @@ const (
 	// unreportedAfter is how long an open pull request's head commit may go
 	// without a check, or without a required one, before ci says so.
 	unreportedAfter = 10 * time.Minute
-	// suitesWaitMax is how long a check suite with no pending check run
-	// keeps ci pending.
+	// suitesWaitMax is how long after the head commit's last check suite
+	// change a suite with no pending check run keeps ci pending.
 	suitesWaitMax = time.Hour
 )
 
@@ -38,9 +38,19 @@ type prReading struct {
 // merged. Nothing that happened before since is announced. Keys carry the
 // pull request so a run's several pull requests never share one.
 func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time) prReading {
-	age := now.Sub(later(snap.HeadSince, since))
+	start := since
+	if snap.HeadSince.After(start) {
+		start = snap.HeadSince
+	}
+	active := start
+	for _, suite := range snap.Suites {
+		if suite.UpdatedAt.After(active) {
+			active = suite.UpdatedAt
+		}
+	}
+	age := now.Sub(start)
 	checks := snap.Checks()
-	if age >= suitesWaitMax {
+	if now.Sub(active) >= suitesWaitMax {
 		checks = checks.WithoutSuites(false)
 	}
 	ref := "#" + strconv.Itoa(snap.Number)
@@ -66,11 +76,14 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 		switch c {
 		case protocol.WatchCI:
 			r.final = r.final && ciFinal
-			switch {
-			case checks.Pending == 0 && checks.Failed > 0 && after(checks.DoneAt, since):
+			failed := checks.Pending == 0 && checks.Failed > 0 && after(checks.DoneAt, since)
+			if failed {
 				notice(c, checks.Key+":failed", fmt.Sprintf("%d %s failed on %s: %s", checks.Failed, checkWord(checks, checks.Failed), ref, names(checks.FailedNames)))
+			}
+			switch {
 			case unreported && len(checks.Missing) > 0:
 				notice(c, checks.Key+":missing", fmt.Sprintf("%s not reported on %s: %s", capitalized(checkWord(checks, len(checks.Missing))), ref, strings.Join(checks.Missing, ", ")))
+			case failed:
 			case unreported:
 				notice(c, checks.Key+":none", fmt.Sprintf("No checks reported on %s in %d minutes", ref, int(unreportedAfter/time.Minute)))
 			case !checks.Final || !after(checks.DoneAt, since):
@@ -100,14 +113,6 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 
 // after compares at GitHub's one-second resolution.
 func after(t, since time.Time) bool { return !t.Before(since.Truncate(time.Second)) }
-
-// later is the later of a and b.
-func later(a, b time.Time) time.Time {
-	if a.After(b) {
-		return a
-	}
-	return b
-}
 
 func watchChecks(c github.Checks) *protocol.WatchChecks {
 	counts := func(c github.Checks) protocol.WatchCheckCounts {

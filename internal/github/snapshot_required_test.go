@@ -201,16 +201,39 @@ func TestPullRequestSnapshotMatchesRequiredChecksByContextAndApp(t *testing.T) {
 	}
 }
 
-func TestPullRequestSnapshotKeyIgnoresRequirements(t *testing.T) {
-	f := recordedPR(t, "branch-protected.json", "rules-no-checks.json")
-	s := snapshotService(t, f)
-	unread, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
-	if err != nil {
-		t.Fatal(err)
+func TestPullRequestSnapshotReadsEveryPageOfRules(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	rules := make([]string, 0, pageSize)
+	for range pageSize {
+		rules = append(rules, `{"type":"deletion"}`)
 	}
-	required := read(t, s, nil)
-	if a, b := unread.Checks(), required.Checks(); a.RequiredOnly || !b.RequiredOnly || a.Key != b.Key {
-		t.Fatalf("key changed with the requirements: %s %v, %s %v", a.Key, a.RequiredOnly, b.Key, b.RequiredOnly)
+	f.bodies[rulesPath] = "[" + strings.Join(rules, ",") + "]"
+	f.links[rulesPath] = `<https://api.github.com/repositories/1/rules/branches/main?per_page=100&page=2>; rel="next"`
+	f.bodies[rulesPath+"&page=2"] = `[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"deploy"}]}}]`
+	s := snapshotService(t, f)
+	first := read(t, s, nil)
+	again := read(t, s, &first)
+	for _, snap := range []Snapshot{first, again} {
+		if c := snap.Checks(); !slices.Equal(c.Missing, []string{"deploy"}) {
+			t.Fatalf("required check on the second page of rules: %+v, required %+v", c, snap.Required)
+		}
+	}
+	if n := f.notMod; n != 6 {
+		t.Fatalf("%d answers were 304, want every unchanged page but the rules", n)
+	}
+}
+
+func TestRequiredChecksWaitForRunsTheirSuitesCount(t *testing.T) {
+	snap := Snapshot{
+		HeadSHA:   "0123456789abcdef0123456789abcdef01234567",
+		Required:  []RequiredCheck{{Context: "build", Source: "branch"}},
+		CheckRuns: []CheckRun{{ID: 1, Name: "build", Status: "completed", Conclusion: "success", SuiteID: 9, App: "GitHub Actions"}},
+		Suites: []CheckSuite{{ID: 9, Status: "completed", AppSlug: "github-actions", Runs: 1},
+			{ID: 10, Status: "completed", Conclusion: "failure", AppSlug: "github-actions", Runs: 1}},
+	}
+	if c := snap.Checks(); c.Final || c.Pending != 1 {
+		t.Fatalf("required build passed while a completed suite's run is unread: %+v", c)
 	}
 }
 

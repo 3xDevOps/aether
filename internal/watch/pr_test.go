@@ -816,17 +816,109 @@ func TestPRClosedBeforeTheWatchIsNotAnnounced(t *testing.T) {
 	}
 }
 
-func TestPRPassedKeyHoldsWhenRequirementsComeAndGo(t *testing.T) {
-	done := time.Now().Add(-time.Minute)
-	snap := github.Snapshot{Repo: "acme/app", Number: 7, State: "open", HeadSHA: shaOne, CheckRuns: []github.CheckRun{
-		{ID: 1, Name: "build", Status: "completed", Conclusion: "success", CompletedAt: &done},
-		{ID: 2, Name: "lint", Status: "completed", Conclusion: "success", CompletedAt: &done},
-	}}
-	all := evaluatePR(snap, []string{protocol.WatchCI}, done.Add(-time.Hour), time.Now())
-	snap.Required = []github.RequiredCheck{{Context: "build", Source: "branch"}}
-	required := evaluatePR(snap, []string{protocol.WatchCI}, done.Add(-time.Hour), time.Now())
-	if len(all.notices) != 1 || len(required.notices) != 1 || all.notices[0].Key != required.notices[0].Key ||
-		required.notices[0].Body != "Required checks passed on #7" {
-		t.Fatalf("every check: %+v; required only: %+v", all.notices, required.notices)
+func TestPRRequiredNoticeKeysFollowOnlyRequiredChecks(t *testing.T) {
+	now := time.Now()
+	done := now.Add(-time.Minute)
+	snap := github.Snapshot{Repo: "acme/app", Number: 7, State: "open", HeadSHA: shaOne, HeadSince: now.Add(-20 * time.Minute),
+		Required: []github.RequiredCheck{{Context: "build", Source: "branch"}},
+		CheckRuns: []github.CheckRun{
+			{ID: 1, Name: "build", Status: "completed", Conclusion: "success", CompletedAt: &done},
+			{ID: 2, Name: "lint", Status: "in_progress"},
+		}}
+	since := now.Add(-time.Hour)
+	running := evaluatePR(snap, []string{protocol.WatchCI}, since, now)
+	snap.CheckRuns[1].Status, snap.CheckRuns[1].Conclusion, snap.CheckRuns[1].CompletedAt = "completed", "failure", &done
+	finished := evaluatePR(snap, []string{protocol.WatchCI}, since, now)
+	if len(running.notices) != 1 || len(finished.notices) != 1 || running.notices[0].Key != finished.notices[0].Key {
+		t.Fatalf("an unrequired check finishing changed the required pass: %+v, then %+v", running.notices, finished.notices)
+	}
+	var keys []string
+	for _, other := range []string{"test", "deploy"} {
+		snap.Required = []github.RequiredCheck{{Context: "build", Source: "branch"}, {Context: other, Source: "rules"}}
+		r := evaluatePR(snap, []string{protocol.WatchCI}, since, now)
+		if len(r.notices) != 1 || r.notices[0].Body != "Required check not reported on #7: "+other {
+			t.Fatalf("%s missing: %+v", other, r.notices)
+		}
+		keys = append(keys, r.notices[0].Key)
+	}
+	if keys[0] == keys[1] {
+		t.Fatalf("another missing check kept the key %s", keys[0])
+	}
+}
+
+func TestPRFailureDoesNotHideAMissingRequiredCheck(t *testing.T) {
+	now := time.Now()
+	done := now.Add(-15 * time.Minute)
+	snap := github.Snapshot{Repo: "acme/app", Number: 7, State: "open", HeadSHA: shaOne, HeadSince: now.Add(-20 * time.Minute),
+		Required:  []github.RequiredCheck{{Context: "build", Source: "branch"}, {Context: "test", Source: "branch"}},
+		CheckRuns: []github.CheckRun{{ID: 1, Name: "build", Status: "completed", Conclusion: "failure", CompletedAt: &done}}}
+	var got []string
+	for _, n := range evaluatePR(snap, []string{protocol.WatchCI}, now.Add(-time.Hour), now).notices {
+		got = append(got, n.Body)
+	}
+	if want := []string{"1 required check failed on #7: build", "Required check not reported on #7: test"}; !slices.Equal(got, want) {
+		t.Fatalf("notices = %q, want %q", got, want)
+	}
+}
+
+func TestPRNewSuiteHoldsCIPastAnHourOnOneHead(t *testing.T) {
+	p := newPRHarness(t)
+	done := p.stamp()
+	p.gh.set(func(f *fakeGitHub) {
+		f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "build", Status: "completed", Conclusion: "success", Completed: done}}
+	})
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	p.clock.advance(2 * time.Hour)
+	p.gh.set(func(f *fakeGitHub) {
+		f.suites = []map[string]any{{"id": 10, "status": "queued", "conclusion": nil, "latest_check_runs_count": 0, "updated_at": p.stamp(),
+			"app": map[string]string{"name": "GitHub Actions", "slug": "github-actions"}}}
+	})
+	p.poll(w.ID)
+	if got := bodies(p.notices(w.ID)); !slices.Equal(got, []string{"ci: Checks passed on #7"}) {
+		t.Fatalf("notices = %q, want one pass before the new suite reports", got)
+	}
+	var observed protocol.WatchObserved
+	_ = json.Unmarshal(p.watchState(w.ID).Observed, &observed)
+	if observed.Checks == nil || observed.Checks.Pending != 1 {
+		t.Fatalf("checks = %+v, want the new suite pending", observed.Checks)
+	}
+}
+
+func TestPRCIReadAfterAnotherWatchsReadsRequirements(t *testing.T) {
+	p := newPRHarness(t)
+	prs, err := NewPRs(PRConfig{GitHub: github.New(p.homes), Store: p.db, Now: p.clock.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(ci bool) github.Snapshot {
+		t.Helper()
+		snap, _, err := prs.snapshot(p.ctx, p.ada.ID, "acme/app", 7, ci, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return snap
+	}
+	read(true)
+	p.clock.advance(PRPollIdle)
+	p.gh.set(func(f *fakeGitHub) { f.required = []string{"build"} })
+	read(false)
+	if c := read(true).Checks(); !slices.Equal(c.Missing, []string{"build"}) {
+		t.Fatalf("ci read right after a review read: %+v, want build required", c)
+	}
+}
+
+func TestPROne404BeforeAnyReadKeepsWatching(t *testing.T) {
+	p := newPRHarness(t)
+	res := p.watchOn(p.bob, prTarget7(), protocol.WatchCI)
+	if res.Watch.State != protocol.WatchError {
+		t.Fatalf("state = %s, want error without a login", res.Watch.State)
+	}
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.login(p.bob)
+	p.clock.advance(time.Minute)
+	p.eventually("the read after login", func() bool { return strings.Contains(p.watchState(res.Watch.ID).Error, "not reachable") })
+	if got := p.watchState(res.Watch.ID); got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
+		t.Fatalf("first 404 of a watch with no read yet = %s %q, next_check_at = %v; want a retry", got.State, got.Error, got.NextCheckAt)
 	}
 }

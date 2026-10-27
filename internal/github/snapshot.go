@@ -111,6 +111,9 @@ type CheckSuite struct {
 	App        string `json:"app"`
 	AppSlug    string `json:"app_slug"`
 	Runs       int    `json:"latest_check_runs_count"`
+	// UpdatedAt is when GitHub last changed the suite, as when it was
+	// queued or rerequested.
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
 // WorkflowRun ties a GitHub Actions check suite to the workflow it ran.
@@ -203,10 +206,11 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	// created before the runs are read.
 	type checkSuitesPage struct {
 		CheckSuites []struct {
-			ID         int64   `json:"id"`
-			Status     string  `json:"status"`
-			Conclusion *string `json:"conclusion"`
-			Runs       int     `json:"latest_check_runs_count"`
+			ID         int64      `json:"id"`
+			Status     string     `json:"status"`
+			Conclusion *string    `json:"conclusion"`
+			Runs       int        `json:"latest_check_runs_count"`
+			UpdatedAt  *time.Time `json:"updated_at"`
 			App        struct {
 				Name string `json:"name"`
 				Slug string `json:"slug"`
@@ -219,6 +223,9 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			suite := CheckSuite{ID: r.ID, Status: r.Status, App: r.App.Name, AppSlug: r.App.Slug, Runs: r.Runs}
 			if r.Conclusion != nil {
 				suite.Conclusion = *r.Conclusion
+			}
+			if r.UpdatedAt != nil {
+				suite.UpdatedAt = *r.UpdatedAt
 			}
 			out = append(out, suite)
 		}
@@ -407,12 +414,30 @@ func (s *Service) RequiredChecks(ctx context.Context, token string, prev, snap *
 		} else {
 			var record []rule
 			header, notModified, err = s.fetch(ctx, token, path, etag, &record)
-			for _, r := range record {
-				if r.Type == "required_status_checks" {
-					for _, c := range r.Parameters.RequiredStatusChecks {
-						found = append(found, RequiredCheck{Context: c.Context, AppID: c.IntegrationID, Source: source})
+			links := header.Values("Link")
+			// An ETag covers one page, so rules that fill the first are
+			// read again whole.
+			if len(record) == pageSize {
+				header.Del("ETag")
+			}
+			for number := 2; err == nil && !notModified; number++ {
+				for _, r := range record {
+					if r.Type == "required_status_checks" {
+						for _, c := range r.Parameters.RequiredStatusChecks {
+							found = append(found, RequiredCheck{Context: c.Context, AppID: c.IntegrationID, Source: source})
+						}
 					}
 				}
+				if _, more := nextLink(links); !more {
+					break
+				}
+				if number > maxPages {
+					return fmt.Errorf("github: branch %s has more than %d rules", snap.BaseRef, maxPages*pageSize)
+				}
+				var page http.Header
+				record = nil
+				page, _, err = s.fetch(ctx, token, path+"&page="+strconv.Itoa(number), "", &record)
+				links = page.Values("Link")
 			}
 		}
 		refused := ""
@@ -453,12 +478,13 @@ func (s *Snapshot) requiredPath(source string) string {
 }
 
 // KeepRequired carries prev's required checks into s without reading them,
-// so a later RequiredChecks still asks conditionally.
+// so a later RequiredChecks still asks conditionally. RequiredRead stays
+// false, so a ci watch reusing s reads them again.
 func (s *Snapshot) KeepRequired(prev *Snapshot) {
 	if prev == nil || prev.Repo != s.Repo || prev.BaseRef != s.BaseRef {
 		return
 	}
-	s.Required, s.RequiredRead, s.RequiredUnreadable = prev.Required, prev.RequiredRead, prev.RequiredUnreadable
+	s.Required, s.RequiredUnreadable = prev.Required, prev.RequiredUnreadable
 	for _, source := range requiredSources {
 		if p, ok := prev.page(s.requiredPath(source)); ok {
 			s.Pages = append(s.Pages, p)
@@ -586,10 +612,11 @@ type Checks struct {
 	// and no required check is missing. A commit whose checks have not been
 	// created yet is not final.
 	Final bool `json:"final"`
-	// Key changes with the head commit and with every check run or status ID
-	// and final conclusion, so a failed run followed by a passing rerun, or a
-	// run updated in place, yields a new key. It covers every check whether
-	// or not RequiredOnly, so reading the requirements does not change it.
+	// Key changes with the head commit and with every counted check run or
+	// status ID and final conclusion, so a failed run followed by a passing
+	// rerun, or a run updated in place, yields a new key. When RequiredOnly
+	// it also changes with the missing names, and not with checks the base
+	// branch does not require.
 	Key string `json:"key"`
 }
 
@@ -617,14 +644,15 @@ func (s Snapshot) CurrentRuns() []CheckRun {
 // with no pending run when it belongs to GitHub Actions or already has
 // runs (other apps can leave a zero-run suite queued forever), and a
 // completed one with more runs than were read. When only required checks
-// count, such a suite counts only while a required check is missing.
+// count, an incomplete suite counts only while a required check is missing;
+// a completed one still counts, since a run not read may be a required one.
 func (s Snapshot) Checks() Checks {
 	all := s.tally(false)
 	if len(s.Required) == 0 {
 		return all
 	}
 	c := s.tally(true)
-	c.All, c.Key = &all, all.Key
+	c.All = &all
 	return c
 }
 
@@ -714,24 +742,23 @@ func (s Snapshot) tally(requiredOnly bool) Checks {
 		}
 		slices.Sort(c.Missing)
 	}
-	if !c.RequiredOnly || len(c.Missing) > 0 {
-		read := map[int64]map[string]bool{}
-		for _, run := range s.CheckRuns {
-			if read[run.SuiteID] == nil {
-				read[run.SuiteID] = map[string]bool{}
-			}
-			read[run.SuiteID][run.App+"/"+run.Name] = true
+	read := map[int64]map[string]bool{}
+	for _, run := range s.CheckRuns {
+		if read[run.SuiteID] == nil {
+			read[run.SuiteID] = map[string]bool{}
 		}
-		for _, suite := range s.Suites {
-			incomplete := suite.Status != "completed" && !running[suite.ID] && (suite.AppSlug == "github-actions" || suite.Runs > 0)
-			if incomplete || suite.Status == "completed" && len(read[suite.ID]) < suite.Runs {
-				c.Pending++
-				c.Suites++
-				if suite.Runs == 0 {
-					c.EmptySuites++
-				}
-				ids = append(ids, "q"+strconv.FormatInt(suite.ID, 10))
+		read[run.SuiteID][run.App+"/"+run.Name] = true
+	}
+	for _, suite := range s.Suites {
+		incomplete := suite.Status != "completed" && !running[suite.ID] && (suite.AppSlug == "github-actions" || suite.Runs > 0) &&
+			(!c.RequiredOnly || len(c.Missing) > 0)
+		if incomplete || suite.Status == "completed" && len(read[suite.ID]) < suite.Runs {
+			c.Pending++
+			c.Suites++
+			if suite.Runs == 0 {
+				c.EmptySuites++
 			}
+			ids = append(ids, "q"+strconv.FormatInt(suite.ID, 10))
 		}
 	}
 	c.Final = c.final()

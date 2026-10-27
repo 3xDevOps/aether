@@ -195,8 +195,9 @@ func (p *PRs) limited(m *prMember, err *github.RateLimitError) *prError {
 // snapshot reads repo#number with member's credentials, conditionally
 // against the last read, which it reuses outright when it is younger than
 // prReuse; when ci and that read skipped the required checks, it reads only
-// those. moved reports a fresh read that differs from the last one.
-func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci bool) (snap github.Snapshot, moved bool, err error) {
+// those. create is a read for watch.create, which a 403 or 404 refuses at
+// once. moved reports a fresh read that differs from the last one.
+func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci, create bool) (snap github.Snapshot, moved bool, err error) {
 	m := p.member(member)
 	if err = p.lock(ctx, m); err != nil {
 		return github.Snapshot{}, false, err
@@ -227,7 +228,7 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 		}
 		m.limitErr = nil
 	}
-	if snap, err = p.read(ctx, member, m, repo, number, prev, ci, recent); err != nil {
+	if snap, err = p.read(ctx, member, m, repo, number, prev, ci, recent, create); err != nil {
 		return github.Snapshot{}, false, err
 	}
 	snap.HeadSince = p.now()
@@ -248,7 +249,7 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 
 // read reads repo#number conditionally against prev, and the required
 // checks when ci; only the required checks when recent.
-func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, repo string, number int, prev *github.Snapshot, ci, recent bool) (github.Snapshot, error) {
+func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, repo string, number int, prev *github.Snapshot, ci, recent, create bool) (github.Snapshot, error) {
 	cached := m.token != ""
 	token, err := p.token(ctx, member, m, false)
 	if err != nil {
@@ -306,7 +307,7 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 		if !refusedBefore {
 			firstRefused = p.now()
 		}
-		if prev != nil && p.now().Sub(firstRefused) < prReuse {
+		if !create && p.now().Sub(firstRefused) < prReuse {
 			m.refused[ref] = firstRefused
 			return github.Snapshot{}, &prError{msg: msg + "; asking once more before the watch stops"}
 		}
@@ -331,7 +332,7 @@ func (p *PRs) Validate(ctx context.Context, member domain.MemberID, target proto
 		_, err := p.token(ctx, member, m, false)
 		return "", err
 	}
-	snap, _, err := p.snapshot(ctx, member, strings.ToLower(target.Repo), target.Number, false)
+	snap, _, err := p.snapshot(ctx, member, strings.ToLower(target.Repo), target.Number, false, true)
 	if err != nil {
 		return "", err
 	}
@@ -366,7 +367,7 @@ func (p *PRs) Evaluate(ctx context.Context, check PRCheck) (PRResult, error) {
 	busy := false
 	ci := slices.Contains(check.Conditions, protocol.WatchCI)
 	for i, t := range targets {
-		snap, moved, err := p.snapshot(ctx, check.Member, t.repo, t.number, ci)
+		snap, moved, err := p.snapshot(ctx, check.Member, t.repo, t.number, ci, false)
 		if err == nil && t.run != "" {
 			err = p.refreshRun(ctx, t, snap)
 		}
