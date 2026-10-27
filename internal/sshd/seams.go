@@ -79,6 +79,9 @@ type RunController interface {
 	// AgentModels lists the models harness offers on account, resolving the
 	// harness and the account owner's login as Launch does.
 	AgentModels(ctx context.Context, member, account domain.MemberID, harness string, refresh bool) (protocol.AgentModelsResult, error)
+	// CachedAgentModels is AgentModels' fresh cached answer for harness on
+	// account, without probing; false when there is none.
+	CachedAgentModels(account domain.MemberID, harness string) (protocol.AgentModelsResult, bool)
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
 	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
@@ -130,7 +133,7 @@ type RunController interface {
 	Seen(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	// Review records actor's complete or later on the run's outcome
 	// (protocol.RunReview*).
-	Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string) (*domain.Run, error)
+	Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string, reportedOnly bool) (*domain.Run, error)
 	// RecordHandoff credits the outgoing owner of a run as a steerer and
 	// refreshes the co-author list its container reads. Called after the
 	// run row already names the new owner.

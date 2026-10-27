@@ -53,6 +53,11 @@ export function isLive(watch: Pick<Watch, 'state'>): boolean {
   return watch.state === 'active' || watch.state === 'paused' || watch.state === 'error'
 }
 
+/** Who keeps the watch, when it is not the member's own doing in the dashboard. */
+export function sourceLabel(watch: Pick<Watch, 'source'>): string | undefined {
+  return watch.source === 'assistant' ? 'Kept by the assistant' : undefined
+}
+
 export function targetKindLabel(target: WatchTarget): string {
   switch (target.kind) {
     case 'run':

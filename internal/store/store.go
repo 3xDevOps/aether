@@ -227,9 +227,9 @@ type Store interface {
 	RunMessageHistoryStore
 	PushStore
 	AssistantStore
-	AssistantFollowStore
 	InsightsStore
 	LaunchReceiptStore
+	LaunchDefaultsStore
 
 	Close() error
 }

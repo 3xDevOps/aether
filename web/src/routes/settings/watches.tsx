@@ -12,7 +12,7 @@ import type { Api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import type { Watch } from '@/lib/types'
-import { conditionLabel, isLive, stateWords, targetKindLabel, watchRoute } from '@/lib/watches'
+import { conditionLabel, isLive, sourceLabel, stateWords, targetKindLabel, watchRoute } from '@/lib/watches'
 import { WatchDetail } from '@/routes/settings/watch-detail'
 import { useStore } from '@/store'
 import { loadWatches } from '@/store/watches'
@@ -37,7 +37,7 @@ const WatchRow = memo(function WatchRow({ watch, onOpen }: { watch: Watch; onOpe
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-baseline gap-2">
           <span className="min-w-0 truncate text-ui font-medium text-text">{watch.label || watch.target_title}</span>
-          <span className="shrink-0 text-ui-sm text-muted">{targetKindLabel(watch.target)}</span>
+          <span className="shrink-0 text-ui-sm text-muted">{[targetKindLabel(watch.target), sourceLabel(watch)].filter(Boolean).join(' · ')}</span>
         </span>
         <StateLine tone={state.tone} label={state.label} strong={watch.state === 'error'}>
           {state.label} · {conditionsText(watch)}
