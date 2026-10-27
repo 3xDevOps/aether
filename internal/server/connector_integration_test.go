@@ -140,7 +140,6 @@ func TestIntegrationConnectorFlows(t *testing.T) {
 	}
 	ws := string(env.ws.ID)
 	tool("aether_list_workspaces", nil)
-	tool("aether_list_agents", nil)
 
 	tasks := []string{"update the changelog", "fix the flaky login test", "add rate limiting", "clean the build directory"}
 	ids := make([]string, len(tasks))
@@ -238,7 +237,7 @@ func TestIntegrationConnectorFlows(t *testing.T) {
 		t.Fatalf("the integrator's question %s does not need attention", asked.Question.ID)
 	}
 	tool("aether_answer", map[string]any{"run_id": question["run_id"], "answer_id": asked.Question.ID, "answer": "the database"})
-	tool("aether_list_swarms", nil)
+	tool("aether_get_swarm", nil)
 
 	for _, id := range ids {
 		tool("aether_stop_run", map[string]any{"run_id": id})

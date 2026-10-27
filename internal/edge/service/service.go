@@ -46,6 +46,10 @@ type Config struct {
 	// OpenAIChallenge is the token the relay origin serves at
 	// edgeproto.PathOpenAIChallenge; empty serves 404.
 	OpenAIChallenge string
+	// ConnectorClientHosts replaces chatgpt.com and claude.ai as the
+	// host names a server may send a browser to from the universal
+	// connector paths; for tests that serve their own client.
+	ConnectorClientHosts []string
 }
 
 // OAuthApp is a GitHub OAuth app. AuthURL, TokenURL and APIURL, the base
@@ -84,8 +88,9 @@ type ServerLink interface {
 	// request and returns false.
 	ReadMCPBody(w http.ResponseWriter, r *http.Request) ([]byte, bool)
 	// ForwardUniversal forwards a universal connector request, whose body
-	// ReadMCPBody read, to serverID.
-	ForwardUniversal(w http.ResponseWriter, r *http.Request, serverID string, body []byte)
+	// ReadMCPBody read, to serverID, with browser, when set, as
+	// edgeproto.HeaderBrowser.
+	ForwardUniversal(w http.ResponseWriter, r *http.Request, serverID string, body []byte, browser string)
 }
 
 // Service is the edge's sign-in service.
@@ -107,6 +112,7 @@ type Service struct {
 	// githubErrors counts calls to GitHub that failed.
 	githubErrors    atomic.Uint64
 	openAIChallenge string
+	clientHosts     []string
 
 	signinLimit *limiter[netip.Prefix]
 	startLimit  *limiter[netip.Prefix]
@@ -170,8 +176,12 @@ func New(cfg Config) (*Service, error) {
 		chooseLimit:       newAddrLimiter(20, 3*time.Second, now),
 		tokenLimit:        newLimiter[serverBlock](60, time.Second, now),
 		openAIChallenge:   cfg.OpenAIChallenge,
+		clientHosts:       cfg.ConnectorClientHosts,
 	}
 	s.tokenLimit.scale = func(k serverBlock) int { return edgeproto.RateLimitScale(k.block) }
+	if s.clientHosts == nil {
+		s.clientHosts = []string{"chatgpt.com", "claude.ai"}
+	}
 	if cfg.GitHub == nil {
 		return nil, errors.New("edge: no GitHub OAuth app is configured; set --github-client-id and its client secret")
 	}

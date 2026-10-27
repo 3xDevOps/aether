@@ -2,19 +2,23 @@ package sshd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // planGateMissionService takes the shared authorization mutex the way the real
 // mission service does, so a handler that also took it would deadlock here.
 type planGateMissionService struct {
-	mu    *sync.Mutex
-	actor domain.MemberID
+	mu         *sync.Mutex
+	actor      domain.MemberID
+	replaceErr error
 }
 
 func (p *planGateMissionService) Create(context.Context, domain.MemberID, protocol.MissionCreateParams) (protocol.MissionCreateResult, error) {
@@ -30,7 +34,29 @@ func (p *planGateMissionService) Show(context.Context, protocol.MissionShowParam
 }
 
 func (p *planGateMissionService) ReplaceIntegrator(context.Context, domain.MemberID, protocol.MissionReplaceIntegratorParams) (protocol.MissionReplaceIntegratorResult, error) {
-	return protocol.MissionReplaceIntegratorResult{}, nil
+	return protocol.MissionReplaceIntegratorResult{}, p.replaceErr
+}
+
+// A stale expected_generation says so in data.reason, which an idempotency
+// key reused for another replacement does not.
+func TestReplaceIntegratorStaleReason(t *testing.T) {
+	t.Parallel()
+	svc := &planGateMissionService{mu: &sync.Mutex{}}
+	e := newTestEnv(t, func(cfg *Config) { cfg.Services.Missions = svc })
+	params := json.RawMessage(`{"mission_id":"mis-1","expected_generation":1,"idempotency_key":"k"}`)
+	for _, tc := range []struct {
+		err  error
+		data string
+	}{
+		{fmt.Errorf("%w: expected generation 1, current 2", store.ErrMissionStale), `{"reason":"` + protocol.ErrorReasonStaleGeneration + `"}`},
+		{store.ErrMissionIdempotencyConflict, ""},
+	} {
+		svc.replaceErr = tc.err
+		_, perr := e.srv.Local(e.member.ID).Call(t.Context(), protocol.MethodMissionReplaceIntegrator, params)
+		if perr == nil || perr.Code != protocol.CodeConflict || string(perr.Data) != tc.data {
+			t.Fatalf("%v = %v data %s, want conflict data %q", tc.err, perr, perr.Data, tc.data)
+		}
+	}
 }
 
 func (p *planGateMissionService) AnswerQuestion(_ context.Context, actor domain.MemberID, params protocol.MissionQuestionAnswerParams) (protocol.MissionQuestionResult, error) {

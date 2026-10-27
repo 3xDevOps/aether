@@ -2,6 +2,7 @@ package edge
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
-	"github.com/modelcontextprotocol/go-sdk/oauthex"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
@@ -34,7 +34,7 @@ func (s *Service) registerUniversal(mux *http.ServeMux) {
 	mux.HandleFunc(edgeproto.PathUniversalMCPToken, s.universalToken)
 	mux.HandleFunc(edgeproto.PathUniversalMCPAuthorize, s.universalAuthorize)
 	mux.Handle("GET "+edgeproto.PathUniversalResourceMetadata, auth.ProtectedResourceMetadataHandler(
-		&oauthex.ProtectedResourceMetadata{Resource: base, AuthorizationServers: []string{base}}))
+		edgeproto.ConnectorResourceMetadata(base)))
 	mux.HandleFunc("GET "+edgeproto.PathUniversalAuthServerMetadata, func(w http.ResponseWriter, _ *http.Request) {
 		writeNoStoreJSON(w, http.StatusOK, edgeproto.ConnectorAuthServerMetadata(base))
 	})
@@ -101,16 +101,29 @@ func (s *Service) universalToken(w http.ResponseWriter, r *http.Request) {
 		tokenFail(w, http.StatusTooManyRequests, "slow_down", fmt.Sprintf("too many token requests for server %s from your address; retry in a few seconds", id))
 		return
 	}
-	s.link.ForwardUniversal(w, r, id, body)
+	s.link.ForwardUniversal(s.guard(w), r, id, body, "")
 }
 
 // universalAuthorize sends a browser without a chosen server to choose
-// one on the sign-in origin, and forwards one with a server to it.
+// one on the sign-in origin, and forwards one with a server to it, bound
+// to the browser by a cookie on the relay origin.
 func (s *Service) universalAuthorize(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(edgeproto.ParamServer)
 	if id == "" && r.Method == http.MethodGet {
 		http.Redirect(w, r, s.signinOrigin+edgeproto.PathMCPChoose+"?"+r.URL.RawQuery, http.StatusSeeOther)
 		return
+	}
+	body, ok := s.link.ReadMCPBody(w, r)
+	if !ok {
+		return
+	}
+	if id == "" && r.Method == http.MethodPost {
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			http.Error(w, "the body is not a form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		id = form.Get(edgeproto.ParamServer)
 	}
 	if !edgeproto.ValidServerID(id) {
 		http.Error(w, fmt.Sprintf("%s=%q is not a server id; start the connection again from ChatGPT or Claude", edgeproto.ParamServer, id),
@@ -121,7 +134,19 @@ func (s *Service) universalAuthorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, string(edgeproto.RefusalTooMany), edgeproto.RefusalTooMany.Status())
 		return
 	}
-	s.forwardUniversal(w, r, id)
+	g := s.guard(w)
+	browser := ""
+	if c, err := r.Cookie(browserCookie); err == nil && edgeproto.ValidToken(c.Value) {
+		browser = c.Value
+	} else {
+		browser = edgeproto.NewToken()
+		// SameSite None: the consent page's form posts from the opaque
+		// origin its sandbox gives it, a cross-site request. Browsers drop
+		// a __Host- cookie whose Path is not /.
+		g.cookie = &http.Cookie{Name: browserCookie, Value: browser, Path: "/",
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode}
+	}
+	s.link.ForwardUniversal(g, r, id, body, edgeproto.BrowserBinding(id, browser))
 }
 
 func (s *Service) forwardUniversal(w http.ResponseWriter, r *http.Request, id string) {
@@ -129,7 +154,96 @@ func (s *Service) forwardUniversal(w http.ResponseWriter, r *http.Request, id st
 	if !ok {
 		return
 	}
-	s.link.ForwardUniversal(w, r, id, body)
+	s.link.ForwardUniversal(s.guard(w), r, id, body, "")
+}
+
+// guard limits what a server answers on the universal paths, which every
+// server shares one origin for: a Location only to this origin or a
+// connector client, and forms only to those. It sets cookie, when set,
+// past the relay, which drops every cookie a server sets.
+func (s *Service) guard(w http.ResponseWriter) *universalGuard {
+	// The consent page's sandbox gives it an opaque origin, which 'self'
+	// may not match, so the relay origin is named.
+	formAction := "form-action " + s.relayOrigin + s.clientSources()
+	return &universalGuard{ResponseWriter: w, s: s, formAction: formAction}
+}
+
+type universalGuard struct {
+	http.ResponseWriter
+	s          *Service
+	formAction string
+	cookie     *http.Cookie
+	wrote      bool
+	refused    bool
+}
+
+func (g *universalGuard) WriteHeader(code int) {
+	if code < http.StatusOK {
+		g.ResponseWriter.WriteHeader(code)
+		return
+	}
+	if g.wrote {
+		return
+	}
+	g.wrote = true
+	h := g.Header()
+	if g.cookie != nil {
+		http.SetCookie(g.ResponseWriter, g.cookie)
+	}
+	if csp := h.Get("Content-Security-Policy"); csp != "" {
+		h.Set("Content-Security-Policy", csp+"; "+g.formAction)
+	}
+	for _, loc := range h.Values("Location") {
+		if g.s.allowedLocation(loc) {
+			continue
+		}
+		g.refused = true
+		h.Del("Location")
+		h.Del("Content-Length")
+		h.Set("Content-Type", "text/plain; charset=utf-8")
+		g.ResponseWriter.WriteHeader(http.StatusBadGateway)
+		_, _ = fmt.Fprintf(g.ResponseWriter, "the server sent the browser to %q; on %s%s the edge sends it only to %s or to %s\n",
+			loc, g.s.relayOrigin, edgeproto.PathUniversalMCP, g.s.relayOrigin+edgeproto.PathUniversalMCPAuthorize, strings.Join(g.s.clientHosts, " or "))
+		return
+	}
+	g.ResponseWriter.WriteHeader(code)
+}
+
+func (g *universalGuard) Write(p []byte) (int, error) {
+	if !g.wrote {
+		g.WriteHeader(http.StatusOK)
+	}
+	if g.refused {
+		return len(p), nil
+	}
+	return g.ResponseWriter.Write(p)
+}
+
+func (g *universalGuard) Unwrap() http.ResponseWriter { return g.ResponseWriter }
+
+// clientSources is the connector clients' origins as CSP sources, each
+// after a space.
+func (s *Service) clientSources() string {
+	var out string
+	for _, host := range s.clientHosts {
+		out += " https://" + host
+	}
+	return out
+}
+
+// allowedLocation reports whether loc is the universal authorization
+// path on the relay origin or an https URL on a connector client's host
+// name. A server's own paths on the relay origin get no form-action
+// limit, so a universal page may not send the browser there.
+func (s *Service) allowedLocation(loc string) bool {
+	u, err := url.Parse(loc)
+	switch {
+	case err != nil || strings.ContainsAny(loc, "\\\r\n\t"):
+		return false
+	case u.Scheme == "" && u.Host == "" && !strings.HasPrefix(loc, "//"), u.Scheme+"://"+u.Host == s.relayOrigin:
+		return u.User == nil && u.Path == edgeproto.PathUniversalMCPAuthorize
+	}
+	return u.Scheme == "https" && u.User == nil && slices.Contains(s.clientHosts, u.Hostname())
 }
 
 func writeNoStoreJSON(w http.ResponseWriter, status int, v any) {
@@ -145,30 +259,34 @@ func tokenFail(w http.ResponseWriter, status int, code, description string) {
 	}{code, description})
 }
 
-// choice is a server on the choose page, with the link that picks it or
-// why it cannot be picked.
-type choice struct {
-	edgeproto.ServerInfo
-	Link   string
-	Reason string
-}
-
 // mcpChoose lists the servers the signed-in account is a member of for
-// the universal connector's authorization request, and sends the browser
-// on to the chosen one, at once when only one can take it, with a
-// ConnectorAssertion of the account.
+// the universal connector's authorization request. Each it can take has
+// a form that posts the request to the relay origin with a
+// ConnectorAssertion for that server, so the account always picks the
+// server and no URL carries the assertion.
 func (s *Service) mcpChoose(w http.ResponseWriter, r *http.Request, v visitor) error {
 	if !s.chooseLimit.allow(addrKeys(r)...) {
 		return edgeproto.RefusalTooMany
 	}
 	q := r.URL.Query()
-	if q.Get("client_id") == "" || q.Get("code_challenge") == "" {
-		return pageErr(http.StatusBadRequest, "this authorization request has no client_id or code_challenge; start the connection again from ChatGPT or Claude")
+	q.Del(edgeproto.ParamServer)
+	q.Del(edgeproto.ParamAssertion)
+	if q.Get("client_id") == "" || q.Get("code_challenge") == "" || q.Get("redirect_uri") == "" {
+		return pageErr(http.StatusBadRequest, "this authorization request has no client_id, code_challenge or redirect_uri; start the connection again from ChatGPT or Claude")
 	}
 	rows, err := s.servers(r.Context(), v.Account.Account)
 	if err != nil {
 		return err
 	}
+	var fields []field
+	for _, k := range slices.Sorted(maps.Keys(q)) {
+		for _, val := range q[k] {
+			fields = append(fields, field{k, val})
+		}
+	}
+	// The server checks the assertion against its own clock, as it checks
+	// grants, which the relay also signs with the wall clock.
+	now := time.Now()
 	var ready, other []choice
 	for _, row := range rows {
 		c := choice{ServerInfo: row.ServerInfo}
@@ -177,51 +295,55 @@ func (s *Service) mcpChoose(w http.ResponseWriter, r *http.Request, v visitor) e
 			c.Reason = "you are invited but have not joined; open the invitation link first"
 		case version == 0:
 			c.Reason = "not connected to this edge"
-		case version < edgeproto.VersionUniversalMCP:
+		case version < edgeproto.VersionConnectorSignIn:
 			c.Reason = "its aether-server is too old for this URL; an admin runs sudo aether-server update"
 		default:
-			pick := url.Values{}
-			for k, vs := range q {
-				pick[k] = vs
+			c.Assertion, err = edgeproto.SignConnectorAssertion(s.key, edgeproto.ConnectorAssertion{
+				Issuer: s.relayOrigin, ServerID: row.ID, Nonce: edgeproto.NewConnID(), Account: v.Account.Account,
+				ClientID: q.Get("client_id"), Challenge: q.Get("code_challenge"), RedirectURI: q.Get("redirect_uri"),
+				IssuedAt: now, ExpiresAt: now.Add(edgeproto.ConnectorAssertionTTL),
+			})
+			if err != nil {
+				return pageErr(http.StatusBadRequest, "%v", err)
 			}
-			pick.Set(edgeproto.ParamServer, row.ID)
-			c.Link = edgeproto.PathMCPChoose + "?" + pick.Encode()
 			ready = append(ready, c)
 			continue
 		}
 		other = append(other, c)
 	}
-	if id := q.Get(edgeproto.ParamServer); id != "" {
-		i := slices.IndexFunc(ready, func(c choice) bool { return c.ID == id })
-		if i < 0 {
-			return pageErr(http.StatusForbidden, "server %s is not one of yours that can take this connection; pick one from the list", id)
-		}
-		return s.handOff(w, r, v, ready[i].ID)
-	}
-	if len(ready) == 1 {
-		return s.handOff(w, r, v, ready[0].ID)
-	}
-	s.render(w, http.StatusOK, "choose", s.view(&v, "Choose a server", struct{ Ready, Other []choice }{ready, other}))
+	// The server answers a bad request with a redirect to the client,
+	// which form-action also governs.
+	w.Header().Set("Content-Security-Policy", pageCSP+" "+s.relayOrigin+s.clientSources())
+	s.render(w, http.StatusOK, "choose", s.view(&v, "Choose a server", chooseData{
+		Action: s.relayOrigin + edgeproto.PathUniversalMCPAuthorize, Client: redirectHost(q.Get("redirect_uri")),
+		Fields: fields, Ready: ready, Other: other,
+	}))
 	return nil
 }
 
-// handOff sends the browser to serverID's consent page with the
-// authorization request and an assertion that the visitor chose it.
-func (s *Service) handOff(w http.ResponseWriter, r *http.Request, v visitor, serverID string) error {
-	q := r.URL.Query()
-	// The server checks the assertion against its own clock, as it checks
-	// grants, which the relay also signs with the wall clock.
-	now := time.Now()
-	signed, err := edgeproto.SignConnectorAssertion(s.key, edgeproto.ConnectorAssertion{
-		Issuer: s.relayOrigin, ServerID: serverID, Nonce: edgeproto.NewConnID(), Account: v.Account.Account,
-		ClientID: q.Get("client_id"), Challenge: q.Get("code_challenge"),
-		IssuedAt: now, ExpiresAt: now.Add(edgeproto.ConnectorAssertionTTL),
-	})
+// choice is a server on the choose page, with the assertion its form
+// posts or why it cannot be picked.
+type choice struct {
+	edgeproto.ServerInfo
+	Assertion string
+	Reason    string
+}
+
+type field struct{ Name, Value string }
+
+// chooseData is the choose page: each ready server's form posts Fields,
+// the authorization request, to Action. Client is the host the request
+// returns to.
+type chooseData struct {
+	Action, Client string
+	Fields         []field
+	Ready, Other   []choice
+}
+
+func redirectHost(uri string) string {
+	u, err := url.Parse(uri)
 	if err != nil {
-		return pageErr(http.StatusBadRequest, "%v", err)
+		return uri
 	}
-	q.Set(edgeproto.ParamServer, serverID)
-	q.Set(edgeproto.ParamAssertion, signed)
-	http.Redirect(w, r, s.relayOrigin+edgeproto.PathUniversalMCPAuthorize+"?"+q.Encode(), http.StatusSeeOther)
-	return nil
+	return u.Host
 }

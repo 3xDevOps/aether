@@ -16,11 +16,15 @@ import (
 // open of a kind it does not know by dropping its control channel.
 // VersionUniversalMCP is the first version whose edges route the
 // universal connector paths and whose servers serve them.
+// VersionConnectorSignIn is the first whose edges deliver a
+// ConnectorAssertion in a form post bound to the browser, and whose
+// servers take it no other way.
 const (
-	Version             = 3
-	MinVersion          = 1
-	VersionHTTP         = 2
-	VersionUniversalMCP = 3
+	Version                = 4
+	MinVersion             = 1
+	VersionHTTP            = 2
+	VersionUniversalMCP    = 3
+	VersionConnectorSignIn = 4
 )
 
 // CheckVersion refuses a peer older than MinVersion with
