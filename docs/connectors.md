@@ -410,8 +410,8 @@ chosen is taken from the swarm already recorded. A launch, swarm or template lau
 
 A launch fills each field you leave out from your saved launch choices: what
 you pass wins, then what you saved, then the server's own defaults. `harness`
-may be left out when you saved an agent that can launch; the saved agent's mode
-and model apply to whichever agent the launch uses. A saved mode the agent
+may be left out when you saved an agent that can launch on the launch's
+account; the saved agent's mode and model apply to whichever agent the launch uses. A saved mode the agent
 cannot start in on the launch's account, or a saved model or fallback member
 `launch.defaults.get` reports as invalid, is skipped with its reason. A saved
 account you may no longer use fails the launch:

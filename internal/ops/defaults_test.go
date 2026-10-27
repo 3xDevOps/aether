@@ -52,7 +52,7 @@ func TestLaunchAppliesSavedDefaults(t *testing.T) {
 		t.Fatalf("run.launch params = %+v, want the saved choices", p)
 	}
 	applied := out["launch"].(map[string]any)["defaults_applied"]
-	if jsonOf(t, applied) != `["harness","account_member_id","fallback","mode","model"]` || strings.Contains(f.acted().params, "saved_defaults") {
+	if jsonOf(t, applied) != `["account_member_id","fallback","harness","mode","model"]` || strings.Contains(f.acted().params, "saved_defaults") {
 		t.Fatalf("defaults_applied = %v, run.launch params %s", applied, f.acted().params)
 	}
 
@@ -60,7 +60,7 @@ func TestLaunchAppliesSavedDefaults(t *testing.T) {
 	// takes that off before the server sees it.
 	f = savedFake(t, savedChoices)
 	run(t, assistantSession(t, f.call), "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
-	if !strings.Contains(f.acted().params, `"saved_defaults":{"applied":["harness","account_member_id","fallback","mode","model"]}`) {
+	if !strings.Contains(f.acted().params, `"saved_defaults":{"applied":["account_member_id","fallback","harness","mode","model"]}`) {
 		t.Fatalf("assistant run.launch params = %s", f.acted().params)
 	}
 }
@@ -147,13 +147,20 @@ func TestLaunchRefusesUnusableSavedAccount(t *testing.T) {
 		t.Fatal("a refused saved account still launched")
 	}
 
-	saved = savedChoices
-	saved.Invalid = []protocol.LaunchDefaultIssue{{Field: "agent", Value: "claude", Reason: "the account owner has not signed in to claude"}}
-	f = savedFake(t, saved)
+	// The saved agent is checked on the account the launch uses: not signed
+	// in on the saved one, it still launches on an account given here.
+	f = savedFake(t, savedChoices)
+	f.answers[protocol.MethodAgentList] = answerTo(func(p protocol.AgentListParams) any {
+		return protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "claude", Installed: true, LoginMissing: p.AccountMemberID == "mem-ada"}}}
+	})
 	cs = connectorSession(t, f, ScopeWrite)
 	text, _, failed = try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
-	if !failed || !strings.Contains(text, "harness is required: your saved agent claude cannot launch: the account owner has not signed in to claude") {
+	if !failed || !strings.Contains(text, "harness is required: your saved agent claude cannot launch: the account's owner is not signed in to it") {
 		t.Fatalf("launch with an unusable saved agent = %q", text)
+	}
+	run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "account_member_id": "mem-me", "idempotency_key": "k2"})
+	if p := launchParams(t, f); p.Harness != "claude" || p.AccountMemberID != "mem-me" {
+		t.Fatalf("run.launch params = %+v, want the saved agent on your own account", p)
 	}
 }
 
@@ -205,8 +212,21 @@ func TestSwarmAppliesSavedDefaultsToIntegrator(t *testing.T) {
 	if !slices.Equal(p.FallbackAccountMemberIDs, []string{"mem-me"}) {
 		t.Fatalf("fallback = %v, want the saved order swarm-wide", p.FallbackAccountMemberIDs)
 	}
-	if jsonOf(t, out["launch"].(map[string]any)["defaults_applied"]) != `["harness","account_member_id","fallback","mode","model"]` {
+	if jsonOf(t, out["launch"].(map[string]any)["defaults_applied"]) != `["account_member_id","fallback","harness","mode","model","workers.account_member_id"]` {
 		t.Fatalf("receipt = %v", out["launch"])
+	}
+
+	// An integrator account given explicitly leaves the saved one for the
+	// workers that name none.
+	f = savedFake(t, savedChoices)
+	cs = connectorSession(t, f, ScopeWrite)
+	run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "account_member_id": "mem-me",
+		"workers": []any{map[string]any{"harness": "codex"}}, "idempotency_key": "s2"})
+	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Integrator.AccountMemberID != "mem-me" || p.ExecutionChoices[len(p.ExecutionChoices)-1].AccountMemberID != "mem-ada" {
+		t.Fatalf("choices = %+v, want the integrator on yours and the worker on the saved account", p.ExecutionChoices)
 	}
 }
 
@@ -257,6 +277,14 @@ func TestAssistantSavesLaunchDefaults(t *testing.T) {
 	delete(f.errs, protocol.MethodLaunchDefaultsSet)
 	if text, _ = run(t, cs, "aether_save_launch_defaults", map[string]any{"fallback": "off"}); text != "Saved your launch defaults (revision 5)." || sets != 1 {
 		t.Fatalf("save = %q after %d sets", text, sets)
+	}
+	f.answers[protocol.MethodLaunchDefaultsSet] = answerTo(func(p protocol.LaunchDefaultsSetParams) any {
+		return protocol.LaunchDefaultsResult{Revision: p.Revision + 1, Defaults: *p.Defaults}
+	})
+	run(t, cs, "aether_save_launch_defaults", map[string]any{"agent": "claude", "model": ""})
+	calls = called(f, protocol.MethodLaunchDefaultsSet)
+	if !strings.Contains(calls[len(calls)-1].params, `"claude":{"mode":"acp"}`) {
+		t.Fatalf("clearing the saved model sent %s", calls[len(calls)-1].params)
 	}
 	if text, _, failed = try(t, cs, "aether_save_launch_defaults", map[string]any{"model": "opus"}); !failed || !strings.Contains(text, "pass agent too") {
 		t.Fatalf("a model with no agent = %q", text)

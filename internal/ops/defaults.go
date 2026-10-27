@@ -25,8 +25,10 @@ type defaultSkip = protocol.AssistantDefaultSkip
 type savedFill struct {
 	Applied []string
 	Skipped []defaultSkip
-	// Account is the saved account the launch took, if it took one.
-	Account string
+	// Account is the saved account, for a swarm worker that names none, or
+	// AccountErr why it cannot be used.
+	Account    string
+	AccountErr error
 }
 
 func (f *savedFill) apply(field string) { f.Applied = append(f.Applied, field) }
@@ -101,32 +103,24 @@ type launchSlots struct {
 // explicit fields first, then saved, then the server's own defaults. An
 // unusable saved account fails the launch rather than starting it on
 // another; an unusable saved agent, mode, model or fallback member is
-// skipped with its reason. The mode is checked against the agent on the
-// account the launch resolved to, which may not be the one get checked.
+// skipped with its reason. The agent and mode are checked on the account
+// the launch resolved to, which may not be the one get checked.
 func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (savedFill, error) {
 	var fill savedFill
 	d := saved.Defaults
-	if *slots.harness == "" && d.Agent != "" {
-		if reason, bad := savedIssue(saved, "agent", ""); bad {
-			fill.skip("harness", reason)
+	if d.AccountMemberID != "" {
+		if reason, bad := savedIssue(saved, "account_member_id", d.AccountMemberID); bad {
+			fill.AccountErr = invalid("saved account %s: %s; pass account_member_id or clear it", d.AccountMemberID, reason)
 		} else {
-			*slots.harness = d.Agent
-			fill.apply("harness")
+			fill.Account = d.AccountMemberID
 		}
-	}
-	if *slots.harness == "" {
-		why := "you have no saved agent"
-		if len(fill.Skipped) > 0 {
-			why = fmt.Sprintf("your saved agent %s cannot launch: %s", d.Agent, fill.Skipped[0].Reason)
-		}
-		return fill, invalid("harness is required: %s; aether_launch_options lists the agents", why)
 	}
 	a := slots.account
 	if a.AccountMemberID == "" && d.AccountMemberID != "" {
-		if reason, bad := savedIssue(saved, "account_member_id", d.AccountMemberID); bad {
-			return fill, invalid("saved account %s: %s; pass account_member_id or clear it", d.AccountMemberID, reason)
+		if fill.AccountErr != nil {
+			return fill, fill.AccountErr
 		}
-		a.AccountMemberID, fill.Account = d.AccountMemberID, d.AccountMemberID
+		a.AccountMemberID = fill.Account
 		fill.apply("account_member_id")
 	}
 	if f := d.Fallback; f != nil && len(a.FallbackAccountMemberIDs) == 0 && !a.NoFallback {
@@ -145,6 +139,21 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 			a.NoFallback = len(a.FallbackAccountMemberIDs) == 0
 		}
 		fill.apply("fallback")
+	}
+	if *slots.harness == "" && d.Agent != "" {
+		if reason := agentRefused(d.Agent, a.AccountMemberID, agentsOn, book); reason != "" {
+			fill.skip("harness", reason)
+		} else {
+			*slots.harness = d.Agent
+			fill.apply("harness")
+		}
+	}
+	if *slots.harness == "" {
+		why := "you have no saved agent"
+		if i := slices.IndexFunc(fill.Skipped, func(s defaultSkip) bool { return s.Field == "harness" }); i >= 0 {
+			why = fmt.Sprintf("your saved agent %s cannot launch: %s", d.Agent, fill.Skipped[i].Reason)
+		}
+		return fill, invalid("harness is required: %s; aether_launch_options lists the agents", why)
 	}
 	choice, ok := d.Agents[*slots.harness]
 	if !ok {
@@ -169,23 +178,42 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 	return fill, nil
 }
 
-// modeRefused is why harness cannot start in mode on account, as
-// aether_launch_options lists its modes, or "".
-func modeRefused(harness, mode string, integrator bool, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) string {
+// agentOn is harness as listed on account, or why it cannot be read.
+func agentOn(harness, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (protocol.AgentInfo, string) {
 	agents, err := agentsOn(cmp.Or(account, book.self()))
 	if err != nil {
-		return "could not list the agents to check it: " + err.Error()
+		return protocol.AgentInfo{}, "could not list the agents to check it: " + err.Error()
 	}
 	i := slices.IndexFunc(agents, func(info protocol.AgentInfo) bool { return info.Name == harness })
 	if i < 0 {
-		return fmt.Sprintf("no agent named %q is available on this account", harness)
+		return protocol.AgentInfo{}, fmt.Sprintf("no agent named %q is available on this account", harness)
 	}
-	row := rowOfAgent(agents[i])
+	return agents[i], ""
+}
+
+// agentRefused is why harness cannot launch on account, as
+// aether_launch_options says, or "".
+func agentRefused(harness, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) string {
+	info, reason := agentOn(harness, account, agentsOn, book)
+	if reason != "" {
+		return reason
+	}
+	return rowOfAgent(info).Refused
+}
+
+// modeRefused is why harness cannot start in mode on account, as
+// aether_launch_options lists its modes, or "".
+func modeRefused(harness, mode string, integrator bool, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) string {
+	info, reason := agentOn(harness, account, agentsOn, book)
+	if reason != "" {
+		return reason
+	}
+	row := rowOfAgent(info)
 	allowed := row.Modes
 	if integrator {
 		allowed = row.Integrator
-		if mode == "tui" && agents[i].SwarmStandardRefusal != "" {
-			return agents[i].SwarmStandardRefusal
+		if mode == "tui" && info.SwarmStandardRefusal != "" {
+			return info.SwarmStandardRefusal
 		}
 	}
 	if slices.Contains(allowed, mode) {

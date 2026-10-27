@@ -538,7 +538,17 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: own, Harness: in.Harness, Mode: integratorMode, Model: in.Model}
 	choices := []protocol.MissionExecutionChoice{integrator}
 	for _, w := range in.Workers {
-		account := cmp.Or(w.AccountMemberID, fill.Account, book.self())
+		account := w.AccountMemberID
+		if account == "" && fill.AccountErr != nil {
+			return "", nil, fill.AccountErr
+		}
+		if account == "" && fill.Account != "" {
+			account = fill.Account
+			if !slices.Contains(fill.Applied, "workers.account_member_id") {
+				fill.apply("workers.account_member_id")
+			}
+		}
+		account = cmp.Or(account, book.self())
 		workerMode := w.Mode
 		if workerMode == "" {
 			agents, ok, listErr := agentsOn(account)

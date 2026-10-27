@@ -18,7 +18,7 @@ type docsInput struct {
 type saveDefaultsInput struct {
 	Agent           string   `json:"agent,omitempty" jsonschema:"the agent launches preselect"`
 	Mode            string   `json:"mode,omitempty" jsonschema:"agent's mode"`
-	Model           string   `json:"model,omitempty" jsonschema:"agent's model"`
+	Model           *string  `json:"model,omitempty" jsonschema:"agent's model; empty for its default"`
 	AccountMemberID string   `json:"account_member_id,omitempty" jsonschema:"your own id for your own account"`
 	Fallback        string   `json:"fallback,omitempty"`
 	FallbackOrder   []string `json:"fallback_order,omitempty" jsonschema:"member ids, with fallback ordered"`
@@ -121,7 +121,7 @@ func saveLaunchDefaults(ctx context.Context, c calls, in saveDefaultsInput) (str
 	switch {
 	case in.Clear && changes:
 		return "", nil, invalid("clear forgets every saved default; pass it alone")
-	case (in.Mode != "" || in.Model != "") && in.Agent == "":
+	case (in.Mode != "" || in.Model != nil) && in.Agent == "":
 		return "", nil, invalid("mode and model are saved for an agent; pass agent too")
 	case !in.Clear && !changes:
 		return "", nil, invalid("pass agent, account_member_id or fallback to save, or clear")
@@ -134,7 +134,10 @@ func saveLaunchDefaults(ctx context.Context, c calls, in saveDefaultsInput) (str
 			d := current.Defaults
 			if in.Agent != "" {
 				choice := d.Agents[in.Agent]
-				choice.Mode, choice.Model = cmp.Or(in.Mode, choice.Mode), cmp.Or(in.Model, choice.Model)
+				choice.Mode = cmp.Or(in.Mode, choice.Mode)
+				if in.Model != nil {
+					choice.Model = *in.Model
+				}
 				d.Agent, d.Agents = in.Agent, maps.Clone(d.Agents)
 				if d.Agents == nil {
 					d.Agents = map[string]protocol.AgentLaunchDefault{}
