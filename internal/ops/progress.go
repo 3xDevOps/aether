@@ -396,7 +396,6 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 		AcceptedAt          string `json:"accepted_at,omitempty"`
 		AcceptedForRevision int    `json:"accepted_for_revision,omitempty"`
 		ScopeViolations     int    `json:"scope_violations,omitempty"`
-		ScopeDecision       string `json:"scope_disposition,omitempty"`
 		CreatedAt           string `json:"created_at"`
 	}
 	type attemptRow struct {
@@ -425,7 +424,7 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 			}
 		}
 	}
-	accepted := map[string]bool{}
+	accepted, dispositions := map[string]bool{}, map[string]string{}
 	attempts := []attemptRow{}
 	for _, a := range res.Attempts {
 		t := byID[a.TaskID]
@@ -437,7 +436,10 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 		if s, ok := newest[a.ID]; ok {
 			sub := &submissionRow{ID: s.ID, State: s.State, TaskRevision: s.TaskRevision, Accepted: acceptedNow(s, t), ScopeViolations: len(s.ScopeViolations), CreatedAt: s.CreatedAt}
 			if acc := s.Acceptance; acc != nil {
-				sub.AcceptedBy, sub.AcceptedAt, sub.AcceptedForRevision, sub.ScopeDecision = "integrator run "+acc.AcceptedByRunID, acc.AcceptedAt, acc.TaskRevision, acc.ScopeDisposition
+				sub.AcceptedBy, sub.AcceptedAt, sub.AcceptedForRevision = "integrator run "+acc.AcceptedByRunID, acc.AcceptedAt, acc.TaskRevision
+				if acc.ScopeDisposition != "" {
+					dispositions[s.ID] = clip(acc.ScopeDisposition, maxReport)
+				}
 			}
 			if sub.Accepted && decides {
 				accepted[a.RunID] = true
@@ -448,6 +450,7 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 			attempts = append(attempts, row)
 		}
 	}
+	untrusted["scope_dispositions"] = dispositions
 
 	var ids, roles []string
 	add := func(id, role string) {

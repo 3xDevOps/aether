@@ -433,7 +433,9 @@ that the run's pull request changed.
   with `tasks_total`; titles and objectives are under `untrusted.progress_tasks`.
 - `implemented`: each attempt's run, task revision, state and times, and its
   newest submission's `state`, `accepted_by` (the integrator run),
-  `accepted_at`, `accepted_for_revision` and number of `scope_violations`.
+  `accepted_at`, `accepted_for_revision` and number of `scope_violations`;
+  the integrator's reason for accepting them is under
+  `untrusted.scope_dispositions`.
   `accepted` is true only for a submission accepted for the task's current
   revision; revising a task leaves earlier acceptances in place but no longer
   accepted.

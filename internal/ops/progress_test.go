@@ -32,7 +32,7 @@ func shopSwarm() protocol.MissionShowResult {
 		},
 		Submissions: []protocol.Submission{
 			{ID: "sub-a", AttemptID: "att-a", TaskRevision: 1, State: "accepted", ScopeViolations: []string{"web/x.ts"}, CreatedAt: "2026-10-26T07:00:00Z",
-				Acceptance: &protocol.Acceptance{TaskRevision: 1, AcceptedByRunID: "run-int", AcceptedAt: accepted, ScopeDisposition: "allowed"}},
+				Acceptance: &protocol.Acceptance{TaskRevision: 1, AcceptedByRunID: "run-int", AcceptedAt: accepted, ScopeDisposition: injection}},
 			{ID: "sub-b", AttemptID: "att-b", TaskRevision: 1, State: "proposed", CreatedAt: "2026-10-26T07:30:00Z"},
 		},
 	}
@@ -199,7 +199,7 @@ func TestSwarmProgress(t *testing.T) {
 	if strings.Contains(trusted(t, out), injection) {
 		t.Errorf("agent text outside untrusted: %s", trusted(t, out))
 	}
-	if dig(t, out, "untrusted", "progress_tasks", 0, "objective") != injection {
+	if dig(t, out, "untrusted", "progress_tasks", 0, "objective") != injection || dig(t, out, "untrusted", "scope_dispositions", "sub-a") != injection {
 		t.Errorf("task objectives = %v", dig(t, out, "untrusted", "progress_tasks"))
 	}
 	if len(called(f, protocol.MethodWorkspaceTimeline)) != 1 {
