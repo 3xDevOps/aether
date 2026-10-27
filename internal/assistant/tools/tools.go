@@ -5,6 +5,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -811,9 +812,17 @@ var accountFields = map[string][]string{
 	protocol.MethodAccountUsage:  {"account_member_id"},
 }
 
+// prepareMission refuses fields mission.create does not know, as the server
+// does: re-encoding p would drop them, so a misspelled option, such as
+// no_fallback, would launch without it.
 func prepareMission(member string, params json.RawMessage) (json.RawMessage, error) {
-	p, err := protocol.DecodeParams[protocol.MissionCreateParams](params)
-	if err != nil {
+	var p protocol.MissionCreateParams
+	dec := json.NewDecoder(bytes.NewReader(params))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+			return nil, fmt.Errorf("unknown param %s; this server does not support it", field)
+		}
 		return nil, err
 	}
 	if p.AccountableHumanID != "" {
