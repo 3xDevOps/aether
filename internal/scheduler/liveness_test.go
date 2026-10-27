@@ -75,24 +75,44 @@ func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 }
 
 // TestReportReminderTurnKeepsTheStallThreshold: the turn the report gate
-// starts to ask for a missing report is not judged as a new turn of work.
+// starts to ask for a missing report is not judged as a new turn of work. A
+// turn that is not the reminder's, such as a member's prompt queued behind
+// it, or any turn while the reminder's start is unknown, is.
 func TestReportReminderTurnKeepsTheStallThreshold(t *testing.T) {
 	t.Parallel()
 	const grace = 300 * time.Millisecond
-	e, _ := newACPEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = time.Hour
-		cfg.FirstEventGrace, cfg.StreamQuietGrace = grace, grace
-		cfg.PollInterval = 20 * time.Millisecond
-	})
-	run := e.launchACP(t, acpmock.PromptWait)
-	e.waitStoreStatus(t, run.ID, domain.RunRunning)
-	e.sched.acp.mu.Lock()
-	e.sched.acp.runs[run.ID].asked = &askedTurn{}
-	e.sched.acp.mu.Unlock()
-	e.startStalls(t)
-	time.Sleep(4 * grace)
-	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunRunning {
-		t.Fatalf("run = %+v, %v; want the reminder turn running past the first-event grace", r, err)
+	for _, tc := range []struct {
+		name  string
+		start func(current int64) int64
+		parks bool
+	}{
+		{"the reminder's turn", func(current int64) int64 { return current }, false},
+		{"a later turn", func(current int64) int64 { return current - 1 }, true},
+		{"start unknown", func(int64) int64 { return 0 }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e, _ := newACPEnv(t, func(cfg *Config) {
+				cfg.StallThreshold = time.Hour
+				cfg.FirstEventGrace, cfg.StreamQuietGrace = grace, grace
+				cfg.PollInterval = 20 * time.Millisecond
+			})
+			run := e.launchACP(t, acpmock.PromptWait)
+			e.waitStoreStatus(t, run.ID, domain.RunRunning)
+			e.sched.acp.mu.Lock()
+			r := e.sched.acp.runs[run.ID]
+			r.asked = &askedTurn{start: tc.start(r.session.Log().TurnStartSeq())}
+			e.sched.acp.mu.Unlock()
+			e.startStalls(t)
+			time.Sleep(4 * grace)
+			got, err := e.db.GetRun(t.Context(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if parked := got.Status == domain.RunNeedsAttention; parked != tc.parks {
+				t.Fatalf("run = %+v; parked %v, want %v past the first-event grace", got, parked, tc.parks)
+			}
+		})
 	}
 }
 
