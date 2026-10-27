@@ -263,8 +263,6 @@ func (s *Service) Delete(ctx context.Context, workspace domain.WorkspaceID, name
 // Launch renders a template and launches it as member. Permission is the
 // caller's business: this is the manually invoked path, guarded at the RPC
 // boundary like any other launch. created is domain.LaunchOptions.Created.
-// Launch launches the template name; a non-empty version must be its
-// current Version.
 func (s *Service) Launch(ctx context.Context, workspace domain.WorkspaceID, name string, member domain.MemberID, params map[string]string, version string,
 	created func(domain.RunID)) (*Launched, error) {
 	t, err := s.store.GetTemplate(ctx, workspace, name)

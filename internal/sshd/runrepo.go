@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -451,6 +452,9 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		}
 		// With the run's environment gone, the server reads GitHub with the
 		// login of the run's home, as gh in it did; comments need the run.
+		if p.Limit < 0 || p.Limit > protocol.MaxRunPRFeedbackEntries {
+			return nil, invalidParams(fmt.Sprintf("limit must be between 1 and %d (or zero for the default)", protocol.MaxRunPRFeedbackEntries))
+		}
 		pr := status.PullRequest
 		account, snap, snapErr := s.cfg.Services.GitHub.MemberPullRequestSnapshot(ctx, call.home, pr.Repository, pr.Number)
 		if snapErr != nil {
@@ -458,7 +462,7 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 			return out, nil
 		}
 		out.Identity = account.Login
-		out.Checks, out.Reviews, out.Truncated = snapshotFeedback(snap, p.Limit)
+		out.Checks, out.Reviews, out.Truncated = snapshotFeedback(snap, cmp.Or(p.Limit, protocol.MaxRunPRFeedbackEntries))
 		return out, nil
 	}
 	if err != nil {

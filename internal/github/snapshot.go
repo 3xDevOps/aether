@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -94,6 +95,8 @@ type Review struct {
 	Body        string     `json:"body,omitempty"`
 	URL         string     `json:"html_url"`
 	SubmittedAt *time.Time `json:"submitted_at,omitempty"`
+	// Clipped is whether Body was cut at 2000 characters.
+	Clipped bool `json:"clipped,omitempty"`
 }
 
 func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, number int, prev *Snapshot) (Snapshot, error) {
@@ -240,7 +243,8 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	reviews, pages, err := paginate(ctx, s, token, pullPath+"/reviews?", prev, prevReviews, "reviews", submitted, func(page []reviewRecord) []Review {
 		out := make([]Review, 0, len(page))
 		for _, r := range page {
-			review := Review{ID: r.ID, State: r.State, Body: truncate(r.Body, reviewBodyMax), URL: r.URL, SubmittedAt: r.SubmittedAt}
+			review := Review{ID: r.ID, State: r.State, Body: truncate(r.Body, reviewBodyMax), URL: r.URL, SubmittedAt: r.SubmittedAt,
+				Clipped: utf8.RuneCountInString(r.Body) > reviewBodyMax}
 			// GitHub returns a null user for deleted accounts.
 			if r.User != nil {
 				review.User = r.User.Login

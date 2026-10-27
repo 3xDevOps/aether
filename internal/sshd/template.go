@@ -146,10 +146,12 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if p.Name == "" {
 		return nil, invalidParams("name is required")
 	}
-	key := p.IdempotencyKey
-	p.IdempotencyKey = ""
+	// A retry of a launch keeps its receipt after the template changes, so
+	// the version is not part of the params it must repeat.
+	key, version := p.IdempotencyKey, p.ExpectedVersion
+	p.IdempotencyKey, p.ExpectedVersion = "", ""
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
-		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, p.ExpectedVersion, created)
+		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, version, created)
 		if err != nil {
 			return nil, templateError(err)
 		}

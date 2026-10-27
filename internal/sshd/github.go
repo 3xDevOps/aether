@@ -77,33 +77,55 @@ type GitHubService interface {
 }
 
 // snapshotFeedback is run.pr.feedback's checks and reviews from a snapshot,
-// at most limit of each: the check runs and waiting suites Checks counts,
-// and the commit statuses, with gh's spelling of their conclusions.
+// spelled and bounded as the live path's: the check runs and waiting suites
+// Checks counts, then the commit statuses, at most limit checks and limit
+// reviews within MaxRunRepoOutputBytes. truncated is set when any row or
+// review body was cut.
 func snapshotFeedback(snap githubservice.Snapshot, limit int) (checks []protocol.RunPRCheck, reviews []protocol.RunPRReview, truncated bool) {
 	checks, reviews = []protocol.RunPRCheck{}, []protocol.RunPRReview{}
+	budget := protocol.MaxRunRepoOutputBytes
+	fits := func(v any) bool {
+		b, _ := json.Marshal(v)
+		if len(b) > budget {
+			truncated = true
+			return false
+		}
+		budget -= len(b)
+		return true
+	}
+	var all []protocol.RunPRCheck
 	for _, run := range snap.CurrentCheckRuns() {
-		checks = append(checks, protocol.RunPRCheck{Name: run.Name, Status: strings.ToUpper(run.Status), Conclusion: strings.ToUpper(run.Conclusion), URL: run.URL})
+		all = append(all, protocol.RunPRCheck{Name: run.Name, Status: strings.ToUpper(run.Status), Conclusion: strings.ToUpper(run.Conclusion), URL: run.URL})
 	}
 	for _, suite := range snap.WaitingSuites() {
-		checks = append(checks, protocol.RunPRCheck{Name: cmp.Or(suite.App, suite.AppSlug), Status: strings.ToUpper(suite.Status)})
+		all = append(all, protocol.RunPRCheck{Name: cmp.Or(suite.App, suite.AppSlug), Status: strings.ToUpper(suite.Status)})
 	}
 	for _, status := range snap.Statuses {
-		conclusion := strings.ToUpper(status.State)
+		check := protocol.RunPRCheck{Name: status.Context, Status: "COMPLETED", Conclusion: strings.ToUpper(status.State), URL: status.TargetURL}
 		if status.State == "pending" {
-			conclusion = ""
+			check.Status, check.Conclusion = "IN_PROGRESS", ""
 		}
-		checks = append(checks, protocol.RunPRCheck{Name: status.Context, Status: strings.ToUpper(status.State), Conclusion: conclusion, URL: status.TargetURL})
+		all = append(all, check)
 	}
-	for _, review := range snap.Reviews {
+	for i, check := range all {
+		if i == limit || !fits(check) {
+			truncated = true
+			break
+		}
+		checks = append(checks, check)
+	}
+	for i, review := range snap.Reviews {
 		submitted := ""
 		if review.SubmittedAt != nil {
 			submitted = review.SubmittedAt.UTC().Format(time.RFC3339)
 		}
-		reviews = append(reviews, protocol.RunPRReview{ID: strconv.FormatInt(review.ID, 10), Author: review.User, Body: review.Body, State: review.State, SubmittedAt: submitted})
-	}
-	if limit > 0 {
-		truncated = len(checks) > limit || len(reviews) > limit
-		checks, reviews = checks[:min(len(checks), limit)], reviews[:min(len(reviews), limit)]
+		row := protocol.RunPRReview{ID: strconv.FormatInt(review.ID, 10), Author: review.User, Body: review.Body, State: review.State, SubmittedAt: submitted}
+		if i == limit || !fits(row) {
+			truncated = true
+			break
+		}
+		truncated = truncated || review.Clipped
+		reviews = append(reviews, row)
 	}
 	return checks, reviews, truncated
 }

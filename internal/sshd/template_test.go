@@ -278,3 +278,36 @@ func awaitTimeline(t *testing.T, sub events.Subscription, want string) string {
 		}
 	}
 }
+
+// A retry of a pinned template launch returns its run even after the
+// template changed, whatever version the retry names.
+func TestTemplateLaunchReplayIgnoresTheVersion(t *testing.T) {
+	t.Parallel()
+	e := templateEnv(t, &testClock{now: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)})
+	control := controlAs(t, e, e.signer)
+	save := protocol.TemplateSaveParams{WorkspaceID: string(e.ws.ID), Name: "triage", Task: "triage", Harness: "claude", Mode: "headless"}
+	if err := control.Call(protocol.MethodTemplateSave, save, nil); err != nil {
+		t.Fatal(err)
+	}
+	var list protocol.TemplateListResult
+	if err := control.Call(protocol.MethodTemplateList, protocol.TemplateListParams{WorkspaceID: string(e.ws.ID)}, &list); err != nil {
+		t.Fatal(err)
+	}
+	launch := protocol.TemplateLaunchParams{WorkspaceID: string(e.ws.ID), Name: "triage", ExpectedVersion: list.Templates[0].Version, IdempotencyKey: "k1"}
+	var first protocol.TemplateLaunchResult
+	if err := control.Call(protocol.MethodTemplateLaunch, launch, &first); err != nil {
+		t.Fatal(err)
+	}
+	save.Task = "triage and label"
+	if err := control.Call(protocol.MethodTemplateSave, save, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The fake scheduler writes no run row, so the replay finds the key's
+	// run gone; a version mismatch would be refused as other params first.
+	launch.ExpectedVersion = "0123456789abcdef"
+	var pe *protocol.Error
+	err := control.Call(protocol.MethodTemplateLaunch, launch, nil)
+	if !errors.As(err, &pe) || pe.Code == protocol.CodeConflict || !strings.Contains(pe.Message, first.Run.ID) || len(e.runs.Calls()) != 1 {
+		t.Fatalf("retry after the template changed = %v after %v, want the key's run %s and no new launch", err, e.runs.Calls(), first.Run.ID)
+	}
+}

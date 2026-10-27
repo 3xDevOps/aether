@@ -1014,14 +1014,16 @@ answers `error` saying to pass both. `run.pr.status` returns the `expected` and
 gone, both report the pull request the run last recorded (`number`, `url`,
 `state`). `run.pr.feedback` then reads its checks and reviews from GitHub with
 the GitHub login of the run's home, as `gh` in the run did, and has no
-comments, `mergeable` or `merge_state_status`; `error` says why when that read
-fails.
+comments, `mergeable` or `merge_state_status`, within the same `limit` and
+byte budget; `truncated` is also set when a review body was cut at 2000
+characters, and `error` says why when that read fails.
 
 `template.list` gives each template a `version`, which changes whenever its
 task, agent, mode, model or parameter defaults do. `template.launch` with
 `expected_version` fails with `-32003` `templates: template changed: <name>
 was saved again and is now version <new>, not <old>` instead of launching a
-template changed since it was read.
+template changed since it was read. A retry with the launch's `idempotency_key` replays its
+run whatever `expected_version` it names.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the

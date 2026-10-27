@@ -62,7 +62,7 @@ func TestInsightsGet(t *testing.T) {
 			{ID: 2, Name: "test", Status: "completed", Conclusion: "success", SuiteID: 7, App: "GitHub Actions"},
 			{ID: 3, Name: "lint", Status: "in_progress", SuiteID: 7, App: "GitHub Actions"}},
 		Statuses: []githubservice.CommitStatus{{ID: 4, Context: "ci/legacy", State: "failure"}},
-		Reviews:  []githubservice.Review{{ID: 5, State: "CHANGES_REQUESTED", User: "grace", Body: "rename it"}},
+		Reviews:  []githubservice.Review{{ID: 5, State: "CHANGES_REQUESTED", User: "grace", Body: "rename it…", Clipped: true}},
 	}
 	e := newTestEnv(t, func(c *Config) {
 		c.Store = db
@@ -471,11 +471,11 @@ func TestInsightsGet(t *testing.T) {
 		}
 	}
 	wantChecks := []protocol.RunPRCheck{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS"}, {Name: "lint", Status: "IN_PROGRESS"},
-		{Name: "ci/legacy", Status: "FAILURE", Conclusion: "FAILURE"}}
-	if perr != nil || feedback.Error != "" || feedback.PullRequest == nil || feedback.Identity != "octocat" || !reflect.DeepEqual(feedback.Checks, wantChecks) ||
+		{Name: "ci/legacy", Status: "COMPLETED", Conclusion: "FAILURE"}}
+	if perr != nil || feedback.Error != "" || !feedback.Truncated || feedback.PullRequest == nil || feedback.Identity != "octocat" || !reflect.DeepEqual(feedback.Checks, wantChecks) ||
 		len(feedback.Reviews) != 1 || feedback.Reviews[0].Author != "grace" || feedback.Reviews[0].State != "CHANGES_REQUESTED" ||
 		gh.lookups[len(gh.lookups)-1] != "snapshot "+string(alice)+" acme/app#4" {
-		t.Errorf("run.pr.feedback of a finished run = %+v, %+v, lookups %v; want GitHub's checks and reviews", feedback, perr, gh.lookups)
+		t.Errorf("run.pr.feedback of a finished run = %+v, %+v, lookups %v; want GitHub's checks and reviews, truncated by the clipped review", feedback, perr, gh.lookups)
 	}
 	lookup = slices.Clone(gh.lookups)
 	if _, perr = status("top6"); perr == nil || perr.Code != protocol.CodeInvalidState {
