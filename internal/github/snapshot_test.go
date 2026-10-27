@@ -569,3 +569,20 @@ func TestPullRequestSnapshotChecksBeforeEveryRequest(t *testing.T) {
 		t.Fatalf("snapshot = %v after %d checks and requests %v; want the check's error after two requests", err, checks, f.requests)
 	}
 }
+
+// A draft pull request reads as a draft, also when an unchanged poll
+// reuses the previous read.
+func TestPullRequestSnapshotDraft(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	f.bodies[pullPath] = strings.Replace(pullBody("open", "null"), `"state"`, `"draft":true,"state"`, 1)
+	s := snapshotService(t, f)
+	first, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	if err != nil || !first.Draft {
+		t.Fatalf("draft pull request = %+v, %v; want draft", first, err)
+	}
+	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
+	if err != nil || !second.Draft || f.notMod == 0 {
+		t.Fatalf("unchanged draft = %+v, %v after %d not-modified; want draft", second, err, f.notMod)
+	}
+}

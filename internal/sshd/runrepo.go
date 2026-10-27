@@ -470,7 +470,7 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		}
 		// The pull request is described from the same read as its checks.
 		out.Identity = account.Login
-		out.PullRequest = &protocol.RunPullRequest{Number: pr.Number, URL: cmp.Or(snap.URL, pr.URL), State: snap.State, Title: snap.Title,
+		out.PullRequest = &protocol.RunPullRequest{Number: pr.Number, URL: cmp.Or(snap.URL, pr.URL), State: snap.State, Title: snap.Title, Draft: snap.Draft,
 			Repository: pr.Repository, BaseBranch: snap.BaseRef, HeadOID: snap.HeadSHA, MergedAt: snap.MergedAt}
 		out.Checks, out.Reviews, out.Truncated = snapshotFeedback(snap, cmp.Or(p.Limit, protocol.MaxRunPRFeedbackEntries))
 		return out, nil

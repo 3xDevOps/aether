@@ -30,6 +30,7 @@ type Snapshot struct {
 	Number   int        `json:"number"`
 	State    string     `json:"state"`
 	MergedAt *time.Time `json:"merged_at,omitempty"`
+	Draft    bool       `json:"draft,omitempty"`
 	Title    string     `json:"title"`
 	URL      string     `json:"html_url"`
 	HeadSHA  string     `json:"head_sha"`
@@ -145,6 +146,7 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 		URL      string     `json:"html_url"`
 		State    string     `json:"state"`
 		MergedAt *time.Time `json:"merged_at"`
+		Draft    bool       `json:"draft"`
 		Head     struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -164,13 +166,13 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 		return Snapshot{}, err
 	}
 	if notModified {
-		snap.State, snap.MergedAt, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = prev.State, prev.MergedAt, prev.Title, prev.URL, prev.HeadSHA, prev.BaseRef
+		snap.State, snap.MergedAt, snap.Draft, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = prev.State, prev.MergedAt, prev.Draft, prev.Title, prev.URL, prev.HeadSHA, prev.BaseRef
 		snap.ReviewRequested = prev.ReviewRequested
 	} else {
 		if pull.Number != number || pull.State != "open" && pull.State != "closed" || !validSHA(pull.Head.SHA) || !strings.HasPrefix(pull.URL, "https://github.com/") {
 			return Snapshot{}, errors.New("github: API returned invalid pull request metadata")
 		}
-		snap.State, snap.MergedAt, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = pull.State, pull.MergedAt, pull.Title, pull.URL, pull.Head.SHA, pull.Base.Ref
+		snap.State, snap.MergedAt, snap.Draft, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = pull.State, pull.MergedAt, pull.Draft, pull.Title, pull.URL, pull.Head.SHA, pull.Base.Ref
 		snap.ReviewRequested = len(pull.RequestedReviewers)+len(pull.RequestedTeams) > 0
 		if snap.MergedAt != nil {
 			snap.State = "merged"
