@@ -147,10 +147,11 @@ func TestIntegrationAssistantWatchesRun(t *testing.T) {
 	for _, d := range got.Notifications[0].Deliveries {
 		statuses[d.Channel] = d.Status
 	}
-	// The run's own notification pushes its owner every need.
+	// The owner has no push device, so nothing pushed the need; skipped is
+	// only for a push the run's own notification already made.
 	if statuses[protocol.WatchChannelInApp] != protocol.WatchStatusDelivered || statuses[protocol.WatchChannelAssistant] != protocol.WatchStatusDelivered ||
-		statuses[protocol.WatchChannelPush] != protocol.WatchStatusSkipped {
-		t.Fatalf("deliveries = %+v, want in-app and assistant delivered, push skipped", got.Notifications[0].Deliveries)
+		statuses[protocol.WatchChannelPush] != protocol.WatchStatusNoDestination {
+		t.Fatalf("deliveries = %+v, want in-app and assistant delivered, push no_destination", got.Notifications[0].Deliveries)
 	}
 	publishStatus()
 	waitEvent(t, sub, &seen, "the second status event", func(e events.Event) bool {
