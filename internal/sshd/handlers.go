@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -486,10 +487,12 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	if p.Action != protocol.RunReviewComplete && p.Action != protocol.RunReviewLater {
 		return nil, invalidParams(`action must be "complete" or "later"`)
 	}
-	if perr := s.connectorReviewRefusal(ctx, domain.RunID(p.RunID), p.Action); perr != nil {
-		return nil, perr
+	reportedOnly := p.Action == protocol.RunReviewComplete && connectorReviewReportedOnly(ctx)
+	run, err := s.cfg.Runs.Review(ctx, domain.RunID(p.RunID), member, p.Action, reportedOnly)
+	if errors.Is(err, scheduler.ErrReviewNotReported) {
+		id, _ := ctx.Value(connIdentityKey{}).(connIdentity)
+		return nil, scopeRefusal(id, protocol.MethodRunReview+" complete of a run with no reported success awaiting review", scopeControl)
 	}
-	run, err := s.cfg.Runs.Review(ctx, domain.RunID(p.RunID), member, p.Action)
 	if err != nil {
 		return nil, rpcError(err)
 	}

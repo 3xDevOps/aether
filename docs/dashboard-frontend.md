@@ -784,9 +784,10 @@ retrying with backoff from 3 seconds up to a minute, stopping on `-32004` or
 choice). `status.share_view` carries it to other tabs and devices.
 
 When the assistant launches or messages a run for the member, the server
-follows it and publishes `assistant.notice` on `/ws/events` as the run
-finishes or needs input, approval or attention. Only the member named by
-`member_id` reacts. `applyAssistantNotice` (`store/assistant-notice.ts`) raises
+watches it ([assistant watches](watches.md#assistant-watches)) and publishes
+`assistant.notice` on `/ws/events` as the run finishes or needs input or
+attention; `watch_id` names the watch. The server streams it only to the
+member named by `member_id`. `applyAssistantNotice` (`store/assistant-notice.ts`) raises
 a toast with an **Open run** action (warning style for `needs_*`, plain for
 `finished`) and adds one to `assistantNotices`. The Assistant button counts
 those updates beside the waiting requests, named "Assistant, 1 request
@@ -1813,7 +1814,7 @@ and leaves the run where it is. Both return `{"run": Run}` and need the same
 permission as `run.close`; a live swarm worker is refused.
 
 The Needs you group, its counts and badges follow the run-state attention
-rule push notifications, assistant follow and `aether runs --needs-you`
+rule push notifications, watches and `aether runs --needs-you`
 share ([failure-handling.md](failure-handling.md)): a live run (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
 `disconnected`, or `failed` while `outcome_unseen`, and a reported success,
@@ -5198,8 +5199,9 @@ tree and editor are a view of each run, scoped to that run's checkout: see
 Folder chevrons turn as a folder opens, and the empty editor pane is an
 `EmptyState` with a folder-tree icon. The tree lists each workspace's `base: <branch>` first, then its live runs
 under **Run checkouts**, then one **Home** row; both start folded, so a
-run's tree or the home is read only when it is opened. Folder expansion is
-kept per view. The tree sits beside the
+run's tree or the home is read only when it is opened. For an admin, each
+workspace ends with a muted **Add .env files for runs** that opens its
+**Environment** section. Folder expansion is kept per view. The tree sits beside the
 editor from `md` up. On a phone it is the first view; once a file is open the
 editor fills the screen and **Browse** opens the tree as a side sheet.
 CodeMirror provides syntax highlighting for JSON/JSONC, JavaScript/TypeScript,
@@ -6050,7 +6052,7 @@ server-side permission; a member without it reads the same facts. The page
 lists no runs: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
-setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
+setup script, variables, files and egress control ([environments.md](environments.md#workspace-environment)),
 read with `workspace.environment.get` when the page opens. Opening the page
 through an **Environment** menu item passes `section: 'environment'`, and the
 section scrolls into view once it has loaded.
@@ -6073,6 +6075,15 @@ section scrolls into view once it has loaded.
   plain; over a saved secret it stays a secret with no value, which **Save**
   refuses, so the saved one is not removed unnoticed. **Add _n_ variables**
   puts them in the list; nothing is sent yet.
+- **Files** lists each workspace file's path and size with **Remove**; the
+  page never holds a saved file's content. **Add file…**, or a file dropped
+  on the list, adds a row whose path starts as the file's name and stays
+  editable until saved. While an added row has a saved file's path, the
+  saved row is hidden and the save replaces it; a saved file is removed only
+  by its own **Remove**. A file
+  over 64 KB is refused before it is read, and one that is not UTF-8 text
+  before anything is sent. A server from before workspace files gets no such
+  row.
 - **Limit outbound traffic** is a checkbox. While it is ticked, the allowed
   hosts show, each with **Remove**, over a field with **Allow** that refuses a
   URL, a port or a repeat before anything is sent. Its help says that on and
@@ -6083,11 +6094,12 @@ section scrolls into view once it has loaded.
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it
   the page says what a save reaches: runs launched afterwards, not containers
   that exist. A row that cannot be saved - no name, a name used twice, `=` in
-  a name, a secret with no value - is marked on **Save**, which focuses it and
+  a name, a secret with no value, a file with no path or one used twice - is
+  marked on **Save**, which focuses it and
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
   the edits stay. A result's `warning` shows under **Saved**.
 - Any other member reads the script, each name and each plain value, with
-  **Secret** in place of a secret's value, whether egress is limited and to
+  **Secret** in place of a secret's value, each file's path and size, whether egress is limited and to
   which hosts, and **Only an admin can change this.** A failed read shows the server's error with **Retry**.
 
 When the setup script fails a launch, the New run and template launch
@@ -7497,8 +7509,8 @@ delivery lines, pause, resume and delete, the Watch form, the watch
 notification preferences, the phone sheet and `watch.changed` toasts.
 `src/components/workspace-environment.test.tsx` covers the workspace
 Environment section: the change a save sends, replacing a secret, the `.env`
-preview, rows that cannot be saved, egress control, the server's refusal and
-the read-only view.
+preview, adding, replacing and removing files, rows that cannot be saved,
+egress control, the server's refusal and the read-only view.
 
 Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.

@@ -205,8 +205,8 @@ stale when it is old or its cited files changed since.
 
 ### Monitoring
 
-Aether follows every run you launch or message and notifies the member
-itself, here, in the dashboard, on the desktop app and on their phone, when
+Aether keeps a watch on every run you launch or message, listed in
+Settings > Watches, and notifies the member itself, here, in the dashboard, on the desktop app and on their phone, when
 it finishes or needs them. It does not notify for waiting on agents, CI or a
 process. Never promise to check back or watch. Say "watching" only when a
 watch tool returned a watch whose state is `active`, and report a delivery
