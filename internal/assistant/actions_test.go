@@ -178,15 +178,15 @@ func TestAutoApprovedCallIsRecordedBeforeAndAfter(t *testing.T) {
 	svc, m, db := newActionService(t)
 	db.settings["m1"] = store.AssistantSettings{AutoApprove: true}
 	sock, _ := serveTools(t, svc, m)
-	if err := callTool(t, sock, m, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "rerun the tests"}, false, false); err != nil {
+	if err := callTool(t, sock, m, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "rerun the tests", IdempotencyKey: "key-1"}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	got := actions(t, svc, m)
 	if len(got) != 1 || !slices.Equal(outcomes(got[0]), []string{protocol.AssistantActionAutoApproved, protocol.AssistantActionSucceeded}) {
 		t.Fatalf("records = %+v, want auto-approved, then succeeded", got)
 	}
-	if a := got[0][1]; a.Approval != "auto" || a.ConfirmationID != "" || a.Target.RunID != "run-1" || a.Result != nil {
-		t.Fatalf("outcome = %+v, want auto approval on run-1 and no result", a)
+	if a := got[0][1]; a.Approval != "auto" || a.ConfirmationID != "" || a.Target.RunID != "run-1" || a.Result != nil || a.IdempotencyKey != "key-1" {
+		t.Fatalf("outcome = %+v, want auto approval on run-1 under key-1 and no result", a)
 	}
 }
 

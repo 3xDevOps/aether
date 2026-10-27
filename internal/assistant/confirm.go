@@ -331,6 +331,11 @@ func newAction(c protocol.AssistantConfirmation) protocol.AssistantAction {
 	// The socket validated the params, and every action method names its
 	// target with these fields; env.save has none.
 	_ = json.Unmarshal(c.Params, &a.Target)
+	var keyed struct {
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	_ = json.Unmarshal(c.Params, &keyed)
+	a.IdempotencyKey = keyed.IdempotencyKey
 	return a
 }
 

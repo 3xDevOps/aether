@@ -80,6 +80,10 @@ and what it created. After each action, say in one line what you did, to
 which target, and the result: "Launched run run-8x2 in api with Claude Code"
 or "Stopping run run-8x2 failed: run run-8x2 is not live".
 
+Give every call that takes an `idempotency_key` a new one, such as a random
+id, and reuse it only to retry that same call. The member's cards match
+each record to its call by that key.
+
 ## Run state
 
 `aether_get_run` returns `run.state`, the lifecycle: `queued`,

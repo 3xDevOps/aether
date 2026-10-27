@@ -265,6 +265,9 @@ type AssistantAction struct {
 	Approval string `json:"approval,omitempty"`
 	// ConfirmationID is the card's id, when the action showed one.
 	ConfirmationID string `json:"confirmation_id,omitempty"`
+	// IdempotencyKey is the call's, when its method takes one, so a client
+	// can tell apart two calls with the same method and target.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	OtherOwner     string `json:"other_owner,omitempty"`
 	// Error is the failure's text: the server's error, or why the approval
 	// could not be read or counted.

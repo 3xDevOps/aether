@@ -322,6 +322,10 @@ interface Draft {
   saved?: AssistantActionRecord
 }
 
+function callKey(action: AssistantAction): string | undefined {
+  return text(action.input.idempotency_key) ?? text(record(action.result).idempotency_key)
+}
+
 /**
  * The call a note belongs to. A record carries no tool call id; it is written
  * while its call runs, so it follows the call's first appearance. It goes to
@@ -342,7 +346,10 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
   const saved = note.saved
   const held = drafts.find((d) => d.saved?.id === saved.id)
   if (held) return held
-  const fits = open.filter((d) => (['run_id', 'workspace_id'] as const).every((key) => {
+  // A call's idempotency key, which the record repeats, names it exactly; a call with another key is not it.
+  const keyed = saved.idempotency_key ? open.find((d) => callKey(d.action) === saved.idempotency_key) : undefined
+  if (keyed) return keyed
+  const fits = open.filter((d) => (!saved.idempotency_key || !callKey(d.action)) && (['run_id', 'workspace_id'] as const).every((key) => {
     const named = text(d.action.input[key])
     return !named || !saved.target?.[key] || named === saved.target[key]
   }))

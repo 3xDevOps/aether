@@ -39,6 +39,8 @@ export interface AssistantActionRecord {
   /** How it passed; absent for a call that never asks, such as a pause. */
   approval?: 'card' | 'auto'
   confirmation_id?: string
+  /** The call's idempotency key, when its method takes one. */
+  idempotency_key?: string
   other_owner?: string
   error?: string
   /** Only what the call created, such as a launched run. */
