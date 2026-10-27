@@ -220,10 +220,15 @@ export function stateWords(
   }
   const waited = waitLine(shown.wait, shown.state, now)
   if (waited) reason = shown.state === 'needs-you' ? `${reason ?? shown.reason} — ${waited}` : waited
-  const label = stale && shown.state === 'ended' ? 'Stale wait' : stateLabel[shown.state]
+  const label = stateName(shown)
   // A stale wait's reason already says how long nothing happened.
   const ran = since && shown.state === 'waiting-ci' && !stale ? compactAge(since, now) : undefined
   return { label, detail: [ran, reason].filter(Boolean).join(' · ') || undefined }
+}
+
+/** A state's label; a reported wait that went stale is not a turn that ended. */
+export function stateName({ state, cause }: Pick<RunPresentation, 'state' | 'cause'>): string {
+  return state === 'ended' && cause === 'wait-expired' ? 'Stale wait' : stateLabel[state]
 }
 
 /** The dot of a state, or of the wait it shows when Aether cannot vouch for that wait. */

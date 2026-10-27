@@ -10,7 +10,7 @@ import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot } from '@/components/ui/status-dot'
-import { runLabel, stateLabel, stateTitle, stateWords, toneOf } from '@/lib/status'
+import { runLabel, stateName, stateTitle, stateWords, toneOf } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { CardActionButton, cardAction, ReplyComposer } from '@/routes/board/card-action'
 import type { MapCard } from '@/routes/board/selectors'
@@ -65,7 +65,7 @@ export const MapNodeCard = memo(function MapNodeCard({ card, agentName, showOwne
               className="mt-0.5 text-ui-xs"
             >
               <StatusDot tone={toneOf(card)} />
-              <span className="truncate">{stateLabel[card.state]}</span>
+              <span className="truncate">{stateName(card)}</span>
             </Badge>
           </div>
           <p className={cn('mt-1.5 line-clamp-2 text-ui-sm break-words', needsYou ? 'text-text' : 'text-muted')}>

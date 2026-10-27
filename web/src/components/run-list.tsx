@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { useClock } from '@/lib/clock'
 import { useDelayed } from '@/lib/hooks'
-import { runLabel, stateLabel, stateTitle, stateTone, stateWords, toneOf, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateName, stateTitle, stateTone, stateWords, toneOf, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useRunPresentation } from '@/store/hooks'
@@ -176,7 +176,7 @@ function Row({
             {toggle.expanded ? <ChevronDown /> : <ChevronRight />}
           </Button>
         )}
-        <StatusDot tone={toneOf({ state, wait })} label={stateLabel[state]} className="mt-1.5" />
+        <StatusDot tone={toneOf({ state, wait })} label={stateName({ state, cause })} className="mt-1.5" />
         <div className="min-w-0 flex-1">
           <button
             type="button"

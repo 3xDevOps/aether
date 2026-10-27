@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
 import { GitFlow } from '@/components/workflow/git-flow'
 import { WorkflowTree } from '@/components/workflow/workflow-tree'
-import { runLabel } from '@/lib/status'
+import { runLabel, stateName, toneOf } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { countChecks, usePullRequest } from '@/routes/diff/publish-pr'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -35,13 +35,16 @@ function useRunWorkflow(run: RunRecord): WorkflowNode {
 
 export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: boolean; onToggle: (opener: HTMLElement) => void }) {
   const tree = useRunWorkflow(run)
+  const shown = useRunPresentation(run)
   const checks = usePullRequest(run, false).feedback?.checks
   const { state } = tree
+  const own = state === shown.state
+  const label = own ? stateName(shown) : workflowLabel[state]
   const running = tree.counts?.running ?? 0
   const busy = state === 'waiting-ci' && checks && checks.length > 0
     ? `${countChecks(checks).passing} of ${checks.length} checks`
     : running > 0 ? `${running} ${running === 1 ? 'agent' : 'agents'} running` : ''
-  const text = busy ? `${workflowLabel[state]} · ${busy}` : workflowLabel[state]
+  const text = busy ? `${label} · ${busy}` : label
   return (
     <Button
       variant="ghost"
@@ -53,8 +56,8 @@ export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: bo
       className="ml-1 shrink-0"
       onClick={(event) => onToggle(event.currentTarget)}
     >
-      <StatusDot tone={workflowTone[state]} pulse={state === 'working'} />
-      <span>{workflowLabel[state]}</span>
+      <StatusDot tone={own ? toneOf(shown) : workflowTone[state]} pulse={state === 'working'} />
+      <span>{label}</span>
       {busy && <span className="hidden @min-[480px]/views:inline">· {busy}</span>}
     </Button>
   )
