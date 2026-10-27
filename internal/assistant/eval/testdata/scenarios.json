@@ -52,6 +52,19 @@
   },
   "coord.messages.list": {
    "messages": []
+  },
+  "account.list": {
+   "accounts": [],
+   "shared_with": []
+  },
+  "run.children": {
+   "root_run_id": "",
+   "children": [],
+   "limits": {},
+   "usage": {}
+  },
+  "integration.list": {
+   "candidates": []
   }
  },
  "scenarios": [
