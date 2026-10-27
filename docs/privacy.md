@@ -457,8 +457,8 @@ never compacted. Forgetting does not remove:
 - backups an operator made of the data directory;
 - runs already launched with the text in their task;
 - the assistant transcript (`<data-dir>/assistant/<member>/items.jsonl`)
-  until you start a **New conversation**, and the agent's own session files,
-  which New conversation does not delete on every server version;
+  until you start a **New conversation**, and the agent's session files in
+  the assistant's home until you start a **New conversation**;
 - copies a connected app or an agent made elsewhere.
 
 Removing a member deletes their preferences in the same transaction and
