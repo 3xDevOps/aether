@@ -41,6 +41,7 @@ export const eventLabel = {
   'member.merged': 'Member merges',
   'profile.change': 'Agent profiles',
   'memory.change': 'Team memory',
+  'watch.changed': 'Watches',
 } satisfies Record<string, string>
 
 export type EventType = keyof typeof eventLabel

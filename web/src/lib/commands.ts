@@ -9,6 +9,7 @@ import {
   Check,
   CircleCheck,
   Download,
+  Eye,
   Hourglass,
   FileText,
   GitMerge,
@@ -356,6 +357,18 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         perform: (d) => d.openForwardDialog(`run:${id}`),
       })
     }
+  }
+
+  // Anyone who can see a run may watch it; the watch only notifies its owner.
+  if (!finished && cap.hasMethod('watch.create')) {
+    list.push({
+      id: 'watch',
+      label: 'Watch…',
+      short: 'Watch',
+      Icon: Eye,
+      value: 'watch notify follow alert subscribe',
+      perform: (d) => d.openDialog('watch', id),
+    })
   }
 
   if (cap.hasMethod('run.review') && mayKill && completable(run)) {
