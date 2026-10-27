@@ -197,6 +197,7 @@ type Attempt struct {
 	TakeoverActive         bool    `json:"takeover_active,omitempty"`
 	TakeoverMemberID       string  `json:"takeover_member_id,omitempty"`
 	TakeoverGeneration     uint64  `json:"takeover_generation,omitempty"`
+	TakeoverSince          string  `json:"takeover_since,omitempty"`
 	CancelRequestedAt      *string `json:"cancel_requested_at,omitempty"`
 	CancellationActorRunID string  `json:"cancellation_actor_run_id,omitempty"`
 	CancellationGeneration uint64  `json:"cancellation_generation,omitempty"`

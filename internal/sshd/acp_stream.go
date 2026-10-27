@@ -254,6 +254,7 @@ func (a *acpStream) acquire(force bool, generation uint64, p *pendingTakeover) e
 		return err
 	}
 	if mission := s.cfg.Services.MissionControl; mission != nil {
+		s.holdUntil(a.run.ID, acquired.Revoked)
 		if err = mission.Takeover(a.ctx, a.run.ID, a.member); err != nil {
 			_ = s.cfg.Control.Release(run, a.member, acquired.SessionID, acquired.Generation)
 			return err

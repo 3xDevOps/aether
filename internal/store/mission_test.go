@@ -609,3 +609,42 @@ func TestMissionAcceptedSetVersionAdvancesOnAbandonmentOfCurrentOutput(t *testin
 		t.Fatalf("accepted set version after abandonment replay = %d, want 2", afterReplay.AcceptedSetVersion)
 	}
 }
+
+func TestMissionWorkerHoldGenerationAndRestartRelease(t *testing.T) {
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
+	task := mustCreateMissionTask(t, db, mission.ID, "held worker")
+	attempt, _, err := reserveMissionAttempt(t, db, mission, task, "held-worker")
+	if err != nil {
+		t.Fatalf("ReserveAttempt: %v", err)
+	}
+	ctx := context.Background()
+	held, err := db.SetMissionWorkerTakeover(ctx, attempt.RunID, member.ID, true)
+	if err != nil {
+		t.Fatalf("take hold: %v", err)
+	}
+	again, err := db.SetMissionWorkerTakeover(ctx, attempt.RunID, member.ID, true)
+	if err != nil || again.Generation != held.Generation || !again.UpdatedAt.Equal(held.UpdatedAt) {
+		t.Fatalf("same member retake = %+v, %v; want generation %d since %s", again, err, held.Generation, held.UpdatedAt)
+	}
+	other := mustCreateMember(t, db)
+	taken, err := db.SetMissionWorkerTakeover(ctx, attempt.RunID, other.ID, true)
+	if err != nil || taken.Generation <= held.Generation {
+		t.Fatalf("another member's take = %+v, %v; want a generation past %d", taken, err, held.Generation)
+	}
+	if err = db.CheckIntegratorInput(ctx, mission.CurrentIntegratorRunID, attempt.RunID, mission.IntegratorGeneration); !errors.Is(err, ErrMissionTakeover) || !strings.Contains(err.Error(), "member "+string(other.ID)+" has held it since ") {
+		t.Fatalf("integrator input while held = %v, want ErrMissionTakeover naming %s", err, other.ID)
+	}
+	if err = db.ReleaseMissionWorkerTakeovers(ctx); err != nil {
+		t.Fatalf("release holds at start: %v", err)
+	}
+	released, err := db.GetMissionWorkerAssignment(ctx, attempt.RunID)
+	if err != nil || released.Active || released.Generation <= taken.Generation {
+		t.Fatalf("hold after a server start = %+v, %v", released, err)
+	}
+	if err = db.CheckIntegratorInput(ctx, mission.CurrentIntegratorRunID, attempt.RunID, mission.IntegratorGeneration); err != nil {
+		t.Fatalf("integrator input after a server start = %v", err)
+	}
+}

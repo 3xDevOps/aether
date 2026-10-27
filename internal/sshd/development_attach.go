@@ -146,6 +146,7 @@ func (s *Server) serveDevelopmentAttach(ctx context.Context, member domain.Membe
 					return err
 				}
 				if mission := s.cfg.Services.MissionControl; mission != nil {
+					s.holdUntil(run.ID, ctx.Done())
 					return mission.Takeover(ctx, run.ID, member)
 				}
 				return nil

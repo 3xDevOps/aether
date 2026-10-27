@@ -145,7 +145,8 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 
 func (d *DB) enrichAttemptTakeover(ctx context.Context, a *domain.Attempt) error {
 	var active int
-	err := d.db.QueryRowContext(ctx, `SELECT active, member_id, generation FROM mission_worker_takeovers WHERE worker_run_id=?`, a.RunID).Scan(&active, &a.TakeoverMemberID, &a.TakeoverGeneration)
+	var since int64
+	err := d.db.QueryRowContext(ctx, `SELECT active, member_id, generation, updated_at FROM mission_worker_takeovers WHERE worker_run_id=?`, a.RunID).Scan(&active, &a.TakeoverMemberID, &a.TakeoverGeneration, &since)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -153,6 +154,9 @@ func (d *DB) enrichAttemptTakeover(ctx context.Context, a *domain.Attempt) error
 		return err
 	}
 	a.TakeoverActive = active != 0
+	if a.TakeoverActive {
+		a.TakeoverSince = decodeTime(since)
+	}
 	return nil
 }
 

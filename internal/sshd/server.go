@@ -241,6 +241,12 @@ type Server struct {
 	// caps claimRunSSH applies.
 	runSSHMu    sync.Mutex
 	runSSHConns map[domain.RunID]map[domain.MemberID]int
+
+	// holds counts the live sessions behind each swarm worker's durable
+	// hold (see holdUntil); holdsStop ends their watchers on Close.
+	holdsMu   sync.Mutex
+	holds     map[domain.RunID]int
+	holdsStop chan struct{}
 }
 
 // New builds a server, loading (or generating) the host key.
@@ -300,6 +306,8 @@ func New(cfg Config) (*Server, error) {
 		controlFrames:    make(map[domain.MemberID]struct{}),
 		controlAttaches:  make(map[string]map[string]controlAttach),
 		runSSHConns:      make(map[domain.RunID]map[domain.MemberID]int),
+		holds:            make(map[domain.RunID]int),
+		holdsStop:        make(chan struct{}),
 		baseCtx:          context.Background(),
 	}
 	sc := &ssh.ServerConfig{PublicKeyCallback: s.authenticate}
@@ -529,6 +537,7 @@ func (s *Server) Close() error {
 	if !s.closed {
 		s.closed = true
 		cancel = s.baseCancel
+		close(s.holdsStop)
 		if s.ln != nil {
 			_ = s.ln.Close()
 		}

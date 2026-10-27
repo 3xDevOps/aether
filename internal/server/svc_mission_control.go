@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -36,6 +37,22 @@ func (m missionControlService) Release(ctx context.Context, workerRun domain.Run
 
 func (m missionControlService) ReleaseHold(ctx context.Context, workerRun domain.RunID, member domain.MemberID, expectedGeneration uint64) (*domain.MissionWorkerAssignment, error) {
 	return m.store.ReleaseMissionWorkerTakeover(ctx, workerRun, member, expectedGeneration)
+}
+
+// ReleaseIdle clears the worker's hold, whoever took it.
+func (m missionControlService) ReleaseIdle(ctx context.Context, workerRun domain.RunID) error {
+	a, err := m.store.GetMissionWorkerAssignment(ctx, workerRun)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil || !a.Active {
+		return err
+	}
+	_, err = m.store.ReleaseMissionWorkerTakeover(ctx, workerRun, a.MemberID, a.Generation)
+	if errors.Is(err, store.ErrMissionStale) {
+		return nil
+	}
+	return err
 }
 
 // AdmitInput serializes its check and callback with the worker's control
@@ -82,6 +99,10 @@ func init() {
 		}
 		if d.Control == nil {
 			return nil, errors.New("mission control needs the shared control service")
+		}
+		// Holds belong to live sessions, and a starting server has none.
+		if err := missionStore.ReleaseMissionWorkerTakeovers(context.Background()); err != nil {
+			return nil, fmt.Errorf("mission control: release holds left by the last server: %w", err)
 		}
 		svc := missionControlService{store: missionStore, control: d.Control}
 		if d.SSH != nil {
