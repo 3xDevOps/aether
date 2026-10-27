@@ -784,9 +784,10 @@ retrying with backoff from 3 seconds up to a minute, stopping on `-32004` or
 choice). `status.share_view` carries it to other tabs and devices.
 
 When the assistant launches or messages a run for the member, the server
-follows it and publishes `assistant.notice` on `/ws/events` as the run
-finishes or needs input, approval or attention. Only the member named by
-`member_id` reacts. `applyAssistantNotice` (`store/assistant-notice.ts`) raises
+watches it ([assistant watches](watches.md#assistant-watches)) and publishes
+`assistant.notice` on `/ws/events` as the run finishes or needs input or
+attention; `watch_id` names the watch. The server streams it only to the
+member named by `member_id`. `applyAssistantNotice` (`store/assistant-notice.ts`) raises
 a toast with an **Open run** action (warning style for `needs_*`, plain for
 `finished`) and adds one to `assistantNotices`. The Assistant button counts
 those updates beside the waiting requests, named "Assistant, 1 request
@@ -1813,7 +1814,7 @@ and leaves the run where it is. Both return `{"run": Run}` and need the same
 permission as `run.close`; a live swarm worker is refused.
 
 The Needs you group, its counts and badges follow the run-state attention
-rule push notifications, assistant follow and `aether runs --needs-you`
+rule push notifications, watches and `aether runs --needs-you`
 share ([failure-handling.md](failure-handling.md)): a live run (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
 `disconnected`, or `failed` while `outcome_unseen`, and a reported success,
