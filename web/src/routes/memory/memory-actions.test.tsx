@@ -5,6 +5,7 @@ import { api, ApiError, type Api } from '@/lib/api'
 import type { MemoryAddResult, MemoryItem, MemorySearchParams } from '@/lib/types'
 import { MemoryRoute } from '@/routes/memory'
 import { undoMs } from '@/routes/memory/use-removal'
+import { useStore } from '@/store'
 import { alice, bob, fakeApi, memoryItem, workspace } from '@/test/fixtures'
 import { agentNote, footer, liveNotes, myPin, outcome, replaced, rowOf, search, seedMemory as seed, showFilter, titles, workspacePin } from '@/test/memory'
 
@@ -450,6 +451,15 @@ describe('memory page writes', () => {
     const dialog = await screen.findByRole('dialog', { name: myPin.title })
     expect(await within(dialog).findByText(`Preference · Member note · ${myPin.id}`)).toBeDefined()
     expect(within(dialog).queryByRole('button', { name: /^(Pin|Unpin|Replace|Remove)/ })).toBeNull()
+  })
+
+  it("offers a collaborator every action on a member note written by the account merged into theirs", async () => {
+    seed(bob)
+    useStore.setState({ mergedInto: { mem_bob_old: bob.id } })
+    const merged = memoryItem({ id: 'note-merged0001', scope: 'member', author_id: 'mem_bob_old', author_name: 'Bob (laptop)' })
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [merged] })) })} />)
+    const row = within(rowOf((await screen.findByRole('button', { name: merged.title })).textContent!))
+    for (const name of ['Pin for your new runs', 'Replace', 'Remove']) expect(row.getByRole('button', { name })).toBeDefined()
   })
 
   it("names the pinner when an admin replaces another member's pinned member note", async () => {

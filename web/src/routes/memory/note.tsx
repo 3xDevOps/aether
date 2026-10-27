@@ -132,6 +132,7 @@ export function NoteDialog({
   const [error, setError] = useState('')
   const request = useRef(0)
   const self = useSelf()
+  const mergedInto = useStore((s) => s.mergedInto)
 
   const read = useCallback(async () => {
     const at = ++request.current
@@ -192,7 +193,7 @@ export function NoteDialog({
           </div>
         )}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
-        {item && canWrite && mayChange(item, self) && (
+        {item && canWrite && mayChange(item, self, mergedInto) && (
           <DialogFooter>
             <Button variant="secondary" className="sm:mr-auto" disabled={busy} onClick={() => onRemove(item)}>Remove</Button>
             {!superseded(item) && <Button variant="secondary" disabled={busy} onClick={() => onReplace(item)}>Replace…</Button>}
@@ -200,7 +201,7 @@ export function NoteDialog({
               <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryUnpin(workspaceID, item.id))}>Unpin</Button>
             ) : !superseded(item) && (
               <>
-                {mayPinForSelf(item, self) && <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id, 'member'))}>Pin for me only</Button>}
+                {mayPinForSelf(item, self, mergedInto) && <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id, 'member'))}>Pin for me only</Button>}
                 {item.scope === 'workspace' && <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id))}>Pin</Button>}
               </>
             )}
