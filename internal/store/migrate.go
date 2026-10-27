@@ -2157,7 +2157,36 @@ CREATE TABLE watch_pr_snapshots (
 );
 CREATE INDEX idx_watch_pr_snapshots_checked ON watch_pr_snapshots(checked_at);
 `,
-	// v90: audit history of writes by connectors and the assistant, and of
+	// v90: the assistant's follows become source=assistant watches on
+	// needs_you and finished that expire in 14 days, keyed as the assistant
+	// keys the watch it keeps on a run, the state each follow
+	// last announced carried over as the key its condition fired on, so
+	// nothing is announced twice. Follows of runs that already ended are
+	// dropped, as a follow ended with its run. Each is due for a check, so
+	// one whose first check fails is retried. Pending assistant
+	// deliveries are indexed for the watch service to retry.
+	`
+INSERT INTO watches (id, member_id, workspace_id, target_kind, run_id, conditions, source, state, idempotency_key, fired,
+	created_at, updated_at, expires_at, next_check_at)
+SELECT 'wat-' || lower(hex(randomblob(5))), f.member_id, r.workspace_id, 'run', f.run_id,
+	'["needs_you","finished"]', 'assistant', 'active', 'assistant:' || f.run_id,
+	CASE
+		WHEN f.notified_key LIKE 'input:%' THEN json_object('needs_you', f.notified_key)
+		WHEN f.notified_key LIKE 'attention:%' THEN json_object('needs_you', 'status:' || substr(f.notified_key, 11))
+		WHEN f.notified_key = 'finished:completed' AND r.reason LIKE 'agent reported success%'
+			THEN json_object('finished', 'reported|' || COALESCE(r.status_changed_at, ''))
+		WHEN f.notified_key = 'finished:completed' THEN json_object('finished', 'completed')
+		WHEN f.notified_key LIKE 'finished:%' THEN json_object('finished', 'reported|live|' || COALESCE(r.status_changed_at, ''))
+		ELSE '{}'
+	END,
+	f.created_at * 1000000000, unixepoch() * 1000000000, (unixepoch() + 14 * 86400) * 1000000000, unixepoch() * 1000000000
+FROM assistant_follows f JOIN runs r ON r.id = f.run_id
+WHERE r.status NOT IN ('merged', 'abandoned', 'failed', 'interrupted');
+DROP TABLE assistant_follows;
+CREATE INDEX idx_watch_deliveries_assistant ON watch_deliveries(notification_id)
+	WHERE channel = 'assistant' AND status = 'pending';
+`,
+	// v91: audit history of writes by connectors and the assistant, and of
 	// connector, account-share, member and Slack link changes. Rows hold
 	// ids, never params, and outlive the members and connectors they name;
 	// security marks a change that took effect, which is kept apart from

@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useMemo, useRef } from 'react'
+import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef } from 'react'
 import type * as React from 'react'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
@@ -16,9 +16,12 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Code, CodeBlock } from '@/components/ui/code'
 import { playEntrance, type Entrance } from '@/lib/motion'
+import { routeFromQuery } from '@/lib/url-state'
 import { cn } from '@/lib/utils'
 import { FileLink } from '@/routes/files/path-link'
 import { findPaths, parsePath } from '@/routes/files/paths'
+import { useStore } from '@/store'
+import type { Route } from '@/store/ui'
 
 const stream = (mode: Parameters<typeof StreamLanguage.define>[0]) => () => StreamLanguage.define(mode)
 
@@ -76,6 +79,58 @@ export function Highlighted({ code, lang }: { code: string; lang: string }) {
   return <>{parts ?? code}</>
 }
 
+/** Opens a dashboard route a link names; a surface such as the assistant's phone sheet may close itself too. */
+export const OpenRoute = createContext<(route: Route) => void>((route) => useStore.getState().navigate(route.name, route.params))
+
+/** The route a same-origin dashboard link, such as `?run=<id>`, names. */
+function dashboardRoute(href: string | undefined): Route | undefined {
+  if (!href) return undefined
+  let url: URL
+  try {
+    url = new URL(href, window.location.href)
+  } catch {
+    return undefined
+  }
+  if (url.origin !== window.location.origin || !(url.searchParams.has('run') || url.searchParams.has('page'))) return undefined
+  const route = routeFromQuery(url.searchParams)
+  const watch = url.searchParams.get('watch')
+  return route.name === 'settings' && watch ? { ...route, params: { ...route.params, watch } } : route
+}
+
+function Link({ href, children }: { href?: string; children?: React.ReactNode }) {
+  const open = useContext(OpenRoute)
+  const route = dashboardRoute(href)
+  const className = 'text-accent underline-offset-2 hover:underline'
+  if (!route) return <a href={href} target="_blank" rel="noreferrer" className={className}>{children}</a>
+  return (
+    <a
+      href={href}
+      className={className}
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+        event.preventDefault()
+        open(route)
+      }}
+    >
+      {children}
+    </a>
+  )
+}
+
+const dashboardLink = /\[([^\]\n]+)\]\((\?[^)\s]+)\)/g
+
+/** Plain text whose `[text](?run=...)` dashboard links open in the app; nothing else is read as markdown. */
+export function LinkedText({ text }: { text: string }) {
+  const parts: React.ReactNode[] = []
+  let at = 0
+  for (const match of text.matchAll(dashboardLink)) {
+    parts.push(text.slice(at, match.index), <Link key={match.index} href={match[2]}>{match[1]}</Link>)
+    at = match.index + match[0].length
+  }
+  parts.push(text.slice(at))
+  return <>{parts}</>
+}
+
 const components: Components = {
   pre: ({ children }) => <>{children}</>,
   code: ({ className, children }) => {
@@ -91,7 +146,7 @@ const components: Components = {
   a: ({ href, children }) => {
     const file = href ? parsePath(href) : null
     if (file) return <FileLink target={file} explicit>{children}</FileLink>
-    return <a href={href} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">{children}</a>
+    return <Link href={href}>{children}</Link>
   },
   data: ({ value, children }) => <FileLink target={parsePath(String(value))!}>{children}</FileLink>,
 }

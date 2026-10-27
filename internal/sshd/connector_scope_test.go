@@ -29,6 +29,7 @@ func TestConnectorMethodScopesNameRegisteredMethods(t *testing.T) {
 func TestConnectorScopesGateEachMethod(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
+	e.runs.reviewFrom = e.store
 	ctx := context.Background()
 	run := json.RawMessage(`{"run_id":"` + string(e.run.ID) + `"}`)
 	ready := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "reported", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
@@ -273,5 +274,32 @@ func TestAuditRecordsConnectorsRemovedWithTheirMember(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("audit.list = %q, want %q", got, want)
+	}
+}
+
+// A connector without control asks the scheduler to complete a run only if
+// its reported success awaits review, so the scheduler judges the state it
+// acts on; a connector with control and the dashboard ask without that
+// limit.
+func TestConnectorReviewLimitReachesTheScheduler(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	params := json.RawMessage(`{"run_id":"` + string(e.run.ID) + `","action":"complete"}`)
+	for _, tc := range []struct {
+		caller *Local
+		want   string
+	}{
+		{e.srv.ConnectorLocal(ConnectorGrant{Member: e.member.ID}, "con-test", "ChatGPT", []string{ConnectorScopeRead, ConnectorScopeWrite}), ":true"},
+		{e.srv.ConnectorLocal(ConnectorGrant{Member: e.member.ID}, "con-test", "ChatGPT", []string{ConnectorScopeWrite, ConnectorScopeControl}), ":false"},
+		{e.srv.Local(e.member.ID), ":false"},
+	} {
+		before := len(e.runs.Calls())
+		_, _ = tc.caller.Call(ctx, protocol.MethodRunReview, params)
+		calls := e.runs.Calls()
+		if len(calls) != before+1 || !strings.HasPrefix(calls[before], "review:"+string(e.run.ID)) || !strings.HasSuffix(calls[before], tc.want) {
+			t.Fatalf("run.review reached the scheduler as %v, want one review ending %s", calls[before:], tc.want)
+		}
 	}
 }

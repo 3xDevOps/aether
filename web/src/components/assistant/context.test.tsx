@@ -155,6 +155,96 @@ describe('attachments', () => {
     await waitFor(() => expect(within(aside).queryByText('lint')).toBeNull())
   })
 
+  it('makes the server forget a removed page before the prompt that follows at once', async () => {
+    const order: string[] = []
+    let land!: () => void
+    vi.mocked(api.assistantView).mockImplementation((context) => {
+      order.push(context.route ? 'page' : 'forget')
+      return context.route ? Promise.resolve({}) : new Promise((resolve) => { land = () => resolve({}) })
+    })
+    vi.mocked(api.assistantPrompt).mockImplementationOnce(async () => {
+      order.push('prompt')
+      return {}
+    })
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await userEvent.type(box(aside), '{Enter}')
+    await waitFor(() => expect(order).toContain('forget'))
+    expect(order).not.toContain('prompt')
+    act(() => land())
+    await waitFor(() => expect(order.at(-1)).toBe('prompt'))
+    expect(order.indexOf('forget')).toBeLessThan(order.indexOf('prompt'))
+    vi.mocked(api.assistantView).mockImplementation(async () => ({}))
+  })
+
+  it('sends nothing when a chip is removed while Send waits for the page to be forgotten', async () => {
+    let land!: () => void
+    vi.mocked(api.assistantView).mockImplementation((context) => context.route ? Promise.resolve({}) : new Promise((resolve) => { land = () => resolve({}) }))
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await userEvent.type(box(aside), '{Enter}')
+    await waitFor(() => expect(land).toBeDefined())
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove check lint from the message' }))
+    act(() => land())
+    await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
+    expect(api.assistantPrompt).not.toHaveBeenCalled()
+    vi.mocked(api.assistantView).mockImplementation(async () => ({}))
+  })
+
+  it('clears the sent message and keeps a check attached while it was in flight', async () => {
+    let reply!: () => void
+    vi.mocked(api.assistantPrompt).mockImplementationOnce(() => new Promise((resolve) => { reply = () => resolve({}) }))
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.type(box(aside), 'Why is this stuck?{Enter}')
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    act(() => reply())
+    await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
+    expect(within(aside).getByRole('button', { name: 'Remove check lint from the message' })).toBeDefined()
+    expect(box(aside).value).toBe('')
+  })
+
+  it('sends a message once when a chip changes while it is in flight', async () => {
+    let reply!: () => void
+    vi.mocked(api.assistantPrompt).mockImplementationOnce(() => new Promise((resolve) => { reply = () => resolve({}) }))
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    await userEvent.type(box(aside), '{Enter}')
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    act(() => reply())
+    await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
+    expect(box(aside).value).toBe('')
+    expect(within(aside).queryByRole('button', { name: 'Remove check lint from the message' })).toBeNull()
+    await userEvent.type(box(aside), '{Enter}')
+    expect(api.assistantPrompt).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a prompt that got no answer and gives Send back', async () => {
+    vi.mocked(api.assistantPrompt).mockRejectedValueOnce(new DOMException('signal timed out', 'TimeoutError'))
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.type(box(aside), 'Why is this stuck?{Enter}')
+    expect(await within(aside).findByRole('alert')).toHaveProperty('textContent', 'assistant.prompt got no answer within 60 seconds')
+    expect(within(aside).getByRole('button', { name: /Send/ })).toHaveProperty('disabled', false)
+    expect(box(aside).value).toBe('Why is this stuck?')
+  })
+
+  it('sends nothing and shows the error when the server cannot forget a removed page', async () => {
+    vi.mocked(api.assistantView).mockImplementation(async (context) => {
+      if (!context.route) throw new Error('connection reset')
+      return {}
+    })
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await userEvent.type(box(aside), '{Enter}')
+    expect(await within(aside).findByRole('alert')).toHaveProperty('textContent', 'assistant.view: connection reset')
+    expect(api.assistantPrompt).not.toHaveBeenCalled()
+    vi.mocked(api.assistantView).mockImplementation(async () => ({}))
+  })
+
   it('drops a removed attachment from the payload and keeps the member\'s own draft', async () => {
     const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
     await userEvent.type(await within(aside).findByRole('textbox', { name: 'Message the assistant' }), 'my own words')
@@ -195,6 +285,25 @@ describe('inspecting what is shared', () => {
     await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
     expect(sent()).toEqual(raw)
+  })
+
+  it('sends the remembered launch choices with the page, newest first, and only with it', async () => {
+    useStore.setState({ launchDefaults: { codex: { mode: 'tui', model: 'me:ghp_x@github.com', at: 1 }, claude: { mode: 'acp', model: 'opus', at: 2 }, 'Bad Name': { mode: 'acp', at: 3 } } })
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.click(within(aside).getByRole('button', { name: 'Inspect what is shared' }))
+    const shared = await screen.findByRole('dialog', { name: 'What is shared' })
+    expect(within(shared).getByRole('region', { name: 'Sent with the next message' }).textContent).toContain('claude opus Enhanced, codex Standard')
+    await userEvent.keyboard('{Escape}')
+    await userEvent.type(box(aside), 'Build the export{Enter}')
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+    expect(sent()?.launch_defaults).toEqual([{ agent: 'claude', mode: 'acp', model: 'opus' }, { agent: 'codex', mode: 'tui' }])
+
+    await userEvent.click(within(aside).getByRole('button', { name: /^Remove page / }))
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    await userEvent.type(box(aside), '{Enter}')
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
+    expect(sent(1)).toMatchObject({ attachments: [{ kind: 'check', check: 'lint' }] })
+    expect(sent(1)?.launch_defaults).toBeUndefined()
   })
 
   it('stops sharing the page from the same place', async () => {

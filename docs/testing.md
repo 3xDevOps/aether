@@ -18,6 +18,7 @@ pull request runs are in
 | `.github/workflows/` | `make lint-workflows` | ShellCheck |
 | How an agent CLI is launched (`internal/harness`) | [Real-agent smoke tests](#real-agent-smoke-tests) | Docker |
 | How a run drives, reads or wakes its agent | [Real agents against a mock model](#real-agents-against-a-mock-model) | Docker, git |
+| The assistant's instructions or tools (`internal/assistant/instructions.md`, `internal/ops`) | [Assistant eval](#assistant-eval) | Claude Code signed in, spends tokens |
 | Native hook adapters (the `.mjs` files in `internal/coordhooks` and `internal/agentstatus`) | `make test-native-hooks` | Node 22.13+ |
 | `cmd/aether-edge`, `internal/edge` | `go test -race ./internal/edge/edgetest/` | Go |
 | `images/edge/Dockerfile` | [The edge image](#the-edge-image) | Docker, curl |
@@ -216,17 +217,52 @@ ACP_LIVE=1 go test -tags integration -run TestLiveEnhancedRunsWithoutPermissionP
 ## Real agents against a mock model
 
 `TestIntegrationRealAgents` (`internal/server/realagents_integration_test.go`)
-launches real Claude Code and Codex runs, Standard and Enhanced, on real
-Docker. A mock model in the test process
-(`internal/server/mockmodel_integration_test.go`) serves streaming Anthropic
-`/v1/messages` and OpenAI `/v1/responses` and plays one turn: a shell tool
-call, then a text answer. For each run the test requires that the tool's
-output reaches the model, the run settles idle, and the answer shows on the
-run's screen (Standard) or in its ACP history (Enhanced). It then sends the
-idle run mail and waits for the turn the mail starts, where Aether can wake
-the run: every Enhanced run, and a Standard run whose agent sets `IdleWake` in
-its capabilities (`internal/harness/capabilities.go`). The other runs report
-that step as skipped.
+launches real Claude Code and Codex runs, Standard, Enhanced and Background,
+on real Docker, and checks that each report an agent makes, or fails to make,
+leaves the run in the state the dashboard shows. A mock model in the test
+process (`internal/server/mockmodel_integration_test.go`) serves streaming
+Anthropic `/v1/messages` and OpenAI `/v1/responses`. Each prompt the test
+sends carries a tag, `aether-script:<turn>;`, naming the script the mock
+plays for that turn: one tool call per step, then a text answer. The mock
+answers each report reminder Aether sends with `aether-internal report`.
+
+One Standard and one Enhanced run per agent play these turns in order. The
+launch starts `turn`, mail starts `wake`, and `run.inject` starts the rest:
+
+| Turn | The agent | The run must show |
+| --- | --- | --- |
+| `turn` | runs a command and ends the turn without a report | `answered` after one reminder; Standard Codex, which Aether cannot remind, `waiting` |
+| `wake` | gets mail while idle | a new turn, where Aether can wake the run |
+| `waiting` | reports `waiting --for ci` | `waiting-ci` with the summary |
+| `answered` | reports `answered` | `answered`, not Needs you |
+| `late-report` | reports `waiting --for process` from a detached process five seconds later | the report landing after the run parked, then `waiting-tools` |
+| `compaction` | claims more tokens than its context holds, compacts, then reports | the reporting rules still in the next request, then `answered` |
+| `subagent` | starts a subagent that runs for eight seconds | not Needs you at any point while it runs, the subagent never reminded, then the turn ends like `turn` |
+| `needs-input` | reports `needs-input` | `needs-you`, Needs you |
+
+Each check also reads the run's `cause`, its report entries on the timeline,
+and whether the report's output reached the model. A failure names the broken
+link: the reporting rules missing from a request (`instruction missing`), no
+report output reaching the model (`report never made`), a report missing from
+the timeline or its output missing from the model's requests (`report lost`),
+or a report recorded but shown as the wrong state (`misclassified`). The
+first turn and every Background run also require the launch to record where
+its instructions went.
+
+The `wake` turn runs where Aether can wake the run: every Enhanced run, and a
+Standard run whose agent sets `IdleWake` in its capabilities
+(`internal/harness/capabilities.go`); the others skip it. A run must never
+need you while its subagent works. It should show `working`, or
+`waiting-agents` when Standard Claude Code ends the turn with the subagent
+still running in the background. Aether gets no
+signal for a Codex subagent, and Standard Claude Code's Stop hook can arrive
+without the subagent among its background tasks, so those runs can read as
+idle; the test logs their idle states as a known gap and fails any other.
+
+Two Background runs per agent check that a Background run is never reminded:
+one reports `success` and finishes awaiting review, the only Background state
+that needs you; the other has its `needs-input` report refused and finishes
+without a report.
 
 `TestIntegrationSilentModelParksAsPossibleStall`
 (`internal/server/liveness_integration_test.go`) launches an Enhanced Claude
@@ -238,7 +274,9 @@ Runs reach the mock the way they reach a [model
 gateway](harnesses.md#per-agent-setup): `ANTHROPIC_BASE_URL` for Claude Code,
 `openai_base_url` in `~/.codex/config.toml` for Codex. The test seeds the
 member home with what a member's first runs leave there: onboarding, an
-approved API key and a trusted checkout.
+approved API key and a trusted checkout. The Codex config also sets
+`model_auto_compact_token_limit`, so the `compaction` turn's claimed usage
+makes Codex compact.
 
 CI's `agents` job runs both as root. Run them the same way, with Docker and
 git:
@@ -249,8 +287,9 @@ sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
 ```
 
 `AGENTS_BASE=aether-standard:local` builds on a standard image you built. A
-failure prints the agent's screen (Standard) or ACP history (Enhanced) and the
-final item of each request the mock received.
+failure prints the broken link, the run's report entries, the agent's screen
+(Standard) or ACP history (Enhanced), and the final item of each request the
+mock received.
 
 ### Bumping the pinned versions
 
@@ -260,6 +299,69 @@ the versions members install. The smoke image takes each vendor's latest
 release; this one is pinned so a vendor release cannot fail an unrelated pull
 request. To bump, change the version, run the two commands above, and fix
 what the new release broke in the same pull request.
+
+## Assistant eval
+
+`internal/assistant/eval` measures what the built-in assistant does with
+`internal/assistant/instructions.md`. It runs the real Claude Code CLI (`claude -p`)
+in a directory whose `CLAUDE.md` is those instructions. The agent's only tools
+are the assistant's own, `ops.RegisterAssistant`, served over HTTP MCP by a fake
+control surface that answers from synthetic scenario state. The fake records
+every tool call. A confirmed-tier call (launch, message, merge) is recorded and
+answered with a made-up success, so nothing is ever started, sent or merged;
+the eval scores the parameters the agent proposed.
+
+It spends model tokens, so it is behind the `assistanteval` build tag and no CI
+job runs it. Claude Code must be on `PATH` and signed in:
+
+```sh
+AETHER_ASSISTANT_EVAL_LABEL=main \
+  go test -count=1 -tags assistanteval -run TestAssistantEval -timeout 40m ./internal/assistant/eval
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AETHER_ASSISTANT_EVAL_LABEL` | `unlabeled` | Names the output files; use the commit or branch under test |
+| `AETHER_ASSISTANT_EVAL_RUNS` | `3` | Runs per scenario |
+| `AETHER_ASSISTANT_EVAL_MODEL` | Claude Code's default | Passed to `claude --model`; the report names the model the harness reports |
+| `AETHER_ASSISTANT_EVAL_ONLY` | all | Comma-separated scenario ids |
+| `AETHER_ASSISTANT_EVAL_PARALLEL` | `4` | Concurrent agent runs |
+| `AETHER_ASSISTANT_EVAL_OUT` | `$TMPDIR/assistant-eval` | Where `<label>.md` and `<label>.json` go |
+
+The scenarios and their expected checks are in
+`internal/assistant/eval/testdata/scenarios.json`: a rough voice request, a
+question, a research-only request, a prohibition, hostile pasted text, a saved
+preference against a one-off override, two members with different defaults, a
+launch with no dashboard view, a shared account, an unavailable saved target,
+merged against released, a failing PR behind a success report, an open task in
+a completed swarm, and a reopened session. The checks are keyword and
+tool-call tests, so they are deterministic but coarse: text matches are whole
+words (so `bo` does not match `both`), an invented-scope keyword does not count
+when the brief negates it ("no refactors"), and the same holds for words a brief must omit ("do not delete staging" does not copy the hostile instruction), and a question counts only when it
+is a sentence addressed to the member, not a `?run=` link or inline code. A
+question after a completed launch that offers to show or edit the brief is
+reported in its own column, not as unnecessary. The Markdown report ends
+with a manual-review list per scenario, with each launch brief and reply.
+
+The report has a row per scenario: runs passed, unnecessary questions, brief offers, launches
+that should not have happened, dropped prohibitions, invented-scope keywords,
+tool calls and latency per run, and cost. Cost is the figure `claude` reports,
+and "not measured" when it reports none. Results are rewritten after every
+run, and each run's timeout is capped by the test's `-timeout`, so a run that
+hits the limit still leaves a report.
+
+A scenario marked `pending: <tool>` needs a tool the registry does not offer
+yet, such as the saved launch choices. The eval serves an eval-only stub of the
+tool from the scenario's contract so the baseline is honest about what the
+agent does without it. Its rate is not product behavior. When the registry
+offers the tool, the real one is served instead, and the scenario's `answers`
+need an entry for each RPC method it calls; a missing one shows up as
+"is not available in this synthetic scenario" in the reply.
+
+Compare a change with `main` by running the command on both commits with
+different labels. Model output varies between runs, so a few runs per scenario
+shows a direction, not a proof. Scripted tests of the scorer itself,
+`go test ./internal/assistant/eval`, run in `make test`.
 
 ## Native hook tests
 

@@ -240,7 +240,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     agentList: null,
     setAgentList: (identity, agents) => set({ agentList: { identity, agents } }),
     setInfo: (info) => set({ info }),
-    setIdentityKey: (identityKey) => set({ identityKey }),
+    setIdentityKey: (identityKey) => set((s) => ({ identityKey, launchDefaults: s.savedLaunchDefaults[identityKey] ?? {} })),
     setCapabilities: (capabilities) => set({ capabilities }),
     setConnection: (connection) => set({ connection }),
     noteSeq: (seq) =>

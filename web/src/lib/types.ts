@@ -408,10 +408,18 @@ export interface WorkspaceVariable {
   secret?: boolean
 }
 
+/** The server never returns a workspace file's content. */
+export interface WorkspaceFile {
+  path: string
+  size: number
+}
+
 export interface WorkspaceEnvironment {
   workspace_id: string
   setup_script: string
   variables: WorkspaceVariable[]
+  /** Absent from a server older than workspace files. */
+  files?: WorkspaceFile[]
   /** Both absent from a server older than egress control. */
   egress?: boolean
   egress_hosts?: string[]
@@ -2155,6 +2163,7 @@ export interface EnvAgentsResult {
 export interface AssistantNoticePayload {
   member_id: string
   run_id: string
+  watch_id?: string
   kind: 'finished' | 'needs_input' | 'needs_approval' | 'needs_attention'
   title: string
   body: string
