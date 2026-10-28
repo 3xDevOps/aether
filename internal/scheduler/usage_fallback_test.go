@@ -528,6 +528,79 @@ func TestEnhancedRunMovesAgainOnASecondLimit(t *testing.T) {
 	}
 }
 
+// Grace's login was never confirmed in the container that ran on her
+// account, as on a server from before the runtime checked it, so her usage
+// was never spent: when Lin's runs out the run goes back to Grace, in a
+// container that mounts only Grace's login. Once that container confirms
+// it, Grace counts as used, and her next limit has nowhere left to go.
+func TestUnconfirmedSharedLoginDoesNotUseUpTheAccount(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	lin := e.addRecipient(t)
+	linHome, err := e.cfg.Homes.Path(lin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFiles(t, linHome, ".claude/.credentials.json")
+	if err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10, lin.ID: 20}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	settled := func(account domain.MemberID) {
+		t.Helper()
+		waitFor(t, "the move to "+string(account), func() bool {
+			row, rowErr := e.db.GetRun(t.Context(), run.ID)
+			sc, scErr := e.sched.readSidecar(run.ID)
+			_, liveErr := e.sched.acp.live(run.ID)
+			return rowErr == nil && scErr == nil && liveErr == nil && row.AccountMemberID == account && sc.AccountSwap == nil
+		})
+	}
+	limit := func() {
+		_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+	}
+
+	limit()
+	e.assertMovedToOwner(t, run.ID, notes)
+	settled(e.owner.ID)
+	e.sched.mu.Lock()
+	e.sched.runs[run.ID].verifiedLogins = nil
+	e.sched.mu.Unlock()
+	limit()
+	settled(lin.ID)
+	limit()
+	settled(e.owner.ID)
+
+	spec := e.rt.byName(string(run.ID)).spec
+	e.assertOwnerExposedOnlyAt(t, spec, ".claude/.credentials.json")
+	if spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.owner.ID) || slices.ContainsFunc(spec.Mounts, func(m runtime.Mount) bool { return m.HostPath == linHome }) {
+		t.Fatalf("the container back on Grace's account = account %q, mounts %+v; want only Grace's login", spec.Env["AETHER_ACCOUNT_MEMBER_ID"], spec.Mounts)
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil || sc.LoginMember != string(e.owner.ID) || !slices.Equal(sc.VerifiedLogins, []domain.MemberID{lin.ID, e.owner.ID}) {
+		t.Fatalf("sidecar = login %q verified %v, %v; want Grace's login, Lin and Grace confirmed", sc.LoginMember, sc.VerifiedLogins, err)
+	}
+
+	limit()
+	waitFor(t, "Grace's limit with nowhere to go", func() bool {
+		row, rowErr := e.db.GetRun(t.Context(), run.ID)
+		return rowErr == nil && row.Status == domain.RunNeedsAttention && strings.HasPrefix(row.Reason, "Usage limit reached on Grace's account")
+	})
+	got, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || got.AccountMemberID != e.owner.ID {
+		t.Fatalf("run = %+v, %v; want it left on Grace's exhausted account", got, err)
+	}
+	segments, err := e.db.ListRunAccountSegments(t.Context(), run.ID)
+	if err != nil || len(segments) != 4 {
+		t.Fatalf("segments = %+v, %v; want Ada, Grace, Lin, Grace", segments, err)
+	}
+}
+
 // A headless Claude run whose output reported Ada's usage limit before it
 // exited resumes its session on Grace's account with the continuation as
 // its prompt, also when it exited while the server was down. The move holds

@@ -306,6 +306,9 @@ type supervised struct {
 	// loginMember is the account owner whose login paths the container
 	// mounts; empty when none.
 	loginMember domain.MemberID
+	// verifiedLogins are the account owners whose own login a container of
+	// this run was started with, as the runtime confirmed at start.
+	verifiedLogins []domain.MemberID
 	// reporter is recovered from the sidecar, since only the launch or mode
 	// switch knew which command the container runs.
 	reporter harness.Reporter

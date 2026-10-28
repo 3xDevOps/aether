@@ -426,7 +426,10 @@ type sidecar struct {
 	Home            string            `json:"home,omitempty"`
 	// LoginMember is the account owner whose login paths the container
 	// mounts, empty when it mounts none.
-	LoginMember         string                   `json:"login_member,omitempty"`
+	LoginMember string `json:"login_member,omitempty"`
+	// VerifiedLogins are the account owners whose own login the runtime
+	// confirmed in a container of this run.
+	VerifiedLogins      []domain.MemberID        `json:"verified_logins,omitempty"`
 	Reporter            harness.Reporter         `json:"reporter,omitempty"`
 	Egress              bool                     `json:"egress,omitempty"`
 	AgentState          agentstatus.State        `json:"agent_state,omitempty"`
@@ -510,6 +513,7 @@ func (e *supervised) sidecar() sidecar {
 		RunUser:             e.runUser,
 		Home:                e.home,
 		LoginMember:         string(e.loginMember),
+		VerifiedLogins:      e.verifiedLogins,
 		Reporter:            e.reporter,
 		Egress:              e.egress,
 		AgentState:          e.agentReport.State,

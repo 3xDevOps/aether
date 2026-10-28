@@ -157,11 +157,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				plan.Path = env["PATH"]
 			}
 		}
-		pins, err := s.pinnedLogins(ctx, member.ID, homePath, home, plan.Mounts)
-		if err != nil {
-			return nil, err
-		}
-		plan.Mounts = append(plan.Mounts, pins...)
+		plan.Mounts = append(plan.Mounts, s.pinnedLogins(member.ID, homePath, home, plan.Mounts)...)
 		nestings = make(map[string]string, len(plan.Mounts)-1)
 		for _, m := range plan.Mounts[1:] {
 			nestings[m.ContainerPath] = home
@@ -682,20 +678,14 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 }
 
 // pinnedLogins mounts each harness's PinnedLogins in member's own home over
-// itself once member shares their account, except where the plan already
-// mounts another member's login. A login path that is a directory or
-// cannot be shared is left unpinned rather than refused: it cannot be shared
-// either, and refusing would keep the member from the terminal that fixes it.
-// A grantee still pending approval counts: approval takes effect while this
-// member's containers keep running.
-func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, homePath, home string, planned []runtime.Mount) ([]runtime.Mount, error) {
-	grantees, err := s.cfg.Store.ListAccountGrantees(ctx, member)
-	if err != nil {
-		return nil, fmt.Errorf("scheduler: list account grantees: %w", err)
-	}
-	if len(grantees) == 0 {
-		return nil, nil
-	}
+// itself, except where the plan mounts another member's login there. A
+// rename over a pinned login fails, so the CLI rewrites it in place: no
+// container replaces the file a run on a shared account mounts over (the
+// kernel would detach that mount), nor the login member shares. A login path
+// that is a directory or cannot be shared is left unpinned rather than
+// refused: it cannot be shared either, and refusing would keep the member
+// from the terminal that fixes it.
+func (s *Scheduler) pinnedLogins(member domain.MemberID, homePath, home string, planned []runtime.Mount) []runtime.Mount {
 	var pins []runtime.Mount
 	for _, profile := range harness.Profiles() {
 		for _, rel := range profile.PinnedLogins {
@@ -713,7 +703,7 @@ func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, ho
 			pins = append(pins, runtime.Mount{HostPath: homePath, Subpath: rel, ContainerPath: target})
 		}
 	}
-	return pins, nil
+	return pins
 }
 
 func worktreePath(run *domain.Run) string {

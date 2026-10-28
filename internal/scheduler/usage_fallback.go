@@ -628,9 +628,18 @@ func (s *Scheduler) tryMove(ctx context.Context, entry *supervised) (usageOutcom
 	if err != nil {
 		return stop(err.Error())
 	}
+	// An account counts as used only where the agent signed in with its own
+	// login: the home's, or a shared login the runtime confirmed in the
+	// container. A shared account whose login never reached the container
+	// spent nothing of its own.
+	s.mu.Lock()
+	verified := slices.Clone(entry.verifiedLogins)
+	s.mu.Unlock()
 	used := make([]domain.MemberID, 0, len(segments))
 	for _, segment := range segments {
-		used = append(used, segment.AccountMemberID)
+		if segment.AccountMemberID == run.HomeMember() || slices.Contains(verified, segment.AccountMemberID) {
+			used = append(used, segment.AccountMemberID)
+		}
 	}
 	measured, err := fallback.MeasureNext(ctx, s.cfg.Store, f.Usage, run.MemberID, from, used, run.Harness, run.Fallback)
 	if err != nil {

@@ -561,6 +561,9 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 		return nil, s.failContainer(ctx, entry, cid, "start container", serr)
 	}
 	s.mu.Lock()
+	if entry.loginMember != "" && !slices.Contains(entry.verifiedLogins, entry.loginMember) {
+		entry.verifiedLogins = append(entry.verifiedLogins, entry.loginMember)
+	}
 	sc := entry.sidecar()
 	s.mu.Unlock()
 	if werr := s.writeSidecar(sc); werr != nil {

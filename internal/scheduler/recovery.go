@@ -1773,11 +1773,12 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	return &supervised{
 		runID: r.ID,
 		// Older sidecars have no workspace scope; the row is the source of truth.
-		workspaceID: r.WorkspaceID,
-		containerID: runtime.ID(sc.ContainerID),
-		task:        r.Task,
-		memberID:    r.HomeMember(),
-		loginMember: domain.MemberID(sc.LoginMember),
+		workspaceID:    r.WorkspaceID,
+		containerID:    runtime.ID(sc.ContainerID),
+		task:           r.Task,
+		memberID:       r.HomeMember(),
+		loginMember:    domain.MemberID(sc.LoginMember),
+		verifiedLogins: sc.VerifiedLogins,
 		// Reattaching makes a full-screen agent repaint; without the saved
 		// report that repaint would read as work resuming.
 		reporter:            sc.Reporter,

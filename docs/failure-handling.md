@@ -401,12 +401,12 @@ Background worker parks), and the reason says why:
 | Reason | Meaning |
 | --- | --- |
 | `Usage limit reached on <owner>'s account; no other account is shared to fall back on` | No other account is shared with the launcher, or with the member whose home the run mounts, or listed in its `--fallback` order. Ask a teammate to share theirs, or wait for the limit to reset. |
-| `Usage limit reached on <owner>'s account; no fallback has usage left` | Every other account was read as exhausted or was already used by this run. Wait for the limit to reset, or ask a teammate to share theirs. |
+| `Usage limit reached on <owner>'s account; no fallback has usage left` | Every other account was read as exhausted or was already used by this run: the launcher's own, or a shared one whose login the server confirmed in the run's container. Wait for the limit to reset, or ask a teammate to share theirs. |
 | `Usage limit reached on <owner>'s account; no account that may have usage left can run <agent> here` | Accounts with usage left, or whose usage could not be read, cannot launch the agent: their owner is not signed in to it, the agent is not installed for them, or the share no longer covers the run's home. |
 | `Usage limit reached on <owner>'s account; Aether cannot read <agent>'s usage, so its runs do not move to another account` | Only `claude` and `codex` runs move ([harnesses.md](harnesses.md#usage-limit-signals)). Wait for the limit to reset, or relaunch on another account. |
 | `Usage limit reached on <owner>'s account; fallback is off for this run` | The run was launched with `--no-fallback`. |
 | `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>` | The run cannot move: for example the agent reported no session to resume, it is a member's own agent definition, or the owner may no longer launch. Nothing was changed. |
-| `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` | The move started and failed. The run fails. |
+| `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` | The move started and failed. The run fails. `start container: runtime: <path> in the container is inode <n>, not <login> in <B's home> ...` means the container would have signed in with another login than B's; the rest of the error says whether Docker or the container runtime left B's login out. |
 | `Usage limit reached on <A>'s account; the run is on <B>'s account and its session could not be restored: <error>` | The run moved, but the Enhanced session did not come back. Send a message to start fresh. |
 
 A paused run, or one being closed or killed, is not moved. A move survives a
