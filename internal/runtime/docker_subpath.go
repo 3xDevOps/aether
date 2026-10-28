@@ -51,7 +51,7 @@ func (d *Docker) checkSubpathMounts(ctx context.Context, id ID, mounts []mount.M
 // another filesystem. The engine mounts where the image's links lead, and
 // the table lists that path.
 const mountCheckScript = `ls -di -- "$1" || exit 1
-real=$(readlink -f -- "$1") || real=$1
+real=$(readlink -f -- "$1" 2>/dev/null) || real=$1
 while read -r _ _ _ _ point _; do
 	if [ "$point" = "$1" ] || [ "$point" = "$real" ]; then
 		echo mounted
