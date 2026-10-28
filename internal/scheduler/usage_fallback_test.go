@@ -21,6 +21,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/secretstore"
@@ -196,18 +197,20 @@ func TestEnhancedRunContinuesOnAnAccountWithUnknownUsage(t *testing.T) {
 // Ada's own account only when Ada can sign the agent in there: with no login
 // and no key Claude reads it stays; with a workspace ANTHROPIC_API_KEY, or a
 // login another member could not borrow because it has a second hard link,
-// it moves.
+// it moves; a login path that became a dangling symlink is no login.
 func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		secrets  map[string]string
 		hardLink bool
+		symlink  bool
 		moves    bool
 	}{
 		{name: "signed out", moves: false},
 		{name: "workspace API key", secrets: map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, moves: true},
 		{name: "a login with another hard link", hardLink: true, moves: true},
+		{name: "a dangling symlink at the login path", symlink: true, moves: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -231,6 +234,15 @@ func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 				t.Fatal(err)
 			}
 			waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+			if tc.symlink {
+				login := filepath.Join(e.adaHome, ".claude", ".credentials.json")
+				if err = os.Remove(login); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Symlink(filepath.Join(e.adaHome, "gone"), login); err != nil {
+					t.Fatal(err)
+				}
+			}
 			_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 			if tc.moves {
 				waitFor(t, "the run on Ada's account", func() bool {
@@ -1411,5 +1423,24 @@ func TestStartStoppedDuringTheEventLogReadIsClean(t *testing.T) {
 				t.Fatalf("Start = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// Each stop reason names why no account took the run.
+func TestNoFallbackReason(t *testing.T) {
+	ada, grace := domain.MemberID("ada"), domain.MemberID("grace")
+	for _, tc := range []struct {
+		harness  string
+		measured fallback.Measured
+		want     string
+	}{
+		{"opencode", fallback.Measured{ada: 100}, "Aether cannot read opencode's usage, so its runs do not move to another account"},
+		{"claude", fallback.Measured{ada: 100}, "no other account is shared to fall back on"},
+		{"claude", fallback.Measured{ada: 100, grace: 97}, "no fallback has usage left"},
+		{"claude", fallback.Measured{ada: 100, grace: fallback.Unknown}, "no account that may have usage left can run claude here"},
+	} {
+		if got := noFallbackReason("Ada", tc.harness, tc.measured, ada); got != "Usage limit reached on Ada's account; "+tc.want {
+			t.Errorf("%s %v: %q, want the reason to end %q", tc.harness, tc.measured, got, tc.want)
+		}
 	}
 }

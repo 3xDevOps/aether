@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -93,6 +94,8 @@ func noFallbackReason(owner, harness string, measured fallback.Measured, from do
 	}
 	reason := usageLimitReason + owner + "'s account; "
 	switch {
+	case !fallback.Reads(harness):
+		return reason + "Aether cannot read " + harness + "'s usage, so its runs do not move to another account"
 	case others == 0:
 		return reason + "no other account is shared to fall back on"
 	case exhausted:
@@ -713,11 +716,15 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 			if profileErr != nil {
 				return false, profileErr
 			}
-			// The replacement mounts home's whole home, so a login that could
-			// not be shared with another member still signs the agent in.
+			// The replacement mounts home's whole home, so a login with a second
+			// hard link, which accountLogins refuses to share, still signs the
+			// agent in; any other refusal does not.
 			_, loginErr := s.accountLogins(ctx, account, profile)
 			var unshareable unshareableLoginError
 			if errors.As(loginErr, &unshareable) {
+				if !errors.Is(unshareable.error, memberhome.ErrHardLinked) {
+					return false, nil
+				}
 				loginErr = nil
 			}
 			if loginErr != nil && !errors.Is(loginErr, errNotLoggedIn) {

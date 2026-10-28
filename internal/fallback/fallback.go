@@ -43,6 +43,12 @@ var windows = map[string][]string{
 	"codex":  {"primary", "secondary"},
 }
 
+// Reads reports whether Aether reads harness's usage, and so can move its
+// runs to another account.
+func Reads(harness string) bool {
+	return windows[harness] != nil
+}
+
 func Policy(order []string, disabled bool) (domain.AccountFallback, error) {
 	if disabled && len(order) > 0 {
 		return domain.AccountFallback{}, errors.New("fallback_account_member_ids and no_fallback cannot both be set")
@@ -134,7 +140,7 @@ func MeasureNext(ctx context.Context, st store.Store, usage QuotaReader, launche
 	}
 	// An agent with no quota windows is never measured, so its candidates
 	// stay out rather than all reading as Unknown.
-	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured, windows[harness] != nil); err != nil {
+	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured, Reads(harness)); err != nil {
 		return nil, err
 	}
 	return measured, nil
