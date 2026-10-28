@@ -3765,12 +3765,15 @@ both what it renders and the overlap set the conflict chips read.
   run merged upstream work: it requests `?from=<fork_tree>`, so it also
   counts that upstream work. Under **Changes since a checkpoint** every
   recorded `run.diff` snapshot is a row, newest first, labelled with its local
-  time (with the date when not today) and its age. Its description is the
+  time (with the date when not today) and its age. Its description is the run
+  at that checkpoint, not the size of what choosing it shows: "After" and the
   commit subject when `head` moved since the next older checkpoint, otherwise
-  the file count and `+a −d` totals, or the count alone for a `truncated`
-  snapshot. Choosing a row requests `?from=<tree>`: everything that changed
-  since that checkpoint up to now, which grows as the run goes on and
-  re-fetches on each new snapshot like the whole diff. The newest 50
+  "Run had N files · +a −d", the run's totals then (the count alone for a
+  `truncated` snapshot). The newest row says "Nothing changed since" in place
+  of the totals, after the subject when it has one: the last snapshot is the
+  worktree as it stands. Choosing a row requests `?from=<tree>`: everything
+  that changed since that checkpoint up to now, which grows as the run goes
+  on and re-fetches on each new snapshot like the whole diff. The newest 50
   checkpoints load from `workspace.timeline` (`types: ["run.diff"]`,
   `newest: true`) when the view first opens for a run on this page, live
   snapshots join them, one row per tree, and **Show older checkpoints** pages

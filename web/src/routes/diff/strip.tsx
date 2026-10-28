@@ -220,6 +220,7 @@ function CompareMenu({ run, comparison, onSelect }: { run: RunRecord; comparison
             const older = checkpoints[i + 1]
             const committed =
               checkpoint.headSubject && older?.head && checkpoint.head && checkpoint.head !== older.head
+            const after = committed ? `After ${checkpoint.headSubject}` : undefined
             return (
               <MenuRadioItem
                 key={key(checkpoint) + i}
@@ -227,18 +228,20 @@ function CompareMenu({ run, comparison, onSelect }: { run: RunRecord; comparison
                 disabled={blocked !== undefined}
                 description={
                   blocked ??
-                  (committed ? (
-                    checkpoint.headSubject
+                  (i === 0 ? (
+                    after ? `${after} · nothing changed since` : 'Nothing changed since'
                   ) : (
-                    <>
-                      {checkpoint.files} file{checkpoint.files === 1 ? '' : 's'}
-                      {!checkpoint.truncated && (
-                        <>
-                          {' · '}
-                          <Counts additions={checkpoint.additions} deletions={checkpoint.deletions} />
-                        </>
-                      )}
-                    </>
+                    after ?? (
+                      <>
+                        Run had {checkpoint.files} file{checkpoint.files === 1 ? '' : 's'}
+                        {!checkpoint.truncated && (
+                          <>
+                            {' · '}
+                            <Counts additions={checkpoint.additions} deletions={checkpoint.deletions} />
+                          </>
+                        )}
+                      </>
+                    )
                   ))
                 }
               >
