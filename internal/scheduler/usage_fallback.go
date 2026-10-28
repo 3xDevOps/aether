@@ -713,7 +713,13 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 			if profileErr != nil {
 				return false, profileErr
 			}
+			// The replacement mounts home's whole home, so a login that could
+			// not be shared with another member still signs the agent in.
 			_, loginErr := s.accountLogins(ctx, account, profile)
+			var unshareable unshareableLoginError
+			if errors.As(loginErr, &unshareable) {
+				loginErr = nil
+			}
 			if loginErr != nil && !errors.Is(loginErr, errNotLoggedIn) {
 				return false, loginErr
 			}

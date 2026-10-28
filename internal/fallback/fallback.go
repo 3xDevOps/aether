@@ -132,7 +132,9 @@ func MeasureNext(ctx context.Context, st store.Store, usage QuotaReader, launche
 	for _, account := range used {
 		measured[account] = 100
 	}
-	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured, true); err != nil {
+	// An agent with no quota windows is never measured, so its candidates
+	// stay out rather than all reading as Unknown.
+	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured, windows[harness] != nil); err != nil {
 		return nil, err
 	}
 	return measured, nil

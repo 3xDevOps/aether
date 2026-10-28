@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -193,17 +194,20 @@ func TestEnhancedRunContinuesOnAnAccountWithUnknownUsage(t *testing.T) {
 
 // A run on Grace's shared account whose usage cannot be read is moved to
 // Ada's own account only when Ada can sign the agent in there: with no login
-// and no key Claude reads it stays, with a workspace ANTHROPIC_API_KEY it
-// moves.
+// and no key Claude reads it stays; with a workspace ANTHROPIC_API_KEY, or a
+// login another member could not borrow because it has a second hard link,
+// it moves.
 func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name    string
-		secrets map[string]string
-		moves   bool
+		name     string
+		secrets  map[string]string
+		hardLink bool
+		moves    bool
 	}{
 		{name: "signed out", moves: false},
 		{name: "workspace API key", secrets: map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, moves: true},
+		{name: "a login with another hard link", hardLink: true, moves: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -212,6 +216,12 @@ func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 			if tc.secrets != nil {
 				e.sched.cfg.Secrets = secretstore.New(t.TempDir())
 				if err := e.sched.cfg.Secrets.Put(e.ws.ID, tc.secrets); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.hardLink {
+				writeHomeFiles(t, e.adaHome, ".claude/.credentials.json")
+				if err := os.Link(filepath.Join(e.adaHome, ".claude", ".credentials.json"), filepath.Join(e.adaHome, "credentials-copy")); err != nil {
 					t.Fatal(err)
 				}
 			}

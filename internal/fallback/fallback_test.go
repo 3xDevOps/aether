@@ -164,6 +164,7 @@ func TestMeasureNextTriesUnknownUsageLast(t *testing.T) {
 	future := time.Now().Add(time.Hour)
 	for _, tc := range []struct {
 		name      string
+		harness   string
 		order     []string
 		used      []string
 		modelOnly []string
@@ -171,6 +172,7 @@ func TestMeasureNextTriesUnknownUsageLast(t *testing.T) {
 		quota     map[string]float64
 		want      string
 	}{
+		{name: "an agent without quota windows does not move", harness: "opencode", want: "Ada"},
 		{name: "an unreadable account takes the run", quota: map[string]float64{"Lena": 97, "Cy": 99}, want: "Bo"},
 		{name: "usage known to be left wins", quota: map[string]float64{"Lena": 97, "Cy": 40}, want: "Cy"},
 		{name: "a failed read is unknown, not exhausted", failing: []string{"Cy"},
@@ -226,7 +228,11 @@ func TestMeasureNextTriesUnknownUsageLast(t *testing.T) {
 			for _, name := range tc.failing {
 				usage.failing[name] = true
 			}
-			measured, err := MeasureNext(ctx, db, usage, launcher, ids["Ada"], used, "claude", policy)
+			harness := tc.harness
+			if harness == "" {
+				harness = "claude"
+			}
+			measured, err := MeasureNext(ctx, db, usage, launcher, ids["Ada"], used, harness, policy)
 			if err != nil {
 				t.Fatal(err)
 			}
