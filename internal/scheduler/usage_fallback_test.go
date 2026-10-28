@@ -22,6 +22,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -190,30 +191,56 @@ func TestEnhancedRunContinuesOnAnAccountWithUnknownUsage(t *testing.T) {
 	e.assertMovedToOwner(t, run.ID, notes)
 }
 
-// A run on Grace's shared account whose usage cannot be read is not moved
-// to Ada's own account when Ada has no login there.
-func TestRunDoesNotMoveToASignedOutOwnAccount(t *testing.T) {
+// A run on Grace's shared account whose usage cannot be read is moved to
+// Ada's own account only when Ada can sign the agent in there: with no login
+// and no API key it stays, with a workspace API key it moves.
+func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 	t.Parallel()
-	e, _, notes := newFallbackEnv(t, enhancedClaude)
-	e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
-	e.share(t)
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.owner.ID, "", "claude", domain.LaunchACP)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
-	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
-	waitFor(t, "the usage-limit reason", func() bool {
-		row, getErr := e.db.GetRun(t.Context(), run.ID)
-		return getErr == nil && strings.HasPrefix(row.Reason, "Usage limit reached")
-	})
-	got, err := e.db.GetRun(t.Context(), run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Reason != "Usage limit reached on Grace's account; no account that may have usage left can run claude here" ||
-		got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
-		t.Fatalf("run = reason %q account %s notes %v; want it kept on Grace's account", got.Reason, got.AccountMemberID, notes.all())
+	for _, tc := range []struct {
+		name    string
+		secrets map[string]string
+		moves   bool
+	}{
+		{name: "signed out", moves: false},
+		{name: "workspace API key", secrets: map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, moves: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e, _, notes := newFallbackEnv(t, enhancedClaude)
+			e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+			if tc.secrets != nil {
+				e.sched.cfg.Secrets = secretstore.New(t.TempDir())
+				if err := e.sched.cfg.Secrets.Put(e.ws.ID, tc.secrets); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e.share(t)
+			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.owner.ID, "", "claude", domain.LaunchACP)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+			_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+			if tc.moves {
+				waitFor(t, "the run on Ada's account", func() bool {
+					row, getErr := e.db.GetRun(t.Context(), run.ID)
+					return getErr == nil && row.AccountMemberID == e.member.ID && !row.Status.Terminal()
+				})
+				return
+			}
+			waitFor(t, "the usage-limit reason", func() bool {
+				row, getErr := e.db.GetRun(t.Context(), run.ID)
+				return getErr == nil && strings.HasPrefix(row.Reason, "Usage limit reached")
+			})
+			got, err := e.db.GetRun(t.Context(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Reason != "Usage limit reached on Grace's account; no account that may have usage left can run claude here" ||
+				got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
+				t.Fatalf("run = reason %q account %s notes %v; want it kept on Grace's account", got.Reason, got.AccountMemberID, notes.all())
+			}
+		})
 	}
 }
 

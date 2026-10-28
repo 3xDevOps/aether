@@ -510,7 +510,9 @@ runs of `claude` and `codex` and Standard `claude` runs
 that spent it. The account that ran out is not read again: the agent's report
 counts as exhausted. The move picks an account with usage left as a launch
 does; when none has, it tries one whose usage cannot be read, in the same
-order, since the run would stop anyway. An account the run already used is
+order, since the run would stop anyway. Your own account qualifies there only
+with a login, or an API key the run's environment passes to the agent such as
+an `ANTHROPIC_API_KEY` workspace secret. An account the run already used is
 never tried again. A run that cannot move parks or fails with a reason that
 says why ([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
 

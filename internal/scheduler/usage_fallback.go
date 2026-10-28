@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -705,18 +706,35 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 			}
 		}
 		// FallbackLaunchable does not look for home's own login; a read quota
-		// implies one, an Unknown one does not.
+		// implies one, an Unknown one does not. An API key the replacement's
+		// environment passes to the agent counts as one.
 		if account == home && measured[account] == fallback.Unknown && s.cfg.Homes != nil {
 			profile, _, profileErr := s.launchProfile(ctx, home, account, run.Harness)
 			if profileErr != nil {
 				return false, profileErr
 			}
 			_, loginErr := s.accountLogins(ctx, account, profile)
-			if errors.Is(loginErr, errNotLoggedIn) {
-				return false, nil
+			if loginErr != nil && !errors.Is(loginErr, errNotLoggedIn) {
+				return false, loginErr
 			}
 			if loginErr != nil {
-				return false, loginErr
+				ws, wsErr := s.cfg.Store.GetWorkspace(ctx, run.WorkspaceID)
+				if wsErr != nil {
+					return false, fmt.Errorf("read workspace environment: %w", wsErr)
+				}
+				ws, secrets, wsErr := s.workspaceEnvironment(ctx, ws)
+				if wsErr != nil {
+					return false, wsErr
+				}
+				env, envErr := explicitEnvironment(profile, ws, secrets)
+				if envErr != nil {
+					return false, envErr
+				}
+				if !slices.ContainsFunc(profile.EnvPassthrough, func(key string) bool {
+					return strings.HasSuffix(key, "_API_KEY") && env[key] != ""
+				}) {
+					return false, nil
+				}
 			}
 		}
 		return s.FallbackLaunchable(ctx, home, from, account, run.Harness, mode)
