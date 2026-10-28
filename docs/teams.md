@@ -469,7 +469,8 @@ lists exactly what is shared.
   is not logged in to claude: no login at ~/.claude/.credentials.json in their
   home; Grace logs in to claude in their own environment terminal`.
 - Every member's containers mount their own Claude Code and Gemini login files
-  in place, so a token refresh rewrites the file instead of replacing it.
+  in place, so a token refresh rewrites the file instead of replacing it. A
+  server on Docker Engine older than 26.0 mounts none, and cannot share either.
   Recipients see the owner's refreshed login, and a run on a shared account
   keeps the owner's login mounted. A container started before v0.7.7-beta.1
   can still replace its member's login file, which detaches the owner's login

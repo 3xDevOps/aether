@@ -18,6 +18,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
+type subpathAPIChecker interface {
+	CheckSubpathAPI(context.Context) error
+}
+
 type imageCacheEnvironmentResolver interface {
 	ImageCacheEnvironment(context.Context, string) (map[string]string, error)
 }
@@ -157,7 +161,11 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				plan.Path = env["PATH"]
 			}
 		}
-		plan.Mounts = append(plan.Mounts, s.pinnedLogins(member.ID, homePath, home, plan.Mounts)...)
+		pins, err := s.pinnedLogins(ctx, member.ID, homePath, home, plan.Mounts)
+		if err != nil {
+			return nil, err
+		}
+		plan.Mounts = append(plan.Mounts, pins...)
 		nestings = make(map[string]string, len(plan.Mounts)-1)
 		for _, m := range plan.Mounts[1:] {
 			nestings[m.ContainerPath] = home
@@ -685,7 +693,18 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 // that is a directory or cannot be shared is left unpinned rather than
 // refused: it cannot be shared either, and refusing would keep the member
 // from the terminal that fixes it.
-func (s *Scheduler) pinnedLogins(member domain.MemberID, homePath, home string, planned []runtime.Mount) []runtime.Mount {
+func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, homePath, home string, planned []runtime.Mount) ([]runtime.Mount, error) {
+	// An engine that cannot mount a subpath cannot mount a shared login
+	// either, so there is nothing to keep mounted.
+	if checker, ok := s.cfg.Runtime.(subpathAPIChecker); ok {
+		err := checker.CheckSubpathAPI(ctx)
+		if errors.Is(err, runtime.ErrSubpathAPI) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
+	}
 	var pins []runtime.Mount
 	for _, profile := range harness.Profiles() {
 		for _, rel := range profile.PinnedLogins {
@@ -703,7 +722,7 @@ func (s *Scheduler) pinnedLogins(member domain.MemberID, homePath, home string, 
 			pins = append(pins, runtime.Mount{HostPath: homePath, Subpath: rel, ContainerPath: target})
 		}
 	}
-	return pins
+	return pins, nil
 }
 
 func worktreePath(run *domain.Run) string {

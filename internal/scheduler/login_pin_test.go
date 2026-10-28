@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -154,6 +156,23 @@ func TestRecipientContainersPinTheirOwnLogin(t *testing.T) {
 	}
 	e.assertLoginMounts(t, e.ownRun(t), "runs", e.pins()...)
 	e.assertLoginMounts(t, e.terminal(t), "terminal", e.pins()...)
+}
+
+// preSubpathEngine is an engine older than Docker 26.0, which cannot mount
+// a path beneath a member home.
+type preSubpathEngine struct{ *fakeRuntime }
+
+func (preSubpathEngine) CheckSubpathAPI(context.Context) error {
+	return fmt.Errorf("runtime: docker engine API %q %w", "1.44", runtime.ErrSubpathAPI)
+}
+
+// On an engine that cannot mount a subpath, which cannot mount a shared
+// login either, nothing is pinned and the member's own run still starts.
+func TestOlderEngineLaunchesWithoutPins(t *testing.T) {
+	t.Parallel()
+	e := newSharerEnv(t)
+	e.sched.cfg.Runtime = preSubpathEngine{e.rt}
+	e.assertLoginMounts(t, e.ownRun(t), "runs")
 }
 
 // A sharer's run on another member's account mounts that member's login where

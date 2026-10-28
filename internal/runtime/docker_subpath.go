@@ -12,9 +12,10 @@ import (
 )
 
 // checkSubpathMounts confirms the container sees each subpath mount's own
-// file or directory at its target, comparing inodes only. A mount the engine
-// or container runtime leaves out shows the container whatever the parent
-// mount holds there instead: for a shared account's login, the launcher's own.
+// file or directory at its target, by mount point and inode, never content.
+// A mount the engine or container runtime leaves out, or that was detached,
+// shows the container whatever the parent mount holds there instead: for a
+// shared account's login, the launcher's own.
 func (d *Docker) checkSubpathMounts(ctx context.Context, id ID, mounts []mount.Mount) error {
 	for _, m := range mounts {
 		if m.Type != mount.TypeVolume || m.VolumeOptions == nil || m.VolumeOptions.Subpath == "" || m.VolumeOptions.DriverConfig == nil {
@@ -25,13 +26,17 @@ func (d *Docker) checkSubpathMounts(ctx context.Context, id ID, mounts []mount.M
 		if err != nil {
 			return fmt.Errorf("runtime: check the mount at %s: %w", m.Target, err)
 		}
-		code, output, _, err := d.execCombined(ctx, id, []string{"ls", "-di", "--", m.Target}, "", "0:0")
+		code, output, _, err := d.execCombined(ctx, id, []string{"/bin/sh", "-c", mountCheckScript, "aether-mount-check", m.Target}, "", "0:0")
 		if err != nil {
 			return fmt.Errorf("runtime: check the mount at %s: %w", m.Target, err)
 		}
-		fields := strings.Fields(output)
-		if code != 0 || len(fields) == 0 {
-			return fmt.Errorf("runtime: check the mount at %s: ls exited %d: %s", m.Target, code, strings.TrimSpace(output))
+		lines := strings.Split(strings.TrimSpace(output), "\n")
+		fields := strings.Fields(lines[0])
+		if code != 0 || len(lines) != 2 || len(fields) == 0 {
+			return fmt.Errorf("runtime: check the mount at %s: exit %d: %s", m.Target, code, strings.TrimSpace(output))
+		}
+		if lines[1] != "mounted" {
+			return fmt.Errorf("runtime: %s is not a mount point in the container; %s", m.Target, d.mountListed(ctx, id, m.Target))
 		}
 		if fields[0] != strconv.FormatUint(want, 10) {
 			return fmt.Errorf("runtime: %s in the container is inode %s, not %s in %s (inode %d); %s",
@@ -40,6 +45,15 @@ func (d *Docker) checkSubpathMounts(ctx context.Context, id ID, mounts []mount.M
 	}
 	return nil
 }
+
+// mountCheckScript prints $1's inode, then whether the container's mount
+// table has a mount point at $1: an inode number alone can repeat on
+// another filesystem.
+const mountCheckScript = `ls -di -- "$1" || exit 1
+while read -r _ _ _ _ point _; do
+	[ "$point" = "$1" ] && echo mounted && exit 0
+done < /proc/self/mountinfo
+echo unmounted`
 
 // subpathInode reads sub's inode without following a symlink out of base.
 func subpathInode(base, sub string) (uint64, error) {

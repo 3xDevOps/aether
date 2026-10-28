@@ -468,6 +468,14 @@ func TestDockerSubpathLoginSurvivesOnlyPinnedRefreshes(t *testing.T) {
 				t.Fatalf("rename over the unpinned login = exit %d, %q", code, out)
 			}
 			wantContent(t, d, shared, loginTarget, "launcher-refreshed")
+			info, err := d.cli.ContainerInspect(t.Context(), string(shared), client.ContainerInspectOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := loginTarget + " is not a mount point in the container; Docker lists the mount"
+			if err := d.checkSubpathMounts(t.Context(), shared, info.Container.HostConfig.Mounts); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("check after the login was detached = %v, want an error containing %q", err, want)
+			}
 		})
 	}
 }
