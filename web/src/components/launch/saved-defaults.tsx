@@ -58,7 +58,9 @@ export function SaveAccountDefault({ choice, onSave }: { choice: string; onSave:
     <div className="flex flex-col gap-1 pt-2">
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" variant="secondary" disabled={state.busy} onClick={save}>Save as my default</Button>
-        <span role="status" className="text-ui-sm text-muted">{state.savedFor === choice ? 'Saved for every device.' : 'Saves this account and fallback for launches on every device.'}</span>
+        {state.savedFor === choice
+          ? <span role="status" className="text-ui-sm text-muted">Saved for every device.</span>
+          : <span className="text-ui-sm text-muted">Saves this account and fallback for launches on every device.</span>}
       </div>
       {state.error && <Callout tone="failed" role="alert">{state.error}</Callout>}
     </div>
