@@ -229,7 +229,7 @@ function CompareMenu({ run, comparison, onSelect }: { run: RunRecord; comparison
                 description={
                   blocked ??
                   (i === 0 ? (
-                    after ? `${after} · nothing changed since` : 'Nothing changed since'
+                    after ? `${after} · latest checkpoint` : 'Latest checkpoint'
                   ) : (
                     after ?? (
                       <>

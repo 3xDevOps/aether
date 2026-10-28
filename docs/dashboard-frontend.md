@@ -3769,13 +3769,14 @@ both what it renders and the overlap set the conflict chips read.
   at that checkpoint, not the size of what choosing it shows: "After" and the
   commit subject when `head` moved since the next older checkpoint, otherwise
   "Run had N files · +a −d", the run's totals then (the count alone for a
-  `truncated` snapshot). The newest row says "Nothing changed since" in place
-  of the totals, after the subject when it has one: the last snapshot is the
-  worktree as it stands. Choosing a row requests `?from=<tree>`: everything
-  that changed since that checkpoint up to now, which grows as the run goes
-  on and re-fetches on each new snapshot like the whole diff. The newest 50
-  checkpoints load from `workspace.timeline` (`types: ["run.diff"]`,
-  `newest: true`) when the view first opens for a run on this page, live
+  `truncated` snapshot). The newest row says "Latest checkpoint" in place of
+  the totals, after the subject when it has one, since choosing it shows only
+  edits not yet snapshotted. Choosing a row requests `?from=<tree>`:
+  everything that changed since that checkpoint up to now, which grows as the
+  run goes on and re-fetches on each new snapshot like the whole diff. The
+  newest 50 checkpoints load from `workspace.timeline`
+  (`types: ["run.diff"]`, `newest: true`) when the view first opens for a run
+  on this page, live
   snapshots join them, one row per tree, and **Show older checkpoints** pages
   back with `before_seq` while the timeline says `more`. A checkpoint keeps
   only its time, tree, head, subject and counts, never its file list. A
