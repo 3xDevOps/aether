@@ -1,7 +1,8 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
-import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateTitle, stateTone, stateWords } from '@/lib/status'
-import type { RunActivity } from '@/lib/types'
+import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateName, stateTitle, stateTone, stateWords, toneOf } from '@/lib/status'
+import { clockTime } from '@/lib/format'
+import type { RunActivity, RunWait } from '@/lib/types'
 import { isTerminal, toRecord } from '@/store/runs'
 import { bob, run, stateContext } from '@/test/fixtures'
 
@@ -299,7 +300,7 @@ describe('state words', () => {
     expect(stateWords(ci, since, now)).toEqual({ label: 'Waiting for CI', detail: '42m · PR 12 checks' })
     expect(stateLine(ci)).toBe('Waiting for CI · PR 12 checks')
     const stale = shown({ status: 'needs-attention', state: 'waiting-ci', reason: 'no update for 30m: PR 12 checks', cause: 'wait-expired' })
-    expect(stateWords(stale, since, now)).toEqual({ label: 'Waiting for CI', detail: 'No update for 30m: PR 12 checks' })
+    expect(stateWords(stale, since, now)).toEqual({ label: 'Waiting for CI', detail: 'Reported waiting on PR 12 checks, no update for 30m' })
     expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-tools', reason: 'deploy to staging' }))).toBe('Waiting for process · deploy to staging')
   })
 
@@ -320,6 +321,8 @@ describe('state words', () => {
     expect(stalled).toMatchObject({ state: 'stalled', cause: 'stall' })
     expect(stalled.needsYou).toBeUndefined()
     expect(groupOf(stalled)).toBe('working')
+    expect(stateName(stalled)).toBe('Possibly stalled')
+    expect(toneOf(stalled)).toBe('waiting')
     expect(stateLine(stalled)).toBe("Possibly stalled · No progress for 6m while awaiting the model's first reply; connection open")
     expect(stateTitle(stalled, since, now)).toBe(
       "Possibly stalled since 42 minutes ago — No progress for 6m while awaiting the model's first reply; connection open. It returns to Working with the agent's next update. Why: the run stalled.",
@@ -330,10 +333,105 @@ describe('state words', () => {
     expect(shown({ status: 'running', state: 'working', reason }).state).toBe('working')
   })
 
+  it('calls a reported wait that went stale a stale wait, not a turn that ended', () => {
+    const stale = shown({ status: 'needs-attention', state: 'waiting', reason: 'no update for 30m: CI on #582', cause: 'wait-expired' })
+    expect(stateWords(stale)).toEqual({ label: 'Stale wait', detail: 'Reported waiting on CI on #582, no update for 30m' })
+    expect(stateWords(shown({ status: 'needs-attention', state: 'waiting', reason: 'no update for 1h5m', cause: 'wait-expired' })))
+      .toEqual({ label: 'Stale wait', detail: 'Reported waiting, no update for 1h5m' })
+    expect(groupOf(stale)).toBe('working')
+    expect(toneOf(stale)).toBe('ended')
+    // Only the server's stale cause renames it: an agent's summary that reads the same does not.
+    expect(stateWords(shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'No update for 2h: from the reviewer', cause: 'report' })))
+      .toEqual({ label: 'Waiting for agents', detail: 'No update for 2h: from the reviewer' })
+  })
+
   it('never asks for a message where nothing is required', () => {
     for (const state of ['waiting', 'answered', 'waiting-agents', 'waiting-ci', 'waiting-tools'] as const) {
       const words = stateTitle(shown({ status: 'needs-attention', state }), since, now)
       expect(words).not.toMatch(/send a message/i)
     }
+  })
+})
+
+describe('checked waits', () => {
+  const ctx = stateContext()
+  const now = Date.parse('2026-08-14T11:00:00Z')
+  const since = '2026-08-14T10:18:00Z'
+  const spec = 'pr:acme/web#582:checks'
+  const shown = (wait: RunWait, over: Parameters<typeof run>[0] = {}) =>
+    presentRun(toRecord(run({ status: 'needs-attention', state: 'waiting-ci', reason: 'CI on #582', cause: 'report', wait, ...over })), { ...ctx, now })
+
+  it('says what a pending condition last read and how long ago, in place of the summary', () => {
+    const wait: RunWait = { kind: 'condition', detail: `${spec}: open, 3 checks running`, verified_at: '2026-08-14T10:58:00Z' }
+    const ci = shown(wait)
+    expect(ci.wait).toEqual(wait)
+    expect(stateWords(ci, undefined, now)).toEqual({ label: 'Waiting for CI', detail: `Waiting on ${spec}: open, 3 checks running · checked 2m ago` })
+    expect(stateWords(ci, undefined, Date.parse('2026-08-14T10:58:20Z')).detail).toBe(`Waiting on ${spec}: open, 3 checks running · checked just now`)
+    expect(stateTitle(ci, since, now)).toBe(
+      `Waiting for CI since 42 minutes ago — Waiting on ${spec}: open, 3 checks running · checked 2m ago. ` +
+        `Last read ${new Date('2026-08-14T10:58:00Z').toLocaleString()}. The agent reported: CI on #582. It resumes on its next message. Why: the agent reported it.`,
+    )
+    expect(toneOf(ci)).toBe('waiting')
+    expect(groupOf(ci)).toBe('working')
+    expect(ci.needsYou).toBeUndefined()
+  })
+
+  it('never shows an unreadable source as live: it says since when the status is unknown and the real error', () => {
+    const error = 'gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)'
+    const unknown = shown({ kind: 'source_unknown', detail: `${spec}: status unknown`, verified_at: '2026-08-14T10:10:00Z', error })
+    expect(stateWords(unknown, undefined, now).detail).toBe(
+      `Waiting on ${spec}: status unknown since ${clockTime('2026-08-14T10:10:00Z', now)} — ${error}`,
+    )
+    expect(stateWords(unknown, undefined, now).detail).not.toMatch(/checked|running/)
+    expect(toneOf(unknown)).toBe('wait-unknown')
+    expect(unknown.needsYou).toBeUndefined()
+    const never = shown({ kind: 'source_unknown', detail: `${spec}: status never read`, error: 'gh: Could not resolve to a PullRequest' })
+    expect(stateWords(never, undefined, now).detail).toBe(`Waiting on ${spec}: status never read — gh: Could not resolve to a PullRequest`)
+  })
+
+  it('shows a fault the agent is being told about in the fault tone, without asking for you', () => {
+    const fault = shown({ kind: 'system_fault', detail: `${spec}: error, waking the agent`, error: 'pull request acme/web#582 not found' })
+    expect(stateWords(fault, undefined, now)).toEqual({
+      label: 'Waiting for CI',
+      detail: `Wait fault: ${spec}: error, waking the agent — pull request acme/web#582 not found`,
+    })
+    expect(toneOf(fault)).toBe('wait-fault')
+    expect(groupOf(fault)).toBe('working')
+    expect(fault.needsYou).toBeUndefined()
+  })
+
+  it('lists a broken wait in Needs you only when the server says so, with the delivery error', () => {
+    const wait: RunWait = { kind: 'system_fault', detail: `${spec} resolved, but the agent was not woken`, error: 'deliver wake: session closed' }
+    const broken = shown(wait, { state: 'needs-you', reason: `wait broken: ${spec} resolved, but the agent was not woken`, cause: 'wait-fault' })
+    expect(broken.needsYou?.id).toBeDefined()
+    expect(groupOf(broken)).toBe('needs-you')
+    expect(toneOf(broken)).toBe('needs-you')
+    expect(stateWords(broken, undefined, now).detail).toBe(
+      `Wait broken: ${spec} resolved, but the agent was not woken · reply to continue — deliver wake: session closed`,
+    )
+    expect(stateTitle({ state: 'needs-you', reason: 'Wait broken', cause: 'wait-fault' }, since, now))
+      .toContain('Why: a condition it waits on resolved or broke, and the agent was not woken.')
+  })
+
+  it('shows the evidence of a wait whose summary names what it waits for', () => {
+    const error = 'gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)'
+    const agents = shown({ kind: 'source_unknown', detail: `${spec}: status unknown`, error }, { state: 'waiting-agents', reason: 'Waiting for PR #582' })
+    expect(stateWords(agents, undefined, now)).toEqual({ label: 'Waiting for agents', detail: `Waiting on ${spec}: status unknown — ${error}` })
+    expect(stateTitle(agents, since, now)).toContain(error)
+  })
+
+  it('keeps the summary of a wait that names no condition, and says Aether cannot check it', () => {
+    const unverified = shown({ kind: 'unverified' })
+    expect(stateWords(unverified, undefined, now)).toEqual({ label: 'Waiting for CI', detail: 'CI on #582' })
+    expect(toneOf(unverified)).toBe('waiting')
+    expect(stateTitle(unverified, since, now)).toContain('Not verified: the wait names no condition Aether can check.')
+  })
+
+  it('drops the wait where the dashboard shows another state than the server', () => {
+    const wait: RunWait = { kind: 'source_unknown', detail: `${spec}: status unknown`, error: 'timeout' }
+    expect(presentRun(toRecord(run({ status: 'completed', wait })), ctx).wait).toBeUndefined()
+    const paused = presentRun(toRecord(run({ status: 'needs-attention', state: 'waiting-ci', wait })), { ...ctx, pausedRuns: { run_1: true } })
+    expect(paused.wait).toBeUndefined()
+    expect(toneOf(paused)).toBe('paused')
   })
 })

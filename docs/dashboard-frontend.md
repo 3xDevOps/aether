@@ -1760,6 +1760,33 @@ run is live and shows the state the server chose, so not for a paused run,
 a swarm worker's question shown as "Waiting for the integrator", or a
 request shown as "Waiting for *name*".
 
+A run that shows a reported wait carries `wait`, what Aether verified about
+the conditions the agent named ([Waits Aether can
+check](failure-handling.md#waits-aether-can-check)). `waitLine` words it,
+and `stateWords` puts that in place of the agent's summary, even one that
+reads "Waiting for ...", which moves to the tooltip as "The agent reported:
+*summary*":
+
+| `wait.kind` | Detail | Dot |
+| --- | --- | --- |
+| `condition` | "Waiting on *detail* · checked 2m ago", aging with the half-minute clock | the state's |
+| `source_unknown` | "Waiting on *detail* since 01:10 — *error*": the local time of the last successful read and the source's error verbatim, never the last status as current | dashed clock, neutral |
+| `system_fault`, still waiting | "Wait fault: *detail* — *error*" | clock, failed colour |
+| `system_fault`, Needs you | the Needs you reason, then " — *error*" | amber ring |
+| `unverified` | the agent's summary; the tooltip adds "Not verified: the wait names no condition Aether can check." | the state's |
+
+`toneOf` picks the dot, and the tooltip gives the exact time of the last
+read. Only the server's `needs-you` state lists a broken wait in Needs you;
+a wait's kind never does. A phone's run header adds the wait's line, wrapped,
+under the header, since its state line truncates; for a broken wait that
+line is the Needs you reason with the error. A swarm card, which shows the
+swarm's progress instead, keeps the state tooltip while it shows a wait.
+Rereads (`reread: true` events) update `wait` in the run store but never
+count as a state change in the lanes or trace bars. A reported wait that went
+stale (`cause` `wait-expired`) reads "Reported waiting on *summary*, no
+update for 30m", and `stateName` labels it **Stale wait** rather than Turn
+ended.
+
 The run header's state line shows the words beyond the label the Workflow
 chip under it already shows, a CI wait's age first ("42m · PR 12 checks";
 a stale one's reason already says "No update for 30m"), since the header
@@ -1776,7 +1803,8 @@ running".
 | Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, an integrator with live workers or unread worker mail, or a `waiting --for agents` report | Working |
 | Waiting for CI | clock | `waiting-ci`: a `waiting --for ci` report | Working |
 | Waiting for process | clock | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
-| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason, or a waiting report went stale. Asks nothing | Working |
+| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason. Asks nothing | Working |
+| Stale wait | dashed ring | `waiting` with `cause` `wait-expired`: a waiting report went stale. Asks nothing | Working |
 | Waiting | dashed ring | a run whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |

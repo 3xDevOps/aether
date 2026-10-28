@@ -10,6 +10,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { PaneHeader } from '@/components/ui/pane-header'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { StatusDot } from '@/components/ui/status-dot'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
 import { memberName, resolveMember } from '@/lib/member-name'
@@ -18,7 +19,7 @@ import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateLabel, stateTitle, stateWords } from '@/lib/status'
+import { runLabel, stateName, stateTitle, stateWords, toneOf, waitLine } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { watchHint, watchRoute } from '@/lib/watches'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -89,6 +90,22 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   }
 }
 
+/** A phone's header line cuts what a wait last read short, so it gets a line of its own. */
+function WaitLine({ run }: { run: RunRecord }) {
+  const shown = useRunPresentation(run)
+  const now = useClock()
+  const line = shown.state === 'needs-you' && shown.wait?.kind === 'system_fault'
+    ? stateWords(shown, undefined, now).detail
+    : waitLine(shown.wait, shown.state, now)
+  if (!line) return null
+  return (
+    <p className="flex gap-1.5 border-b border-seam px-4 py-1 text-ui-sm text-muted">
+      <StatusDot tone={toneOf(shown)} className="mt-1" />
+      <span className="min-w-0 break-words">{line}</span>
+    </p>
+  )
+}
+
 function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const presented = useRunPresentation(run)
   const asks = useNeedsYouRuns([run.id]).has(run.id)
@@ -106,7 +123,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   // The Workflow chip under the header shows the state's own label.
   const detail = [
     subagents > 0 && `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running`,
-    words.label !== stateLabel[state] && words.label,
+    words.label !== stateName(presentation) && words.label,
     words.detail,
   ]
     .filter(Boolean)
@@ -120,7 +137,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const navigate = useStore((s) => s.navigate)
   return (
     <div className="@container/state flex w-full min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-ui-sm text-muted">
-      <span role="status" className="sr-only">{stateLabel[state]}</span>
+      <span role="status" className="sr-only">{stateName(presentation)}</span>
       {run.branch && (
         <>
           <Button
@@ -311,6 +328,7 @@ export function RunHeader({
           </>
         }
       />
+      {mobile && !composing && <WaitLine run={run} />}
       <RunLineage run={run} />
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
       <RunChildNudge run={run} />

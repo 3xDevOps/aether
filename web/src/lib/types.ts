@@ -39,6 +39,21 @@ export type RunStatusCause =
   | 'human'
   | 'disconnect'
 
+/** How far Aether can vouch for a reported wait; mirrors domain.WaitEvidence in internal/domain/wait.go. */
+export type WaitKind = 'condition' | 'source_unknown' | 'system_fault' | 'unverified'
+
+/**
+ * The evidence behind the reported wait a live run shows, from the conditions its agent named; mirrors
+ * domain.RunWait. `detail` and `error` are server text, `error` the source's or delivery's error
+ * verbatim; `verified_at` is the oldest last successful source read, absent when one was never read.
+ */
+export interface RunWait {
+  kind: WaitKind
+  detail?: string
+  verified_at?: string
+  error?: string
+}
+
 export type RunActivity =
   | 'working'
   | 'waiting-agents'
@@ -103,6 +118,8 @@ export interface Run {
   cause?: RunStatusCause
   /** A live Enhanced run's turn, read from its agent session when the run was fetched; not pushed. */
   liveness?: RunLiveness
+  /** Set while `state` is a wait the agent reported. */
+  wait?: RunWait
   /** Increments on every change of status, state, reason or outcome flags. */
   status_seq: number
   branch: string
@@ -1026,6 +1043,7 @@ export interface RunStatusPayload {
   cause?: RunStatusCause
   /** Only a newer read of the wait's sources; history leaves it out. */
   reread?: boolean
+  wait?: RunWait
   status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean

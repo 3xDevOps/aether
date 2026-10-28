@@ -1,4 +1,5 @@
-import type { CoordMessagePayload, Event, RunStatusPayload } from '@/lib/types'
+import { isReread } from '@/lib/events'
+import type { CoordMessagePayload, Event } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /** Empty strings mean no filter. */
@@ -124,5 +125,5 @@ function selects(f: FeedFilters, event: Event): boolean {
   if (f.runID && event.run_id !== f.runID && !mailTo(event, f.runID)) return false
   if (f.memberID && event.actor_id !== f.memberID) return false
   if (f.type) return event.type === f.type
-  return !detailTypes.has(event.type) && !(event.type === 'run.status' && (event.payload as RunStatusPayload | undefined)?.reread)
+  return !detailTypes.has(event.type) && !isReread(event)
 }

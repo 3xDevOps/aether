@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatusDot, toneClasses, type Tone } from '@/components/ui/status-dot'
 import { compactAge } from '@/lib/format'
-import { stateDetail, stateLabel, stateTone } from '@/lib/status'
+import { stateLabel, stateTone, stateWords } from '@/lib/status'
 import { cn, focusRingInset } from '@/lib/utils'
 import { elapsed } from '@/routes/missions/tree'
 import { xOf, type TimeWindow } from '@/routes/board/lanes/axis'
@@ -115,7 +115,8 @@ function barText(lane: RunLane): string {
   const { card } = lane
   if (lane.outcome) return stateLabel[card.state]
   if (card.group === 'needs-you') return card.reason
-  return [stateLabel[card.state], stateDetail(card)].filter(Boolean).join(' · ')
+  const words = stateWords(card)
+  return [words.label, words.detail].filter(Boolean).join(' · ')
 }
 
 function RunBar({ lane, g, now }: { lane: RunLane; g: LaneGeometry; now: number }) {
