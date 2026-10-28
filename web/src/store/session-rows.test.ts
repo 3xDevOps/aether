@@ -26,7 +26,7 @@ describe('session rows from the item log', () => {
     ]))
     expect(rows.map((row) => row.kind)).toEqual(['user', 'steps', 'assistant'])
     expect(rows[1]).toMatchObject({
-      id: 'steps:1:message:1:m2',
+      id: 'steps:1:thought:1:t1',
       summary: 'Read 1 file, ran 1 command and edited 1 file',
       icons: ['think', 'plan', 'read'],
       plan: { done: 1, total: 1 },
@@ -63,7 +63,7 @@ describe('session rows from the item log', () => {
     const more = turnRows(turnOf([...start, tool(1, 'y', 'execute', 'make test', 'in_progress')], false))
     expect(more).toMatchObject([
       { kind: 'user' },
-      { kind: 'steps', id: 'steps:1:message:1:m2', current: false, steps: [{ kind: 'tool', entry: { command: 'make' } }] },
+      { kind: 'steps', id: 'steps:1:1:x', current: false, steps: [{ kind: 'tool', entry: { command: 'make' } }] },
       { kind: 'assistant', text: 'Built.' },
       { kind: 'steps', id: 'steps:1:1:y', current: true, running: 1, steps: [{ kind: 'tool', entry: { command: 'make test' } }] },
     ])
@@ -93,6 +93,20 @@ describe('session rows from the item log', () => {
       end,
     ]))
     expect(mcp).toMatchObject([{ kind: 'user' }, { kind: 'steps', steps: [{ kind: 'tool', entry: { name: 'mcp__aether__aether_report' } }] }, { kind: 'assistant', text: 'pong', outcome: { tone: 'done' } }])
+    const thought = turnRows(turnOf([
+      item('turn_start', 1),
+      say(1, 'user', 'go'),
+      tool(1, 'x', 'execute', 'make', 'completed'),
+      say(1, 'assistant', 'Built.'),
+      item('thought', 1, { message: { role: 'assistant', message_id: 't', text: 'report it', complete: true } }),
+      tool(1, 'r', 'execute', 'aether-internal report --outcome answered --summary "Built"', 'completed'),
+      end,
+    ]))
+    expect(thought).toMatchObject([
+      { kind: 'user' },
+      { kind: 'steps', steps: [{ kind: 'tool' }, { kind: 'thought', text: 'report it' }, { kind: 'tool', entry: { id: '1:r' } }] },
+      { kind: 'assistant', text: 'Built.', outcome: { tone: 'done' } },
+    ])
   })
 
   it('starts a segment at each message from a person, each with its own block', () => {
@@ -107,9 +121,9 @@ describe('session rows from the item log', () => {
     ]))
     expect(rows.map((row) => [row.kind, row.id])).toEqual([
       ['user', 'message:1:u1'],
-      ['steps', 'steps:1:message:1:u1'],
+      ['steps', 'steps:1:1:x'],
       ['user', 'message:1:u2'],
-      ['steps', 'steps:1:message:1:u2'],
+      ['steps', 'steps:1:1:y'],
       ['assistant', 'message:1:m6'],
       ['finished', 'end:1'],
     ])
