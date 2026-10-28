@@ -4,6 +4,8 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"slices"
@@ -114,14 +116,16 @@ func (r shareRun) want(t *testing.T, script, want string) {
 	}
 }
 
-// engineMounts lists the engine's view of the container's volume mounts,
-// and its bind mounts whose source lies in home, as "type source at
-// destination".
+// engineMounts lists the engine's view of the container's volume mounts of
+// home (a subpath volume is named for its base), and its bind mounts whose
+// source lies in home, as "type source at destination".
 func (r shareRun) engineMounts(home string) (volumes, binds []string) {
+	volume := sha256.Sum256([]byte(home))
+	name := "aether-home-" + hex.EncodeToString(volume[:])[:32]
 	for _, m := range r.mounts {
 		desc := string(m.Type) + " " + m.Name + m.Source + " at " + m.Destination
 		switch {
-		case m.Type == mount.TypeVolume:
+		case m.Type == mount.TypeVolume && m.Name == name:
 			volumes = append(volumes, desc)
 		case m.Source == home || strings.HasPrefix(m.Source, home+"/"):
 			binds = append(binds, desc)

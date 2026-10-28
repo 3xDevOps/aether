@@ -464,7 +464,7 @@ func TestSharedLaunchNonRootOwnershipAndReservation(t *testing.T) {
 	}
 	spec := e.rt.byName(string(run.ID)).spec
 	want := runtime.Mount{HostPath: e.ownerHome, Subpath: ".claude/.credentials.json", ContainerPath: "/home/aether/.claude/.credentials.json"}
-	if spec.User != "1000:1000" || len(spec.Mounts) != 4 || spec.Mounts[1] != want {
+	if spec.User != "1000:1000" || len(spec.Mounts) != 5 || spec.Mounts[1] != want {
 		t.Fatalf("spec user %q mounts %+v, want 1000:1000 and login %+v", spec.User, spec.Mounts, want)
 	}
 	if got := ownerOf(t, filepath.Join(e.ownerHome, ".claude", ".credentials.json")); got != 1000 {
