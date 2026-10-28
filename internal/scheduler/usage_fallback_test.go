@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -216,11 +217,12 @@ func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 			t.Parallel()
 			e, _, notes := newFallbackEnv(t, enhancedClaude)
 			e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
-			if tc.secrets != nil {
-				e.sched.cfg.Secrets = secretstore.New(t.TempDir())
-				if err := e.sched.cfg.Secrets.Put(e.ws.ID, tc.secrets); err != nil {
-					t.Fatal(err)
-				}
+			// An empty workspace value masks a key the test process exports.
+			secrets := map[string]string{"ANTHROPIC_API_KEY": ""}
+			maps.Copy(secrets, tc.secrets)
+			e.sched.cfg.Secrets = secretstore.New(t.TempDir())
+			if err := e.sched.cfg.Secrets.Put(e.ws.ID, secrets); err != nil {
+				t.Fatal(err)
 			}
 			if tc.hardLink {
 				writeHomeFiles(t, e.adaHome, ".claude/.credentials.json")
