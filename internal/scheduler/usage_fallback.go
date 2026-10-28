@@ -79,8 +79,28 @@ type accountSwap struct {
 	Continuation string `json:"continuation,omitempty"`
 }
 
-func noFallbackReason(owner string) string {
-	return usageLimitReason + owner + "'s account; no fallback has usage left"
+// noFallbackReason says why no account took over from the one the run is on:
+// none other was shared, every one is exhausted or already used by the run,
+// or the ones that may have usage left cannot run harness.
+func noFallbackReason(owner, harness string, measured fallback.Measured, from domain.MemberID) string {
+	others, exhausted := 0, true
+	for account, share := range measured {
+		if account == from {
+			continue
+		}
+		others++
+		exhausted = exhausted && share >= fallback.ExhaustedPercent
+	}
+	reason := usageLimitReason + owner + "'s account; "
+	switch {
+	case !fallback.Reads(harness):
+		return reason + "Aether cannot read " + harness + "'s usage, so its runs do not move to another account"
+	case others == 0:
+		return reason + "no other account is shared to fall back on"
+	case exhausted:
+		return reason + "no fallback has usage left"
+	}
+	return reason + "no account that may have usage left can run " + harness + " here"
 }
 
 func cannotContinueReason(owner, cause string) string {
@@ -629,7 +649,7 @@ func (s *Scheduler) tryMove(ctx context.Context, entry *supervised) (usageOutcom
 	case to == "" && excluded != nil:
 		return stop(excluded.Error())
 	case to == "":
-		return usageNoFallback, noFallbackReason(fromName)
+		return usageNoFallback, noFallbackReason(fromName, run.Harness, measured, from)
 	case excluded != nil:
 		slog.Warn("scheduler: fallback accounts left out of a move", "run", run.ID, "error", excluded)
 	}
@@ -684,6 +704,50 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 					return false, nil
 				}
 				return false, authErr
+			}
+		}
+		// FallbackLaunchable does not look for home's own login; a read quota
+		// implies one, an Unknown one does not. An API key the agent signs in
+		// with in this mode counts as one: Claude's in every mode, Codex's
+		// CODEX_API_KEY in Background runs only (docs/harnesses.md).
+		if account == home && measured[account] == fallback.Unknown && s.cfg.Homes != nil {
+			profile, _, profileErr := s.launchProfile(ctx, home, account, run.Harness)
+			if profileErr != nil {
+				return false, profileErr
+			}
+			// The replacement mounts home's whole home, so a login counts even
+			// where accountLogins would refuse to share it.
+			paths, pathsErr := profile.LoginPaths()
+			if pathsErr != nil {
+				return false, fmt.Errorf("scheduler: %w", pathsErr)
+			}
+			signedIn, loginErr := s.cfg.Homes.LoginFound(account, paths)
+			if loginErr != nil {
+				return false, loginErr
+			}
+			if !signedIn {
+				ws, wsErr := s.cfg.Store.GetWorkspace(ctx, run.WorkspaceID)
+				if wsErr != nil {
+					return false, fmt.Errorf("read workspace environment: %w", wsErr)
+				}
+				ws, secrets, wsErr := s.workspaceEnvironment(ctx, ws)
+				if wsErr != nil {
+					return false, wsErr
+				}
+				env, envErr := explicitEnvironment(profile, ws, secrets)
+				if envErr != nil {
+					return false, envErr
+				}
+				key := ""
+				switch {
+				case run.Harness == "claude":
+					key = "ANTHROPIC_API_KEY"
+				case run.Harness == "codex" && mode == domain.LaunchHeadless:
+					key = "CODEX_API_KEY"
+				}
+				if key == "" || env[key] == "" {
+					return false, nil
+				}
 			}
 		}
 		return s.FallbackLaunchable(ctx, home, from, account, run.Harness, mode)

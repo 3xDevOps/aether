@@ -314,7 +314,8 @@ A turn that fails on the account's usage limit does not park with
 the new account, the log gets a **Continued on `<B>`'s account** notice, and the
 session is prompted to continue. The session must be restorable there, or the run
 parks with `enhanced session failed: <error>`. With no account to move to, the run
-parks with `Usage limit reached on <A>'s account; no fallback has usage left`.
+parks with a `Usage limit reached on <A>'s account; ...` reason that says why
+([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
 
 ## Switching a running agent
 
