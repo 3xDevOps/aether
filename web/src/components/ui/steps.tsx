@@ -95,10 +95,6 @@ export function StepRow({
   )
 }
 
-export function ProseMark() {
-  return <span className="size-1.5 rounded-full bg-icon-faint" />
-}
-
 export function StepLine({
   expanded,
   onToggle,

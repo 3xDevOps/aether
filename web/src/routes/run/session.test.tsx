@@ -314,7 +314,7 @@ describe('the Enhanced session view', () => {
     SizedObserver.viewport = 240
     const earlier = [
       item('turn_start', 1), say(1, 'user', 'Round the totals'), tool(1, 'r1', 'read', 'Read a.js', 'completed'),
-      say(1, 'assistant', 'Reading on.'), tool(1, 'r2', 'read', 'Read b.js', 'completed'),
+      tool(1, 'r2', 'read', 'Read b.js', 'completed'),
     ]
     const loaded = [
       tool(1, 'r3', 'read', 'Read c.js', 'completed'), ...Array.from({ length: 30 }, (_, n) => say(1, 'assistant', `Reply ${n}`)),
