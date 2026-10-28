@@ -107,15 +107,25 @@ const (
 )
 
 func (s *Scheduler) assistantLock(member domain.MemberID) *sync.Mutex {
+	return s.memberLock(&s.assistantLocks, member)
+}
+
+// assistantLoginLock orders starting a sign-in against removing the
+// transcript of one that exited, so the removal never ends a new sign-in.
+func (s *Scheduler) assistantLoginLock(member domain.MemberID) *sync.Mutex {
+	return s.memberLock(&s.assistantLoginLocks, member)
+}
+
+func (s *Scheduler) memberLock(locks *map[domain.MemberID]*sync.Mutex, member domain.MemberID) *sync.Mutex {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.assistantLocks == nil {
-		s.assistantLocks = make(map[domain.MemberID]*sync.Mutex)
+	if *locks == nil {
+		*locks = make(map[domain.MemberID]*sync.Mutex)
 	}
-	lock := s.assistantLocks[member]
+	lock := (*locks)[member]
 	if lock == nil {
 		lock = &sync.Mutex{}
-		s.assistantLocks[member] = lock
+		(*locks)[member] = lock
 	}
 	return lock
 }

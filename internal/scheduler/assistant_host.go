@@ -87,6 +87,9 @@ func (s *Scheduler) StartAssistantLogin(ctx context.Context, member domain.Membe
 		return "", fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
 	key := ptyhost.AssistantLoginSession(member, agent)
+	lock := s.assistantLoginLock(member)
+	lock.Lock()
+	defer lock.Unlock()
 	cid, err := s.freshAssistantContainer(ctx, member, agent, func() {}, agent)
 	if err != nil || cid == "" {
 		return key, err
@@ -105,6 +108,13 @@ func (s *Scheduler) StartAssistantLogin(ctx context.Context, member domain.Membe
 // EndAssistantLogin removes the transcript of agent's sign-in for the
 // member once it exits: it shows the sign-in URL and codes.
 func (s *Scheduler) EndAssistantLogin(ctx context.Context, member domain.MemberID, agent string) error {
+	lock := s.assistantLoginLock(member)
+	lock.Lock()
+	defer lock.Unlock()
+	return s.endAssistantLogin(ctx, member, agent)
+}
+
+func (s *Scheduler) endAssistantLogin(ctx context.Context, member domain.MemberID, agent string) error {
 	key := ptyhost.AssistantLoginSession(member, agent)
 	if slices.Contains(s.cfg.PTY.ActiveSessions(string(key)), key) {
 		return nil
@@ -119,7 +129,7 @@ func (s *Scheduler) EndAssistantLogin(ctx context.Context, member domain.MemberI
 // sign-ins that no longer run.
 func (s *Scheduler) removeAssistantLoginTranscripts(ctx context.Context, member domain.MemberID) error {
 	for _, agent := range assistantAgents {
-		if err := s.EndAssistantLogin(ctx, member, agent); err != nil {
+		if err := s.endAssistantLogin(ctx, member, agent); err != nil {
 			return err
 		}
 	}

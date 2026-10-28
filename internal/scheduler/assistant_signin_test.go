@@ -27,9 +27,10 @@ func codexToken(account string) string {
 // "<account>~<n>"; each is good once, as the vendors' are, and its refresh
 // returns "<account>~<n+1>".
 type fakeIssuer struct {
-	mu   sync.Mutex
-	used map[string]bool
-	down bool
+	mu          sync.Mutex
+	used        map[string]bool
+	down        bool
+	profileDown bool
 }
 
 func newFakeIssuer(t *testing.T) (*fakeIssuer, AssistantIssuer) {
@@ -46,6 +47,12 @@ func (f *fakeIssuer) setDown(down bool) {
 	f.down = down
 }
 
+func (f *fakeIssuer) setProfileDown(down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.profileDown = down
+}
+
 func (f *fakeIssuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -54,6 +61,10 @@ func (f *fakeIssuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/claude/profile" {
+		if f.profileDown {
+			http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		account, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer access-")
 		if !ok {
 			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
@@ -165,6 +176,16 @@ func TestAssistantSignInVerifiedWithTheIssuer(t *testing.T) {
 	issuer.setDown(false)
 	if err := start("codex"); err != nil {
 		t.Fatalf("the start once the issuer is back: %v", err)
+	}
+
+	signIn("claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a","refreshToken":"alice~p","scopes":["user:inference"]}}`)
+	issuer.setProfileDown(true)
+	if err := start("claude"); err == nil || !strings.Contains(err.Error(), "couldn't verify the assistant's sign-in with Anthropic: 503") {
+		t.Fatalf("a start with the profile down = %v, want its real error", err)
+	}
+	issuer.setProfileDown(false)
+	if err := start("claude"); err != nil {
+		t.Fatalf("the start once the profile is back, after the failed start spent the refresh token: %v", err)
 	}
 
 	if _, err := e.sched.StartAssistantLogin(t.Context(), e.member.ID, "codex", 80, 24); err != nil {

@@ -198,13 +198,13 @@ func (s *Scheduler) verifyAssistantSignIn(ctx context.Context, member domain.Mem
 	if errors.Is(err, ErrAssistantSignInRefused) || errors.Is(err, ErrAssistantNotSignedIn) {
 		return notSignedIn(fmt.Errorf("scheduler: %w", err))
 	}
+	if rotated != nil {
+		if writeErr := writeFileAtomic(root, rel, rotated); writeErr != nil {
+			return errors.Join(err, fmt.Errorf("scheduler: write back the assistant's %s sign-in: %w", agent, writeErr))
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("scheduler: %w", err)
-	}
-	if rotated != nil {
-		if err = writeFileAtomic(root, rel, rotated); err != nil {
-			return fmt.Errorf("scheduler: write back the assistant's %s sign-in: %w", agent, err)
-		}
 	}
 	if isPending {
 		if err = os.WriteFile(record, []byte(account), 0o600); err != nil {
@@ -276,25 +276,6 @@ func (i AssistantIssuer) refreshClaude(ctx context.Context, data []byte) (string
 	if tokens.RefreshToken == "" {
 		tokens.RefreshToken = cred.RefreshToken
 	}
-	var profile struct {
-		Account struct {
-			UUID string `json:"uuid"`
-		} `json:"account"`
-		Organization struct {
-			UUID string `json:"uuid"`
-		} `json:"organization"`
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, i.ClaudeProfile, nil)
-	if err != nil {
-		return "", nil, fmt.Errorf("couldn't verify the assistant's sign-in with Anthropic: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
-	if err = i.do(req, "Anthropic", &profile); err != nil {
-		return "", nil, err
-	}
-	if profile.Account.UUID == "" {
-		return "", nil, errors.New("couldn't verify the assistant's sign-in with Anthropic: the profile names no account")
-	}
 	fields := map[string]any{
 		"accessToken":  tokens.AccessToken,
 		"refreshToken": tokens.RefreshToken,
@@ -306,6 +287,27 @@ func (i AssistantIssuer) refreshClaude(ctx context.Context, data []byte) (string
 	rotated, err := rewriteSignIn(file, "claudeAiOauth", oauth, fields)
 	if err != nil {
 		return "", nil, err
+	}
+	// The exchange already spent the old refresh token, so the rotated one
+	// is returned even when the profile check fails.
+	var profile struct {
+		Account struct {
+			UUID string `json:"uuid"`
+		} `json:"account"`
+		Organization struct {
+			UUID string `json:"uuid"`
+		} `json:"organization"`
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, i.ClaudeProfile, nil)
+	if err != nil {
+		return "", rotated, fmt.Errorf("couldn't verify the assistant's sign-in with Anthropic: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	if err = i.do(req, "Anthropic", &profile); err != nil {
+		return "", rotated, err
+	}
+	if profile.Account.UUID == "" {
+		return "", rotated, errors.New("couldn't verify the assistant's sign-in with Anthropic: the profile names no account")
 	}
 	return "account=" + profile.Account.UUID + ";organization=" + profile.Organization.UUID, rotated, nil
 }

@@ -25,7 +25,14 @@ export function AssistantSignIn({ agent, client, onDone }: { agent: AssistantAge
         terminal.reset()
         setRefused(undefined)
       },
-      onState: () => {},
+      // A reconnect after the sign-in finished while disconnected would
+      // start another sign-in and delete the one just made.
+      onState: (state) => {
+        if (state === 'reconnecting') {
+          attached.close()
+          setEnded(true)
+        }
+      },
       onRefused: (detail) => setRefused(detail),
       onWriteDenied: (detail) => setRefused(detail ?? 'Terminal input was denied'),
       // A reconnect after the sign-in exits would start another one.

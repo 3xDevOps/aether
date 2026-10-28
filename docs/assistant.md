@@ -32,10 +32,10 @@ runs and your [environment](environments.md) (the persistent container
 Each start of the assistant replaces its container, so nothing the agent
 changed outside its home survives. In the home it keeps only the sign-in file
 and the files that resume the conversation: `~/.claude/projects` for Claude
-Code; `~/.codex/sessions`, `archived_sessions`, `session_index.jsonl` and the
-`state_*.sqlite` files for Codex. Settings, hooks, instructions, MCP servers,
-skills and memories the agent wrote are deleted, and `~/.claude.json` is
-written again with only the onboarding flag.
+Code; `~/.codex/sessions` and `archived_sessions` for Codex. Settings, hooks,
+instructions, MCP servers, skills, memories and Codex's `session_index.jsonl`
+and `state_*.sqlite` files are deleted, and `~/.claude.json` is written again
+with only the onboarding flag.
 
 The sign-in file must hold only what a sign-in writes. Claude Code's
 `.credentials.json` keeps `claudeAiOauth`; Codex's `auth.json` keeps
