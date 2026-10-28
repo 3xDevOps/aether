@@ -704,6 +704,21 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 				return false, authErr
 			}
 		}
+		// FallbackLaunchable does not look for home's own login; a read quota
+		// implies one, an Unknown one does not.
+		if account == home && measured[account] == fallback.Unknown && s.cfg.Homes != nil {
+			profile, _, profileErr := s.launchProfile(ctx, home, account, run.Harness)
+			if profileErr != nil {
+				return false, profileErr
+			}
+			_, loginErr := s.accountLogins(ctx, account, profile)
+			if errors.Is(loginErr, errNotLoggedIn) {
+				return false, nil
+			}
+			if loginErr != nil {
+				return false, loginErr
+			}
+		}
 		return s.FallbackLaunchable(ctx, home, from, account, run.Harness, mode)
 	})
 	if to == from {
