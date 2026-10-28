@@ -428,6 +428,22 @@ func TestDockerSubpathLoginNotSeenIsRefused(t *testing.T) {
 	}
 }
 
+// TestDockerSubpathLoginBehindALinkIsSeen: the image's /lib64 links to lib,
+// so the engine mounts the login at /lib/aether-login and the mount table
+// lists that path. Start finds the mount there.
+func TestDockerSubpathLoginBehindALinkIsSeen(t *testing.T) {
+	t.Parallel()
+	d := newSubpathDocker(t)
+	h := newSubpathHomes(t)
+	writeTree(t, h.owner, map[string]string{loginRel: "owner-login"})
+	subpathVolume(t, d, h.owner)
+	id := createContainer(t, d, subpathSpec("linked", Mount{HostPath: h.owner, Subpath: loginRel, ContainerPath: "/lib64/aether-login"}))
+	if err := d.Start(t.Context(), id); err != nil {
+		t.Fatalf("Start() with the login behind an image link: %v", err)
+	}
+	wantContent(t, d, id, "/lib/aether-login", "owner-login")
+}
+
 // TestDockerSubpathLoginSurvivesOnlyPinnedRefreshes: a run on the owner's
 // account mounts the owner's login over the launcher's own. Another container
 // of the launcher's that refreshes its login by rename replaces the file

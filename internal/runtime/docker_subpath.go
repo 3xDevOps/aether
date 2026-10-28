@@ -48,10 +48,15 @@ func (d *Docker) checkSubpathMounts(ctx context.Context, id ID, mounts []mount.M
 
 // mountCheckScript prints $1's inode, then whether the container's mount
 // table has a mount point at $1: an inode number alone can repeat on
-// another filesystem.
+// another filesystem. The engine mounts where the image's links lead, and
+// the table lists that path.
 const mountCheckScript = `ls -di -- "$1" || exit 1
+real=$(readlink -f -- "$1") || real=$1
 while read -r _ _ _ _ point _; do
-	[ "$point" = "$1" ] && echo mounted && exit 0
+	if [ "$point" = "$1" ] || [ "$point" = "$real" ]; then
+		echo mounted
+		exit 0
+	fi
 done < /proc/self/mountinfo
 echo unmounted`
 
