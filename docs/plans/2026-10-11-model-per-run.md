@@ -186,4 +186,5 @@ template editor. The model in the run header.
 - A curated model catalog.
 - Validating a model against what the agent advertises.
 - Model flags for custom definitions.
-- Effort and reasoning settings.
+- Effort and reasoning settings; see
+  [effort-per-run](2026-10-27-effort-per-run.md).

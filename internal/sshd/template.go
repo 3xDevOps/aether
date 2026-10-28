@@ -90,15 +90,16 @@ func (s *Server) templateSave(ctx context.Context, member domain.MemberID, param
 		Harness:     p.Harness,
 		Mode:        domain.LaunchMode(p.Mode),
 		Model:       p.Model,
+		Effort:      p.Effort,
 		Params:      p.Params,
 		BudgetUSD:   p.BudgetUSD,
 	}
-	if validator, ok := s.cfg.Runs.(LaunchValidator); ok && p.Model != "" {
+	if validator, ok := s.cfg.Runs.(LaunchValidator); ok && (p.Model != "" || p.Effort != "") {
 		mode := t.Mode
 		if mode == "" {
 			mode = domain.LaunchHeadless
 		}
-		if err := validator.ValidateMissionLaunch(ctx, member, member, t.Harness, mode, t.Model); err != nil {
+		if err := validator.ValidateMissionLaunch(ctx, member, member, t.Harness, mode, t.Model, t.Effort); err != nil {
 			return nil, invalidParams(err.Error())
 		}
 	}
@@ -260,6 +261,7 @@ func templateWire(t *store.Template) protocol.Template {
 		Harness:     t.Harness,
 		Mode:        string(t.Mode),
 		Model:       t.Model,
+		Effort:      t.Effort,
 		Params:      t.Params,
 		BudgetUSD:   t.BudgetUSD,
 		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),

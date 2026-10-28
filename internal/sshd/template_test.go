@@ -204,15 +204,18 @@ func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T)
 	}
 }
 
-// validatingRuns refuses a model for the "fake" agent the way the scheduler
-// refuses a model for an agent with no model flag.
+// validatingRuns refuses a model or an effort for the "fake" agent the way
+// the scheduler refuses them for an agent with no model or effort flag.
 type validatingRuns struct {
 	*fakeRuns
 }
 
-func (validatingRuns) ValidateMissionLaunch(_ context.Context, _, _ domain.MemberID, harness string, _ domain.LaunchMode, model string) error {
+func (validatingRuns) ValidateMissionLaunch(_ context.Context, _, _ domain.MemberID, harness string, _ domain.LaunchMode, model, effort string) error {
 	if harness == "fake" && model != "" {
 		return fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harness)
+	}
+	if harness == "fake" && effort != "" {
+		return fmt.Errorf("scheduler: agent %q has no effort flag; launch it without an effort", harness)
 	}
 	return nil
 }
@@ -243,6 +246,46 @@ func TestTemplateSaveRefusesModelTheAgentCannotTake(t *testing.T) {
 	save.Model = ""
 	if err := control.Call(protocol.MethodTemplateSave, save, nil); err != nil {
 		t.Fatalf("template.save without a model: %v", err)
+	}
+}
+
+func TestTemplateSaveRefusesAnEffortTheAgentHasNoFlagFor(t *testing.T) {
+	t.Parallel()
+	clock := &testClock{now: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
+	e := templateEnv(t, clock, func(c *Config) {
+		c.Runs = validatingRuns{fakeRuns: c.Runs.(*fakeRuns)}
+	})
+	control := controlAs(t, e, e.signer)
+	save := protocol.TemplateSaveParams{
+		WorkspaceID: string(e.ws.ID),
+		Name:        "nightly",
+		Task:        "triage",
+		Harness:     "fake",
+		Mode:        "headless",
+		Effort:      "high",
+	}
+
+	var pe *protocol.Error
+	err := control.Call(protocol.MethodTemplateSave, save, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams ||
+		pe.Message != `scheduler: agent "fake" has no effort flag; launch it without an effort` {
+		t.Fatalf("template.save with an effort = %v, want the no-effort-flag refusal", err)
+	}
+
+	save.Harness = "claude"
+	var saved protocol.TemplateSaveResult
+	if err := control.Call(protocol.MethodTemplateSave, save, &saved); err != nil {
+		t.Fatalf("template.save with an effort its agent takes: %v", err)
+	}
+	if saved.Template.Effort != "high" {
+		t.Fatalf("saved template effort = %q, want high", saved.Template.Effort)
+	}
+	var listed protocol.TemplateListResult
+	if err := control.Call(protocol.MethodTemplateList, protocol.TemplateListParams{WorkspaceID: string(e.ws.ID)}, &listed); err != nil {
+		t.Fatalf("template.list: %v", err)
+	}
+	if len(listed.Templates) != 1 || listed.Templates[0].Effort != "high" {
+		t.Fatalf("listed templates = %+v, want one with effort high", listed.Templates)
 	}
 }
 

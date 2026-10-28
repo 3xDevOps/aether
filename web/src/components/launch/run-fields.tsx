@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AgentPicker, customAgent, launchable } from '@/components/launch/agent-picker'
+import { EffortPicker } from '@/components/launch/effort-picker'
 import { ModeControl } from '@/components/launch/mode-control'
 import { ModelPicker } from '@/components/launch/model-picker'
 import { initialMode, modeRefusal, refusals } from '@/components/launch/modes'
@@ -25,16 +26,17 @@ function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, prefer
   return recent?.harness ?? ok[0]?.name ?? ''
 }
 
-/** The agent, mode and model a launch uses, reloaded for each account; `preferred`
- * wins the first pick when that agent can launch, with `preferredModel` as its model.
+/** The agent, mode, model and effort a launch uses, reloaded for each account; `preferred`
+ * wins the first pick when that agent can launch, with `preferredModel` and `preferredEffort`.
  * The first pick waits for `saved`, the server's saved choices, or uses this
  * browser's when the server keeps none or cannot be read. */
-export function useAgentChoice({ account, ownAccountID, saved, preferred, preferredModel, hold = false, pick = 0, client = api }: {
+export function useAgentChoice({ account, ownAccountID, saved, preferred, preferredModel, preferredEffort, hold = false, pick = 0, client = api }: {
   account: string
   ownAccountID: string
   saved: LaunchDefaultsRead
   preferred?: string
   preferredModel?: string
+  preferredEffort?: string
   /** Holds the first pick while the caller may still switch `account`. */
   hold?: boolean
   /** A change picks again from the saved choices, replacing the current agent. */
@@ -47,9 +49,10 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
   const [harness, setHarness] = useState('')
   const [mode, setMode] = useState<LaunchMode>('tui')
   const [model, setModel] = useState('')
+  const [effort, setEffort] = useState('')
   const [attempt, setAttempt] = useState(0)
   const savedReady = saved.fresh
-  const choice = useRef({ harness, mode, preferred, preferredModel, saved: saved.result, pick })
+  const choice = useRef({ harness, mode, preferred, preferredModel, preferredEffort, saved: saved.result, pick })
   choice.current = { ...choice.current, harness, mode, saved: saved.result }
 
   const choose = useCallback((name: string, list: AgentInfo[]) => {
@@ -58,6 +61,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
     const last = rememberedChoice(name, choice.current.saved)
     setMode(initialMode(info, name, last.mode))
     setModel(last.model ?? '')
+    setEffort((current) => (info?.effort_levels?.includes(current) ? current : ''))
   }, [])
 
   useEffect(() => {
@@ -84,6 +88,7 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
       const name = preselect(agents, current.saved, current.preferred)
       choose(name, agents)
       if (name === current.preferred && current.preferredModel !== undefined) setModel(current.preferredModel)
+      if (name === current.preferred && current.preferredEffort !== undefined) setEffort(current.preferredEffort)
     }
     else if (modeRefusal(agents.find((item) => item.name === current.harness), current.harness, current.mode)) setMode('tui')
   }, [agents, agentError, savedReady, hold, pick, choose])
@@ -100,6 +105,9 @@ export function useAgentChoice({ account, ownAccountID, saved, preferred, prefer
     setMode,
     model,
     setModel,
+    effort,
+    setEffort,
+    effortLevels: agent?.effort_levels ?? [],
     noAgents,
     choose: (name: string) => choose(name, agents ?? []),
     reload: () => setAttempt((n) => n + 1),
@@ -150,6 +158,7 @@ export function RunFields({
         <ModeControl label="Mode" value={mode} onChange={(next) => { onChoice?.(); choice.setMode(next) }} refused={refusals(agent, harness)} onSetUp={onSetUp} />
       )}
       {harness && <ModelField harness={harness} accountMemberID={choice.accountMemberID} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />}
+      {choice.effortLevels.length > 0 && <EffortField levels={choice.effortLevels} value={choice.effort} onChange={(next) => { onChoice?.(); choice.setEffort(next) }} disabled={disabled} />}
     </>
   )
 }
@@ -165,6 +174,20 @@ export function ModelField({ label = 'Model', harness, accountMemberID, value, o
   return (
     <FormField label={label}>
       <ModelPicker harness={harness} accountMemberID={accountMemberID} value={value} onChange={onChange} disabled={disabled} />
+    </FormField>
+  )
+}
+
+export function EffortField({ label = 'Effort', levels, value, onChange, disabled = false }: {
+  label?: string
+  levels: string[]
+  value: string
+  onChange: (effort: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <FormField label={label}>
+      <EffortPicker levels={levels} value={value} onChange={onChange} disabled={disabled} />
     </FormField>
   )
 }

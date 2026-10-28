@@ -77,9 +77,9 @@ func fakeControlMethods(t *testing.T, replies map[string]*fakeReply) *protocol.C
 
 func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	spec, err := parseSwarmCreate([]string{
-		"-", "--agent", "claude", "--model", "opus", "--worker", "codex:background:gpt-5-codex", "--worker", "claude",
+		"-", "--agent", "claude", "--model", "opus", "--effort", "high", "--worker", "codex:background:gpt-5-codex", "--worker", "claude",
 		"--worker", "codex:background:gpt-5-codex", "--worker", "claude:standard:opus", "--worker", "codex:background", "--worker", "codex::gpt-5-codex",
-		"--workspace", "ws-name",
+		"--worker", "claude:standard+high:opus", "--workspace", "ws-name",
 	}, strings.NewReader("ship the swarm CLI\n"))
 	if err != nil {
 		t.Fatalf("parseSwarmCreate: %v", err)
@@ -106,11 +106,12 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	want := protocol.MissionCreateParams{
 		WorkspaceID: "ws1",
 		Objective:   "ship the swarm CLI",
-		Integrator:  protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "claude", Mode: "tui", Model: "opus"},
+		Integrator:  protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "claude", Mode: "tui", Model: "opus", Effort: "high"},
 		ExecutionChoices: []protocol.MissionExecutionChoice{
-			{AccountMemberID: "mem1", Harness: "claude", Mode: "tui", Model: "opus"},
+			{AccountMemberID: "mem1", Harness: "claude", Mode: "tui", Model: "opus", Effort: "high"},
 			{AccountMemberID: "mem1", Harness: "codex", Mode: "headless", Model: "gpt-5-codex"},
 			{AccountMemberID: "mem1", Harness: "claude", Mode: "tui"},
+			{AccountMemberID: "mem1", Harness: "claude", Mode: "tui", Model: "opus"},
 			{AccountMemberID: "mem1", Harness: "codex", Mode: "headless"},
 			{AccountMemberID: "mem1", Harness: "codex", Mode: "acp", Model: "gpt-5-codex"},
 		},
@@ -213,6 +214,22 @@ func TestSwarmCreateEnhancedIntegrator(t *testing.T) {
 	}
 }
 
+func TestParseWorkerReadsTheEffortAfterTheMode(t *testing.T) {
+	for spec, want := range map[string]protocol.MissionExecutionChoice{
+		"codex:background+xhigh:gpt-5-codex":          {Harness: "codex", Mode: "headless", Model: "gpt-5-codex", Effort: "xhigh"},
+		"claude:enhanced+max":                         {Harness: "claude", Mode: "acp", Effort: "max"},
+		"pi:+high:anthropic/claude-sonnet-4@20250514": {Harness: "pi", Model: "anthropic/claude-sonnet-4@20250514", Effort: "high"},
+		"pi:background:sonnet:high":                   {Harness: "pi", Mode: "headless", Model: "sonnet:high"},
+		"pi:background+low:sonnet:high":               {Harness: "pi", Mode: "headless", Model: "sonnet:high", Effort: "low"},
+		"codex":                                       {Harness: "codex"},
+	} {
+		got, err := parseWorker(spec)
+		if err != nil || got != want {
+			t.Errorf("parseWorker(%q) = %+v, %v; want %+v", spec, got, err, want)
+		}
+	}
+}
+
 func TestSwarmCreateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
@@ -223,6 +240,8 @@ func TestSwarmCreateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 		"empty worker":          {args: []string{"objective", "--agent", "claude", "--worker", ":standard"}, want: `invalid --worker ":standard"`},
 		"bad worker model":      {args: []string{"objective", "--agent", "claude", "--worker", "codex:background:bad model"}, want: `invalid --worker "codex:background:bad model"`},
 		"bad integrator model":  {args: []string{"objective", "--agent", "claude", "--model", "-opus"}, want: "invalid --model"},
+		"bad worker effort":     {args: []string{"objective", "--agent", "claude", "--worker", "codex:background+-high"}, want: `invalid --worker "codex:background+-high"`},
+		"bad integrator effort": {args: []string{"objective", "--agent", "claude", "--effort", "very high"}, want: "invalid --effort"},
 		"background integrator": {args: []string{"objective", "--agent", "claude", "--mode", "background"}, want: "--mode must be standard or enhanced"},
 		"fallback and none":     {args: []string{"objective", "--agent", "claude", "--fallback", "mem2", "--no-fallback"}, want: "--fallback and --no-fallback cannot be used together"},
 	} {

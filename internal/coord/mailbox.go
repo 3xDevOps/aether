@@ -278,7 +278,11 @@ func (s *Service) Send(ctx context.Context, from domain.RunID, p protocol.CoordS
 	if rpcErr != nil {
 		return protocol.CoordSendResult{}, rpcErr
 	}
-	return protocol.CoordSendResult{MessageID: msg.ID, RecipientStatus: string(recipient)}, nil
+	status, rpcErr := s.receiptStatus(ctx, method, to, recipient)
+	if rpcErr != nil {
+		return protocol.CoordSendResult{}, rpcErr
+	}
+	return protocol.CoordSendResult{MessageID: msg.ID, RecipientStatus: status}, nil
 }
 
 // Ask answers coord.ask, creating a durable question whose ID is also its
@@ -301,7 +305,11 @@ func (s *Service) Ask(ctx context.Context, from domain.RunID, p protocol.CoordAs
 	if rpcErr != nil {
 		return protocol.CoordAskResult{}, rpcErr
 	}
-	return protocol.CoordAskResult{QuestionID: msg.ID, RecipientStatus: string(recipient)}, nil
+	status, rpcErr := s.receiptStatus(ctx, method, to, recipient)
+	if rpcErr != nil {
+		return protocol.CoordAskResult{}, rpcErr
+	}
+	return protocol.CoordAskResult{QuestionID: msg.ID, RecipientStatus: status}, nil
 }
 
 // Reply answers coord.reply. It routes only to the original question sender,
@@ -1113,6 +1121,41 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 		return err
 	}
 	return outbox.MarkCoordAuditPublished(ctx, pub.EventID)
+}
+
+type takeoverStore interface {
+	GetMissionWorkerAssignment(context.Context, domain.RunID) (*domain.MissionWorkerAssignment, error)
+}
+
+// heldWorker reports whether a person holds run, a swarm worker, so mail to
+// it waits for them to let go.
+func (s *Service) heldWorker(ctx context.Context, run domain.RunID) (bool, error) {
+	takeovers, ok := s.cfg.Mail.(takeoverStore)
+	if !ok {
+		return false, nil
+	}
+	a, err := takeovers.GetMissionWorkerAssignment(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return a.Active, nil
+}
+
+func (s *Service) receiptStatus(ctx context.Context, method string, to domain.RunID, recipient domain.RunStatus) (string, *protocol.Error) {
+	if recipient.Terminal() {
+		return string(recipient), nil
+	}
+	held, err := s.heldWorker(ctx, to)
+	if err != nil {
+		return "", internalError(method, err)
+	}
+	if held {
+		return protocol.CoordSentStateHeld, nil
+	}
+	return string(recipient), nil
 }
 
 // sendMessage is shared by send, ask, and reply. For replies, correlated is

@@ -59,13 +59,13 @@ Enhanced.
 
 ```sh
 aether run "fix the flaky login test" --agent codex --mode enhanced
-aether run "fix the flaky login test" --agent claude --mode enhanced --model opus
+aether run "fix the flaky login test" --agent claude --mode enhanced --model opus --effort high
 ```
 
 `--mode` takes `standard`, `enhanced` or `background` on `aether run` and
 `aether template save`. On `aether swarm create`, `--mode standard|enhanced`
 sets the integrator, and `--worker codex:enhanced` (or
-`codex:enhanced:<model>`) allows Enhanced workers. The task is the session's
+`codex:enhanced+<effort>:<model>`) allows Enhanced workers. The task is the session's
 first prompt. An agent with no ACP command is refused:
 
 ```text
@@ -78,6 +78,15 @@ pick later from the composer menu becomes the run's recorded model and survives 
 reopen, a server restart and a switch to Standard. A model id Aether cannot
 store (whitespace, a leading `-`, or over 128 bytes) shows a **Model not
 recorded** notice.
+
+`--effort` is set after the model, through the agent's `thought_level` session
+option, so the first turn already runs at it. Copilot reads
+`--reasoning-effort` on `copilot --acp` itself, so its Enhanced runs get the
+flag instead. If the agent rejects the effort or advertises no effort option,
+the Session view shows an **Effort not set** error notice, and a Background run
+driven over ACP fails rather than run at the default. An effort you pick later
+from the composer menu becomes the run's recorded effort and survives a reopen
+and a switch to Standard, like the model.
 
 The run's container is the same as a Standard run's, with the same image, home,
 retention, Pause and Close. The agent's ACP server runs beside a login shell,

@@ -177,7 +177,7 @@ done`)
   // The raw desktop attach still owns the controller lease. Hold Take control,
   // then let its unanswered decision window grant the phone control.
   const presence = page.getByRole('group', { name: 'Run presence' })
-  await expect(presence.getByText(/in another tab|controls/)).toBeVisible()
+  await expect(presence.getByText(/in another session|controls/)).toBeVisible()
   await takeControlFromRawHolder(page, presence)
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
@@ -382,7 +382,7 @@ done`)
 
     // Browsing while steering must not focus xterm's keyboard or emit input.
     const presence = page.getByRole('group', { name: 'Run presence' })
-    await expect(presence.getByText(/in another tab|controls/)).toBeVisible()
+    await expect(presence.getByText(/in another session|controls/)).toBeVisible()
     await takeControlFromRawHolder(page, presence)
     await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
     await page.evaluate(() => {

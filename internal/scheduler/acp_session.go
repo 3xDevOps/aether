@@ -176,8 +176,34 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 		return err
 	}
 	isModel := optionID == sess.ModelOptionID()
+	effortID := sess.EffortOptionID()
 	if err = sess.SetOption(ctx, optionID, value); err != nil {
 		return err
+	}
+	if effortID != "" && optionID == effortID {
+		effort := sess.Effort()
+		// Claude Code's adapter offers "default", which its CLI flag refuses.
+		if effort == "default" {
+			effort = ""
+		}
+		var stored *domain.Run
+		if stored, err = s.cfg.Store.GetRun(ctx, run); err != nil {
+			return fmt.Errorf("scheduler: load run to record its effort: %w", err)
+		}
+		if effort == stored.Effort {
+			return nil
+		}
+		if err = domain.ValidEffort(effort); err != nil {
+			if nerr := sess.Notice("error", "Effort not recorded", err.Error()); nerr != nil {
+				slog.Warn("scheduler: record the effort notice", "run", run, "error", nerr)
+			}
+			return nil
+		}
+		if err = s.cfg.Store.SetRunEffort(ctx, run, effort); err != nil {
+			return fmt.Errorf("scheduler: record the run's effort: %w", err)
+		}
+		s.publish(ctx, events.Event{WorkspaceID: stored.WorkspaceID, RunID: run, Payload: events.RunEffortPayload{Effort: effort}})
+		return nil
 	}
 	model := sess.Model()
 	if !isModel || model == "" {

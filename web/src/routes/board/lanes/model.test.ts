@@ -66,6 +66,17 @@ describe('runSegments', () => {
     ])
   })
 
+  it('ignores a wait\'s rereads, which change no state', () => {
+    const reread = (minute: number): Event => {
+      const event = status('r', minute, 'needs-attention', 'needs-attention', 'waiting-ci')
+      return { ...event, payload: { ...(event.payload as object), reread: true } }
+    }
+    const changes = statusChanges([status('r', 10, 'running', 'needs-attention', 'waiting-ci'), reread(20), reread(30)]).get('r')!
+    expect(changes).toHaveLength(1)
+    const segments = runSegments({ run: { ...live, status: 'needs-attention', stateChangedAt: at(10) }, shown: 'needs-you', changes, now, floor: -Infinity })
+    expect(segments.at(-1)).toEqual({ state: 'needs-you', start: t0 + 10 * min, end: now })
+  })
+
   it('leaves the span before the read history unloaded, even when the last status change is older', () => {
     const segments = runSegments({ run: { ...live, stateChangedAt: at(40) }, shown: 'working', changes: [], now, floor: t0 + 50 * min })
     expect(segments.map((s) => s.state)).toEqual(['unloaded', 'working'])

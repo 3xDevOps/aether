@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"os"
@@ -17,7 +18,7 @@ func init() {
 		short: "list, save, or delete a workspace's task templates",
 		usage: "aether template list [--workspace <name>]\n" +
 			"aether template save <name> --agent <agent> --task \"<task>\" [--param <name=value>]... [--workspace <name>]\n" +
-			"    [--mode standard|enhanced|background] [--model <model>] [--budget <usd>]\n" +
+			"    [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--budget <usd>]\n" +
 			"aether template delete <name> [--workspace <name>]",
 		example: "aether template list\n" +
 			"aether template save nightly-audit --agent claude --task \"audit {{area}} for bugs\" --param area=api\n" +
@@ -66,18 +67,14 @@ func runTemplate(args []string) error {
 			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "NAME\tAGENT\tMODE\tMODEL\tPARAMS\tBUDGET\tTASK")
+		_, _ = fmt.Fprintln(tw, "NAME\tAGENT\tMODE\tMODEL\tEFFORT\tPARAMS\tBUDGET\tTASK")
 		for _, t := range res.Templates {
 			budget := "-"
 			if t.BudgetUSD > 0 {
 				budget = fmt.Sprintf("$%.2f", t.BudgetUSD)
 			}
-			model := t.Model
-			if model == "" {
-				model = "-"
-			}
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				t.Name, t.Harness, modeName(t.Mode), model, formatParams(t.Params), budget, firstLine(t.Task))
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				t.Name, t.Harness, modeName(t.Mode), cmp.Or(t.Model, "-"), cmp.Or(t.Effort, "-"), formatParams(t.Params), budget, firstLine(t.Task))
 		}
 		return tw.Flush()
 	})
@@ -89,16 +86,17 @@ func templateSave(args []string) error {
 	task := fs.String("task", "", "task prompt; {{name}} marks a parameter")
 	mode := fs.String("mode", "background", launchModeHelp)
 	model := fs.String("model", "", modelHelp)
+	effort := fs.String("effort", "", effortHelp)
 	budget := fs.Float64("budget", 0, "advisory cost hint in USD per run")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	params := kvFlag{}
 	fs.Var(params, "param", "default for a task parameter, name=value (repeatable)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--param k=v] [--budget] [--workspace]", err)
+		return fmt.Errorf("%w\nusage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--effort] [--param k=v] [--budget] [--workspace]", err)
 	}
 	if name == "" || *task == "" || *agent == "" {
-		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--param k=v] [--budget] [--workspace]")
+		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--effort] [--param k=v] [--budget] [--workspace]")
 	}
 	wireMode, err := parseLaunchMode(*mode)
 	if err != nil {
@@ -118,6 +116,7 @@ func templateSave(args []string) error {
 			Harness:     *agent,
 			Mode:        *mode,
 			Model:       *model,
+			Effort:      *effort,
 			Params:      params,
 			BudgetUSD:   *budget,
 		}, &res); err != nil {
@@ -126,6 +125,9 @@ func templateSave(args []string) error {
 		summary := res.Template.Harness + ", " + modeName(res.Template.Mode)
 		if res.Template.Model != "" {
 			summary += ", " + res.Template.Model
+		}
+		if res.Template.Effort != "" {
+			summary += ", effort " + res.Template.Effort
 		}
 		fmt.Printf("template %s (%s)\n", res.Template.Name, summary)
 		return nil

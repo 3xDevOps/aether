@@ -42,7 +42,7 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 
 	replacement := &Template{
 		WorkspaceID: w.ID, Name: "nightly-deps", Task: "upgrade {{ecosystem}} deps and run tests",
-		Harness: "claude", Mode: domain.LaunchHeadless, Model: "opus",
+		Harness: "claude", Mode: domain.LaunchHeadless, Model: "opus", Effort: "high",
 		Params: map[string]string{"ecosystem": "npm"},
 	}
 	if err := db.SaveTemplate(ctx, replacement); err != nil {
@@ -56,7 +56,7 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTemplate: %v", err)
 	}
-	if got.Task != replacement.Task || got.Model != "opus" || got.Params["ecosystem"] != "npm" || got.BudgetUSD != 0 {
+	if got.Task != replacement.Task || got.Model != "opus" || got.Effort != "high" || got.Params["ecosystem"] != "npm" || got.BudgetUSD != 0 {
 		t.Fatalf("template after replace = %+v, want the replacement's fields", got)
 	}
 	list, err := db.ListTemplates(ctx, w.ID)

@@ -55,7 +55,7 @@ A live run carries a state that says what it is doing. The dashboard and
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
-| `waiting` | Turn ended (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
+| `waiting` | Turn ended, or Stale wait for a stale wait (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-aether-can-check). |
 | `finished` | Ready for review | An interactive run reported `success`. |
 | `failed` | Failed | The run reported `failure`, or its turn failed. |
@@ -83,13 +83,18 @@ evidence:
 
 | `wait.kind` | When | What you see | Needs you |
 | --- | --- | --- | --- |
-| `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way or delivered. | The state, and `<condition>: <status> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
+| `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way. | The state, and `<condition>: <status> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
 | `source_unknown` | A pending condition was not read within twice its poll interval, or its reads fail. | `Waiting for CI (status unknown)` and `<condition>: status unknown (last read 12m ago): <error>`. The last status is not shown as current. | No. Aether keeps retrying. |
 | `system_fault` | A condition errored or expired, for example the pull request is gone, and the agent is being told. | `Waiting for CI (wait fault)` and the condition's error. | No. The agent decides what to do next. |
 | `system_fault` | A condition resolved, errored or expired, and its wake was not delivered within 5 minutes. | `Needs you`, reason `wait broken: <condition> resolved, but the agent was not woken`, and the delivery error. | Yes. The agent will not move on its own. Send it a message. |
 | `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`, and the last read error. | Yes. |
 | `system_fault` | Every read of the run's conditions failed for an hour, counted from the first failure or from the wait's report if later. A read that succeeds starts the hour over, and so does a server restart. Before that the wait is `source_unknown`. | `Needs you`, reason `wait broken: cannot read this run's wait conditions for over 1h, so the agent will not be woken`, and the read error. | Yes. |
-| `unverified` | The agent named no condition, or only ones that left pending before its current turn. | The state, as described above. | No. |
+| `unverified` | The agent named no condition, or only ones that left pending before its current turn or whose wake was delivered. Once delivered, including a condition that resolved inside the agent's own report, the run waits on its agent, not on the condition. | The state, as described above. It goes stale like a wait with no condition. | No. |
+
+The dashboard words the same evidence as "Waiting on <condition>: <status>
+· checked 2m ago", "Waiting on <condition>: status unknown since 01:10 —
+<error>" or "Wait fault: <condition> — <error>"
+([dashboard-frontend.md](dashboard-frontend.md#run-state)).
 
 A broken wait is the only one that needs you, because only then can nothing
 but a person move the run. While another of its conditions is still pending
@@ -108,7 +113,8 @@ its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
 carries `wait` too. A wait whose source was read again at least a minute
 later is published as a same-status event with `reread: true`;
 `aether timeline` and the dashboard's activity feed leave it out unless
-filtered to `run.status`, and `changes.list` leaves it out. A live
+filtered to `run.status`, `changes.list` leaves it out, and the
+dashboard's lanes and trace bars never draw it as a state change. A live
 run's record carries its latest `cause` too. `aether timeline <run-id>`
 prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by

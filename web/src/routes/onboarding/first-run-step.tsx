@@ -66,11 +66,11 @@ export function FirstRunStep({
   const caps = useCapability()
   const launchable = canLaunch({ cap: caps, role: useSelfRole() })
   const saved = useLaunchDefaultsRead(client)
-  const choice = useAgentChoice({ account: '', ownAccountID: '', saved, preferred: draft.harness, preferredModel: draft.model, client })
+  const choice = useAgentChoice({ account: '', ownAccountID: '', saved, preferred: draft.harness, preferredModel: draft.model, preferredEffort: draft.effort, client })
   const source = useSourceCheck(client, workspace?.id)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const { harness, mode, model, agentError, noAgents } = choice
+  const { harness, mode, model, effort, agentError, noAgents } = choice
 
   useEffect(() => {
     const current = useStore.getState().onboardingFirstRun
@@ -81,6 +81,11 @@ export function FirstRunStep({
     const current = useStore.getState().onboardingFirstRun
     if (harness && model !== (current.model ?? '')) setDraft({ ...current, model })
   }, [harness, model, setDraft])
+
+  useEffect(() => {
+    const current = useStore.getState().onboardingFirstRun
+    if (harness && effort !== (current.effort ?? '')) setDraft({ ...current, effort })
+  }, [harness, effort, setDraft])
 
   const goToBoard = () => {
     setOnboarded(true)
@@ -114,6 +119,7 @@ export function FirstRunStep({
         ...(task ? { task } : {}),
         mode,
         ...(chosenModel ? { model: chosenModel } : {}),
+        ...(effort ? { effort } : {}),
       })
       if (signedIn()) rememberChoice(harness, mode, chosenModel)
       upsertRun(run)

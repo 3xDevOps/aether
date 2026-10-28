@@ -196,9 +196,12 @@ type CoordSentMessage struct {
 }
 
 // CoordSentMessage states. Retired mail left the recipient's inbox
-// unacknowledged, as when its container was released.
+// unacknowledged, as when its container was released. Held mail waits
+// undelivered while a person holds the recipient swarm worker; receipts
+// report it as their recipient_status.
 const (
 	CoordSentStateSent      = "sent"
+	CoordSentStateHeld      = "held"
 	CoordSentStateDelivered = "delivered"
 	CoordSentStateAcked     = "acked"
 	CoordSentStateRetired   = "retired"
@@ -272,7 +275,7 @@ type CoordSendParams struct {
 }
 
 // CoordSendResult is the result of coord.send. RecipientStatus is the
-// recipient run's lifecycle status when the receipt was issued.
+// recipient run's lifecycle status when the receipt was issued, or held.
 type CoordSendResult struct {
 	MessageID       string `json:"message_id"`
 	RecipientStatus string `json:"recipient_status,omitempty"`
@@ -286,7 +289,7 @@ type CoordAskParams struct {
 }
 
 // CoordAskResult is the result of coord.ask. RecipientStatus is the
-// recipient run's lifecycle status when the receipt was issued.
+// recipient run's lifecycle status when the receipt was issued, or held.
 type CoordAskResult struct {
 	QuestionID      string `json:"question_id"`
 	RecipientStatus string `json:"recipient_status,omitempty"`
