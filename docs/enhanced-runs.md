@@ -95,20 +95,21 @@ the checkout ([terminal.md](terminal.md)).
 
 An Enhanced run opens on **Session**: one timeline, newest at the bottom.
 
-- Your messages are bubbles on the right. The agent's answer renders
-  Markdown under them, with the turn's outcome ("Finished in 12s") and
-  **Copy the reply**.
-- Everything the agent did before answering, its thoughts, tool calls, plan,
-  subagents and answered requests, folds into one header per turn ("Read 2
-  files, ran 1 command and edited 1 file"). Click it for one step per call,
-  and click a call for its command, output, diff, or input and result. Files
-  the agent read are chips that open in **Files**.
-- While a turn runs its steps stay open and the header says what the agent is
+- Your messages are bubbles on the right. Everything the agent writes to
+  you renders Markdown under them; its last message is the answer, with the
+  turn's outcome ("Finished in 12s") and **Copy the reply**.
+- The work between two of its messages, its thoughts, tool calls, plan,
+  subagents and answered requests, folds into one header ("Read 2 files, ran
+  1 command and edited 1 file"). Click it for one step per call, and click a
+  call for its command, output, diff, or input and result. Files the agent
+  read are chips that open in **Files**.
+- While the agent works, the newest header stays open and says what it is
   doing, with the seconds since it began. While it waits on you it reads
-  "Waiting for your approval: <command>" or "Waiting for your answer". When
-  the turn ends the steps fold away, unless you opened or closed them yourself
-  or a subagent still runs. When a turn ends with no request, the run says
-  **Waiting for your reply**, and the header's **Reply** focuses the composer.
+  "Waiting for your approval: <command>" or "Waiting for your answer". Once
+  the agent writes again, or the turn ends, the steps fold away, unless you
+  opened or closed them yourself or a subagent still runs. When a turn ends
+  with no request, the run says **Waiting for your reply**, and the header's
+  **Reply** focuses the composer.
 - Notices, a turn that was cancelled or stopped, and messages between agents
   show inline. **Hide from Session**, under **Agent messages** in Details,
   turns agent messages off.

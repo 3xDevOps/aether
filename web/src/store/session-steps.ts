@@ -144,25 +144,59 @@ export function asRow(step: Step): SessionRow {
 /** A boundary starts a segment: a person's message, a wake or a new agent session. */
 export type Part = { kind: 'boundary'; row: SessionRow } | { kind: 'step'; step: Step }
 
+/** Aether's end-of-turn report, run as a command or called as an MCP tool. */
+const reportCall = /(?:^|[;&|]\s*)(?:\S*\/)?aether-internal report\b|(?:^|[_.])aether_report$/
+
+function isReport(step: Step): boolean {
+  return step.kind === 'tool' && reportCall.test(step.entry.name ?? step.entry.command ?? step.entry.label)
+}
+
+/** Moves each report before the prose just ahead of it, so a reply written before reporting still ends its segment. */
+function reportsFirst(steps: Step[]): Step[] {
+  const out: Step[] = []
+  for (const step of steps) {
+    let at = out.length
+    if (isReport(step)) while (at > 0 && (out[at - 1]!.kind === 'narration' || out[at - 1]!.kind === 'event')) at--
+    out.splice(at, 0, step)
+  }
+  return out
+}
+
 /**
- * Splits a turn into segments at each boundary. Within a segment every step
- * up to the last piece of work joins one block; the prose after it is the
- * answer, outside the block. A segment without work keeps its rows as they are.
+ * Splits a turn into segments at each boundary. Within a segment the agent's
+ * prose stays in the conversation, and the work between two pieces of prose
+ * joins one block. A segment without work keeps its rows as they are.
  */
 export function segmentTurn(turn: number, parts: Part[], options: { start?: string; open: boolean; outcome?: Extract<SessionRow, { kind: 'finished' }> }): SessionRow[] {
   const rows: SessionRow[] = []
   let boundary: SessionRow | undefined
   let steps: Step[] = []
   const flush = (last: boolean) => {
-    let cut = -1
-    steps.forEach((step, index) => {
-      if (workKinds.has(step.kind)) cut = index
-    })
-    if (cut !== -1) {
-      const start = boundary?.at ?? options.start ?? steps[0]!.at
-      rows.push(stepsBlock(`steps:${turn}:${boundary?.id ?? 'start'}`, steps.slice(0, cut + 1), start, last && options.open))
+    let afterProse = false
+    let run: Step[] = []
+    const close = (final: boolean) => {
+      let cut = -1
+      run.forEach((step, index) => {
+        if (workKinds.has(step.kind)) cut = index
+      })
+      if (cut !== -1) {
+        const id = afterProse ? `steps:${turn}:${run[0]!.id}` : `steps:${turn}:${boundary?.id ?? 'start'}`
+        const start = afterProse ? run[0]!.at : (boundary?.at ?? options.start ?? run[0]!.at)
+        rows.push(stepsBlock(id, run.slice(0, cut + 1), start, final && last && options.open))
+      }
+      rows.push(...run.slice(cut + 1).map(asRow))
+      run = []
     }
-    rows.push(...steps.slice(cut + 1).map(asRow))
+    for (const step of reportsFirst(steps)) {
+      if (step.kind !== 'narration') {
+        run.push(step)
+        continue
+      }
+      close(false)
+      rows.push(asRow(step))
+      afterProse = true
+    }
+    close(true)
     steps = []
   }
   for (const part of parts) {

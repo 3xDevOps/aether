@@ -2799,18 +2799,23 @@ block re-renders, code highlighted with the Lezer languages), `live`,
 `finished` and `agent-message`.
 
 `turnRows` splits a turn into segments at each person's message, wake and
-new agent session (`store/session-steps.ts`). In a segment, every step up to
-the last piece of work (a thought, tool call, plan, subagent launch or
-answered request) joins one `steps` block, and the prose after it is the
-answer. A segment without work, such as `ping` and `pong`, has no block. The
+new agent session (`store/session-steps.ts`). In a segment, the agent's
+prose stays in the conversation as `assistant` rows, and the work between
+two pieces of prose (thoughts, tool calls, plans, subagent launches and
+answered requests) joins one `steps` block. The prose after the last block
+is the answer. The `aether-internal report` call (or `aether_report` tool)
+that ends an Aether turn joins the block before the prose it follows, so a
+reply written before reporting stays the answer. A segment without work,
+such as `ping` and `pong`, has no block. The
 block's header names the work ("Read 12 files, ran 5 commands and edited 3
 files") with up to three tool icons, failures, plan progress and tools still
 running. While the turn is open and the stream live, the header carries the
 live state instead: the state dot, "Running npm test", "Waiting on 2
 subagents", "Waiting for your approval: <command>" (or "Waiting for your
-answer") in amber, else "Working", with the seconds since the segment began.
-A turn with no block yet keeps the `live` row. Steps sit on a rail: thoughts
-(a two-line preview that expands to the whole thought), narration, lookups
+answer") in amber, else "Working", with the seconds since the block's work
+began: the segment's start for its first block.
+A turn whose newest row is not a block keeps the `live` row. Steps sit on a
+rail: thoughts (a two-line preview that expands to the whole thought), lookups
 (consecutive reads, searches and fetches as chips; a chip for a file in the
 checkout opens Files,
 a page chip a new tab; four, then **+N more**), tool calls (the command, the
@@ -2825,8 +2830,9 @@ selection holds every line); a body cut to fit the wire is read whole with `run.
 A block over 40 steps shows its first 5 and last 30 around **Show N more
 steps**, which then reads **Show fewer steps**.
 
-A block is open while its turn is, or while a subagent in it runs, and shuts
-once the turn ends; the viewer's own choice for a block or step
+A block is open while it is the newest row of an open turn, or while a
+subagent in it runs, and shuts once the agent writes after it or the turn
+ends; the viewer's own choice for a block or step
 (`expandedRows`, kept until reload) wins. Those defaults, and how much of a
 growing block folds, change only while the view follows the newest row and
 focus is outside the block, so nothing moves under a reader scrolled up or a
