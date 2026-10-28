@@ -85,6 +85,7 @@ type MissionControlStore interface {
 	SetMissionWorkerTakeover(context.Context, domain.RunID, domain.MemberID, bool) (*domain.MissionWorkerAssignment, error)
 	ReleaseMissionWorkerTakeover(context.Context, domain.RunID, domain.MemberID, uint64) (*domain.MissionWorkerAssignment, error)
 	CheckIntegratorInput(context.Context, domain.RunID, domain.RunID, uint64) error
+	ReleaseMissionWorkerTakeovers(context.Context) error
 }
 
 var _ MissionStore = (*DB)(nil)
@@ -649,6 +650,12 @@ func missionPhaseReason(phase domain.MissionPhase) string {
 	}
 }
 
+// TakeoverError is ErrMissionTakeover naming who holds the worker and since
+// when.
+func TakeoverError(holder domain.MemberID, since time.Time) error {
+	return fmt.Errorf("%w: member %s has held it since %s", ErrMissionTakeover, holder, since.UTC().Format(time.RFC3339))
+}
+
 func (d *DB) SetMissionWorkerTakeover(ctx context.Context, workerRun domain.RunID, member domain.MemberID, active bool) (*domain.MissionWorkerAssignment, error) {
 	if workerRun == "" {
 		return nil, ErrNotFound
@@ -669,11 +676,20 @@ func (d *DB) SetMissionWorkerTakeover(ctx context.Context, workerRun domain.RunI
 	}
 	a.WorkerRunID = workerRun
 	var currentGen uint64
-	err = tx.QueryRowContext(ctx, `SELECT generation FROM mission_worker_takeovers WHERE worker_run_id=?`, workerRun).Scan(&currentGen)
+	var currentMember domain.MemberID
+	var currentActive int
+	var currentUpdated int64
+	err = tx.QueryRowContext(ctx, `SELECT generation,member_id,active,updated_at FROM mission_worker_takeovers WHERE worker_run_id=?`, workerRun).Scan(&currentGen, &currentMember, &currentActive, &currentUpdated)
 	if errors.Is(err, sql.ErrNoRows) {
 		currentGen = 0
 	} else if err != nil {
 		return nil, err
+	}
+	// Re-taking a hold the same member already has, as a reconnect does,
+	// keeps its generation so an observed release CAS stays valid.
+	if active && currentActive != 0 && currentMember == member {
+		a.MemberID, a.Active, a.Generation, a.UpdatedAt = member, true, currentGen, decodeTime(currentUpdated)
+		return &a, nil
 	}
 	currentGen++
 	now := missionNow(time.Time{})
@@ -751,6 +767,43 @@ func (d *DB) ReleaseMissionWorkerTakeover(ctx context.Context, workerRun domain.
 	}
 	return &a, nil
 }
+
+// ReleaseMissionWorkerTakeovers is only safe while no session can hold a
+// worker, as when the server starts.
+func (d *DB) ReleaseMissionWorkerTakeovers(ctx context.Context) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT mission_id FROM mission_worker_takeovers WHERE active=1`)
+	if err != nil {
+		return err
+	}
+	var missions []domain.MissionID
+	for rows.Next() {
+		var id domain.MissionID
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			_ = rows.Close()
+			return scanErr
+		}
+		missions = append(missions, id)
+	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	n, _ := encodeTime(missionNow(time.Time{}))
+	if _, err = tx.ExecContext(ctx, `UPDATE mission_worker_takeovers SET active=0,generation=generation+1,updated_at=? WHERE active=1`, n); err != nil {
+		return err
+	}
+	for _, id := range missions {
+		if err = enqueueMissionControlChange(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (d *DB) PendingMissionControlChange(ctx context.Context, missionID domain.MissionID) (uint64, error) {
 	if missionID == "" {
 		return 0, ErrNotFound
@@ -824,12 +877,14 @@ func (d *DB) CheckIntegratorInput(ctx context.Context, integratorRun, workerRun 
 		return ErrMissionStale
 	}
 	var active int
-	if err := d.db.QueryRowContext(ctx, `SELECT active FROM mission_worker_takeovers WHERE worker_run_id=?`, workerRun).Scan(&active); errors.Is(err, sql.ErrNoRows) {
+	var holder domain.MemberID
+	var since int64
+	if err := d.db.QueryRowContext(ctx, `SELECT active,member_id,updated_at FROM mission_worker_takeovers WHERE worker_run_id=?`, workerRun).Scan(&active, &holder, &since); errors.Is(err, sql.ErrNoRows) {
 		return nil
 	} else if err != nil {
 		return err
 	} else if active != 0 {
-		return ErrMissionTakeover
+		return TakeoverError(holder, decodeTime(since))
 	}
 	return nil
 }

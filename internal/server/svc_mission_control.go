@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -38,6 +39,22 @@ func (m missionControlService) ReleaseHold(ctx context.Context, workerRun domain
 	return m.store.ReleaseMissionWorkerTakeover(ctx, workerRun, member, expectedGeneration)
 }
 
+// ReleaseIdle clears the worker's hold, whoever took it.
+func (m missionControlService) ReleaseIdle(ctx context.Context, workerRun domain.RunID) error {
+	a, err := m.store.GetMissionWorkerAssignment(ctx, workerRun)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil || !a.Active {
+		return err
+	}
+	_, err = m.store.ReleaseMissionWorkerTakeover(ctx, workerRun, a.MemberID, a.Generation)
+	if errors.Is(err, store.ErrMissionStale) {
+		return nil
+	}
+	return err
+}
+
 // AdmitInput serializes its check and callback with the worker's control
 // admission lock. Callers must not pre-lock workerRun; the integrator run is
 // validated by MissionState inside this same boundary.
@@ -58,16 +75,20 @@ func (m missionControlService) admitInput(ctx context.Context, integratorRun, wo
 	if m.control == nil {
 		return errors.New("mission control: shared control service is unavailable")
 	}
-	check := func() error {
-		if err := m.store.CheckIntegratorInput(ctx, integratorRun, workerRun, generation); err != nil {
+	check := func(lease control.Snapshot, held bool) error {
+		err := m.store.CheckIntegratorInput(ctx, integratorRun, workerRun, generation)
+		if held && errors.Is(err, store.ErrMissionTakeover) {
+			return fmt.Errorf("%w, in control session %s", err, lease.SessionID)
+		}
+		if err != nil {
 			return err
 		}
 		return fn()
 	}
 	if try {
-		return m.control.TryAdmit(string(workerRun), check)
+		return m.control.TryAdmit(string(workerRun), func() error { return check(control.Snapshot{}, false) })
 	}
-	return m.control.Admit(string(workerRun), check)
+	return m.control.AdmitSnapshot(string(workerRun), check)
 }
 
 var _ sshd.MissionControl = missionControlService{}
@@ -82,6 +103,10 @@ func init() {
 		}
 		if d.Control == nil {
 			return nil, errors.New("mission control needs the shared control service")
+		}
+		// Holds belong to live sessions, and a starting server has none.
+		if err := missionStore.ReleaseMissionWorkerTakeovers(context.Background()); err != nil {
+			return nil, fmt.Errorf("mission control: release holds left by the last server: %w", err)
 		}
 		svc := missionControlService{store: missionStore, control: d.Control}
 		if d.SSH != nil {

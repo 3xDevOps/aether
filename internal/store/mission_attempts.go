@@ -118,12 +118,12 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if !errors.Is(blockedErr, sql.ErrNoRows) {
 		return nil, false, blockedErr
 	}
-	var takeover int
-	if takeoverErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_worker_takeovers WHERE mission_id=? AND task_id=? AND active=1`, r.MissionID, r.TaskID).Scan(&takeover); takeoverErr != nil {
+	var holder domain.MemberID
+	var since int64
+	if takeoverErr := tx.QueryRowContext(ctx, `SELECT member_id,updated_at FROM mission_worker_takeovers WHERE mission_id=? AND task_id=? AND active=1 LIMIT 1`, r.MissionID, r.TaskID).Scan(&holder, &since); takeoverErr == nil {
+		return nil, false, TakeoverError(holder, decodeTime(since))
+	} else if !errors.Is(takeoverErr, sql.ErrNoRows) {
 		return nil, false, takeoverErr
-	}
-	if takeover > 0 {
-		return nil, false, ErrMissionTakeover
 	}
 	var number int
 	if numberErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number),0)+1 FROM mission_attempts WHERE task_id = ?`, r.TaskID).Scan(&number); numberErr != nil {
@@ -148,7 +148,8 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 
 func (d *DB) enrichAttemptTakeover(ctx context.Context, a *domain.Attempt) error {
 	var active int
-	err := d.db.QueryRowContext(ctx, `SELECT active, member_id, generation FROM mission_worker_takeovers WHERE worker_run_id=?`, a.RunID).Scan(&active, &a.TakeoverMemberID, &a.TakeoverGeneration)
+	var since int64
+	err := d.db.QueryRowContext(ctx, `SELECT active, member_id, generation, updated_at FROM mission_worker_takeovers WHERE worker_run_id=?`, a.RunID).Scan(&active, &a.TakeoverMemberID, &a.TakeoverGeneration, &since)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -156,6 +157,9 @@ func (d *DB) enrichAttemptTakeover(ctx context.Context, a *domain.Attempt) error
 		return err
 	}
 	a.TakeoverActive = active != 0
+	if a.TakeoverActive {
+		a.TakeoverSince = decodeTime(since)
+	}
 	return nil
 }
 

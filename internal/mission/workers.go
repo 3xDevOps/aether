@@ -350,7 +350,7 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "worker.retry: mission: attempt is still active"}
 	}
 	if a.TakeoverActive {
-		return nil, store.ErrMissionTakeover
+		return nil, store.TakeoverError(a.TakeoverMemberID, a.TakeoverSince)
 	}
 	req := protocol.WorkerStartParams{
 		MissionID: string(m.ID), TaskID: string(a.TaskID), TaskRevision: a.TaskRevision,
@@ -386,6 +386,9 @@ func attemptWire(a *domain.Attempt) protocol.Attempt {
 	if a.CancelRequestedAt != nil {
 		v := a.CancelRequestedAt.UTC().Format(time.RFC3339)
 		out.CancelRequestedAt = &v
+	}
+	if a.TakeoverActive {
+		out.TakeoverSince = a.TakeoverSince.UTC().Format(time.RFC3339)
 	}
 	return out
 }

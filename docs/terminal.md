@@ -88,7 +88,7 @@ it, does not give you input.
   worker is a run an integrator assigned work to. Tap or click **Take control**
   to type, and **Release** to go back to watching.
 - A second tab of your own is a different session, not a second writer. The
-  toolbar reads **You control in another tab**.
+  toolbar reads **You control in another session since <time>**.
 - `aether attach <run>` asks for control. `aether attach --read-only <run>`
   only watches.
 
@@ -109,8 +109,12 @@ current controller and cancels every queued message. While protected, other
 members cannot message the run.
 
 On a swarm worker, taking control also sets a hold: the integrator cannot steer
-the worker until you select **Release control** on its task in the swarm page.
-Releasing the terminal alone does not clear it.
+the worker while you control it. **Release** or leaving the run page clears
+it, as does **Release control** on the worker's task in the swarm page. If
+that release never arrives, as when the tab is killed, the lease lapses 15
+seconds later and the hold with it. See
+[coordination.md](coordination.md#delivery-acknowledgement-and-retries) for every session
+that keeps a hold.
 
 ### The Terminal toolbar
 
@@ -311,11 +315,11 @@ by UNKNOWN port 65535`:
 
 A shell, command or file transfer in a swarm worker takes control of it and
 sets the hold described under [Run control](#run-control). Port forwarding
-alone does not. Disconnecting does not release the hold. `ssh` prints this
-first:
+alone does not. Closing the connection releases the hold unless someone else
+still controls the worker. `ssh` prints this first:
 
 ```
-aether: this run is a swarm worker: a shell, command or file transfer here takes control of it, and its integrator cannot steer it until control is released on the swarm page
+aether: this run is a swarm worker: a shell, command or file transfer here takes control of it, and its integrator cannot steer it until you disconnect or control is released on the swarm page
 ```
 
 ## Sign in to agents and set up GitHub

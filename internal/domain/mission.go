@@ -323,6 +323,7 @@ type Attempt struct {
 	TakeoverActive         bool
 	TakeoverMemberID       MemberID
 	TakeoverGeneration     uint64
+	TakeoverSince          time.Time
 	CancelRequestedAt      *time.Time
 	CancellationActorRunID RunID
 	CancellationGeneration uint64
