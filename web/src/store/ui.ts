@@ -86,6 +86,7 @@ export interface OnboardingFirstRun {
   harness: string
   task: string
   model?: string
+  effort?: string
 }
 
 const emptyFirstRun: OnboardingFirstRun = { harness: '', task: '' }

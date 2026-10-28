@@ -416,6 +416,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	if len(adapter) == 0 {
 		return fmt.Errorf("agent %q has no ACP command", run.Harness)
 	}
+	if profile.ACPEffortArgs {
+		adapter = append(slices.Clone(adapter), profile.EffortLaunchArgs(run.Effort)...)
+	}
 	managed, ok := d.s.cfg.Runtime.(runtime.ManagedExecRuntime)
 	if !ok {
 		return fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
@@ -538,6 +541,15 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			}
 		}
 	}
+	// After the model: the levels an agent offers can depend on it.
+	var effortErr error
+	if run.Effort != "" && !profile.ACPEffortArgs {
+		if effortErr = sess.SetEffort(ctx, run.Effort); effortErr != nil {
+			if err := sess.Notice("error", "Effort not set", effortErr.Error()); err != nil {
+				slog.Warn("scheduler: record the effort notice", "run", runID, "error", err)
+			}
+		}
+	}
 	r.session = sess
 	// A session that started anew, here or after a failed restore, or
 	// refused its prompts so far has not had them yet.
@@ -569,6 +581,8 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	case oneShot && modelErr != nil:
 		// Unattended, the task would otherwise run on the agent's default model.
 		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
+	case oneShot && effortErr != nil:
+		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "effort not set: " + effortErr.Error()})
 	case how == openContinue:
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, prompt)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -411,15 +412,19 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	if agents["pi"].Installed {
 		t.Fatalf("pi linked outside the borrowed directories is listed as installed: %+v", agents["pi"])
 	}
+	levels := func(name string) []string {
+		profile, _ := harness.Lookup(name)
+		return profile.EffortLevels
+	}
 	for name, want := range map[string]protocol.AgentInfo{
 		"claude": {Name: "claude", DisplayName: "Claude Code", Glyph: "claude", Source: "shipped", Installed: true, Executable: "claude",
-			Enhanced: "adapter", Switchable: true, DefaultMode: "tui", LoginMissing: true},
+			Enhanced: "adapter", Switchable: true, DefaultMode: "tui", LoginMissing: true, EffortLevels: levels("claude")},
 		"codex": {Name: "codex", DisplayName: "Codex", Glyph: "codex", Source: "shipped", Installed: true, Executable: "codex",
-			Enhanced: "adapter", DefaultMode: "tui", EnhancedDefault: true},
+			Enhanced: "adapter", DefaultMode: "tui", EnhancedDefault: true, EffortLevels: levels("codex")},
 		"ownbot": {Name: "ownbot", DisplayName: "ownbot", Glyph: "custom", Source: "member", Installed: true, Executable: "ownbot",
 			Enhanced: "none", DefaultMode: "tui", OwnAccountOnly: true},
 		"omp": {Name: "omp", DisplayName: "oh-my-pi", Glyph: "omp", Source: "shipped", Installed: false, Executable: "omp",
-			Enhanced: "native", Switchable: true, DefaultMode: "tui", EnhancedDefault: true, Unavailable: refusal},
+			Enhanced: "native", Switchable: true, DefaultMode: "tui", EnhancedDefault: true, Unavailable: refusal, EffortLevels: levels("omp")},
 	} {
 		got := agents[name]
 		got.InstallScript, got.EnhancedInstallScript, got.LoginCommand, got.LoginKind = "", "", "", ""
@@ -427,7 +432,7 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 			t.Fatalf("shared %s login_found = %v, want false for a shipped agent and none for a member's", name, got.LoginFound)
 		}
 		got.LoginFound = nil
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("shared %s = %+v, want %+v", name, got, want)
 		}
 	}

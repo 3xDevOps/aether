@@ -2214,7 +2214,17 @@ ALTER TABLE runs ADD COLUMN cpu_limit REAL NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN memory_limit_bytes INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN pids_limit INTEGER NOT NULL DEFAULT 0;
 `,
-	// v93: audit history of writes by connectors and the assistant, and of
+	// v93: the effort or thinking level a run, attempt, template or
+	// integrator launches with; empty keeps the agent's default.
+	`
+ALTER TABLE runs ADD COLUMN effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_attempts ADD COLUMN effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE templates ADD COLUMN effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE missions ADD COLUMN integrator_effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_create_receipts ADD COLUMN integrator_effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_integrator_replacements ADD COLUMN effort TEXT NOT NULL DEFAULT '';
+`,
+	// v94: audit history of writes by connectors and the assistant, and of
 	// connector, account-share, member and Slack link changes. Rows hold
 	// ids, never params, and outlive the members and connectors they name;
 	// security marks a change that took effect, which is kept apart from

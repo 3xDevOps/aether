@@ -57,6 +57,18 @@ func (m missionControlStoreAdapter) ReleaseHold(ctx context.Context, run domain.
 	return m.store.ReleaseMissionWorkerTakeover(ctx, run, member, expectedGeneration)
 }
 
+func (m missionControlStoreAdapter) ReleaseIdle(ctx context.Context, run domain.RunID) error {
+	a, err := m.store.GetMissionWorkerAssignment(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil || !a.Active {
+		return err
+	}
+	_, err = m.store.ReleaseMissionWorkerTakeover(ctx, run, a.MemberID, a.Generation)
+	return err
+}
+
 func (m missionControlStoreAdapter) AdmitInput(ctx context.Context, integrator, worker domain.RunID, generation uint64, fn func() error) error {
 	if err := m.control.Admit(string(worker), func() error {
 		if err := m.store.CheckIntegratorInput(ctx, integrator, worker, generation); err != nil {
@@ -153,10 +165,31 @@ func missionWorkerTestEnv(t *testing.T) (*testEnv, *store.DB, *domain.Mission) {
 	return e, e.store.(*store.DB), mission
 }
 
-func TestMissionTakeoverSurvivesExpiryAndFailedRelease(t *testing.T) {
+func waitMissionHold(t *testing.T, db *store.DB, run domain.RunID, active bool) *domain.MissionWorkerAssignment {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		assignment, err := db.GetMissionWorkerAssignment(context.Background(), run)
+		if errors.Is(err, store.ErrNotFound) {
+			assignment, err = &domain.MissionWorkerAssignment{}, nil
+		}
+		if err != nil {
+			t.Fatalf("read hold: %v", err)
+		}
+		if assignment.Active == active {
+			return assignment
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("hold = %+v, want active=%v", assignment, active)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestMissionTakeoverEndsWithItsLeaseAndSurvivesFailedRelease(t *testing.T) {
 	e, db, mission := missionWorkerTestEnv(t)
 	clock := &missionControlTestClock{now: time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)}
-	e.srv.cfg.Control = control.New(control.Config{Now: clock.Now, ReconnectWindow: time.Second})
+	e.srv.cfg.Control = control.New(control.Config{Now: clock.Now, ReconnectWindow: 20 * time.Millisecond})
 	e.srv.cfg.Services.MissionControl = missionControlStoreAdapter{store: db, control: e.srv.cfg.Control}
 	e.pty.gate = NewWriteGate(e.store)
 
@@ -164,13 +197,10 @@ func TestMissionTakeoverSurvivesExpiryAndFailedRelease(t *testing.T) {
 	if !ack.OK || !ack.HasControl {
 		t.Fatalf("human attach = %+v", ack)
 	}
-	assignment, err := db.GetMissionWorkerAssignment(context.Background(), e.run.ID)
-	if err != nil || !assignment.Active {
-		t.Fatalf("takeover assignment = %+v, %v", assignment, err)
-	}
+	held := waitMissionHold(t, db, e.run.ID, true)
 
 	called := false
-	err = e.srv.cfg.Services.MissionControl.AdmitInput(context.Background(), mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error {
+	err := e.srv.cfg.Services.MissionControl.AdmitInput(context.Background(), mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error {
 		called = true
 		return nil
 	})
@@ -185,35 +215,28 @@ func TestMissionTakeoverSurvivesExpiryAndFailedRelease(t *testing.T) {
 		t.Fatal("attach did not finish after client close")
 	}
 	e.srv.cfg.Control.Disconnect(string(e.run.ID), "human", ack.ControlGeneration)
-	clock.Advance(2 * time.Second)
+	clock.Advance(time.Second)
 	if _, ok := e.srv.cfg.Control.Status(string(e.run.ID)); ok {
 		t.Fatal("expired human lease remained present")
 	}
-	assignment, err = db.GetMissionWorkerAssignment(context.Background(), e.run.ID)
-	if err != nil || !assignment.Active {
-		t.Fatalf("takeover after expiry = %+v, %v", assignment, err)
+	if released := waitMissionHold(t, db, e.run.ID, false); released.Generation <= held.Generation {
+		t.Fatalf("hold released at generation %d, want past %d", released.Generation, held.Generation)
+	}
+	if err = e.srv.cfg.Services.MissionControl.AdmitInput(context.Background(), mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error {
+		return nil
+	}); err != nil {
+		t.Fatalf("integrator input after the lease expired = %v", err)
 	}
 
-	// A new in-memory control table models a server restart without mutating
-	// the live server while its attach goroutines are settling. The same
-	// durable mission hold remains visible through the fresh control seam.
-	restarted := control.New(control.Config{Now: clock.Now, ReconnectWindow: time.Second})
-	restartedMission := missionControlStoreAdapter{store: db, control: restarted}
-	restartedLease, _, err := restarted.Acquire(string(e.run.ID), string(e.member.ID), "restart", false)
-	if err != nil {
-		t.Fatalf("reacquire after restart: %v", err)
+	second, retaken := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "human"}, true)
+	if !retaken.OK || !retaken.HasControl {
+		t.Fatalf("retake control = %+v", retaken)
 	}
-	if err = restartedMission.AdmitInput(context.Background(), mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error {
-		return nil
-	}); !errors.Is(err, store.ErrMissionTakeover) {
-		t.Fatalf("takeover after restart = %v, want ErrMissionTakeover", err)
-	}
-	if err = restarted.Release(string(e.run.ID), e.member.ID, restartedLease.SessionID, restartedLease.Generation); err != nil {
-		t.Fatalf("release restart controller: %v", err)
-	}
-	human, _, err := e.srv.cfg.Control.Acquire(string(e.run.ID), string(e.member.ID), "human", false)
-	if err != nil {
-		t.Fatalf("reacquire after expiry: %v", err)
+	defer func() { _ = second.ch.Close() }()
+	waitMissionHold(t, db, e.run.ID, true)
+	human, ok := e.srv.cfg.Control.Status(string(e.run.ID))
+	if !ok {
+		t.Fatal("retaken lease is missing")
 	}
 
 	e.srv.cfg.PTY = &admissionFailurePTY{fakePTY: e.pty, err: errors.New("replacement admission failed")}
@@ -223,7 +246,7 @@ func TestMissionTakeoverSurvivesExpiryAndFailedRelease(t *testing.T) {
 	if failed.OK {
 		t.Fatalf("failed release ack = %+v", failed)
 	}
-	assignment, err = db.GetMissionWorkerAssignment(context.Background(), e.run.ID)
+	assignment, err := db.GetMissionWorkerAssignment(context.Background(), e.run.ID)
 	if err != nil || !assignment.Active {
 		t.Fatalf("takeover after failed release = %+v, %v", assignment, err)
 	}

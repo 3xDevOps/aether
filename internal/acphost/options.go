@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -137,9 +138,9 @@ func (o *optionCatalog) syntheticID(category string) string {
 	}
 }
 
-func (o *optionCatalog) nativeModelID() string {
+func (o *optionCatalog) nativeID(category string) string {
 	for _, option := range o.options {
-		if option.category() == "model" {
+		if option.category() == category {
 			return option.ID
 		}
 	}
@@ -338,7 +339,7 @@ func (s *Session) setLegacy(ctx context.Context, category, selected string, revi
 // calls session/set_model otherwise.
 func (s *Session) SetModel(ctx context.Context, model string) error {
 	s.mu.Lock()
-	id := s.options.nativeModelID()
+	id := s.options.nativeID("model")
 	s.mu.Unlock()
 	if id != "" {
 		return s.SetOption(ctx, id, model)
@@ -357,7 +358,7 @@ func (s *Session) SetModel(ctx context.Context, model string) error {
 func (s *Session) ModelOptionID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id := s.options.nativeModelID(); id != "" {
+	if id := s.options.nativeID("model"); id != "" {
 		return id
 	}
 	return s.options.syntheticID("model")
@@ -375,6 +376,39 @@ func (s *Session) Model() string {
 		}
 	}
 	return s.options.model.current
+}
+
+// SetEffort sets the agent's effort or thinking level through its
+// thought_level option.
+func (s *Session) SetEffort(ctx context.Context, effort string) error {
+	id := s.EffortOptionID()
+	if id == "" {
+		return errors.New("acphost: the agent offers no effort option")
+	}
+	return s.SetOption(ctx, id, effort)
+}
+
+// EffortOptionID is the id SetOption takes to change the effort level, empty
+// when the agent offers none.
+func (s *Session) EffortOptionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.options.nativeID("thought_level")
+}
+
+// Effort is the session's current effort level, empty when the agent
+// reports none.
+func (s *Session) Effort() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, option := range s.options.options {
+		if option.category() == "thought_level" {
+			if current, ok := option.selectValue(); ok {
+				return current
+			}
+		}
+	}
+	return ""
 }
 
 // SetMode switches the agent's mode for agents that expose modes but no

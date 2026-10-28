@@ -192,7 +192,7 @@ task summary and what it is doing: activity (working, waiting-agents,
 waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or
 disconnected) with its reason, then the raw run_status, where needs-attention
 only means parked. A peer you wrote to has
-last_sent: your newest message to it, sent, delivered, acked or retired. Use
+last_sent: your newest message to it, sent, held, delivered, acked or retired. Use
 a peer's run_id with send --to or ask --to. A viewer-owned run has no peers;
 it can only reply to questions it was asked. At the 8-peer cap, only swarm
 peers and existing conversations are listed.
@@ -209,8 +209,8 @@ discovery; no tools or authority are implied.
 
 Send one durable message to a peer run ID from aether-internal status. A body
 file of "-" reads standard input. The receipt means queued, not read;
-recipient_status is the peer's status when the receipt is returned. A finished
-peer returns -32004. On a denial, read its reason and check status; do not retry.
+recipient_status is the peer's status when the receipt is returned, or held
+while a person controls that swarm worker. A finished peer returns -32004. On a denial, read its reason and check status; do not retry.
 `,
 	"inbox": `usage: aether-internal inbox [--wait <seconds>] [--ack <token>]
 
@@ -363,11 +363,12 @@ request after an uncertain outcome; do not invent another delivery request.
 	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
 	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
 	"task abandon":           "usage: aether-internal task abandon --task-id <id> [--revision <n>] --expected-integrator-generation <n> --idempotency-key <key>\n\nWithout --revision the whole task is abandoned; a revision drops only that pending revision.\n",
-	"worker start": `usage: aether-internal worker start --task-id <id> [--harness <name>] [--mode <mode>] [--model <model>] [--account-owner-id <id>] [--task-revision <n>] [--dispatch-key <key>]
+	"worker start": `usage: aether-internal worker start --task-id <id> [--harness <name>] [--mode <mode>] [--model <model>] [--effort <level>] [--account-owner-id <id>] [--task-revision <n>] [--dispatch-key <key>]
 
 Start a worker on an accepted task. Pick one approved execution choice with
-any of --harness, --mode, --model, and --account-owner-id; with a single
-choice none is needed. Without --mode, matches that differ only in mode
+any of --harness, --mode, --model, --effort, and --account-owner-id; with a
+single choice none is needed. --model "" and --effort "" pick a choice that
+names none. Without --mode, matches that differ only in mode
 start the enhanced (acp) one. The task revision defaults to the current one, and the dispatch
 key to <task-id>-r<revision>, so repeating the same start replays it.
 The mission, run owner, and integrator generation come from this run's
@@ -502,7 +503,7 @@ matching peer in status; message only listed peers.
 ` + coordhooks.PeerRule + `
   aether-internal ask --help
 ` + coordhooks.ReceiptRule + ` recipient_status is the peer's status when the
-receipt is returned.
+receipt is returned, or held while a person controls that swarm worker.
 ` + coordhooks.UntrustedRule + `
 Hooks announce pending inbox items at harness lifecycle boundaries; managed
 Claude Code launches and loaded native omp/pi/OpenCode integrations can also
@@ -676,6 +677,9 @@ func boundedSkillExecutionChoices(values []protocol.MissionExecutionChoice) stri
 			" mode=" + boundedSkillField(choice.Mode)
 		if choice.Model != "" {
 			value += " model=" + boundedSkillField(choice.Model)
+		}
+		if choice.Effort != "" {
+			value += " effort=" + boundedSkillField(choice.Effort)
 		}
 		separator := 0
 		if b.Len() > 0 {

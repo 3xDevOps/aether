@@ -1,15 +1,26 @@
+import { useCallback, useEffect, useState } from 'react'
 import { ControlMatrix } from '@/components/control-matrix'
 import { Shield, Users } from '@/components/icons'
+import { loadMission } from '@/components/messages/handles'
 import { connectionLabel } from '@/components/shell/connection'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
+import { api } from '@/lib/api'
+import { clockTime, message } from '@/lib/format'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { allowed } from '@/lib/permissions'
+import type { RoomController } from '@/lib/types'
+import { useReleaseHold } from '@/routes/missions/tasks'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { useStore } from '@/store'
-import { useSelf } from '@/store/hooks'
+import { useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+import { missionSeqOf } from '@/store/workflow-signals'
+
+function heldElsewhere(controller: RoomController | undefined, selfID: string | null, agent: AgentTerminal): boolean {
+  return !agent.localControl && controller?.member_id === selfID && controller.control_session_id !== agent.controlSessionID
+}
 
 export function usePresenceSummary(run: RunRecord, agent: AgentTerminal): string {
   const self = useSelf()
@@ -21,13 +32,36 @@ export function usePresenceSummary(run: RunRecord, agent: AgentTerminal): string
   const stream = useStore((s) => s.acpSessions[run.id]?.stream)
   if (agent.localControl) return 'You control'
   if (!status) return statusError ? 'Control unknown' : 'Checking control…'
-  const controllerID = status.controller?.member_id
-  const who = !controllerID ? 'Nobody controls'
-    : controllerID === self.id ? 'You control in another tab'
-      : `${memberName({ members, mergedInto }, controllerID)} controls`
+  const holder = status.controller
+  const who = !holder ? 'Nobody controls'
+    : holder.member_id !== self.id ? `${memberName({ members, mergedInto }, holder.member_id)} controls`
+      : heldElsewhere(holder, self.id, agent) ? `You control in another session since ${clockTime(holder.acquired_at)}`
+        : 'You control'
   const connection = run.acp ? stream : agent.session.state.connection
   const stale = connection !== 'live' || statusControl !== agent.roomControl || Boolean(statusError)
   return stale ? `${who} (last known)` : who
+}
+
+function ReleaseHold({ run, missionID, onError }: { run: RunRecord; missionID: string; onError: (error: string | null) => void }) {
+  const attempt = useStore((s) => s.missionDetails[missionID]?.attempts.find((item) => item.run_id === run.id && item.takeover_active))
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const refresh = useCallback(() => {
+    loadMission(missionID).then(() => setLoadError(null), (err: unknown) => setLoadError(message(err)))
+  }, [missionID])
+  const changed = useStore(missionSeqOf(missionID))
+  useEffect(refresh, [refresh, changed])
+  const { busy, error, release } = useReleaseHold(api, attempt, refresh)
+  const shown = loadError ? `Could not load the swarm: ${loadError}` : error ? `Release failed: ${error}` : null
+  useEffect(() => {
+    onError(shown)
+    return () => onError(null)
+  }, [shown, onError])
+  if (!attempt) return null
+  return (
+    <Button size="sm" variant="secondary" className="shrink-0" disabled={busy} hint="Release the control you hold in another session" onClick={() => void release()}>
+      {busy ? 'Releasing…' : 'Release'}
+    </Button>
+  )
 }
 
 export function MultiplayerControls({ run, agent, onPeople }: {
@@ -52,6 +86,8 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   const controllerName = controllerID ? memberName({ members, mergedInto }, controllerID) : undefined
   const controllerSummary = controllerID === self.id && controllerName ? `${controllerName} · ${summary}` : summary
   const staleWatchers = stream !== 'live' || Boolean(presenceError)
+  const cap = useCapability()
+  const [releaseError, setReleaseError] = useState<string | null>(null)
 
   return (
     <div role="group" aria-label="Multiplayer controls" className="@container/multiplayer relative isolate shrink-0 overflow-clip border-b border-seam bg-chrome px-2 py-1">
@@ -98,9 +134,12 @@ export function MultiplayerControls({ run, agent, onPeople }: {
               takeover={agent.takeover.interaction}
             />
           )}
+          {agent.steerable && maySteer && run.mission_role === 'worker' && run.mission_id && cap.hasMethod('mission.worker.release') &&
+            heldElsewhere(status?.controller, self.id, agent) && <ReleaseHold run={run} missionID={run.mission_id} onError={setReleaseError} />}
           {agent.steerable && !maySteer && <span className="shrink-0 text-ui-sm text-muted">View only</span>}
         </div>
       </div>
+      {releaseError && <p role="alert" className="control-matrix-clear w-fit px-1 py-1 text-ui-sm text-state-failed">{releaseError}</p>}
       {controlError && <p role="alert" className="control-matrix-clear w-fit px-1 py-1 text-ui-sm text-state-failed">Control request failed: {controlError}</p>}
       {session?.streamError && <p role="status" className="control-matrix-clear w-fit px-1 py-1 text-ui-sm text-state-failed">{session.streamError}</p>}
       {presenceError && <p role="status" className="control-matrix-clear w-fit px-1 py-1 text-ui-sm text-muted">Presence unavailable: {presenceError}</p>}

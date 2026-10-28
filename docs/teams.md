@@ -356,13 +356,13 @@ the workspace repository after `delete`.
 
 ### Task templates and schedules
 
-A template is a saved launch: agent, task, mode, model and parameters. An admin
+A template is a saved launch: agent, task, mode, model, effort and parameters. An admin
 saves and deletes templates. Any collaborator launches them and sets schedules.
 
 ```sh
 aether template save nightly-triage --agent claude --task "triage new issues" \
-  [--mode standard|enhanced|background] [--model <model>] [--param key=value] \
-  [--budget <usd>]
+  [--mode standard|enhanced|background] [--model <model>] [--effort <level>] \
+  [--param key=value] [--budget <usd>]
 aether run --template nightly-triage [--param key=value]
 aether schedule set nightly-triage "0 6 * * *"
 ```
@@ -375,7 +375,8 @@ syntax or an `@descriptor`, in UTC. A schedule that was due while the server was
 down waits for its next occurrence. `aether template list|delete` and `aether
 schedule list|delete` manage the rest. A `--model` the agent has no flag for
 fails with `scheduler: agent "<agent>" has no model flag; launch it without a
-model`.
+model`, and an `--effort` it does not take fails with the error in
+[harnesses.md](harnesses.md#choose-an-effort).
 
 ### Attribution
 
@@ -577,8 +578,8 @@ flowchart LR
 
 In the dashboard, open **New run** and use the **Swarm** tab. Set the objective,
 the **Integrator agent**, **Integrator mode** (Standard or Enhanced, since
-Background exits after one turn), the **Integrator model**, **Agents for
-workers** with a model on each, **Worker mode** (Enhanced by default) and,
+Background exits after one turn), the **Integrator model** and **Integrator
+effort**, **Agents for workers** with a model and an effort on each, **Worker mode** (Enhanced by default) and,
 optionally, **Add repos**. A
 worker whose agent cannot use that mode runs in the mode its row names. Swarm
 agents run only in a mode Aether can wake when mail arrives, so an agent with no
@@ -588,19 +589,21 @@ CLI does the same:
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
-  --agent claude --model opus --worker claude:background \
-  --worker codex:background:gpt-5-codex
+  --agent claude --model opus --effort high --worker claude:background \
+  --worker codex:background+xhigh:gpt-5-codex
 ```
 
 `--idempotency-key <key>` makes a retried create return the same swarm.
-`--worker agent[:mode[:model]]` allows workers on an agent and repeats.
+`--worker agent[:mode[+effort][:model]]` allows workers on an agent and
+repeats. The effort rides on the mode (`codex:+high` keeps the default mode),
+because a model may itself contain `:`, as in pi's `sonnet:high`.
 `--repo <workspace>` (repeatable) checks out another workspace at
 `/repos/<name>` in the integrator and every worker, as `aether run --repo`
 does for one run ([quickstart.md](quickstart.md#working-across-repos)). A
 candidate combines `/workspace` only: a worker's commits in an extra repo stay
 on that worker's run branch there, which its run page shows under **Changes**,
 and the integrator names those runs in its final report. An empty
-model keeps the agent's default. `-` as the objective reads it from stdin. The
+model or effort keeps the agent's default. `-` as the objective reads it from stdin. The
 integrator runs on your account, or the one named by `--account`, in `--mode
 standard` or `enhanced` ([enhanced-runs.md](enhanced-runs.md)). A mode left out of
 `--mode` or a `--worker` is `enhanced` where the agent's Enhanced mode is

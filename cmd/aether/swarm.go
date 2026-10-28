@@ -20,16 +20,17 @@ func init() {
 	register(command{
 		name:  "swarm",
 		short: "create, follow, and cancel swarms (an integrator run and its workers)",
-		usage: "aether swarm create <objective>|- --agent <agent> [--worker <agent>[:<mode>[:<model>]]]... [--workspace <name>]\n" +
-			"    [--repo <workspace>]... [--mode standard|enhanced] [--model <model>] [--account <member-id>]\n" +
+		usage: "aether swarm create <objective>|- --agent <agent> [--worker <agent>[:<mode>[+<effort>][:<model>]]]... [--workspace <name>]\n" +
+			"    [--repo <workspace>]... [--mode standard|enhanced] [--model <model>] [--effort <level>] [--account <member-id>]\n" +
 			"    [--fallback <member-id>,...|--no-fallback] [--idempotency-key <key>]\n" +
 			"aether swarm list [--workspace <name>]\n" +
 			"aether swarm show <swarm-id>\n" +
 			"aether swarm answer <swarm-id> --question <question-id> \"<answer>\"\n" +
 			"aether swarm answer <swarm-id> --question <question-id> -\n" +
 			"aether swarm cancel <swarm-id>\n" +
-			"aether swarm replace-integrator <swarm-id> --agent <agent> [--model <model>] [--account <member-id>]",
+			"aether swarm replace-integrator <swarm-id> --agent <agent> [--model <model>] [--effort <level>] [--account <member-id>]",
 		example: "aether swarm create \"split the parser rewrite across workers\" --agent claude --worker codex\n" +
+			"aether swarm create \"port the CLI\" --agent claude --effort high --worker codex:background+xhigh:gpt-5-codex\n" +
 			"aether swarm list\n" +
 			"aether swarm show swarm-1\n" +
 			"aether swarm answer swarm-1 --question q-1 \"use the v2 schema\"\n" +
@@ -38,12 +39,12 @@ func init() {
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--model <model>] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--worker <agent>[:standard|enhanced|background[:<model>]]]... [--workspace] [--repo <workspace>]... [--idempotency-key <key>]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--model <model>] [--effort <level>] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--worker <agent>[:standard|enhanced|background[+<effort>][:<model>]]]... [--workspace] [--repo <workspace>]... [--idempotency-key <key>]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <swarm-id>\n" +
 	"   or: aether swarm answer <swarm-id> --question <question-id> \"<answer>\"|-\n" +
 	"   or: aether swarm cancel <swarm-id>\n" +
-	"   or: aether swarm replace-integrator <swarm-id> --agent <agent> [--model <model>] [--account <member-id>]"
+	"   or: aether swarm replace-integrator <swarm-id> --agent <agent> [--model <model>] [--effort <level>] [--account <member-id>]"
 
 func runSwarm(args []string) error {
 	if len(args) == 0 {
@@ -71,6 +72,7 @@ type swarmSpec struct {
 	agent      string
 	mode       string
 	model      string
+	effort     string
 	account    string
 	workspace  string
 	workers    []protocol.MissionExecutionChoice
@@ -131,6 +133,7 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	agent := fs.String("agent", "", "integrator agent name")
 	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+defaultModeHelp+")")
 	model := fs.String("model", "", "integrator "+modelHelp)
+	effort := fs.String("effort", "", "integrator "+effortHelp)
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	fallbackOrder := fs.String("fallback", "", fallbackHelp)
@@ -139,7 +142,7 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	var repos stringList
 	fs.Var(&repos, "repo", "also check out this workspace ID or name at /repos/<name> in the integrator and every worker (repeatable)")
 	var workers stringList
-	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode[:model]] with mode standard|enhanced|background; an omitted or empty mode is "+defaultModeHelp+" (repeatable)")
+	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode[+effort][:model]] with mode standard|enhanced|background; an omitted or empty mode is "+defaultModeHelp+" (repeatable)")
 	objective, err := parseLeadingArg(fs, args)
 	if err != nil {
 		return swarmSpec{}, fmt.Errorf("%w\n%s", err, swarmUsage)
@@ -162,8 +165,11 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	if err := domain.ValidModel(*model); err != nil {
 		return swarmSpec{}, fmt.Errorf("invalid --model: %w", err)
 	}
+	if err := domain.ValidEffort(*effort); err != nil {
+		return swarmSpec{}, fmt.Errorf("invalid --effort: %w", err)
+	}
 	spec := swarmSpec{
-		objective: objective, agent: *agent, mode: integratorMode, model: *model, account: *account, workspace: *workspace,
+		objective: objective, agent: *agent, mode: integratorMode, model: *model, effort: *effort, account: *account, workspace: *workspace,
 		repos: repos, fallbacks: fallbacks, noFallback: *noFallback, key: *key,
 	}
 	for _, w := range workers {
@@ -241,27 +247,33 @@ func stdinText(value, what string, stdin io.Reader) (string, error) {
 	return text, nil
 }
 
-// The account is the integrator's, filled in by missionCreateParams.
+// The account is the integrator's, filled in by missionCreateParams. The
+// model is last because it may contain ":" (pi's sonnet:high), so the effort
+// rides on the mode, whose words are fixed.
 func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
 	parts := strings.SplitN(spec, ":", 3)
-	var mode, model string
+	var mode, effort, model string
 	var err error
-	if len(parts) > 1 && parts[1] != "" {
-		mode, err = parseLaunchMode(parts[1])
+	if len(parts) > 1 {
+		var name string
+		name, effort, _ = strings.Cut(parts[1], "+")
+		if name != "" {
+			mode, err = parseLaunchMode(name)
+		}
 	}
 	if len(parts) > 2 {
 		model = parts[2]
 	}
-	if parts[0] == "" || err != nil || domain.ValidModel(model) != nil {
-		return protocol.MissionExecutionChoice{}, fmt.Errorf("invalid --worker %q (want agent, agent:mode or agent:mode:model, mode %s)", spec, launchModeHelp)
+	if parts[0] == "" || err != nil || domain.ValidModel(model) != nil || domain.ValidEffort(effort) != nil {
+		return protocol.MissionExecutionChoice{}, fmt.Errorf("invalid --worker %q (want agent[:mode[+effort][:model]], mode %s)", spec, launchModeHelp)
 	}
-	return protocol.MissionExecutionChoice{Harness: parts[0], Mode: mode, Model: model}, nil
+	return protocol.MissionExecutionChoice{Harness: parts[0], Mode: mode, Model: model, Effort: effort}, nil
 }
 
 // A --worker that repeats the integrator or another worker is sent once,
 // because the store refuses duplicates.
 func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key string) protocol.MissionCreateParams {
-	integrator := protocol.MissionExecutionChoice{AccountMemberID: accountID, Harness: spec.agent, Mode: spec.mode, Model: spec.model}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: accountID, Harness: spec.agent, Mode: spec.mode, Model: spec.model, Effort: spec.effort}
 	choices := []protocol.MissionExecutionChoice{integrator}
 	for _, w := range spec.workers {
 		w.AccountMemberID = accountID
@@ -401,6 +413,9 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 	integrator := m.Integrator.Harness + " " + modeName(m.Integrator.Mode)
 	if m.Integrator.Model != "" {
 		integrator += " " + m.Integrator.Model
+	}
+	if m.Integrator.Effort != "" {
+		integrator += " effort " + m.Integrator.Effort
 	}
 	fmt.Fprintf(&b, "integrator: run %s generation %d (%s, account %s)\n",
 		m.CurrentIntegratorRunID, m.IntegratorGeneration, integrator, m.Integrator.AccountMemberID)
