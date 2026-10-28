@@ -1852,7 +1852,8 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
-Needs you row does.
+Needs you row does. A control hold waits since the attempt's
+`takeover_since`.
 
 A device waiting for approval is not a run, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device
@@ -2517,9 +2518,9 @@ copyable commands for whoever has not set the host up. For a swarm worker
 (`mission_role === 'worker'`) a `needs-you` callout above the buttons,
 **Connecting takes control of this swarm worker**, says that a shell,
 command or file transfer over SSH stops the integrator from steering it
-until control is released on the swarm page. The item is not offered for a
-run whose id is not one lowercase host label (`runHost`), the only kind the
-links and the command are built from. The dashboard calls
+until you disconnect or control is released on the swarm page. The item is
+not offered for a run whose id is not one lowercase host label (`runHost`),
+the only kind the links and the command are built from. The dashboard calls
 nothing: the server authorizes when the editor connects
 ([terminal.md](terminal.md#ssh-and-editors)). The desktop app lets exactly
 those three link shapes out of its window.
@@ -2587,7 +2588,12 @@ with their member name and `Avatar`, protection and the existing
 `ControlButton`: take a free lease, release it, or hold for three seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
-beside **You control** or **You control in another tab**.
+beside **You control** or **You control in another session since <time>**.
+That text appears when `run.room.status` names your member with a
+`control_session_id` other than this tab's: another tab, device or
+`aether attach`, held since the lease's `acquired_at`. On a swarm worker the
+strip then adds **Release**, which calls `mission.worker.release` with the
+attempt's `takeover_generation`, so you can free a hold from any tab.
 **Multiplayer** still opens Details for shared notes and run facts.
 The strip is one row whenever the controls fit beside a 6rem roster, which
 covers desktop windows. Only when they cannot, as on a phone with
@@ -2716,9 +2722,13 @@ for the lease once it has shown Session and the stream has acked, when the
 terminal would (the owner, not a phone, not a swarm worker). A refused
 automatic request shows no error: it retries with backoff while the holder is
 the viewer or nobody, and again when `run.controller` reports the lease free.
-Leaving the page releases a held lease, so a reload takes it straight back;
-closing the stream resets the run's stream and lease state. Frames go through
-`batchNotifications`, so a burst re-renders once per frame.
+Leaving the run page, by navigating elsewhere in the dashboard or by closing
+or reloading the tab, releases a held lease before the stream closes, so a
+reload takes it straight back and a swarm worker's hold does not outlive the
+page. Navigating away waits up to 2 s for the release's answer, because the
+server commits it on the stream's context. Closing the stream resets the
+run's stream and lease state. Frames go through `batchNotifications`, so a
+burst re-renders once per frame.
 
 An ack or history page's `truncated_before` displays the expired-prefix
 boundary. The page's `oldest_seq` stops older-page requests at the actual
@@ -3057,7 +3067,10 @@ controller approval. `useImplicitControl`
 (`agent-terminal.ts`) lets the owner of a run nobody controls act in one step
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10
-seconds). Pending requests dock above it
+seconds). On a swarm worker it never takes the lease: Send goes without it,
+which the server delivers at once while nobody controls the run, and a
+request's options wait for **Take control to answer**, so no action sets the
+worker's hold. Pending requests dock above it
 one at a time, oldest first, with "1 of N" and **Previous request** / **Next
 request** in the card header (`routes/run/request-dock.tsx`). The dock holds
 the card on screen by request id, so arrivals and other answers never swap
@@ -3456,10 +3469,11 @@ and the Environment keep native xterm scrollback.
   terminals and other members start as mirrors. The server grants write only
   when no controller exists; a second tab cannot become a second writer. A
   mirror shows who controls ("Nobody controls", "<name> controls", "You
-  control in another tab", with "(last known)" while the status is stale)
-  and **Take control**. Live, acknowledged local control reads "You control"
-  with an accent-filled **Release**, plus teal control dots behind the
-  terminal toolbar while input is writable ([styles.md](styles.md)). They
+  control in another session since <time>", with "(last known)" while the
+  status is stale) and **Take control**. Live, acknowledged local control
+  reads "You control" with an accent-filled **Release**, plus teal control
+  dots behind the terminal toolbar while input is writable
+  ([styles.md](styles.md)). They
   never change layout, and return to neutral during replay or history
   reading and after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
   ended runs show no control and replay their recording, or say **This run
@@ -3807,7 +3821,8 @@ both what it renders and the overlap set the conflict chips read.
   sent again is delivered once, whatever went to the run in between.
   `useAgentSend` (`agent-send.ts`) wraps it for the review bar and the pull
   request panel: it passes the lease and, for the owner of a run nobody
-  controls, takes it first (`useImplicitControl`); anyone else's message
+  controls, takes it first (`useImplicitControl`), except on a swarm worker,
+  where it sends without the lease; anyone else's message
   waits 45 seconds for the controller, and both surfaces say so. **Send to
   agent** is disabled, with the composer's own sentence beside it, for a
   finished, starting or switching run, a Background run, a protected run and

@@ -75,7 +75,7 @@ export function useOpenInEditor(run: RunRecord): { item: ExtraItem | null; dialo
         </DialogHeader>
         {run.mission_role === 'worker' && (
           <Callout tone="needs-you" title="Connecting takes control of this swarm worker">
-            A shell, command or file transfer over SSH stops the integrator from steering it until control is released on the swarm page.
+            A shell, command or file transfer over SSH stops the integrator from steering it until you disconnect or control is released on the swarm page.
           </Callout>
         )}
         <div className="flex flex-wrap gap-2">

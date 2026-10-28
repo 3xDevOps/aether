@@ -318,6 +318,7 @@ export interface MissionAttempt {
   takeover_active?: boolean
   takeover_member_id?: string
   takeover_generation?: number
+  takeover_since?: string
   orchestration_hold?: boolean
   cancel_requested_at?: string | null
   cancellation_actor_run_id?: string
@@ -917,6 +918,8 @@ export interface RoomMessageListResult {
 
 export interface RoomController {
   member_id: string
+  /** The holder's control session; absent from a gateway older than the field. */
+  control_session_id?: string
   connected: boolean
   acquired_at: string
   expires_at?: string

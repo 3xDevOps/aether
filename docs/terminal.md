@@ -135,7 +135,8 @@ eight files per message.
 
 - A message from the current controller reaches the agent's terminal at once
   (**Sends to the agent's terminal.**). The owner of an uncontrolled run takes
-  the lease first, then sends. A message you send without the lease, from the
+  the lease first, then sends; on a swarm worker it sends without
+  the lease, so sending never sets a hold. A message you send without the lease, from the
   assistant, `aether message` or a connector, also arrives at once while you
   are the controller.
 - A message from anyone else waits 45 seconds (**Delivers in 45 s unless the
