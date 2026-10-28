@@ -39,12 +39,12 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 		if planErr != nil {
 			t.Fatalf("BuildEnvironmentPlan(%q): %v", purpose, planErr)
 		}
-		wantMounts := 2
+		wantMounts := 4
 		if purpose == EnvironmentPurposeTerminal {
-			wantMounts = 3
+			wantMounts = 5
 		}
 		if len(plan.Mounts) != wantMounts {
-			t.Fatalf("purpose %q mounts = %v, want home plus isolated cache mount", purpose, plan.Mounts)
+			t.Fatalf("purpose %q mounts = %v, want home, its pinned logins and isolated cache mount", purpose, plan.Mounts)
 		}
 		home, homeErr := homes.Path(member.ID)
 		if homeErr != nil {
@@ -59,8 +59,8 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 			pool = "terminal"
 		}
 		cache := runtime.Mount{HostPath: filepath.Join(homes.CacheRoot(), string(member.ID), pool, "data"), ContainerPath: "/aether-cache"}
-		if plan.Mounts[1] != cache {
-			t.Fatalf("purpose %q cache mount = %+v, want %+v", purpose, plan.Mounts[1], cache)
+		if plan.Mounts[3] != cache {
+			t.Fatalf("purpose %q cache mount = %+v, want %+v", purpose, plan.Mounts[3], cache)
 		}
 		if plan.Env["GOCACHE"] != "/aether-cache/go-build" || plan.Env["HOME"] != "/root" || plan.Env["PATH"] != "/root/.local/bin:/workspace/bin" {
 			t.Fatalf("cache defaults changed persistent environment: %#v", plan.Env)

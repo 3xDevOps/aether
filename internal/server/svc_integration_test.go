@@ -84,7 +84,10 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 			case "/aether-cache":
 				foundCache = mount == (runtime.Mount{HostPath: cache, ContainerPath: "/aether-cache"})
 			default:
-				t.Fatalf("%s: unexpected account or coordination mount: %+v", stage, mount)
+				// The member's own logins, pinned in place, are the only others.
+				if mount.HostPath != home || mount.Subpath == "" || mount.ContainerPath != "/root/"+mount.Subpath {
+					t.Fatalf("%s: unexpected account or coordination mount: %+v", stage, mount)
+				}
 			}
 		}
 		if !foundHome || !foundCache {

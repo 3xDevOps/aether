@@ -299,7 +299,9 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 	}
 	cfg.Labels[labelFingerprint] = spec.Fingerprint
 	nestedDockerd := spec.NestedDocker && containerRuntime == runtimeSysbox
-	if spec.SetupScript != "" || nestedDockerd {
+	// Gated so the agent starts only once Start has checked every subpath mount.
+	subpaths := slices.ContainsFunc(spec.Mounts, func(m Mount) bool { return m.Subpath != "" })
+	if spec.SetupScript != "" || nestedDockerd || subpaths {
 		sentinel := newSetupSentinel()
 		cfg.Entrypoint = gateEntrypoint(sentinel)
 		cfg.Cmd = spec.Command
@@ -507,6 +509,12 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 			)
 		}
 		return fmt.Errorf("runtime: start container: %w", err)
+	}
+	if err := d.checkSubpathMounts(ctx, id, info.Container.HostConfig.Mounts); err != nil {
+		if !wasRunning {
+			_, _ = d.cli.ContainerKill(context.WithoutCancel(ctx), string(id), client.ContainerKillOptions{Signal: "KILL"})
+		}
+		return err
 	}
 	labels := info.Container.Config.Labels
 	sentinel := labels[labelSetupSentinel]

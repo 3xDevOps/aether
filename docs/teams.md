@@ -468,9 +468,22 @@ lists exactly what is shared.
 - An owner with no login shows **Not logged in**. A CLI launch fails with `Grace
   is not logged in to claude: no login at ~/.claude/.credentials.json in their
   home; Grace logs in to claude in their own environment terminal`.
-- A refreshed Claude Code login reaches recipients only if the owner's environment
-  started after the first share. Use **Stop environment** in **Profile**, or
-  `aether terminal stop`, then reopen it.
+- Every member's containers mount their own Claude Code and Gemini login files
+  in place, so a token refresh rewrites the file instead of replacing it. A
+  server on Docker Engine older than 26.0 mounts none, and cannot share either.
+  Recipients see the owner's refreshed login, and a run on a shared account
+  keeps the owner's login mounted. A container started before v0.7.7-beta.1
+  can still replace its member's login file, which detaches the owner's login
+  from that member's runs on shared accounts: those runs then sign in as the
+  member. Restart such environments with **Stop environment** in **Profile**,
+  or `aether terminal stop`, and relaunch such runs.
+- Before the agent starts, the server checks that the container sees the
+  owner's login file itself, not the recipient's own. Otherwise the launch, or
+  the move to the account, fails with `runtime: /root/.claude/.credentials.json
+  in the container is inode <n>, not .claude/.credentials.json in <owner's
+  home> (inode <m>); Docker lists the mount, so container runtime "<name>" did
+  not apply it`, or `...; Docker did not mount it (container runtime
+  "<name>")`.
 - Shared accounts need Docker Engine 26.0 or newer on the server, or the launch
   fails with `runtime: docker engine API "1.44" cannot mount a path beneath a
   member home; that needs API 1.45 (Docker Engine 26.0) or newer`.
@@ -515,8 +528,11 @@ order, since the run would stop anyway. Your own account qualifies there only
 with a login, or an API key the agent signs in with in that mode:
 `ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for a Background Codex run
 ([per-agent setup](harnesses.md#per-agent-setup)). An account the run already used is
-never tried again. A run that cannot move parks or fails with a reason that
-says why ([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
+never tried again: your own, or a shared one whose login the server confirmed
+in the run's container. A shared account whose login never reached the
+container spent none of its quota, so it stays a candidate. A run that cannot
+move parks or fails with a reason that says why
+([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
 
 ### Saved launch choices
 

@@ -122,7 +122,10 @@ the launch dialog's **Account** picker, or with `aether run --account
 account.
 
 Their run uses their own image and home plus your agent login file, mounted
-read-write because a token refresh rewrites it. For `claude` that is
+read-write because a token refresh rewrites it. The server checks the mounted
+file is yours before their agent starts. Their own login is mounted in place in
+all their containers, so a refresh in another of their runs cannot replace the
+file yours is mounted over and detach it. For `claude` that is
 `~/.claude/.credentials.json`;
 [harnesses.md](harnesses.md#per-agent-setup) gives each agent's path. When
 they have no installation of the agent in their own `~/.local/bin`, they also
