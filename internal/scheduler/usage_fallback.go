@@ -15,7 +15,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/fallback"
-	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -716,21 +715,17 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 			if profileErr != nil {
 				return false, profileErr
 			}
-			// The replacement mounts home's whole home, so a login with a second
-			// hard link, which accountLogins refuses to share, still signs the
-			// agent in; any other refusal does not.
-			_, loginErr := s.accountLogins(ctx, account, profile)
-			var unshareable unshareableLoginError
-			if errors.As(loginErr, &unshareable) {
-				if !errors.Is(unshareable.error, memberhome.ErrHardLinked) {
-					return false, nil
-				}
-				loginErr = nil
+			// The replacement mounts home's whole home, so a login counts even
+			// where accountLogins would refuse to share it.
+			paths, pathsErr := profile.LoginPaths()
+			if pathsErr != nil {
+				return false, fmt.Errorf("scheduler: %w", pathsErr)
 			}
-			if loginErr != nil && !errors.Is(loginErr, errNotLoggedIn) {
+			signedIn, loginErr := s.cfg.Homes.LoginFound(account, paths)
+			if loginErr != nil {
 				return false, loginErr
 			}
-			if loginErr != nil {
+			if !signedIn {
 				ws, wsErr := s.cfg.Store.GetWorkspace(ctx, run.WorkspaceID)
 				if wsErr != nil {
 					return false, fmt.Errorf("read workspace environment: %w", wsErr)

@@ -17,10 +17,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
-// ErrHardLinked marks a login file LoginPathIsDir refuses to share because it
-// has another hard link; in its own member's home it still signs the agent in.
-var ErrHardLinked = errors.New("has another hard link and cannot be shared")
-
 // LoginPathIsDir reports whether the home-relative login path rel in
 // member's home is a directory (true) or a regular file (false). A missing
 // path, or an empty file, returns an error matching fs.ErrNotExist: an empty
@@ -49,7 +45,7 @@ func (m *Manager) LoginPathIsDir(member domain.MemberID, rel string) (bool, erro
 	case info.IsDir():
 		return true, nil
 	case info.Mode().IsRegular() && hasMultipleLinks(info):
-		return false, fmt.Errorf("memberhome: login path %s in %q %w", rel, member, ErrHardLinked)
+		return false, fmt.Errorf("memberhome: login path %s in %q has another hard link and cannot be shared", rel, member)
 	case info.Mode().IsRegular() && info.Size() == 0:
 		return false, fmt.Errorf("memberhome: login path %s in %q is empty: %w", rel, member, fs.ErrNotExist)
 	case info.Mode().IsRegular():

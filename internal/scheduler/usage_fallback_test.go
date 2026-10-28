@@ -197,25 +197,29 @@ func TestEnhancedRunContinuesOnAnAccountWithUnknownUsage(t *testing.T) {
 // A run on Grace's shared account whose usage cannot be read is moved to
 // Ada's own account only when Ada can sign the agent in there: with no login
 // and no key Claude reads it stays; with a workspace ANTHROPIC_API_KEY, or a
-// login another member could not borrow because it has a second hard link,
-// it moves; a login path that became a dangling symlink is no login.
+// login another member could not borrow because it has a second hard link or
+// is reached through a relative symlink, the session continues there; an
+// empty login file or a dangling symlink is no login.
 func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		secrets  map[string]string
+		login    string
 		hardLink bool
-		symlink  bool
+		symlink  string
 		moves    bool
 	}{
 		{name: "signed out", moves: false},
 		{name: "workspace API key", secrets: map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, moves: true},
-		{name: "a login with another hard link", hardLink: true, moves: true},
-		{name: "a dangling symlink at the login path", symlink: true, moves: false},
+		{name: "a login with another hard link", login: "{}", hardLink: true, moves: true},
+		{name: "an empty login with another hard link", login: "", hardLink: true, moves: false},
+		{name: "a login behind a relative symlink", symlink: "login.json", moves: true},
+		{name: "a dangling symlink at the login path", symlink: "gone", moves: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			e, _, notes := newFallbackEnv(t, enhancedClaude)
+			e, rt, notes := newFallbackEnv(t, enhancedClaude)
 			e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
 			// An empty workspace value masks a key the test process exports.
 			secrets := map[string]string{"ANTHROPIC_API_KEY": ""}
@@ -226,6 +230,9 @@ func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 			}
 			if tc.hardLink {
 				writeHomeFiles(t, e.adaHome, ".claude/.credentials.json")
+				if err := os.WriteFile(filepath.Join(e.adaHome, ".claude", ".credentials.json"), []byte(tc.login), 0o600); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.Link(filepath.Join(e.adaHome, ".claude", ".credentials.json"), filepath.Join(e.adaHome, "credentials-copy")); err != nil {
 					t.Fatal(err)
 				}
@@ -236,21 +243,32 @@ func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 				t.Fatal(err)
 			}
 			waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
-			if tc.symlink {
-				login := filepath.Join(e.adaHome, ".claude", ".credentials.json")
-				if err = os.Remove(login); err != nil {
+			if tc.symlink != "" {
+				dir := filepath.Join(e.adaHome, ".claude")
+				if err = os.WriteFile(filepath.Join(dir, "login.json"), []byte("{}"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				if err = os.Symlink(filepath.Join(e.adaHome, "gone"), login); err != nil {
+				if err = os.Remove(filepath.Join(dir, ".credentials.json")); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Symlink(tc.symlink, filepath.Join(dir, ".credentials.json")); err != nil {
 					t.Fatal(err)
 				}
 			}
 			_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 			if tc.moves {
-				waitFor(t, "the run on Ada's account", func() bool {
-					row, getErr := e.db.GetRun(t.Context(), run.ID)
-					return getErr == nil && row.AccountMemberID == e.member.ID && !row.Status.Terminal()
+				continued := continuationPrompt("Grace", "Ada")
+				waitFor(t, "the continuation prompt on Ada's account", func() bool {
+					execs := rt.all()
+					prompts := execs[len(execs)-1].wire.prompts(t)
+					return len(execs) == 2 && len(prompts) == 1 && prompts[0][0].Text != nil && prompts[0][0].Text.Text == continued
 				})
+				row, getErr := e.db.GetRun(t.Context(), run.ID)
+				c := e.rt.byName(string(run.ID))
+				if getErr != nil || row.AccountMemberID != e.member.ID || row.Status.Terminal() || c == nil ||
+					c.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.member.ID) || c.spec.Env["ANTHROPIC_API_KEY"] != tc.secrets["ANTHROPIC_API_KEY"] {
+					t.Fatalf("moved run = %+v, %v; replacement %+v; want it live on Ada's account with the workspace key", row, getErr, c)
+				}
 				return
 			}
 			waitFor(t, "the usage-limit reason", func() bool {
