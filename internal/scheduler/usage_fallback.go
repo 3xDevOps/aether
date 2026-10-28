@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -706,8 +705,9 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 			}
 		}
 		// FallbackLaunchable does not look for home's own login; a read quota
-		// implies one, an Unknown one does not. An API key the replacement's
-		// environment passes to the agent counts as one.
+		// implies one, an Unknown one does not. An API key the agent signs in
+		// with in this mode counts as one: Claude's in every mode, Codex's
+		// CODEX_API_KEY in Background runs only (docs/harnesses.md).
 		if account == home && measured[account] == fallback.Unknown && s.cfg.Homes != nil {
 			profile, _, profileErr := s.launchProfile(ctx, home, account, run.Harness)
 			if profileErr != nil {
@@ -730,9 +730,14 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 				if envErr != nil {
 					return false, envErr
 				}
-				if !slices.ContainsFunc(profile.EnvPassthrough, func(key string) bool {
-					return strings.HasSuffix(key, "_API_KEY") && env[key] != ""
-				}) {
+				key := ""
+				switch {
+				case run.Harness == "claude":
+					key = "ANTHROPIC_API_KEY"
+				case run.Harness == "codex" && mode == domain.LaunchHeadless:
+					key = "CODEX_API_KEY"
+				}
+				if key == "" || env[key] == "" {
 					return false, nil
 				}
 			}

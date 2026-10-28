@@ -193,7 +193,8 @@ func TestEnhancedRunContinuesOnAnAccountWithUnknownUsage(t *testing.T) {
 
 // A run on Grace's shared account whose usage cannot be read is moved to
 // Ada's own account only when Ada can sign the agent in there: with no login
-// and no API key it stays, with a workspace API key it moves.
+// and no key Claude reads it stays, with a workspace ANTHROPIC_API_KEY it
+// moves.
 func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -238,6 +239,45 @@ func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
 			}
 			if got.Reason != "Usage limit reached on Grace's account; no account that may have usage left can run claude here" ||
 				got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
+				t.Fatalf("run = reason %q account %s notes %v; want it kept on Grace's account", got.Reason, got.AccountMemberID, notes.all())
+			}
+		})
+	}
+}
+
+// Codex signs in from neither OPENAI_API_KEY nor, outside Background runs,
+// CODEX_API_KEY, so neither makes Ada's signed-out own account a fallback
+// for an Enhanced Codex run whose usage cannot be read.
+func TestUnknownUsageCodexIgnoresKeysItDoesNotSignInWith(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"OPENAI_API_KEY", "CODEX_API_KEY"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			e, _, notes := newFallbackEnv(t, func(cfg *Config) {
+				cfg.Harnesses["codex"] = HarnessSpec{HeadlessArgs: []string{"fake-agent", "-p", "{task}"}, ACPArgs: []string{"acp-mock"}}
+			})
+			writeHomeFiles(t, e.ownerHome, ".codex/auth.json")
+			e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+			e.sched.cfg.Secrets = secretstore.New(t.TempDir())
+			if err := e.sched.cfg.Secrets.Put(e.ws.ID, map[string]string{key: "sk-test"}); err != nil {
+				t.Fatal(err)
+			}
+			e.share(t)
+			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.owner.ID, "", "codex", domain.LaunchACP)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+			_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+			waitFor(t, "the usage-limit reason", func() bool {
+				row, getErr := e.db.GetRun(t.Context(), run.ID)
+				return getErr == nil && strings.HasPrefix(row.Reason, "Usage limit reached")
+			})
+			got, err := e.db.GetRun(t.Context(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
 				t.Fatalf("run = reason %q account %s notes %v; want it kept on Grace's account", got.Reason, got.AccountMemberID, notes.all())
 			}
 		})
