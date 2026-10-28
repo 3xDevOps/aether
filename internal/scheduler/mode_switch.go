@@ -289,7 +289,7 @@ func (m modeSwitch) writeTerminal(ctx context.Context) (string, harness.Reporter
 	if err != nil {
 		return "", 0, fmt.Errorf("load the run's model: %w", err)
 	}
-	argv := m.profile.ResumeCommand(m.session, current.Model)
+	argv := m.profile.ResumeCommand(m.session, current.Model, current.Effort)
 	base, err := m.s.harnessEnvironment(ctx, m.run, m.profile, current.Model)
 	if err != nil {
 		return "", 0, err

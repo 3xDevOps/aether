@@ -144,7 +144,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
           <span aria-hidden>·</span>
         </>
       )}
-      <span className="flex min-w-0 items-center gap-1.5" title={[agentName, mode, run.model].filter(Boolean).join(' · ')}>
+      <span className="flex min-w-0 items-center gap-1.5" title={[agentName, mode, run.model, run.effort].filter(Boolean).join(' · ')}>
         <AgentGlyph agent={run.harness} />
         <span className="sr-only">{agentName} · </span>
         <span className="min-w-0 truncate">{mode}</span>

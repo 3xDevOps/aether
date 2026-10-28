@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { modes } from '@/components/launch/modes'
 import { own, placeholderNames } from '@/components/templates/placeholders'
-import { ModelField } from '@/components/launch/run-fields'
+import { EffortField, ModelField } from '@/components/launch/run-fields'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,6 +36,7 @@ export interface TemplateDraft {
   harness: string
   mode: string
   model?: string
+  effort?: string
   params?: Record<string, string>
   budget_usd?: number
 }
@@ -60,6 +61,7 @@ export function TemplateForm({
   const [harness, setHarness] = useState(source?.harness ?? 'claude')
   const [mode, setMode] = useState(source?.mode ?? 'headless')
   const [model, setModel] = useState(source?.model ?? '')
+  const [effort, setEffort] = useState(source?.effort ?? '')
   const [defaults, setDefaults] = useState<Record<string, string>>(source?.params ?? {})
   const { agents, error: agentsError, reload: reloadAgents } = useAgentList()
   const options = (agents ?? []).map((agent) => ({ value: agent.name, label: agent.display_name || agent.name }))
@@ -67,6 +69,8 @@ export function TemplateForm({
   for (const value of [harness, 'custom']) {
     if (!options.some((option) => option.value === value)) options.push({ value, label: value })
   }
+  const levelsOf = (name: string) => agents?.find((agent) => agent.name === name)?.effort_levels ?? []
+  const levels = levelsOf(harness)
   const chosenModel = model.trim()
   const names = placeholderNames(task)
   // Only names the task uses: the server refuses a default for any other.
@@ -77,6 +81,7 @@ export function TemplateForm({
     harness,
     mode,
     ...(chosenModel ? { model: chosenModel } : {}),
+    ...(effort ? { effort } : {}),
     ...(Object.keys(params).length ? { params } : {}),
     ...(source?.budget_usd ? { budget_usd: source.budget_usd } : {}),
   }
@@ -138,6 +143,7 @@ export function TemplateForm({
               <Label htmlFor="template-harness">Agent</Label>
               <Select value={harness} onValueChange={(value) => {
                 setHarness(value)
+                if (!levelsOf(value).includes(effort)) setEffort('')
                 onEdit()
               }}>
                 <SelectTrigger id="template-harness">
@@ -175,6 +181,12 @@ export function TemplateForm({
             setModel(value)
             onEdit()
           }} />
+          {levels.length > 0 && (
+            <EffortField levels={levels} value={effort} onChange={(value) => {
+              setEffort(value)
+              onEdit()
+            }} />
+          )}
         </form>
         {form.failure && <FailureCallout error={form.failure.error} onRetry={form.failure.unanswered ? () => onRetry(draft) : undefined} />}
         <DialogFooter>

@@ -228,6 +228,7 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 	harness := fs.String("harness", "", "worker harness")
 	mode := fs.String("mode", "", "worker launch mode")
 	model := fs.String("model", "", "worker model, when the approved choice names one")
+	effort := fs.String("effort", "", "worker effort level, when the approved choice names one")
 	accountOwner := fs.String("account-owner-id", "", "account owner ID")
 	runOwner := fs.String("run-owner-id", "", "run owner ID")
 	generation := fs.String("expected-integrator-generation", "", "integrator generation observed by the caller")
@@ -256,13 +257,17 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 		if assignment == nil || assignment.Role != "integrator" {
 			return protocol.WorkerStartResult{}, usageError("worker start: this run is not a mission integrator")
 		}
-		modelGiven := false
-		fs.Visit(func(f *flag.Flag) { modelGiven = modelGiven || f.Name == "model" })
+		modelGiven, effortGiven := false, false
+		fs.Visit(func(f *flag.Flag) {
+			modelGiven = modelGiven || f.Name == "model"
+			effortGiven = effortGiven || f.Name == "effort"
+		})
 		var matches []protocol.MissionExecutionChoice
-		anyModel := false
+		anyModel, anyEffort := false, false
 		for _, choice := range assignment.ExecutionChoices {
 			anyModel = anyModel || choice.Model != ""
-			if (*harness == "" || choice.Harness == *harness) && (*mode == "" || choice.Mode == *mode) && (!modelGiven || choice.Model == *model) && (*accountOwner == "" || choice.AccountMemberID == *accountOwner) {
+			anyEffort = anyEffort || choice.Effort != ""
+			if (*harness == "" || choice.Harness == *harness) && (*mode == "" || choice.Mode == *mode) && (!modelGiven || choice.Model == *model) && (!effortGiven || choice.Effort == *effort) && (*accountOwner == "" || choice.AccountMemberID == *accountOwner) {
 				matches = append(matches, choice)
 			}
 		}
@@ -271,7 +276,7 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 			sameButMode := true
 			for _, choice := range matches {
 				first := matches[0]
-				sameButMode = sameButMode && choice.Harness == first.Harness && choice.AccountMemberID == first.AccountMemberID && choice.Model == first.Model
+				sameButMode = sameButMode && choice.Harness == first.Harness && choice.AccountMemberID == first.AccountMemberID && choice.Model == first.Model && choice.Effort == first.Effort
 				if choice.Mode == "acp" {
 					enhanced = append(enhanced, choice)
 				}
@@ -290,11 +295,17 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 				case anyModel:
 					line += ` --model ""`
 				}
+				switch {
+				case choice.Effort != "":
+					line += " --effort " + choice.Effort
+				case anyEffort:
+					line += ` --effort ""`
+				}
 				listed = append(listed, line)
 			}
 			return protocol.WorkerStartResult{}, usageError(fmt.Sprintf("worker start: %d approved execution choices match; select exactly one of: %s", len(matches), strings.Join(listed, "; ")))
 		}
-		*harness, *mode, *model, *accountOwner = matches[0].Harness, matches[0].Mode, matches[0].Model, matches[0].AccountMemberID
+		*harness, *mode, *model, *effort, *accountOwner = matches[0].Harness, matches[0].Mode, matches[0].Model, matches[0].Effort, matches[0].AccountMemberID
 		if *missionID == "" {
 			*missionID = assignment.MissionID
 		}
@@ -314,7 +325,7 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 		// it instead of launching a second worker.
 		*dispatchKey = fmt.Sprintf("%s-r%d", *taskID, *taskRevision)
 	}
-	p := protocol.WorkerStartParams{MissionID: *missionID, TaskID: *taskID, TaskRevision: *taskRevision, DispatchKey: *dispatchKey, Harness: *harness, Mode: *mode, Model: *model, AccountOwnerID: *accountOwner, RunOwnerID: *runOwner, ExpectedIntegratorGeneration: gen}
+	p := protocol.WorkerStartParams{MissionID: *missionID, TaskID: *taskID, TaskRevision: *taskRevision, DispatchKey: *dispatchKey, Harness: *harness, Mode: *mode, Model: *model, Effort: *effort, AccountOwnerID: *accountOwner, RunOwnerID: *runOwner, ExpectedIntegratorGeneration: gen}
 	var out protocol.WorkerStartResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodWorkerStart, p, &out); err != nil {
 		return out, err

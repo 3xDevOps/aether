@@ -1210,7 +1210,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
-  `run.title`, `run.model`, `run.protected` and `run.archived` follow the
+  `run.title`, `run.model`, `run.effort`, `run.protected` and `run.archived` follow the
   same fetch-first rule on a run the client has never seen; `run.controller`
   skips an unknown run, whose snapshot carries the holder. `run.account`
   likewise skips an unknown run, and on a known one replaces
@@ -2300,6 +2300,14 @@ including for agents with no discovery. A saved model missing from the list
 stays selected. A model that is not a single argument is
 refused by `run.launch` and shown under "Launch failed".
 
+**Effort**, under Model, shows only for an agent whose `agent.list` entry has
+`effort_levels`. It is a select (`EffortPicker` in
+`src/components/launch/effort-picker.tsx`) of **Agent default**, which sends
+no `effort`, then those levels in the agent's order
+([per-agent levels](harnesses.md#choose-an-effort)). It starts at Agent
+default and is not remembered; switching to an agent without the chosen level
+resets it.
+
 The form remembers a mode and a model per agent in the `launchDefaults`
 slice (`{mode, model, at}` keyed by agent name), persisted per member in
 `savedLaunchDefaults`; defaults saved before persist version 10 had no
@@ -2448,8 +2456,8 @@ agent's last terminal or Enhanced session title,
 line, else the task's first line cut at 120 characters, with a lock for a
 protected run), then a one-line state line: the run branch with a copy
 icon (click copies the name), the agent's glyph and mode ("Standard"; the
-tooltip adds the `agent.list` display name and `run.model`, "Claude Code ·
-Standard · opus"), "On `<name>`'s account (fallback)" when the run carries
+tooltip adds the `agent.list` display name, `run.model` and `run.effort`,
+"Claude Code · Standard · opus · high"), "On `<name>`'s account (fallback)" when the run carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
 a `run.account` event updates it live when the run moves), the reason, and
 the owner. The state's dot and label are the Workflow chip's, on the row
@@ -4557,11 +4565,11 @@ remembered mode, shared with Run and saved when the swarm is created, else
 Enhanced when the agent can use it and Standard otherwise; Background disabled with the reason
 `mission.create` gives: it exits after one turn; Standard disabled with
 `agent.list`'s `swarm_standard_refusal` for an agent Aether cannot wake; with no
-mode left, **Create swarm** is disabled), **Integrator model**
-(the same field as Run), **Agents for workers** (a checkbox row per
+mode left, **Create swarm** is disabled), **Integrator model** and
+**Integrator effort** (the same fields as Run), **Agents for workers** (a checkbox row per
 installed agent and account, defaulting to the integrator account's first
-launchable agent; a ticked row has the same model picker, Agent default
-until changed) and **Worker mode**, which defaults to Enhanced and disables a
+launchable agent; a ticked row has the same model picker and, for an agent
+with levels, the effort select, both Agent default until changed) and **Worker mode**, which defaults to Enhanced and disables a
 mode no ticked worker can use. Each worker choice is sent in the worker mode
 when its agent can use it and otherwise in the first of Enhanced, Standard and
 Background it can; the row says so ("Runs Background: no idle wake in
@@ -4571,10 +4579,10 @@ the same reasons as the Run picker, and a ticked worker whose agent stops
 being launchable when the lists are read again is dropped.
 
 `mission.create` refuses an integrator whose exact account, `harness`, mode
-and `model` are not one of `execution_choices`, so the integrator's own
-choice is always sent; a worker choice with the same tuple is not sent twice,
-two choices that differ only in model are both sent, and the list is sorted
-by account, harness, mode and model, so the same set is always the same
+, `model` and `effort` are not one of `execution_choices`, so the
+integrator's own choice is always sent; a worker choice with the same tuple
+is not sent twice, two choices that differ only in model or effort are both
+sent, and the list is sorted by account, harness, mode, model and effort, so the same set is always the same
 request. **Create swarm** starts the integrator, not the workers, toasts
 `Swarm created` and navigates to `missions/<server-issued-id>`; a refusal,
 such as `mission: coordination is unavailable`, appears in the dialog verbatim
@@ -4742,8 +4750,9 @@ shows its error and is asked again on the next swarm refetch. Finished
 swarms show none of this; the server refuses a replacement there.
 
 **Replace integrator…** opens a dialog with the distinct accounts and
-agent-and-model pairs from `execution_choices` (each listed as
-"<agent> · <model>" when it has a model), sends the choice's model,
+agent, model and effort choices from `execution_choices` (each listed as
+"<agent> · <model> · <effort>", leaving out an empty model or effort), sends
+the choice's model and effort,
 sends the **Mode** control's mode (Enhanced where the agent can use it, with the
 integrator's refusals, judged from the selected account's `agent.list`; a failed
 list shows its error with **Retry** and no mode), pins
@@ -5432,7 +5441,7 @@ selects the next.
 
 The detail shows the name, the mode, **Edit** and a menu with **Schedule…**,
 **Duplicate** and **Delete**; a meta line with the agent, the model or
-"agent default", the schedule (`Scheduled <cron> UTC, next in 3 hours`) or
+"agent default", the effort when set, the schedule (`Scheduled <cron> UTC, next in 3 hours`) or
 when it was saved, and the advisory budget; then the task. Each `{{name}}`
 placeholder (the server's pattern in `internal/templates/render.go`) is an
 inline field at its first occurrence, prefilled with the template's default;
@@ -5455,7 +5464,8 @@ the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
 `<name> copy`. The form's agent select lists the agents from `agent.list` by
 display name and keeps the template's current agent as an extra option when
-the list omits it. Its **Parameters** group lists each `{{name}}` the task
+the list omits it. An **Effort** field, as in New run, shows for an agent with
+`effort_levels`, and picking an agent that lacks the chosen level clears it. Its **Parameters** group lists each `{{name}}` the task
 uses, live, with an optional default (clearing the field removes it); defaults for names the task no longer
 uses are dropped, and the template's budget hint is kept, so an edit never
 wipes either. With no templates the view says what one is and offers

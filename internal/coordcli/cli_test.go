@@ -685,6 +685,39 @@ func TestCLIWorkerStartDefaultsFromAssignment(t *testing.T) {
 	}
 }
 
+func TestCLIWorkerStartSelectsTheChoiceByEffort(t *testing.T) {
+	var sent protocol.WorkerStartParams
+	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
+		switch req.Method {
+		case protocol.MethodCoordStatus:
+			return protocol.Response{Result: json.RawMessage(`{"run_id":"run-1","assignment":{"mission_id":"mission-1","role":"integrator","integrator_generation":4,"execution_choices":[{"account_member_id":"member-1","harness":"claude","mode":"tui"},{"account_member_id":"member-1","harness":"claude","mode":"tui","effort":"high"}]}}`)}
+		case protocol.MethodTaskShow:
+			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","current_revision":3}}`)}
+		case protocol.MethodWorkerStart:
+			if err := json.Unmarshal(req.Params, &sent); err != nil {
+				t.Fatalf("decode worker start: %v", err)
+			}
+			return protocol.Response{Result: json.RawMessage(`{"attempt":{"id":"attempt-1","state":"reserved"}}`)}
+		default:
+			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
+		}
+	})
+	for _, effort := range []string{"high", ""} {
+		sent = protocol.WorkerStartParams{}
+		if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--effort", effort}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
+			t.Fatalf("worker start --effort %q = code %d, envelope %s", effort, code, raw)
+		}
+		want := protocol.WorkerStartParams{MissionID: "mission-1", TaskID: "task-1", TaskRevision: 3, DispatchKey: "task-1-r3", Harness: "claude", Mode: "tui", Effort: effort, AccountOwnerID: "member-1", ExpectedIntegratorGeneration: 4}
+		if sent != want {
+			t.Fatalf("worker start --effort %q params = %+v, want %+v", effort, sent, want)
+		}
+	}
+	code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1"}, "")
+	if envelope := decodeEnvelope(t, raw); code != ExitUsage || envelope.OK || !strings.Contains(envelope.Error.Message, `--harness claude --mode tui --account-owner-id member-1 --effort ""; --harness claude --mode tui --account-owner-id member-1 --effort high`) {
+		t.Fatalf("worker start without --effort = code %d, envelope %s; want both choices listed", code, raw)
+	}
+}
+
 func TestCLIAckSpendsOneInboxRead(t *testing.T) {
 	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
 		if req.Method != protocol.MethodCoordInbox {

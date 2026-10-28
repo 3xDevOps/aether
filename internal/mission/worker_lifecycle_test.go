@@ -153,6 +153,36 @@ func TestWorkerStartPicksTheChoiceWithTheModel(t *testing.T) {
 	}
 }
 
+func TestWorkerStartPicksTheChoiceWithTheEffort(t *testing.T) {
+	f := newMissionFixtureFor(t, "claude", domain.LaunchACP, domain.MissionExecutionChoice{Harness: "claude", Mode: domain.LaunchHeadless, Effort: "high"})
+	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
+	start := func(effort, key string) (any, error) {
+		return f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+			MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
+			DispatchKey: key, Harness: "claude", Mode: string(domain.LaunchHeadless), Effort: effort, AccountOwnerID: string(f.member.ID),
+		})
+	}
+	if _, err := start("max", "no-such-effort"); err == nil || err.Error() != "mission: worker choice is not authorized" {
+		t.Fatalf("worker.start with an effort no choice has = %v, want not authorized", err)
+	}
+	out, err := start("high", "high")
+	if err != nil {
+		t.Fatalf("worker.start with effort high: %v", err)
+	}
+	attempt := out.(protocol.WorkerStartResult).Attempt
+	run, err := f.db.GetRun(context.Background(), domain.RunID(attempt.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := f.db.GetAttempt(context.Background(), domain.AttemptID(attempt.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt.Effort != "high" || stored.Effort != "high" || run.Effort != "high" {
+		t.Fatalf("attempt effort %q, stored %q, run effort %q, want high", attempt.Effort, stored.Effort, run.Effort)
+	}
+}
+
 func TestReconcilePromotesOnlyConfirmedLiveWorkers(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

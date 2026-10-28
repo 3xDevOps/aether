@@ -557,6 +557,7 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    effort?: string
     account_member_id?: string
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
@@ -1016,6 +1017,7 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    effort?: string
     params?: Record<string, string>
     budget_usd?: number
   }) =>

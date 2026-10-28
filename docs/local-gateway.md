@@ -596,6 +596,16 @@ whitespace or control characters, a leading `-`, or more than 128 bytes is
 Run snapshots and templates carry the `model` they launch with, omitted when
 empty.
 
+They take an optional `effort` in the same places: one of the agent's
+`effort_levels` from `agent.list`, empty for the agent's default
+([harnesses.md](harnesses.md#choose-an-effort)). An effort with whitespace or
+control characters, a leading `-`, or more than 32 bytes is `-32602` with
+`effort "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 32 bytes`;
+a level the agent does not list, or an effort for an agent with no effort flag
+outside an Enhanced run, is refused with the scheduler's error. Run
+snapshots and templates carry `effort`, omitted when empty; a composer change
+publishes `run.effort` with `{"effort": "<level>"}`.
+
 `run.launch` and `mission.create` take an optional `extra_workspace_ids`:
 other workspaces checked out at `/repos/<name>` in the run, or in a swarm's
 integrator and every worker. An empty id, the primary workspace or a repeated

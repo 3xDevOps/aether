@@ -298,7 +298,9 @@ aether run "add a health check endpoint" --workspace myproject --agent claude
 
 It prints `run run-d6ay38tj8j running`. `--mode` picks `standard`, `enhanced`
 or `background`; without it, the run is Enhanced when the agent's Enhanced
-mode is installed, and Standard otherwise. `--model` picks the model.
+mode is installed, and Standard otherwise. `--model` picks the model and
+`--effort` the effort or thinking level
+([harnesses.md](harnesses.md#choose-an-effort)).
 The first run on a server pulls the environment image, so it starts slower. To
 give one objective to a group of agents, see swarms in [teams.md](teams.md).
 
