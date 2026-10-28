@@ -325,6 +325,7 @@ type supervised struct {
 	waitsFailingSince time.Time
 	startedAt         time.Time
 	quietFrom         time.Time // a resume or restart; the stall clock starts no earlier
+	stallTurnAt       time.Time // when the Enhanced turn the last stall parked started
 	paused            bool
 	killRequested     bool
 	killActor         domain.MemberID
