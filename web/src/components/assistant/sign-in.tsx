@@ -19,16 +19,18 @@ export function AssistantSignIn({ agent, client, onDone }: { agent: AssistantAge
   const { terminal, geometry } = controller
   useEffect(() => {
     if (!terminal) return
+    let wasAttached = false
     const attached = connectAttach(() => client.assistantLoginSocket(agent.name), {
       onData: (chunk) => terminal.write(chunk),
       onAttached: () => {
+        wasAttached = true
         terminal.reset()
         setRefused(undefined)
       },
       // A reconnect after the sign-in finished while disconnected would
       // start another sign-in and delete the one just made.
       onState: (state) => {
-        if (state === 'reconnecting') {
+        if (state === 'reconnecting' && wasAttached) {
           attached.close()
           setEnded(true)
         }
