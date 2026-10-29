@@ -218,7 +218,13 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 		return "", nil, err
 	}
 	w := res.Watch
-	out := map[string]any{"watch_id": w.ID, "state": w.State, "conditions": w.Conditions, "expires_at": w.ExpiresAt, "url": l.at(w.Link),
+	link := l.at(w.Link)
+	// The assistant's own dashboard opens a relative link when the server
+	// has no dashboard URL, as under aether gui without --web-port.
+	if link == "" && c.surface == Assistant {
+		link = w.Link
+	}
+	out := map[string]any{"watch_id": w.ID, "state": w.State, "conditions": w.Conditions, "expires_at": w.ExpiresAt, "url": link,
 		"untrusted": map[string]any{"receipt": res.Receipt, "target_title": clip(w.TargetTitle, maxReport)}}
 	summary := fmt.Sprintf("Watch %s is %s.", w.ID, w.State)
 	if w.Error != "" {
