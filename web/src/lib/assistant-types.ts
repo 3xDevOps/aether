@@ -22,6 +22,10 @@ export interface AssistantConfirmation {
   /** The call acts on another member's run, owned by `other_owner`: it asks even with auto-approval on. */
   other_member?: boolean
   other_owner?: string
+  /** The assistant's one line on why it launches; shown on the card, never sent with the call. */
+  reason?: string
+  /** A template launch's task as its params render it; shown on the card, never sent with the call. */
+  task?: string
 }
 
 export interface AssistantActionTarget {

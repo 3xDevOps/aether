@@ -220,7 +220,9 @@ Save your environment as a new image; new runs and terminals start from it
 
 A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
-task, and how you hear back. Unless told otherwise, the assistant launches on
+task, and how you hear back. A template launch's card shows the whole task its
+parameters fill in. When the assistant gives a one-line reason for a launch,
+the card shows it as a **Reason** row above the rest. Unless told otherwise, the assistant launches on
 your own account with automatic [usage fallback](teams.md#usage-fallback): if
 your account is nearly out of quota, the run starts on an account shared with
 you. With [auto-approval](#auto-approval) on, such a launch still asks while
