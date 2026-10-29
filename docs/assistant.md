@@ -241,7 +241,8 @@ spelled out.
 
 When you ask it to keep a choice for next time ("from now on use codex"), the
 assistant saves it with `aether_save_launch_defaults`, behind a card that
-spells out every saved choice; a choice for one launch is never saved.
+spells out every saved choice; a choice for one launch is never saved. The
+launch dialog and **Settings → Launch** show the same choices.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was
