@@ -487,6 +487,21 @@ describe('temporary chat', () => {
     await waitFor(() => expect(within(aside).queryByText(/Temporary: the assistant won't read/)).toBeNull())
   })
 
+  it('drops a reply that arrives after New conversation', async () => {
+    let finish: (value: AssistantSettings) => void = () => {}
+    vi.mocked(api.assistantSettings).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    vi.mocked(api.assistantReset).mockResolvedValue(status({ temporary: false }))
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'old question'), item('turn_end', 1)])
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Temporary chat' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
+    await waitFor(() => expect(api.assistantReset).toHaveBeenCalled())
+    await act(async () => finish({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, temporary: true }))
+    expect(within(aside).queryByText(/Temporary: the assistant won't read/)).toBeNull()
+    expect(useStore.getState().assistantStatus?.temporary).not.toBe(true)
+  })
+
   it('shows the server refusal as it came', async () => {
     vi.mocked(api.assistantSettings).mockRejectedValue(new Error('assistant.settings: memory is off: the owner turned memory off'))
     const aside = await openPanel()

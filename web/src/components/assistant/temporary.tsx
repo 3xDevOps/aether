@@ -17,16 +17,17 @@ export function TemporaryChatToggle({ temporary }: { temporary: boolean }) {
       aria-pressed={temporary}
       disabled={busy}
       onClick={() => {
-        const identity = useStore.getState().identityKey
+        const { identityKey, assistantGeneration } = useStore.getState()
+        const current = () => useStore.getState().identityKey === identityKey && useStore.getState().assistantGeneration === assistantGeneration
         useStore.getState().setAssistantError(null)
         setBusy(true)
         api.assistantSettings({ temporary: !temporary }).then(
           (settings) => {
             const state = useStore.getState()
-            if (state.identityKey === identity && state.assistantStatus) state.setAssistantStatus({ ...state.assistantStatus, ...settings })
+            if (current() && state.assistantStatus) state.setAssistantStatus({ ...state.assistantStatus, ...settings })
           },
           (err: unknown) => {
-            if (useStore.getState().identityKey === identity) useStore.getState().setAssistantError(message(err))
+            if (current()) useStore.getState().setAssistantError(message(err))
           },
         ).finally(() => setBusy(false))
       }}
