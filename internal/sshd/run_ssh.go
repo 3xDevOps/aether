@@ -66,7 +66,7 @@ const (
 
 // runSSHWorkerNotice tells a member connecting to a swarm worker what a
 // session there does. A terminal shows no dialog that could.
-const runSSHWorkerNotice = "this run is a swarm worker: a shell, command or file transfer here takes control of it, and its integrator cannot steer it until control is released on the swarm page"
+const runSSHWorkerNotice = "this run is a swarm worker: a shell, command or file transfer here takes control of it, and its integrator cannot steer it until you disconnect or control is released on the swarm page"
 
 var (
 	// What a stock sshd accepts from SendEnv.
@@ -160,7 +160,7 @@ func (s *Server) serveRunSSH(ctx context.Context, member domain.MemberID, ch sub
 
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	c := &runSSHConn{s: s, svc: svc, run: run.ID, principal: principal, authorize: authorize}
+	c := &runSSHConn{s: s, svc: svc, run: run.ID, principal: principal, authorize: authorize, record: run, done: connCtx.Done()}
 	defer c.close()
 	s.spawn(func() { c.revalidate(connCtx, nested) })
 	// Every global request is refused, tcpip-forward included: no reverse
@@ -226,6 +226,10 @@ type runSSHConn struct {
 	run       domain.RunID
 	principal control.Principal
 	authorize func() error
+	// record is the run as the connection found it; done closes when the
+	// connection ends.
+	record *domain.Run
+	done   <-chan struct{}
 
 	mu       sync.Mutex
 	sessions int
@@ -445,8 +449,8 @@ func (c *runSSHConn) session(ctx context.Context, nc ssh.NewChannel) {
 
 // takeover puts a swarm worker under the member's hold before a session
 // starts in it, as a writable shell tab does: the integrator sends the worker
-// nothing while a person works in its checkout, and only a person releases
-// the hold. Any other run has none to take. The member is admitted first, so
+// nothing while a person works in its checkout. The connection counts as a
+// live holder until it closes. Any other run has none to take. The member is admitted first, so
 // one who has just lost the run cannot leave a hold on it.
 func (c *runSSHConn) takeover(ctx context.Context) error {
 	mission := c.s.cfg.Services.MissionControl
@@ -456,6 +460,7 @@ func (c *runSSHConn) takeover(ctx context.Context) error {
 	if err := c.svc.CheckRunExec(ctx, c.run, c.principal, c.authorize); err != nil {
 		return err
 	}
+	c.s.holdUntil(c.record, c.done)
 	return mission.Takeover(ctx, c.run, c.principal.MemberID)
 }
 

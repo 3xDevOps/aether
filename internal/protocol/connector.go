@@ -22,16 +22,21 @@ type ConnectorCodeResult struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-// Connector is one authorized connector. RedirectHost is the host its
-// OAuth client returns to, such as chatgpt.com; DeviceID is the edge
-// device its code was minted on, empty for none. Times are RFC 3339;
-// LastUsedAt is empty until it first calls a tool.
+// Connector is one authorized connector. ClientID is its OAuth client_id
+// metadata URL; RedirectHost is the host that client returns to, such as
+// chatgpt.com; DeviceID is the edge device its code was minted on, empty
+// for none. Times are RFC 3339; LastUsedAt is empty until it first calls
+// a tool.
 type Connector struct {
 	ID           string `json:"id"`
 	MemberID     string `json:"member_id"`
+	ClientID     string `json:"client_id"`
 	ClientName   string `json:"client_name"`
 	RedirectHost string `json:"redirect_host"`
 	DeviceID     string `json:"device_id,omitempty"`
+	// Resource is the connector URL the client was authorized for: the
+	// universal <edge>/mcp or the server's own <edge>/mcp/<server id>.
+	Resource string `json:"resource"`
 	// Scopes are the scopes the member granted on the consent page: read,
 	// and write and control when checked.
 	Scopes     []string `json:"scopes"`
@@ -39,8 +44,17 @@ type Connector struct {
 	LastUsedAt string   `json:"last_used_at,omitempty"`
 }
 
+// ConnectorListResult is the caller's connectors and how the caller adds
+// one. URL is the connector URL to add, empty while the server has no
+// edge; UniversalURL is the edge's one URL for every server, empty while
+// the edge does not serve it, and differs from URL for a member with no
+// GitHub account bound. SignIn is set when URL's consent page takes the
+// caller's edge sign-in instead of a pairing code.
 type ConnectorListResult struct {
-	Connectors []Connector `json:"connectors"`
+	Connectors   []Connector `json:"connectors"`
+	URL          string      `json:"url,omitempty"`
+	UniversalURL string      `json:"universal_url,omitempty"`
+	SignIn       bool        `json:"sign_in"`
 }
 
 type ConnectorRevokeParams struct {

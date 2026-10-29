@@ -467,6 +467,13 @@ func (f *fakeRuns) AgentModels(_ context.Context, member, account domain.MemberI
 	return protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: harness}}}, nil
 }
 
+func (f *fakeRuns) CachedAgentModels(_ domain.MemberID, harness string) (protocol.AgentModelsResult, bool) {
+	if harness != "claude" && harness != "codex" {
+		return protocol.AgentModelsResult{}, false
+	}
+	return protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: harness}, {ID: "opus"}}}, true
+}
+
 func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {
 	return true, nil
 }
@@ -674,6 +681,7 @@ func (f *fakeRuns) Paused(run domain.RunID) bool {
 }
 
 func (f *fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
+func (f *fakeRuns) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
 
 func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	f.mu.Lock()
@@ -817,6 +825,14 @@ func (f *fakeRuns) EnsureTerminal(ctx context.Context, member domain.MemberID) (
 
 func (f *fakeRuns) EnsureTerminalTab(_ context.Context, member domain.MemberID, tab string, cols, rows uint) error {
 	return f.record(fmt.Sprintf("terminal-tab:%s:%s:%d:%d", member, tab, cols, rows))
+}
+
+func (f *fakeRuns) StartAssistantLogin(_ context.Context, member domain.MemberID, agent string, cols, rows uint) (ptyhost.SessionKey, error) {
+	return ptyhost.AssistantLoginSession(member, agent), f.record(fmt.Sprintf("assistant-login:%s:%s:%d:%d", member, agent, cols, rows))
+}
+
+func (f *fakeRuns) EndAssistantLogin(_ context.Context, member domain.MemberID, agent string) error {
+	return f.record(fmt.Sprintf("assistant-login-end:%s:%s", member, agent))
 }
 
 func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error {

@@ -43,7 +43,9 @@ act without asking by default.
 
 The dashboard remembers the mode you last chose for each agent, in **Set up**,
 in **New run** or in the **Default mode** select on the **Agents** page, and
-**New run** starts on it. For an agent with no remembered mode, **New run** and
+**New run** starts on it. A launch from **New run** or **New swarm** saves the
+agent, mode and model on the server, so every device starts from them
+([Saved launch choices](teams.md#saved-launch-choices)). For an agent with no remembered mode, **New run** and
 **New swarm** start on Enhanced when the agent's Enhanced mode is installed, and on Standard
 otherwise; `aether run`, `aether swarm create` and the connector do so
 whenever no mode is named. **New run** lists Enhanced first and marks it
@@ -57,13 +59,13 @@ Enhanced.
 
 ```sh
 aether run "fix the flaky login test" --agent codex --mode enhanced
-aether run "fix the flaky login test" --agent claude --mode enhanced --model opus
+aether run "fix the flaky login test" --agent claude --mode enhanced --model opus --effort high
 ```
 
 `--mode` takes `standard`, `enhanced` or `background` on `aether run` and
 `aether template save`. On `aether swarm create`, `--mode standard|enhanced`
 sets the integrator, and `--worker codex:enhanced` (or
-`codex:enhanced:<model>`) allows Enhanced workers. The task is the session's
+`codex:enhanced+<effort>:<model>`) allows Enhanced workers. The task is the session's
 first prompt. An agent with no ACP command is refused:
 
 ```text
@@ -77,6 +79,15 @@ reopen, a server restart and a switch to Standard. A model id Aether cannot
 store (whitespace, a leading `-`, or over 128 bytes) shows a **Model not
 recorded** notice.
 
+`--effort` is set after the model, through the agent's `thought_level` session
+option, so the first turn already runs at it. Copilot reads
+`--reasoning-effort` on `copilot --acp` itself, so its Enhanced runs get the
+flag instead. If the agent rejects the effort or advertises no effort option,
+the Session view shows an **Effort not set** error notice, and a Background run
+driven over ACP fails rather than run at the default. An effort you pick later
+from the composer menu becomes the run's recorded effort and survives a reopen
+and a switch to Standard, like the model.
+
 The run's container is the same as a Standard run's, with the same image, home,
 retention, Pause and Close. The agent's ACP server runs beside a login shell,
 and the **Terminal** tab is that shell: use it to log the agent in or inspect
@@ -86,20 +97,21 @@ the checkout ([terminal.md](terminal.md)).
 
 An Enhanced run opens on **Session**: one timeline, newest at the bottom.
 
-- Your messages are bubbles on the right. The agent's answer renders
-  Markdown under them, with the turn's outcome ("Finished in 12s") and
-  **Copy the reply**.
-- Everything the agent did before answering, its thoughts, tool calls, plan,
-  subagents and answered requests, folds into one header per turn ("Read 2
-  files, ran 1 command and edited 1 file"). Click it for one step per call,
-  and click a call for its command, output, diff, or input and result. Files
-  the agent read are chips that open in **Files**.
-- While a turn runs its steps stay open and the header says what the agent is
+- Your messages are bubbles on the right. Everything the agent writes to
+  you renders Markdown under them; its last message is the answer, with the
+  turn's outcome ("Finished in 12s") and **Copy the reply**.
+- The work between two of its messages, its thoughts, tool calls, plan,
+  subagents and answered requests, folds into one header ("Read 2 files, ran
+  1 command and edited 1 file"). Click it for one step per call, and click a
+  call for its command, output, diff, or input and result. Files the agent
+  read are chips that open in **Files**.
+- While the agent works, the newest header stays open and says what it is
   doing, with the seconds since it began. While it waits on you it reads
-  "Waiting for your approval: <command>" or "Waiting for your answer". When
-  the turn ends the steps fold away, unless you opened or closed them yourself
-  or a subagent still runs. When a turn ends with no request, the run says
-  **Waiting for your reply**, and the header's **Reply** focuses the composer.
+  "Waiting for your approval: <command>" or "Waiting for your answer". Once
+  the agent writes again, or the turn ends, the steps fold away, unless you
+  opened or closed them yourself or a subagent still runs. When a turn ends
+  with no request, the run says **Waiting for your reply**, and the header's
+  **Reply** focuses the composer.
 - Notices, a turn that was cancelled or stopped, and messages between agents
   show inline. **Hide from Session**, under **Agent messages** in Details,
   turns agent messages off.
@@ -304,7 +316,8 @@ A turn that fails on the account's usage limit does not park with
 the new account, the log gets a **Continued on `<B>`'s account** notice, and the
 session is prompted to continue. The session must be restorable there, or the run
 parks with `enhanced session failed: <error>`. With no account to move to, the run
-parks with `Usage limit reached on <A>'s account; no fallback has usage left`.
+parks with a `Usage limit reached on <A>'s account; ...` reason that says why
+([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
 
 ## Switching a running agent
 

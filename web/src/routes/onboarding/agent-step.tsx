@@ -17,6 +17,7 @@ import { useAgentList } from '@/routes/agents/use-agents'
 import { actionRow, Step } from '@/routes/onboarding/layout'
 import { GitHubConnect, githubSubStep } from '@/routes/onboarding/github-connect'
 import { useStore } from '@/store'
+import { rememberChoice } from '@/store/launch-defaults'
 import { type Capability, useIsAdmin } from '@/store/hooks'
 
 export const addAgentSubStep = '@custom'
@@ -41,7 +42,6 @@ export function AgentStep({
   const isAdmin = useIsAdmin()
   const { agents, error, reload } = useAgentList(client, true)
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
-  const rememberLaunch = useStore((s) => s.rememberLaunch)
   const loading = useDelayed(agents === null && error === null)
   const canSetUp = caps.hasMethod('agent.install') || caps.hasWS('terminal')
   const settingUp = agents?.find((agent) => agent.name === setup)
@@ -98,7 +98,7 @@ export function AgentStep({
                 returnFocusTo={returnFocusTo}
                 primary={installed ? undefined : agents[0].name}
                 onRun={(agent) => {
-                  rememberLaunch(agent.name, defaultMode(agent, useStore.getState().launchDefaults[agent.name]?.mode))
+                  rememberChoice(agent.name, defaultMode(agent, useStore.getState().launchDefaults[agent.name]?.mode))
                   onNext(false)
                 }}
               />

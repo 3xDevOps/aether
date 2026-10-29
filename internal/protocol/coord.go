@@ -165,21 +165,24 @@ const (
 // set only in the grace state and is RFC3339. RunStatus is the peer run's
 // lifecycle status.
 type CoordPeer struct {
-	RunID           string            `json:"run_id"`
-	MemberID        string            `json:"member_id"`
-	Task            string            `json:"task,omitempty"`
-	TaskBytes       int               `json:"task_bytes,omitempty"`
-	TaskTruncated   bool              `json:"task_truncated,omitempty"`
-	Files           []string          `json:"files,omitempty"`
-	FileTotal       int               `json:"file_total,omitempty"`
-	FilesTruncated  bool              `json:"files_truncated,omitempty"`
-	State           string            `json:"state"`
-	ExpiresAt       string            `json:"expires_at,omitempty"`
-	Activity        string            `json:"activity,omitempty"`
-	Reason          string            `json:"reason,omitempty"`
-	ReasonTruncated bool              `json:"reason_truncated,omitempty"`
-	RunStatus       string            `json:"run_status,omitempty"`
-	LastSent        *CoordSentMessage `json:"last_sent,omitempty"`
+	RunID           string   `json:"run_id"`
+	MemberID        string   `json:"member_id"`
+	Task            string   `json:"task,omitempty"`
+	TaskBytes       int      `json:"task_bytes,omitempty"`
+	TaskTruncated   bool     `json:"task_truncated,omitempty"`
+	Files           []string `json:"files,omitempty"`
+	FileTotal       int      `json:"file_total,omitempty"`
+	FilesTruncated  bool     `json:"files_truncated,omitempty"`
+	State           string   `json:"state"`
+	ExpiresAt       string   `json:"expires_at,omitempty"`
+	Activity        string   `json:"activity,omitempty"`
+	Reason          string   `json:"reason,omitempty"`
+	ReasonTruncated bool     `json:"reason_truncated,omitempty"`
+	// Wait is what Aether verified about a reported wait: the condition's
+	// last checked status, or why it cannot vouch for it.
+	Wait      string            `json:"wait,omitempty"`
+	RunStatus string            `json:"run_status,omitempty"`
+	LastSent  *CoordSentMessage `json:"last_sent,omitempty"`
 }
 
 // CoordSentMessage is the newest message the caller sent one peer and how
@@ -193,9 +196,12 @@ type CoordSentMessage struct {
 }
 
 // CoordSentMessage states. Retired mail left the recipient's inbox
-// unacknowledged, as when its container was released.
+// unacknowledged, as when its container was released. Held mail waits
+// undelivered while a person holds the recipient swarm worker; receipts
+// report it as their recipient_status.
 const (
 	CoordSentStateSent      = "sent"
+	CoordSentStateHeld      = "held"
 	CoordSentStateDelivered = "delivered"
 	CoordSentStateAcked     = "acked"
 	CoordSentStateRetired   = "retired"
@@ -269,7 +275,7 @@ type CoordSendParams struct {
 }
 
 // CoordSendResult is the result of coord.send. RecipientStatus is the
-// recipient run's lifecycle status when the receipt was issued.
+// recipient run's lifecycle status when the receipt was issued, or held.
 type CoordSendResult struct {
 	MessageID       string `json:"message_id"`
 	RecipientStatus string `json:"recipient_status,omitempty"`
@@ -283,7 +289,7 @@ type CoordAskParams struct {
 }
 
 // CoordAskResult is the result of coord.ask. RecipientStatus is the
-// recipient run's lifecycle status when the receipt was issued.
+// recipient run's lifecycle status when the receipt was issued, or held.
 type CoordAskResult struct {
 	QuestionID      string `json:"question_id"`
 	RecipientStatus string `json:"recipient_status,omitempty"`

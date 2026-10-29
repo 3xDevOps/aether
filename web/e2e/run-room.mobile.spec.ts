@@ -123,7 +123,7 @@ test('a phone opens Run details as a sheet without resizing the run PTY', async 
     // A tap cannot displace the same member's desktop session or open a
     // requester-side confirmation. A takeover requires a continuous hold.
     const presence = page.getByRole('group', { name: 'Run presence' })
-    await expect(presence.getByText('You control in another tab')).toBeVisible()
+    await expect(presence.getByText(/^You control in another session since /)).toBeVisible()
     await presence.getByRole('button', { name: 'Take control' }).tap()
     await expect(page.getByRole('alertdialog')).toBeHidden()
     await expect(presence.getByRole('button', { name: 'Take control' })).toBeVisible()
@@ -215,7 +215,7 @@ test('incoming control decisions stay usable over Run details and Captures', asy
   try {
     await requester.goto(`${alice.url}&run=${run.id}`)
     const requestPresence = requester.getByRole('group', { name: 'Run presence' })
-    await expect(requestPresence.getByText(/^You control in another tab/)).toBeVisible()
+    await expect(requestPresence.getByText(/^You control in another session/)).toBeVisible()
     const takeControl = requestPresence.getByRole('button', { name: 'Take control', exact: true })
     const takeover = page.getByRole('alertdialog', { name: 'Run control requested' })
     const deny = takeover.getByRole('button', { name: 'Deny', exact: true })

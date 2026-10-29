@@ -29,12 +29,14 @@ const (
 )
 
 const (
-	AssistantStateSetup        = "setup"
-	AssistantStateNeedsRestart = "needs_restart"
-	AssistantStateIdle         = "idle"
-	AssistantStateStarting     = "starting"
-	AssistantStateRunning      = "running"
-	AssistantStateFailed       = "failed"
+	AssistantStateSetup = "setup"
+	AssistantStateIdle  = "idle"
+	// AssistantStateInstalling is a start installing the agent in the
+	// assistant's container.
+	AssistantStateInstalling = "installing"
+	AssistantStateStarting   = "starting"
+	AssistantStateRunning    = "running"
+	AssistantStateFailed     = "failed"
 )
 
 type AssistantAgent struct {
@@ -100,8 +102,7 @@ type AssistantSettings struct {
 }
 
 type AssistantStartParams struct {
-	Agent              string `json:"agent,omitempty"`
-	RestartEnvironment bool   `json:"restart_environment,omitempty"`
+	Agent string `json:"agent,omitempty"`
 }
 
 type AssistantPromptParams struct {

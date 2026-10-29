@@ -94,8 +94,15 @@ type Config struct {
 	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
+	// AssistantIssuer is where assistant sign-ins are checked; the zero
+	// value is the vendors' own sign-in services.
+	AssistantIssuer scheduler.AssistantIssuer
 	// Usage overrides the vendor quota reader, primarily for tests.
 	Usage fallback.QuotaReader
+	// WaitConditions reads the conditions agents' waiting reports name;
+	// nil leaves every reported wait unverified. Primarily for tests until
+	// the condition store is wired.
+	WaitConditions scheduler.WaitConditions
 	// IntegrationAdmission is the server-controlled policy seam for
 	// consequential candidate mutations. It is never populated from a
 	// request field.
@@ -118,6 +125,9 @@ type Config struct {
 	// PolicyApprovedDevices. The server enforces it and announces it to
 	// the edge for display only.
 	EdgeAccess edgeproto.AccessPolicy
+	// EdgeReviewer lets a connector authorized by the edge's reviewer
+	// account act as the member an admin bound it to.
+	EdgeReviewer bool
 	// CoordinationDisabled turns the conflict coordination kill switch off.
 	// The zero value keeps coordination enabled, which is the shipped
 	// default.
@@ -380,25 +390,26 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		egressProxy = s.egress
 	}
 	if s.sched, err = scheduler.New(scheduler.Config{
-		Store:         s.db,
-		Runtime:       s.rt,
-		Bus:           s.bus,
-		Egress:        egressProxy,
-		EventSeq:      s.log.LastSeq,
-		Git:           lazyGit{s.git},
-		PTY:           s.pty,
-		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),
-		DataDir:       cfg.DataDir,
-		Homes:         homes,
-		Signing:       s.signing,
-		Memory:        mem,
-		RemoveAll:     removeAgentFiles,
-		Secrets:       secrets,
-		ReposDir:      filepath.Join(cfg.DataDir, "repos"),
-		Profiles:      prof,
-		StandardImage: cfg.StandardImage,
-		BrowserImage:  cfg.BrowserImage,
-		Control:       s.control,
+		Store:          s.db,
+		Runtime:        s.rt,
+		Bus:            s.bus,
+		WaitConditions: cfg.WaitConditions,
+		Egress:         egressProxy,
+		EventSeq:       s.log.LastSeq,
+		Git:            lazyGit{s.git},
+		PTY:            s.pty,
+		StateDir:       filepath.Join(cfg.DataDir, "scheduler"),
+		DataDir:        cfg.DataDir,
+		Homes:          homes,
+		Signing:        s.signing,
+		Memory:         mem,
+		RemoveAll:      removeAgentFiles,
+		Secrets:        secrets,
+		ReposDir:       filepath.Join(cfg.DataDir, "repos"),
+		Profiles:       prof,
+		StandardImage:  cfg.StandardImage,
+		BrowserImage:   cfg.BrowserImage,
+		Control:        s.control,
 		// What this build ships with, so the scheduler can tell a member
 		// whether a server update would move their environment image.
 		DefaultStandardImage: DefaultStandardImage,
@@ -415,6 +426,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		RunPidsLimit:         cfg.RunPidsLimit,
 		ServerBinary:         cfg.ServerBinary,
 		AssistantDir:         filepath.Join(cfg.DataDir, "assistant"),
+		AssistantIssuer:      cfg.AssistantIssuer,
 
 		HarnessUpdateDisabled: cfg.HarnessUpdateDisabled,
 	}); err != nil {
@@ -452,6 +464,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Addr:              cfg.Addr,
 		HostKeyPath:       HostKeyPath(cfg.DataDir),
 		Store:             s.db,
+		RunLimits:         scheduler.ResolveRunLimits(domain.RunLimits{CPUs: cfg.RunCPULimit, MemoryBytes: cfg.RunMemoryBytes, Pids: cfg.RunPidsLimit}),
 		Bus:               s.bus,
 		Git:               lazyGit{s.git},
 		PTY:               s.pty,
@@ -474,13 +487,14 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	s.assistant = assistant.New(assistant.Config{
 		Dir:    filepath.Join(cfg.DataDir, "assistant"),
 		Store:  s.db,
-		Homes:  homes,
 		Runs:   s.sched,
-		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
+		Host:   s.sched,
+		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
 		Bus:    s.bus,
 	})
 	sshCfg.Services.Assistant = s.assistant
 	sshCfg.EdgeAccess = cfg.EdgeAccess
+	sshCfg.EdgeReviewer = cfg.EdgeReviewer
 	sshCfg.Services.Usage = cfg.Usage
 	if sshCfg.Services.Usage == nil {
 		sshCfg.Services.Usage = quota.New(homes)

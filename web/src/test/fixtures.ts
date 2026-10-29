@@ -531,6 +531,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
     childSettings: vi.fn<Api['childSettings']>(async () => ({ enabled: false, fallback: true, shared_when_missing: false, configured: false, nudge: 'show' })),
+    launchDefaultsGet: vi.fn<Api['launchDefaultsGet']>(async () => ({ revision: 0, defaults: {} })),
+    launchDefaultsSet: vi.fn<Api['launchDefaultsSet']>(async (params) => ({ revision: params.revision + 1, defaults: params.defaults ?? {} })),
     runChildren: vi.fn<Api['runChildren']>(async (runID) => ({
       root_run_id: runID,
       children: [],
@@ -752,6 +754,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       content, truncated: false, binary: false,
       size: new TextEncoder().encode(content).length, revision: 'saved', writable: true,
     })),
+    filesUpload: vi.fn(async () => ({})),
     filesDiff: vi.fn(async () => ({ patch: '', truncated: false })),
     disk: vi.fn(async () => ({
       used_bytes: 512 * 1024 * 1024,
@@ -767,6 +770,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       methods: ['*'],
       ws: ['events', 'attach', 'terminal'],
     })),
+    assistantLoginSocket: vi.fn((agent: string) => `ws://localhost/ws/terminal?assistant_login=${agent}`),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
     assistantSocket: vi.fn(() => 'ws://localhost/ws/assistant'),
@@ -885,7 +889,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     pushActive: vi.fn(async () => ({})),
     connectorCode: vi.fn(async () => ({ url: 'https://edge.example/mcp/srv', code: 'ABCD-EFGH', expires_at: '2026-10-25T12:10:00Z' })),
     connectorList: vi.fn(async () => ({ connectors: [] })),
-    connectorRevoke: vi.fn(async () => ({ connector: { id: '', member_id: '', client_name: '', redirect_host: '', scopes: [], created_at: '' } })),
+    connectorRevoke: vi.fn(async () => ({ connector: { id: '', member_id: '', client_id: '', client_name: '', redirect_host: '', scopes: [], created_at: '' } })),
     slackStatus: vi.fn(async () => ({ configured: false, connected: false })),
     slackLink: vi.fn(async () => ({ code: 'K7Q2-M9XD', expires_at: '2026-10-25T12:10:00Z' })),
     slackUnlink: vi.fn(async () => ({ link: { user_id: 'U123', team_id: 'T123', linked_at: '2026-10-25T12:00:00Z' } })),
@@ -993,6 +997,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     localUpdateStatus: vi.fn(async () => ({ phase: 'idle' as const })),
     serverUpdateStatus: vi.fn(async () => serverUpdateStatus()),
+    serverRunLimits: vi.fn<Api['serverRunLimits']>(async () => ({ limits: {}, default: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 }, effective: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 } })),
     sysboxStatus: vi.fn(async () => ({ state: 'on' as const })),
     sysboxInstall: vi.fn(async () => ({ state: 'installing' as const })),
     serverUpdate: vi.fn(async () => ({

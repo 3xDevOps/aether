@@ -55,8 +55,8 @@ A live run carries a state that says what it is doing. The dashboard and
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
-| `waiting` | Turn ended (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
-| `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, or an Enhanced turn that waits for a reply. |
+| `waiting` | Turn ended, or Stale wait for a stale wait (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
+| `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-aether-can-check). |
 | `finished` | Ready for review | An interactive run reported `success`. |
 | `failed` | Failed | The run reported `failure`, or its turn failed. |
 | `disconnected` | Disconnected | The Enhanced session failed or ended while the run is open. |
@@ -64,18 +64,57 @@ A live run carries a state that says what it is doing. The dashboard and
 When several apply, the first in this order wins: disconnected, needs-you,
 working, failed, finished, waiting-agents, waiting-ci, waiting-tools,
 answered, waiting. An answer never goes stale.
-A wait the agent reported goes stale after three times `--stall-threshold`
-(30 minutes by default) with no activity, unless the run still holds
-background tasks or, as a swarm integrator, has a live worker attempt or
-unread worker mail. Its reason becomes `no update for <duration>: <summary>`.
+A wait the agent reported with no condition goes stale after three times
+`--stall-threshold` (30 minutes by default) with no activity, unless the run
+still holds background tasks or, as a swarm integrator, has a live worker
+attempt or unread worker mail. Its reason becomes `no update for <duration>: <summary>`.
 A CI or process wait keeps its state; an agents wait shows `waiting`, or
 `waiting-agents` while a worker is live again. A wait goes stale once; the
 next turn starts it over. A wait Aether infers from a swarm or background
 tasks lasts exactly as long as they do.
 
+### Waits Aether can check
+
+A waiting report can name conditions Aether checks for the agent, such as
+a pull request's checks finishing, so it wakes the agent when one resolves.
+While the run shows such a wait, `aether runs <run-id>` prints a `wait` line, the run record carries
+`wait {kind, detail, verified_at, error}`, and the state is judged by the
+evidence:
+
+| `wait.kind` | When | What you see | Needs you |
+| --- | --- | --- | --- |
+| `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way. | The state, and `<condition>: <status> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
+| `source_unknown` | A pending condition was not read within twice its poll interval, or its reads fail. | `Waiting for CI (status unknown)` and `<condition>: status unknown (last read 12m ago): <error>`. The last status is not shown as current. | No. Aether keeps retrying. |
+| `system_fault` | A condition errored or expired, for example the pull request is gone, and the agent is being told. | `Waiting for CI (wait fault)` and the condition's error. | No. The agent decides what to do next. |
+| `system_fault` | A condition resolved, errored or expired, and its wake was not delivered within 5 minutes. | `Needs you`, reason `wait broken: <condition> resolved, but the agent was not woken`, and the delivery error. | Yes. The agent will not move on its own. Send it a message. |
+| `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`, and the last read error. | Yes. |
+| `system_fault` | Every read of the run's conditions failed for an hour, counted from the first failure or from the wait's report if later. A read that succeeds starts the hour over, and so does a server restart. Before that the wait is `source_unknown`. | `Needs you`, reason `wait broken: cannot read this run's wait conditions for over 1h, so the agent will not be woken`, and the read error. | Yes. |
+| `unverified` | The agent named no condition, or only ones that left pending before its current turn or whose wake was delivered. Once delivered, including a condition that resolved inside the agent's own report, the run waits on its agent, not on the condition. | The state, as described above. It goes stale like a wait with no condition. | No. |
+
+The dashboard words the same evidence as "Waiting on <condition>: <status>
+· checked 2m ago", "Waiting on <condition>: status unknown since 01:10 —
+<error>" or "Wait fault: <condition> — <error>"
+([dashboard-frontend.md](dashboard-frontend.md#run-state)).
+
+A broken wait is the only one that needs you, because only then can nothing
+but a person move the run. While another of its conditions is still pending
+or its wake is on its way, or the run still holds background tasks or, as a
+swarm integrator, has a live worker attempt, a child run or unread worker
+mail, those can wake it: the run keeps its waiting state, marked `(wait fault)`, and needs you
+only once they end. Its reason holds no time or source status, and names
+broken conditions in a fixed order, so it is announced once. A swarm worker's broken wait is not announced to you: its
+integrator sees it in peer status and from `aether wait` (exit 5). A paused
+run is judged again when it resumes.
+
 Each `run.status` event for a live run carries a `cause` naming what chose
 its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
-`wait-expired`, `workers`, `tasks-held`, `human`, or `disconnect`. A live
+`wait-expired`, `wait-fault` (a broken wait), `workers`, `tasks-held`,
+`human`, or `disconnect`. While the run shows a reported wait the event
+carries `wait` too. A wait whose source was read again at least a minute
+later is published as a same-status event with `reread: true`;
+`aether timeline` and the dashboard's activity feed leave it out unless
+filtered to `run.status`, `changes.list` leaves it out, and the
+dashboard's lanes and trace bars never draw it as a state change. A live
 run's record carries its latest `cause` too. `aether timeline <run-id>`
 prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by
@@ -102,7 +141,7 @@ Any new turn clears the review, and a later success report asks again.
 
 One rule decides whether a run needs a person. The **Needs you** list,
 `aether runs --needs-you`, `aether wait` (exit 3, except that a success ready
-for review exits 0 and a failure exits 1), the Insights count of runs that need
+for review exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of runs that need
 you, `attention.list`
 ([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), push
 notifications and the assistant's notices all use it. The run status
@@ -117,6 +156,7 @@ waiting on agents, CI or a process and a reported success.
 | `failed`, result seen | No | No. |
 | Review ready, live or `completed` | Yes | Once per success: `Agent reported success, review the result`, at normal urgency. |
 | Review marked **Not yet** or complete | No | No. |
+| A broken wait (`wait-fault`) | Yes | Once: `Wait broken, send a message to continue: <condition> ...`. |
 | `working` or any waiting state, including `turn cancelled` | No | No. |
 | Any state while the run is paused | No | Checked again on resume. |
 | A swarm worker | Only for its `blocked` report | Its other requests go to its integrator. |
@@ -360,10 +400,13 @@ Background worker parks), and the reason says why:
 
 | Reason | Meaning |
 | --- | --- |
-| `Usage limit reached on <owner>'s account; no fallback has usage left` | No account shared with the launcher has usage. Wait for the limit to reset, or ask a teammate to share theirs. |
+| `Usage limit reached on <owner>'s account; no other account is shared to fall back on` | No other account is shared with the launcher, or with the member whose home the run mounts, or listed in its `--fallback` order. Ask a teammate to share theirs, or wait for the limit to reset. |
+| `Usage limit reached on <owner>'s account; no fallback has usage left` | Every other account was read as exhausted or was already used by this run: the launcher's own, or a shared one whose login the server confirmed in the run's container. Wait for the limit to reset, or ask a teammate to share theirs. |
+| `Usage limit reached on <owner>'s account; no account that may have usage left can run <agent> here` | Accounts with usage left, or whose usage could not be read, cannot launch the agent: their owner is not signed in to it, the agent is not installed for them, or the share no longer covers the run's home. |
+| `Usage limit reached on <owner>'s account; Aether cannot read <agent>'s usage, so its runs do not move to another account` | Only `claude` and `codex` runs move ([harnesses.md](harnesses.md#usage-limit-signals)). Wait for the limit to reset, or relaunch on another account. |
 | `Usage limit reached on <owner>'s account; fallback is off for this run` | The run was launched with `--no-fallback`. |
 | `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>` | The run cannot move: for example the agent reported no session to resume, it is a member's own agent definition, or the owner may no longer launch. Nothing was changed. |
-| `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` | The move started and failed. The run fails. |
+| `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` | The move started and failed. The run fails. `start container: runtime: <path> in the container is inode <n>, not <login> in <B's home> ...` means the container would have signed in with another login than B's; the rest of the error says whether Docker or the container runtime left B's login out. |
 | `Usage limit reached on <A>'s account; the run is on <B>'s account and its session could not be restored: <error>` | The run moved, but the Enhanced session did not come back. Send a message to start fresh. |
 
 A paused run, or one being closed or killed, is not moved. A move survives a

@@ -24,6 +24,7 @@ export function toRecord(snapshot: Run, previous?: RunRecord): RunRecord {
         reason: previous.reason,
         state: previous.state,
         cause: previous.cause,
+        wait: previous.wait,
         status_seq: previous.status_seq,
         outcome_unseen: previous.outcome_unseen,
         finish_unopened: previous.finish_unopened,
@@ -121,6 +122,7 @@ export interface RunsSlice {
   applyAgentEvent: (runID: string, payload: AgentPayload, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
   applyRunModel: (runID: string, model: string) => void
+  applyRunEffort: (runID: string, effort: string) => void
   applyUnackedMessages: (runID: string, unread: Pick<Run, 'unacked_messages' | 'oldest_unacked_at'>) => void
   applyRunProtected: (runID: string, isProtected: boolean) => void
   applyRunController: (runID: string, memberID: string, lastMemberID?: string) => void
@@ -193,7 +195,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         deletingRuns: pruneRuns(s.deletingRuns, other),
       }
     }),
-  applyRunStatus: (runID, { to, reason, state, cause, status_seq, outcome_unseen = false, finish_unopened = false, review = '', review_changed_at }, time) =>
+  applyRunStatus: (runID, { to, reason, state, cause, wait, status_seq, outcome_unseen = false, finish_unopened = false, review = '', review_changed_at }, time) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current || status_seq <= current.status_seq) return {}
@@ -206,6 +208,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         reason,
         state,
         cause,
+        wait,
         status_seq,
         stateChangedAt: timed ? time : current.stateChangedAt,
         stateChangedAtEstimated: !timed && current.stateChangedAtEstimated,
@@ -287,6 +290,12 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       const current = s.runs[runID]
       if (!current || current.model === model) return {}
       return { runs: { ...s.runs, [runID]: { ...current, model } } }
+    }),
+  applyRunEffort: (runID, effort) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || current.effort === effort) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, effort } } }
     }),
   applyUnackedMessages: (runID, { unacked_messages, oldest_unacked_at }) =>
     set((s) => {

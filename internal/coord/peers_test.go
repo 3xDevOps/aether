@@ -180,6 +180,43 @@ func TestSendReceiptCarriesRecipientStatus(t *testing.T) {
 	}
 }
 
+type heldWorkerMail struct {
+	*store.DB
+	held domain.RunID
+}
+
+func (m heldWorkerMail) GetMissionWorkerAssignment(_ context.Context, run domain.RunID) (*domain.MissionWorkerAssignment, error) {
+	if run != m.held {
+		return nil, store.ErrNotFound
+	}
+	return &domain.MissionWorkerAssignment{WorkerRunID: run, Active: true}, nil
+}
+
+// Mail to a swarm worker a person holds waits for them to let go, and the
+// sender is told so.
+func TestReceiptsAndStatusShowMailHeldForAPerson(t *testing.T) {
+	h := newHarness(t, 2)
+	ctx := context.Background()
+	a, b := h.run(0), h.run(1)
+	h.svc.cfg.Mail = heldWorkerMail{DB: h.db, held: b}
+	sent, err := h.svc.Send(ctx, a, sendParams(b, "ping"))
+	if err != nil || sent.RecipientStatus != protocol.CoordSentStateHeld {
+		t.Fatalf("send receipt = %+v (err %v), want recipient_status held", sent, err)
+	}
+	asked, err := h.svc.Ask(ctx, a, protocol.CoordAskParams{ToRunID: string(b), Body: "ready?", IdempotencyKey: "ask-held"})
+	if err != nil || asked.RecipientStatus != protocol.CoordSentStateHeld {
+		t.Fatalf("ask receipt = %+v (err %v), want recipient_status held", asked, err)
+	}
+	st, err := h.svc.Status(ctx, a)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	i := slices.IndexFunc(st.Peers, func(p protocol.CoordPeer) bool { return p.RunID == string(b) })
+	if i < 0 || st.Peers[i].LastSent == nil || st.Peers[i].LastSent.State != protocol.CoordSentStateHeld {
+		t.Fatalf("status peers = %+v, want last_sent to the held worker held", st.Peers)
+	}
+}
+
 // TestStatusShowsWhatHappenedToTheLastMessageSent follows the newest message
 // a run sent each peer from sent through delivered to acked, back to sent
 // when a message stamped earlier commits later, and to retired for a peer

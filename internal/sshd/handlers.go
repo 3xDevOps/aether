@@ -137,7 +137,7 @@ func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, para
 }
 
 func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	p, perr := decodeParams[protocol.RunLaunchParams](params)
+	p, perr := decodeLaunchParams[protocol.RunLaunchParams](params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -149,6 +149,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		return nil, invalidParams("invalid mode: " + p.Mode)
 	}
 	if err := domain.ValidModel(p.Model); err != nil {
+		return nil, invalidParams(err.Error())
+	}
+	if err := domain.ValidEffort(p.Effort); err != nil {
 		return nil, invalidParams(err.Error())
 	}
 	// A taskless launch opens the agent's TUI with no prompt; headless has no
@@ -166,6 +169,11 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Children != "" && p.Children != domain.ChildrenOn && p.Children != domain.ChildrenOff {
 		return nil, invalidParams(`children must be "on", "off" or empty`)
 	}
+	if p.Limits != nil {
+		if err := scheduler.ValidateRunBudgets(p.Limits.CPUs, p.Limits.MemoryBytes, p.Limits.Pids); err != nil {
+			return nil, invalidParams(err.Error())
+		}
+	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
 	// Cancelling a launch mid-provisioning fails the run it is creating, so
@@ -173,6 +181,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancel()
 	defer context.AfterFunc(s.authCtx(), cancel)()
+	var skipped []protocol.SkippedAccount
 	var childrenErr *protocol.Error
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
 		return s.launchRun(ctx, member, p, mode, policy, func(id domain.RunID) {
@@ -184,7 +193,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 			if p.Children != "" {
 				childrenErr = s.setRunChildren(ctx, member, id, p.Children)
 			}
-		})
+		}, &skipped)
 	})
 	if perr != nil {
 		return nil, perr
@@ -198,10 +207,11 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		}
 		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; run %s was stopped, so launch again", childrenErr.Message, run.ID)}
 	}
-	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
+	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed, SkippedFallbackAccounts: skipped}, nil
 }
 
-func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback, created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback,
+	created func(domain.RunID), skipped *[]protocol.SkippedAccount) (*domain.Run, *protocol.Error) {
 	measured, err := fallback.Measure(ctx, s.cfg.Store, s.cfg.Services.Usage, member, p.AccountMemberID, p.Harness, policy)
 	if err != nil {
 		return nil, rpcError(err)
@@ -228,14 +238,20 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	if excluded != nil {
 		slog.Warn("sshd: fallback accounts left out of a launch", "member", member, "error", excluded)
 	}
+	*skipped = fallback.Skipped(excluded)
+	var limits domain.RunLimits
+	if p.Limits != nil {
+		limits = domain.RunLimits{CPUs: p.Limits.CPUs, MemoryBytes: p.Limits.MemoryBytes, Pids: p.Limits.Pids}
+	}
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
-		CachedBase: p.CachedBase, Model: p.Model, RequestedAccount: requested, Fallback: policy,
+		Limits:     limits,
+		CachedBase: p.CachedBase, Model: p.Model, Effort: p.Effort, RequestedAccount: requested, Fallback: policy,
 		Admitted: unlockAuthorization, Created: created,
 		ExtraWorkspaces: workspaceIDs(p.ExtraWorkspaceIDs),
 	})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {
-			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.launch: launch options (a cached base or a model) are not supported by this server"}
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.launch: launch options (a cached base, a model or an effort) are not supported by this server"}
 		}
 		return nil, rpcError(err)
 	}
@@ -305,6 +321,7 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 	if s.cfg.Runs != nil {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
 		out.Cause = string(s.cfg.Runs.Cause(run.ID, run.Activity))
+		out.Wait = s.cfg.Runs.Wait(run.ID, run.Activity)
 		if l, ok := s.cfg.Runs.Liveness(run.ID); ok {
 			out.Liveness = protocol.RunLivenessFromDomain(l)
 		}

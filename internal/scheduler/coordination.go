@@ -254,15 +254,11 @@ func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtim
 			release = nil
 		}
 	}()
-	if spec.CPULimit == 0 {
-		spec.CPULimit = s.cfg.RunCPULimit
+	limits, err := s.runLimits(ctx, domain.RunLimits{CPUs: spec.CPULimit, MemoryBytes: spec.MemoryLimitBytes, Pids: spec.PidsLimit})
+	if err != nil {
+		return release, err
 	}
-	if spec.MemoryLimitBytes == 0 {
-		spec.MemoryLimitBytes = s.cfg.RunMemoryBytes
-	}
-	if spec.PidsLimit == 0 {
-		spec.PidsLimit = s.cfg.RunPidsLimit
-	}
+	spec.CPULimit, spec.MemoryLimitBytes, spec.PidsLimit = limits.CPUs, limits.MemoryBytes, limits.Pids
 	c := s.coordinationSeam()
 	if c == nil {
 		return release, errors.New("scheduler: verification coordination is unavailable")
@@ -619,15 +615,6 @@ func (s *Scheduler) terminalCoordinationMount(member domain.MemberID) ([]runtime
 	mounts := []runtime.Mount{{
 		HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true,
 	}}
-	if s.cfg.AssistantDir != "" {
-		sock := AssistantSocketDir(s.cfg.AssistantDir, member)
-		if err := os.MkdirAll(sock, 0o755); err != nil {
-			return nil, fmt.Errorf("create assistant socket directory: %w", err)
-		}
-		mounts = append(mounts,
-			runtime.Mount{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
-			runtime.Mount{HostPath: sock, ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true})
-	}
 	if err := checkCoordinationMounts(mounts); err != nil {
 		return nil, err
 	}

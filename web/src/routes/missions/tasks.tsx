@@ -81,30 +81,35 @@ function TaskDetails({ task, detail, showProposalBlocker }: { task: MissionTask;
   )
 }
 
-function ControlHold({ attempt, worker, canRelease, client, onReleased }: {
-  attempt: MissionAttempt
-  worker: string
-  canRelease: boolean
-  client: Api
-  onReleased: () => void
-}) {
-  const holder = useStore((s) => (attempt.takeover_member_id ? memberName(s, attempt.takeover_member_id) : undefined))
+export function useReleaseHold(client: Api, attempt: MissionAttempt | undefined, refresh: () => void) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const release = async () => {
-    if (attempt.takeover_generation == null || busy) return
+    if (attempt?.takeover_generation == null || busy) return
     setBusy(true)
     setError(null)
     try {
       await client.missionWorkerRelease({ run_id: attempt.run_id, expected_takeover_generation: attempt.takeover_generation })
       toast.success('Human control released')
-      onReleased()
     } catch (err) {
       setError(message(err))
     } finally {
       setBusy(false)
+      refresh()
     }
   }
+  return { busy, error, release }
+}
+
+function ControlHold({ attempt, worker, canRelease, client, onChanged }: {
+  attempt: MissionAttempt
+  worker: string
+  canRelease: boolean
+  client: Api
+  onChanged: () => void
+}) {
+  const holder = useStore((s) => (attempt.takeover_member_id ? memberName(s, attempt.takeover_member_id) : undefined))
+  const { busy, error, release } = useReleaseHold(client, attempt, onChanged)
   return (
     <Callout
       tone="needs-you"
@@ -235,7 +240,7 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
     <section aria-label="Tasks" className="flex flex-col gap-1">
       <SectionLabel as="h2">Tasks</SectionLabel>
       {held.map(({ attempt, worker }) => (
-        <ControlHold key={attempt.id} attempt={attempt} worker={worker} canRelease={canRelease} client={client} onReleased={onChanged} />
+        <ControlHold key={attempt.id} attempt={attempt} worker={worker} canRelease={canRelease} client={client} onChanged={onChanged} />
       ))}
       <WorkflowTree root={tree} label="Swarm workflow" onSelect={select} extra={extra} />
       {detail.tasks.length === 0 && (

@@ -50,6 +50,9 @@ type Config struct {
 	// host names a server may send a browser to from the universal
 	// connector paths; for tests that serve their own client.
 	ConnectorClientHosts []string
+	// Reviewer, when set, is the reviewer account an app directory's
+	// reviewer signs in with at PathReviewerSignin. Nil serves 404 there.
+	Reviewer *ReviewerAccount
 }
 
 // OAuthApp is a GitHub OAuth app. AuthURL, TokenURL and APIURL, the base
@@ -133,6 +136,12 @@ type Service struct {
 	// per address and server.
 	chooseLimit *limiter[netip.Prefix]
 	tokenLimit  *limiter[serverBlock]
+
+	reviewer     *ReviewerAccount
+	reviewerLock reviewerLock
+	// reviewerChecks holds a token for each reviewer password check under
+	// way, reviewerMaxChecks at most.
+	reviewerChecks chan struct{}
 }
 
 // New opens the edge's store and signing key in cfg.DataDir, creating both
@@ -177,6 +186,8 @@ func New(cfg Config) (*Service, error) {
 		tokenLimit:        newLimiter[serverBlock](60, time.Second, now),
 		openAIChallenge:   cfg.OpenAIChallenge,
 		clientHosts:       cfg.ConnectorClientHosts,
+		reviewer:          cfg.Reviewer,
+		reviewerChecks:    make(chan struct{}, reviewerMaxChecks),
 	}
 	s.tokenLimit.scale = func(k serverBlock) int { return edgeproto.RateLimitScale(k.block) }
 	if s.clientHosts == nil {
@@ -259,6 +270,10 @@ func (s *Service) Handler() http.Handler {
 	pages.HandleFunc("GET /account", s.signedIn(s.accountPage))
 	pages.HandleFunc("POST /account/delete", s.signedIn(s.accountDelete))
 	pages.HandleFunc("GET "+edgeproto.PathMCPChoose, s.signedIn(s.mcpChoose))
+	if s.reviewer != nil {
+		pages.HandleFunc("GET "+PathReviewerSignin, s.reviewerPage)
+		pages.HandleFunc("POST "+PathReviewerSignin, s.reviewerSignin)
+	}
 
 	api := http.NewServeMux()
 	api.HandleFunc("POST "+edgeproto.PathDeviceStart, s.api(s.apiDeviceStart))

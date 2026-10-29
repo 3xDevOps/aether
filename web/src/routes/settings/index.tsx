@@ -16,6 +16,7 @@ import { ChildRunsSection } from '@/routes/settings/children'
 import { ConnectorsSection } from '@/routes/settings/connectors'
 import { GeneralSections } from '@/routes/settings/general'
 import { GitHubSection } from '@/routes/settings/github'
+import { LaunchDefaultsSection } from '@/routes/settings/launch'
 import { SettingsNav } from '@/routes/settings/nav'
 import { NotificationSections } from '@/routes/settings/notifications'
 import { type CategoryID, categoryOf, visibleCategories, visibleEntries } from '@/routes/settings/registry'
@@ -29,6 +30,7 @@ import { useCapability, useIsAdmin } from '@/store/hooks'
 
 const bodies: Record<CategoryID, (client: Api) => ReactNode> = {
   general: () => <GeneralSections />,
+  launch: (client) => <LaunchDefaultsSection client={client} />,
   connections: (client) => <><ConnectorsSection client={client} /><GitHubSection client={client} /></>,
   notifications: (client) => <NotificationSections client={client} />,
   watches: (client) => <WatchesSection client={client} />,

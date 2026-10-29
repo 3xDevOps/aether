@@ -1,10 +1,12 @@
+import type { ReactNode } from 'react'
 import { ChevronDown, ChevronUp, GitBranch } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import type { Member, Workspace } from '@/lib/types'
+import { limitsText, type LimitsDraft, parseLimits, RunLimitsFields } from '@/components/launch/run-limits'
+import type { Member, RunLimits, Workspace } from '@/lib/types'
 
 /** `order` stays null, the server's automatic order, until the reader reorders or unticks an account. */
 export type Fallback = { off: boolean; order: string[] | null; excluded: string[] }
@@ -97,6 +99,7 @@ export function AccountOptions({
   fallback,
   onFallback,
   swarm = false,
+  save,
 }: {
   label: string
   accounts: Member[]
@@ -106,6 +109,7 @@ export function AccountOptions({
   fallback: Fallback
   onFallback: (fallback: Fallback) => void
   swarm?: boolean
+  save?: ReactNode
 }) {
   // A swarm's list is every worker's policy too; the server skips each run's current account.
   const skip = swarm ? '' : account
@@ -138,6 +142,7 @@ export function AccountOptions({
             : 'A teammate who shares their agent account appears here.'}
         </p>
         <FallbackList accounts={accounts} account={account} skip={skip} accountName={accountName} fallback={fallback} onChange={onFallback} />
+        {save}
       </CollapsibleContent>
     </Collapsible>
   )
@@ -192,5 +197,31 @@ export function WorkspaceLine({ workspace }: { workspace: Workspace | undefined 
         'Pick a workspace in the sidebar first.'
       )}
     </p>
+  )
+}
+
+/** The run's own limits, collapsed until opened; an empty field follows the server's limit. */
+export function RunLimitsOption({ value, onChange, effective, disabled }: {
+  value: LimitsDraft
+  onChange: (value: LimitsDraft) => void
+  /** What a run with no override gets, unknown until read. */
+  effective: RunLimits | undefined
+  disabled?: boolean
+}) {
+  const parsed = parseLimits(value)
+  const summary = parsed.limits ? limitsText(parsed.limits) : ''
+  return (
+    <Collapsible defaultOpen={summary !== ''}>
+      <CollapsibleTrigger>
+        <span className="font-medium">Resource limits</span>
+        {summary && <span className="min-w-0 truncate text-muted">· {summary}</span>}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="flex flex-col gap-2 pt-2 pl-5">
+        <RunLimitsFields idPrefix="launch-limit" value={value} onChange={onChange} placeholders={effective} disabled={disabled} />
+        <p className={parsed.error ? 'text-ui-sm text-state-failed' : 'text-ui-sm text-muted'} role={parsed.error ? 'alert' : undefined}>
+          {parsed.error ?? 'Caps this run only. An empty field uses the server limit, shown in grey.'}
+        </p>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }

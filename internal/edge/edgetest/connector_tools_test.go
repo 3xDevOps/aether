@@ -157,8 +157,8 @@ func TestConnectorToolsThroughTheEdge(t *testing.T) {
 	writes := connectAs(t, bctl, client, base, "write")
 	session := connectAs(t, bctl, client, base, "write", "control")
 	nRead, nWrite, nAll := len(toolNames(t, reads)), len(toolNames(t, writes)), len(toolNames(t, session))
-	if nRead != 15 || nWrite != 27 || nAll != 37 || slices.Contains(toolNames(t, writes), "aether_stop_run") {
-		t.Fatalf("tools per scope: read %d, read and write %d, all %d; want 15, 27, 37", nRead, nWrite, nAll)
+	if nRead != 17 || nWrite != 29 || nAll != 39 || slices.Contains(toolNames(t, writes), "aether_stop_run") {
+		t.Fatalf("tools per scope: read %d, read and write %d, all %d; want 17, 29, 39", nRead, nWrite, nAll)
 	}
 
 	launch := map[string]any{"workspace_id": string(ws.ID), "harness": "claude", "task": "fix the flaky login test", "idempotency_key": "launch-1"}

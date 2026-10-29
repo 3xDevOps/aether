@@ -27,8 +27,8 @@ credentials out of the report.
 | [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
-| [Workspace secrets](#workspace-secrets) | Secrets and workspace files are hidden in settings and never returned by the API. Secrets are masked in setup script output; files stay out of git and out of **Files**. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
-| [Assistant](#the-assistant) | Launching, messaging and stopping runs and saving the environment wait for your click. | Its shell runs any command in your environment without asking. Auto-approve removes the click. |
+| [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
+| [Assistant](#the-assistant) | Its own container, home and sign-in, which your runs and account share recipients cannot see or change. Launching, messaging and stopping runs and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Candidate delivery](#candidate-verification-and-delivery) | Permission to push is checked again at delivery. A mirrored target gets a proposal branch, never an upstream push. | Verification runs with the member's home credentials. An agent can still push on its own outside Aether. |
@@ -122,7 +122,10 @@ the launch dialog's **Account** picker, or with `aether run --account
 account.
 
 Their run uses their own image and home plus your agent login file, mounted
-read-write because a token refresh rewrites it. For `claude` that is
+read-write because a token refresh rewrites it. The server checks the mounted
+file is yours before their agent starts. Their own login is mounted in place in
+all their containers, so a refresh in another of their runs cannot replace the
+file yours is mounted over and detach it. For `claude` that is
 `~/.claude/.credentials.json`;
 [harnesses.md](harnesses.md#per-agent-setup) gives each agent's path. When
 they have no installation of the agent in their own `~/.local/bin`, they also
@@ -266,29 +269,41 @@ someone who can run code in the workspace.
   `***`. An encoded or split value is not recognized, and nothing masks what
   the agent prints later.
 
-Workspace files ([environments.md](environments.md#files)) are treated the
-same way:
-
-- Their content is stored in `<data-dir>/workspace-secrets/<workspace-id>.files.json`,
-  plain text, mode `0600`, and deleted with the workspace. The API returns
-  only each path and size.
-- Every new run gets them in its checkout, mode `0600`, readable by every
-  process in the run. Anyone who can launch or message a run in the
-  workspace can make it print one.
-- `.git/info/exclude` keeps them out of the run's commits, **Changes** and
-  published branch. A launch whose repository un-ignores one fails before
-  writing any. An agent that edits that file or runs `git add -f` can still
-  commit one.
-- **Files** refuses to open them in a run checkout, so a member who can only
-  view a run cannot read them there. Setup script output does not mask a
-  file's content.
-
 ## The assistant
 
-The [assistant](assistant.md) is an agent that runs in your environment
-container, driven from the dashboard. Its Aether tools act as you, with your
-permissions, and it always uses your own agent account.
+The [assistant](assistant.md) is an agent that runs in a container of its own
+per member, driven from the dashboard. Its Aether tools act as you, with your
+permissions, and it uses the account you signed it in to.
 
+- Its home is `<data>/assistant/<member>/home` and its instructions are
+  read-only. No run, environment or other member's container mounts either,
+  and only the assistant's container mounts its tool socket. It mounts nothing
+  from any member's home, so a run that changes your `CLAUDE.md`, `~/.claude`
+  settings and hooks, `~/.codex/config.toml`, `.bashrc`, `~/.local/bin` or
+  agent login does not change the assistant.
+- Its sign-in is its own, made in its container and kept in its home. Your
+  runs, and the runs of members you share your account with, cannot read or
+  replace it. A login file carries more than tokens: Claude Code also reads a
+  gateway URL that receives every prompt, MCP tokens and plugin secrets from
+  `.credentials.json`.
+- The one remaining writer of that home is the assistant's own agent. Each
+  start therefore runs a new container, deletes everything in the home but the
+  sign-in and the session files, rewrites the sign-in file to the keys a
+  sign-in writes, and refuses the start if it removed any. Then the server
+  refreshes the sign-in with the vendor itself and asks the vendor which
+  account it belongs to, and refuses the start unless it is the account you
+  signed in with. The account is recorded at the first start of either
+  agent after you sign in, before any agent session runs, so neither agent's
+  session can rewrite the other's sign-in first. A sign-in the agent swapped
+  for another account's, in any field, is caught at the next start.
+- What a steered agent can still do, within the one session it runs in:
+  change what that session reads again (Claude Code rereads
+  `.credentials.json` and `~/.claude/settings.json`) and so point the rest of
+  the session at another endpoint or account, and write text into the session
+  files, which the same conversation reads back when it resumes, until
+  **New conversation**.
+- The assistant does not start when the server cannot reach the vendor's
+  sign-in service.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a run and saving your environment wait for you to
   approve a card. An unanswered card fails after 10 minutes.
@@ -296,17 +311,14 @@ permissions, and it always uses your own agent account.
   skips the card for your own runs. Messaging or stopping another member's run
   always asks. The assistant cannot turn auto-approve on or approve a card
   itself.
-- Its shell and file tools never ask. It can read your whole home, agent
-  logins included, and run any command in your environment.
+- Its shell and file tools never ask, inside its own container.
 - Transcripts it reads can carry injected instructions. With auto-approve off,
-  a steered assistant still needs your click. With it on, any code in your
-  environment can launch, message and stop your runs too: a package install
-  hook, or a `.bashrc` line or `~/.claude` hook one of your runs planted in
-  your shared home. Saving the environment then bakes that code into the image
-  new runs start from.
+  a steered assistant still needs your click. With it on, a steered assistant
+  can launch, message and stop your runs.
 
-Do not sign the `aether` CLI in inside your environment: that gives the
-assistant, and every run that mounts your home, a way to approve its own cards.
+Never sign the `aether` CLI in inside a run or your environment terminal. Its
+client key would sit in your home, where every run can read it and act as you,
+including approving the assistant's cards.
 
 ## Remote development and browser isolation
 
@@ -430,6 +442,15 @@ mounts. Uploading to a run needs permission to steer it and writes into its
 launcher's home. The files stay until removed or the member is deleted, every
 container that mounts the home can read them, and saved images leave them out.
 
+### Run file uploads
+
+**Upload files…** in a run's **Files** needs permission to steer the run and
+writes into its checkout. An uploaded file is part of the run's changes, and
+so of what it commits and publishes, unless the repository ignores it. Files
+lists ignored files too, and anyone who can view the run can read any file in
+its checkout, a `.env` included. Keep a value viewers must not see as a
+workspace secret and out of files.
+
 ## Agent configuration and Files
 
 `aether config push` uploads agent configuration from your computer
@@ -543,16 +564,16 @@ there is no terminal, file, settings or git-writing tool.
   on, so a method that needs an approved device refuses a connector minted on
   a registered or pending one, under either `edge-access` policy. Audit
   records name the connector, such as `ChatGPT connector con-7k2m9q4xbd`.
-- Scopes: the member picks them on the consent page, not the client. `read`
-  is always granted, and every member can read every run on the server, so a
+- Scopes: the member picks them on the consent page, not the client. `read` is
+  always granted, and every member can read every run on the server, so a
   connector can read all of them. `write` (launch runs and swarms, message,
   pause and resume runs, answer questions, mark runs reviewed) is checked by
-  default; `control` (decide permission requests, stop and close
-  runs, cancel swarms) is not, because text an agent wrote could talk the
-  assistant into approving or ending work. A connector serves only
-  its scopes' tools, and the server checks every call's method against its
-  scopes, a permission decision against `control`, and refuses every method
-  outside its table ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
+  default; `control` (decide permission requests, stop and close runs, cancel
+  swarms) is not, because text an agent wrote could talk the assistant into
+  approving or ending work. A connector serves only its scopes' tools, and the
+  server checks every call's method against its scopes, a permission decision
+  against `control`, and refuses every method outside its table
+  ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
   then one every 2 seconds.
 - A connector minted over a member SSH key or a tailnet connection has no
   device: revoking a device does not cut it off. `aether mcp revoke` does.
@@ -599,6 +620,17 @@ there is no terminal, file, settings or git-writing tool.
   person approved: a method that needs an approved device refuses it, and it
   cannot mint a pairing code or a Slack link code that would outlive these
   cut-offs.
+- An edge given `--reviewer-account-file` offers one password sign-in, the
+  [reviewer account](edge.md#reviewer-account), for an app directory's
+  review. Anyone holding its password authorizes a connector as the member it
+  is bound to, so a server takes it only with `edge-reviewer` on, under
+  `edge-access account`, and only for a member who is no admin; it gets no
+  edge session. Ten wrong passwords in a row for its login lock it for 15
+  minutes, which also lets anyone who knows the login keep it locked, and
+  the `429` confirms a guessed login, so keep the login as private as the
+  password. A new password stops only new sign-ins; unlinking the login
+  deletes its connectors, and binding it again does not revive them. Bind it to a member of a server kept for the review: every
+  member reads every workspace.
 - Under `edge-access account` the consent page has no code, so an
   authorization link someone started in their own ChatGPT or Claude, opened
   by a member signed in at the edge, is one **Allow** away from connecting
@@ -626,10 +658,10 @@ there is no terminal, file, settings or git-writing tool.
 
 ## Slack
 
-The [Slack bot](slack.md) acts as the member who linked a Slack account, the
-way a connector does: with that member's role checks, judged by the device
-`aether slack link` ran on, and with audit records naming
-`Slack connector <Slack user id>`. It holds all three [scopes](connectors.md#scopes), since deciding a
+The [Slack bot](slack.md) acts as the member who linked a Slack account, the way
+a connector does: with that member's role checks, judged by the device `aether
+slack link` ran on, and with audit records naming `Slack connector <Slack user
+id>`. It holds all three [scopes](connectors.md#scopes), since deciding a
 permission request takes `control`, and calls only the methods its buttons and
 replies need.
 

@@ -162,7 +162,8 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
   const held = entry
   return () => {
     if (--held.users > 0) return
-    held.stream.close()
+    const control = store.getState().acpSessions[runID]?.control
+    held.stream.close(control?.has_control ? control.control_generation : undefined)
     held.stopWatch()
     clearTimeout(held.retryTimer)
     owned.delete(runID)

@@ -536,8 +536,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   line under it says the assistant acts without asking, with **Change in
   Settings**.
 - **Body:** by `assistant.status` state. `setup` lists each agent with its
-  reason and opens `AgentSetup` in place; `needs_restart` is a callout with a
-  button that calls `assistant.start {restart_environment: true}`; `failed`
+  reason, and **Sign in** opens `AssistantSignIn` in place: a terminal on
+  `/ws/terminal?assistant_login=<agent>`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
   the run Session's `TimelineRow` and `useFlatRows`, with the Session's
@@ -675,8 +675,8 @@ conversation bumps; `assistantOpen` and `assistantWidth` persist.
 (`useIdentityKnown` in `store/hooks.ts`; `useAgentList` waits for it too, so
 neither read is sent under no identity and repeated), and on each open, then
 connects unless the
-state is `setup` or `needs_restart`. It stays connected with the panel closed
-only while the state is `running` or `starting`, or a confirmation or a
+state is `setup`. It stays connected with the panel closed
+only while the state is `running`, `installing` or `starting`, or a confirmation or a
 harness prompt is pending. After that, `status` frames carry the state and the
 whole confirmation set, so the UI makes no further status calls. A truncated
 item in the transcript is read with `assistant.item`. Each pending
@@ -1210,7 +1210,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
-  `run.title`, `run.model`, `run.protected` and `run.archived` follow the
+  `run.title`, `run.model`, `run.effort`, `run.protected` and `run.archived` follow the
   same fetch-first rule on a run the client has never seen; `run.controller`
   skips an unknown run, whose snapshot carries the holder. `run.account`
   likewise skips an unknown run, and on a known one replaces
@@ -1760,6 +1760,33 @@ run is live and shows the state the server chose, so not for a paused run,
 a swarm worker's question shown as "Waiting for the integrator", or a
 request shown as "Waiting for *name*".
 
+A run that shows a reported wait carries `wait`, what Aether verified about
+the conditions the agent named ([Waits Aether can
+check](failure-handling.md#waits-aether-can-check)). `waitLine` words it,
+and `stateWords` puts that in place of the agent's summary, even one that
+reads "Waiting for ...", which moves to the tooltip as "The agent reported:
+*summary*":
+
+| `wait.kind` | Detail | Dot |
+| --- | --- | --- |
+| `condition` | "Waiting on *detail* · checked 2m ago", aging with the half-minute clock | the state's |
+| `source_unknown` | "Waiting on *detail* since 01:10 — *error*": the local time of the last successful read and the source's error verbatim, never the last status as current | dashed clock, neutral |
+| `system_fault`, still waiting | "Wait fault: *detail* — *error*" | clock, failed colour |
+| `system_fault`, Needs you | the Needs you reason, then " — *error*" | amber ring |
+| `unverified` | the agent's summary; the tooltip adds "Not verified: the wait names no condition Aether can check." | the state's |
+
+`toneOf` picks the dot, and the tooltip gives the exact time of the last
+read. Only the server's `needs-you` state lists a broken wait in Needs you;
+a wait's kind never does. A phone's run header adds the wait's line, wrapped,
+under the header, since its state line truncates; for a broken wait that
+line is the Needs you reason with the error. A swarm card, which shows the
+swarm's progress instead, keeps the state tooltip while it shows a wait.
+Rereads (`reread: true` events) update `wait` in the run store but never
+count as a state change in the lanes or trace bars. A reported wait that went
+stale (`cause` `wait-expired`) reads "Reported waiting on *summary*, no
+update for 30m", and `stateName` labels it **Stale wait** rather than Turn
+ended.
+
 The run header's state line shows the words beyond the label the Workflow
 chip under it already shows, a CI wait's age first ("42m · PR 12 checks";
 a stale one's reason already says "No update for 30m"), since the header
@@ -1776,7 +1803,8 @@ running".
 | Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, an integrator with live workers or unread worker mail, or a `waiting --for agents` report | Working |
 | Waiting for CI | clock | `waiting-ci`: a `waiting --for ci` report | Working |
 | Waiting for process | clock | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
-| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason, or a waiting report went stale. Asks nothing | Working |
+| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason. Asks nothing | Working |
+| Stale wait | dashed ring | `waiting` with `cause` `wait-expired`: a waiting report went stale. Asks nothing | Working |
 | Waiting | dashed ring | a run whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
@@ -1852,7 +1880,8 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
-Needs you row does.
+Needs you row does. A control hold waits since the attempt's
+`takeover_since`.
 
 A device waiting for approval is not a run, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device
@@ -2253,13 +2282,13 @@ caller. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Login found" or "No login found" for a
 shipped agent (`login_found` checks the launch home for login files, not for a
 working session; a server that does not report it shows nothing). An agent
-that is not installed stays listed, disabled, with **Set up**, which closes
-the dialog and opens Agents. The last row is `custom`, the escape hatch that
+that is not installed is not listed. **Install more agents...** below the
+list closes the dialog and opens Agents. The last row is `custom`, the escape hatch that
 `agent.list` never returns and that only launches where the deployment pinned
 an agent definition with `--agent-definitions`. With nothing installed,
 nothing is preselected, Launch stays disabled, and the form says "No agent is
 installed in your environment." with a **Set up an agent** button in place of
-the per-row links. The list is read each time the dialog opens; a failed read
+**Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
 **Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
@@ -2300,15 +2329,59 @@ including for agents with no discovery. A saved model missing from the list
 stays selected. A model that is not a single argument is
 refused by `run.launch` and shown under "Launch failed".
 
-The form remembers a mode and a model per agent in the `launchDefaults`
-slice (`{mode, model, at}` keyed by agent name), persisted per member in
-`savedLaunchDefaults`; defaults saved before persist version 10 had no
-owner and are dropped. It
-preselects the launchable agent launched most recently, then the agent of
-the newest run, then the first launchable one, and starts in that agent's
-remembered mode, else Enhanced, with its remembered model; an Enhanced or
-remembered mode the agent cannot use (no Enhanced support, or its adapter
-not installed) shows as Standard.
+**Effort**, under Model, shows only for an agent whose `agent.list` entry has
+`effort_levels`. It is a select (`EffortPicker` in
+`src/components/launch/effort-picker.tsx`) of **Agent default**, which sends
+no `effort`, then those levels in the agent's order
+([per-agent levels](harnesses.md#choose-an-effort)). It starts at Agent
+default and is not remembered; switching to an agent without the chosen level
+resets it.
+
+Where the gateway offers `launch.defaults.get`, the form starts from the
+member's [saved launch choices](teams.md#saved-launch-choices) on the
+server (`store/launch-defaults.ts`), so every browser and device opens on
+the same ones. Each open reads them again, since another device or the
+assistant may have saved since. The first pick waits for that read and for
+the saved account to be applied, then
+preselects the saved agent if it can launch, else the agent of the newest
+run, else the first launchable one, in that agent's saved mode, else
+Enhanced, with its saved model. A successful launch or swarm saves only the
+agent, mode and model through `launch.defaults.set` with the revision it
+read; when another device saved since, the refusal carries the current
+choices, and the form applies its change to those and saves once more. A
+failed save shows "Launch choices not saved: " and the server's error. The
+saved account is preselected when `account.list` still lists it and `get`
+does not mark it invalid, and the saved fallback policy fills the fallback
+list, keeping only listed accounts. A launch never saves the account or the
+fallback; **Save as my default** under **Options** does, and says "Saved
+for every device." until the account or fallback changes again. On the Run tab it saves the fallback list as the run sends
+it, without the selected account. **Run**, **Default mode** and **Set up** on
+Agents, and the onboarding wizard, save their agent and mode the same way
+(`rememberChoice`); **Default mode** leaves the preselected agent alone.
+Agents reads the saved choices too, and its **Default mode** and **Run** use
+the saved mode, else this browser's. Saves
+run one at a time, each from the last one's answer; a save after the
+signed-in member changes is refused, and a failed save reads the choices
+again. A read's answer is dropped when another read or a save started or
+stored its answer after the read began. A **Saved defaults not used** note lists each saved
+account, fallback member, agent, and the chosen agent's mode or model that
+`get` reports in `invalid`, with the server's reason.
+
+Where the gateway does not offer `launch.defaults.get`, the form uses this
+browser's copy instead: the `launchDefaults` slice (`{mode, model, at}`
+keyed by agent name), persisted per member in `savedLaunchDefaults`;
+defaults saved before persist version 10 had no owner and are dropped. It
+preselects the launchable agent launched most recently, then as above. When
+the read fails, the form says "Your saved launch choices could not be read."
+with the server's error and **Try again**, and starts from the copy last
+read from the server, else this browser's; a retry that reads them presets
+the agent, account and fallback from them again. Every launch also updates
+this copy; nothing copies it to the server. On a server that offers
+`launch.defaults.get` but has nothing saved for the member, the form ignores
+this browser's copy and uses the server's defaults, so a new device and an
+old one open on the same choices. The form starts over when a different
+member signs in while it is open. An Enhanced or remembered mode the agent cannot
+use (no Enhanced support, or its adapter not installed) shows as Standard.
 
 **Options** appears when `account.list` returns more than the caller and
 holds the **Account** select: the caller first as "(you)", then accounts
@@ -2448,8 +2521,8 @@ agent's last terminal or Enhanced session title,
 line, else the task's first line cut at 120 characters, with a lock for a
 protected run), then a one-line state line: the run branch with a copy
 icon (click copies the name), the agent's glyph and mode ("Standard"; the
-tooltip adds the `agent.list` display name and `run.model`, "Claude Code ·
-Standard · opus"), "On `<name>`'s account (fallback)" when the run carries
+tooltip adds the `agent.list` display name, `run.model` and `run.effort`,
+"Claude Code · Standard · opus · high"), "On `<name>`'s account (fallback)" when the run carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
 a `run.account` event updates it live when the run moves), the reason, and
 the owner. The state's dot and label are the Workflow chip's, on the row
@@ -2509,9 +2582,9 @@ copyable commands for whoever has not set the host up. For a swarm worker
 (`mission_role === 'worker'`) a `needs-you` callout above the buttons,
 **Connecting takes control of this swarm worker**, says that a shell,
 command or file transfer over SSH stops the integrator from steering it
-until control is released on the swarm page. The item is not offered for a
-run whose id is not one lowercase host label (`runHost`), the only kind the
-links and the command are built from. The dashboard calls
+until you disconnect or control is released on the swarm page. The item is
+not offered for a run whose id is not one lowercase host label (`runHost`),
+the only kind the links and the command are built from. The dashboard calls
 nothing: the server authorizes when the editor connects
 ([terminal.md](terminal.md#ssh-and-editors)). The desktop app lets exactly
 those three link shapes out of its window.
@@ -2579,7 +2652,12 @@ with their member name and `Avatar`, protection and the existing
 `ControlButton`: take a free lease, release it, or hold for three seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
-beside **You control** or **You control in another tab**.
+beside **You control** or **You control in another session since <time>**.
+That text appears when `run.room.status` names your member with a
+`control_session_id` other than this tab's: another tab, device or
+`aether attach`, held since the lease's `acquired_at`. On a swarm worker the
+strip then adds **Release**, which calls `mission.worker.release` with the
+attempt's `takeover_generation`, so you can free a hold from any tab.
 **Multiplayer** still opens Details for shared notes and run facts.
 The strip is one row whenever the controls fit beside a 6rem roster, which
 covers desktop windows. Only when they cannot, as on a phone with
@@ -2598,24 +2676,29 @@ do not cancel a held gesture. Explicit control choices and revocations stop
 automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
 
-`SessionView` reuses `TerminalControlBorder` along the top of the Enhanced
-timeline, under the frame toolbar. The component is one SVG strip, 5.6rem tall,
-over the top of its parent: a single top-edge path, drawn from right to left
-so the light pours out of the control button, rendered as a blurred wide
-glow, a tight halo and a rim. All three inherit the SVG's animated
-`stroke-dashoffset` and colour, which is what the acquisition, release, hold
-and takeover animations drive. Strength is the SVG's own opacity, a separate
-animation: 70% while the light moves or a hold is under way, then half once
-acquisition settles, breathing on an infinite 8-second loop. Animating the
-`<svg>` element's opacity, not its blurred strokes, lets the compositor run
-the loop without repainting. During a hold the teal copy takes a dash
-pattern that leaves out the span the red copy covers. Its appearance follows
-the acknowledged ACP lease, not the unused agent terminal's history or
-connection state. Voluntary release retracts it; takeover feedback requires
-an explicit revocation matching the held session and generation.
-Disconnects, permission loss and other fencing hide it immediately. The
-shared component supplies acquisition, holder progress, takeover loss and
-reduced-motion behavior.
+`MultiplayerControls` renders `ControlMatrix` as the strip's background,
+and `TerminalPane` renders it behind the agent terminal's toolbar. The
+component is a neutral dot layer, one `radial-gradient` tile, under a
+colored copy of the same dots. The bars give each group of text and
+buttons `.control-matrix-clear`, a 90% `--chrome` fill with a blurred
+shadow of the same colour that hides the dots under the group and fades
+them back in around it. A `:has(> .control-matrix)` rule turns
+`text-muted` on the bar to `--text`. The copy is clipped from the left by
+`--control-reach`, a registered `@property` number (1 empty, 0 full), so it
+is revealed from the right edge, where the control button sits. The
+acquisition, release and takeover animations drive `--control-reach` and
+`color` on the colored layer. Its opacity is a separate animation: 70%
+while the dots move or a hold is under way, then half once acquisition
+settles, breathing on an infinite 8-second loop. During a hold
+`--control-hold` moves a 4rem gradient mask that fades the teal out and a
+red copy in. In
+Enhanced runs its appearance follows the acknowledged ACP lease, not the
+unused agent terminal's history or connection state, and it shows on every
+view that shows the strip. Voluntary release retracts it; takeover
+feedback requires an explicit revocation matching the held session and
+generation. Disconnects, permission loss and other fencing return it to
+neutral immediately. The shared component supplies acquisition, holder
+progress, takeover loss and reduced-motion behavior.
 
 ### Session view
 
@@ -2703,9 +2786,13 @@ for the lease once it has shown Session and the stream has acked, when the
 terminal would (the owner, not a phone, not a swarm worker). A refused
 automatic request shows no error: it retries with backoff while the holder is
 the viewer or nobody, and again when `run.controller` reports the lease free.
-Leaving the page releases a held lease, so a reload takes it straight back;
-closing the stream resets the run's stream and lease state. Frames go through
-`batchNotifications`, so a burst re-renders once per frame.
+Leaving the run page, by navigating elsewhere in the dashboard or by closing
+or reloading the tab, releases a held lease before the stream closes, so a
+reload takes it straight back and a swarm worker's hold does not outlive the
+page. Navigating away waits up to 2 s for the release's answer, because the
+server commits it on the stream's context. Closing the stream resets the
+run's stream and lease state. Frames go through `batchNotifications`, so a
+burst re-renders once per frame.
 
 An ack or history page's `truncated_before` displays the expired-prefix
 boundary. The page's `oldest_seq` stops older-page requests at the actual
@@ -2748,18 +2835,23 @@ block re-renders, code highlighted with the Lezer languages), `live`,
 `finished` and `agent-message`.
 
 `turnRows` splits a turn into segments at each person's message, wake and
-new agent session (`store/session-steps.ts`). In a segment, every step up to
-the last piece of work (a thought, tool call, plan, subagent launch or
-answered request) joins one `steps` block, and the prose after it is the
-answer. A segment without work, such as `ping` and `pong`, has no block. The
+new agent session (`store/session-steps.ts`). In a segment, the agent's
+prose stays in the conversation as `assistant` rows, and the work between
+two pieces of prose (thoughts, tool calls, plans, subagent launches and
+answered requests) joins one `steps` block. The prose after the last block
+is the answer. The `aether-internal report` call (or `aether_report` tool)
+that ends an Aether turn joins the block before the prose it follows, so a
+reply written before reporting stays the answer. A segment without work,
+such as `ping` and `pong`, has no block. The
 block's header names the work ("Read 12 files, ran 5 commands and edited 3
 files") with up to three tool icons, failures, plan progress and tools still
 running. While the turn is open and the stream live, the header carries the
 live state instead: the state dot, "Running npm test", "Waiting on 2
 subagents", "Waiting for your approval: <command>" (or "Waiting for your
-answer") in amber, else "Working", with the seconds since the segment began.
-A turn with no block yet keeps the `live` row. Steps sit on a rail: thoughts
-(a two-line preview that expands to the whole thought), narration, lookups
+answer") in amber, else "Working", with the seconds since the block's work
+began: the segment's start for its first block.
+A turn whose newest row is not a block keeps the `live` row. Steps sit on a
+rail: thoughts (a two-line preview that expands to the whole thought), lookups
 (consecutive reads, searches and fetches as chips; a chip for a file in the
 checkout opens Files,
 a page chip a new tab; four, then **+N more**), tool calls (the command, the
@@ -2774,8 +2866,9 @@ selection holds every line); a body cut to fit the wire is read whole with `run.
 A block over 40 steps shows its first 5 and last 30 around **Show N more
 steps**, which then reads **Show fewer steps**.
 
-A block is open while its turn is, or while a subagent in it runs, and shuts
-once the turn ends; the viewer's own choice for a block or step
+A block is open while it is the newest row of an open turn, or while a
+subagent in it runs, and shuts once the agent writes after it or the turn
+ends; the viewer's own choice for a block or step
 (`expandedRows`, kept until reload) wins. Those defaults, and how much of a
 growing block folds, change only while the view follows the newest row and
 focus is outside the block, so nothing moves under a reader scrolled up or a
@@ -3044,7 +3137,10 @@ controller approval. `useImplicitControl`
 (`agent-terminal.ts`) lets the owner of a run nobody controls act in one step
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10
-seconds). Pending requests dock above it
+seconds). On a swarm worker it never takes the lease: Send goes without it,
+which the server delivers at once while nobody controls the run, and a
+request's options wait for **Take control to answer**, so no action sets the
+worker's hold. Pending requests dock above it
 one at a time, oldest first, with "1 of N" and **Previous request** / **Next
 request** in the card header (`routes/run/request-dock.tsx`). The dock holds
 the card on screen by request id, so arrivals and other answers never swap
@@ -3443,12 +3539,13 @@ and the Environment keep native xterm scrollback.
   terminals and other members start as mirrors. The server grants write only
   when no controller exists; a second tab cannot become a second writer. A
   mirror shows who controls ("Nobody controls", "<name> controls", "You
-  control in another tab", with "(last known)" while the status is stale)
-  and **Take control**. Live, acknowledged local control reads "You control"
-  with an accent-filled **Release**, plus the control light along the
-  terminal's top edge while input is writable ([styles.md](styles.md)). It
-  never changes layout, and is hidden during replay or history reading and
-  after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
+  control in another session since <time>", with "(last known)" while the
+  status is stale) and **Take control**. Live, acknowledged local control
+  reads "You control" with an accent-filled **Release**, plus teal control
+  dots behind the terminal toolbar while input is writable
+  ([styles.md](styles.md)). They
+  never change layout, and return to neutral during replay or history
+  reading and after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
   ended runs show no control and replay their recording, or say **This run
   has ended and left no recorded terminal to replay.** Whether a member may
   write is the server's answer: `-32001` downgrades the attach to a mirror
@@ -3710,14 +3807,18 @@ both what it renders and the overlap set the conflict chips read.
   run merged upstream work: it requests `?from=<fork_tree>`, so it also
   counts that upstream work. Under **Changes since a checkpoint** every
   recorded `run.diff` snapshot is a row, newest first, labelled with its local
-  time (with the date when not today) and its age. Its description is the
+  time (with the date when not today) and its age. Its description is the run
+  at that checkpoint, not the size of what choosing it shows: "After" and the
   commit subject when `head` moved since the next older checkpoint, otherwise
-  the file count and `+a −d` totals, or the count alone for a `truncated`
-  snapshot. Choosing a row requests `?from=<tree>`: everything that changed
-  since that checkpoint up to now, which grows as the run goes on and
-  re-fetches on each new snapshot like the whole diff. The newest 50
-  checkpoints load from `workspace.timeline` (`types: ["run.diff"]`,
-  `newest: true`) when the view first opens for a run on this page, live
+  "Run had N files · +a −d", the run's totals then (the count alone for a
+  `truncated` snapshot). The newest row says "Latest checkpoint" in place of
+  the totals, after the subject when it has one, since choosing it shows only
+  edits not yet snapshotted. Choosing a row requests `?from=<tree>`:
+  everything that changed since that checkpoint up to now, which grows as the
+  run goes on and re-fetches on each new snapshot like the whole diff. The
+  newest 50 checkpoints load from `workspace.timeline`
+  (`types: ["run.diff"]`, `newest: true`) when the view first opens for a run
+  on this page, live
   snapshots join them, one row per tree, and **Show older checkpoints** pages
   back with `before_seq` while the timeline says `more`. A checkpoint keeps
   only its time, tree, head, subject and counts, never its file list. A
@@ -3794,7 +3895,8 @@ both what it renders and the overlap set the conflict chips read.
   sent again is delivered once, whatever went to the run in between.
   `useAgentSend` (`agent-send.ts`) wraps it for the review bar and the pull
   request panel: it passes the lease and, for the owner of a run nobody
-  controls, takes it first (`useImplicitControl`); anyone else's message
+  controls, takes it first (`useImplicitControl`), except on a swarm worker,
+  where it sends without the lease; anyone else's message
   waits 45 seconds for the controller, and both surfaces say so. **Send to
   agent** is disabled, with the composer's own sentence beside it, for a
   finished, starting or switching run, a Background run, a protected run and
@@ -4552,11 +4654,11 @@ remembered mode, shared with Run and saved when the swarm is created, else
 Enhanced when the agent can use it and Standard otherwise; Background disabled with the reason
 `mission.create` gives: it exits after one turn; Standard disabled with
 `agent.list`'s `swarm_standard_refusal` for an agent Aether cannot wake; with no
-mode left, **Create swarm** is disabled), **Integrator model**
-(the same field as Run), **Agents for workers** (a checkbox row per
+mode left, **Create swarm** is disabled), **Integrator model** and
+**Integrator effort** (the same fields as Run), **Agents for workers** (a checkbox row per
 installed agent and account, defaulting to the integrator account's first
-launchable agent; a ticked row has the same model picker, Agent default
-until changed) and **Worker mode**, which defaults to Enhanced and disables a
+launchable agent; a ticked row has the same model picker and, for an agent
+with levels, the effort select, both Agent default until changed) and **Worker mode**, which defaults to Enhanced and disables a
 mode no ticked worker can use. Each worker choice is sent in the worker mode
 when its agent can use it and otherwise in the first of Enhanced, Standard and
 Background it can; the row says so ("Runs Background: no idle wake in
@@ -4566,10 +4668,10 @@ the same reasons as the Run picker, and a ticked worker whose agent stops
 being launchable when the lists are read again is dropped.
 
 `mission.create` refuses an integrator whose exact account, `harness`, mode
-and `model` are not one of `execution_choices`, so the integrator's own
-choice is always sent; a worker choice with the same tuple is not sent twice,
-two choices that differ only in model are both sent, and the list is sorted
-by account, harness, mode and model, so the same set is always the same
+, `model` and `effort` are not one of `execution_choices`, so the
+integrator's own choice is always sent; a worker choice with the same tuple
+is not sent twice, two choices that differ only in model or effort are both
+sent, and the list is sorted by account, harness, mode, model and effort, so the same set is always the same
 request. **Create swarm** starts the integrator, not the workers, toasts
 `Swarm created` and navigates to `missions/<server-issued-id>`; a refusal,
 such as `mission: coordination is unavailable`, appears in the dialog verbatim
@@ -4737,8 +4839,9 @@ shows its error and is asked again on the next swarm refetch. Finished
 swarms show none of this; the server refuses a replacement there.
 
 **Replace integrator…** opens a dialog with the distinct accounts and
-agent-and-model pairs from `execution_choices` (each listed as
-"<agent> · <model>" when it has a model), sends the choice's model,
+agent, model and effort choices from `execution_choices` (each listed as
+"<agent> · <model> · <effort>", leaving out an empty model or effort), sends
+the choice's model and effort,
 sends the **Mode** control's mode (Enhanced where the agent can use it, with the
 integrator's refusals, judged from the selected account's `agent.list`; a failed
 list shows its error with **Retry** and no mode), pins
@@ -5199,9 +5302,8 @@ tree and editor are a view of each run, scoped to that run's checkout: see
 Folder chevrons turn as a folder opens, and the empty editor pane is an
 `EmptyState` with a folder-tree icon. The tree lists each workspace's `base: <branch>` first, then its live runs
 under **Run checkouts**, then one **Home** row; both start folded, so a
-run's tree or the home is read only when it is opened. For an admin, each
-workspace ends with a muted **Add .env files for runs** that opens its
-**Environment** section. Folder expansion is kept per view. The tree sits beside the
+run's tree or the home is read only when it is opened. Folder expansion is
+kept per view. The tree sits beside the
 editor from `md` up. On a phone it is the first view; once a file is open the
 editor fills the screen and **Browse** opens the tree as a side sheet.
 CodeMirror provides syntax highlighting for JSON/JSONC, JavaScript/TypeScript,
@@ -5257,6 +5359,18 @@ on the Files route. The pane is measured: below 640px, with the Browser
 docked beside it for instance, it shows the tree until a file is open and
 then the editor with **Browse**, as a phone does.
 
+A live run's checkout root, here and under **Run checkouts** on the Files
+route, is a `RunCheckoutTree` (`tree.tsx`). When the gateway serves
+`files.upload`, its row has an **Upload files…** icon button, and files and
+folders dropped on its tree upload into the root of the repository it shows,
+folders kept (`droppedUploads`). `useUpload` sends one `files.upload` per
+file, so a path the checkout has
+fails as **README.md already exists in this run; open it to edit**; there is
+no **Replace**. `UploadStatus` under that tree shows progress and failures as
+on Home, and `invalidateRun` rereads the run's listings afterwards. The
+upload state lives in the tree: closing the phone sheet or folding **Run
+checkouts** hides an upload's progress, not the upload.
+
 `openInFiles(runID, { path, line, column })` (`open.ts`) is the one way in
 from outside the tree. It navigates to the run route with `view: 'files'`,
 `file` and, when named, `line` and `column`; those three are not written to
@@ -5301,9 +5415,10 @@ a whole checkout.
 **Home** is one root row with a trailing `~`, shown when the gateway serves
 `home.tree`. Under it is the member's whole persistent home, the directory
 that is `$HOME` in their Environment and runs, read one folder at a time
-through `home.tree` with nothing filtered. Only this tree changes files;
-base and run-checkout trees are read and edited as before. The methods and
-the server's rules are in
+through `home.tree` with nothing filtered. Only this tree creates, renames,
+moves and deletes entries; base and run-checkout trees are read and edited,
+and a live run's takes uploads ([Files in a run](#files-in-a-run)). The
+methods and the server's rules are in
 [local-gateway.md](local-gateway.md#files-and-member-configuration).
 
 | File | Holds |
@@ -5313,7 +5428,7 @@ the server's rules are in
 | `home-menu.tsx` | `HomeMenu`, a row's actions |
 | `home-name.tsx` | `NameRow`, the field a name is typed into |
 | `home-dialogs.tsx` | The delete, move and replace confirmations |
-| `home-upload.ts` | `useHomeUpload` and `droppedUploads` |
+| `home-upload.ts` | `useUpload` and `droppedUploads`, shared with run checkouts |
 
 `HomeFiles` wraps the whole route, above `FilesPane`: a phone remounts the
 tree in its side sheet, and an upload in progress or an open dialog must
@@ -5360,7 +5475,7 @@ that folder, a file row its parent, and the **Home** row or the empty pane
 below the tree is `~`. The folder that would receive them is outlined, and
 a folded one opens after 600ms. `droppedUploads` walks dropped folders with
 `webkitGetAsEntry`, so their structure is kept; empty folders are not
-created. `useHomeUpload` sends one `home.upload` per file, in order, first
+created. `useUpload` sends one `home.upload` per file, in order, first
 without `overwrite`, while `HomeStatus` shows **Uploading 3 of 12 · name**
 pinned to the bottom of the tree pane. A file over 64 MiB fails without being
 read. Files the server already has are collected and asked about once at the
@@ -5415,7 +5530,7 @@ selects the next.
 
 The detail shows the name, the mode, **Edit** and a menu with **Schedule…**,
 **Duplicate** and **Delete**; a meta line with the agent, the model or
-"agent default", the schedule (`Scheduled <cron> UTC, next in 3 hours`) or
+"agent default", the effort when set, the schedule (`Scheduled <cron> UTC, next in 3 hours`) or
 when it was saved, and the advisory budget; then the task. Each `{{name}}`
 placeholder (the server's pattern in `internal/templates/render.go`) is an
 inline field at its first occurrence, prefilled with the template's default;
@@ -5438,7 +5553,8 @@ the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
 `<name> copy`. The form's agent select lists the agents from `agent.list` by
 display name and keeps the template's current agent as an extra option when
-the list omits it. Its **Parameters** group lists each `{{name}}` the task
+the list omits it. An **Effort** field, as in New run, shows for an agent with
+`effort_levels`, and picking an agent that lacks the chosen level clears it. Its **Parameters** group lists each `{{name}}` the task
 uses, live, with an optional default (clearing the field removes it); defaults for names the task no longer
 uses are dropped, and the template's budget hint is kept, so an edit never
 wipes either. With no templates the view says what one is and offers
@@ -6052,7 +6168,7 @@ server-side permission; a member without it reads the same facts. The page
 lists no runs: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
-setup script, variables, files and egress control ([environments.md](environments.md#workspace-environment)),
+setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
 read with `workspace.environment.get` when the page opens. Opening the page
 through an **Environment** menu item passes `section: 'environment'`, and the
 section scrolls into view once it has loaded.
@@ -6075,15 +6191,6 @@ section scrolls into view once it has loaded.
   plain; over a saved secret it stays a secret with no value, which **Save**
   refuses, so the saved one is not removed unnoticed. **Add _n_ variables**
   puts them in the list; nothing is sent yet.
-- **Files** lists each workspace file's path and size with **Remove**; the
-  page never holds a saved file's content. **Add file…**, or a file dropped
-  on the list, adds a row whose path starts as the file's name and stays
-  editable until saved. While an added row has a saved file's path, the
-  saved row is hidden and the save replaces it; a saved file is removed only
-  by its own **Remove**. A file
-  over 64 KB is refused before it is read, and one that is not UTF-8 text
-  before anything is sent. A server from before workspace files gets no such
-  row.
 - **Limit outbound traffic** is a checkbox. While it is ticked, the allowed
   hosts show, each with **Remove**, over a field with **Allow** that refuses a
   URL, a port or a repeat before anything is sent. Its help says that on and
@@ -6094,12 +6201,11 @@ section scrolls into view once it has loaded.
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it
   the page says what a save reaches: runs launched afterwards, not containers
   that exist. A row that cannot be saved - no name, a name used twice, `=` in
-  a name, a secret with no value, a file with no path or one used twice - is
-  marked on **Save**, which focuses it and
+  a name, a secret with no value - is marked on **Save**, which focuses it and
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
   the edits stay. A result's `warning` shows under **Saved**.
 - Any other member reads the script, each name and each plain value, with
-  **Secret** in place of a secret's value, each file's path and size, whether egress is limited and to
+  **Secret** in place of a secret's value, whether egress is limited and to
   which hosts, and **Only an admin can change this.** A failed read shows the server's error with **Retry**.
 
 When the setup script fails a launch, the New run and template launch
@@ -6136,6 +6242,7 @@ while one of its entries is visible, so the nav and search never disagree.
 | Group | Category (`id`) | Sections and rows (anchor ids) |
 |---|---|---|
 | You | General (`general`) | Appearance: Theme (`theme`), Text size (`text-size`); Keyboard (`keyboard`); Profile (`profile`); Setup guide (`setup-guide`) |
+| You | Launch (`launch`) | Saved defaults (`saved-launch-defaults`) |
 | You | Connections (`connections`) | ChatGPT and Claude (`connectors`); GitHub (`github`) |
 | You | Notifications (`notifications`) | Push notifications (`push`); Watch notifications: push devices (`watch-push`), Quiet hours (`quiet-hours`); Slack (`slack`) |
 | You | Watches (`watches`) | Watches (`watch-list`) |
@@ -6196,16 +6303,38 @@ Categories:
   `connectors`): one exported `ConnectorsSection
   {client}`, remounted when `identityKey` changes so a code never outlives
   its member. A ChatGPT / Claude segmented control picks numbered steps.
-  **Get a code** calls `connector.code` and shows its `url` and code, the
-  code with `useCountdown`; before that, `server.edge` only says whether the
-  server has an edge or is connected to it. While the code lives,
-  `connector.list` is polled every 3 s, and once more when it expires; a
-  connector absent at mint time shows **<client> (<host>) connected** in the
-  section's one `role="status"` region and focuses its **Done** button. A
+  `connector.list` gives the URL to show at once (`url`), the edge's
+  `universal_url` and `sign_in`. With `sign_in` the third step mints no code
+  and **Watch for the connection** polls for 10 minutes, then says nothing
+  connected; otherwise **Get a
+  code** calls `connector.code` and shows its code with `useCountdown`. A
+  `url` other than `universal_url` adds how to link a GitHub account. Without
+  a `url`, `server.edge` only says whether the server has an edge or is
+  connected to it. While a code or watch lives, `connector.list` is polled
+  every 3 s, and once more when it ends; a
+  connector of the tab's app at the URL shown, absent at mint time, or for a
+  sign-in absent from the list shown before **Watch for the connection**,
+  since the sign-in may be done already, shows **<client> (<host>) connected** in the section's one `role="status"`
+  region and focuses its **Done** button. A
   failed poll shows its error until the next one succeeds. Rows list each
-  connector's scopes, added and last-used times, **Reconnect** (confirm,
-  a new code on that client's tab, then `connector.revoke`; a failed mint
-  revokes nothing) and **Revoke** (confirm). Errors show verbatim with a fix:
+  connector's scopes, its `resource` as **Universal URL** or the server's own
+  URL, added and last-used times, **Move to the universal URL** (where `url`
+  is universal and the connector's is not: confirm, start watching for a
+  connector at `universal_url` with the old one's `client_id`, preferring
+  one with a `last_used_at`, and `connector.revoke` the old connector only
+  once it has one; `localStorage` key `aether:connector-move-claims`
+  records which move took which new connector, so two tabs never revoke two
+  connectors for one; a move that ends without one says the old connector
+  was kept), **Reconnect** (confirm, then the same watch on that client's
+  tab, the tab from the `client_id` host or, from an older server, the
+  `redirect_host`, at the connector's own `resource`: a connector at the
+  server's own URL reconnects there with a code even under `sign_in`; a
+  failed mint revokes nothing) and **Revoke** (confirm). A move or
+  reconnect stays in progress past its code or watch, so **Get a code** or
+  **Watch for the connection** continues it at its URL, until its
+  replacement calls Aether or **Stop** ends it; until then the status region
+  names it and the other **Move** and **Reconnect** buttons are disabled.
+  Errors show verbatim with a fix:
   a server without `connector.list` (`-32601`) gets the update command and
   hides the steps, the no-edge and not-connected errors link `docs/edge.md`,
   anything else links the connector troubleshooting. The palette's **Connect
@@ -6242,6 +6371,20 @@ Categories:
   row. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
+- **Launch**, where the server offers `launch.defaults.get`: **Saved
+  defaults** says who saved them (you or the assistant) and when, or
+  "Nothing saved yet". It lists each agent's saved mode and model with
+  **Forget**, a **Not usable now** list of `invalid` choices with the
+  server's reason, and the `unknown` ones as "Not checked: " and the
+  reason. When the saved account or a fallback member is invalid, **Remove
+  unusable accounts** saves both repaired at once: your own account, and
+  the order without them, or fallback off when none are left. **Account** and **Fallback** (any account, off, or the saved
+  ordered list) save on change; the order itself is set in the launch
+  dialog with **Save as my default**. **Clear** asks first, then clears
+  them. Each change uses `launch.defaults.set` with the revision read and
+  retries once on a conflict, as the launch dialog does. The section starts
+  over, closing **Clear**'s confirmation, when a different member signs in. Child runs keep
+  their own choices in **Child runs**.
 - **Child runs**, where the server offers `child.settings`: **Let my runs
   start child runs** (`enabled`), with a **What child runs cover** list
   (what it allows, that swarms use their own choices, that budgets and
@@ -6286,6 +6429,11 @@ Categories:
   board's Finished menu for the active workspace. It prevents reopening those
   runs but does not delete all run data: checkouts, homes, repositories and
   history retain their existing lifecycle.
+- **Run limits**, a row in **Server › Admin**, for admins when the server
+  answers `server.run_limits`: CPUs, memory in GiB and processes, empty
+  meaning the flag or automatic value shown in grey, and **Save**. The launch
+  dialog's **Run** tab reads the same method for the grey values and sends a
+  run's own `limits` under **Resource limits**.
 - **Docker inside runs**, a row in **Server › Admin**, for admins when the
   server answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States:
   **On**, **Off** with **Install**, `Unavailable on this host` plus the
@@ -6339,7 +6487,9 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
 - **Settings › Watches** (`src/routes/settings/watches.tsx`), shown when the
   server has `watch.list`: the member's watches from the `watches` store
   slice (`src/store/watches.ts`, read at hydration and on wake) in an
-  `InsetList`. A row holds the label or target title, the target kind, a
+  `InsetList`. A row holds the label or target title, the target kind
+  (followed by `Kept by the assistant` for a watch whose `source` is
+  `assistant`, also shown in the detail's header), a
   `StateLine` (`Watching`, `Paused`, `Cannot check`, `Done`, `Expired`) with
   the conditions, the server's error verbatim for `error`, the last notice
   and the last and next check. **Active** (the default) hides done and
@@ -7496,7 +7646,8 @@ terminal links.
 `src/routes/files/home.test.tsx` covers the Home tree: each row's menu,
 naming in place, delete, upload from the picker and from a drop, and moving
 a dragged row.
-`src/routes/files/run-files.test.tsx` covers the run's Files view and path
+`src/routes/files/run-files.test.tsx` covers the run's Files view, a drop
+uploaded into its checkout, and path
 links in the Session view, `paths.test.ts` what reads as a path, and
 `src/routes/run/terminal-links.test.tsx` a path link in a terminal.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
@@ -7509,8 +7660,8 @@ delivery lines, pause, resume and delete, the Watch form, the watch
 notification preferences, the phone sheet and `watch.changed` toasts.
 `src/components/workspace-environment.test.tsx` covers the workspace
 Environment section: the change a save sends, replacing a secret, the `.env`
-preview, adding, replacing and removing files, rows that cannot be saved,
-egress control, the server's refusal and the read-only view.
+preview, rows that cannot be saved, egress control, the server's refusal and
+the read-only view.
 
 Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.

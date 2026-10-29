@@ -20,7 +20,7 @@ type memoryAddInput struct {
 type memoryPinInput struct {
 	WorkspaceID string `json:"workspace_id"`
 	ID          string `json:"id"`
-	Pin         bool   `json:"pin" jsonschema:"false unpins"`
+	Pin         bool   `json:"pin"`
 }
 
 var memoryOps = []Op{

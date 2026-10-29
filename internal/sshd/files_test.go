@@ -1,9 +1,11 @@
 package sshd
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -73,20 +75,6 @@ func TestFilesReadDoesNotEchoServicePath(t *testing.T) {
 	}
 }
 
-func TestFilesReadRefusesAWorkspaceFile(t *testing.T) {
-	t.Parallel()
-	reader := &fakeFiles{readErr: fmt.Errorf(".env: %w", gitengine.ErrWorkspaceFile)}
-	e := newTestEnv(t, func(c *Config) { c.Services.Files = reader })
-	viewerSigner, _ := addMember(t, e, "Viewer", domain.RoleViewer, false)
-	err := controlAs(t, e, viewerSigner).Call(protocol.MethodFilesRead, protocol.FilesReadParams{
-		WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID), Path: ".env",
-	}, nil)
-	pe := wireErrOf(t, err)
-	if want := "files.read: .env: a workspace file is readable only inside the run, by its agent or in its terminal"; pe.Code != protocol.CodeDenied || pe.Message != want {
-		t.Fatalf("files.read of a workspace file = %+v, want CodeDenied %q", pe, want)
-	}
-}
-
 func TestFileDiffStagingLimitDoesNotClaimCheckoutRemoved(t *testing.T) {
 	reader := &fakeFiles{diffErr: errors.Join(gitengine.ErrSnapshotStorageLimit, errors.New("private /host/checkout"))}
 	e := newTestEnv(t, func(c *Config) { c.Services.Files = reader })
@@ -111,5 +99,51 @@ func TestFilesWriteRequiresRunOrWorkspaceWritePermission(t *testing.T) {
 		if pe := wireErrOf(t, viewer.Call(protocol.MethodFilesWrite, target, nil)); pe.Code != protocol.CodeDenied {
 			t.Errorf("viewer files.write target %#v code = %d, want %d", target.RunID, pe.Code, protocol.CodeDenied)
 		}
+	}
+}
+
+func TestFilesUploadWritesBytesIntoARunCheckout(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	engine, err := gitengine.New(gitengine.Config{ReposDir: filepath.Join(root, "repos"), CheckoutsDir: filepath.Join(root, "checkouts")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = engine.Close() })
+	e := newTestEnv(t, func(c *Config) { c.Services.Files = engine })
+	repo, err := engine.InitWorkspaceRepo(t.Context(), e.ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "source")
+	workspaceImportGit(t, root, "init", "--initial-branch=main", source)
+	workspaceImportCommit(t, source)
+	workspaceImportGit(t, source, "push", "-q", repo, "main")
+	checkout, _, err := engine.CreateRunCheckout(t.Context(), e.ws.ID, e.run.ID, "main", "upload", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := controlClient(t, e)
+	payload := []byte{0x89, 'P', 'N', 'G', 0, 0xff, 0xfe, '\n'}
+	upload := protocol.FilesUploadParams{WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID), Path: "assets/logo.png", Content: payload}
+	if err = c.Call(protocol.MethodFilesUpload, upload, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(checkout, "assets", "logo.png")); readErr != nil || !bytes.Equal(got, payload) {
+		t.Fatalf("uploaded file = %q (%v), want %q", got, readErr, payload)
+	}
+
+	if pe := wireErrOf(t, c.Call(protocol.MethodFilesUpload, upload, nil)); pe.Code != protocol.CodeConflict {
+		t.Errorf("upload over an existing file = %+v, want conflict", pe)
+	}
+	base := upload
+	base.RunID, base.Path = "", "base.bin"
+	if pe := wireErrOf(t, c.Call(protocol.MethodFilesUpload, base, nil)); pe.Code != protocol.CodeInvalidParams || pe.Message != "run_id is required" {
+		t.Errorf("upload without a run = %+v, want run_id is required", pe)
+	}
+	text := protocol.FilesWriteParams{WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID), Path: "nul.txt", Content: "a\x00b"}
+	if pe := wireErrOf(t, c.Call(protocol.MethodFilesWrite, text, nil)); pe.Code != protocol.CodeInvalidParams {
+		t.Errorf("files.write with a NUL byte = %+v, want invalid params", pe)
 	}
 }

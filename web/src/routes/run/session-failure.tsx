@@ -62,7 +62,25 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
         nav.go('terminal')
         return
       }
-      const next = await api.runLaunch({ workspace_id: run.workspace_id, task: run.task, harness: run.harness, mode: 'tui', ...(run.model ? { model: run.model } : {}) })
+      // The run's owner keeps the account they chose, its fallback and its
+      // child-run setting; a teammate's launch runs on their own, as any
+      // launch of theirs does.
+      const own = run.member_id === useStore.getState().info?.member.id
+      const account = run.requested_account_member_id ?? run.account_member_id
+      const extras = run.repos?.filter((repo) => !repo.primary).map((repo) => repo.workspace_id) ?? []
+      const fallback = run.no_fallback ? { no_fallback: true } : run.fallback_account_member_ids?.length ? { fallback_account_member_ids: run.fallback_account_member_ids } : {}
+      const next = await api.runLaunch({
+        workspace_id: run.workspace_id,
+        task: run.task,
+        harness: run.harness,
+        mode: 'tui',
+        ...(run.model ? { model: run.model } : {}),
+        ...(run.effort ? { effort: run.effort } : {}),
+        ...(own && account && account !== run.member_id ? { account_member_id: account } : {}),
+        ...(own ? fallback : {}),
+        ...(own && run.children ? { children: run.children } : {}),
+        ...(extras.length ? { extra_workspace_ids: extras } : {}),
+      })
       useStore.getState().upsertRun(next)
       useStore.getState().upsertRun(await api.runClose(run.id, 'abandoned'))
       useStore.getState().navigate('run', { runId: next.id })

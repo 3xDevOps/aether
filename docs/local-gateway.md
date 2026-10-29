@@ -211,8 +211,8 @@ in `internal/localgw/backend.go`. Their lost response may follow a committed wri
 so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A call with no answer after 60 seconds fails with `-32004`
 `server did not answer <method> within 1m0s` and is not retried;
-`home.upload`, `home.download` and `terminal.file`, which carry up to
-64 MiB, and `workspace.import`, whose first fetch of a large repository is
+`home.upload`, `home.download`, `files.upload` and `terminal.file`, which
+carry up to 64 MiB, and `workspace.import`, whose first fetch of a large repository is
 slow, get 15 minutes. Only that call's channel closes: a slow server
 handler is not a dead connection, so the connection, its streams and its
 other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
@@ -318,7 +318,7 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/acp/<run_id>` | the session item stream of a run with `acp: true` (WebSocket) |
 | `GET` | `/ws/assistant` | the caller's assistant session: `AssistantFrame` lines, each an item, a reset, or the whole `AssistantStatus` (WebSocket). A status frame follows the ack and every change of the state or the pending confirmations. Header `{"after_seq":0}`; the ack is an `ACPStreamResponse`. There is no control lease. Every end other than a revocation closes 1012 and the client resubscribes from its last seq |
-| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
+| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket); with `assistant_login=<agent>` instead, that agent's sign-in for the caller's assistant |
 | `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
 | `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
 | `GET` | `/api/v1/run/<run_id>/messages/<message_id>/attachments/<index>` | persisted chat image bytes; zero-based attachment index, requires View on the run |
@@ -557,9 +557,21 @@ take the fallback policy as `fallback_account_member_ids` (member IDs, tried
 in order) or `no_fallback: true`; omitting both orders the launcher's
 accounts by usage left, and sending both is refused with `-32602`
 `fallback_account_member_ids and no_fallback cannot both be set`. When no
-account qualifies, the run launches on the requested account. Swarm
-attempts carry `launch_account_id`, the account the worker's run launched
-on.
+account qualifies, the run launches on the requested account. Run snapshots
+and swarms carry the policy back in the same two fields. A fallback account
+whose check failed, rather than one that is exhausted or not shared, is left
+out, and `run.launch` and `mission.create` list it in
+`skipped_fallback_accounts` `[{account_member_id, error}]` (an entry with no
+account means listing the candidates failed); `error` is a fixed reason, such
+as `the account's agent could not be checked`, and the server log has the
+detail. A replay does not repeat them.
+Swarm attempts carry `launch_account_id`, the account the worker's run
+launched on.
+
+`run.launch`, `mission.create` and `template.launch` refuse a param they do
+not know with `-32602` `unknown param "<name>"; this server does not support
+it`, so a client never launches without an option it asked for. Other
+methods ignore unknown params.
 
 Run snapshots carry `status_changed_at` (RFC 3339): when the run entered its
 current `status`, or its current `reason` while it is `needs-attention`. A
@@ -595,6 +607,16 @@ whitespace or control characters, a leading `-`, or more than 128 bytes is
 `model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes`.
 Run snapshots and templates carry the `model` they launch with, omitted when
 empty.
+
+They take an optional `effort` in the same places: one of the agent's
+`effort_levels` from `agent.list`, empty for the agent's default
+([harnesses.md](harnesses.md#choose-an-effort)). An effort with whitespace or
+control characters, a leading `-`, or more than 32 bytes is `-32602` with
+`effort "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 32 bytes`;
+a level the agent does not list, or an effort for an agent with no effort flag
+outside an Enhanced run, is refused with the scheduler's error. Run
+snapshots and templates carry `effort`, omitted when empty; a composer change
+publishes `run.effort` with `{"effort": "<level>"}`.
 
 `run.launch` and `mission.create` take an optional `extra_workspace_ids`:
 other workspaces checked out at `/repos/<name>` in the run, or in a swarm's
@@ -1003,14 +1025,34 @@ again, so look the run up instead.
 
 `run.pr.status` and `run.pr.feedback` default an omitted `expected` to the
 checkout's branch and head, and an omitted `target` to the pull request the
-dashboard proposes: the branch's upstream (else `origin`, when the
-workspace sets an origin) as the head, into the run's base branch on the
-workspace's GitHub source, or on the head repository without one. A
-checkout with no GitHub push remote answers `error` saying to pass
-`target`, and one on a detached HEAD answers `error` saying to pass both. `run.pr.status`
-returns the `expected` and `target` it used, to pass to `run.pr.create`. Once a finished run's container is gone, both report the pull
-request the run last recorded (`number`, `url`, `state`); `run.pr.feedback`
-then has no checks or comments, and `error` says why.
+dashboard proposes: the branch's upstream (else `origin`, when the workspace
+sets an origin) as the head, into the run's base branch on the workspace's
+GitHub source, or on the head repository without one. A checkout with no GitHub
+push remote answers `error` saying to pass `target`, and one on a detached HEAD
+answers `error` saying to pass both. `run.pr.status` returns the `expected` and
+`target` it used, to pass to `run.pr.create`. Once a finished run's container is
+gone, both report the pull request the run last recorded (`number`, `url`,
+`state`). `run.pr.feedback` then reads the pull request, its checks and its
+reviews from GitHub in one read, with the GitHub login of the run's home, as
+`gh` in the run did, so `head_oid`, `state` and `merged_at` match the checks;
+it has no comments, `mergeable` or `merge_state_status`, and sets
+`comments_unavailable: true` so empty comment lists do not read as none,
+within the same `limit` and byte budget; `truncated` is also set when a review
+body was cut at 2000 characters, and `error` says why when that read fails.
+When only the reviews fail, it keeps the checks, sets
+`reviews_unavailable: true` and says why in `error`.
+
+A server without child runs answers their methods with `-32004` and
+`data: {"reason":"children_unavailable"}`.
+
+`template.list` gives each template a `version`, which changes whenever its
+task, agent, mode, model, effort or parameter defaults do. `template.launch` with
+`expected_version` fails with `-32003` `templates: template changed: <name>
+was saved again and is now version <new>, not <old>` instead of launching a
+template changed since it was read. A retry with the launch's `idempotency_key` replays its
+run whatever `expected_version` it names. With `replay_only: true` it launches
+nothing: it returns the key's run, or fails with `-32000` when the key started
+none.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the
@@ -1064,6 +1106,7 @@ unavailable owned source remains the server's protocol error.
 | `coord.messages.list` | `{"workspace_id":"...","mission_id":"...","run_id":"...","correlation_id":"...","before":"...","limit":50}` (only `workspace_id` required; `run_id` matches either side) | `{"messages":[{"id":"...","workspace_id":"...","mission_id":"...","from_run_id":"...","to_run_id":"...","kind":"message"\|"question"\|"reply"\|"report","correlation_id":"...","body":"...","created_at":"...","delivered_at":"...","acked_at":"...","outcome":"...","summary":"...","next_action":"..."}],"next_before":"..."}` newest first; report fields only on `report` rows. See [coordination.md](coordination.md#seeing-agent-messages) |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `system.stats` | `{"since_ms":1761100000000}` (optional; Unix milliseconds, 0 or absent returns the whole window) | `SystemStatsResult` - `{"interval_ms":5000,"retention_ms":3600000,"host":{"cpu_cores","memory_total_bytes","swap_total_bytes","uptime_seconds"},"host_error":"","samples":[{"t_ms","cpu_user","cpu_system","cpu_iowait","cpu_steal","memory_used_bytes","memory_available_bytes","memory_free_bytes","swap_used_bytes","load1","load5","load15","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps","pressure_cpu","pressure_memory","pressure_io"}],"containers_at_ms":0,"containers_error":"","containers":[{"owner_kind":"run"\|"browser"\|"member","owner_id","member_id","workspace_id","title","status","cpu_cores","cpu_limit_cores","cpu_throttled_percent","memory_bytes","memory_limit_bytes","pids","pids_limit","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps"}],"others":{"containers","cpu_cores","memory_bytes"}}`. The host is sampled every 5 s from server start and kept for an hour; CPU fields are percent of all cores over the interval, and the `pressure_*` fields (PSI `some avg10`) are absent without `/proc/pressure`. Host sampling reads `/proc` and `/sys`, so on a non-Linux server `host_error` says so. Containers are sampled only while a `system.stats` call arrived in the last 60 s; a call while idle starts sampling without waiting for it and the next sample follows 1 s later. `containers` is empty and `containers_at_ms` 0 when the latest snapshot is older than two intervals, and `containers_error` carries the Docker error when sampling failed. A run's browser sidecar is its own entry with `owner_kind` `browser`, the run's id and its own limits. `cpu_cores` and the rate fields are absent until a container has two samples; `cpu_limit_cores` is absent when unlimited. A member sees only their own containers; `others` sums the rest and any container with no run or member owner, and is absent when empty |
+| `server.run_limits` | optional `cpus`, `memory_bytes`, `pids` (`0` clears one); setting any is admin only | `{"limits":{...},"default":{...},"effective":{...}}` - what an admin set, what an unset field gets (the flag or automatic value), and what a run with no override of its own gets. New containers only. `run.launch` takes `limits` `{cpus,memory_bytes,pids}` to override them for one run |
 | `server.sysbox.status` | none; admin only | `{"state":"on"\|"off"\|"unsupported"\|"installing"\|"failed","reason":"...","log":"..."}` - whether Docker lists `sysbox-runc`. `reason` explains `off`, `unsupported` and `failed`; `off` with a reason naming `sudo aether-server sysbox install` means the server is not root. `log` is the last 8 KiB of installer output |
 | `server.sysbox.install` | none; admin only | the same status. Starts the installer in the background, one at a time; a call while one runs returns `installing`. Poll `server.sysbox.status` until `on`, `unsupported` or `failed`. The server then uses Sysbox for new containers at once. Never retried after a transport failure. While it runs, `server.update` answers `-32003` |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
@@ -1075,6 +1118,7 @@ unavailable owned source remains the server's protocol error.
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
+| `files.upload` | `{"workspace_id":"...","run_id":"...","path":"assets/logo.png","content_base64":"..."}` | empty result |
 | `files.diff` | `{"run_id":"...","path":"README.md"}` | `{"patch":"...","truncated":false}` |
 | `config.roots` | `{}` | `{"roots":[{"harness":"claude","display_name":"Claude Code","path":"~/.claude","runtime_ignores":["projects/","shell-snapshots/","statsig/","todos/","file-history/","history.jsonl","daemon/","transcripts/",...],"credential_names":[".credentials.json",...]}]}` |
 | `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
@@ -1097,20 +1141,20 @@ unavailable owned source remains the server's protocol error.
 | `terminal.file` | `TerminalFileParams` (`{"run_id":"<run-id>","name":"notes.md","content":"<base64-file-bytes>"}`; `run_id` optional) | `TerminalUploadResult` (`{"path":"/home/<account>/.aether/terminal-files/<random>/notes.md"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
-| `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `needs_restart`, `idle`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the run belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `needs_restart` means the environment was created before the assistant existed and lacks its mounts |
-| `assistant.start` | `{"agent":"claude","restart_environment":false}` (both optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their own agent in their environment, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation. `restart_environment` stops and recreates the environment first |
+| `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `idle`, `installing`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the run belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `installing` means a start is installing the agent in the assistant's container |
+| `assistant.start` | `{"agent":"claude"}` (optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their agent in the caller's assistant container, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation |
 | `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `mission`, `pr`, `check`, `failure`, `task`) and any of `workspace_id`, `run_id`, `mission_id`, `task_id`, `attempt_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
 | `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's held view context, which the assistant reads with `aether_view_context` along with its `source` (`prompt` or `navigation`) and `age_seconds`, unless `share_view` is off. An update whose `captured_at` is before the held view's is dropped while that view is under 10 seconds old, so a late update never replaces the view a prompt just carried; after that the last one received wins, whatever the device's clock. One without `route` forgets the held view: the member removed the page from their draft. Kept in memory only |
 | `assistant.cancel` | none | empty result; cancels the turn in flight |
 | `assistant.answer` | `{"request_id":"...","option_id":"...","values":{}}` | empty result; answers one of the harness's permission prompts or questions |
 | `assistant.confirm` | `{"confirmation_id":"...","approve":true}` | empty result; answers a tool call waiting for approval. A confirmation expires after 10 minutes |
-| `assistant.reset` | none | `AssistantStatus` - stops the session and discards the conversation |
+| `assistant.reset` | none | `AssistantStatus` - stops the session, discards the conversation and deletes the agent's state in the assistant's home |
 | `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false}`) - the caller's own assistant settings. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's run. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
 | `assistant.history` | `{"before_seq":0,"limit":1000}` | like `run.acp.history`. A `notice` item may carry an `action` record, below |
 | `assistant.item` | `{"seq":12}` | like `run.acp.item` |
 | `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
-| `workspace.environment.get` | `WorkspaceEnvironmentGetParams` (`{"workspace_id":"..."}`) | Any member. `WorkspaceEnvironmentResult` (`{"workspace_id":"...","setup_script":"npm ci\n","variables":[{"name":"API_URL","value":"https://api.example.test"},{"name":"NPM_TOKEN","secret":true}],"files":[{"path":".env","size":412}]}`), variables sorted by name and files by path; a secret never carries `value` and a file never carries its content |
-| `workspace.environment.set` | `WorkspaceEnvironmentSetParams` (`{"workspace_id":"...","setup_script":"npm ci\n","set":[{"name":"NPM_TOKEN","value":"...","secret":true}],"unset":["OLD_NAME"],"files":[{"path":".env","content":"..."}],"remove_files":["old.env"]}`; every field but `workspace_id` optional). Admin only. `set` adds or replaces, `unset` removes, `remove_files` removes files and then `files` adds or replaces them, a present `setup_script` replaces the script and `""` clears it; whatever is not named is kept. The script, each value and each file are limited to 64 KiB, and a workspace to 20 files. A file path is relative to the repository root, with no `.` or `..` component, no name that starts or ends with whitespace and nothing under `.git` | `WorkspaceEnvironmentResult` after the change, with `warning` when the change is saved and its timeline note was not recorded. A `run.launch` or `template.launch` the setup script fails answers with error data `{"setup_output":"..."}`: the end of what the script printed, secret values masked |
+| `workspace.environment.get` | `WorkspaceEnvironmentGetParams` (`{"workspace_id":"..."}`) | Any member. `WorkspaceEnvironmentResult` (`{"workspace_id":"...","setup_script":"npm ci\n","variables":[{"name":"API_URL","value":"https://api.example.test"},{"name":"NPM_TOKEN","secret":true}]}`), variables sorted by name; a secret never carries `value` |
+| `workspace.environment.set` | `WorkspaceEnvironmentSetParams` (`{"workspace_id":"...","setup_script":"npm ci\n","set":[{"name":"NPM_TOKEN","value":"...","secret":true}],"unset":["OLD_NAME"]}`; every field but `workspace_id` optional). Admin only. `set` adds or replaces, `unset` removes, a present `setup_script` replaces the script and `""` clears it; whatever is not named is kept. The script and each value are limited to 64 KiB | `WorkspaceEnvironmentResult` after the change, with `warning` when the change is saved and its timeline note was not recorded. A `run.launch` or `template.launch` the setup script fails answers with error data `{"setup_output":"..."}`: the end of what the script printed, secret values masked |
 | `workspace.mirror.status` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | Read-only for admitted members. `WorkspaceMirrorResult` reports whether mirroring is enabled, source, branch, status, observed and accepted commits, check times, public key, and safe warning/error fields; no private key or server path |
 | `workspace.mirror.configure` | `WorkspaceMirrorConfigureParams` (`{"workspace_id":"...","source_url":"https://github.com/acme/app.git","branch":"main","auth":"public"\|"deploy-key"\|"github","known_hosts":"...","github_account_id":42}`; last two fields optional and mode-specific) | `WorkspaceMirrorResult`; deploy-key configuration includes only the public key and safe installation warning; GitHub mode binds the authenticated admin and verified numeric account |
 | `workspace.mirror.refresh` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` after fetching the configured source branch |
@@ -1303,15 +1347,15 @@ rebinds to the current admin's verified account (and can check
 ### Files and member configuration
 
 `files.tree` and `files.read` address a workspace's base branch when
-`run_id` is omitted, or a live run checkout when it is present. Complete
+`run_id` is omitted, or a live run checkout when it is present. A run
+checkout's tree lists tracked, untracked and ignored files, but not a folder
+that is ignored as a whole, such as `node_modules/`. Complete
 valid UTF-8 text without NUL bytes is returned with an exact SHA-256
 `revision` and may be writable. Binary content is read-only with an empty
 revision. File reads, diffs, and editor writes carry complete content up to 64
 MiB. Binary or oversized content is read-only; an oversized response sets
 `truncated:true` and omits its `revision`. The `truncated` field remains in
-the wire shape for compatibility. `files.read` of a
-[workspace file](environments.md#files) in a run checkout answers `-32001`
-`files.read: <path>: a workspace file is readable only inside the run, by its agent or in its terminal`.
+the wire shape for compatibility.
 
 `files.write` without `run_id` requires **Push** and creates a one-file commit
 on the workspace base branch; it does not push upstream. With `run_id`, it
@@ -1319,7 +1363,13 @@ requires **Steer** and changes that run's uncommitted checkout. Existing file
 modes are preserved and new files use `0644`. Run-checkout saves recheck the
 revision immediately before atomic rename under Aether's root lock. Base
 commits compare-and-swap the branch head. Aether's locks do not serialize
-arbitrary live-agent filesystem writers.
+arbitrary live-agent filesystem writers. `content` is text without NUL bytes.
+
+`files.upload` adds one new file of any bytes, up to the same 64 MiB, to a
+run's checkout, the dashboard's **Upload files…**. It requires `run_id` and
+**Steer**, like a run-checkout `files.write`, and never replaces a file: a path
+the checkout already has answers `-32003` `files.upload: file changed; reload
+before saving`.
 
 `config.roots`, `config.tree`, `config.read`, `config.stat`, `config.write`,
 and `config.import` always address the authenticated member's own persistent
@@ -1469,7 +1519,7 @@ delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
-and `config.import` and `terminal.file` at 96 MiB. The 64 MiB file and
+and `config.import`, `home.upload`, `files.upload` and `terminal.file` at 96 MiB. The 64 MiB file and
 per-request import limits remain authoritative after JSON decoding. The SSH control-channel line cap is
 96 MiB, allowing base64 import requests without unbounded framing.
 The HTTP gateway admits at most two imports at once, before reading their
@@ -1936,6 +1986,10 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
   (`{"member_id":"..."}`), `member.identity.remove`
   (`{"member_id":"...","provider":"github","subject":"..."}`) and
   `server.owner.transfer` (`{"member_id":"..."}`).
+- `member.reviewer.link` (`{"member_id":"...","login":"..."}`), admins only,
+  binds the edge's [reviewer account](edge.md#reviewer-account) to a member
+  who is no admin while `edge-reviewer` is on, and answers the identity
+  `{"provider":"reviewer","subject":"<login>","login":"<login>","created_at":"..."}`.
 - `member.merge.start` answers `{"code":"XXXX-XXXX-XXXX-XXXX","expires_at":"..."}`,
   shown once. `member.merge.preview` (`{"code":"..."}`), from the other
   sign-in, answers the plan: `minted` and `proposer`, each with `id`,
@@ -2890,6 +2944,12 @@ open as a viewer. A run accepts at most 32 of these sockets at once; the next is
 The member environment terminal uses the same binary-output and JSON-control
 framing as run attaches. The `tab` query is `main` or a client-selected name
 matching `^[a-z0-9-]{1,32}$`.
+
+With `assistant_login=claude` or `assistant_login=codex` the stream is that
+agent's sign-in, run in the caller's assistant container
+([assistant.md](assistant.md#first-use)), and `tab` is ignored. The server
+installs the adapter first if needed, so the ack can take a minute. The stream
+ends when the sign-in exits; there is no replay of an earlier sign-in.
 
 1. Client sends one text header with `cols` and `rows`, and `follow` where
    it means the same as it does for an attach. The gateway ensures the

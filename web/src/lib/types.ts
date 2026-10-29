@@ -5,6 +5,7 @@ import type { DevArtifact } from '@/lib/development-types'
 export * from '@/lib/development-types'
 export * from '@/lib/run-repository-types'
 export * from '@/lib/child-types'
+export * from '@/lib/launch-defaults-types'
 
 export type RunStatus =
   | 'queued'
@@ -27,7 +28,32 @@ export interface RunLiveness {
   transport: 'open' | 'closed' | 'unknown'
 }
 
-export type RunStatusCause = 'turn' | 'report' | 'turn-end' | 'stall' | 'wait-expired' | 'workers' | 'tasks-held' | 'human' | 'disconnect'
+export type RunStatusCause =
+  | 'turn'
+  | 'report'
+  | 'turn-end'
+  | 'stall'
+  | 'wait-expired'
+  | 'wait-fault'
+  | 'workers'
+  | 'tasks-held'
+  | 'human'
+  | 'disconnect'
+
+/** How far Aether can vouch for a reported wait; mirrors domain.WaitEvidence in internal/domain/wait.go. */
+export type WaitKind = 'condition' | 'source_unknown' | 'system_fault' | 'unverified'
+
+/**
+ * The evidence behind the reported wait a live run shows, from the conditions its agent named; mirrors
+ * domain.RunWait. `detail` and `error` are server text, `error` the source's or delivery's error
+ * verbatim; `verified_at` is the oldest last successful source read, absent when one was never read.
+ */
+export interface RunWait {
+  kind: WaitKind
+  detail?: string
+  verified_at?: string
+  error?: string
+}
 
 export type RunActivity =
   | 'working'
@@ -61,6 +87,9 @@ export interface Run {
   account_member_id?: string
   /** The account the launcher chose, present only when usage fallback moved the run to `account_member_id`. */
   requested_account_member_id?: string
+  /** The run's fallback order; absent means automatic, or a server too old to say. */
+  fallback_account_member_ids?: string[]
+  no_fallback?: boolean
   mission_id?: string
   mission_role?: 'integrator' | 'worker'
   integrator_run_id?: string
@@ -81,6 +110,7 @@ export interface Run {
   harness: string
   mode: string
   model?: string
+  effort?: string
   /** The connector client, such as ChatGPT, the run was launched through. */
   via?: string
   /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
@@ -92,6 +122,8 @@ export interface Run {
   cause?: RunStatusCause
   /** A live Enhanced run's turn, read from its agent session when the run was fetched; not pushed. */
   liveness?: RunLiveness
+  /** Set while `state` is a wait the agent reported. */
+  wait?: RunWait
   /** Increments on every change of status, state, reason or outcome flags. */
   status_seq: number
   branch: string
@@ -173,6 +205,7 @@ export interface MissionExecutionChoice {
   harness: string
   mode: string
   model?: string
+  effort?: string
 }
 
 export type MissionIntegrator = MissionExecutionChoice
@@ -306,6 +339,7 @@ export interface MissionAttempt {
   takeover_active?: boolean
   takeover_member_id?: string
   takeover_generation?: number
+  takeover_since?: string
   orchestration_hold?: boolean
   cancel_requested_at?: string | null
   cancellation_actor_run_id?: string
@@ -418,18 +452,10 @@ export interface WorkspaceVariable {
   secret?: boolean
 }
 
-/** The server never returns a workspace file's content. */
-export interface WorkspaceFile {
-  path: string
-  size: number
-}
-
 export interface WorkspaceEnvironment {
   workspace_id: string
   setup_script: string
   variables: WorkspaceVariable[]
-  /** Absent from a server older than workspace files. */
-  files?: WorkspaceFile[]
   /** Both absent from a server older than egress control. */
   egress?: boolean
   egress_hosts?: string[]
@@ -913,6 +939,8 @@ export interface RoomMessageListResult {
 
 export interface RoomController {
   member_id: string
+  /** The holder's control session; absent from a gateway older than the field. */
+  control_session_id?: string
   connected: boolean
   acquired_at: string
   expires_at?: string
@@ -1017,6 +1045,9 @@ export interface RunStatusPayload {
   reason?: string
   state?: RunActivity | ''
   cause?: RunStatusCause
+  /** Only a newer read of the wait's sources; history leaves it out. */
+  reread?: boolean
+  wait?: RunWait
   status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean
@@ -1086,6 +1117,9 @@ export interface RunTitlePayload {
 }
 export interface RunModelPayload {
   model: string
+}
+export interface RunEffortPayload {
+  effort: string
 }
 export interface RunProtectedPayload {
   protected: boolean
@@ -1302,6 +1336,7 @@ export interface Template {
   harness: string
   mode: string
   model?: string
+  effort?: string
   params?: Record<string, string>
   budget_usd?: number
   created_at: string
@@ -1382,6 +1417,8 @@ export interface AgentInfo {
   install_script?: string
   /** install_script followed by the pinned enhanced-mode adapter's install. */
   enhanced_install_script?: string
+  /** The levels a launch may send as `effort`, lowest first; absent when the agent has no effort setting. */
+  effort_levels?: string[]
 }
 
 /** One model agent.models discovered; `id` is what a launch sends as `model`. */
@@ -2116,6 +2153,23 @@ export interface SysboxStatus {
   log?: string
 }
 
+/** Caps on a run's container. A missing field is unset: a run's own limits
+ * fall back to the server's, the server's to its automatic values. */
+export interface RunLimits {
+  cpus?: number
+  memory_bytes?: number
+  pids?: number
+}
+
+/** server.run_limits: `limits` is what an admin set, `effective` what a run
+ * with no override of its own gets. */
+export interface ServerRunLimits {
+  limits: RunLimits
+  /** What an unset field gets: the server's flag or automatic value. */
+  default: RunLimits
+  effective: RunLimits
+}
+
 /** When an update applies: immediately, at the next idle moment, or never
  * (which clears the pending one). */
 export type ServerUpdateWhen = 'now' | 'idle' | 'cancel'
@@ -2282,12 +2336,29 @@ export interface ConnectorCode {
 export interface Connector {
   id: string
   member_id: string
+  /** The OAuth client_id metadata URL, such as `https://chatgpt.com/...`; Claude Code's is on claude.ai and returns to a loopback port. */
+  client_id?: string
   client_name: string
   redirect_host: string
   device_id?: string
+  /** The connector URL it was authorized for: the edge's universal `<edge>/mcp` or the server's own `<edge>/mcp/<server id>`. */
+  resource?: string
   scopes: string[]
   created_at: string
   last_used_at?: string
+}
+
+/**
+ * connector.list: the member's connectors and how they add one. `url` is
+ * the URL to add; `universal_url` the edge's one URL for every server,
+ * which differs from `url` until the member links a GitHub account;
+ * `sign_in` means the consent page takes the edge sign-in, no code.
+ */
+export interface ConnectorList {
+  connectors: Connector[]
+  url?: string
+  universal_url?: string
+  sign_in?: boolean
 }
 
 export interface SlackLinkResult {

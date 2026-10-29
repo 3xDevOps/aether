@@ -43,6 +43,7 @@ type MissionExecutionChoice struct {
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
 	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
 }
 
 type MissionIntegrator struct {
@@ -50,30 +51,35 @@ type MissionIntegrator struct {
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
 	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
 }
 
 type Mission struct {
-	ID                           string                   `json:"id"`
-	WorkspaceID                  string                   `json:"workspace_id"`
-	Objective                    string                   `json:"objective"`
-	AccountableHumanID           string                   `json:"accountable_human_id"`
-	Integrator                   MissionIntegrator        `json:"integrator"`
-	ExecutionChoices             []MissionExecutionChoice `json:"execution_choices"`
-	ExtraWorkspaceIDs            []string                 `json:"extra_workspace_ids,omitempty"`
-	CurrentIntegratorRunID       string                   `json:"current_integrator_run_id,omitempty"`
-	IntegratorAuthorizingHumanID string                   `json:"integrator_authorizing_human_id,omitempty"`
-	IntegratorRunOwnerID         string                   `json:"integrator_run_owner_id,omitempty"`
-	IntegratorGeneration         uint64                   `json:"integrator_generation"`
-	AcceptedSetVersion           uint64                   `json:"accepted_set_version"`
-	Phase                        string                   `json:"phase"`
-	OpenQuestions                int                      `json:"open_questions"`
-	IntegratorLaunchError        string                   `json:"integrator_launch_error,omitempty"`
-	IntegratorLaunchErrorAt      string                   `json:"integrator_launch_error_at,omitempty"`
-	IntegratorRunLaunched        bool                     `json:"integrator_run_launched"`
-	ChangeSeq                    uint64                   `json:"change_seq"`
-	CreatedAt                    string                   `json:"created_at"`
-	UpdatedAt                    string                   `json:"updated_at"`
-	ArchivedAt                   *string                  `json:"archived_at,omitempty"`
+	ID                 string                   `json:"id"`
+	WorkspaceID        string                   `json:"workspace_id"`
+	Objective          string                   `json:"objective"`
+	AccountableHumanID string                   `json:"accountable_human_id"`
+	Integrator         MissionIntegrator        `json:"integrator"`
+	ExecutionChoices   []MissionExecutionChoice `json:"execution_choices"`
+	ExtraWorkspaceIDs  []string                 `json:"extra_workspace_ids,omitempty"`
+	// FallbackAccountMemberIDs and NoFallback are the swarm's fallback
+	// policy, as on MissionCreateParams.
+	FallbackAccountMemberIDs     []string `json:"fallback_account_member_ids,omitempty"`
+	NoFallback                   bool     `json:"no_fallback,omitempty"`
+	CurrentIntegratorRunID       string   `json:"current_integrator_run_id,omitempty"`
+	IntegratorAuthorizingHumanID string   `json:"integrator_authorizing_human_id,omitempty"`
+	IntegratorRunOwnerID         string   `json:"integrator_run_owner_id,omitempty"`
+	IntegratorGeneration         uint64   `json:"integrator_generation"`
+	AcceptedSetVersion           uint64   `json:"accepted_set_version"`
+	Phase                        string   `json:"phase"`
+	OpenQuestions                int      `json:"open_questions"`
+	IntegratorLaunchError        string   `json:"integrator_launch_error,omitempty"`
+	IntegratorLaunchErrorAt      string   `json:"integrator_launch_error_at,omitempty"`
+	IntegratorRunLaunched        bool     `json:"integrator_run_launched"`
+	ChangeSeq                    uint64   `json:"change_seq"`
+	CreatedAt                    string   `json:"created_at"`
+	UpdatedAt                    string   `json:"updated_at"`
+	ArchivedAt                   *string  `json:"archived_at,omitempty"`
 }
 
 // MissionQuestion is one clarifying question the integrator asked the
@@ -182,6 +188,7 @@ type Attempt struct {
 	Harness                string  `json:"harness"`
 	Mode                   string  `json:"mode"`
 	Model                  string  `json:"model,omitempty"`
+	Effort                 string  `json:"effort,omitempty"`
 	State                  string  `json:"state"`
 	RunID                  string  `json:"run_id"`
 	ActorRunID             string  `json:"actor_run_id,omitempty"`
@@ -197,6 +204,7 @@ type Attempt struct {
 	TakeoverActive         bool    `json:"takeover_active,omitempty"`
 	TakeoverMemberID       string  `json:"takeover_member_id,omitempty"`
 	TakeoverGeneration     uint64  `json:"takeover_generation,omitempty"`
+	TakeoverSince          string  `json:"takeover_since,omitempty"`
 	CancelRequestedAt      *string `json:"cancel_requested_at,omitempty"`
 	CancellationActorRunID string  `json:"cancellation_actor_run_id,omitempty"`
 	CancellationGeneration uint64  `json:"cancellation_generation,omitempty"`
@@ -260,8 +268,11 @@ type MissionCreateParams struct {
 	ExtraWorkspaceIDs []string `json:"extra_workspace_ids,omitempty"`
 }
 
+// MissionCreateResult's SkippedFallbackAccounts are as on RunLaunchResult,
+// for the integrator's launch.
 type MissionCreateResult struct {
-	Mission Mission `json:"mission"`
+	Mission                 Mission          `json:"mission"`
+	SkippedFallbackAccounts []SkippedAccount `json:"skipped_fallback_accounts,omitempty"`
 }
 
 type MissionListParams struct {
@@ -432,6 +443,7 @@ type WorkerStartParams struct {
 	Harness                      string `json:"harness"`
 	Mode                         string `json:"mode"`
 	Model                        string `json:"model,omitempty"`
+	Effort                       string `json:"effort,omitempty"`
 	AccountOwnerID               string `json:"account_owner_id"`
 	RunOwnerID                   string `json:"run_owner_id"`
 	ExpectedIntegratorGeneration uint64 `json:"expected_integrator_generation"`
@@ -472,18 +484,19 @@ type WorkerMutationResult struct {
 }
 
 func MissionFromDomain(m *domain.Mission) Mission {
-	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode), Model: m.Integrator.Model}, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), OpenQuestions: m.OpenQuestions, IntegratorLaunchError: m.IntegratorLaunchError, IntegratorRunLaunched: m.IntegratorRunLaunched, ChangeSeq: m.ChangeSeq, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
+	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode), Model: m.Integrator.Model, Effort: m.Integrator.Effort}, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), OpenQuestions: m.OpenQuestions, IntegratorLaunchError: m.IntegratorLaunchError, IntegratorRunLaunched: m.IntegratorRunLaunched, ChangeSeq: m.ChangeSeq, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
 	if m.IntegratorLaunchErrorAt != nil {
 		out.IntegratorLaunchErrorAt = rfc3339(*m.IntegratorLaunchErrorAt)
 	}
 	out.ArchivedAt = rfc3339Ptr(m.ArchivedAt)
 	out.ExecutionChoices = make([]MissionExecutionChoice, len(m.ExecutionChoices))
 	for i, c := range m.ExecutionChoices {
-		out.ExecutionChoices[i] = MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode), Model: c.Model}
+		out.ExecutionChoices[i] = MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode), Model: c.Model, Effort: c.Effort}
 	}
 	for _, id := range m.ExtraWorkspaces {
 		out.ExtraWorkspaceIDs = append(out.ExtraWorkspaceIDs, string(id))
 	}
+	out.FallbackAccountMemberIDs, out.NoFallback = FallbackIDs(m.Fallback), m.Fallback.Disabled
 	return out
 }
 

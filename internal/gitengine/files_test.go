@@ -439,3 +439,46 @@ func gitFileTest(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
+
+func TestRunTreeListsIgnoredFilesButNotIgnoredFolders(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := context.Background()
+	repo, err := e.InitWorkspaceRepo(ctx, domain.WorkspaceID("ws1"))
+	if err != nil {
+		t.Fatalf("InitWorkspaceRepo: %v", err)
+	}
+	source := t.TempDir()
+	gitFileTest(t, source, "init", "-q", "-b", "main")
+	gitFileTest(t, source, "config", "user.name", "Files Test")
+	gitFileTest(t, source, "config", "user.email", "files@example.test")
+	if err = os.WriteFile(filepath.Join(source, ".gitignore"), []byte(".env\nnode_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitFileTest(t, source, "add", "-A")
+	gitFileTest(t, source, "commit", "-q", "-m", "seed")
+	gitFileTest(t, source, "push", "-q", repo, "main")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "ignored", "")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout: %v", err)
+	}
+	for _, name := range []string{".env", "node_modules/pkg/index.js"} {
+		if err = os.MkdirAll(filepath.Dir(filepath.Join(checkout, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(checkout, name), []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	entries, err := e.FilesTree(ctx, "ws1", "run1", "", "")
+	if err != nil {
+		t.Fatalf("FilesTree: %v", err)
+	}
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name)
+	}
+	if strings.Join(names, " ") != ".env .gitignore" {
+		t.Fatalf("run tree = %v, want the ignored .env listed and node_modules left out", names)
+	}
+}

@@ -1,3 +1,4 @@
+import { isReread } from '@/lib/events'
 import type { CoordMessagePayload, Event } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
@@ -123,5 +124,6 @@ function selects(f: FeedFilters, event: Event): boolean {
   if (!f.workspaceID || event.workspace_id !== f.workspaceID) return false
   if (f.runID && event.run_id !== f.runID && !mailTo(event, f.runID)) return false
   if (f.memberID && event.actor_id !== f.memberID) return false
-  return f.type ? event.type === f.type : !detailTypes.has(event.type)
+  if (f.type) return event.type === f.type
+  return !detailTypes.has(event.type) && !isReread(event)
 }

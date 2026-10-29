@@ -41,6 +41,7 @@ const (
 	TypeRunController Type = "run.controller"
 	TypeRunMode       Type = "run.mode"
 	TypeRunModel      Type = "run.model"
+	TypeRunEffort     Type = "run.effort"
 	// TypeRunArchived carries a run's archive state: a nil ArchivedAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
@@ -143,6 +144,12 @@ type RunStatusPayload struct {
 	StatusSeq int64              `json:"status_seq"`
 	// Cause is what chose Activity; empty on a run that is not live.
 	Cause RunStatusCause `json:"cause,omitempty"`
+	// Wait is the evidence behind the reported wait the run shows, nil when
+	// it shows none.
+	Wait *domain.RunWait `json:"wait,omitempty"`
+	// Reread marks a same-status event whose only news is a newer read of
+	// the wait's sources; history leaves it out unless asked for by type.
+	Reread bool `json:"reread,omitempty"`
 	// Review and ReviewChangedAt are the run's after this transition.
 	Review          domain.RunReview `json:"review,omitempty"`
 	ReviewChangedAt *time.Time       `json:"review_changed_at,omitempty"`
@@ -157,10 +164,13 @@ const (
 	CauseTurnEnd     RunStatusCause = "turn-end"
 	CauseStall       RunStatusCause = "stall"
 	CauseWaitExpired RunStatusCause = "wait-expired"
-	CauseWorkers     RunStatusCause = "workers"
-	CauseTasksHeld   RunStatusCause = "tasks-held"
-	CauseHuman       RunStatusCause = "human"
-	CauseDisconnect  RunStatusCause = "disconnect"
+	// CauseWaitFault: a condition the agent waits on left pending and its
+	// wake was not delivered.
+	CauseWaitFault  RunStatusCause = "wait-fault"
+	CauseWorkers    RunStatusCause = "workers"
+	CauseTasksHeld  RunStatusCause = "tasks-held"
+	CauseHuman      RunStatusCause = "human"
+	CauseDisconnect RunStatusCause = "disconnect"
 )
 
 // RunRetentionPayload replaces the runtime retention metadata. Omitted fields
@@ -260,6 +270,16 @@ type RunModelPayload struct {
 func (RunModelPayload) EventType() Type { return TypeRunModel }
 
 func init() { registerPayload[RunModelPayload](TypeRunModel) }
+
+// RunEffortPayload reports the effort level a run's agent now uses; empty
+// is the agent's default.
+type RunEffortPayload struct {
+	Effort string `json:"effort"`
+}
+
+func (RunEffortPayload) EventType() Type { return TypeRunEffort }
+
+func init() { registerPayload[RunEffortPayload](TypeRunEffort) }
 
 // RunArchivedPayload reports a run's archive state as RFC3339. A nil
 // ArchivedAt means the run was restored.

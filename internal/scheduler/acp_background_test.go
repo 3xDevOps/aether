@@ -148,22 +148,33 @@ func TestBackgroundRunOverACPFailsOnAnotherStop(t *testing.T) {
 	}
 }
 
-func TestBackgroundRunOverACPFailsWhenTheModelIsRefused(t *testing.T) {
+func TestBackgroundRunOverACPFailsWhenItsSettingIsRefused(t *testing.T) {
 	t.Parallel()
-	e, rt := newBackgroundEnv(t, enhancedAgent, true)
-	// No configOptions, so the model goes through session/set_model, which
-	// the mock agent does not implement.
-	rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
-	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", enhancedAgent, domain.LaunchHeadless, domain.LaunchOptions{Model: "anthropic/claude-sonnet-4-5"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if want := exitedFailedReasonPrefix + "1: model not set: "; !strings.HasPrefix(got.Reason, want) {
-		t.Fatalf("reason %q, want prefix %q", got.Reason, want)
-	}
-	if slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
-		t.Fatal("the task ran on the agent's default model")
+	for name, tc := range map[string]struct {
+		opts   domain.LaunchOptions
+		reason string
+	}{
+		"model":  {domain.LaunchOptions{Model: "anthropic/claude-sonnet-4-5"}, "model not set: "},
+		"effort": {domain.LaunchOptions{Effort: "high"}, "effort not set: "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e, rt := newBackgroundEnv(t, enhancedAgent, true)
+			// No configOptions: the model goes through session/set_model, which
+			// the mock agent does not implement, and there is no effort option.
+			rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
+			run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", enhancedAgent, domain.LaunchHeadless, tc.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+			if want := exitedFailedReasonPrefix + "1: " + tc.reason; !strings.HasPrefix(got.Reason, want) {
+				t.Fatalf("reason %q, want prefix %q", got.Reason, want)
+			}
+			if slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
+				t.Fatalf("the task ran without its %s", name)
+			}
+		})
 	}
 }
 
@@ -172,10 +183,11 @@ func TestBackgroundRunOverACPFailsWhenTheModelIsRefused(t *testing.T) {
 func TestBackgroundWorkerOverACPEndsWhenItsTaskNeverStarted(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
-		task, model string
-		legacy      bool
+		task, model, effort string
+		legacy              bool
 	}{
 		"model refused":  {task: "say pong", model: "anthropic/claude-sonnet-4-5", legacy: true},
+		"effort refused": {task: "say pong", effort: "high", legacy: true},
 		"prompt refused": {task: acpmock.PromptRefuse},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -187,7 +199,7 @@ func TestBackgroundWorkerOverACPEndsWhenItsTaskNeverStarted(t *testing.T) {
 			run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
 				WorkspaceID: e.ws.ID, RunID: "unstarted-worker", Actor: e.member.ID,
 				RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: tc.task,
-				Harness: enhancedAgent, Mode: domain.LaunchHeadless, Model: tc.model,
+				Harness: enhancedAgent, Mode: domain.LaunchHeadless, Model: tc.model, Effort: tc.effort,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -198,7 +210,7 @@ func TestBackgroundWorkerOverACPEndsWhenItsTaskNeverStarted(t *testing.T) {
 				return err == nil && observed.State == MissionRunRetained
 			})
 			if tc.legacy && slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
-				t.Fatal("the task ran on the agent's default model")
+				t.Fatal("the task ran on the agent's defaults")
 			}
 		})
 	}

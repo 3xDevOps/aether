@@ -21,7 +21,8 @@ type prCreateInput struct {
 type prMergeInput struct {
 	RunID           string `json:"run_id"`
 	Repo            string `json:"repo,omitempty"`
-	Number          int    `json:"number" jsonschema:"pr.number from aether_pr_status"`
+	Number          int    `json:"number" jsonschema:"its pr.number"`
+	Repository      string `json:"repository" jsonschema:"its pr.repository"`
 	ExpectedHeadOID string `json:"expected_head_oid" jsonschema:"its pr.head_oid"`
 	Method          string `json:"method,omitempty" jsonschema:"default squash"`
 }
@@ -107,21 +108,24 @@ func prMerge(ctx context.Context, c calls, in prMergeInput) (string, any, error)
 	}
 	out := map[string]any{"run_id": in.RunID, "pr": prOf(pr), "url": l.run(in.RunID), "blockers": fb.Blockers(), "merge_state": fb.MergeStateStatus}
 	switch {
-	case pr.Number != in.Number:
+	case pr.Number != in.Number || !strings.EqualFold(pr.Repository, in.Repository):
 		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
-			"run %s's pull request is now #%d, not #%d; review it with aether_pr_status before merging", in.RunID, pr.Number, in.Number)}
+			"run %s's pull request is now %s#%d, not %s#%d; review it with aether_pr_status before merging", in.RunID, pr.Repository, pr.Number, in.Repository, in.Number)}
 	case pr.State == "merged":
 		out["merged"] = true
 		return fmt.Sprintf("Pull request #%d is already merged.", pr.Number), out, nil
 	case pr.State != "open":
 		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("pull request #%d is %s, not open", pr.Number, pr.State)}
+	case pr.HeadOID == "":
+		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("pull request #%d's head commit could not be read: %s",
+			pr.Number, cmp.Or(fb.Error, "GitHub returned none"))}
 	case !strings.HasPrefix(pr.HeadOID, in.ExpectedHeadOID):
 		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
 			"pull request #%d's head moved from %s to %s; review it again with aether_pr_status before merging%s", pr.Number, in.ExpectedHeadOID, pr.HeadOID, blockers(fb))}
 	}
 	var res protocol.RunPRMergeResult
 	if err := c.act(ctx, protocol.MethodRunPRMerge, protocol.RunPRMergeParams{RunID: in.RunID, Repo: in.Repo, Method: cmp.Or(in.Method, "squash"),
-		ExpectedHead: pr.HeadOID, Repository: pr.Repository, Number: pr.Number, ExpectedLogin: fb.Identity, ExpectedBase: pr.BaseBranch}, &res); err != nil {
+		ExpectedHead: pr.HeadOID, Repository: in.Repository, Number: pr.Number, ExpectedLogin: fb.Identity, ExpectedBase: pr.BaseBranch}, &res); err != nil {
 		return "", nil, err
 	}
 	if res.Error == "" && !res.Merged {

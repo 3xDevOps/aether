@@ -64,14 +64,15 @@ var actOps = []Op{
 		"Use this when the user wants a stopped run relaunched, or a run protected from cleanup, archived or restored.", runLifecycle).
 		enum("action", lifecycleRelaunch, lifecycleProtect, lifecycleUnprotect, lifecycleArchive, lifecycleRestore).
 		hints(false, true).offer(TierConfirmed).
-		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunRelaunch, protocol.MethodRunProtect, protocol.MethodRunArchive),
+		calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunGet, protocol.MethodRunRelaunch, protocol.MethodRunProtect,
+			protocol.MethodRunArchive),
 	opOf("aether_switch_run_mode", "Switch run mode", ScopeControl, true, nextRuns,
 		"Use this when the user wants a live run switched to standard or enhanced mode; a turn in progress is discarded.", switchRunMode).
 		enum("mode", lifecycleStandard, lifecycleEnhanced).
 		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunModeSwitch),
 	opOf("aether_handoff_run", "Hand off run", ScopeControl, true, "",
-		"Use this when the user gives their run to a teammate, who then owns it; only they can hand it back.", handoffRun).
+		"Use this when the user gives their run to a teammate; only they can hand it back.", handoffRun).
 		hints(true, false).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodMemberList, protocol.MethodRunHandoff),
 	opOf("aether_swarm_manage", "Manage swarm", ScopeControl, true, nextSwarms,
@@ -80,10 +81,10 @@ var actOps = []Op{
 		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive),
 	opOf("aether_replace_integrator", "Replace integrator", ScopeControl, true, nextSwarms,
-		"Use this when a swarm's integrator stopped or is stuck: a new one starts from the swarm's agents; fails if it changed since expected_generation."+
+		"Use this when a swarm's integrator stopped or is stuck: a new one starts from the swarm's agents."+
 			idempotencyRule+"without one, a repeat is made once.", replaceIntegrator).
 		enum("mode", "tui", "acp").hints(true, true).offer(TierConfirmed).
-		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodAccountList, protocol.MethodMissionReplaceIntegrator),
+		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodAccountList, protocol.MethodAgentList, protocol.MethodMissionReplaceIntegrator),
 }
 
 func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any, error) {
@@ -95,11 +96,17 @@ func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any,
 	var params any
 	switch in.Action {
 	case lifecycleRelaunch:
+		// Read before relaunching: a failed read after it would fail a call
+		// whose relaunch happened.
+		book, err := accounts(ctx, c.read)
+		if err != nil {
+			return "", nil, err
+		}
 		var res protocol.RunResult
 		if err := c.act(ctx, protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: in.RunID}, &res); err != nil {
 			return "", nil, err
 		}
-		out := launched(res.Run, l)
+		out := launched(res.Run, l, book)
 		return fmt.Sprintf("Relaunched run %s (%s).", res.Run.ID, res.Run.Status), out, nil
 	case lifecycleProtect, lifecycleUnprotect:
 		// run.protect revokes the run's control even when the flag is unchanged.
@@ -272,7 +279,7 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 	}
 	l := links(info.DashboardURL)
 	var shown protocol.MissionShowResult
-	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &shown); err != nil {
+	if err = c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &shown); err != nil {
 		return "", nil, err
 	}
 	m := shown.Mission
@@ -289,7 +296,7 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 		model = m.Integrator.Model
 	}
 	var accounts protocol.AccountListResult
-	if err := c.read(ctx, protocol.MethodAccountList, nil, &accounts); err != nil {
+	if err = c.read(ctx, protocol.MethodAccountList, nil, &accounts); err != nil {
 		return "", nil, err
 	}
 	usable := func(id string) bool {
@@ -320,7 +327,30 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 			account = prefer
 		}
 	}
-	mode := cmp.Or(in.Mode, m.Integrator.Mode)
+	mode := in.Mode
+	if mode == "" && harness != m.Integrator.Harness {
+		// Another agent starts in the first integrator mode it can take, as
+		// the launch dialog's integrator does.
+		param := account
+		if account == info.Member.ID {
+			param = ""
+		}
+		var agents protocol.AgentListResult
+		if err = c.read(ctx, protocol.MethodAgentList, protocol.AgentListParams{AccountMemberID: param}, &agents); err != nil {
+			return "", nil, fmt.Errorf("list agents to choose the integrator's mode (or pass mode): %w", err)
+		}
+		if i := slices.IndexFunc(agents.Agents, func(a protocol.AgentInfo) bool { return a.Name == harness }); i >= 0 {
+			if modes := rowOfAgent(agents.Agents[i]).Integrator; len(modes) > 0 {
+				mode = modes[0]
+			}
+		}
+		if mode == "" {
+			if mode, err = protocol.SwarmMode(agents.Agents, harness); err != nil {
+				return "", nil, err
+			}
+		}
+	}
+	mode = cmp.Or(mode, m.Integrator.Mode)
 	if mode == "headless" {
 		// Older swarms may have a headless integrator; a replacement must be interactive.
 		mode = "acp"

@@ -152,6 +152,19 @@ func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T)
 		t.Fatalf("launch with an unknown parameter = %v, want CodeInvalidParams", err)
 	}
 
+	// A launch pinned to a version the template no longer has starts nothing.
+	if list.Templates[0].Version == "" {
+		t.Fatal("template.list returned no version")
+	}
+	if err := bobControl.Call(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{
+		WorkspaceID: string(e.ws.ID), Name: "nightly-deps", ExpectedVersion: "0123456789abcdef",
+	}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeConflict || !strings.Contains(pe.Message, list.Templates[0].Version) {
+		t.Fatalf("launch at a stale version = %v, want CodeConflict naming %s", err, list.Templates[0].Version)
+	}
+	if calls := e.runs.Calls(); len(calls) != 1 {
+		t.Fatalf("calls after a stale launch = %v, want only the manual launch", calls)
+	}
+
 	// Scheduling is launching: a standing order for future runs.
 	var scheduled protocol.ScheduleSaveResult
 	if err := bobControl.Call(protocol.MethodScheduleSave, protocol.ScheduleSaveParams{
@@ -204,15 +217,18 @@ func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T)
 	}
 }
 
-// validatingRuns refuses a model for the "fake" agent the way the scheduler
-// refuses a model for an agent with no model flag.
+// validatingRuns refuses a model or an effort for the "fake" agent the way
+// the scheduler refuses them for an agent with no model or effort flag.
 type validatingRuns struct {
 	*fakeRuns
 }
 
-func (validatingRuns) ValidateMissionLaunch(_ context.Context, _, _ domain.MemberID, harness string, _ domain.LaunchMode, model string) error {
+func (validatingRuns) ValidateMissionLaunch(_ context.Context, _, _ domain.MemberID, harness string, _ domain.LaunchMode, model, effort string) error {
 	if harness == "fake" && model != "" {
 		return fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harness)
+	}
+	if harness == "fake" && effort != "" {
+		return fmt.Errorf("scheduler: agent %q has no effort flag; launch it without an effort", harness)
 	}
 	return nil
 }
@@ -246,6 +262,46 @@ func TestTemplateSaveRefusesModelTheAgentCannotTake(t *testing.T) {
 	}
 }
 
+func TestTemplateSaveRefusesAnEffortTheAgentHasNoFlagFor(t *testing.T) {
+	t.Parallel()
+	clock := &testClock{now: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
+	e := templateEnv(t, clock, func(c *Config) {
+		c.Runs = validatingRuns{fakeRuns: c.Runs.(*fakeRuns)}
+	})
+	control := controlAs(t, e, e.signer)
+	save := protocol.TemplateSaveParams{
+		WorkspaceID: string(e.ws.ID),
+		Name:        "nightly",
+		Task:        "triage",
+		Harness:     "fake",
+		Mode:        "headless",
+		Effort:      "high",
+	}
+
+	var pe *protocol.Error
+	err := control.Call(protocol.MethodTemplateSave, save, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams ||
+		pe.Message != `scheduler: agent "fake" has no effort flag; launch it without an effort` {
+		t.Fatalf("template.save with an effort = %v, want the no-effort-flag refusal", err)
+	}
+
+	save.Harness = "claude"
+	var saved protocol.TemplateSaveResult
+	if err := control.Call(protocol.MethodTemplateSave, save, &saved); err != nil {
+		t.Fatalf("template.save with an effort its agent takes: %v", err)
+	}
+	if saved.Template.Effort != "high" {
+		t.Fatalf("saved template effort = %q, want high", saved.Template.Effort)
+	}
+	var listed protocol.TemplateListResult
+	if err := control.Call(protocol.MethodTemplateList, protocol.TemplateListParams{WorkspaceID: string(e.ws.ID)}, &listed); err != nil {
+		t.Fatalf("template.list: %v", err)
+	}
+	if len(listed.Templates) != 1 || listed.Templates[0].Effort != "high" {
+		t.Fatalf("listed templates = %+v, want one with effort high", listed.Templates)
+	}
+}
+
 // awaitTimeline waits for a workspace.timeline entry whose message contains
 // want, and returns it.
 func awaitTimeline(t *testing.T, sub events.Subscription, want string) string {
@@ -263,5 +319,52 @@ func awaitTimeline(t *testing.T, sub events.Subscription, want string) string {
 		case <-deadline:
 			t.Fatalf("timed out waiting for a timeline entry containing %q", want)
 		}
+	}
+}
+
+// A retry of a pinned template launch returns its run even after the
+// template changed, whatever version the retry names.
+func TestTemplateLaunchReplayIgnoresTheVersion(t *testing.T) {
+	t.Parallel()
+	e := templateEnv(t, &testClock{now: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)})
+	control := controlAs(t, e, e.signer)
+	save := protocol.TemplateSaveParams{WorkspaceID: string(e.ws.ID), Name: "triage", Task: "triage", Harness: "claude", Mode: "headless"}
+	if err := control.Call(protocol.MethodTemplateSave, save, nil); err != nil {
+		t.Fatal(err)
+	}
+	var list protocol.TemplateListResult
+	if err := control.Call(protocol.MethodTemplateList, protocol.TemplateListParams{WorkspaceID: string(e.ws.ID)}, &list); err != nil {
+		t.Fatal(err)
+	}
+	launch := protocol.TemplateLaunchParams{WorkspaceID: string(e.ws.ID), Name: "triage", ExpectedVersion: list.Templates[0].Version, IdempotencyKey: "k1"}
+	var first protocol.TemplateLaunchResult
+	if err := control.Call(protocol.MethodTemplateLaunch, launch, &first); err != nil {
+		t.Fatal(err)
+	}
+	save.Task = "triage and label"
+	if err := control.Call(protocol.MethodTemplateSave, save, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The fake scheduler writes no run row, so the replay finds the key's
+	// run gone; a version mismatch would be refused as other params first.
+	launch.ExpectedVersion = "0123456789abcdef"
+	var pe *protocol.Error
+	err := control.Call(protocol.MethodTemplateLaunch, launch, nil)
+	if !errors.As(err, &pe) || pe.Code == protocol.CodeConflict || !strings.Contains(pe.Message, first.Run.ID) || len(e.runs.Calls()) != 1 {
+		t.Fatalf("retry after the template changed = %v after %v, want the key's run %s and no new launch", err, e.runs.Calls(), first.Run.ID)
+	}
+	// replay_only finds the same run, and launches nothing for a key that
+	// started none.
+	launch.ReplayOnly = true
+	if err := control.Call(protocol.MethodTemplateLaunch, launch, nil); !errors.As(err, &pe) || !strings.Contains(pe.Message, first.Run.ID) {
+		t.Fatalf("replay_only of the first key = %v, want its run %s", err, first.Run.ID)
+	}
+	launch.IdempotencyKey = "k2"
+	if err := control.Call(protocol.MethodTemplateLaunch, launch, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound || len(e.runs.Calls()) != 1 {
+		t.Fatalf("replay_only of a new key = %v after %v, want not found and no launch", err, e.runs.Calls())
+	}
+	launch.ReplayOnly, launch.ExpectedVersion = false, ""
+	if err := control.Call(protocol.MethodTemplateLaunch, launch, nil); err != nil || len(e.runs.Calls()) != 2 {
+		t.Fatalf("launch after a replay_only miss = %v after %v, want it launched", err, e.runs.Calls())
 	}
 }

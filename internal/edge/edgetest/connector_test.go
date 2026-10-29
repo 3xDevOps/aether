@@ -101,6 +101,7 @@ func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, s
 }
 func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
 func (launcher) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
+func (launcher) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
 func (launcher) Liveness(domain.RunID) (domain.RunLiveness, bool)             { return domain.RunLiveness{}, false }
 func (launcher) Switching(domain.RunID) domain.LaunchMode                     { return "" }
 func (launcher) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
@@ -279,8 +280,8 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 				}
 				names = append(names, tool.Name)
 			}
-			if len(names) != 37 {
-				t.Fatalf("tools = %v, want all 37", names)
+			if len(names) != 39 {
+				t.Fatalf("tools = %v, want all 39", names)
 			}
 			const task = "fix the flaky login test"
 			if out := callTool(t, session, "aether_list_runs", map[string]any{"mine": true}); strings.Contains(out, task) {

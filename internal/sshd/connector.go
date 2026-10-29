@@ -119,12 +119,19 @@ func (s *Server) ConnectorAccountGrant(ctx context.Context, account edgeproto.Ac
 		return ConnectorGrant{}, "", err
 	}
 	m, err := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject)
-	if errors.Is(err, store.ErrNotFound) {
+	switch {
+	case errors.Is(err, store.ErrNotFound) && account.Provider == edgeproto.ProviderReviewer:
+		return ConnectorGrant{}, "", fmt.Errorf("%s is bound to no member of %s; an admin binds it with aether member link --reviewer %s <member-id>",
+			accountName(account), cmp.Or(s.cfg.Name, "this server"), account.Subject)
+	case errors.Is(err, store.ErrNotFound):
 		return ConnectorGrant{}, "", fmt.Errorf("%s is not a member of %s; an admin invites it, or a member connects with a code from aether mcp",
 			accountName(account), cmp.Or(s.cfg.Name, "this server"))
 	}
 	if err != nil {
 		return ConnectorGrant{}, "", fmt.Errorf("sshd: connector account: %w", err)
+	}
+	if err = s.checkReviewer(account, m); err != nil {
+		return ConnectorGrant{}, "", err
 	}
 	return ConnectorGrant{Member: m.ID, Provider: account.Provider, Subject: account.Subject}, cmp.Or(m.DisplayName, string(m.ID)), nil
 }
@@ -281,12 +288,29 @@ func (s *Server) CheckConnectorGrant(ctx context.Context, g ConnectorGrant) erro
 	case err != nil:
 		return fmt.Errorf("sshd: connector account: %w", err)
 	}
+	return s.checkReviewer(account, m)
+}
+
+// checkReviewer refuses the edge's reviewer account unless edge-reviewer
+// is on and its member is no admin: a reviewer's password is shared
+// with an app directory.
+func (s *Server) checkReviewer(account edgeproto.Account, m *domain.Member) error {
+	switch {
+	case account.Provider != edgeproto.ProviderReviewer:
+		return nil
+	case !s.cfg.EdgeReviewer:
+		return fmt.Errorf("%s does not take the edge's reviewer account: edge-reviewer is off. An admin turns it on on the server's host with "+
+			"sudo aether-server config set edge-reviewer true, then sudo systemctl restart aether-server", cmp.Or(s.cfg.Name, "this server"))
+	case m.Role == domain.RoleAdmin:
+		return fmt.Errorf("%s is bound to member %s, an admin, and a reviewer may act only as a viewer or collaborator; "+
+			"an admin changes the member's role with aether member role", accountName(account), m.ID)
+	}
 	return nil
 }
 
 func connectorToWire(c *store.Connector) protocol.Connector {
-	out := protocol.Connector{ID: c.ID, MemberID: string(c.Member), ClientName: c.ClientName, RedirectHost: c.RedirectHost,
-		DeviceID: string(c.Device), Scopes: c.Scopes, CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339)}
+	out := protocol.Connector{ID: c.ID, MemberID: string(c.Member), ClientID: c.ClientID, ClientName: c.ClientName, RedirectHost: c.RedirectHost,
+		DeviceID: string(c.Device), Resource: c.Resource, Scopes: c.Scopes, CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339)}
 	if c.LastUsedAt != nil {
 		out.LastUsedAt = c.LastUsedAt.UTC().Format(time.RFC3339)
 	}
@@ -302,7 +326,13 @@ func (s *Server) connectorList(ctx context.Context, member domain.MemberID, _ js
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := protocol.ConnectorListResult{Connectors: make([]protocol.Connector, 0, len(list))}
+	connectorURL, err := s.connectorURLFor(ctx, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	universal := s.UniversalConnectorURL()
+	out := protocol.ConnectorListResult{Connectors: make([]protocol.Connector, 0, len(list)), URL: connectorURL, UniversalURL: universal,
+		SignIn: universal != "" && connectorURL == universal && s.cfg.EdgeAccess == edgeproto.PolicyAccount}
 	for _, c := range list {
 		out.Connectors = append(out.Connectors, connectorToWire(c))
 	}

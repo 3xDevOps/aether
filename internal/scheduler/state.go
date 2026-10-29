@@ -343,12 +343,14 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		return err
 	}
 	payload := events.RunStatusPayload{
-		From: from, To: to, Reason: public, Activity: activity, Cause: d.cause, StatusSeq: stamp.StatusSeq,
+		From: from, To: to, Reason: public, Activity: activity, Cause: d.cause, Wait: d.wait, StatusSeq: stamp.StatusSeq,
 		OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened,
 		Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt,
 	}
 	if e != nil {
-		e.status, e.reason, e.activity, e.cause = to, public, activity, d.cause
+		payload.Reread = from == to && e.activity == activity && e.reason == public && e.cause == d.cause &&
+			d.wait != nil && sameWait(d.wait, e.wait)
+		e.status, e.reason, e.activity, e.cause, e.wait = to, public, activity, d.cause, d.wait
 		e.workersReason = workersReason
 		if startedAt != nil {
 			e.startedAt = now
@@ -424,7 +426,10 @@ type sidecar struct {
 	Home            string            `json:"home,omitempty"`
 	// LoginMember is the account owner whose login paths the container
 	// mounts, empty when it mounts none.
-	LoginMember         string                   `json:"login_member,omitempty"`
+	LoginMember string `json:"login_member,omitempty"`
+	// VerifiedLogins are the account owners whose own login the runtime
+	// confirmed in a container of this run.
+	VerifiedLogins      []domain.MemberID        `json:"verified_logins,omitempty"`
 	Reporter            harness.Reporter         `json:"reporter,omitempty"`
 	Egress              bool                     `json:"egress,omitempty"`
 	AgentState          agentstatus.State        `json:"agent_state,omitempty"`
@@ -508,6 +513,7 @@ func (e *supervised) sidecar() sidecar {
 		RunUser:             e.runUser,
 		Home:                e.home,
 		LoginMember:         string(e.loginMember),
+		VerifiedLogins:      e.verifiedLogins,
 		Reporter:            e.reporter,
 		Egress:              e.egress,
 		AgentState:          e.agentReport.State,

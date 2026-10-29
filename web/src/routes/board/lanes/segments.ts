@@ -1,4 +1,5 @@
 import type { Tone } from '@/components/ui/status-dot'
+import { isReread } from '@/lib/events'
 import { liveStateOf, outcomeState, stateLabel, stateTone, type PresentationState } from '@/lib/status'
 import type { Event, RunStatus, RunStatusPayload } from '@/lib/types'
 import { isTerminal, type RunRecord } from '@/store/runs'
@@ -30,7 +31,7 @@ export const segmentLabel: Record<SegmentState, string> = {
 export function statusChanges(events: Event[]): Map<string, StatusChange[]> {
   const byRun = new Map<string, StatusChange[]>()
   for (const event of events) {
-    if (event.type !== 'run.status' || !event.run_id) continue
+    if (event.type !== 'run.status' || !event.run_id || isReread(event)) continue
     const p = event.payload as RunStatusPayload
     const list = byRun.get(event.run_id) ?? []
     list.push({ t: Date.parse(event.time), from: p.from, to: p.to, state: p.state || undefined })

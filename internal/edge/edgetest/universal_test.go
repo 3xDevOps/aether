@@ -271,13 +271,14 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				}
 				names = append(names, tool.Name)
 			}
-			if len(names) != 27 {
-				t.Fatalf("tools with read and write = %v, want 27", names)
+			if len(names) != 29 {
+				t.Fatalf("tools with read and write = %v, want 29", names)
 			}
 			t.Logf("tools/list on %s as %s: %d tools: %s", base, bobName, len(names), strings.Join(names, " "))
 			list := call[protocol.ConnectorListResult](t, bctl, protocol.MethodConnectorList, struct{}{})
-			if len(list.Connectors) != 1 || list.Connectors[0].LastUsedAt == "" {
-				t.Fatalf("connector.list = %+v, want one used connector", list)
+			if len(list.Connectors) != 1 || list.Connectors[0].LastUsedAt == "" || list.Connectors[0].Resource != base ||
+				list.URL != base || list.UniversalURL != base || list.SignIn != (policy == edgeproto.PolicyAccount) {
+				t.Fatalf("connector.list = %+v, want one used connector on %s, and signing in to replace the code only under account", list, base)
 			}
 
 			for _, tt := range []struct {
@@ -368,7 +369,7 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				bobID := s1.memberOf(t, bob).ID
 				call[protocol.MemberIdentityRemoveResult](t, h.control(al, s1), protocol.MethodMemberIdentityRemove, protocol.MemberIdentityRemoveParams{
 					MemberID: string(bobID), Provider: edgeproto.ProviderGitHub, Subject: bob.account().Subject})
-				if resp, body = bearer(rotated.AccessToken); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "github account 1002, which authorized it, is no longer bound to member "+string(bobID)) {
+				if resp, body = bearer(rotated.AccessToken); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "no connector holds this access token") {
 					t.Fatalf("bob's connector once his GitHub account is unbound: %s %s", resp.Status, body)
 				}
 				s1.restart(edgeproto.PolicyAccount)

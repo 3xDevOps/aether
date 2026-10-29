@@ -145,7 +145,7 @@ describe('terminal view', () => {
       roomStatusError: {},
     }))
     const presence = within(screen.getByRole('group', { name: 'Run presence' }))
-    expect(presence.getByText('You control in another tab')).toBeDefined()
+    expect(presence.getByText(/^You control in another session since /)).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
     expect(presence.queryByText('You control')).toBeNull()
@@ -177,12 +177,12 @@ describe('terminal view', () => {
     expect(presence.getByText('You control')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     controlAck(false, 2, 1)
-    expect(presence.getByText('You control in another tab (last known)')).toBeDefined()
+    expect(presence.getByText(/^You control in another session since .* \(last known\)$/)).toBeDefined()
     await act(async () => {
       refresh.reject(new Error('presence service unavailable'))
       await Promise.resolve()
     })
-    expect(presence.getByText('You control in another tab (last known)')).toBeDefined()
+    expect(presence.getByText(/^You control in another session since .* \(last known\)$/)).toBeDefined()
     expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
     view.unmount()
   })

@@ -46,16 +46,16 @@ type RunLauncherWithOptions interface {
 // LaunchValidator is implemented by schedulers that can resolve a launch
 // without starting it.
 type LaunchValidator interface {
-	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model string) error
+	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model, effort string) error
 }
 
-var errLaunchOptionsUnsupported = errors.New("sshd: launch options (a cached base or a model) are not supported")
+var errLaunchOptionsUnsupported = errors.New("sshd: launch options (a cached base, a model or an effort) are not supported")
 
 func launchWithOptions(ctx context.Context, runs RunController, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	if launcher, ok := runs.(RunLauncherWithOptions); ok {
 		return launcher.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 	}
-	if opts.CachedBase != "" || opts.Model != "" || len(opts.ExtraWorkspaces) > 0 {
+	if opts.CachedBase != "" || opts.Model != "" || opts.Effort != "" || len(opts.ExtraWorkspaces) > 0 || opts.Limits != (domain.RunLimits{}) {
 		return nil, errLaunchOptionsUnsupported
 	}
 	return runs.Launch(ctx, workspace, member, account, task, harness, mode)
@@ -79,6 +79,9 @@ type RunController interface {
 	// AgentModels lists the models harness offers on account, resolving the
 	// harness and the account owner's login as Launch does.
 	AgentModels(ctx context.Context, member, account domain.MemberID, harness string, refresh bool) (protocol.AgentModelsResult, error)
+	// CachedAgentModels is AgentModels' fresh cached answer for harness on
+	// account, without probing; false when there is none.
+	CachedAgentModels(account domain.MemberID, harness string) (protocol.AgentModelsResult, bool)
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
 	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
@@ -92,6 +95,9 @@ type RunController interface {
 	// Cause is what chose activity for the live run; empty when unknown or
 	// when the run's activity has since changed.
 	Cause(run domain.RunID, activity domain.RunActivity) events.RunStatusCause
+	// Wait is the evidence behind the reported wait the live, unpaused run
+	// shows with activity; nil when it shows none.
+	Wait(run domain.RunID, activity domain.RunActivity) *domain.RunWait
 	// Liveness is the live or provisioning Enhanced run's turn phase, last
 	// agent progress and connection state; ok is false for any other run.
 	Liveness(run domain.RunID) (domain.RunLiveness, bool)
@@ -142,6 +148,11 @@ type RunController interface {
 	EnsureRunShellTabReserved(ctx context.Context, run domain.RunID, tab string, cols, rows uint) (ptyhost.ShellTabReservation, error)
 	EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
 	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
+	// StartAssistantLogin runs agent's sign-in for the member's assistant
+	// and returns the PTY session that streams it.
+	StartAssistantLogin(ctx context.Context, member domain.MemberID, agent string, cols, rows uint) (ptyhost.SessionKey, error)
+	// EndAssistantLogin removes the transcript of a sign-in that exited.
+	EndAssistantLogin(ctx context.Context, member domain.MemberID, agent string) error
 	StopTerminal(ctx context.Context, member domain.MemberID) error
 	// WithStoppedTerminal excludes terminal recreation through afterStop.
 	// The callback may lock member caches but must not reenter terminal lifecycle.

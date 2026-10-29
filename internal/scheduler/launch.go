@@ -205,7 +205,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return nil, err
 	}
-	argv, profile, acp, err := s.command(ctx, workspace, member, account, harness, mode, opts.AssignedRunID != "", task, opts.Model, extraRepos...)
+	argv, profile, acp, err := s.command(ctx, workspace, member, account, harness, mode, opts.AssignedRunID != "", task, opts.Model, opts.Effort, extraRepos...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +232,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 			requested := &domain.Run{
 				ID: reservedID, WorkspaceID: workspace,
 				MemberID: member, AccountMemberID: account, Task: task,
-				Harness: harness, Mode: mode, Model: opts.Model,
+				Harness: harness, Mode: mode, Model: opts.Model, Effort: opts.Effort,
 			}
 			if !sameReservedRun(existing, requested) || (opts.CachedBase != "" && opts.CachedBase != existing.BaseCommit) {
 				return nil, errors.New("scheduler: reserved run does not match launch request")
@@ -306,6 +306,8 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		Harness:         harness,
 		Mode:            mode,
 		Model:           opts.Model,
+		Effort:          opts.Effort,
+		Limits:          opts.Limits,
 		Via:             domain.ViaFrom(ctx),
 		ACP:             acp,
 		Status:          domain.RunQueued,
@@ -409,15 +411,6 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if len(run.Extras) > 0 {
 		if updateErr := s.cfg.Store.SetRunRepos(ctx, run.ID, run.Extras); updateErr != nil {
 			return fmt.Errorf("record extra repositories: %w", updateErr)
-		}
-	}
-	if s.cfg.Secrets != nil {
-		files, readErr := s.cfg.Secrets.Files(ws.ID)
-		if readErr != nil {
-			return fmt.Errorf("read workspace files: %w", readErr)
-		}
-		if writeErr := s.cfg.Git.WriteRunFiles(ctx, run.ID, files); writeErr != nil {
-			return fmt.Errorf("write workspace files: %w", writeErr)
 		}
 	}
 	if pinErr := s.pinLatestProfile(ctx, run); pinErr != nil {
@@ -546,7 +539,11 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	s.mu.Lock()
 	entry.appServer = appServer
 	s.mu.Unlock()
-	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
+	limits, err := s.runLimits(ctx, run.Limits)
+	if err != nil {
+		return nil, err
+	}
+	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, limits, persistSupervisor))
 	if err != nil {
 		return nil, fmt.Errorf("create container: %w", err)
 	}
@@ -564,6 +561,9 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 		return nil, s.failContainer(ctx, entry, cid, "start container", serr)
 	}
 	s.mu.Lock()
+	if entry.loginMember != "" && !slices.Contains(entry.verifiedLogins, entry.loginMember) {
+		entry.verifiedLogins = append(entry.verifiedLogins, entry.loginMember)
+	}
 	sc := entry.sidecar()
 	s.mu.Unlock()
 	if werr := s.writeSidecar(sc); werr != nil {
@@ -687,8 +687,11 @@ func (s *Scheduler) freshen(ctx context.Context, run *domain.Run) *domain.Run {
 // command resolves argv and profile for one launch by member in workspace on
 // account's shared account, with the profile from launchProfile. An acp
 // launch has no argv: the task travels over the protocol.
-func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model string, extras ...domain.RunRepo) (argv []string, profile harness.Profile, acp bool, err error) {
+func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model, effort string, extras ...domain.RunRepo) (argv []string, profile harness.Profile, acp bool, err error) {
 	if err = domain.ValidModel(model); err != nil {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
+	}
+	if err = domain.ValidEffort(effort); err != nil {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
 	}
 	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
@@ -710,6 +713,9 @@ func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, m
 	if len(argv) == 0 {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
 	}
+	if err = profile.CheckEffort(effort, acp); err != nil {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q %w", harnessName, err)
+	}
 	if acp {
 		return nil, profile, true, nil
 	}
@@ -723,5 +729,5 @@ func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, m
 		}
 		task = withInstructions(task, instructions)
 	}
-	return harness.Argv(argv, task, profile.ModelLaunchArgs(model)), profile, false, nil
+	return harness.Argv(argv, task, profile.LaunchArgs(model, effort)), profile, false, nil
 }

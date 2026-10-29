@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -90,15 +91,16 @@ func (s *Server) templateSave(ctx context.Context, member domain.MemberID, param
 		Harness:     p.Harness,
 		Mode:        domain.LaunchMode(p.Mode),
 		Model:       p.Model,
+		Effort:      p.Effort,
 		Params:      p.Params,
 		BudgetUSD:   p.BudgetUSD,
 	}
-	if validator, ok := s.cfg.Runs.(LaunchValidator); ok && p.Model != "" {
+	if validator, ok := s.cfg.Runs.(LaunchValidator); ok && (p.Model != "" || p.Effort != "") {
 		mode := t.Mode
 		if mode == "" {
 			mode = domain.LaunchHeadless
 		}
-		if err := validator.ValidateMissionLaunch(ctx, member, member, t.Harness, mode, t.Model); err != nil {
+		if err := validator.ValidateMissionLaunch(ctx, member, member, t.Harness, mode, t.Model, t.Effort); err != nil {
 			return nil, invalidParams(err.Error())
 		}
 	}
@@ -135,7 +137,7 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if perr != nil {
 		return nil, perr
 	}
-	p, perr := decodeParams[protocol.TemplateLaunchParams](params)
+	p, perr := decodeLaunchParams[protocol.TemplateLaunchParams](params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -146,10 +148,19 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if p.Name == "" {
 		return nil, invalidParams("name is required")
 	}
-	key := p.IdempotencyKey
-	p.IdempotencyKey = ""
+	// A retry of a launch keeps its receipt after the template changes, so
+	// the version is not part of the params it must repeat, nor is
+	// replay_only.
+	key, version, replayOnly := p.IdempotencyKey, p.ExpectedVersion, p.ReplayOnly
+	p.IdempotencyKey, p.ExpectedVersion, p.ReplayOnly = "", "", false
+	if replayOnly && key == "" {
+		return nil, invalidParams("replay_only needs the idempotency_key of the launch to return")
+	}
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
-		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, created)
+		if replayOnly {
+			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: no run was launched under idempotency_key %q", protocol.MethodTemplateLaunch, key)}
+		}
+		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, version, created)
 		if err != nil {
 			return nil, templateError(err)
 		}
@@ -248,6 +259,9 @@ func templateError(err error) *protocol.Error {
 		errors.Is(err, templates.ErrInvalidDefinition) {
 		return invalidParams(err.Error())
 	}
+	if errors.Is(err, templates.ErrChanged) {
+		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}
+	}
 	return rpcError(err)
 }
 
@@ -260,9 +274,11 @@ func templateWire(t *store.Template) protocol.Template {
 		Harness:     t.Harness,
 		Mode:        string(t.Mode),
 		Model:       t.Model,
+		Effort:      t.Effort,
 		Params:      t.Params,
 		BudgetUSD:   t.BudgetUSD,
 		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),
+		Version:     templates.Version(t),
 	}
 }
 

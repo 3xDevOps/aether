@@ -1,17 +1,22 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronRight, File, Folder, GitBranch } from '@/components/icons'
+import { createContext, useContext, useEffect, useRef, useState, type ComponentProps, type DragEvent, type ReactNode } from 'react'
+import { ChevronRight, File, Folder, GitBranch, Upload } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ListRow } from '@/components/ui/list-row'
-import type { Api } from '@/lib/api'
+import { Spinner } from '@/components/ui/spinner'
+import { ApiError, type Api } from '@/lib/api'
+import { useRefuseStrayFileDrops } from '@/lib/file-drag'
 import { message } from '@/lib/format'
+import { allowed } from '@/lib/permissions'
 import { runLabel } from '@/lib/status'
 import type { Run, Workspace } from '@/lib/types'
 import { chevronTurn, cn } from '@/lib/utils'
-import { type FileSource, type SelectFile, type Selection, sourceKey } from '@/routes/files/sources'
+import { droppedUploads, useUpload, type UploadState } from '@/routes/files/home-upload'
+import { baseName, type FileSource, isLiveRun, type SelectFile, type Selection, sourceKey, type WorkspaceSource } from '@/routes/files/sources'
 import { useStore } from '@/store'
 import type { FileTreeState } from '@/store/files'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability, useSelf } from '@/store/hooks'
 
 interface Expansion {
   open: (key: string, fallback: boolean) => boolean
@@ -72,9 +77,6 @@ export function FileTree({
   selected: Selection | null
 }) {
   const several = workspaces.length > 1
-  const navigate = useStore((s) => s.navigate)
-  const caps = useCapability()
-  const offerFiles = useIsAdmin() && caps.hasMethod('workspace.environment.set')
   return (
     <div className="flex flex-1 flex-col gap-3 p-2">
       {workspaces.map((workspace) => {
@@ -87,10 +89,9 @@ export function FileTree({
             {checkouts.length > 0 && (
               <Disclosure id={`runs:${workspace.id}`} label="Run checkouts" count={checkouts.length}>
                 {checkouts.map((run) => (
-                  <TreeDirectory
+                  <RunCheckoutTree
                     key={run.id}
                     source={{ kind: 'workspace', workspaceID: workspace.id, runID: run.id, label: runLabel(run) }}
-                    path=""
                     depth={1}
                     rootOpen={false}
                     client={client}
@@ -100,11 +101,6 @@ export function FileTree({
                   />
                 ))}
               </Disclosure>
-            )}
-            {offerFiles && (
-              <Button variant="quiet" size="sm" className="self-start px-2 py-1" onClick={() => navigate('workspace', { workspaceId: workspace.id, section: 'environment' })}>
-                Add .env files for runs
-              </Button>
             )}
           </section>
         )
@@ -184,6 +180,42 @@ export function ListingStatus({ listing, depth }: { listing: FileTreeState | und
   )
 }
 
+export const dropTargetClass = 'bg-accent-soft outline-1 -outline-offset-1 outline-accent'
+
+/** Transfers in progress and what could not be uploaded, pinned under a tree. */
+export function UploadStatus({ uploads, downloading = null, dismissFailures }: { uploads: UploadState; downloading?: string | null; dismissFailures: () => void }) {
+  const progress = uploads.progress
+    ? uploads.progress.of === 0
+      ? 'Reading dropped files…'
+      : `Uploading ${uploads.progress.at} of ${uploads.progress.of} · ${uploads.progress.name}`
+    : downloading && `Downloading ${baseName(downloading)}`
+  if (!progress && uploads.failures.length === 0) return null
+  return (
+    <div className="sticky bottom-0 flex flex-col gap-2 border-t border-seam bg-chrome p-2">
+      {uploads.failures.length > 0 && (
+        <Callout
+          tone="failed"
+          role="alert"
+          title={uploads.failures.length === 1 ? '1 file was not uploaded' : `${uploads.failures.length} files were not uploaded`}
+          actions={<Button size="sm" variant="ghost" onClick={dismissFailures}>Dismiss</Button>}
+        >
+          <ul className="max-h-32 overflow-y-auto text-ui-sm">
+            {uploads.failures.map((failure) => (
+              <li key={failure}>{failure}</li>
+            ))}
+          </ul>
+        </Callout>
+      )}
+      {progress && (
+        <p role="status" className="flex min-w-0 items-center gap-2 text-ui-sm text-muted">
+          <Spinner />
+          <span className="min-w-0 truncate">{progress}</span>
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function TreeDirectory({
   source,
   path,
@@ -194,6 +226,7 @@ export function TreeDirectory({
   selected,
   touched = noPaths,
   icon,
+  action,
 }: {
   source: FileSource
   path: string
@@ -204,6 +237,7 @@ export function TreeDirectory({
   selected: Selection | null
   touched?: Set<string>
   icon?: ReactNode
+  action?: ReactNode
 }) {
   const [expanded, toggle] = useExpanded(sourceKey(source, path), path === '' && rootOpen)
   const listing = useListing(source, path, expanded, client)
@@ -221,6 +255,7 @@ export function TreeDirectory({
           </>
         }
         title={label}
+        hoverAction={action}
       >
         {label}
       </ListRow>
@@ -250,6 +285,73 @@ export function TreeDirectory({
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+export function RunCheckoutTree({ source, client, ...props }: Omit<ComponentProps<typeof TreeDirectory>, 'source' | 'path' | 'action'> & { source: WorkspaceSource }) {
+  const run = useStore((s) => s.runs[source.runID])
+  const self = useSelf()
+  const steerOthers = useStore((s) => s.workspaces[source.workspaceID]?.steer_others)
+  const writable = useCapability().hasMethod('files.upload') && run !== undefined && isLiveRun(run) &&
+    allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
+  const uploader = useUpload(
+    (path, content) =>
+      client
+        .filesUpload({ workspace_id: source.workspaceID, run_id: source.runID, ...(source.repo ? { repo: source.repo } : {}), path, content_base64: content })
+        .catch((err: unknown) => {
+          throw err instanceof ApiError && err.status === 409 ? new Error(`${path} already exists in this run; open it to edit`) : err
+        }),
+    () => useStore.getState().invalidateRun(source.runID),
+  )
+  const picker = useRef<HTMLInputElement>(null)
+  const [over, setOver] = useState(false)
+  useRefuseStrayFileDrops()
+  const accepts = (event: DragEvent) => writable && !uploader.busy && event.dataTransfer.types.includes('Files')
+  return (
+    <div
+      className={cn('rounded-control', over && dropTargetClass)}
+      onDragOver={(event) => {
+        if (!accepts(event)) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+        setOver(true)
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false)
+      }}
+      onDrop={(event) => {
+        setOver(false)
+        if (!accepts(event)) return
+        event.preventDefault()
+        uploader.upload('', droppedUploads(event.dataTransfer))
+      }}
+    >
+      <TreeDirectory
+        {...props}
+        source={source}
+        path=""
+        client={client}
+        action={writable && (
+          <Button variant="ghost" size="icon-sm" label="Upload files…" disabled={uploader.busy} onClick={() => picker.current?.click()}>
+            <Upload />
+          </Button>
+        )}
+      />
+      {writable && (
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          hidden
+          aria-label={`Files to upload to ${source.label}`}
+          onChange={(event) => {
+            uploader.upload('', [...(event.target.files ?? [])].map((file) => ({ file, path: file.name })))
+            event.target.value = ''
+          }}
+        />
+      )}
+      <UploadStatus uploads={uploader.state} dismissFailures={uploader.dismissFailures} />
     </div>
   )
 }

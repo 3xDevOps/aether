@@ -65,8 +65,7 @@ what `edge.onaether.dev` serves.
 | Privacy policy at a public URL, from [legal/privacy-connectors.md](legal/privacy-connectors.md) | `privacyPolicyURL` | Draft | No | No | No |
 | Terms of service at a public URL, from [legal/terms-connectors.md](legal/terms-connectors.md) | `termsOfServiceURL` | Draft | No | No | No |
 | Demo server with sample data ([Reviewer setup](#reviewer-setup)) | Project edge | n/a | No | n/a | n/a |
-| Reviewer account that needs no email code | Review details | No: needs an edge sign-in other than GitHub | No | No | No |
-| `aether_changes`, used by test 2 | Connector tools | No: planned (PR #585 adds `changes.list`; the tool follows) | No | No | No |
+| Reviewer account that needs no email code ([Reviewer setup](#reviewer-setup)) | Review details | Built in Aether; not enabled on edge.onaether.dev: `aether-edge serve --reviewer-account-file` | No | No | No |
 | Walkthrough video of the five positive test cases | `review.demo_recording_url` | n/a | No | No | No |
 | Live test from chatgpt.com | n/a | n/a | Not run | n/a | n/a |
 
@@ -118,7 +117,7 @@ can push branches and open pull requests.
 
 | Tool | Read-only | Destructive | Open world | Justification |
 | --- | --- | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
+| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `aether_launch_options`, `aether_changes`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
 | `aether_get_run` | yes | no | no | Reads one run on the user's server. It also reads the run's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_pr_status` | yes | no | no | Reads a run's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds a run or swarm, which can be stopped; its agents can push branches and open pull requests |
@@ -148,24 +147,28 @@ scopes.
 
 ### Tool list budget
 
-Neither ChatGPT nor Claude documents a limit on `tools/list`. A
-[report on OpenAI's developer forum](https://community.openai.com/t/token-limit-when-connecting-chatgpt-with-external-mcp/1371022)
+Neither ChatGPT nor Claude documents a limit on `tools/list`. A [report on
+OpenAI's developer
+forum](https://community.openai.com/t/token-limit-when-connecting-chatgpt-with-external-mcp/1371022)
 (2026-01-05) quotes ChatGPT refusing a server because "All tools (including
-name, description, and input schema) must be less than 5000 tokens",
-possibly for the total; that figure is unverified until a live ChatGPT test
-settles it. Anthropic notes that tool selection "degrades once you exceed
-30–50 available tools"
-([tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)).
+name, description, and input schema) must be less than 5000 tokens", possibly
+for the total; that figure is unverified until a live ChatGPT test settles it.
+15000 bytes is about 4300 tokens at 3.5 bytes per token, under 5000 even as a
+total. Anthropic notes that tool selection "degrades once you exceed 30–50
+available tools" ([tool
+search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)).
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
-tools, and each tool's name, description and compact input schema at most
-3500 bytes, 15000 for all of them together. Today that is 37 tools, 13263
-bytes and 3175 o200k tokens, the largest tool `aether_launch_swarm` at 895
-bytes; the whole `tools/list` JSON is 19686 bytes and 4684 tokens. Give each tool one "Use
-this when" sentence, describe a property only when its name does not say
-enough, and fold a read into a tool that already answers it. Merge only
-tools of the same scope and hints. There is no room for
-`openai/toolInvocation` status strings.
+tools, and each tool's name, description and compact input schema at most 3500
+bytes, 15000 for all of them together. Today that is 39 tools, 14860 bytes and
+3549 o200k tokens, the largest tool `aether_launch_run` at 1318 bytes; the
+whole `tools/list` JSON is 21622 bytes and 5137 tokens. Measure offline with the
+`o200k_base` tokenizer and update these numbers when tools change. Give each
+tool one "Use this when" sentence, describe a property only when its name does
+not say enough, and fold a read into a tool that already answers it, as
+`aether_launch_options` carries templates and models. Merge only tools of the
+same scope and hints. There is no room for `openai/toolInvocation` status
+strings.
 
 ## Reviewer setup
 
@@ -174,28 +177,67 @@ further configuration required ... do not feature MFA (including requiring
 SMS codes, login through systems that require SMS, email or other
 verification schemes)" ([app review](https://developers.openai.com/plugins/deploy/app-review)).
 
-**Blocker.** The edge signs in with GitHub only. GitHub asks a password-only
-account for a code sent by email on each new browser, and skips it only with
-2FA or a passkey
+A GitHub account cannot pass: GitHub asks a password-only account for a
+code sent by email on each new browser, and skips it only with 2FA or a
+passkey
 ([GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/verifying-new-devices-when-signing-in)).
-Reviewers use new browsers, so a GitHub reviewer account fails either way.
-A pre-authorized demo path with no sign-in would give anyone on the internet
-a member that launches agents. The proposed fix is a reviewer sign-in on the
-edge: off unless `aether-edge` is given a reviewer account file, a separate
-identity provider that can never match a GitHub account, offered only the
-one demo server, accepted only by a server that opts in, rate-limited,
-logged and revocable. It is not built; until it is, review cannot pass.
+The reviewer signs in with the edge's **reviewer account** instead: a login
+and password in a file the edge's operator writes, offered on the edge's
+sign-in page only for a connector sign-in. It is off unless `aether-edge
+serve` gets `--reviewer-account-file`, and it is never a GitHub account
+(provider `reviewer`). It reaches one server, the one its file names, and
+only one that turned on `edge-reviewer` and whose admin bound it to a
+member who is no admin. It starts no edge session, so it cannot sign in a
+device, claim a server or open an invitation. Ten wrong passwords in a row
+for its login lock it for 15 minutes, besides the sign-in rate limit per
+address. Each attempt writes one line, with the client address, to the
+edge's log (`edge: reviewer signed in` or `edge: reviewer sign-in
+refused`). Only the right login counts toward the lock, so a `429` tells a
+guesser the login was right: pick one nobody would guess and share it only
+with the review, like the password. Turning it on for `edge.onaether.dev` is the owner's step; this
+repository does not do it.
+
+Set it up, with the demo server's id from `aether-server edge status` or
+`aether-edge servers list`:
+
+1. On the edge host, write the file, mode 0600, and note the password it
+   prints, the only copy. `<random-login>` is a login nobody would guess,
+   such as `review-` and eight random letters:
+   `sudo -u aether-edge aether-edge reviewer --login <random-login> --server-id <server id> /var/lib/aether-edge/reviewer.json`.
+2. Set `AETHER_EDGE_REVIEWER_ACCOUNT_FILE=/var/lib/aether-edge/reviewer.json`
+   in `/etc/aether-edge/aether-edge.env` (or pass
+   `--reviewer-account-file`) and restart the edge. Its log says
+   `aether-edge: reviewer account on`.
+3. On the demo server: `sudo aether-server config set edge-reviewer true`,
+   then `sudo systemctl restart aether-server`. It needs
+   `edge-access account`; under `approved-devices` the consent page asks
+   the reviewer for a pairing code as it asks anyone.
+4. As an admin of the demo server, bind the login to the reviewer's member,
+   a collaborator: `aether member link --reviewer <random-login> <member-id>`.
+   An admin member is refused, and a member made admin later is cut off.
+
+Revoke it with `aether member unlink <member-id> reviewer:<random-login>`,
+which deletes the connectors it authorized, or by turning `edge-reviewer`
+off on the demo server and restarting it, which cuts them off at their next
+call. Removing the flag from the edge, or a new password, only stops new
+sign-ins; connectors already authorized keep working. After each review,
+unlink the login, run step 1 again for a new password, restart the edge and
+bind the login again (step 4): connectors from the last review stay
+deleted.
 
 The rest of the setup:
 
 - **Demo server.** An `aether-server` linked to the project edge with
-  `--edge-access account`, so the reviewer's devices work without an admin
-  approving each one ([edge.md](edge.md), [connectors.md](connectors.md)).
+  `--edge-access account` and `edge-reviewer` on
+  ([edge.md](edge.md), [connectors.md](connectors.md)).
   Install and sign in Claude Code on it so test 1 can launch, and give it
-  GitHub access to the sample repository only.
-- **Reviewer member.** Invite the reviewer identity as a collaborator. Enter
-  its login, password and these steps in **Review details**, never in the
-  ZIP. Rotate the password after each review.
+  GitHub access to the sample repository only. Every member reads every
+  workspace on a server, so keep the demo server for the review.
+- **Reviewer member.** A collaborator, bound as in step 4. Enter the login,
+  password and these steps in **Review details**, never in the ZIP: open
+  the connector, choose **Sign in with the reviewer account** on the edge's
+  sign-in page, enter the login and password, choose the demo server, and
+  allow on its consent page.
 - **Sample data.** A workspace `aether-demo` from a public sample repository
   with: two active runs that both edit `README.md`; a run with an open pull
   request whose checks have finished and that has one review comment; a run
@@ -209,14 +251,12 @@ The rest of the setup:
 ## Test cases
 
 `plugin.json` carries these; the portal imports them read-only. They follow
-a run from launch to acting on it. Test 2 uses `aether_changes`, which is
-planned (PR #585 adds `changes.list`; the tool follows) and not yet a
-connector tool; the build warns until it is.
+a run from launch to acting on it.
 
 | # | Step | Prompt | tools_triggered | expected_behavior |
 | --- | --- | --- | --- | --- |
-| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
-| 2 | Track | What changed in my Aether runs since we last checked? | `aether_changes` (planned, after #585) | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
+| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_launch_options`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
+| 2 | Track | What changed in my Aether runs since we last checked? | `aether_changes` | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
 | 3 | Coordinate | Which runs touch the same files as the Contributing section run? | `aether_list_runs`, `aether_overlaps` | Names the other run editing `README.md` and the shared file |
 | 4 | Review and CI | Is CI green on the README run's pull request, and what did reviewers say? | `aether_list_runs`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |
 | 5 | Act | What needs me in Aether? Answer the licence question with MIT. | `aether_needs_attention`, `aether_answer` | Lists the question and the run awaiting review; after confirmation, answers with MIT |
@@ -257,8 +297,9 @@ use, the categories of recipients, data retention timelines"
 from them.
 
 **Collected from ChatGPT or Claude.** Tool arguments: workspace, run, swarm,
-candidate and note ids, task and message text, answers, pull request titles
-and bodies, team memory note text and cited paths, a teammate's member id or
+candidate and note ids, task and message text, answers, template parameters,
+pull request titles and bodies, team memory note text and cited paths, the
+member ids of agent accounts to launch on or read, a teammate's member id or
 display name for a handoff, watch targets, conditions and expiry times, and
 optional idempotency keys. The OAuth
 exchange: the client id URL (only `chatgpt.com` and `claude.ai` hosts are
@@ -271,11 +312,17 @@ branches, file paths and dashboard links; and, under `untrusted`, text other
 people and agents wrote: run titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
 request reviews and comments with their GitHub usernames, swarm tasks,
-questions and messages, team memory notes with their author's name, and
-integration verification output, and watch receipts and notices with the
-target's title. A handoff to an unknown teammate returns
-teammates' member ids and roles. No tool returns member emails
-or logins. Every member can read every run on the
+questions and messages, template tasks, team memory notes with their
+author's name, integration verification output, and watch receipts and
+notices with the target's title. A handoff to an unknown
+teammate returns teammates' member ids and roles. `aether_launch_options` and
+launch receipts return the display names and member ids of the agent
+accounts the user may launch on (their own and those teammates shared with
+them), each account's agents and whether they are signed in, and each usage
+window's label, percentage used and reset time; never money, plan prices or
+credentials. A run or swarm's receipt names its account's owner by id, and by
+name when the account is the user's or shared with them. No tool returns
+member emails or logins. Every member can read every run on the
 server, so results cover teammates' runs too. Sizes are capped
 ([connectors.md](connectors.md#what-it-can-do)).
 

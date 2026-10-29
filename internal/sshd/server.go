@@ -62,9 +62,12 @@ const (
 )
 
 type Config struct {
-	Addr            string // default ":2222"
-	HostKeyPath     string // <data>/ssh/host_ed25519_key; generated on first start if absent
-	Store           store.Store
+	Addr        string // default ":2222"
+	HostKeyPath string // <data>/ssh/host_ed25519_key; generated on first start if absent
+	Store       store.Store
+	// RunLimits are the server's flags with the automatic values filled in,
+	// what a run gets when neither an admin nor the launch sets a limit.
+	RunLimits       domain.RunLimits
 	Bus             events.Bus
 	Git             GitTransport
 	PTY             PTYAttacher
@@ -115,6 +118,10 @@ type Config struct {
 	// and admitted; under PolicyApprovedDevices, which empty selects, it
 	// waits until a person approves it.
 	EdgeAccess edgeproto.AccessPolicy
+	// EdgeReviewer lets an admin bind the edge's reviewer account to a
+	// member who is no admin, and a connector authorized by signing in
+	// with it act as that member. False refuses both.
+	EdgeReviewer bool
 	// Name is the server's host name, as its edge refusals name it.
 	Name string
 
@@ -241,6 +248,12 @@ type Server struct {
 	// caps claimRunSSH applies.
 	runSSHMu    sync.Mutex
 	runSSHConns map[domain.RunID]map[domain.MemberID]int
+
+	// holds counts the live sessions behind each swarm worker's durable
+	// hold (see holdUntil); holdsStop ends their watchers on Close.
+	holdsMu   sync.Mutex
+	holds     map[domain.RunID]map[<-chan struct{}]struct{}
+	holdsStop chan struct{}
 }
 
 // New builds a server, loading (or generating) the host key.
@@ -300,6 +313,8 @@ func New(cfg Config) (*Server, error) {
 		controlFrames:    make(map[domain.MemberID]struct{}),
 		controlAttaches:  make(map[string]map[string]controlAttach),
 		runSSHConns:      make(map[domain.RunID]map[domain.MemberID]int),
+		holds:            make(map[domain.RunID]map[<-chan struct{}]struct{}),
+		holdsStop:        make(chan struct{}),
 		baseCtx:          context.Background(),
 	}
 	sc := &ssh.ServerConfig{PublicKeyCallback: s.authenticate}
@@ -529,6 +544,7 @@ func (s *Server) Close() error {
 	if !s.closed {
 		s.closed = true
 		cancel = s.baseCancel
+		close(s.holdsStop)
 		if s.ln != nil {
 			_ = s.ln.Close()
 		}

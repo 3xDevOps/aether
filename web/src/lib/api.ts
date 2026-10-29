@@ -12,8 +12,11 @@ import type {
   ChildLimits,
   ChildSettings,
   ChildSettingsParams,
+  LaunchDefaultsResult,
+  LaunchDefaultsSetParams,
   Connector,
   ConnectorCode,
+  ConnectorList,
   CoordMessagesListResult,
   DaemonInstallResult,
   DaemonStatusResult,
@@ -111,6 +114,8 @@ import type {
   ServerInfo,
   ServerUpdateResult,
   ServerUpdateStatus,
+  RunLimits,
+  ServerRunLimits,
   SysboxStatus,
   ServerUpdateWhen,
   SyncSessionState,
@@ -555,15 +560,20 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    effort?: string
     account_member_id?: string
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
     extra_workspace_ids?: string[]
     /** The run's own child-run setting; absent follows the owner's. */
     children?: 'on' | 'off'
+    /** Overrides the server's run limits for this run. */
+    limits?: RunLimits
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   childSettings: (params: ChildSettingsParams = {}) => call<ChildSettings>('child.settings', params),
+  launchDefaultsGet: () => call<LaunchDefaultsResult>('launch.defaults.get'),
+  launchDefaultsSet: (params: LaunchDefaultsSetParams) => call<LaunchDefaultsResult>('launch.defaults.set', params),
   runChildren: (runID: string) => call<RunChildrenResult>('run.children', { run_id: runID }),
   runChildrenAllow: (runID: string, children: RunChildrenSetting) =>
     call<{ children: RunChildrenSetting }>('run.children.allow', { run_id: runID, children }),
@@ -860,6 +870,10 @@ export const api = {
    * next idle moment, or to cancel the pending one. */
   serverUpdate: (when: ServerUpdateWhen) =>
     call<ServerUpdateResult>('server.update', { when }),
+  /** Reads the server-wide run limits; with a field set, an admin changes
+   * them. Zero clears a field. */
+  serverRunLimits: (params: { cpus?: number; memory_bytes?: number; pids?: number } = {}) =>
+    call<ServerRunLimits>('server.run_limits', params),
   /** Admin only. Whether runs can run Docker inside their containers. */
   sysboxStatus: () => call<SysboxStatus>('server.sysbox.status'),
   /** Admin only. Starts the install in the background; poll sysboxStatus. */
@@ -958,8 +972,6 @@ export const api = {
     setup_script?: string
     set?: WorkspaceVariable[]
     unset?: string[]
-    files?: { path: string; content: string }[]
-    remove_files?: string[]
     egress?: boolean
     egress_allow?: string[]
     egress_deny?: string[]
@@ -1010,6 +1022,7 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    effort?: string
     params?: Record<string, string>
     budget_usd?: number
   }) =>
@@ -1063,7 +1076,7 @@ export const api = {
   pushTest: (endpoint: string) => call<unknown>('push.test', { endpoint }),
   pushActive: () => call<unknown>('push.active'),
   connectorCode: () => call<ConnectorCode>('connector.code'),
-  connectorList: () => call<{ connectors: Connector[] }>('connector.list'),
+  connectorList: () => call<ConnectorList>('connector.list'),
   connectorRevoke: (connectorID: string) => call<{ connector: Connector }>('connector.revoke', { connector_id: connectorID }),
   slackStatus: () => call<SlackStatusResult>('slack.status'),
   slackLink: () => call<SlackLinkResult>('slack.link'),
@@ -1089,6 +1102,8 @@ export const api = {
     call<FileRead>('files.read', params),
   filesWrite: (params: { workspace_id: string; run_id?: string; repo?: string; path: string; content: string; revision: string }) =>
     call<FileRead>('files.write', params),
+  filesUpload: (params: { workspace_id: string; run_id: string; repo?: string; path: string; content_base64: string }) =>
+    call<unknown>('files.upload', params),
   homeTree: (path: string) => call<FilesTreeResult>('home.tree', { path }),
   homeRead: (path: string) => call<FileRead>('home.read', { path }),
   homeWrite: (params: { path: string; content: string; revision: string }) =>
@@ -1195,6 +1210,8 @@ export const api = {
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
+  assistantLoginSocket: (agent: string) =>
+    socketURL(`/ws/terminal?assistant_login=${encodeURIComponent(agent)}`),
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),

@@ -79,7 +79,7 @@ func returns(v any) func(json.RawMessage) (any, error) {
 	return func(json.RawMessage) (any, error) { return v, nil }
 }
 
-var testRun = protocol.Run{ID: "run-1", WorkspaceID: "ws-1", Task: "fix the login test", Title: "Fix login", Harness: "claude",
+var testRun = protocol.Run{ID: "run-1", WorkspaceID: "ws-1", AccountMemberID: "mem-me", Task: "fix the login test", Title: "Fix login", Harness: "claude",
 	Mode: "acp", ACP: true, Status: "running", CreatedAt: "2026-10-22T10:00:00Z", PendingInputs: []domain.RunInputRequest{}}
 
 func newFake(t *testing.T) *fakeServer {
@@ -92,6 +92,9 @@ func newFake(t *testing.T) *fakeServer {
 		protocol.MethodWorkspaceTimeline: returns(protocol.WorkspaceTimelineResult{}),
 		protocol.MethodWorkspaceList:     returns(protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws-1", Name: "api"}}}),
 		protocol.MethodMissionList:       returns(protocol.MissionListResult{}),
+		protocol.MethodRunChildren:       returns(protocol.RunChildrenResult{}),
+		protocol.MethodAccountList: returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-me", DisplayName: "Me"},
+			{ID: "mem-ada", DisplayName: "Ada"}}}),
 	}}
 }
 
@@ -289,7 +292,7 @@ func TestConnectorToolList(t *testing.T) {
 		}
 	}
 	// An optional value may be sent empty for its default.
-	if want := map[string]string{"aether_launch_run.mode": ",tui,headless,acp", "aether_launch_swarm.mode": ",tui,acp",
+	if want := map[string]string{"aether_launch_run.mode": ",tui,headless,acp", "aether_launch_run.children": ",on,off", "aether_launch_swarm.mode": ",tui,acp",
 		"aether_launch_swarm.workers.mode": ",tui,headless,acp", "aether_activity_summary.period": ",today,yesterday,week",
 		"aether_decide_approval.decision": "allow,deny", "aether_stop_run.outcome": ",merged,abandoned",
 		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
@@ -397,7 +400,7 @@ func TestConnectorReadTools(t *testing.T) {
 
 	text, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run:run-1"})
 	untrusted := out["untrusted"].(map[string]any)
-	if text != "Run run-1 is running. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
+	if text != "Run run-1 is running on your account. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
 		out["pr_error"] != "refresh pull request: gh: rate limited" || untrusted["latest_report"].(map[string]any)["summary"] != injection || untrusted["pr_title"] != injection ||
 		out["needs_you"].(map[string]any)["answer_with"] != "aether_answer" || strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("aether_get_run of a search id = %q %v", text, out)
@@ -544,6 +547,17 @@ func TestConnectorReadTools(t *testing.T) {
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "OPEN"}, Truncated: true})
 	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !strings.Contains(text, "0 comments (truncated: at least these many)") || out["truncated"] != true {
 		t.Fatalf("aether_pr_status of truncated feedback = %q %v", text, out)
+	}
+	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "MERGED"}, CommentsUnavailable: true})
+	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !strings.Contains(text, "0 reviews, comments unavailable (the run's environment is gone);") ||
+		strings.Contains(text, "0 comments") || out["comments_unavailable"] != true {
+		t.Fatalf("aether_pr_status of a finished run without comments = %q %v", text, out)
+	}
+	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "MERGED"},
+		Checks: []protocol.RunPRCheck{{Name: "test", Conclusion: "FAILURE"}}, CommentsUnavailable: true, ReviewsUnavailable: true, Error: "read reviews from GitHub: HTTP 502"})
+	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); text != "PR #7 is MERGED: 0 checks passed, 1 failing, 0 pending; reviews unavailable (read reviews from GitHub: HTTP 502), comments unavailable (the run's environment is gone); merge state unknown." ||
+		out["reviews_unavailable"] != true || out["error"] != "read reviews from GitHub: HTTP 502" {
+		t.Fatalf("aether_pr_status whose reviews read failed = %q %v", text, out)
 	}
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Error: "no pull request for branch x"})
 	if msg, _, failed := try(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !failed || !strings.Contains(msg, "no pull request for branch x; aether_message_run") {
@@ -832,7 +846,7 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1] != (protocol.MissionExecutionChoice{Harness: "codex", Mode: "acp"}) || p.Integrator.Mode != "tui" {
+	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1] != (protocol.MissionExecutionChoice{AccountMemberID: "mem-me", Harness: "codex", Mode: "acp"}) || p.Integrator.Mode != "tui" {
 		t.Fatalf("mission.create = %+v", p)
 	}
 	f.calls = nil
@@ -845,7 +859,7 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	choice := protocol.MissionExecutionChoice{AccountMemberID: "mem-bo", Harness: "claude", Mode: "tui"}
+	choice := protocol.MissionExecutionChoice{AccountMemberID: "mem-me", Harness: "claude", Mode: "tui"}
 	earlier := protocol.Mission{ID: "mis-1", Objective: "Ship it", AccountableHumanID: "mem-bo", Phase: "planning", CreatedAt: now,
 		Integrator: protocol.MissionIntegrator(choice), ExecutionChoices: []protocol.MissionExecutionChoice{choice}}
 	other := earlier

@@ -91,3 +91,30 @@ func TestRunModelRoundTripsAndCanBeChanged(t *testing.T) {
 		t.Fatal("set model with whitespace succeeded")
 	}
 }
+
+func TestRunEffortRoundTripsAndCanBeChanged(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := &domain.Run{WorkspaceID: workspace.ID, MemberID: member.ID, Task: "t", Harness: "claude", Mode: domain.LaunchTUI, Effort: "high", Status: domain.RunQueued}
+	if err := db.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if got, err := db.GetRun(ctx, run.ID); err != nil || got.Effort != "high" {
+		t.Fatalf("created run effort = %+v, %v, want high", got, err)
+	}
+	if err := db.SetRunEffort(ctx, run.ID, "low"); err != nil {
+		t.Fatalf("set effort: %v", err)
+	}
+	if got, err := db.GetRun(ctx, run.ID); err != nil || got.Effort != "low" {
+		t.Fatalf("changed run effort = %+v, %v, want low", got, err)
+	}
+	if err := db.SetRunEffort(ctx, run.ID, "-high"); err == nil {
+		t.Fatal("set effort with a leading dash succeeded")
+	}
+	if err := db.CreateRun(ctx, &domain.Run{WorkspaceID: workspace.ID, MemberID: member.ID, Task: "t", Harness: "claude", Mode: domain.LaunchTUI, Effort: "very high", Status: domain.RunQueued}); err == nil {
+		t.Fatal("create run with whitespace in effort succeeded")
+	}
+}

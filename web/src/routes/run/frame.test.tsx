@@ -104,10 +104,10 @@ describe('run frame', () => {
     await waitFor(() => expect(screen.getByTitle(/^Paused since /)).toBeDefined())
   })
 
-  it('keeps the model out of the state line and in the agent tooltip', async () => {
-    open({ model: 'opus' })
-    await waitFor(() => expect(screen.getByTitle('Claude Code · Standard · opus')).toBeDefined())
-    expect(screen.getByRole('banner').textContent).not.toContain('opus')
+  it('keeps the model and effort out of the state line and in the agent tooltip', async () => {
+    open({ model: 'opus', effort: 'high' })
+    await waitFor(() => expect(screen.getByTitle('Claude Code · Standard · opus · high')).toBeDefined())
+    expect(screen.getByRole('banner').textContent).not.toMatch(/opus|high/)
   })
 
   it('keeps the agent terminal attached while other views are shown', () => {
