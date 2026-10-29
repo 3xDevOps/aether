@@ -1,4 +1,4 @@
-import type { AssistantActionRecord, AssistantConfirmation } from '@/lib/assistant-types'
+import type { AssistantActionRecord, AssistantActionTarget, AssistantConfirmation } from '@/lib/assistant-types'
 import { routeFromQuery } from '@/lib/url-state'
 import type { SessionToolCall } from '@/lib/session-types'
 import type { SessionRow, Turn } from '@/store/session-rows'
@@ -67,6 +67,8 @@ const toolMethods: Record<string, string | string[] | ((input: Record<string, un
   aether_integration_decide: (input) => (input.action === 'deliver' ? 'integration.deliver' : 'integration.decide'),
   aether_memory_add: 'memory.add',
   aether_memory_pin: (input) => (input.pin === false ? 'memory.unpin' : 'memory.pin'),
+  aether_watch: (input) => (text(input.watch_id) ? 'watch.update' : 'watch.create'),
+  aether_unwatch: 'watch.delete',
 }
 
 function toolMethod(tool: string, input: Record<string, unknown>): string[] {
@@ -97,8 +99,7 @@ const readTools: Record<string, [string, string]> = {
   aether_changes: ['change list', 'change lists'],
   aether_launch_options: ['launch options', 'launch options'],
   aether_integration: ['integration status', 'integration statuses'],
-  aether_list_watches: ['watch list', 'watch lists'],
-  aether_get_watch: ['watch', 'watches'],
+  aether_watches: ['watch list', 'watch lists'],
 }
 
 /** The Aether tool a call's `tool_name` names: Claude Code's `mcp__aether__aether_get_run`, or a bare name. */
@@ -328,11 +329,40 @@ function callKey(action: AssistantAction): string | undefined {
   return text(action.input.idempotency_key) ?? text(record(action.result).idempotency_key)
 }
 
+type TargetNames = Partial<Record<'run_id' | 'workspace_id' | 'watch_id' | 'swarm' | 'pr', string>>
+
+function inputNames(input: Record<string, unknown>): TargetNames {
+  return {
+    run_id: text(input.run_id)?.replace(/^run:/, ''),
+    workspace_id: text(input.workspace_id),
+    watch_id: text(input.watch_id),
+    swarm: text(input.swarm_id)?.replace(/^swarm:/, ''),
+    pr: prKey(text(input.pr)),
+  }
+}
+
+function recordNames(target: AssistantActionTarget | undefined): TargetNames {
+  const watch = target?.watch
+  return {
+    run_id: target?.run_id ?? watch?.run_id,
+    workspace_id: target?.workspace_id,
+    watch_id: target?.watch_id,
+    swarm: watch?.mission_id?.replace(/^swarm:/, ''),
+    pr: watch?.repo && watch.number ? prKey(`${watch.repo}#${watch.number}`) : undefined,
+  }
+}
+
+/** `owner/name#7` from that or a pull request URL, lowercased as GitHub matches names. */
+function prKey(pr: string | undefined): string | undefined {
+  const match = pr ? /([\w.-]+\/[\w.-]+?)(?:#|\/pull\/)(\d+)/.exec(pr) : null
+  return match ? `${match[1]}#${match[2]}`.toLowerCase() : undefined
+}
+
 /**
  * The call a note belongs to. A record carries no tool call id; it is written
  * while its call runs, so it follows the call's first appearance. It goes to
  * the call that already holds its action, else to an unclaimed call of its
- * method whose input names no other run or workspace than its target: the
+ * method whose input names no other target than the record's: the
  * oldest such call of the newest block holding one, since a block's
  * identical calls are approved in turn and an older block's call may never
  * have been recorded. An older server's note names the run only in its
@@ -351,9 +381,12 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
   // A call's idempotency key, which the record repeats, names it exactly; a call with another key is not it.
   const keyed = saved.idempotency_key ? open.find((d) => callKey(d.action) === saved.idempotency_key) : undefined
   if (keyed) return keyed
-  const fits = open.filter((d) => (!saved.idempotency_key || !callKey(d.action)) && (['run_id', 'workspace_id'] as const).every((key) => {
-    const named = text(d.action.input[key])
-    return !named || !saved.target?.[key] || named === saved.target[key]
+  const recorded = recordNames(saved.target)
+  // A watch record names its call's whole target, so a call naming less is another call.
+  const whole = saved.target?.watch !== undefined || saved.target?.watch_id !== undefined
+  const fits = open.filter((d) => (!saved.idempotency_key || !callKey(d.action)) && Object.entries(inputNames(d.action.input)).every(([key, named]) => {
+    const other = recorded[key as keyof TargetNames]
+    return whole ? named === other : !named || !other || named === other
   }))
   const newest = fits.at(-1)?.block
   return fits.find((d) => d.block === newest)
@@ -454,6 +487,12 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     // GitHub's reply to the create was lost and no pull request was found after: it may exist or not.
     if (action.state === 'done' && action.tool === 'aether_pr_create' && record(action.result).write === 'pending') action.state = 'unconfirmed'
     action.error = saved?.error ?? error
+    // The server creates a watch that cannot check its target, such as a pull request without GitHub connected, in state error.
+    const watched = record(action.result)
+    if (action.state === 'done' && action.tool === 'aether_watch' && watched.state === 'error') {
+      action.state = 'failed'
+      action.error ??= text(watched.error)
+    }
     action.target = target(action.tool, action.input, record(action.result), saved)
   }
   // The live line would name the running call by its raw tool title; its card already says what it does, and the approval card asks for a call waiting on it.
@@ -505,11 +544,15 @@ function prName(action: AssistantAction, names: ActionNames): string {
   return number ? `PR #${number}` : `the pull request of run ${runName(action, names)}`
 }
 
+function alreadyGone(action: AssistantAction): boolean {
+  return action.state === 'done' && record(action.result).state === 'not_found'
+}
+
 function watchObject(action: AssistantAction, names: ActionNames): string {
   const pr = text(action.input.pr) ?? text(action.input.pr_number)
   if (pr) return `PR ${/^\d+$/.test(pr) ? `#${pr}` : pr}`
-  const mission = text(action.input.mission_id)
-  if (mission) return `swarm ${mission}`
+  const swarm = text(action.input.swarm_id)?.replace(/^swarm:/, '')
+  if (swarm) return `swarm ${swarm}`
   return text(action.input.run_id) ? `run ${runName(action, names)}` : text(action.input.watch_id) ?? ''
 }
 
@@ -546,8 +589,15 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
   aether_pr_create: { verb: ['Open', 'Opened', 'Opening'], object: (a, n) => `a pull request for run ${runName(a, n)}` },
   aether_memory_add: { verb: ['Add', 'Added', 'Adding'], object: (a) => (text(a.input.kind) ? `a ${text(a.input.kind)} note` : 'a note') },
   aether_memory_pin: { verb: (a) => (a.input.pin === false ? ['Unpin', 'Unpinned', 'Unpinning'] : ['Pin', 'Pinned', 'Pinning']), object: (a) => `note ${text(a.input.id) ?? ''}`.trimEnd() },
-  aether_watch_create: { verb: ['Watch', 'Started watching', 'Starting to watch'], object: watchObject },
-  aether_watch_delete: { verb: ['Stop watching', 'Stopped watching', 'Stopping watching'], object: watchObject },
+  aether_watch: {
+    verb: (a) => !text(a.input.watch_id) ? ['Watch', 'Started watching', 'Starting to watch']
+      : a.input.paused === true ? ['Pause', 'Paused', 'Pausing'] : a.input.paused === false ? ['Resume', 'Resumed', 'Resuming'] : ['Change', 'Changed', 'Changing'],
+    object: (a, n) => (text(a.input.watch_id) ? `watch ${text(a.input.watch_id)}` : watchObject(a, n)),
+  },
+  aether_unwatch: {
+    verb: (a) => (alreadyGone(a) ? ['Delete', 'Found no', 'Deleting'] : ['Delete', 'Deleted', 'Deleting']),
+    object: (a) => `watch ${text(a.input.watch_id) ?? ''}`.trimEnd() + (alreadyGone(a) ? ' to delete' : ''),
+  },
 }
 
 export function actionSummary(action: AssistantAction, names: ActionNames): string {
@@ -617,7 +667,7 @@ function askedLaunch(action: AssistantAction, result: Record<string, unknown>, n
 }
 
 export function watchLine(action: AssistantAction): string | undefined {
-  if (!action.tool.startsWith('aether_watch_')) return undefined
+  if (action.tool !== 'aether_watch') return undefined
   const result = record(action.result)
   const watch = record(result.watch ?? result)
   const conditions = Array.isArray(watch.conditions) ? watch.conditions.filter((c): c is string => typeof c === 'string') : []

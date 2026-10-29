@@ -105,6 +105,11 @@ var tiers = map[string]string{
 	protocol.MethodRunPRMerge:               tierConfirmed,
 	protocol.MethodMemoryPin:                tierConfirmed,
 	protocol.MethodMemoryUnpin:              tierConfirmed,
+	protocol.MethodWatchList:                tierRead,
+	protocol.MethodWatchGet:                 tierRead,
+	protocol.MethodWatchCreate:              tierReversible,
+	protocol.MethodWatchUpdate:              tierReversible,
+	protocol.MethodWatchDelete:              tierConfirmed,
 	protocol.MethodLaunchDefaultsGet:        tierRead,
 	protocol.MethodLaunchDefaultsSet:        tierConfirmed,
 }

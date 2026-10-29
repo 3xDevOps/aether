@@ -222,6 +222,35 @@ func TestAssistantWatchIsItsOwnBesideADashboardWatch(t *testing.T) {
 	}
 }
 
+func TestAssistantRequestForADashboardWatchWritesItsNoticesToTheConversation(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.assistant = &conversation{}
+	_ = h.svc.Close()
+	h.start()
+	run := h.run(h.bob, "Tidy the fixtures")
+	dashboard := h.watch(h.ada, runTarget(run)).Watch
+	res, err := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(run), Source: protocol.WatchSourceAssistant})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if w := res.Watch; w.ID != dashboard.ID || w.Source != protocol.WatchSourceAssistant {
+		t.Fatalf("assistant request = %+v, want watch %s as an assistant watch", w, dashboard.ID)
+	}
+	if w := h.follow(h.ada, run); w.ID != dashboard.ID {
+		t.Fatalf("follow = %s, want the same watch %s", w.ID, dashboard.ID)
+	}
+	h.status(run, domain.RunCompleted, "", "")
+	h.eventually("the end in the conversation", func() bool { return len(h.assistant.(*conversation).written()) == 1 })
+	h.settle()
+	if got := h.assistant.(*conversation).written(); len(got) != 1 {
+		t.Fatalf("written = %+v, want one notice", got)
+	}
+	if got := h.notices(dashboard.ID); len(got) != 1 || deliveryOf(got[0], protocol.WatchChannelAssistant).Channel == "" {
+		t.Fatalf("notices = %+v, want the end with an assistant delivery", got)
+	}
+}
+
 func TestOwnersRunNotificationCoversOnlyWhatItPushes(t *testing.T) {
 	t.Parallel()
 	w := &store.Watch{MemberID: "ada"}

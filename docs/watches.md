@@ -175,7 +175,8 @@ made again. A run relaunched after its watch was done gets a new watch. A need t
 seen, since the assistant has just acted on it. A run that already
 failed, stopped or was closed when the watch began, such as a launch that
 failed at once, has that end announced. A watch you keep on the same
-run from the dashboard is separate and notifies on its own.
+run from the dashboard is separate and notifies on its own, unless an
+`aether_watch` call made it an assistant watch: then it is the one watch.
 
 Each notice of an assistant watch is also written into your assistant
 conversation, with a link to the watch, and raises the assistant's toast and
@@ -205,7 +206,10 @@ In-app notices are not affected. Omit `quiet_hours` to turn them off.
 ## Methods
 
 All methods act on the caller's own watches. The dashboard posts them to
-`/api/v1/<method>`.
+`/api/v1/<method>`. ChatGPT, Claude and the built-in assistant call them
+through `aether_watches`, `aether_watch` and `aether_unwatch`
+([connectors.md](connectors.md#what-it-can-do)), which set `source` to `mcp`
+or `assistant`; neither offers the preferences methods.
 
 | Method | Params | Result |
 | --- | --- | --- |
@@ -219,7 +223,9 @@ All methods act on the caller's own watches. The dashboard posts them to
 
 `watch.create` with an `idempotency_key` you used before returns that watch.
 Without one, an existing live watch on the same target with the same
-conditions is returned, and resumed if paused. `receipt` is one line such as
+conditions is returned, and resumed if paused; with `source` `assistant` it
+becomes an assistant watch, so its notices also reach your assistant
+conversation. `receipt` is one line such as
 `Watching run fix-login for: needs you, finished. Push: 2 devices. Expires
 Nov 9.`, and says `in-app only` when push is off or no device is subscribed.
 

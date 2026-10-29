@@ -329,8 +329,16 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 func newAction(c protocol.AssistantConfirmation) protocol.AssistantAction {
 	a := protocol.AssistantAction{ID: rand.Text(), Method: c.Method, Summary: c.Summary, OtherOwner: c.OtherOwner, CreatedAt: c.CreatedAt.UTC()}
 	// The socket validated the params, and every action method names its
-	// target with these fields; env.save has none.
+	// target with these fields; env.save has none, and watch.create nests
+	// its target.
 	_ = json.Unmarshal(c.Params, &a.Target)
+	if c.Method == protocol.MethodWatchCreate {
+		var p struct {
+			Target *protocol.WatchTarget `json:"target"`
+		}
+		_ = json.Unmarshal(c.Params, &p)
+		a.Target.Watch = p.Target
+	}
 	var keyed struct {
 		IdempotencyKey string `json:"idempotency_key"`
 	}
@@ -456,9 +464,13 @@ func (c actionCaller) Call(ctx context.Context, method string, params json.RawMe
 	if !ok {
 		conv = c.m.conversation()
 		a = newAction(protocol.AssistantConfirmation{Method: method, Params: params, CreatedAt: time.Now()})
-		owner, rpcErr := tools.OwnerName(ctx, c.Caller, string(c.m.id), a.Target.RunID)
+		var owner string
+		var rpcErr *protocol.Error
+		if a.Target.RunID != "" {
+			owner, rpcErr = tools.OwnerName(ctx, c.Caller, string(c.m.id), a.Target.RunID)
+		}
 		a.OtherOwner = owner
-		a.Summary = reversibleSummary(method, a.Target.RunID, owner)
+		a.Summary = reversibleSummary(method, params, a.Target.RunID, owner)
 		if rpcErr != nil {
 			rpcErr = &protocol.Error{Code: rpcErr.Code, Message: "look up the owner of run " + a.Target.RunID + ": " + rpcErr.Message}
 			c.record(conv, method, a, nil, rpcErr)
@@ -500,7 +512,46 @@ func created(result json.RawMessage, target protocol.AssistantActionTarget) *pro
 	return &protocol.AssistantActionTarget{RunID: ids.Run.ID, WorkspaceID: ids.Run.WorkspaceID}
 }
 
-func reversibleSummary(method, run, owner string) string {
+const unreadableWatch = "Watch (unreadable parameters)"
+
+func reversibleSummary(method string, params json.RawMessage, run, owner string) string {
+	switch method {
+	case protocol.MethodWatchCreate:
+		p, err := protocol.DecodeParams[protocol.WatchCreateParams](params)
+		if err != nil {
+			return unreadableWatch
+		}
+		t := p.Target
+		var target string
+		switch {
+		case t.Kind == protocol.WatchTargetRun && t.RunID != "":
+			target = "run " + t.RunID
+		case t.Kind == protocol.WatchTargetMission && t.MissionID != "":
+			target = "swarm " + t.MissionID
+		case t.Kind == protocol.WatchTargetPR && t.Repo != "":
+			target = fmt.Sprintf("pull request %s#%d", t.Repo, t.Number)
+		default:
+			raw, _ := json.Marshal(t)
+			target = "target " + string(raw)
+		}
+		conditions := "its default conditions"
+		if len(p.Conditions) > 0 {
+			conditions = strings.Join(p.Conditions, ", ")
+		}
+		return fmt.Sprintf("Watch %s for %s", target, conditions)
+	case protocol.MethodWatchUpdate:
+		p, err := protocol.DecodeParams[protocol.WatchUpdateParams](params)
+		if err != nil || p.WatchID == "" {
+			return unreadableWatch
+		}
+		switch {
+		case p.Paused == nil || len(p.Conditions) > 0 || p.ExpiresAt != "" || p.Label != nil:
+			return "Change watch " + p.WatchID
+		case *p.Paused:
+			return "Pause watch " + p.WatchID
+		}
+		return "Resume watch " + p.WatchID
+	}
 	verb := "Pause"
 	if method == protocol.MethodRunResume {
 		verb = "Resume"

@@ -286,8 +286,9 @@ func (s *Service) create(ctx context.Context, memberID domain.MemberID, p protoc
 
 // insert stores w unless member already has it: the watch with the same
 // idempotency key, or without a key, a live watch on the same target with
-// the same conditions, resumed if it was paused. It reports whether w is
-// new, and otherwise replaces *w with the existing watch.
+// the same conditions, resumed if it was paused and given w's assistant
+// source if w has it. It reports whether w is new, and otherwise replaces
+// *w with the existing watch.
 func (s *Service) insert(ctx context.Context, w *store.Watch) (bool, error) {
 	if w.IdempotencyKey != "" {
 		err := s.store.CreateWatch(ctx, w)
@@ -303,7 +304,7 @@ func (s *Service) insert(ctx context.Context, w *store.Watch) (bool, error) {
 	}
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
-	found, err := s.existing(ctx, w.MemberID, targetOf(w), w.Conditions)
+	found, err := s.existing(ctx, w.MemberID, targetOf(w), w.Conditions, w.Source)
 	if err != nil {
 		return false, err
 	}
@@ -315,8 +316,10 @@ func (s *Service) insert(ctx context.Context, w *store.Watch) (bool, error) {
 }
 
 // existing is member's live watch on target with conditions, resumed if it
-// was paused, or nil.
-func (s *Service) existing(ctx context.Context, member domain.MemberID, t protocol.WatchTarget, conditions []string) (*store.Watch, error) {
+// was paused, or nil. A request from the assistant makes the watch an
+// assistant watch, since only those write their notices into the assistant
+// conversation; push delivery is unchanged.
+func (s *Service) existing(ctx context.Context, member domain.MemberID, t protocol.WatchTarget, conditions []string, source string) (*store.Watch, error) {
 	for range 4 {
 		watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: t.Kind, RunID: domain.RunID(t.RunID), MissionID: domain.MissionID(t.MissionID)})
 		if err != nil {
@@ -330,11 +333,17 @@ func (s *Service) existing(ctx context.Context, member domain.MemberID, t protoc
 			return nil, nil
 		}
 		w := watches[i]
-		if w.State != protocol.WatchPaused {
+		adopt := source == protocol.WatchSourceAssistant && w.Source != source
+		if w.State != protocol.WatchPaused && !adopt {
 			return w, nil
 		}
 		now := s.now()
-		w.State, w.UpdatedAt, w.NextCheckAt = protocol.WatchActive, now, &now
+		if adopt {
+			w.Source, w.UpdatedAt = source, now
+		}
+		if w.State == protocol.WatchPaused {
+			w.State, w.UpdatedAt, w.NextCheckAt = protocol.WatchActive, now, &now
+		}
 		err = s.store.UpdateWatch(ctx, w)
 		if errors.Is(err, store.ErrConflict) {
 			continue

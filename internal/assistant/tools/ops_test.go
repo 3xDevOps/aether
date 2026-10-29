@@ -80,6 +80,9 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","scope":"member","title":"CI needs Docker","pinned_by":"m2","pinned_by_name":"Grace","pinned_at":"2026-10-26T10:00:00Z"}}`), nil
 	case protocol.MethodRunGet:
 		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t","member_id":"m2","mission_id":"mis-1"}}`), nil
+	case protocol.MethodWatchGet:
+		return json.RawMessage(`{"watch":{"id":"w-1","target":{"kind":"mission","mission_id":"mis-1"},"target_title":"Ship the billing page",
+			"conditions":["needs_you","finished"],"state":"active"},"notifications":[{"id":"n-2"},{"id":"n-1"}]}`), nil
 	case protocol.MethodRunPRFeedback:
 		return json.RawMessage(`{"pull_request":{"number":7},"checks":[{"name":"test","conclusion":"FAILURE"},{"name":"e2e"},{"name":"lint","conclusion":"SUCCESS"}],
 			"reviews":[{"author":"grace","state":"CHANGES_REQUESTED"},{"author":"ada","state":"CHANGES_REQUESTED"},{"author":"ada","state":"APPROVED"}]}`), nil
@@ -124,6 +127,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMemoryAdd:   protocol.MemoryAddParams{WorkspaceID: "ws-1", Kind: "gotcha", Text: "CI needs Docker.", Supersedes: "mem-0"},
 		protocol.MethodMemoryPin:   protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1", Scope: protocol.MemoryScopeMember},
 		protocol.MethodMemoryUnpin: protocol.MemoryUnpinParams{WorkspaceID: "ws-1", ID: "mem-1"},
+		protocol.MethodWatchDelete: protocol.WatchIDParams{WatchID: "w-1"},
 		protocol.MethodLaunchDefaultsSet: protocol.LaunchDefaultsSetParams{Revision: 3, Defaults: &protocol.LaunchDefaults{AccountMemberID: "m2",
 			Agents:   map[string]protocol.AgentLaunchDefault{"claude": {Mode: "acp", Model: "opus"}, "codex": {}},
 			Fallback: &protocol.LaunchFallbackDefault{Policy: protocol.FallbackOrdered, Order: []string{"m1", "m3"}}}},
@@ -156,6 +160,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMemoryAdd:                `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0 ("CI needs Docker") and moving its pin`,
 		protocol.MethodMemoryPin:                `Pin, into new runs' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
 		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha), taking it out of Grace's briefs: "CI needs Docker"`,
+		protocol.MethodWatchDelete:              `Delete your watch w-1 on swarm "Ship the billing page" (needs_you, finished) and its 2 notices`,
 		protocol.MethodLaunchDefaultsSet: `Replace your saved launch choices: launch on Grace's (m2) account; run claude in acp mode with model opus; ` +
 			`run codex in its default mode with its default model; when usage runs out, move only to your own account, then m3's (m3) account`,
 	}
@@ -211,6 +216,34 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	raw, _ = json.Marshal(protocol.MissionQuestionAnswerParams{QuestionID: "q-x", Answer: "v2", IdempotencyKey: "k"})
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodMissionQuestionAnswer, Params: raw}); perr == nil || perr.Code != protocol.CodeNotFound || got.Summary != "" {
 		t.Fatalf("answering an unknown question = %v, card %q; want not found before any card", perr, got.Summary)
+	}
+}
+
+type fullWatchCaller struct{ fakeCaller }
+
+func (c *fullWatchCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if method != protocol.MethodWatchGet {
+		return c.fakeCaller.Call(ctx, method, params)
+	}
+	raw, _ := json.Marshal(protocol.WatchGetResult{Watch: protocol.Watch{ID: "w-1", Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"},
+		TargetTitle: "Fix login", Conditions: []string{protocol.WatchFinished}}, Notifications: make([]protocol.WatchNotification, protocol.WatchNotificationsMax)})
+	return raw, nil
+}
+
+// watch.get returns at most WatchNotificationsMax notices, so the delete
+// card counts a full page as a lower bound.
+func TestWatchDeleteCardCountsAFullPageAsALowerBound(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	s := &Server{Caller: &fullWatchCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	raw, _ := json.Marshal(protocol.WatchIDParams{WatchID: "w-1"})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodWatchDelete, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if want := `Delete your watch w-1 on run "Fix login" (finished) and at least 50 notices`; got.Summary != want {
+		t.Fatalf("summary = %q, want %q", got.Summary, want)
 	}
 }
 

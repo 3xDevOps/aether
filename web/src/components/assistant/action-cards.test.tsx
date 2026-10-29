@@ -212,16 +212,16 @@ describe('action cards', () => {
         run: { id: 'run_fix' },
         launch: { kind: 'run', id: 'run_fix', workspace_id: workspace.id, harness: 'claude', model: 'opus', mode: 'acp', mode_name: 'Enhanced', account: { member_id: 'mem_bob', name: 'Bob', access: 'shared' }, requested_account: { member_id: alice.id, name: 'Alice', access: 'own' }, fallback: { policy: 'ordered', order: ['mem_bob', alice.id] }, url: '?run=run_fix' },
       } }),
-      aether(1, 't2', 'aether_watch_create', 'completed', { raw_input: { run_id: 'run_fix' }, raw_output: {
-        watch: { state: 'active', conditions: ['needs_you', 'finished'], last_notification: { deliveries: [{ channel: 'push', status: 'no_destination' }] } },
-        link: '/?page=settings&id=watches&watch=wat-1',
+      aether(1, 't2', 'aether_watch', 'completed', { raw_input: { run_id: 'run_fix' }, raw_output: {
+        watch_id: 'wat-1', state: 'active', conditions: ['needs_you', 'finished'],
+        url: '/?page=settings&id=watches&watch=wat-1',
       } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const launched = await card(aside, /^Launched run on main-repo with Claude Code\./)
     expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · fell back from your account · then mem_bob, your account")).toBeDefined()
     const watching = await card(aside, /^Started watching run fix-login\. Done$/)
-    expect(within(watching).getByText('active · on needs you, finished · last notice: push no destination')).toBeDefined()
+    expect(within(watching).getByText('active · on needs you, finished')).toBeDefined()
     await userEvent.click(within(watching).getByRole('button', { name: 'Open watch' }))
     expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'watches', watch: 'wat-1' } })
   })
@@ -304,6 +304,22 @@ describe('review fixes', () => {
     await userEvent.click(within(await card(aside, /^Stop run fix-login\. You declined$/)).getByRole('button', { name: 'Retry' }))
     expect(useStore.getState().assistantDraft).toBe('also check CI\n\nRetry: Stop run fix-login')
     expect(api.assistantPrompt).not.toHaveBeenCalled()
+  })
+
+  it('opens the run a launch approved by an older server names only in its text result', async () => {
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_fix' } } })
+    const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'Fix this'), aether(1, 't1', 'aether_launch_run', 'in_progress', { raw_input: launchInput })])
+    assistantSocket().send({ status: status({ state: 'running', confirmations: [launch] }) })
+    await card(aside, /Waiting for your approval$/)
+    const text = `Launched run run_9.\n${JSON.stringify({ run_id: 'run_9', state: 'queued', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' })}`
+    assistantSocket().send({ status: status({ state: 'running' }) }).items(
+      item('notice', 1, { notice: { severity: 'info', title: `Approved: ${launch.summary}`, description: 'run.launch passed after you approved its card.' } }),
+      aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, content: [{ type: 'text', text }] }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    )
+    const done = await card(aside, /^Launched run on main-repo with Claude Code\. .*approved by you$/)
+    await userEvent.click(within(done).getByRole('button', { name: 'Open run' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
   })
 
   it('keeps Open run on a launch whose run the store has not heard of yet', async () => {
