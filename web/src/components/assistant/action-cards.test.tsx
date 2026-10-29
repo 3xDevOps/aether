@@ -306,6 +306,22 @@ describe('review fixes', () => {
     expect(api.assistantPrompt).not.toHaveBeenCalled()
   })
 
+  it('opens the run a launch approved by an older server names only in its text result', async () => {
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_fix' } } })
+    const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'Fix this'), aether(1, 't1', 'aether_launch_run', 'in_progress', { raw_input: launchInput })])
+    assistantSocket().send({ status: status({ state: 'running', confirmations: [launch] }) })
+    await card(aside, /Waiting for your approval$/)
+    const text = `Launched run run_9.\n${JSON.stringify({ run_id: 'run_9', state: 'queued', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' })}`
+    assistantSocket().send({ status: status({ state: 'running' }) }).items(
+      item('notice', 1, { notice: { severity: 'info', title: `Approved: ${launch.summary}`, description: 'run.launch passed after you approved its card.' } }),
+      aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, content: [{ type: 'text', text }] }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    )
+    const done = await card(aside, /^Launched run on main-repo with Claude Code\. .*approved by you$/)
+    await userEvent.click(within(done).getByRole('button', { name: 'Open run' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
+  })
+
   it('keeps Open run on a launch whose run the store has not heard of yet', async () => {
     const aside = await openPanel([
       item('turn_start', 1),

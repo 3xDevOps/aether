@@ -124,6 +124,11 @@ export async function fixThisJourney(page: Page, aether: Aether, testInfo: TestI
   const action = assistant.getByRole('group', { name: /^Launched run on / })
   await expect(action).toContainText(`run · ${workspace.name} · fake`)
   await expect(action).toContainText('approved by you')
+  // The launched run fails at once on the seeded agent.sh; its card loses the working-in-the-background line when it does, which would move Open run under the click.
+  await expect
+    .poll(async () => (await alice.api.rpc<{ run: { status: string } }>('run.get', { run_id: launched.id })).run.status, { timeout: 180_000, intervals: [250, 500, 1_000, 2_000] })
+    .toBe('failed')
+  await expect(action).toContainText('Done')
   await action.scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath(`${shot}-action.png`) })
   await action.getByRole('button', { name: 'Open run' }).click()
