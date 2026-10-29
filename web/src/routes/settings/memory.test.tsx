@@ -342,13 +342,13 @@ describe('memory in settings', () => {
     const client = show([pref({ enabled: false })], {
       preferenceList: listed,
       preferenceDelete: vi.fn(async () => ({ deleted: pref({ enabled: false }) })),
-      preferenceAdd: vi.fn(async () => ({ preference: pref({ id: 'pref-2' }) })),
+      preferenceAdd: vi.fn(async () => ({ preference: pref({ id: 'pref-2', updated_at: '2026-10-27T12:00:00Z' }) })),
       preferenceUpdate: vi.fn(async () => ({ preference: pref({ id: 'pref-2', enabled: false }) })),
     })
     await user.click(await screen.findByRole('button', { name: 'Forget' }))
     await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
     await user.click(await screen.findByRole('button', { name: 'Undo' }))
-    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-2', enabled: false, expected_member_id: alice.id }))
+    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-2', enabled: false, expected_member_id: alice.id, expected_updated_at: '2026-10-27T12:00:00Z' }))
   })
 
   it('drops another member\'s list when the identity changes', async () => {
@@ -418,7 +418,7 @@ describe('memory in settings', () => {
     const client = show([pref({ enabled: false })], {
       preferenceList: listed,
       preferenceDelete: vi.fn(async () => ({ deleted: pref({ enabled: false }) })),
-      preferenceAdd: vi.fn(async () => ({ preference: pref({ id: 'pref-2' }) })),
+      preferenceAdd: vi.fn(async () => ({ preference: pref({ id: 'pref-2', updated_at: '2026-10-27T12:00:00Z' }) })),
       preferenceUpdate: vi.fn()
         .mockRejectedValueOnce(new ApiError(-32001, 'preference.update: database is locked'))
         .mockResolvedValue({ preference: pref({ id: 'pref-2', enabled: false }) }),
@@ -430,6 +430,7 @@ describe('memory in settings', () => {
     await user.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(client.preferenceUpdate).toHaveBeenCalledTimes(2))
     expect(client.preferenceAdd).toHaveBeenCalledTimes(1)
+    for (const call of vi.mocked(client.preferenceUpdate).mock.calls) expect(call[0]).toMatchObject({ id: 'pref-2', expected_updated_at: '2026-10-27T12:00:00Z' })
   })
 
   it('disables the switch while it saves', async () => {

@@ -5,6 +5,8 @@ import { sameIdentity, useStore } from '@/store'
 /** The row a restore has already added, so a retry after a failed second step only finishes the disable, and the member it started for. */
 export interface Restore {
   added?: string
+  /** The version the added row had, which the turn-off must still find. */
+  addedAt?: string
   same?: () => boolean
   member?: string
 }
@@ -24,8 +26,9 @@ export async function restorePreference(client: Api, gone: Pick<Preference, 'tex
     checkMember()
     const added = await client.preferenceAdd({ text: gone.text, ...(gone.workspace_id ? { workspace_id: gone.workspace_id } : {}), expected_member_id: progress.member })
     progress.added = added.preference.id
+    progress.addedAt = added.preference.updated_at
     if (gone.enabled) return added.preference
   }
   checkMember()
-  return (await client.preferenceUpdate({ id: progress.added, enabled: false, expected_member_id: progress.member })).preference
+  return (await client.preferenceUpdate({ id: progress.added, enabled: false, expected_member_id: progress.member, expected_updated_at: progress.addedAt })).preference
 }
