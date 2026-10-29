@@ -498,7 +498,7 @@ jobs:
   # real git. Separate from `dashboard` because that job is the fast jsdom
   # gate and this one starts containers.
   dashboard-e2e:
-    name: dashboard-e2e (${{ matrix.shard }}/4)
+    name: dashboard-e2e (${{ matrix.shard }}/2)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
@@ -506,7 +506,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -589,7 +589,7 @@ jobs:
             "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
             "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
             "AETHER_E2E_STANDARD_IMAGE=$AETHER_E2E_STANDARD_IMAGE" \
-            make test-e2e E2E_ARGS='--shard=${{ matrix.shard }}/4'
+            make test-e2e E2E_ARGS='--shard=${{ matrix.shard }}/2'
       # Uploaded on a pass too: the mobile project attaches a full-page
       # screenshot of every phone scenario, and a layout can be wrong with
       # every assertion green. Not on a cancelled job, which has no report.
