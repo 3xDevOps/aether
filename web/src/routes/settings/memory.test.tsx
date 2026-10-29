@@ -525,4 +525,34 @@ describe('memory in settings', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }))
     expect(client.preferenceUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'pref-1', expected_updated_at: '2026-10-27T10:00:00Z' }))
   })
+
+  it('merges only the switch from the settings reply, not what changed meanwhile', async () => {
+    const user = userEvent.setup()
+    let finish: (value: AssistantSettings) => void = () => {}
+    useStore.getState().setAssistantStatus({ state: 'idle', agents: [], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true, temporary: false })
+    show([pref()], { assistantSettings: vi.fn(() => new Promise<AssistantSettings>((resolve) => { finish = resolve })) })
+    const toggle = await screen.findByRole('checkbox', { name: preferencesLabel })
+    await waitFor(() => expect(toggle).toHaveProperty('disabled', false))
+    await user.click(toggle)
+    act(() => useStore.getState().setAssistantStatus({ ...useStore.getState().assistantStatus!, temporary: true }))
+    act(() => finish({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true, preferences_enabled: false, temporary: false }))
+    await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('false'))
+    expect(useStore.getState().assistantStatus).toMatchObject({ preferences_enabled: false, temporary: true, auto_approve: false })
+  })
+
+  it('locks the text and scope while a save is in flight', async () => {
+    const user = userEvent.setup()
+    let finish: () => void = () => {}
+    const client = fakeApi({ preferenceUpdate: vi.fn(() => new Promise<{ preference: Preference; previous: Preference }>((resolve) => { finish = () => resolve({ preference: pref({ text: 'Prefer JSON output please' }), previous: pref() }) })) })
+    render(<ul><PreferenceRow preference={pref()} client={client} workspaceName={undefined} activeWorkspace="" highlighted={false} onChanged={() => {}} onForgotten={() => {}} /></ul>)
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    const box = screen.getByRole('textbox', { name: 'Preference text' })
+    await user.clear(box)
+    await user.type(box, 'Prefer JSON output please')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(box).toHaveProperty('disabled', true)
+    expect(screen.getByRole('radio', { name: 'This workspace' })).toHaveProperty('disabled', true)
+    act(() => finish())
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Preference text' })).toBeNull())
+  })
 })

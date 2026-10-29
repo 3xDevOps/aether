@@ -149,7 +149,7 @@ function MemoryBody({ client }: { client: Api }) {
       writes.current++
       setEnabled(settings.preferences_enabled !== false)
       const status = useStore.getState().assistantStatus
-      if (status) useStore.getState().setAssistantStatus({ ...status, ...settings })
+      if (status) useStore.getState().setAssistantStatus({ ...status, preferences_enabled: settings.preferences_enabled })
     } catch (err) {
       setToggleError(errorSentence(err))
     } finally {

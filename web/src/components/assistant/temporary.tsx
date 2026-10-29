@@ -24,7 +24,7 @@ export function TemporaryChatToggle({ temporary }: { temporary: boolean }) {
         api.assistantSettings({ temporary: !temporary }).then(
           (settings) => {
             const state = useStore.getState()
-            if (current() && state.assistantStatus) state.setAssistantStatus({ ...state.assistantStatus, ...settings })
+            if (current() && state.assistantStatus) state.setAssistantStatus({ ...state.assistantStatus, temporary: settings.temporary })
           },
           (err: unknown) => {
             if (current()) useStore.getState().setAssistantError(message(err))

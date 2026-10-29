@@ -18,9 +18,9 @@ export const forgetWarning =
 
 export type Scope = 'all' | 'workspace'
 
-export function ScopePills({ value, onChange, label, workspace = 'This workspace' }: { value: Scope; onChange: (scope: Scope) => void; label: string; workspace?: string }) {
+export function ScopePills({ value, onChange, label, workspace = 'This workspace', disabled }: { value: Scope; onChange: (scope: Scope) => void; label: string; workspace?: string; disabled?: boolean }) {
   return (
-    <RadioPills aria-label={label} value={value} onValueChange={(next) => onChange(next as Scope)}>
+    <RadioPills aria-label={label} value={value} disabled={disabled} onValueChange={(next) => onChange(next as Scope)}>
       <RadioPillsItem value="all">All my workspaces</RadioPillsItem>
       <RadioPillsItem value="workspace">{workspace}</RadioPillsItem>
     </RadioPills>
@@ -101,8 +101,8 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
       {mode === 'edit'
         ? (
           <div className="flex min-w-0 flex-col gap-2">
-            <Textarea aria-label="Preference text" value={text} rows={2} onChange={(event) => setText(event.target.value)} />
-            <ScopePills label="Applies to" value={scope} onChange={setScope} workspace={preference.workspace_id ? scopeLabel : undefined} />
+            <Textarea aria-label="Preference text" value={text} rows={2} disabled={busy} onChange={(event) => setText(event.target.value)} />
+            <ScopePills label="Applies to" value={scope} onChange={setScope} disabled={busy} workspace={preference.workspace_id ? scopeLabel : undefined} />
             <div className="flex flex-wrap gap-2">
               <Button size="sm" disabled={busy || text.trim() === '' || !changed || (scope === 'workspace' && !preference.workspace_id && !activeWorkspace)} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setError(null); setMode('view') }}>Cancel</Button>

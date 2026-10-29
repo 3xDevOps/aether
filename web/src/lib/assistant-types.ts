@@ -76,6 +76,7 @@ export interface AssistantStatus {
   share_view: boolean
   /** Temporary chat: the assistant neither uses nor saves preferences, and the chat is discarded on New conversation. Absent from a server without it. */
   temporary?: boolean
+  preferences_enabled?: boolean
 }
 
 export interface AssistantSettings {
