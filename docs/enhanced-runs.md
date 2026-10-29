@@ -281,8 +281,10 @@ server and starts a fresh one. Aether then restores the agent's session. A turn
 cut off by the restart ends with a **Turn interrupted** notice, its pending
 permission requests are dropped, and the run parks with `turn interrupted`. Queued
 messages read **Not sent**: send them again. Background tasks end with the old
-adapter, and the log notes **Background work interrupted**. A session that cannot
-be restored starts a new one and says `Started a new agent session`.
+adapter, including commands the agent's own shell tool left running, and the log
+notes **Background work interrupted**. Commands in a terminal started with
+`aether-internal terminal` keep running. A session that cannot be restored
+starts a new one and says `Started a new agent session`.
 
 Restoration depends on the agent's own saved session and login. Check the
 checkout before you retry interrupted work.
