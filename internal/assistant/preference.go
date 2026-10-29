@@ -381,7 +381,9 @@ var openers = map[rune]rune{')': '(', ']': '[', '}': '{', '»': '«', '”': '�
 // typedSegments splits message into runs of lines the member wrote
 // themselves. Text pasted from elsewhere splits it and is dropped: quoted
 // lines starting with '>' and the lines continuing them up to a blank line,
-// fenced code blocks, and lines indented as code by a tab or four spaces.
+// fenced code blocks, and lines indented as code by four columns, counting
+// a tab to the next multiple of four. An indented fence is code, not a
+// fence.
 func typedSegments(message string) []string {
 	var out, cur []string
 	fence, quoting := "", false
@@ -393,13 +395,14 @@ func typedSegments(message string) []string {
 	}
 	for _, line := range strings.Split(message, "\n") {
 		trimmed := strings.TrimSpace(line)
+		indented := indent(line) >= 4
 		run := fenceRun(trimmed)
 		switch {
 		case fence != "":
-			if run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(trimmed[len(run):]) == "" {
+			if !indented && run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(trimmed[len(run):]) == "" {
 				fence = ""
 			}
-		case run != "":
+		case run != "" && !indented:
 			flush()
 			fence, quoting = run, false
 		case strings.HasPrefix(trimmed, ">"):
@@ -409,7 +412,7 @@ func typedSegments(message string) []string {
 			quoting = false
 			cur = append(cur, line)
 		case quoting:
-		case strings.HasPrefix(line, "\t"), strings.HasPrefix(line, "    "):
+		case indented:
 			flush()
 		default:
 			cur = append(cur, line)
@@ -417,6 +420,23 @@ func typedSegments(message string) []string {
 	}
 	flush()
 	return out
+}
+
+// indent is the width of line's leading spaces and tabs, a tab reaching the
+// next multiple of four columns.
+func indent(line string) int {
+	n := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			n++
+		case '\t':
+			n += 4 - n%4
+		default:
+			return n
+		}
+	}
+	return n
 }
 
 // fenceRun is the run of backticks or tildes that opens or closes a code

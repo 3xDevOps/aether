@@ -394,7 +394,9 @@ and connected apps such as ChatGPT cannot reach them.
   gitleaks flags as a secret, and text it treats as pasted: lines starting
   with `>` and the lines after them up to a blank line, fenced code blocks
   (up to a fence at least as long as the opening one, or to the end of the
-  message), and lines indented by a tab or four spaces.
+  message), and lines indented by four columns or more, where a tab
+  reaches the next multiple of four; an indented fence is such a line, not
+  a fence.
 - **See, edit and forget:** **Settings → Memory** lists them. The assistant
   can also forget one after you approve its card, even while preferences are
   off or the conversation is temporary. Forgetting deletes the preference;

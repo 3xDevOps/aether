@@ -584,6 +584,7 @@ func TestQuotedSkipsPastedText(t *testing.T) {
 		"unclosed fence":    "```go\nprefer table output always",
 		"indented code":     "see:\n    prefer table output always",
 		"tab indented code": "\tprefer table output always",
+		"mixed indentation": " \tprefer table output always",
 	} {
 		if span, err := quoted(message, want); err == nil {
 			t.Errorf("%s: quoted = %q, want refused", name, span)
@@ -606,9 +607,10 @@ func TestQuotedSkipsPastedText(t *testing.T) {
 		t.Errorf("quoted(%q) = %q, %v; want the span the text quotes with its symbols", replaced, span, err)
 	}
 	for name, message := range map[string]string{
-		"after a quote":     "> from the review\n\nPrefer table output, always.",
-		"after a fence":     "````\nx\n```\n````\nPrefer table output, always.",
-		"after indentation": "    x := 1\nPrefer table output, always.",
+		"after a quote":           "> from the review\n\nPrefer table output, always.",
+		"after a fence":           "````\nx\n```\n````\nPrefer table output, always.",
+		"after indentation":       "    x := 1\nPrefer table output, always.",
+		"after an indented fence": "    ```sh\n\nPrefer table output, always.",
 	} {
 		if span, err := quoted(message, want); err != nil || span != "Prefer table output, always" {
 			t.Errorf("%s: quoted = %q, %v; want the member's own span", name, span, err)
