@@ -797,7 +797,10 @@ func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
 // agent may refuse, instead of starting without them.
 func TestNextPromptWaitsForTheLastPromptsNotes(t *testing.T) {
 	s, m, prefs, saved := refusingAssistant(t)
-	m.notesSettled = make(chan struct{})
+	settled := make(chan struct{})
+	m.mu.Lock()
+	m.notesSettled = settled
+	m.mu.Unlock()
 	done := make(chan error, 1)
 	go func() { done <- s.Prompt(t.Context(), m.id, "show my runs", "k2", nil) }()
 	select {
@@ -810,8 +813,34 @@ func TestNextPromptWaitsForTheLastPromptsNotes(t *testing.T) {
 		t.Fatalf("notes while waiting = %q; want %q still owed", notes, want)
 	}
 	prefs.RestoreChanges(m.id, notes)
-	close(m.notesSettled)
+	close(settled)
 	if err := wait(t, done); err == nil {
 		t.Fatal("the refusing agent accepted the prompt")
+	}
+}
+
+// A silent agent must not hold up New conversation or member removal: a
+// prompt waiting on its notes lets a reset through and then stops waiting.
+func TestResetCompletesWhileAPromptWaitsForNotes(t *testing.T) {
+	s := New(Config{Dir: t.TempDir(), Store: newMemStore(), Host: &fakeHost{}})
+	t.Cleanup(func() { _ = s.Close() })
+	m := s.member("m1")
+	m.mu.Lock()
+	m.notesSettled = make(chan struct{})
+	m.mu.Unlock()
+	waiting := make(chan error, 1)
+	go func() { waiting <- m.waitForNotes(t.Context()) }()
+	time.Sleep(50 * time.Millisecond)
+	reset := make(chan error, 1)
+	go func() {
+		m.op.Lock()
+		defer m.op.Unlock()
+		reset <- s.resetLocked(t.Context(), m)
+	}()
+	if err := wait(t, reset); err != nil {
+		t.Fatalf("reset while a prompt waited on notes = %v", err)
+	}
+	if err := wait(t, waiting); err != nil {
+		t.Fatalf("the waiting prompt after the reset = %v; want it released", err)
 	}
 }
