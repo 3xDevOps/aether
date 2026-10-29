@@ -1,4 +1,4 @@
-import type { AssistantActionRecord, AssistantActionTarget, AssistantConfirmation } from '@/lib/assistant-types'
+import type { AssistantActionRecord, AssistantConfirmation } from '@/lib/assistant-types'
 import { routeFromQuery } from '@/lib/url-state'
 import type { SessionToolCall } from '@/lib/session-types'
 import type { SessionRow, Turn } from '@/store/session-rows'
@@ -336,31 +336,6 @@ function callKey(action: AssistantAction): string | undefined {
   return text(action.input.idempotency_key) ?? text(record(action.result).idempotency_key)
 }
 
-type TargetNames = Partial<Record<'run_id' | 'workspace_id' | 'watch_id' | 'swarm' | 'pr' | 'preference', string>>
-
-function inputNames(input: Record<string, unknown>, result: unknown): TargetNames {
-  return {
-    run_id: text(input.run_id)?.replace(/^run:/, ''),
-    workspace_id: text(input.workspace_id),
-    watch_id: text(input.watch_id),
-    swarm: text(input.swarm_id)?.replace(/^swarm:/, ''),
-    pr: prKey(text(input.pr)),
-    preference: text(input.id) ?? text(record(record(result).preference).id),
-  }
-}
-
-function recordNames(target: AssistantActionTarget | undefined): TargetNames {
-  const watch = target?.watch
-  return {
-    run_id: target?.run_id ?? watch?.run_id,
-    workspace_id: target?.workspace_id,
-    watch_id: target?.watch_id,
-    swarm: watch?.mission_id?.replace(/^swarm:/, ''),
-    pr: watch?.repo && watch.number ? prKey(`${watch.repo}#${watch.number}`) : undefined,
-    preference: target?.preference_id,
-  }
-}
-
 /** `owner/name#7` from that or a pull request URL, lowercased as GitHub matches names. */
 function prKey(pr: string | undefined): string | undefined {
   const match = pr ? /([\w.-]+\/[\w.-]+?)(?:#|\/pull\/)(\d+)/.exec(pr) : null
@@ -390,13 +365,31 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
   // A call's idempotency key, which the record repeats, names it exactly; a call with another key is not it.
   const keyed = saved.idempotency_key ? open.find((d) => callKey(d.action) === saved.idempotency_key) : undefined
   if (keyed) return keyed
-  const recorded = recordNames(saved.target)
+  const target = saved.target ?? {}
+  const watch = target.watch
+  const recorded: Record<string, string | undefined> = {
+    run_id: target.run_id ?? watch?.run_id,
+    workspace_id: target.workspace_id,
+    watch_id: target.watch_id,
+    swarm: watch?.mission_id?.replace(/^swarm:/, ''),
+    pr: watch?.repo && watch.number ? prKey(`${watch.repo}#${watch.number}`) : undefined,
+    preference: target.preference_id,
+  }
   // A watch record names its call's whole target, so a call naming less is another call.
-  const whole = saved.target?.watch !== undefined || saved.target?.watch_id !== undefined
-  const fits = open.filter((d) => (!saved.idempotency_key || !callKey(d.action)) && Object.entries(inputNames(d.action.input, d.action.result)).every(([key, named]) => {
-    const other = recorded[key as keyof TargetNames]
-    return whole ? named === other : !named || !other || named === other
-  }))
+  const whole = watch !== undefined || target.watch_id !== undefined
+  const fits = open.filter((d) => {
+    const input = d.action.input
+    const named: Record<string, string | undefined> = {
+      run_id: text(input.run_id)?.replace(/^run:/, ''),
+      workspace_id: text(input.workspace_id),
+      watch_id: text(input.watch_id),
+      swarm: text(input.swarm_id)?.replace(/^swarm:/, ''),
+      pr: prKey(text(input.pr)),
+      preference: text(input.id) ?? text(record(record(d.action.result).preference).id),
+    }
+    return (!saved.idempotency_key || !callKey(d.action)) && Object.entries(named).every(([key, value]) =>
+      whole ? value === recorded[key] : !value || !recorded[key] || value === recorded[key])
+  })
   const newest = fits.at(-1)?.block
   return fits.find((d) => d.block === newest)
 }
@@ -557,14 +550,6 @@ function alreadyGone(action: AssistantAction): boolean {
   return action.state === 'done' && record(action.result).state === 'not_found'
 }
 
-function watchObject(action: AssistantAction, names: ActionNames): string {
-  const pr = text(action.input.pr) ?? text(action.input.pr_number)
-  if (pr) return `PR ${/^\d+$/.test(pr) ? `#${pr}` : pr}`
-  const swarm = text(action.input.swarm_id)?.replace(/^swarm:/, '')
-  if (swarm) return `swarm ${swarm}`
-  return text(action.input.run_id) ? `run ${runName(action, names)}` : text(action.input.watch_id) ?? ''
-}
-
 const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb); object: (action: AssistantAction, names: ActionNames) => string }> = {
   aether_launch_run: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run') },
   aether_launch_swarm: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('swarm') },
@@ -604,7 +589,15 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
   aether_watch: {
     verb: (a) => !text(a.input.watch_id) ? ['Watch', 'Started watching', 'Starting to watch']
       : a.input.paused === true ? ['Pause', 'Paused', 'Pausing'] : a.input.paused === false ? ['Resume', 'Resumed', 'Resuming'] : ['Change', 'Changed', 'Changing'],
-    object: (a, n) => (text(a.input.watch_id) ? `watch ${text(a.input.watch_id)}` : watchObject(a, n)),
+    object: (a, n) => {
+      const watch = text(a.input.watch_id)
+      const pr = text(a.input.pr)
+      const swarm = text(a.input.swarm_id)?.replace(/^swarm:/, '')
+      if (watch) return `watch ${watch}`
+      if (pr) return `PR ${pr}`
+      if (swarm) return `swarm ${swarm}`
+      return text(a.input.run_id) ? `run ${runName(a, n)}` : ''
+    },
   },
   aether_unwatch: {
     verb: (a) => (alreadyGone(a) ? ['Delete', 'Found no', 'Deleting'] : ['Delete', 'Deleted', 'Deleting']),

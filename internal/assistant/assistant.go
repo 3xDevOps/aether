@@ -687,6 +687,7 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	m.conv, m.endConv = context.WithCancel(context.Background())
 	m.err = ""
 	m.attempts, m.done = make(map[string]*attempt), nil
+	m.notesSettled = nil
 	m.signalLocked()
 	m.mu.Unlock()
 	return nil
@@ -768,6 +769,10 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 			return ctx.Err()
 		}
 	}
+	if err := m.waitForNotes(ctx); err != nil {
+		m.finish(key, a, err)
+		return err
+	}
 	m.share.RLock()
 	dispatched, err := s.send(ctx, m, text, key, view)
 	m.share.RUnlock()
@@ -804,11 +809,14 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if err != nil {
 		return false, err
 	}
-	if m.notesSettled != nil {
+	m.mu.Lock()
+	wait := m.notesSettled
+	m.mu.Unlock()
+	if wait != nil {
 		select {
-		case <-m.notesSettled:
-		case <-ctx.Done():
-			return false, fmt.Errorf("assistant: wait for the last prompt's answer: %w", ctx.Err())
+		case <-wait:
+		default:
+			return false, ErrTurnRunning
 		}
 	}
 	notes, restore, err := s.preferenceNotes(ctx, m.id)
@@ -819,7 +827,9 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	// dispatched; the agent may still refuse it.
 	settled := make(chan struct{})
 	if len(notes) > 0 {
+		m.mu.Lock()
 		m.notesSettled = settled
+		m.mu.Unlock()
 	}
 	settle := sync.OnceFunc(func() { close(settled) })
 	restore = sync.OnceFunc(restore)
@@ -873,6 +883,25 @@ func promptLive(ctx context.Context, live *session, text string, view *protocol.
 		return false, err
 	}
 	return live.acp.PromptIdle(ctx, append(blocks, notes...), delivered)
+}
+
+// waitForNotes waits, outside the member's lock so a reset is not held up by
+// a silent agent, for the last prompt's preference notes to settle, or for the
+// conversation to be discarded.
+func (m *member) waitForNotes(ctx context.Context) error {
+	m.mu.Lock()
+	wait, conv := m.notesSettled, m.conv
+	m.mu.Unlock()
+	if wait == nil {
+		return nil
+	}
+	select {
+	case <-wait:
+	case <-conv.Done():
+	case <-ctx.Done():
+		return fmt.Errorf("assistant: wait for the last prompt's answer: %w", ctx.Err())
+	}
+	return nil
 }
 
 func (m *member) begin(key string) (*attempt, bool) {
