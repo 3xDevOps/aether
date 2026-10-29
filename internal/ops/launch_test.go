@@ -283,7 +283,7 @@ func TestConnectorLaunchTemplate(t *testing.T) {
 		{map[string]any{"workspace_id": "ws-1", "template": "triage", "account_member_id": "mem-ada", "model": "opus"}, "account_member_id, model cannot be given"},
 		{map[string]any{"workspace_id": "ws-1", "params": map[string]string{"issue": "42"}, "task": "t", "harness": "claude"}, "pass template too"},
 		{map[string]any{"workspace_id": "ws-1", "template_version": "v1", "task": "t", "harness": "claude"}, "pass template too"},
-		{map[string]any{"workspace_id": "ws-1", "task": "t"}, "task and harness are required, or template"},
+		{map[string]any{"workspace_id": "ws-1", "task": "t"}, "harness is required: you have no saved agent"},
 	} {
 		if text, _, failed := try(t, cs, "aether_launch_run", c.args); !failed || !strings.Contains(text, c.want) {
 			t.Errorf("aether_launch_run %v = %q, want refused with %q", c.args, text, c.want)

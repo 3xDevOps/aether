@@ -41,6 +41,7 @@ type connectorLaunchInput struct {
 	Mode            string `json:"mode,omitempty" jsonschema:"default acp if installed"`
 	Model           string `json:"model,omitempty"`
 	Children        string `json:"children,omitempty" jsonschema:"may the agent start child runs; default your setting"`
+	SavedDefaults   string `json:"saved_defaults,omitempty" jsonschema:"ignore sends only the given fields"`
 	accountChoice
 	// Reason is the assistant's, for the member's confirmation card; the
 	// server never sees it.
@@ -56,12 +57,13 @@ type swarmWorker struct {
 }
 
 type launchSwarmInput struct {
-	WorkspaceID string        `json:"workspace_id"`
-	Objective   string        `json:"objective" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
-	Harness     string        `json:"harness" jsonschema:"the integrator's agent"`
-	Mode        string        `json:"mode,omitempty"`
-	Model       string        `json:"model,omitempty"`
-	Workers     []swarmWorker `json:"workers,omitempty" jsonschema:"default the integrator's agent"`
+	WorkspaceID   string        `json:"workspace_id"`
+	Objective     string        `json:"objective" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
+	Harness       string        `json:"harness,omitempty" jsonschema:"the integrator's agent"`
+	Mode          string        `json:"mode,omitempty"`
+	Model         string        `json:"model,omitempty"`
+	Workers       []swarmWorker `json:"workers,omitempty" jsonschema:"default the integrator's agent"`
+	SavedDefaults string        `json:"saved_defaults,omitempty" jsonschema:"ignore sends only the given fields"`
 	accountChoice
 	Reason         string `json:"reason,omitempty" jsonschema:"one line on why, shown to the member"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
@@ -106,15 +108,17 @@ const idempotencyRule = " Reuse idempotency_key on a retry; "
 
 var writeOps = []Op{
 	opOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user asks to start an agent on a task or a saved template, one call per task; options from aether_launch_options; then poll aether_get_run."+
+		"Use this when starting an agent on a task or saved template, one call per task; options from aether_launch_options; then poll aether_get_run."+
 			idempotencyRule+"without one, a repeat within 60s, or of a template while it starts, returns the first run.", launchRun).
-		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").hints(false, true).hide(Connector, "reason").
-		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunList, protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
+		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
+		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodAgentList, protocol.MethodRunList,
+		protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
 	opOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user wants one goal split across agents: an integrator plans tasks for workers; then poll aether_get_swarm."+
+		"Use this when one goal is split across agents: an integrator plans tasks for workers; then poll aether_get_swarm."+
 			idempotencyRule+"without one, a repeat within 60s returns the first swarm.", launchSwarm).
-		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").hints(false, true).hide(Connector, "reason").
-		offer(TierConfirmed).calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodMissionList, protocol.MethodMissionCreate),
+		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
+		offer(TierConfirmed).calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodMissionList,
+		protocol.MethodMissionCreate, protocol.MethodRunGet),
 	opOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
 		"Use this when the user wants to tell a run's agent something, which cannot be taken back; it waits up to 45s for approval if someone else controls the run."+
 			idempotencyRule+"without one, a repeat within 60s is sent once.", messageRun).hints(true, true).
@@ -305,14 +309,23 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 		return launchTemplate(ctx, c, in)
 	case len(in.Params) > 0 || in.TemplateVersion != "":
 		return "", nil, invalid("params and template_version are for a template; pass template too")
-	case in.Task == "" || in.Harness == "":
-		return "", nil, invalid("task and harness are required, or template to run a saved template; aether_launch_options lists the agents and, with workspace_id, the templates")
+	case in.Task == "":
+		return "", nil, invalid("task is required, or template to run a saved template; aether_launch_options lists the agents and, with workspace_id, the templates")
 	}
 	info, err := serverInfo(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
 	book, err := accounts(ctx, c.read)
+	if err != nil {
+		return "", nil, err
+	}
+	saved, err := savedDefaults(ctx, c.read, in.SavedDefaults)
+	if err != nil {
+		return "", nil, err
+	}
+	fill, err := fillSaved(saved, launchSlots{harness: &in.Harness, mode: &in.Mode, model: &in.Model, account: &in.accountChoice},
+		agentLister(ctx, c.read, book), book)
 	if err != nil {
 		return "", nil, err
 	}
@@ -338,9 +351,9 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 				prior.Harness, prior.CreatedAt, prior.ID), out, nil
 		}
 	}
-	res, finished, err := launch[protocol.RunLaunchResult](ctx, c, protocol.MethodRunLaunch, withReason(params, in.Reason), done)
+	res, finished, err := launch[protocol.RunLaunchResult](ctx, c, protocol.MethodRunLaunch, withReason(params, in.Reason, c.surface, fill), done)
 	if err != nil && finished {
-		return "", nil, retryable(err, params.IdempotencyKey)
+		return "", nil, retryable(savedConflict(err, in.SavedDefaults != savedIgnore, in.IdempotencyKey != ""), params.IdempotencyKey)
 	}
 	if res.Run.ID == "" {
 		return starting("aether_launch_run", params.IdempotencyKey, err)
@@ -348,6 +361,10 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	out := launched(res.Run, l, book)
 	receipt := out["launch"].(*launchReceipt)
 	receipt.IdempotencyKey, receipt.Skipped = params.IdempotencyKey, res.SkippedFallbackAccounts
+	if !dup && !res.Replayed {
+		fill.startedOn(res.Run.AccountMemberID)
+		fill.stamp(receipt)
+	}
 	out["idempotency_key"] = params.IdempotencyKey
 	switch {
 	case dup:
@@ -363,11 +380,13 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	return fmt.Sprintf("Launched run %s (%s) on %s.", res.Run.ID, res.Run.Status, accountName(receipt)), out, nil
 }
 
-// withReason adds the assistant's stated reason to a launch's params, for
-// the member's confirmation card; the assistant's socket takes it off
-// before the call reaches the server.
-func withReason(params any, reason string) any {
-	if reason == "" {
+// withReason adds the assistant's stated reason, and on the assistant what
+// saved defaults filled, to a launch's params, for the member's
+// confirmation card; the assistant's socket takes both off before the call
+// reaches the server.
+func withReason(params any, reason string, s Surface, fill savedFill) any {
+	noted := s == Assistant && (len(fill.Applied) > 0 || len(fill.Skipped) > 0 || len(fill.Unchecked) > 0)
+	if reason == "" && !noted {
 		return params
 	}
 	// params are a launch's own params struct, which always encodes as an
@@ -375,7 +394,12 @@ func withReason(params any, reason string) any {
 	b, _ := json.Marshal(params)
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(b, &fields)
-	fields["reason"], _ = json.Marshal(reason)
+	if reason != "" {
+		fields["reason"], _ = json.Marshal(reason)
+	}
+	if noted {
+		fields["saved_defaults"], _ = json.Marshal(protocol.AssistantDefaultsUse{Applied: fill.Applied, Skipped: fill.Skipped, Unchecked: fill.Unchecked})
+	}
 	return fields
 }
 
@@ -473,22 +497,23 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	if err != nil {
 		return "", nil, err
 	}
+	saved, err := savedDefaults(ctx, c.read, in.SavedDefaults)
+	if err != nil {
+		return "", nil, err
+	}
+	listAgents := agentLister(ctx, c.read, book)
+	fill, err := fillSaved(saved, launchSlots{harness: &in.Harness, mode: &in.Mode, model: &in.Model, account: &in.accountChoice, integrator: true}, listAgents, book)
+	if err != nil {
+		return "", nil, err
+	}
 	own := cmp.Or(in.AccountMemberID, book.self())
-	listed := map[string][]protocol.AgentInfo{}
 	// unresolved is why a keyed launch left a mode empty: the account's
 	// agents could not be listed, as once its share is revoked. A retry
 	// then takes the modes of the swarm it may replay.
 	var unresolved error
 	agentsOn := func(account string) ([]protocol.AgentInfo, bool, error) {
-		if agents, ok := listed[account]; ok {
-			return agents, true, nil
-		}
-		param := account
-		if account == book.self() {
-			param = ""
-		}
-		var res protocol.AgentListResult
-		if listErr := c.read(ctx, protocol.MethodAgentList, protocol.AgentListParams{AccountMemberID: param}, &res); listErr != nil {
+		agents, listErr := listAgents(account)
+		if listErr != nil {
 			listErr = fmt.Errorf("list agents to choose their modes (or pass every mode): %w", listErr)
 			if in.IdempotencyKey == "" {
 				return nil, false, listErr
@@ -498,8 +523,7 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 			}
 			return nil, false, nil
 		}
-		listed[account] = res.Agents
-		return res.Agents, true, nil
+		return agents, true, nil
 	}
 	integratorMode := in.Mode
 	if integratorMode == "" {
@@ -516,7 +540,17 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: own, Harness: in.Harness, Mode: integratorMode, Model: in.Model}
 	choices := []protocol.MissionExecutionChoice{integrator}
 	for _, w := range in.Workers {
-		account := cmp.Or(w.AccountMemberID, book.self())
+		account := w.AccountMemberID
+		if account == "" && fill.AccountErr != nil {
+			return "", nil, fill.AccountErr
+		}
+		if account == "" && fill.Account != "" {
+			account = fill.Account
+			if !slices.Contains(fill.Applied, "workers.account_member_id") {
+				fill.apply("workers.account_member_id")
+			}
+		}
+		account = cmp.Or(account, book.self())
 		workerMode := w.Mode
 		if workerMode == "" {
 			agents, ok, listErr := agentsOn(account)
@@ -575,9 +609,9 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 				prior.CreatedAt, prior.ID), out, nil
 		}
 	}
-	res, finished, err := launch[protocol.MissionCreateResult](ctx, c, protocol.MethodMissionCreate, withReason(params, in.Reason), done)
+	res, finished, err := launch[protocol.MissionCreateResult](ctx, c, protocol.MethodMissionCreate, withReason(params, in.Reason, c.surface, fill), done)
 	if err != nil && finished {
-		return "", nil, retryable(err, params.IdempotencyKey)
+		return "", nil, retryable(savedConflict(err, in.SavedDefaults != savedIgnore, in.IdempotencyKey != ""), params.IdempotencyKey)
 	}
 	m := res.Mission
 	if m.ID == "" {
@@ -586,6 +620,17 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	out := swarmLaunched(m, l, book)
 	receipt := out["launch"].(*launchReceipt)
 	receipt.IdempotencyKey, receipt.Skipped = params.IdempotencyKey, res.SkippedFallbackAccounts
+	if !dup {
+		// mission.create does not say which account usage fallback started
+		// the integrator on; its run does.
+		if fill.modelCheckedOn != "" && m.CurrentIntegratorRunID != "" {
+			var ir protocol.RunResult
+			if c.read(ctx, protocol.MethodRunGet, protocol.RunIDParams{RunID: m.CurrentIntegratorRunID}, &ir) == nil {
+				fill.startedOn(ir.Run.AccountMemberID)
+			}
+		}
+		fill.stamp(receipt)
+	}
 	out["idempotency_key"] = params.IdempotencyKey
 	switch {
 	case dup:
