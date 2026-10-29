@@ -1,6 +1,6 @@
 import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { LaunchDefault, ViewAttachment, ViewContext, ViewEntry } from '@/lib/assistant-types'
+import type { ViewAttachment, ViewContext, ViewEntry } from '@/lib/assistant-types'
 import { isRunView, type RunView } from '@/routes/run/views'
 import type { RootState, RootStore } from '@/store'
 import type { SliceCreator } from '@/store/slice'
@@ -10,7 +10,6 @@ export const maxAttachments = 6
 export const maxViewContextBytes = 4096
 export const maxViewPathBytes = 512
 export const maxViewCheckBytes = 128
-export const maxLaunchDefaults = 4
 /** Navigation sends at most one view context per second. */
 export const viewSyncDelay = 1000
 export const shareRetryDelay = 3000
@@ -123,27 +122,11 @@ function pageContext(s: RootState): PageContext {
   return { route, open_file: openFile(s, route), recent: s.viewHistory.filter((entry) => !sameEntity(entry, route)) }
 }
 
-/** A model the server keeps: one with both : and @ is shaped like user:token@host. */
-function sendableModel(model: string | undefined): model is string {
-  return model !== undefined && /^[A-Za-z0-9][A-Za-z0-9_.:/@[\]-]{0,127}$/.test(model) && !(model.includes(':') && model.includes('@'))
-}
-
-/** The member's remembered launches, newest first, as the server keeps them. */
-export function launchDefaults(s: RootState): LaunchDefault[] | undefined {
-  const list = Object.entries(s.launchDefaults)
-    .filter(([agent, held]) => /^[a-z][a-z0-9_.-]{0,39}$/.test(agent) && ['tui', 'acp', 'headless'].includes(held.mode))
-    .sort(([, a], [, b]) => b.at - a.at)
-    .slice(0, maxLaunchDefaults)
-    .map(([agent, { mode, model }]): LaunchDefault => (sendableModel(model) ? { agent, mode, model } : { agent, mode }))
-  return list.length ? list : undefined
-}
-
-/** Trims as the server does: the oldest recent pages, then the open file, then the launch defaults, then the last attachments. */
+/** Trims as the server does: the oldest recent pages, then the open file, then the last attachments. */
 function fit(context: ViewContext): ViewContext {
   while (marshalledBytes(context) > maxViewContextBytes) {
     if (context.recent?.length) context.recent = context.recent.slice(0, -1)
     else if (context.open_file) context.open_file = undefined
-    else if (context.launch_defaults) context.launch_defaults = undefined
     else if (context.attachments?.length) context.attachments = context.attachments.slice(0, -1)
     else break
   }
@@ -198,12 +181,10 @@ export function draftViewContext(s: RootState): ViewContext | undefined {
   const attachments = s.assistantAttachments.map(sendableAttachment)
   const page = assistantShareView(s) && !s.assistantPageRemoved ? draftPage(s).page : undefined
   if (!page && !attachments.length) return undefined
-  const defaults = page && launchDefaults(s)
   return fit({
     version: 1,
     captured_at: s.assistantPin?.captured_at ?? new Date().toISOString(),
     ...page,
-    ...(defaults ? { launch_defaults: defaults } : {}),
     ...(attachments.length ? { attachments } : {}),
   })
 }
@@ -240,8 +221,7 @@ export function viewContextKey(context: ViewContext): string {
 export function syncedViewContext(s: RootState, now = new Date()): ViewContext | undefined {
   if (s.assistantPageRemoved) return { version: 1, captured_at: now.toISOString() }
   const { page, moved } = draftPage(s)
-  const defaults = launchDefaults(s)
-  return moved ? undefined : fit({ version: 1, captured_at: now.toISOString(), ...page, ...(defaults ? { launch_defaults: defaults } : {}) })
+  return moved ? undefined : fit({ version: 1, captured_at: now.toISOString(), ...page })
 }
 
 const syncs = new WeakMap<RootStore, () => Promise<void>>()

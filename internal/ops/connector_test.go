@@ -93,6 +93,7 @@ func newFake(t *testing.T) *fakeServer {
 		protocol.MethodWorkspaceList:     returns(protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws-1", Name: "api"}}}),
 		protocol.MethodMissionList:       returns(protocol.MissionListResult{}),
 		protocol.MethodRunChildren:       returns(protocol.RunChildrenResult{}),
+		protocol.MethodLaunchDefaultsGet: returns(protocol.LaunchDefaultsResult{}),
 		protocol.MethodAccountList: returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-me", DisplayName: "Me"},
 			{ID: "mem-ada", DisplayName: "Ada"}}}),
 	}}
@@ -293,7 +294,7 @@ func TestConnectorToolList(t *testing.T) {
 	}
 	// An optional value may be sent empty for its default.
 	if want := map[string]string{"aether_launch_run.mode": ",tui,headless,acp", "aether_launch_run.children": ",on,off", "aether_launch_swarm.mode": ",tui,acp",
-		"aether_launch_swarm.workers.mode": ",tui,headless,acp", "aether_activity_summary.period": ",today,yesterday,week",
+		"aether_launch_swarm.workers.mode": ",tui,headless,acp", "aether_launch_run.saved_defaults": ",apply,ignore", "aether_launch_swarm.saved_defaults": ",apply,ignore", "aether_activity_summary.period": ",today,yesterday,week",
 		"aether_decide_approval.decision": "allow,deny", "aether_stop_run.outcome": ",merged,abandoned",
 		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
 		"aether_memory_add.kind": "decision,convention,gotcha,preference", "aether_pr_merge.method": ",squash,merge,rebase",

@@ -229,6 +229,9 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 		}
 		for _, name := range slices.Sorted(maps.Keys(saved.Agents)) {
 			unknown("agents."+name, name, reason)
+			if model := saved.Agents[name].Model; model != "" {
+				unknown("agents."+name+".model", model, reason)
+			}
 		}
 		return out, nil
 	}

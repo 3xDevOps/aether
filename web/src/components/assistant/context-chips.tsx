@@ -9,7 +9,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import type { ViewAttachment, ViewContext, ViewEntry } from '@/lib/assistant-types'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { modeLabel } from '@/routes/run/agent-name'
 import { useStore, type RootState } from '@/store'
 import { assistantShareView, draftConflict, nextViewContext, saveShareView, viewContextKey } from '@/store/view-context'
 
@@ -59,9 +58,6 @@ function rows(s: RootState, payload: ViewContext): Row[] {
   if (file) list.push({ kind: 'Open file', label: file.path, ids: [file.workspace_id, file.run_id].filter(Boolean).join(' · ') })
   if (payload.recent?.length) {
     list.push({ kind: 'Recent pages', label: `${payload.recent.length}`, ids: payload.recent.map((entry) => entryIds(entry) || entry.name).join(', ') })
-  }
-  if (payload.launch_defaults?.length) {
-    list.push({ kind: 'Launch choices', label: payload.launch_defaults.map((d) => [d.agent, d.model, modeLabel[d.mode]].filter(Boolean).join(' ')).join(', '), ids: '' })
   }
   payload.attachments?.forEach((attachment, index) => list.push(attachmentRow(s, attachment, index)))
   return list

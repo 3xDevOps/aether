@@ -14,7 +14,7 @@ import (
 
 // ContractVersion is the version of the ops' inputs and results; it rises
 // when one changes in a way a client that relied on it would notice.
-const ContractVersion = 1
+const ContractVersion = 2
 
 // modeNames are the dashboard's names of the launch modes.
 var modeNames = map[string]string{"tui": "Standard", "headless": "Background", "acp": "Enhanced"}
@@ -121,10 +121,16 @@ type launchReceipt struct {
 	Repos            []repoRef                 `json:"repos,omitempty"`
 	// Children is a run's own child-run setting, on or off; absent follows
 	// its owner's.
-	Children       string `json:"children,omitempty"`
-	Via            string `json:"via,omitempty"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	URL            string `json:"url,omitempty"`
+	Children string `json:"children,omitempty"`
+	// DefaultsApplied are the input fields the member's saved launch
+	// defaults filled, DefaultsSkipped the saved ones it did not use, and
+	// DefaultsUnchecked the ones it used that nothing could check.
+	DefaultsApplied   []string      `json:"defaults_applied,omitempty"`
+	DefaultsSkipped   []defaultSkip `json:"defaults_skipped,omitempty"`
+	DefaultsUnchecked []defaultSkip `json:"defaults_unchecked,omitempty"`
+	Via               string        `json:"via,omitempty"`
+	IdempotencyKey    string        `json:"idempotency_key,omitempty"`
+	URL               string        `json:"url,omitempty"`
 }
 
 func runReceipt(r protocol.Run, l links, book accountBook) *launchReceipt {
@@ -160,9 +166,9 @@ type launchOptionsInput struct {
 
 var launchOps = []Op{
 	opOf("aether_launch_options", "Launch options", ScopeRead, true, nextWorkspaces,
-		"Use this when choosing what to launch: workspaces, your accounts with usage, their agents and modes, swarm eligibility, fallback; "+
+		"Use this when choosing what to launch: workspaces, accounts with usage, agents and modes, swarm eligibility, fallback, saved defaults; "+
 			"templates with workspace_id, models with models.", launchOptions).
-		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodAccountList, protocol.MethodAgentList,
+		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodAccountList, protocol.MethodAgentList, protocol.MethodLaunchDefaultsGet,
 		protocol.MethodAccountUsage, protocol.MethodTemplateList, protocol.MethodAgentModels),
 }
 
@@ -310,6 +316,15 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 			"moves to the usable account with the most usage left. Usage is unknown for agents with no usage row.", fallback.ExhaustedPercent),
 	}
 	summary := fmt.Sprintf("%d workspaces, %d accounts.", len(workspaces), len(rows))
+	var saved protocol.LaunchDefaultsResult
+	if err := c.read(ctx, protocol.MethodLaunchDefaultsGet, nil, &saved); err != nil {
+		out["saved_error"] = err.Error()
+	} else {
+		out["saved"] = saved
+		if saved.Revision > 0 {
+			summary += fmt.Sprintf(" Saved defaults at revision %d, %d unusable.", saved.Revision, len(saved.Invalid))
+		}
+	}
 	if len(ws.Workspaces) > len(workspaces) {
 		out["workspaces_total"] = len(ws.Workspaces)
 	}
@@ -418,7 +433,7 @@ func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (stri
 			return "", nil, err
 		}
 	}
-	res, finished, err := launch[protocol.TemplateLaunchResult](ctx, c, protocol.MethodTemplateLaunch, withReason(params, in.Reason), done)
+	res, finished, err := launch[protocol.TemplateLaunchResult](ctx, c, protocol.MethodTemplateLaunch, withReason(params, in.Reason, c.surface, savedFill{}), done)
 	if err != nil && finished {
 		return "", nil, retryable(err, params.IdempotencyKey)
 	}

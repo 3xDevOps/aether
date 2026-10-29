@@ -44,7 +44,7 @@ type runIDInput struct {
 
 type getRunInput struct {
 	RunID    string `json:"run_id"`
-	Evidence bool   `json:"evidence,omitempty" jsonschema:"add PR, CI, review, report and child-run evidence"`
+	Evidence bool   `json:"evidence,omitempty" jsonschema:"add PR, CI, review and report evidence"`
 }
 
 type historyInput struct {
@@ -67,7 +67,7 @@ type swarmsInput struct {
 	SwarmID     string `json:"swarm_id,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"default 20"`
-	Evidence    bool   `json:"evidence,omitempty" jsonschema:"with swarm_id: what was asked, done, reviewed and merged"`
+	Evidence    bool   `json:"evidence,omitempty" jsonschema:"with swarm_id: asked, done, reviewed, merged"`
 }
 
 type swarmInput struct {

@@ -68,6 +68,24 @@ type AssistantConfirmation struct {
 	// card only; the call sends neither.
 	Reason string `json:"reason,omitempty"`
 	Task   string `json:"task,omitempty"`
+	// Defaults is what the member's saved launch defaults filled into a
+	// launch, as the assistant's launch tool reported it. It is shown on the
+	// card and decides nothing.
+	Defaults *AssistantDefaultsUse `json:"defaults,omitempty"`
+}
+
+// AssistantDefaultsUse names the launch fields saved defaults filled, each
+// saved choice the launch skipped, and each it used without being able to
+// check it on the launch's account, with the reason.
+type AssistantDefaultsUse struct {
+	Applied   []string               `json:"applied,omitempty"`
+	Skipped   []AssistantDefaultSkip `json:"skipped,omitempty"`
+	Unchecked []AssistantDefaultSkip `json:"unchecked,omitempty"`
+}
+
+type AssistantDefaultSkip struct {
+	Field  string `json:"field"`
+	Reason string `json:"reason"`
 }
 
 type AssistantStatus struct {
@@ -139,23 +157,14 @@ type AssistantViewParams struct {
 // names only, never titles, file contents, drafts or terminal text. Its ids
 // are hints for the assistant's member-scoped tools, never permissions. A
 // prompt with the page removed has no route; Attachments are what the member
-// pointed the message at. LaunchDefaults travel with the page.
+// pointed the message at.
 type AssistantViewContext struct {
-	Version        int                       `json:"version"`
-	CapturedAt     time.Time                 `json:"captured_at"`
-	Route          AssistantViewEntry        `json:"route,omitzero"`
-	OpenFile       *AssistantViewFile        `json:"open_file,omitempty"`
-	Recent         []AssistantViewEntry      `json:"recent,omitempty"`
-	LaunchDefaults []AssistantLaunchDefault  `json:"launch_defaults,omitempty"`
-	Attachments    []AssistantViewAttachment `json:"attachments,omitempty"`
-}
-
-// AssistantLaunchDefault is a mode and model the member's dashboard
-// remembers for an agent from their own launches, newest first.
-type AssistantLaunchDefault struct {
-	Agent string `json:"agent"`
-	Mode  string `json:"mode"`
-	Model string `json:"model,omitempty"`
+	Version     int                       `json:"version"`
+	CapturedAt  time.Time                 `json:"captured_at"`
+	Route       AssistantViewEntry        `json:"route,omitzero"`
+	OpenFile    *AssistantViewFile        `json:"open_file,omitempty"`
+	Recent      []AssistantViewEntry      `json:"recent,omitempty"`
+	Attachments []AssistantViewAttachment `json:"attachments,omitempty"`
 }
 
 // AssistantViewAttachment names one thing a prompt is about. Kind is

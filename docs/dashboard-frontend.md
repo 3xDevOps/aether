@@ -746,16 +746,11 @@ once; `settlePromptKey` clears the record when a send settles, so a second
 "yes" after the agent asks again is a new message. Only a SHA-256 of the
 draft is stored, in `localStorage` under `aether.assistant.sent`. Over plain
 HTTP, where `crypto.subtle` and `crypto.randomUUID` are missing, keys fall
-back to a timestamp and random suffix and tabs do not share them. The page part
-also carries `launch_defaults`, `launchDefaults` from the UI slice as
-`{agent, mode, model}`, newest first, at most 4, and **Inspect** lists them
-as **Launch choices**. `launchDefaults` is the signed-in member's:
-`savedLaunchDefaults` persists each member's by identity key, and
-`setIdentityKey` loads the incoming member's, so another member on the same
-browser never sends them. A model with both `:` and `@`, shaped like
-`user:token@host`, is dropped on both sides. Client
+back to a timestamp and random suffix and tabs do not share them. The
+assistant reads saved launch choices from the server through
+`aether_launch_options`, never from the page. Client
 `fit` and `sendableAttachment` trim as the server does (recent pages, then
-the open file, then the launch defaults, then the last attachments, counting bytes as Go's
+the open file, then the last attachments, counting bytes as Go's
 `json.Marshal` writes them; a check name over 128 bytes or with a control or
 format character is dropped), so **Inspect** never shows what the server
 drops. A draft or chip changed while the key is being made cancels that
