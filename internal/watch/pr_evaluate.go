@@ -96,13 +96,22 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 		case protocol.WatchCI:
 			r.final = r.final && ciFinal
 			failed := checks.Pending == 0 && checks.Failed > 0 && after(checks.DoneAt, since)
-			if failed {
-				notice(c, checks.Key+":failed", fmt.Sprintf("%d %s failed on %s: %s", checks.Failed, checkWord(checks, checks.Failed), ref, names(checks.FailedNames)))
+			missing := ""
+			if unreported && len(checks.Missing) > 0 {
+				missing = fmt.Sprintf("%s not reported on %s: %s", capitalized(checkWord(checks, len(checks.Missing))), ref, strings.Join(checks.Missing, ", "))
 			}
 			switch {
-			case unreported && len(checks.Missing) > 0:
-				notice(c, checks.Key+":missing", fmt.Sprintf("%s not reported on %s: %s", capitalized(checkWord(checks, len(checks.Missing))), ref, strings.Join(checks.Missing, ", ")))
 			case failed:
+				// One notice: a second under the same push topic would replace
+				// the failure on a device that has yet to receive it.
+				body := fmt.Sprintf("%d %s failed on %s: %s", checks.Failed, checkWord(checks, checks.Failed), ref, names(checks.FailedNames))
+				k := checks.Key + ":failed"
+				if missing != "" {
+					body, k = body+". "+missing, k+":missing"
+				}
+				notice(c, k, body)
+			case missing != "":
+				notice(c, checks.Key+":missing", missing)
 			case unreported:
 				notice(c, checks.Key+":none", fmt.Sprintf("No checks reported on %s in %d minutes", ref, int(unreportedAfter/time.Minute)))
 			case !checks.Final || !after(checks.DoneAt, since):

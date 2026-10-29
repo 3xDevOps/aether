@@ -279,11 +279,13 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 	}
 	ref := fmt.Sprintf("%s#%d", repo, number)
 	firstRefused, refusedBefore := m.refused[ref]
-	delete(m.refused, ref)
 	var limited *github.RateLimitError
 	var apiErr *github.APIError
 	var pull *github.PullRequestError
-	ofPull := errors.As(err, &pull)
+	refusal := errors.As(err, &pull) && errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusForbidden)
+	if !refusal {
+		delete(m.refused, ref)
+	}
 	switch {
 	case err == nil:
 		return snap, nil
@@ -295,10 +297,10 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 	case errors.Is(err, github.ErrSSO):
 		return github.Snapshot{}, &prError{transient: true, msg: fmt.Sprintf(
 			"read pull request %s: your GitHub token needs SAML single sign-on authorization for this organization (%v)", ref, err)}
-	case ofPull && errors.Is(err, github.ErrMoved):
+	case errors.As(err, &pull) && errors.Is(err, github.ErrMoved):
 		return github.Snapshot{}, &prError{gone: true, msg: fmt.Sprintf(
 			"pull request %s is not reachable with your GitHub login: GitHub answers 301, the repository was renamed or transferred (%v); create the watch again under its new owner/name", ref, err)}
-	case ofPull && errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusForbidden):
+	case refusal:
 		cause := "GitHub answers 404, so the pull request or repository is gone or your login lost access to it"
 		if apiErr.Status == http.StatusForbidden {
 			cause = "GitHub answers 403, so your login may no longer read it"
@@ -307,8 +309,8 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 		if !refusedBefore {
 			firstRefused = p.now()
 		}
+		m.refused[ref] = firstRefused
 		if !create && p.now().Sub(firstRefused) < prReuse {
-			m.refused[ref] = firstRefused
 			return github.Snapshot{}, &prError{msg: msg + "; asking once more before the watch stops"}
 		}
 		return github.Snapshot{}, &prError{gone: true, msg: msg + ", then create the watch again"}

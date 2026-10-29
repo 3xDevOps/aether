@@ -736,6 +736,22 @@ func TestPROne404ReadByTwoWatchesStopsNeither(t *testing.T) {
 	}
 }
 
+func TestPRConfirmedRefusalStopsEveryWatchOnIt(t *testing.T) {
+	p := newPRHarness(t)
+	ci := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	review := p.watchOn(p.ada, prTarget7(), protocol.WatchReview).Watch
+	p.eventually("the first reads", func() bool {
+		return p.watchState(ci.ID).LastCheckAt != nil && p.watchState(review.ID).LastCheckAt != nil
+	})
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(ci.ID)
+	p.eventually("the second watch's poll", func() bool { return p.watchState(review.ID).State == protocol.WatchError })
+	p.clock.advance(maxBackoff)
+	p.eventually("both watches stopped", func() bool {
+		return p.watchState(ci.ID).NextCheckAt == nil && p.watchState(review.ID).NextCheckAt == nil
+	})
+}
+
 func TestPRMovedRepositoryStopsTheWatchAtOnce(t *testing.T) {
 	p := newPRHarness(t)
 	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
@@ -874,7 +890,7 @@ func TestPRFailureDoesNotHideAMissingRequiredCheck(t *testing.T) {
 	for _, n := range evaluatePR(snap, []string{protocol.WatchCI}, now.Add(-time.Hour), now).notices {
 		got = append(got, n.Body)
 	}
-	if want := []string{"1 required check failed on #7: build", "Required check not reported on #7: test"}; !slices.Equal(got, want) {
+	if want := []string{"1 required check failed on #7: build. Required check not reported on #7: test"}; !slices.Equal(got, want) {
 		t.Fatalf("notices = %q, want %q", got, want)
 	}
 }
