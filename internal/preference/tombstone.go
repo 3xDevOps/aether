@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,15 +102,17 @@ func editLine(id, mark string, was time.Time) string {
 	return id + " " + mark + " " + strconv.FormatInt(was.UnixMilli(), 10)
 }
 
-// append writes lines and syncs them before the change they record
-// commits. A leading newline ends a partial line a crash left, which read
-// skips.
+// append writes lines and syncs them, and the directory when it created
+// the file, before the change they record commits. A leading newline ends
+// a partial line a crash left, which read skips.
 func (t *tombstones) append(lines ...string) error {
 	if len(lines) == 0 {
 		return nil
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	_, err := os.Stat(t.path)
+	created := errors.Is(err, os.ErrNotExist)
 	f, err := os.OpenFile(t.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		return fmt.Errorf("preference: record the change: %w", err)
@@ -120,10 +123,25 @@ func (t *tombstones) append(lines ...string) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+	if err == nil && created {
+		err = syncDir(filepath.Dir(t.path))
+	}
 	if err != nil {
 		return fmt.Errorf("preference: record the change: %w", err)
 	}
 	return nil
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 type edit struct {
