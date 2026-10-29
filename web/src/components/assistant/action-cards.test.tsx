@@ -2,9 +2,10 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event'
 import { AppShell } from '@/components/shell/app-shell'
 import type * as apiModule from '@/lib/api'
-import { api } from '@/lib/api'
+import { ApiError, api } from '@/lib/api'
 import type { AssistantActionRecord, AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
 import type { SessionItem } from '@/lib/session-types'
+import type { Preference } from '@/lib/types'
 import { useStore } from '@/store'
 import { item, resetItems, ScriptedSession, say, tool } from '@/test/acp-stream'
 import { alice, mission, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
@@ -533,5 +534,217 @@ describe('quiet outcomes and names', () => {
     expect(within(launched).getByText(/^Aether notifies you here/)).toBeDefined()
     await userEvent.click(within(launched).getByRole('button', { name: 'Open run' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
+  })
+})
+
+describe('preference cards', () => {
+  const saved: Preference = { id: 'pref-1', text: 'Prefer table output', enabled: true, source: 'assistant', created_at: '2026-10-27T10:00:00Z', updated_at: '2026-10-27T10:00:00Z' }
+
+  it('shows what was saved, undoes it by deleting the row and edits it in Settings', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [saved], enabled: true })
+    vi.mocked(api.preferenceDelete).mockResolvedValue({ deleted: { ...saved, source: 'assistant' } } as never)
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Saved: Prefer table output\. Done$/)
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect(api.preferenceDelete).toHaveBeenCalledWith('pref-1', { expected_member_id: alice.id, expected_updated_at: saved.updated_at })
+    expect(await within(notice).findByText('Undone')).toBeDefined()
+    expect(useStore.getState().preferenceUndos).toBe(1)
+
+    await userEvent.click(within(notice).getByRole('button', { name: 'Edit' }))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'memory', entry: 'pref-1' } })
+  })
+
+  it('shows an update with the text it replaced and undoes it back to that text', async () => {
+    vi.mocked(api.preferenceUpdate).mockResolvedValue({ preference: saved } as never)
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Actually I prefer JSON'),
+      aether(1, 't1', 'aether_remember', 'completed', {
+        raw_input: { text: 'Prefer JSON output', replaces: 'pref-1' },
+        raw_output: { preference: { ...saved, text: 'Prefer JSON output', updated_at: '2026-10-27T10:05:00.250Z' }, previous: saved },
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Updated: Prefer JSON output\. Done$/)
+    expect(within(notice).getByText('was: Prefer table output')).toBeDefined()
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect(api.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-1', text: 'Prefer table output', clear_workspace: true, expected_member_id: alice.id, expected_updated_at: '2026-10-27T10:05:00.250Z' })
+  })
+
+  it('shows the server refusing to undo a save or an update the member changed since', async () => {
+    const changed = (id: string) => `preference ${id} changed since you saw it, so nothing was changed; show its current text and ask again`
+    vi.mocked(api.preferenceDelete).mockRejectedValue(new ApiError(409, `preference.delete: ${changed('pref-1')}`))
+    vi.mocked(api.preferenceUpdate).mockRejectedValue(new ApiError(409, `preference.update: ${changed('pref-2')}`))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      aether(1, 't2', 'aether_remember', 'completed', {
+        raw_input: { text: 'Prefer JSON output', replaces: 'pref-2' },
+        raw_output: { preference: { ...saved, id: 'pref-2', text: 'Prefer JSON output', updated_at: '2026-10-27T10:05:00Z' }, previous: { ...saved, id: 'pref-2' } },
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const save = await card(aside, /^Saved: Prefer table output\. Done$/)
+    await userEvent.click(within(save).getByRole('button', { name: 'Undo' }))
+    expect((await within(save).findByRole('alert')).textContent).toBe(changed('pref-1'))
+    const update = await card(aside, /^Updated: Prefer JSON output\. Done$/)
+    await userEvent.click(within(update).getByRole('button', { name: 'Undo' }))
+    expect((await within(update).findByRole('alert')).textContent).toBe(changed('pref-2'))
+    expect(api.preferenceDelete).toHaveBeenCalledExactlyOnceWith('pref-1', { expected_member_id: alice.id, expected_updated_at: saved.updated_at })
+    expect(api.preferenceUpdate).toHaveBeenCalledExactlyOnceWith({ id: 'pref-2', text: 'Prefer table output', clear_workspace: true, expected_member_id: alice.id, expected_updated_at: '2026-10-27T10:05:00Z' })
+    expect(api.preferenceList).not.toHaveBeenCalled()
+    expect(api.preferenceAdd).not.toHaveBeenCalled()
+  })
+
+  it('shows a forgotten preference, undoes it by adding the text again and shows a refusal verbatim', async () => {
+    vi.mocked(api.preferenceAdd).mockRejectedValueOnce(new Error('preference.add: memory is off: you turned it off in Settings'))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Forget the table thing'),
+      aether(1, 't1', 'aether_forget', 'completed', { raw_input: { id: 'pref-1' }, raw_output: { deleted: { ...saved, workspace_id: workspace.id } } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Forgotten: Prefer table output\. Done$/)
+    expect(within(notice).queryByRole('button', { name: 'Edit' })).toBeNull()
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect((await within(notice).findByRole('alert')).textContent).toBe('memory is off: you turned it off in Settings')
+
+    vi.mocked(api.preferenceAdd).mockResolvedValueOnce({ preference: saved } as never)
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect(api.preferenceAdd).toHaveBeenLastCalledWith({ text: 'Prefer table output', workspace_id: workspace.id, expected_member_id: alice.id })
+    expect(await within(notice).findByText('Undone')).toBeDefined()
+  })
+
+  it('leaves a second restore of the same text to the server and shows its refusal', async () => {
+    const remembered: Preference[] = []
+    vi.mocked(api.preferenceList).mockImplementation(async () => ({ preferences: [...remembered], enabled: true }))
+    vi.mocked(api.preferenceAdd).mockImplementation(async ({ text }) => {
+      const kept = remembered.find((p) => p.text === text)
+      if (kept) throw new ApiError(409, `preference.add: already remembered as preference ${kept.id}`)
+      remembered.push({ ...saved, id: 'pref-9', text })
+      return { preference: remembered.at(-1)! }
+    })
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Forget the table thing'),
+      aether(1, 't1', 'aether_forget', 'completed', { raw_input: { id: 'pref-1' }, raw_output: { deleted: saved } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+      item('turn_start', 2),
+      say(2, 'user', 'Forget it again'),
+      aether(2, 't2', 'aether_forget', 'completed', { raw_input: { id: 'pref-3' }, raw_output: { deleted: { ...saved, id: 'pref-3' } } }),
+      item('turn_end', 2, { stop_reason: 'end_turn' }),
+    ])
+    const [first, second] = await within(aside).findAllByRole('group', { name: /^Forgotten: Prefer table output\. Done$/ })
+    await userEvent.click(within(first!).getByRole('button', { name: 'Undo' }))
+    expect(await within(first!).findByText('Undone')).toBeDefined()
+    await userEvent.click(within(second!).getByRole('button', { name: 'Undo' }))
+    expect((await within(second!).findByRole('alert')).textContent).toBe('already remembered as preference pref-9')
+    expect(api.preferenceAdd).toHaveBeenCalledTimes(2)
+    expect(remembered).toHaveLength(1)
+  })
+
+  it("folds the server's record of a save into the card that made it", async () => {
+    const record: AssistantActionRecord = { id: 'a1', method: 'assistant.remember', summary: 'Saved your preference: "Prefer table output"', target: { preference_id: 'pref-1' }, outcome: 'succeeded', created_at: '2026-10-27T10:00:00Z' }
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'in_progress', { raw_input: { text: 'Prefer table output' } }),
+      item('notice', 1, { notice: { severity: 'info', title: record.summary, action: record } }),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    expect(await card(aside, /^Saved: Prefer table output\. Done$/)).toBeDefined()
+    expect(within(aside).queryByText(record.summary)).toBeNull()
+  })
+
+  it('gives each forget card the record of the preference it forgot', async () => {
+    const forgot = (id: string, preference: string, outcome: AssistantActionRecord['outcome']): AssistantActionRecord =>
+      ({ id, method: 'assistant.forget', summary: `Forget your preference: "${preference}"`, target: { preference_id: preference }, outcome, approval: 'card', created_at: '2026-10-27T10:00:00Z', ...(outcome === 'failed' ? { error: `preference ${preference} not found` } : {}) })
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Forget both'),
+      aether(1, 't1', 'aether_forget', 'in_progress', { raw_input: { id: 'pref-1' } }),
+      aether(1, 't2', 'aether_forget', 'in_progress', { raw_input: { id: 'pref-2' } }),
+      item('notice', 1, { notice: { severity: 'info', title: 'Failed: forget pref-2', action: forgot('a2', 'pref-2', 'failed') } }),
+      item('notice', 1, { notice: { severity: 'info', title: 'Forgot pref-1', action: forgot('a1', 'pref-1', 'succeeded') } }),
+      aether(1, 't1', 'aether_forget', 'completed', { raw_input: { id: 'pref-1' }, raw_output: { deleted: saved } }),
+      aether(1, 't2', 'aether_forget', 'failed', { raw_input: { id: 'pref-2' }, raw_output: 'preference pref-2 not found' }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const done = await card(aside, /^Forgotten: Prefer table output\. Done/)
+    expect(done.dataset.state).toBe('done')
+  })
+
+  it('says how many preferences the assistant used and lists them on request', async () => {
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Show the failing tests'),
+      aether(1, 't1', 'aether_my_preferences', 'completed', {
+        raw_output: { preferences: [
+          { id: 'pref-1', text: 'Prefer table output', scope: 'all', source: 'assistant', updated_at: '2026-10-27T10:00:00Z' },
+          { id: 'pref-2', text: 'Use pnpm here', scope: 'workspace', source: 'settings', updated_at: '2026-10-27T10:00:00Z' },
+        ] },
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Read 2 of your preferences\. Done$/)
+    expect(within(notice).queryByText('Use pnpm here')).toBeNull()
+    await userEvent.click(within(notice).getByRole('button', { name: 'Show preferences' }))
+    const list = within(notice).getByRole('list', { name: 'Preferences used' })
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Prefer table output · All my workspaces',
+      'Use pnpm here · This workspace',
+    ])
+  })
+
+  it('keeps Undone after the card is shown again, and only on the change it undid', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [saved], enabled: true })
+    vi.mocked(api.preferenceDelete).mockResolvedValue({ deleted: saved } as never)
+    const conversation = (preference: typeof saved) => [
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ]
+    const reopen = async (preference: typeof saved) => {
+      cleanup()
+      act(() => useStore.setState({ assistantOpen: false, acpSessions: {} }))
+      return openPanel(conversation(preference))
+    }
+    const aside = await openPanel(conversation(saved))
+    await userEvent.click(within(await card(aside, /^Saved: Prefer table output\. Done$/)).getByRole('button', { name: 'Undo' }))
+    await within(aside).findByText('Undone')
+
+    const again = await reopen(saved)
+    const notice = await card(again, /^Saved: Prefer table output\. Done$/)
+    expect(within(notice).queryByRole('button', { name: 'Undo' })).toBeNull()
+    expect(within(notice).getByText('Undone')).toBeDefined()
+
+    const later = await reopen({ ...saved, id: 'pref-7' })
+    expect(within(await card(later, /^Saved: Prefer table output\. Done$/)).getByRole('button', { name: 'Undo' })).toBeDefined()
+  })
+
+  it('keeps the Undone marker under the signed-in member and drops the old shared key', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [saved], enabled: true })
+    vi.mocked(api.preferenceDelete).mockResolvedValue({ deleted: saved } as never)
+    localStorage.setItem('aether.preferences.undone', JSON.stringify([`saved:${saved.id}:${saved.updated_at}`]))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Saved: Prefer table output\. Done$/)
+    expect(within(notice).getByRole('button', { name: 'Undo' })).toBeDefined()
+    expect(localStorage.getItem('aether.preferences.undone')).toBeNull()
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    await within(aside).findByText('Undone')
+    expect(Object.keys(localStorage).filter((key) => key.startsWith('aether.preferences.undone'))).toEqual([`aether.preferences.undone.${serverInfo.member.id}`])
   })
 })

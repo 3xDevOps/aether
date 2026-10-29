@@ -437,6 +437,10 @@ and connected apps such as ChatGPT cannot reach them.
   the assistant's next prompt tells it not to use the old text. If the
   preference changes while its card waits, approving the card forgets
   nothing and the call fails with `changed since you saw it`.
+  **Undo** on a Saved, Updated or Forgotten card restores the earlier text
+  through Settings, so the preference then reads **Added in Settings**. It
+  refuses, and says why, when the preference changed since the card. The
+  **Temporary chat** switch appears only on servers that support it.
 - **Turn off:** switch off preferences in **Settings → Memory**
   (`assistant.settings` with `preferences_enabled: false`). The assistant
   then neither reads nor saves them, and each of your messages tells it not

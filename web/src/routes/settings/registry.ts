@@ -1,8 +1,8 @@
 import type { ComponentType } from 'react'
-import { Bell, Cable, Eye, Gauge, Globe, Monitor, Network, Rocket, ServerCog, Settings, Sparkles } from '@/components/icons'
+import { Bell, Brain, Cable, Eye, Gauge, Globe, Monitor, Network, Rocket, ServerCog, Settings, Sparkles } from '@/components/icons'
 import type { Capability } from '@/store/hooks'
 
-export type CategoryID = 'general' | 'launch' | 'connections' | 'notifications' | 'watches' | 'assistant' | 'children' | 'usage' | 'this-computer' | 'server' | 'remote-access'
+export type CategoryID = 'general' | 'launch' | 'connections' | 'notifications' | 'watches' | 'memory' | 'assistant' | 'children' | 'usage' | 'this-computer' | 'server' | 'remote-access'
 
 export type Gates = { cap: Capability; admin: boolean; assistant: boolean; onboarding: boolean; member: boolean; workspace: boolean }
 
@@ -30,6 +30,7 @@ export const categories: Category[] = [
   { id: 'connections', group: 'You', title: 'Connections', purpose: 'Services Aether works with on your behalf.', Icon: Cable },
   { id: 'notifications', group: 'You', title: 'Notifications', purpose: 'Where Aether reaches you when a run needs you.', Icon: Bell },
   { id: 'watches', group: 'You', title: 'Watches', purpose: 'Runs, swarms and pull requests the server watches for you, and what it told you.', Icon: Eye },
+  { id: 'memory', group: 'You', title: 'Memory', purpose: 'Private preferences the assistant uses.', Icon: Brain },
   { id: 'assistant', group: 'You', title: 'Assistant', purpose: 'What the built-in assistant may do without asking.', Icon: Sparkles },
   { id: 'children', group: 'You', title: 'Child runs', purpose: 'Whether agents in your runs may start other agents, and on which accounts.', Icon: Network },
   { id: 'usage', group: 'You', title: 'Usage', purpose: 'Subscription usage of your agent accounts.', Icon: Gauge },
@@ -54,6 +55,8 @@ export const entries: SettingEntry[] = [
   { id: 'quiet-hours', category: 'notifications', label: 'Quiet hours', help: 'Hold watch pushes overnight and send one summary when they end.', keywords: 'quiet hours night sleep do not disturb mute time zone', visible: (g) => g.cap.hasMethod('notify.prefs.get') },
   { id: 'slack', category: 'notifications', label: 'Slack', help: 'Get a direct message in Slack when a run needs you.', keywords: 'slack dm message' },
   { id: 'watch-list', category: 'watches', label: 'Watches', help: 'What the server watches for you, its state and every notice it sent.', keywords: 'watch follow notify subscribe run swarm pull request ci merged review', visible: (g) => g.member && g.cap.hasMethod('watch.list') },
+  { id: 'preferences-enabled', category: 'memory', label: 'Use my preferences in the assistant', help: 'Turn off to stop the assistant reading or saving preferences.', keywords: 'memory remember preferences assistant private', visible: (g) => g.member && g.assistant && g.cap.hasMethod('preference.list') },
+  { id: 'preference-list', category: 'memory', label: 'What the assistant remembers about me', help: 'Add, edit, turn off or forget your private preferences.', keywords: 'memory remember preferences forget private assistant', visible: (g) => g.member && g.cap.hasMethod('preference.list') },
   { id: 'auto-approve', category: 'assistant', label: 'Let the assistant act without asking', help: 'Launch, message and stop your runs without an approval card.', keywords: 'auto approve approval card', visible: (g) => g.assistant },
   { id: 'child-runs', category: 'children', label: 'Let my runs start child runs', help: 'Agents in your runs start other agents, such as a reviewer on another model.', keywords: 'child runs delegate subagent review agent', visible: (g) => g.member && g.cap.hasMethod('child.settings') },
   { id: 'child-fallback', category: 'children', label: 'Allow automatic fallback', help: "Moves a child run off an account at 95% of its quota.", keywords: 'child runs fallback quota account', visible: (g) => g.member && g.cap.hasMethod('child.settings') },

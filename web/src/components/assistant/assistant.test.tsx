@@ -504,6 +504,62 @@ describe('confirmations', () => {
   })
 })
 
+describe('temporary chat', () => {
+  beforeEach(() => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ temporary: false }))
+  })
+
+  it('switches on from the header, says what it means in the composer and clears on a new conversation', async () => {
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, temporary: true })
+    vi.mocked(api.assistantReset).mockResolvedValue(status({ temporary: false }))
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'old question'), item('turn_end', 1)])
+    const toggle = await within(aside).findByRole('button', { name: 'Temporary chat' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect(within(aside).queryByText(/Temporary: the assistant won't read or save your preferences/)).toBeNull()
+
+    await userEvent.click(toggle)
+    expect(api.assistantSettings).toHaveBeenCalledWith({ temporary: true })
+    expect(await within(aside).findByText("Temporary: the assistant won't read or save your preferences until New conversation.")).toBeDefined()
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+
+    await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
+    await waitFor(() => expect(within(aside).queryByText(/Temporary: the assistant won't read/)).toBeNull())
+  })
+
+  it('offers no toggle on a server whose status has no temporary chat', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status())
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'hello'), item('turn_end', 1)])
+    await within(aside).findByRole('button', { name: 'New conversation' })
+    expect(within(aside).queryByRole('button', { name: 'Temporary chat' })).toBeNull()
+  })
+
+  it('drops a reply that arrives after New conversation', async () => {
+    let finish: (value: AssistantSettings) => void = () => {}
+    vi.mocked(api.assistantSettings).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    vi.mocked(api.assistantReset).mockResolvedValue(status({ temporary: false }))
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'old question'), item('turn_end', 1)])
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Temporary chat' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
+    await waitFor(() => expect(api.assistantReset).toHaveBeenCalled())
+    await act(async () => finish({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, temporary: true }))
+    expect(within(aside).queryByText(/Temporary: the assistant won't read/)).toBeNull()
+    expect(useStore.getState().assistantStatus?.temporary).not.toBe(true)
+  })
+
+  it('shows the server refusal as it came', async () => {
+    vi.mocked(api.assistantSettings).mockRejectedValue(new Error('assistant.settings: memory is off: the owner turned memory off'))
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'hello'), item('turn_end', 1)])
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Temporary chat' }))
+    expect((await within(aside).findByRole('alert')).textContent).toContain('memory is off: the owner turned memory off')
+  })
+})
+
 describe('the auto-approval suggestion', () => {
   const title = 'Skip approval cards for the assistant?'
   const conversation = () => [item('turn_start', 1), say(1, 'user', 'Stop the flaky run'), item('turn_end', 1, { stop_reason: 'end_turn' })]

@@ -1,5 +1,6 @@
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { paramRows } from '@/components/assistant/cards'
+import { PreferenceDetail, PreferenceUndo, UsedPreferences } from '@/components/assistant/preference-notice'
 import { hearBack } from '@/components/assistant/launch-summary'
 import { AssistantSheet } from '@/components/assistant/suggestion'
 import { ChevronRight, ExternalLink, RotateCcw } from '@/components/icons'
@@ -8,7 +9,7 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { ToolValue } from '@/components/ui/session-blocks'
 import { StatusDot, type Tone, toneClasses } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
-import { actionSummary, isKnownAction, launchLine, readNoun, readSummary, watchLine, type ActionNames, type ActionState, type ActionTarget, type AssistantAction } from '@/lib/assistant-actions'
+import { actionSummary, isKnownAction, launchLine, preferenceFacts, readNoun, readSummary, watchLine, type ActionNames, type ActionState, type ActionTarget, type AssistantAction } from '@/lib/assistant-actions'
 import { message } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
@@ -49,6 +50,7 @@ const targetWord: Record<ActionTarget['kind'], string> = {
   workspace: 'Open workspace',
   environment: 'Open environment',
   watch: 'Open watch',
+  preference: 'Edit',
   link: 'Open link',
 }
 
@@ -183,6 +185,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
   }
   const known = isKnownAction(action.tool)
   const facts = launchLine(action, names) ?? watchLine(action)
+  const preference = preferenceFacts(action)
   const retry = action.state === 'failed' || action.state === 'declined' || action.state === 'expired' || action.state === 'unfinished'
   const link = action.target && !gone && (action.target.route || action.target.url) ? action.target : undefined
   const shownError = action.error && !quiet.has(action.state) ? action.error : undefined
@@ -201,6 +204,8 @@ export function ActionCard({ action }: { action: AssistantAction }) {
       </div>
       <p className={cn('pl-5 text-ui-sm', toneClasses(tone).text)}>{state}</p>
       {facts && <p className="pl-5 text-ui-sm break-words text-muted">{facts}</p>}
+      {preference && <PreferenceDetail facts={preference} />}
+      {preference?.kind === 'used' && <UsedPreferences action={action} items={preference.items} />}
       {background && <p className="pl-5 text-ui-sm break-words text-muted">{action.target?.kind === 'swarm' ? hearBack.swarm : hearBack.run}</p>}
       {!known && <InputRows input={action.input} />}
       {shownError && (
@@ -217,6 +222,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
             {link.url && <ExternalLink aria-hidden className="size-3.5" />}
           </Button>
         )}
+        {preference && <PreferenceUndo facts={preference} />}
         {retry && (
           <Button variant="secondary" size="sm" onClick={() => retryDraft(action, names)}>
             <RotateCcw aria-hidden />

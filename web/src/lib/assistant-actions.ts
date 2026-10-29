@@ -10,7 +10,7 @@ export type ActionState = 'approval' | 'running' | 'done' | 'unconfirmed' | 'fai
 export type Approval = 'approved' | 'auto-approved'
 
 export interface ActionTarget {
-  kind: 'run' | 'swarm' | 'pr' | 'workspace' | 'environment' | 'watch' | 'link'
+  kind: 'run' | 'swarm' | 'pr' | 'workspace' | 'environment' | 'watch' | 'preference' | 'link'
   id: string
   route?: Route
   url?: string
@@ -65,6 +65,8 @@ const toolMethods: Record<string, string | string[] | ((input: Record<string, un
   aether_swarm_manage: (input) => ({ release_worker: 'mission.worker.release', archive: 'mission.archive', unarchive: 'mission.unarchive' } as Record<string, string>)[text(input.action) ?? ''],
   aether_replace_integrator: 'mission.replace-integrator',
   aether_integration_decide: (input) => (input.action === 'deliver' ? 'integration.deliver' : 'integration.decide'),
+  aether_remember: 'assistant.remember',
+  aether_forget: 'assistant.forget',
   aether_memory_add: 'memory.add',
   aether_memory_pin: (input) => (input.pin === false ? 'memory.unpin' : 'memory.pin'),
   aether_watch: (input) => (text(input.watch_id) ? 'watch.update' : 'watch.create'),
@@ -188,6 +190,11 @@ export function swarmTarget(id: string): ActionTarget {
 }
 
 function target(tool: string, input: Record<string, unknown>, result: Record<string, unknown>, saved?: AssistantActionRecord): ActionTarget | undefined {
+  if (tool === 'aether_remember') {
+    const id = text(record(result.preference).id)
+    return id ? { kind: 'preference', id, route: { name: 'settings', params: { section: 'memory', entry: id } } } : undefined
+  }
+  if (tool === 'aether_forget' || tool === 'aether_my_preferences') return undefined
   if (tool === 'aether_pr_merge' || tool === 'aether_pr_create') {
     const url = text(record(result.pull_request).url) ?? text(result.pr_url) ?? text(record(result.pr).url)
     if (url) return { kind: 'pr', id: url, url }
@@ -366,6 +373,7 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
     watch_id: target.watch_id,
     swarm: watch?.mission_id?.replace(/^swarm:/, ''),
     pr: watch?.repo && watch.number ? prKey(`${watch.repo}#${watch.number}`) : undefined,
+    preference: target.preference_id,
   }
   // A watch record names its call's whole target, so a call naming less is another call.
   const whole = watch !== undefined || target.watch_id !== undefined
@@ -377,6 +385,7 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
       watch_id: text(input.watch_id),
       swarm: text(input.swarm_id)?.replace(/^swarm:/, ''),
       pr: prKey(text(input.pr)),
+      preference: text(input.id) ?? text(record(record(d.action.result).preference).id),
     }
     return (!saved.idempotency_key || !callKey(d.action)) && Object.entries(named).every(([key, value]) =>
       whole ? value === recorded[key] : !value || !recorded[key] || value === recorded[key])
@@ -562,6 +571,9 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
     object: prName,
   },
   aether_save_environment: { verb: ['Save', 'Saved', 'Saving'], object: () => 'your environment' },
+  aether_remember: { verb: ['Remember', 'Remembered', 'Remembering'], object: () => 'a preference' },
+  aether_forget: { verb: ['Forget', 'Forgotten', 'Forgetting'], object: () => 'a preference' },
+  aether_my_preferences: { verb: ['Read', 'Read', 'Reading'], object: () => 'your preferences' },
   aether_run_lifecycle: { verb: (a) => words(text(a.input.action) ?? 'change'), object: (a, n) => `run ${runName(a, n)}` },
   aether_switch_run_mode: { verb: ['Switch', 'Switched', 'Switching'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.mode) ?? 'another'} mode` },
   aether_handoff_run: { verb: ['Hand off', 'Handed off', 'Handing off'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.to_member_id) ?? 'a teammate'}` },
@@ -593,7 +605,51 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
   },
 }
 
+export type PreferenceFacts =
+  | { kind: 'saved'; text: string; id: string; updated_at: string }
+  | { kind: 'updated'; text: string; id: string; updated_at: string; previous: { text: string; workspace_id?: string } }
+  | { kind: 'forgotten'; text: string; id: string; updated_at: string; workspace_id?: string; enabled: boolean }
+  | { kind: 'used'; items: { id: string; text: string; scope: string }[] }
+
+/** What a finished preference tool did, read from its result; absent for any other call or a failed one. */
+export function preferenceFacts(action: AssistantAction): PreferenceFacts | undefined {
+  if (action.state !== 'done') return undefined
+  const result = record(action.result)
+  if (action.tool === 'aether_remember') {
+    const preference = record(result.preference)
+    const previous = record(result.previous)
+    const body = text(preference.text)
+    const id = text(preference.id)
+    if (!body || !id) return undefined
+    const before = text(previous.text)
+    const version = text(preference.updated_at) ?? ''
+    return before
+      ? { kind: 'updated', text: body, id, updated_at: version, previous: { text: before, workspace_id: text(previous.workspace_id) } }
+      : { kind: 'saved', text: body, id, updated_at: version }
+  }
+  if (action.tool === 'aether_forget') {
+    const gone = record(result.deleted)
+    const body = text(gone.text)
+    return body ? { kind: 'forgotten', text: body, id: text(gone.id) ?? '', updated_at: text(gone.updated_at) ?? '', workspace_id: text(gone.workspace_id), enabled: gone.enabled !== false } : undefined
+  }
+  if (action.tool === 'aether_my_preferences' && Array.isArray(result.preferences)) {
+    return { kind: 'used', items: result.preferences.map((item) => ({ id: text(record(item).id) ?? '', text: text(record(item).text) ?? '', scope: text(record(item).scope) ?? 'all' })) }
+  }
+  return undefined
+}
+
+function preferenceSummary(facts: PreferenceFacts): string {
+  switch (facts.kind) {
+    case 'saved': return `Saved: ${facts.text}`
+    case 'updated': return `Updated: ${facts.text}`
+    case 'forgotten': return `Forgotten: ${facts.text}`
+    case 'used': return `Read ${facts.items.length} of your ${facts.items.length === 1 ? 'preference' : 'preferences'}`
+  }
+}
+
 export function actionSummary(action: AssistantAction, names: ActionNames): string {
+  const facts = preferenceFacts(action)
+  if (facts) return preferenceSummary(facts)
   const phrase = phrases[action.tool] ?? { verb: ['Use', 'Used', 'Using'] as Verb, object: () => action.tool }
   const [imperative, past, present] = typeof phrase.verb === 'function' ? phrase.verb(action) : phrase.verb
   const verb = action.state === 'done' ? past : action.state === 'running' || action.state === 'approval' ? present : imperative
