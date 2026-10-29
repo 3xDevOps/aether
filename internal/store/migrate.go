@@ -2224,7 +2224,31 @@ ALTER TABLE missions ADD COLUMN integrator_effort TEXT NOT NULL DEFAULT '';
 ALTER TABLE mission_create_receipts ADD COLUMN integrator_effort TEXT NOT NULL DEFAULT '';
 ALTER TABLE mission_integrator_replacements ADD COLUMN effort TEXT NOT NULL DEFAULT '';
 `,
-	// v94: each member's private assistant preferences, the setting that
+	// v94: audit history of writes by connectors and the assistant, and of
+	// connector, account-share, member and Slack link changes. Rows hold
+	// ids, never params, and outlive the members and connectors they name;
+	// security marks a change that took effect, which is kept apart from
+	// call entries.
+	`
+CREATE TABLE audit (
+	seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+	ts           INTEGER NOT NULL,
+	member_id    TEXT NOT NULL,
+	via          TEXT NOT NULL,
+	connector_id TEXT NOT NULL DEFAULT '',
+	client       TEXT NOT NULL DEFAULT '',
+	method       TEXT NOT NULL,
+	workspace_id TEXT NOT NULL DEFAULT '',
+	target       TEXT NOT NULL DEFAULT '',
+	code         INTEGER NOT NULL,
+	security     INTEGER NOT NULL
+);
+CREATE INDEX audit_member ON audit(member_id, seq);
+CREATE INDEX audit_kept ON audit(member_id, security, seq);
+CREATE INDEX audit_connector ON audit(connector_id, seq);
+CREATE INDEX audit_target ON audit(target, seq);
+`,
+	// v95: each member's private assistant preferences, the setting that
 	// lets the assistant use them, and temporary conversations that do not.
 	`
 CREATE TABLE member_preferences (

@@ -748,8 +748,27 @@ func (d *DB) UpdateMember(ctx context.Context, m *domain.Member) error {
 	return nil
 }
 
+// DeleteMember deletes member id and, recording each, its connectors.
 func (d *DB) DeleteMember(ctx context.Context, id domain.MemberID) error {
-	return d.execDelete(ctx, "delete member", `DELETE FROM members WHERE id = ?`, id)
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin delete member: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = removeConnectors(ctx, tx, `member_id = ?`, id); err != nil {
+		return err
+	}
+	err = notFoundOnZeroRows(tx.ExecContext(ctx, `DELETE FROM members WHERE id = ?`, id))
+	if errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("store: delete member: %w", mapConstraint(err, ErrInUse))
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit delete member: %w", err)
+	}
+	return nil
 }
 
 func (d *DB) GetTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {

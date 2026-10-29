@@ -522,6 +522,22 @@ type RunPullParams struct {
 // (run.launch, run.get, run.close, run.relaunch).
 type RunResult struct {
 	Run Run `json:"run"`
+	// PullRequests are the pull requests the run opened, newest first, as
+	// Aether last recorded them without asking GitHub; only run.get sets it.
+	PullRequests []RecordedPullRequest `json:"pull_requests,omitempty"`
+}
+
+// RecordedPullRequest is a run's pull request as Aether last observed it at
+// CheckedAt. Repo is the run's repos[].workspace_id that owns it, empty for
+// the run's own repository.
+type RecordedPullRequest struct {
+	Repo       string     `json:"repo,omitempty"`
+	Repository string     `json:"repository"`
+	Number     int        `json:"number"`
+	URL        string     `json:"url"`
+	State      string     `json:"state"`
+	MergedAt   *time.Time `json:"merged_at,omitempty"`
+	CheckedAt  time.Time  `json:"checked_at"`
 }
 
 // RunInjectParams.IdempotencyKey makes a retry return the original room

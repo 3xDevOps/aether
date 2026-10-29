@@ -12,32 +12,41 @@ import (
 // ShareAccount grants grantee use of owner's agent login. Repeating an
 // existing grant is idempotent so dashboard retries cannot turn success into
 // an error.
-func (d *DB) ShareAccount(ctx context.Context, owner, grantee domain.MemberID) error {
+func (d *DB) ShareAccount(ctx context.Context, owner, grantee domain.MemberID) (bool, error) {
 	if owner == "" || grantee == "" || owner == grantee {
-		return fmt.Errorf("store: share account: owner and a different grantee are required")
+		return false, fmt.Errorf("store: share account: owner and a different grantee are required")
 	}
-	_, err := d.db.ExecContext(ctx, `
+	res, err := d.db.ExecContext(ctx, `
 		INSERT INTO account_shares (owner_member_id, grantee_member_id, created_at)
 		VALUES (?, ?, unixepoch())
 		ON CONFLICT (owner_member_id, grantee_member_id) DO NOTHING`, owner, grantee)
 	if err != nil {
-		return fmt.Errorf("store: share account: %w", mapConstraint(err, ErrNotFound))
+		return false, fmt.Errorf("store: share account: %w", mapConstraint(err, ErrNotFound))
 	}
-	return nil
+	return changedRows(res, "share account")
 }
 
 // RevokeAccountShare removes one grant. Revoking an absent grant is
 // idempotent; callers care that access is gone, not whether it existed.
-func (d *DB) RevokeAccountShare(ctx context.Context, owner, grantee domain.MemberID) error {
+func (d *DB) RevokeAccountShare(ctx context.Context, owner, grantee domain.MemberID) (bool, error) {
 	if owner == "" || grantee == "" {
-		return fmt.Errorf("store: revoke account share: owner and grantee are required")
+		return false, fmt.Errorf("store: revoke account share: owner and grantee are required")
 	}
-	if _, err := d.db.ExecContext(ctx,
+	res, err := d.db.ExecContext(ctx,
 		`DELETE FROM account_shares WHERE owner_member_id = ? AND grantee_member_id = ?`,
-		owner, grantee); err != nil {
-		return fmt.Errorf("store: revoke account share: %w", err)
+		owner, grantee)
+	if err != nil {
+		return false, fmt.Errorf("store: revoke account share: %w", err)
 	}
-	return nil
+	return changedRows(res, "revoke account share")
+}
+
+func changedRows(res sql.Result, op string) (bool, error) {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: %s: %w", op, err)
+	}
+	return n > 0, nil
 }
 
 func (d *DB) AccountSharedWith(ctx context.Context, owner, grantee domain.MemberID) (bool, error) {

@@ -480,7 +480,7 @@ func TestRunSSHRefusals(t *testing.T) {
 			name: "a protected run",
 			arrange: func(t *testing.T, e *testEnv, _ *runSSHTestService) (ssh.Signer, string) {
 				signer, bo := addMember(t, e, "Bo", domain.RoleCollaborator, false)
-				if err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
+				if _, err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
 					t.Fatal(err)
 				}
 				e.run.Protected = true
@@ -495,7 +495,7 @@ func TestRunSSHRefusals(t *testing.T) {
 			name: "a viewer",
 			arrange: func(t *testing.T, e *testEnv, _ *runSSHTestService) (ssh.Signer, string) {
 				signer, bo := addMember(t, e, "Bo", domain.RoleViewer, false)
-				if err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
+				if _, err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
 					t.Fatal(err)
 				}
 				return signer, string(e.run.ID)
@@ -568,7 +568,7 @@ func TestRunSSHEndsWhenAuthorizationOrTheRunGoes(t *testing.T) {
 			}
 		},
 		"account share withdrawn": func(t *testing.T, e *testEnv, _ *runSSHTestService, bo *domain.Member) {
-			if err := e.store.RevokeAccountShare(t.Context(), e.member.ID, bo.ID); err != nil {
+			if _, err := e.store.RevokeAccountShare(t.Context(), e.member.ID, bo.ID); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -594,7 +594,7 @@ func TestRunSSHEndsWhenAuthorizationOrTheRunGoes(t *testing.T) {
 			e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 20 * time.Millisecond })
 			svc := installRunSSHTestService(t, e)
 			signer, bo := addMember(t, e, "Bo", domain.RoleCollaborator, false)
-			if err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
+			if _, err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
 				t.Fatal(err)
 			}
 			client := mustDialRunSSH(t, e, signer)
@@ -625,12 +625,12 @@ func TestRunSSHRefusesANewChannelOnceAuthorizationIsWithdrawn(t *testing.T) {
 	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = time.Hour })
 	svc := installRunSSHTestService(t, e)
 	signer, bo := addMember(t, e, "Bo", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
+	if _, err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
 		t.Fatal(err)
 	}
 	client := mustDialRunSSH(t, e, signer)
 	port := listenLoopback(t, "")
-	if err := e.store.RevokeAccountShare(t.Context(), e.member.ID, bo.ID); err != nil {
+	if _, err := e.store.RevokeAccountShare(t.Context(), e.member.ID, bo.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1030,7 +1030,7 @@ func TestRunSSHBoundsSessionsForwardsAndConnections(t *testing.T) {
 	bo, boMember := addMember(t, e, "Bo", domain.RoleCollaborator, false)
 	cy, cyMember := addMember(t, e, "Cy", domain.RoleCollaborator, false)
 	for _, teammate := range []*domain.Member{boMember, cyMember} {
-		if err = e.store.ShareAccount(t.Context(), e.member.ID, teammate.ID); err != nil {
+		if _, err = e.store.ShareAccount(t.Context(), e.member.ID, teammate.ID); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -92,7 +92,7 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedHome(t, adaHome, map[string]string{".claude/.credentials.json": "ada-login"})
-	if err := e.db.ShareAccount(ctx, ada, grace.ID); err != nil {
+	if _, err := e.db.ShareAccount(ctx, ada, grace.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -327,7 +327,7 @@ func TestIntegrationAssistantIgnoresPlantedGatewayDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.db.ShareAccount(ctx, ada, grace.ID); err != nil {
+	if _, err := e.db.ShareAccount(ctx, ada, grace.ID); err != nil {
 		t.Fatal(err)
 	}
 	seedHome(t, adaHome, map[string]string{".claude/.credentials.json": "ada-login"})

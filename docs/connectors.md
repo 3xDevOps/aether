@@ -255,11 +255,11 @@ others:
 | --- | --- | --- |
 | `aether_list_workspaces` | Workspaces, and agents (installed, signed in, Enhanced) | `read` |
 | `aether_launch_options` | What you can launch and on which account: workspaces, your accounts with their usage, each account's agents and modes, swarm eligibility, fallback, a workspace's templates, and an agent's models when asked for ([Launch options](#launch-options)) | `read` |
-| `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its latest report and its pull request | `read` |
+| `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its latest report and its pull request; `evidence: true` adds [progress evidence](#progress-evidence) | `read` |
 | `aether_run_history` | A page of a run's conversation (Enhanced) or terminal, with its reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your runs did today, yesterday or this week, in your time zone | `read` |
-| `aether_get_swarm` | Your swarms; with `swarm_id`, one swarm's tasks, workers with their agent, mode, model and account, who holds their control and why one failed, questions, recent messages and integrator generation | `read` |
+| `aether_get_swarm` | Your swarms; with `swarm_id`, one swarm's tasks, workers with their agent, mode, model and account, who holds their control and why one failed, questions, recent messages and integrator generation; `evidence: true` adds [progress evidence](#progress-evidence) | `read` |
 | `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
 | `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md), or with `id` one note with the notes that replaced it or that it replaced | `read` |
 | `aether_integration` | A workspace's or swarm's [integration candidates](teams.md#combine-several-runs-into-one-result), or one with its verifications and delivery request | `read` |
@@ -416,9 +416,86 @@ in place of the run fields, each with the account it was asked to run on.
 `aether_get_swarm`'s `workers` list each worker run with the account it launched
 on, and `requested_account` when usage fallback moved it. `aether_get_run` also
 names the run's `parent_run_id` and lists its `children`, nearest first, each
-with its state, agent and account, and what its parent asked of it under
-`untrusted`; `children_error` says why they could not be read, unless the
-server has no child runs.
+with its state, agent and account, `stale` when the run's branch moved past
+the commit the child started from, its latest report's `outcome` and `at`, and
+what its parent asked of it and the report's summary under `untrusted`;
+`children_error` says why they could not be read, unless the server has no
+child runs.
+
+### Progress evidence
+
+`aether_get_run` and `aether_get_swarm` with `swarm_id` take `evidence: true`
+to answer "what is left" and "did we ship" from evidence rather than from an
+agent's own report. Without it they make no GitHub lookups for this.
+Every part carries its source and the time it was read (`as_of` or
+`checked_at`); a lookup that failed returns its `error` instead of a guess,
+and the summary line ends with `Not confirmed:` and the number of lookups
+that returned an error, runs with pull requests not checked live, and
+unreadable reports. Both add `released` and `deployed` as `{"state":
+"unknown", "reason": "Aether does not track releases or deployments of this
+repository"}`.
+
+The lookups are the same as `aether_pr_status`'s, for at most 5 runs per
+call: one may record what GitHub showed in Aether and tell open dashboards
+that the run's pull request changed.
+
+`aether_get_run`'s `evidence` has:
+
+- `pull_requests`: the first 20 pull requests the run opened
+  (`pull_requests_total` when there are more), as Aether recorded it
+  (`source: "aether record"`, with the `checked_at` of that record), or as
+  GitHub just showed it (`source: "github"`). Only a lookup that reached
+  GitHub without an error relabels one; a finished run's lookup can answer
+  from Aether's record without asking GitHub, and a recorded merge stays as
+  recorded. A pull request not merged that no lookup confirmed has
+  `not_checked_live`. A run closed as merged adds `closed_as_merged`: a
+  person closed it, which is not a GitHub merge.
+- `reviewed`: for a run with a pull request not merged, GitHub's checks
+  (`total`, `failing`, `pending`), `approvals` and `changes_requested` from
+  the latest verdict of each reviewer, `merge_state` and `checked_at`. The
+  checks belong to the `pr` and head shown; when the pull request moved
+  between the status and checks lookups, `error` says so. When GitHub cut
+  the review list off, `partial` is set and `approvals` is left out, since
+  a later verdict may be missing.
+- `report`: the latest report's `outcome` and `at`, or `not in the last 100
+  reports`.
+- `conflicts`: `success_with_failing_checks`, `success_with_pending_checks`,
+  `success_with_changes_requested` and `closed_as_merged_but_pr_not_merged`.
+
+`aether_get_swarm`'s `progress` has:
+
+- `requested`: each task's `status`, `revision`, `depends_on`,
+  `plan_accepted_by` (a member or a run) and `plan_accepted_at`, the first 20
+  with `tasks_total`; titles and objectives are under `untrusted.progress_tasks`.
+- `implemented`: each attempt's run, task revision, state and times, and its
+  newest submission's `state`, `accepted_by` (the integrator run),
+  `accepted_at`, `accepted_for_revision` and number of `scope_violations`;
+  the integrator's reason for accepting them is under
+  `untrusted.scope_dispositions`.
+  `accepted` is true only for a submission accepted for the task's current
+  revision; revising a task leaves earlier acceptances in place but no longer
+  accepted.
+- `merged`, `reviewed`, `reports` and `children`: per run, as for one run,
+  for the first 20 of the integrator, earlier integrators that decided a
+  submission, and the worker runs, each with its `role` (`runs_total` when
+  there are more). At most 5 runs are checked on GitHub per call, 4 at a
+  time: the integrator first, then runs with a pull request not merged, then
+  unfinished runs with none recorded, whose agent may have opened one with
+  `gh` (`pr_lookup_error` says why none was found). A run's pull requests
+  are capped at 20 with `pull_requests_total`. Reports come from the
+  workspace's last 100; their summaries are under
+  `untrusted.progress_reports`. With `integrator_generation` above 1,
+  `integrator_note` counts earlier integrators no submission names, which
+  are not listed.
+- `aether_delivery`: the swarm's first 20 delivery receipts
+  (`receipts_total` when there are more), which land in Aether's own git,
+  not on GitHub. They come from the newest 100 candidates; `note` says
+  when earlier deliveries may be missing.
+- `flags`: `open_tasks_in_completed_swarm`, tasks neither done nor abandoned
+  in a completed swarm, and `report_conflicts`, which adds
+  `success_without_accepted_submission` for a worker with no submission
+  accepted for its task's current revision. Superseded and abandoned
+  attempts and abandoned tasks do not raise it.
 
 `aether_launch_run` with `template` (a name from `aether_launch_options`
 with `workspace_id`) and `params` runs a saved template on your own account
@@ -537,6 +614,52 @@ connector: write call connector=con-7k2m9q4xbd member=mem-... method=run.launch 
 
 `result` is `ok` or the call's error. Audit records, such as a member merge's
 `confirmed_by`, name the connector: `ChatGPT connector con-7k2m9q4xbd of member mem-...`.
+
+### Audit history
+
+The server also keeps a durable audit history of:
+
+- every write call a connector makes past its rate limit, including calls the
+  server refused, such as a method outside the connector's scopes
+- every write call the assistant makes
+- connectors being created and revoked, including the server revoking one
+  whose rotated refresh token was used again (`connector.reused`) and deleting
+  one with its member, or when the edge account that authorized it or its
+  device is unlinked or deleted (`connector.removed`)
+- account shares and revocations, member approvals, removals and role changes,
+  device revocations, edge sign-in removals, member merge acceptances, and
+  Slack link codes and unlinks, however they were made
+
+A connector whose refresh token lapsed after 30 days unused is deleted without
+an entry.
+
+An entry names the member, how the call arrived, the method, the workspace,
+the run, swarm, note, integration candidate, question, connector, member,
+device or Slack user it acted on (for an accepted merge, the absorbed member;
+for a refused one, the proposal), and `ok` or `error` with the error code. It never holds tokens, messages or other parameters. How a call arrived
+is `connector` with the client and connector id, `assistant`, `dashboard` for
+the server-hosted dashboard, or `cli` for any SSH client, including the
+desktop app and `aether gui`.
+
+```sh
+aether audit                                  # your entries, newest first
+aether audit --connector con-7k2m9q4xbd       # one connector's calls, creation and end
+aether audit --before 812                     # the page after one ending at 812
+```
+
+```
+SEQ  TIME                 MEMBER          VIA                                METHOD      TARGET          OUTCOME
+814  2026-10-26 14:02:11  mem-4f8x2kq9vd  connector ChatGPT con-7k2m9q4xbd    run.kill    run-d6ay38tj8j  error -32001
+813  2026-10-26 14:01:40  mem-4f8x2kq9vd  connector ChatGPT con-7k2m9q4xbd    run.launch  run-d6ay38tj8j  ok
+```
+
+You see your own entries; an admin sees everyone's. The `audit.list` RPC
+returns the same entries, at most 200 a page. The server keeps each member's
+newest 10,000 call entries and, apart from them, their newest 10,000 connector,
+account, member and Slack changes that took effect, so a flood of calls cannot
+push a security change out of the history. A call that changed nothing, such
+as revoking a share that does not exist, is a call entry. After a member merge, the absorbed member's entries
+keep their id, so only admins see them.
 
 ## Revoke a connector
 
