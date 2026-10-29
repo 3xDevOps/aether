@@ -182,7 +182,7 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
         actions={
           <>
             {ready && <ActionHistory session={session} />}
-            {ready && <TemporaryChatToggle temporary={status?.temporary === true} />}
+            {ready && status.temporary !== undefined && <TemporaryChatToggle temporary={status.temporary} />}
             {ready && (
               <Button variant="ghost" size="icon-sm" label="New conversation" onClick={() => setConfirming(true)}>
                 <MessageSquarePlus />

@@ -468,6 +468,10 @@ describe('confirmations', () => {
 })
 
 describe('temporary chat', () => {
+  beforeEach(() => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ temporary: false }))
+  })
+
   it('switches on from the header, says what it means in the composer and clears on a new conversation', async () => {
     vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, temporary: true })
     vi.mocked(api.assistantReset).mockResolvedValue(status({ temporary: false }))
@@ -485,6 +489,14 @@ describe('temporary chat', () => {
     await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
     await waitFor(() => expect(within(aside).queryByText(/Temporary: the assistant won't read/)).toBeNull())
+  })
+
+  it('offers no toggle on a server whose status has no temporary chat', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status())
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'hello'), item('turn_end', 1)])
+    await within(aside).findByRole('button', { name: 'New conversation' })
+    expect(within(aside).queryByRole('button', { name: 'Temporary chat' })).toBeNull()
   })
 
   it('drops a reply that arrives after New conversation', async () => {

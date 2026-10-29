@@ -63,7 +63,7 @@ export interface AssistantStatus {
   suggest_auto_approve: boolean
   /** Prompts carry the member's view context. */
   share_view: boolean
-  /** Temporary chat: the assistant neither uses nor saves preferences, and the chat is discarded on New conversation. */
+  /** Temporary chat: the assistant neither uses nor saves preferences, and the chat is discarded on New conversation. Absent from a server without it. */
   temporary?: boolean
 }
 
