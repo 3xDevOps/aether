@@ -563,6 +563,7 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    effort?: string
     account_member_id?: string
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
@@ -1022,6 +1023,7 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    effort?: string
     params?: Record<string, string>
     budget_usd?: number
   }) =>
@@ -1213,6 +1215,8 @@ export const api = {
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
+  assistantLoginSocket: (agent: string) =>
+    socketURL(`/ws/terminal?assistant_login=${encodeURIComponent(agent)}`),
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),

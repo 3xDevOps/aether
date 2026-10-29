@@ -378,6 +378,47 @@ until the sending or receiving run is deleted. Every member of the workspace
 can read their bodies, the same audience the **Activity** page has. Do not
 ask agents to pass credentials to each other.
 
+## The assistant
+
+Your [assistant](assistant.md) keeps its conversation on your server under
+`<data-dir>/assistant/<member>/`:
+
+- `items.jsonl` is the transcript the panel shows: your prompts, the agent's
+  replies, its tool calls and their results, and the action cards.
+- `home/` is the agent's home: the sign-in you made for the assistant
+  (`.claude/.credentials.json` or `.codex/auth.json`) and the conversation's
+  session files (`.claude/projects/` or `.codex/sessions/`). History, todos,
+  file history, shell snapshots and debug logs exist only while a session
+  runs; each start deletes them.
+- `signin/` records the account of the sign-in you made: the Claude account
+  and organization ids, the ChatGPT account id, or a SHA-256 hash of a Codex
+  API key.
+
+On every assistant start the server sends the sign-in's refresh token to the
+vendor's sign-in service and the new access token to its profile endpoint
+(Claude Code), to learn which account the sign-in belongs to.
+- `install/` holds each agent's installed adapter, and `install/<agent>.installed`
+  its version.
+- `instructions/` holds the instructions the server gives it, and `tools/` its
+  tool socket.
+
+Only the server process and your assistant's container read or write them;
+no run, environment or other member can, including members you
+[share your account](security.md#account-sharing) with. Anyone with access to
+the server's data directory, such as its administrator, can read them. Your
+prompts and the files the agent reads go to the agent's vendor under the
+account you signed the assistant in to.
+
+**New conversation** deletes `items.jsonl` and everything in `home/` but the
+sign-in. The output of a sign-in terminal, which shows the sign-in URL and,
+for Codex, a one-time code, is recorded like any terminal in
+`<data-dir>/transcripts/assistant-login-<member>-<agent>.cast` and deleted
+when the sign-in exits; if the dashboard was not attached then, at the next
+start or sign-in. Removing a member deletes the whole directory. Assistant state
+from before the assistant had its own container is in your home;
+[assistant.md](assistant.md#earlier-assistant-state-in-your-home) says how to
+delete it.
+
 ## Team memory
 
 Team memory is a store of short notes per workspace, kept in
@@ -457,8 +498,9 @@ never compacted. Forgetting does not remove:
 - backups an operator made of the data directory;
 - runs already launched with the text in their task;
 - the assistant transcript (`<data-dir>/assistant/<member>/items.jsonl`)
-  until you start a **New conversation**, and the agent's session files in
-  the assistant's home until you start a **New conversation**;
+  and the agent's session files in `home/` until you start a **New
+  conversation**, which deletes both but the sign-in, as it does for a
+  temporary conversation;
 - copies a connected app or an agent made elsewhere.
 
 Removing a member deletes their preferences in the same transaction and

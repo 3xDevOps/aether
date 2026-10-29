@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +34,7 @@ type prefFixture struct {
 	db    *store.DB
 	svc   *Service
 	prefs *preference.Service
+	host  *fakeHost
 	m     *member
 	sock  string
 
@@ -53,8 +55,9 @@ func newPrefFixture(t *testing.T) *prefFixture {
 	if err = db.CreateMember(context.Background(), alice); err != nil {
 		t.Fatal(err)
 	}
+	f.host = &fakeHost{}
 	f.db, f.prefs = db, preference.New(db, filepath.Join(f.dir, "preference-tombstones"))
-	f.svc = New(Config{Dir: filepath.Join(f.dir, "assistant"), Store: db, Preferences: f.prefs})
+	f.svc = New(Config{Dir: filepath.Join(f.dir, "assistant"), Store: db, Host: f.host, Preferences: f.prefs})
 	t.Cleanup(func() { _ = f.svc.Close() })
 	f.m = f.svc.member(alice.ID)
 
@@ -356,6 +359,9 @@ func TestTemporaryIsSetInSettingsAndEndsWithANewConversation(t *testing.T) {
 	f.m.op.Unlock()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Equal(f.host.discarded, []domain.MemberID{f.m.id}) {
+		t.Fatalf("ending a temporary conversation discarded agent state for %v; want %v", f.host.discarded, f.m.id)
 	}
 	if got, err = f.svc.Settings(t.Context(), f.m.id); err != nil || got.Temporary || got.PreferencesEnabled {
 		t.Fatalf("after a new conversation = %+v, %v; want temporary cleared and preferences still off", got, err)

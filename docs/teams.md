@@ -353,13 +353,13 @@ the workspace repository after `delete`.
 
 ### Task templates and schedules
 
-A template is a saved launch: agent, task, mode, model and parameters. An admin
+A template is a saved launch: agent, task, mode, model, effort and parameters. An admin
 saves and deletes templates. Any collaborator launches them and sets schedules.
 
 ```sh
 aether template save nightly-triage --agent claude --task "triage new issues" \
-  [--mode standard|enhanced|background] [--model <model>] [--param key=value] \
-  [--budget <usd>]
+  [--mode standard|enhanced|background] [--model <model>] [--effort <level>] \
+  [--param key=value] [--budget <usd>]
 aether run --template nightly-triage [--param key=value]
 aether schedule set nightly-triage "0 6 * * *"
 ```
@@ -372,7 +372,8 @@ syntax or an `@descriptor`, in UTC. A schedule that was due while the server was
 down waits for its next occurrence. `aether template list|delete` and `aether
 schedule list|delete` manage the rest. A `--model` the agent has no flag for
 fails with `scheduler: agent "<agent>" has no model flag; launch it without a
-model`.
+model`, and an `--effort` it does not take fails with the error in
+[harnesses.md](harnesses.md#choose-an-effort).
 
 ### Attribution
 
@@ -467,9 +468,22 @@ lists exactly what is shared.
 - An owner with no login shows **Not logged in**. A CLI launch fails with `Grace
   is not logged in to claude: no login at ~/.claude/.credentials.json in their
   home; Grace logs in to claude in their own environment terminal`.
-- A refreshed Claude Code login reaches recipients only if the owner's environment
-  started after the first share. Use **Stop environment** in **Profile**, or
-  `aether terminal stop`, then reopen it.
+- Every member's containers mount their own Claude Code and Gemini login files
+  in place, so a token refresh rewrites the file instead of replacing it. A
+  server on Docker Engine older than 26.0 mounts none, and cannot share either.
+  Recipients see the owner's refreshed login, and a run on a shared account
+  keeps the owner's login mounted. A container started before v0.7.7-beta.1
+  can still replace its member's login file, which detaches the owner's login
+  from that member's runs on shared accounts: those runs then sign in as the
+  member. Restart such environments with **Stop environment** in **Profile**,
+  or `aether terminal stop`, and relaunch such runs.
+- Before the agent starts, the server checks that the container sees the
+  owner's login file itself, not the recipient's own. Otherwise the launch, or
+  the move to the account, fails with `runtime: /root/.claude/.credentials.json
+  in the container is inode <n>, not .claude/.credentials.json in <owner's
+  home> (inode <m>); Docker lists the mount, so container runtime "<name>" did
+  not apply it`, or `...; Docker did not mount it (container runtime
+  "<name>")`.
 - Shared accounts need Docker Engine 26.0 or newer on the server, or the launch
   fails with `runtime: docker engine API "1.44" cannot mount a path beneath a
   member home; that needs API 1.45 (Docker Engine 26.0) or newer`.
@@ -507,8 +521,18 @@ session there. The run keeps its ID, checkout and branch, but processes in the
 old container, terminals included, end. This works for Enhanced and Background
 runs of `claude` and `codex` and Standard `claude` runs
 ([harnesses.md](harnesses.md#usage-limit-signals)). Cost stays with the account
-that spent it. A run that cannot move parks or fails with a reason that says
-why ([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
+that spent it. The account that ran out is not read again: the agent's report
+counts as exhausted. The move picks an account with usage left as a launch
+does; when none has, it tries one whose usage cannot be read, in the same
+order, since the run would stop anyway. Your own account qualifies there only
+with a login, or an API key the agent signs in with in that mode:
+`ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for a Background Codex run
+([per-agent setup](harnesses.md#per-agent-setup)). An account the run already used is
+never tried again: your own, or a shared one whose login the server confirmed
+in the run's container. A shared account whose login never reached the
+container spent none of its quota, so it stays a candidate. A run that cannot
+move parks or fails with a reason that says why
+([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
 
 ### Saved launch choices
 
@@ -574,8 +598,8 @@ flowchart LR
 
 In the dashboard, open **New run** and use the **Swarm** tab. Set the objective,
 the **Integrator agent**, **Integrator mode** (Standard or Enhanced, since
-Background exits after one turn), the **Integrator model**, **Agents for
-workers** with a model on each, **Worker mode** (Enhanced by default) and,
+Background exits after one turn), the **Integrator model** and **Integrator
+effort**, **Agents for workers** with a model and an effort on each, **Worker mode** (Enhanced by default) and,
 optionally, **Add repos**. A
 worker whose agent cannot use that mode runs in the mode its row names. Swarm
 agents run only in a mode Aether can wake when mail arrives, so an agent with no
@@ -585,19 +609,21 @@ CLI does the same:
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
-  --agent claude --model opus --worker claude:background \
-  --worker codex:background:gpt-5-codex
+  --agent claude --model opus --effort high --worker claude:background \
+  --worker codex:background+xhigh:gpt-5-codex
 ```
 
 `--idempotency-key <key>` makes a retried create return the same swarm.
-`--worker agent[:mode[:model]]` allows workers on an agent and repeats.
+`--worker agent[:mode[+effort][:model]]` allows workers on an agent and
+repeats. The effort rides on the mode (`codex:+high` keeps the default mode),
+because a model may itself contain `:`, as in pi's `sonnet:high`.
 `--repo <workspace>` (repeatable) checks out another workspace at
 `/repos/<name>` in the integrator and every worker, as `aether run --repo`
 does for one run ([quickstart.md](quickstart.md#working-across-repos)). A
 candidate combines `/workspace` only: a worker's commits in an extra repo stay
 on that worker's run branch there, which its run page shows under **Changes**,
 and the integrator names those runs in its final report. An empty
-model keeps the agent's default. `-` as the objective reads it from stdin. The
+model or effort keeps the agent's default. `-` as the objective reads it from stdin. The
 integrator runs on your account, or the one named by `--account`, in `--mode
 standard` or `enhanced` ([enhanced-runs.md](enhanced-runs.md)). A mode left out of
 `--mode` or a `--worker` is `enhanced` where the agent's Enhanced mode is

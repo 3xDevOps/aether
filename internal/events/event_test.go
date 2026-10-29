@@ -22,6 +22,7 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunControllerPayload{LastMemberID: "mem_1"},
 		RunModePayload{Mode: domain.LaunchACP, Previous: domain.LaunchTUI, Switching: domain.LaunchACP, Reason: "Switching to Enhanced…"},
 		RunModelPayload{Model: "claude-opus-4-1"},
+		RunEffortPayload{Effort: "high"},
 		RunArchivedPayload{ArchivedAt: strPtr("2024-01-02T03:04:05Z")},
 		RunArchivedPayload{},
 		RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted, Reason: "agent reported success", OutcomeUnseen: true, FinishUnopened: true},

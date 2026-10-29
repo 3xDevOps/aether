@@ -110,6 +110,10 @@ const (
 // AgentInstallTimeout bounds one agent.install.
 const AgentInstallTimeout = 10 * time.Minute
 
+// AssistantStartTimeout bounds starting the assistant, which on a first start
+// installs its agent; assistant.start and assistant.prompt wait for it.
+const AssistantStartTimeout = 10 * time.Minute
+
 const TerminalExecTimeout = 10 * time.Minute
 
 // Permission-model methods.

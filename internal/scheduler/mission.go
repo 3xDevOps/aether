@@ -26,6 +26,7 @@ type MissionLaunchSpec struct {
 	Harness      string
 	Mode         domain.LaunchMode
 	Model        string
+	Effort       string
 	CachedBase   string
 	// RequestedAccount is the account the mission asked for; AccountOwner
 	// differs from it after a usage fallback.
@@ -168,7 +169,8 @@ func sameReservedRun(existing, requested *domain.Run) bool {
 		existing.Task == requested.Task &&
 		existing.Harness == requested.Harness &&
 		existing.Mode == requested.Mode &&
-		existing.Model == requested.Model
+		existing.Model == requested.Model &&
+		existing.Effort == requested.Effort
 }
 
 // CancelMission stops an assigned worker without attributing a human action.
@@ -207,7 +209,7 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
 	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{
-		Model: spec.Model, CachedBase: spec.CachedBase, AssignedRunID: spec.RunID, RequestedAccount: spec.RequestedAccount, Fallback: spec.Fallback,
+		Model: spec.Model, Effort: spec.Effort, CachedBase: spec.CachedBase, AssignedRunID: spec.RunID, RequestedAccount: spec.RequestedAccount, Fallback: spec.Fallback,
 		Admitted: spec.Admitted, ExtraWorkspaces: spec.ExtraWorkspaces,
 	})
 }
@@ -226,8 +228,8 @@ func (s *Scheduler) SwarmRefusal(agent string, mode domain.LaunchMode) error {
 // account has a command for mode, resolving it exactly as a launch would, so
 // a mission never records an integrator the scheduler cannot start. The task
 // shapes only the prompt, so validation passes none and reads no brief.
-func (s *Scheduler) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model string) error {
-	_, _, _, err := s.command(ctx, "", member, account, harnessName, mode, true, "", model)
+func (s *Scheduler) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model, effort string) error {
+	_, _, _, err := s.command(ctx, "", member, account, harnessName, mode, true, "", model, effort)
 	return err
 }
 

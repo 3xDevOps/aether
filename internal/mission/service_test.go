@@ -84,12 +84,17 @@ func TestCreateNamesIntegratorChoiceMissingFromExecutionChoices(t *testing.T) {
 		"mode": {
 			integrator: protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"},
 			choice:     protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "headless"},
-			want:       "integrator choice account=" + string(member.ID) + " harness=claude mode=tui model= must be one of execution_choices",
+			want:       "integrator choice account=" + string(member.ID) + " harness=claude mode=tui model= effort= must be one of execution_choices",
 		},
 		"model": {
 			integrator: protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui", Model: "opus"},
 			choice:     protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui", Model: "sonnet"},
-			want:       "integrator choice account=" + string(member.ID) + " harness=claude mode=tui model=opus must be one of execution_choices",
+			want:       "integrator choice account=" + string(member.ID) + " harness=claude mode=tui model=opus effort= must be one of execution_choices",
+		},
+		"effort": {
+			integrator: protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui", Effort: "high"},
+			choice:     protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui", Effort: "low"},
+			want:       "integrator choice account=" + string(member.ID) + " harness=claude mode=tui model= effort=high must be one of execution_choices",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -130,6 +135,36 @@ func TestRecoveryTreatsAChangedModelAsStale(t *testing.T) {
 	} {
 		if err := f.svc.launchRecovered(ctx, req); !errors.Is(err, store.ErrMissionStale) || !strings.Contains(err.Error(), name) {
 			t.Fatalf("recovery with a changed model = %v, want %q", err, name)
+		}
+	}
+}
+
+func TestRecoveryTreatsAChangedEffortAsStale(t *testing.T) {
+	ctx := context.Background()
+	f := newMissionFixtureFor(t, "claude", domain.LaunchTUI, domain.MissionExecutionChoice{Harness: "claude", Mode: domain.LaunchHeadless, Model: "haiku", Effort: "high"})
+	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
+	out := f.mustCall(t, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+		MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
+		DispatchKey: "haiku-high", Harness: "claude", Mode: string(domain.LaunchHeadless), Model: "haiku", Effort: "high", AccountOwnerID: string(f.member.ID),
+	}).(protocol.WorkerStartResult)
+	m := f.reloadMission(t)
+	for name, req := range map[string]MissionLaunchRequest{
+		"recovered integrator assignment changed": {
+			WorkspaceID: m.WorkspaceID, MissionID: m.ID, IntegratorGeneration: m.IntegratorGeneration,
+			RunID: m.CurrentIntegratorRunID, ActorRunID: m.CurrentIntegratorRunID,
+			RunOwnerID: m.IntegratorRunOwnerID, RequestedAccount: m.Integrator.AccountMemberID,
+			Task: m.Objective, Harness: m.Integrator.Harness, Mode: m.Integrator.Mode, Effort: "high",
+		},
+		"recovered worker assignment changed": {
+			WorkspaceID: m.WorkspaceID, MissionID: m.ID, AttemptID: domain.AttemptID(out.Attempt.ID),
+			IntegratorGeneration: out.Attempt.IntegratorGeneration,
+			RunID:                domain.RunID(out.Attempt.RunID), ActorRunID: domain.RunID(out.Attempt.ActorRunID),
+			RunOwnerID: domain.MemberID(out.Attempt.RunOwnerID), RequestedAccount: domain.MemberID(out.Attempt.AccountOwnerID),
+			Task: task.Revision.Objective, Harness: out.Attempt.Harness, Mode: domain.LaunchMode(out.Attempt.Mode), Model: out.Attempt.Model,
+		},
+	} {
+		if err := f.svc.launchRecovered(ctx, req); !errors.Is(err, store.ErrMissionStale) || !strings.Contains(err.Error(), name) {
+			t.Fatalf("recovery with a changed effort = %v, want %q", err, name)
 		}
 	}
 }
@@ -706,7 +741,7 @@ func (l *validatingLauncher) LaunchMission(ctx context.Context, req MissionLaunc
 	return l.recordingLauncher.LaunchMission(ctx, req)
 }
 
-func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model string) error {
+func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model, effort string) error {
 	l.calls++
 	l.validated = append(l.validated, [2]domain.MemberID{member, account})
 	if l.refuseAll || (harnessName == "legacy" && mode == domain.LaunchTUI) {
@@ -714,6 +749,9 @@ func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, ac
 	}
 	if harnessName == "legacy" && model != "" {
 		return errors.New(`scheduler: agent "legacy" takes no model`)
+	}
+	if harnessName == "legacy" && effort != "" {
+		return errors.New(`scheduler: agent "legacy" has no effort flag; launch it without an effort`)
 	}
 	return nil
 }
@@ -769,9 +807,10 @@ func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 }
 
 // A launch resolves the harness in the run owner's context, not the account's.
-func TestCreateRefusesAWorkerModelTheAgentCannotTake(t *testing.T) {
+func TestCreateRefusesAWorkerModelOrEffortTheAgentCannotTake(t *testing.T) {
 	ctx := context.Background()
-	const want = `execution choice harness legacy cannot launch in headless mode with model opus: scheduler: agent "legacy" takes no model`
+	const want = `execution choice harness legacy cannot launch in headless mode with model "opus" and effort "": scheduler: agent "legacy" takes no model`
+	const wantEffort = `execution choice harness legacy cannot launch in headless mode with model "" and effort "high": scheduler: agent "legacy" has no effort flag; launch it without an effort`
 	f := newMissionFixture(t)
 	f.svc.cfg.Runs = &validatingLauncher{recordingLauncher: f.launcher}
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)}
@@ -788,9 +827,13 @@ func TestCreateRefusesAWorkerModelTheAgentCannotTake(t *testing.T) {
 	if err := create(legacy, "create-model"); !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
 		t.Fatalf("create with a worker model the agent cannot take = %v, want invalid params %q", err, want)
 	}
-	legacy.Model = ""
+	legacy.Model, legacy.Effort = "", "high"
+	if err := create(legacy, "create-effort"); !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != wantEffort {
+		t.Fatalf("create with a worker effort the agent cannot take = %v, want invalid params %q", err, wantEffort)
+	}
+	legacy.Effort = ""
 	if err := create(legacy, "create-no-model"); err != nil {
-		t.Fatalf("create with a worker choice without a model: %v", err)
+		t.Fatalf("create with a worker choice without a model or effort: %v", err)
 	}
 }
 

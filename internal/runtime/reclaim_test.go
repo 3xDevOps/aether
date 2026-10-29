@@ -112,3 +112,24 @@ func TestRemoverReportsPermissionErrorWhenRootContainerFails(t *testing.T) {
 		t.Fatal("reclaim container was not destroyed")
 	}
 }
+
+// TestEmptyAsRootRefusesASymlink keeps a symlink planted where a directory
+// was from mounting its target into the root container.
+func TestEmptyAsRootRefusesASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	rt := &reclaimRuntime{}
+	if err := emptyAsRoot(t.Context(), rt, "aether-standard:test", link); err == nil {
+		t.Fatal("emptyAsRoot accepted a symlink")
+	}
+	if rt.spec.Image != "" {
+		t.Fatalf("created a root container for a symlink: %+v", rt.spec)
+	}
+}

@@ -41,6 +41,7 @@ const (
 	TypeRunController Type = "run.controller"
 	TypeRunMode       Type = "run.mode"
 	TypeRunModel      Type = "run.model"
+	TypeRunEffort     Type = "run.effort"
 	// TypeRunArchived carries a run's archive state: a nil ArchivedAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
@@ -269,6 +270,16 @@ type RunModelPayload struct {
 func (RunModelPayload) EventType() Type { return TypeRunModel }
 
 func init() { registerPayload[RunModelPayload](TypeRunModel) }
+
+// RunEffortPayload reports the effort level a run's agent now uses; empty
+// is the agent's default.
+type RunEffortPayload struct {
+	Effort string `json:"effort"`
+}
+
+func (RunEffortPayload) EventType() Type { return TypeRunEffort }
+
+func init() { registerPayload[RunEffortPayload](TypeRunEffort) }
 
 // RunArchivedPayload reports a run's archive state as RFC3339. A nil
 // ArchivedAt means the run was restored.

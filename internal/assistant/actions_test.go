@@ -147,7 +147,7 @@ func callTool(t *testing.T, sock string, m *member, method string, params any, a
 func newActionService(t *testing.T) (*Service, *member, *memStore) {
 	t.Helper()
 	db := newMemStore()
-	svc := New(Config{Dir: t.TempDir(), Store: db})
+	svc := New(Config{Dir: t.TempDir(), Store: db, Host: &fakeHost{}})
 	t.Cleanup(func() { _ = svc.Close() })
 	return svc, svc.member("m1"), db
 }
@@ -336,7 +336,7 @@ func (f *failingSettings) PutAssistantSettings(ctx context.Context, id domain.Me
 
 func TestAnApprovalThatCannotBeReadOrCountedIsRecordedAsFailed(t *testing.T) {
 	db := &failingSettings{memStore: newMemStore()}
-	svc := New(Config{Dir: t.TempDir(), Store: db})
+	svc := New(Config{Dir: t.TempDir(), Store: db, Host: &fakeHost{}})
 	t.Cleanup(func() { _ = svc.Close() })
 	m := svc.member("m1")
 	sock, fake := serveTools(t, svc, m)

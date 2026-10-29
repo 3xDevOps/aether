@@ -40,7 +40,7 @@ function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: A
           <Fact term="Accepted set">{mission.accepted_set_version}</Fact>
           <Fact term="Execution choices">
             {mission.execution_choices
-              .map((c) => `${agentLabel(agents?.find((agent) => agent.name === c.harness), c.harness)} · ${modeLabel(c.mode)}${c.model ? ` · ${c.model}` : ''} · ${memberName({ members, mergedInto }, c.account_member_id)}`)
+              .map((c) => `${agentLabel(agents?.find((agent) => agent.name === c.harness), c.harness)} · ${modeLabel(c.mode)}${c.model ? ` · ${c.model}` : ''}${c.effort ? ` · ${c.effort}` : ''} · ${memberName({ members, mergedInto }, c.account_member_id)}`)
               .join('\n')}
           </Fact>
           {tasks.map((task) => (

@@ -41,6 +41,7 @@ func runRun(args []string) error {
 	agent := fs.String("agent", "", "agent name")
 	mode := fs.String("mode", "", launchModeHelp+" (default: "+defaultModeHelp+")")
 	model := fs.String("model", "", modelHelp)
+	effort := fs.String("effort", "", effortHelp)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	account := fs.String("account", "", "member ID whose shared agent account to use")
 	template := fs.String("template", "", "launch a saved task template instead of a prompt")
@@ -67,8 +68,8 @@ func runRun(args []string) error {
 		task = fs.Arg(0)
 	}
 	if *template != "" {
-		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 || *idempotencyKey != "" || *children != "" {
-			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, --cached-base, --fallback, --no-fallback, --repo, --children, and --idempotency-key")
+		if task != "" || *agent != "" || *model != "" || *effort != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 || *idempotencyKey != "" || *children != "" {
+			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --effort, --account, --cached-base, --fallback, --no-fallback, --repo, --children, and --idempotency-key")
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
@@ -87,7 +88,7 @@ func runRun(args []string) error {
 		return fmt.Errorf("invalid --children %q: want on or off", *children)
 	}
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: aether run [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
 	}
 	fromStdin := task == "-"
 	task, err = stdinText(task, "task", os.Stdin)
@@ -113,7 +114,7 @@ func runRun(args []string) error {
 			}
 		}
 		var res protocol.RunLaunchResult
-		params := launchParams(wsID, task, *agent, *mode, *model, *account, *cachedBase)
+		params := launchParams(wsID, task, *agent, *mode, *model, *effort, *account, *cachedBase)
 		params.FallbackAccountMemberIDs, params.NoFallback = fallbacks, *noFallback
 		params.Children = *children
 		params.IdempotencyKey = cmp.Or(*idempotencyKey, cli.NewControlSessionID())
@@ -177,6 +178,9 @@ func launchCommand(params protocol.RunLaunchParams, fromStdin bool) string {
 	if params.Model != "" {
 		args = append(args, "--model", shellquote.Quote(params.Model))
 	}
+	if params.Effort != "" {
+		args = append(args, "--effort", shellquote.Quote(params.Effort))
+	}
 	args = append(args, "--workspace", shellquote.Quote(params.WorkspaceID))
 	if params.AccountMemberID != "" {
 		args = append(args, "--account", shellquote.Quote(params.AccountMemberID))
@@ -205,13 +209,14 @@ func launchCommand(params protocol.RunLaunchParams, fromStdin bool) string {
 	return strings.Join(append(args, "--", shellquote.Quote(params.Task)), " ")
 }
 
-func launchParams(workspace, task, agent, mode, model, account, cachedBase string) protocol.RunLaunchParams {
+func launchParams(workspace, task, agent, mode, model, effort, account, cachedBase string) protocol.RunLaunchParams {
 	return protocol.RunLaunchParams{
 		WorkspaceID:     workspace,
 		Task:            task,
 		Harness:         agent,
 		Mode:            mode,
 		Model:           model,
+		Effort:          effort,
 		AccountMemberID: account,
 		CachedBase:      cachedBase,
 	}

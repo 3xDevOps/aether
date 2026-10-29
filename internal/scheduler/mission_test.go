@@ -380,7 +380,7 @@ func TestMissionWorkerOfAnAgentNamedApartFromItsCommand(t *testing.T) {
 // still cursor, the name coordination keys on.
 func TestMissionWorkerOfCursorRunsAgent(t *testing.T) {
 	e := newTestEnv(t, nil)
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchHeadless, "gpt-5"); err != nil {
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchHeadless, "gpt-5", ""); err != nil {
 		t.Fatalf("ValidateMissionLaunch of a Background cursor worker with a model: %v", err)
 	}
 	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
@@ -429,7 +429,7 @@ func TestMissionWorkerOfAntigravityRunsAgyInBackground(t *testing.T) {
 		t.Fatalf("Standard antigravity worker launch = %v, want %q", err, refused)
 	}
 	spec.Mode = domain.LaunchHeadless
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", spec.Mode, spec.Model); err != nil {
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", spec.Mode, spec.Model, ""); err != nil {
 		t.Fatalf("ValidateMissionLaunch of a Background antigravity worker with a model: %v", err)
 	}
 	run, err := e.sched.LaunchMission(t.Context(), spec)
