@@ -220,7 +220,9 @@ Save your environment as a new image; new runs and terminals start from it
 
 A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
-task, and how you hear back. The assistant fills what you did not say from
+task, and how you hear back. A template launch's card shows the whole task its
+parameters fill in. When the assistant gives a one-line reason for a launch,
+the card shows it as a **Reason** row above the rest. The assistant fills what you did not say from
 your [saved launch choices](teams.md#saved-launch-choices): **From your saved
 defaults** names each choice that came from them, **Saved mode not used** (or
 agent, fallback account) gives the reason a saved one was skipped, such as an

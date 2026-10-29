@@ -444,8 +444,10 @@ run), `requested_account` when usage fallback moved the run, `fallback`
 own `children` setting, `via`, and `url`. A new launch's receipt adds
 `defaults_applied`, the input fields your saved choices filled,
 `defaults_skipped`, each saved choice it did not use with `field` and `reason`,
-and `defaults_unchecked`, a saved model it used that nothing checked on the
-account the run started on, with the reason. A duplicate or replayed run
+and `defaults_unchecked`, each saved agent, mode or model it used without
+being able to check it on the account the run started on, with `field` and
+`reason`: an agent or mode when the agents could not be listed, which the
+server then checks at launch, and a model the server could not check there. A duplicate or replayed run
 launch's receipt has none of them; a swarm launch replayed by its
 `idempotency_key` still lists them, since `mission.create` does not say it
 replayed.

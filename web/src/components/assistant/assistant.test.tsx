@@ -448,6 +448,23 @@ describe('confirmations', () => {
     expect(rows.Account).toBe("Bob's account, shared with you")
   })
 
+  it("shows the assistant's reason and a template's whole task as their own rows", async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [
+      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in api: "Fix it". The assistant\'s reason: "you asked"', reason: 'you asked', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', task: 'Fix it' } },
+      { ...stop, id: 't', method: 'template.launch', summary: 'Launch template "triage" in api: claude (acp) on your account: "triage issue 42…". The assistant\'s reason: "you asked for 42"', reason: 'you asked for 42', task: 'triage issue 42\nthen label it', params: { workspace_id: 'ws_1', name: 'triage', params: { issue: '42' } } },
+    ] }) })
+    const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude/ })
+    expect(within(launch).getByText('Launch claude (acp) in api')).toBeDefined()
+    const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
+    expect(rows.Reason).toBe('you asked')
+    const template = within(aside).getByRole('group', { name: /^Approve this action\? Launch template/ })
+    expect(within(template).getByText('Launch template "triage" in api: claude (acp) on your account')).toBeDefined()
+    expect(within(template).getByText('you asked for 42')).toBeDefined()
+    expect(within(template).getByText((_, el) => el?.textContent === 'triage issue 42\nthen label it')).toBeDefined()
+  })
+
   it('approves and declines through assistant.confirm and clears on a status frame', async () => {
     vi.mocked(api.assistantConfirm).mockResolvedValue({})
     const aside = await openPanel()

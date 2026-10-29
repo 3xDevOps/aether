@@ -443,14 +443,16 @@ func TestLaunchCardQuotesTheTaskFirstLine(t *testing.T) {
 	}
 }
 
-// A template launch's card shows the task its params fill in, and the
-// approved launch is pinned to the version the card showed; a launch pinned
-// to an older version gets no card.
+// A template launch's card shows the whole task its params fill in and the
+// assistant's reason as their own fields, neither sent to the server, and
+// the approved launch is pinned to the version the card showed; a launch
+// pinned to an older version gets no card.
 func TestTemplateLaunchIsPinnedToItsCard(t *testing.T) {
 	fc := &fakeCaller{}
 	var cards []string
+	var card protocol.AssistantConfirmation
 	s := &Server{Caller: fc, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
-		cards = append(cards, c.Summary)
+		cards, card = append(cards, c.Summary), c
 		return nil
 	}}
 	launch := func(method string, params any) *protocol.Error {
@@ -458,12 +460,19 @@ func TestTemplateLaunchIsPinnedToItsCard(t *testing.T) {
 		_, perr := s.dispatch(t.Context(), protocol.Request{Method: method, Params: raw})
 		return perr
 	}
-	if perr := launch(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}}); perr != nil {
+	if perr := launch(protocol.MethodTemplateLaunch, map[string]any{"workspace_id": "ws-1", "name": "triage", "params": map[string]string{"issue": "42"},
+		"reason": "the member asked to triage 42"}); perr != nil {
 		t.Fatal(perr)
 	}
 	sent, err := protocol.DecodeParams[protocol.TemplateLaunchParams](fc.params[protocol.MethodTemplateLaunch])
-	if err != nil || sent.ExpectedVersion != "v1" || sent.Params["issue"] != "42" || !strings.HasSuffix(cards[0], `: "triage issue 42…"`) {
+	if err != nil || sent.ExpectedVersion != "v1" || sent.Params["issue"] != "42" || !strings.Contains(cards[0], `: "triage issue 42…"`) {
 		t.Fatalf("template.launch sent %+v (%v) after card %q, want pinned to v1", sent, err, cards[0])
+	}
+	if card.Task != "triage issue 42\nthen label it" || card.Reason != "the member asked to triage 42" {
+		t.Fatalf("template.launch card task %q, reason %q; want the whole rendered task and the reason", card.Task, card.Reason)
+	}
+	if raw := string(fc.params[protocol.MethodTemplateLaunch]); strings.Contains(raw, "then label it") || strings.Contains(raw, "reason") {
+		t.Fatalf("template.launch reached the server as %s, want neither the card's task nor its reason", raw)
 	}
 	delete(fc.params, protocol.MethodTemplateLaunch)
 	perr := launch(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"},

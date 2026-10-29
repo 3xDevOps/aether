@@ -184,6 +184,9 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			strings.Contains(want[method], "may fall back to accounts shared with you")) {
 			t.Errorf("%s summary = %q (other member %t), want %q", method, got.Summary, got.OtherMember, want[method])
 		}
+		if wantReason := map[string]string{protocol.MethodMissionCreate: "the member asked for codex workers"}[method]; got.Reason != wantReason {
+			t.Errorf("%s reason = %q, want %q on the card", method, got.Reason, wantReason)
+		}
 	}
 
 	if sent := string(caller.params[protocol.MethodMissionCreate]); strings.Contains(sent, "reason") || !strings.Contains(sent, `"accountable_human_id":"m1"`) {
