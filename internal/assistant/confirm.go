@@ -408,8 +408,7 @@ func (s *Service) noteOutcome(conv context.Context, m *member, a protocol.Assist
 type heldAction struct {
 	conv   context.Context
 	action protocol.AssistantAction
-	// shown is the confirmation's Shown.
-	shown time.Time
+	shown  time.Time
 }
 
 // heldActions are the actions whose call was allowed and has not run yet,
