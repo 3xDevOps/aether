@@ -60,6 +60,9 @@ type AssistantConfirmation struct {
 	// auto-approval on.
 	OtherMember bool   `json:"other_member,omitempty"`
 	OtherOwner  string `json:"other_owner,omitempty"`
+	// Shown is when the row the summary shows was last updated, for a call
+	// that must act on that version only. It never leaves the server.
+	Shown time.Time `json:"-"`
 	// Reason is the assistant's one line on why it launches, and Task a
 	// template launch's task as its params render it. Both are for the
 	// card only; the call sends neither.
@@ -93,6 +96,10 @@ type AssistantStatus struct {
 	Confirmations []AssistantConfirmation `json:"confirmations"`
 	AutoApprove   bool                    `json:"auto_approve"`
 	ShareView     bool                    `json:"share_view"`
+	// PreferencesEnabled lets the assistant read and save the member's
+	// preferences; Temporary keeps this conversation from using them.
+	PreferencesEnabled bool `json:"preferences_enabled"`
+	Temporary          bool `json:"temporary"`
 	// SuggestAutoApprove means the member approved enough cards by hand
 	// that the dashboard may suggest turning auto-approval on.
 	SuggestAutoApprove bool `json:"suggest_auto_approve"`
@@ -110,6 +117,12 @@ const (
 type AssistantSettingsParams struct {
 	AutoApprove *bool `json:"auto_approve,omitempty"`
 	ShareView   *bool `json:"share_view,omitempty"`
+	// PreferencesEnabled turns the assistant's use of preferences on or
+	// off for every conversation.
+	PreferencesEnabled *bool `json:"preferences_enabled,omitempty"`
+	// Temporary sets whether the current conversation is temporary: it
+	// neither reads nor saves preferences. A new conversation clears it.
+	Temporary *bool `json:"temporary,omitempty"`
 	// Suggestion answers the suggestion to turn auto-approval on.
 	Suggestion string `json:"suggestion,omitempty"`
 }
@@ -121,7 +134,9 @@ type AssistantSettings struct {
 	// SuggestionOff means the suggestion will not show again.
 	SuggestionOff bool `json:"suggestion_off"`
 	// ShareView sends the assistant the member's dashboard view context.
-	ShareView bool `json:"share_view"`
+	ShareView          bool `json:"share_view"`
+	PreferencesEnabled bool `json:"preferences_enabled"`
+	Temporary          bool `json:"temporary"`
 }
 
 type AssistantStartParams struct {
@@ -299,4 +314,6 @@ type AssistantActionTarget struct {
 	RunID       string       `json:"run_id,omitempty"`
 	WatchID     string       `json:"watch_id,omitempty"`
 	Watch       *WatchTarget `json:"watch,omitempty"`
+	// PreferenceID is the preference the assistant saved or forgot.
+	PreferenceID string `json:"preference_id,omitempty"`
 }

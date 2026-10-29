@@ -26,6 +26,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -64,6 +65,9 @@ type Config struct {
 	Host   Host
 	Caller func(domain.MemberID) tools.Caller
 	Bus    events.Bus
+	// Preferences are the members' private preferences the assistant reads
+	// and saves.
+	Preferences *preference.Service
 }
 
 // Host is the scheduler's side of the assistant: its container and the
@@ -98,6 +102,9 @@ type member struct {
 	id       domain.MemberID
 	confirms *confirmations
 	actions  heldActions
+	// notesSettled closes once the agent has answered the last prompt that
+	// carried preference notes, so the next prompt takes any it refused.
+	notesSettled chan struct{}
 	// conv is cancelled when a reset discards the conversation, so an
 	// action record that outlived it is dropped. Read it under mu.
 	conv    context.Context
@@ -282,6 +289,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	status := protocol.AssistantStatus{
 		Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(),
 		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove, ShareView: settings.ShareView,
+		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary,
 	}
 	switch {
 	case live != nil:
@@ -430,7 +438,7 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		cancel()
 		return nil, err
 	}
-	srv := &tools.Server{Caller: actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}, Confirm: s.approver(m), Member: string(m.id),
+	srv := &tools.Server{Caller: s.preferenceCaller(m, actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}), Confirm: s.approver(m), Member: string(m.id),
 		View: func() protocol.AssistantViewContextResult { return s.View(m.id, time.Now()) }}
 	if s.watches != nil {
 		srv.Follow = func(ctx context.Context, run string) {
@@ -679,6 +687,7 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	m.conv, m.endConv = context.WithCancel(context.Background())
 	m.err = ""
 	m.attempts, m.done = make(map[string]*attempt), nil
+	m.notesSettled = nil
 	m.signalLocked()
 	m.mu.Unlock()
 	return nil
@@ -760,8 +769,13 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 			return ctx.Err()
 		}
 	}
+	conv := m.conversation()
+	if err := m.waitForNotes(ctx, conv); err != nil {
+		m.finish(key, a, err)
+		return err
+	}
 	m.share.RLock()
-	dispatched, err := s.send(ctx, m, text, key, view)
+	dispatched, err := s.send(ctx, m, conv, text, key, view)
 	m.share.RUnlock()
 	if err != nil && !dispatched {
 		m.finish(key, a, err)
@@ -775,9 +789,12 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 // check, the dispatch and saving the key under the generation it ran in.
 // dispatched is true once the agent may have the prompt; its key then stays
 // reserved even if the caller left or saving it failed.
-func (s *Service) send(ctx context.Context, m *member, text, key string, view *protocol.AssistantViewContext) (dispatched bool, err error) {
+func (s *Service) send(ctx context.Context, m *member, conv context.Context, text, key string, view *protocol.AssistantViewContext) (dispatched bool, err error) {
 	m.op.Lock()
 	defer m.op.Unlock()
+	if conv.Err() != nil {
+		return false, fmt.Errorf("assistant: %w while the prompt waited; send it again in the new conversation", errConversationEnded)
+	}
 	row, err := s.stored(ctx, m.id)
 	if err != nil {
 		return false, err
@@ -796,7 +813,43 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if err != nil {
 		return false, err
 	}
-	started, err := promptLive(ctx, live, text, view)
+	m.mu.Lock()
+	wait := m.notesSettled
+	m.mu.Unlock()
+	if wait != nil {
+		select {
+		case <-wait:
+		default:
+			return false, ErrTurnRunning
+		}
+	}
+	notes, restore, err := s.preferenceNotes(ctx, m.id)
+	if err != nil {
+		return false, err
+	}
+	// A caller that left before the agent answered took the prompt as
+	// dispatched; the agent may still refuse it.
+	settled := make(chan struct{})
+	if len(notes) > 0 {
+		m.mu.Lock()
+		m.notesSettled = settled
+		m.mu.Unlock()
+	}
+	settle := sync.OnceFunc(func() { close(settled) })
+	restore = sync.OnceFunc(restore)
+	refused := func(err error) {
+		if err != nil {
+			restore()
+		}
+		settle()
+	}
+	defer func() {
+		if !dispatched {
+			restore()
+			settle()
+		}
+	}()
+	started, err := promptLive(ctx, live, text, view, notes, refused)
 	if errors.Is(err, acphost.ErrPromptUnsent) {
 		// The adapter died after ensure saw it alive and before the prompt
 		// left: once its session has ended, start a new one and send there.
@@ -808,7 +861,7 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
 			return false, err
 		}
-		started, err = promptLive(ctx, live, text, view)
+		started, err = promptLive(ctx, live, text, view, notes, refused)
 	}
 	switch {
 	case err == nil && !started:
@@ -827,12 +880,32 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	return true, err
 }
 
-func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext) (bool, error) {
+func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext, notes []acp.ContentBlock,
+	delivered func(error)) (bool, error) {
 	blocks, err := promptBlocks(text, view, live.acp.Info().PromptEmbedded)
 	if err != nil {
 		return false, err
 	}
-	return live.acp.PromptIdle(ctx, blocks, nil)
+	return live.acp.PromptIdle(ctx, append(blocks, notes...), delivered)
+}
+
+// waitForNotes waits, outside the member's lock so a reset is not held up by
+// a silent agent, for the last prompt's preference notes to settle, or for the
+// conversation to be discarded.
+func (m *member) waitForNotes(ctx, conv context.Context) error {
+	m.mu.Lock()
+	wait := m.notesSettled
+	m.mu.Unlock()
+	if wait == nil {
+		return nil
+	}
+	select {
+	case <-wait:
+	case <-conv.Done():
+	case <-ctx.Done():
+		return fmt.Errorf("assistant: wait for the last prompt's answer: %w", ctx.Err())
+	}
+	return nil
 }
 
 func (m *member) begin(key string) (*attempt, bool) {

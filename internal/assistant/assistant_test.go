@@ -36,7 +36,7 @@ func (m *memStore) AssistantSettings(_ context.Context, id domain.MemberID) (sto
 	if st, ok := m.settings[id]; ok {
 		return st, nil
 	}
-	return store.AssistantSettings{ShareView: true}, nil
+	return store.AssistantSettings{ShareView: true, PreferencesEnabled: true}, nil
 }
 
 func (m *memStore) PutAssistantSettings(ctx context.Context, id domain.MemberID, settings store.AssistantSettings) error {
@@ -88,10 +88,22 @@ func (m *memStore) ResetAssistantSession(_ context.Context, id domain.MemberID) 
 		row = &store.AssistantSession{MemberID: id}
 		m.rows[id] = row
 	}
-	row.Agent, row.HarnessSessionID = "", ""
+	row.Agent, row.HarnessSessionID, row.Temporary = "", "", false
 	row.Generation++
 	m.keys = map[string]bool{}
 	return row.Generation, nil
+}
+
+func (m *memStore) SetAssistantTemporary(_ context.Context, id domain.MemberID, temporary bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row := m.rows[id]
+	if row == nil {
+		row = &store.AssistantSession{MemberID: id}
+		m.rows[id] = row
+	}
+	row.Temporary = temporary
+	return nil
 }
 
 func keyOf(id domain.MemberID, generation int64, key string) string {

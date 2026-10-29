@@ -38,7 +38,7 @@ var ConfirmedMethods = []string{protocol.MethodRunKill, protocol.MethodRunClose,
 	protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive, protocol.MethodMissionReplaceIntegrator,
 	protocol.MethodIntegrationDecide, protocol.MethodIntegrationDeliver, protocol.MethodRunPRCreate, protocol.MethodRunPRMerge,
 	protocol.MethodMemoryAdd, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin, protocol.MethodMissionCreate, protocol.MethodTemplateLaunch, protocol.MethodLaunchDefaultsSet,
-	protocol.MethodWatchDelete}
+	protocol.MethodWatchDelete, protocol.MethodAssistantForget}
 
 func callTimeout(method string, params any) time.Duration {
 	timeout := callDefaultTimeout

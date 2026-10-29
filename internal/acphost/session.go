@@ -231,8 +231,10 @@ type Session struct {
 	actAt      time.Time
 	actNext    *[2]string
 	actTimer   *time.Timer
-	// prompted is the latest prompt's text with whitespace collapsed.
+	// prompted is the latest prompt's text with whitespace collapsed;
+	// message is that prompt as the member wrote it.
 	prompted string
+	message  UserMessage
 	spend    Spend
 	spendDue bool
 
@@ -662,8 +664,10 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 	s.proj.closeText()
 	var text strings.Builder
 	var attachments []Content
+	var forAgent []acp.ContentBlock
 	for _, b := range blocks {
 		if forAgentOnly(b) {
+			forAgent = append(forAgent, b)
 			continue
 		}
 		if b.Text != nil {
@@ -673,10 +677,33 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 		}
 	}
 	s.prompted = strings.Join(strings.Fields(text.String()), " ")
+	s.message = UserMessage{Turn: s.turn, MessageID: rand.Text(), Text: text.String(), Context: forAgent}
 	body, cut := cutTail(text.String(), maxTextSegment)
 	s.emitLocked(Item{Kind: KindMessage, Truncated: cut, Message: &Message{
-		Role: "user", MessageID: rand.Text(), Text: body, Attachments: attachments, Complete: true,
+		Role: "user", MessageID: s.message.MessageID, Text: body, Attachments: attachments, Complete: true,
 	}})
+}
+
+// UserMessage is the latest prompt's text as the member wrote it, without
+// the blocks meant for the agent alone, which Context holds, and the turn
+// it was sent in.
+type UserMessage struct {
+	Turn      int64
+	MessageID string
+	Text      string
+	Context   []acp.ContentBlock
+}
+
+// CurrentPrompt is the latest prompt while the turn it started or joined
+// still runs; false during an autonomous turn, once the turn ended and on a
+// restored session before its first prompt.
+func (s *Session) CurrentPrompt() (UserMessage, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.turnActive || s.closingLocked() || s.message.MessageID == "" || s.message.Turn != s.turn {
+		return UserMessage{}, false
+	}
+	return s.message, true
 }
 
 // forAgentOnly reports a block annotated for the agent's audience alone,

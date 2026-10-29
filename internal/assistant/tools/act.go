@@ -53,6 +53,7 @@ var actSummaries = map[string]summarizer{
 	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
 	protocol.MethodMemoryPin:                (*Server).summarizeMemoryPin,
 	protocol.MethodMemoryUnpin:              (*Server).summarizeMemoryUnpin,
+	protocol.MethodAssistantForget:          (*Server).summarizeForget,
 	protocol.MethodWatchDelete:              (*Server).summarizeWatchDelete,
 	protocol.MethodLaunchDefaultsSet:        (*Server).summarizeLaunchDefaults,
 }
@@ -387,6 +388,20 @@ func forWhom(scope string) string {
 		return " for you only"
 	}
 	return " for everyone"
+}
+
+// summarizeForget shows the exact text the member would forget.
+func (s *Server) summarizeForget(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.PreferenceIDParams](req.Params)
+	if err != nil || p.ID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": id is required"}
+	}
+	var pref protocol.AssistantPreference
+	if rpcErr := s.call(ctx, protocol.MethodAssistantPreferenceShow, p, &pref); rpcErr != nil {
+		return rpcErr
+	}
+	c.Summary, c.Shown = fmt.Sprintf("Forget your preference %s: %q", p.ID, pref.Text), pref.UpdatedAt
+	return nil
 }
 
 // summarizeLaunchDefaults spells out every choice the save replaces the

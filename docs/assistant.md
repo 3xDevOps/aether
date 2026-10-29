@@ -409,6 +409,57 @@ rm -rf ~/.aether/assistant ~/.claude/projects/*--aether-assistant
 Codex sessions from that time are in `~/.codex/sessions` together with your
 runs' sessions.
 
+## Preferences
+
+A **preference** is a short instruction about how you work that you ask the
+assistant to remember, such as "remember that I prefer table output". Only
+you can read, change or forget your preferences; teammates, admins, your runs
+and connected apps such as ChatGPT cannot reach them.
+
+- **Save one:** say "remember", "from now on" or "always". The assistant
+  saves your own words from that message without a card, and the transcript
+  shows **Saved** or **Updated** with the text. A preference is at least 3
+  words and 12 characters and at most 500 characters; the assistant saves at
+  most 3 per message and you keep at most 200. Saving text you already keep
+  for the same workspace, or for all of them, fails with
+  `already remembered as preference <id>`.
+- **What it can quote:** only a run of whole words you typed in your latest
+  message, stored as you wrote them. It refuses paraphrases, anything
+  gitleaks flags as a secret, and text it treats as pasted: lines starting
+  with `>` and the lines after them up to a blank line, fenced code blocks
+  (up to a fence at least as long as the opening one, or to the end of the
+  message), and lines indented by four columns or more, where a tab
+  reaches the next multiple of four; an indented fence is such a line, not
+  a fence.
+- **See, edit and forget:** **Settings → Memory** lists them. The assistant
+  can also forget one after you approve its card, even while preferences are
+  off or the conversation is temporary. Forgetting deletes the preference;
+  the assistant's next prompt tells it not to use the old text. If the
+  preference changes while its card waits, approving the card forgets
+  nothing and the call fails with `changed since you saw it`.
+- **Turn off:** switch off preferences in **Settings → Memory**
+  (`assistant.settings` with `preferences_enabled: false`). The assistant
+  then neither reads nor saves them, and each of your messages tells it not
+  to use the preferences it read earlier in the conversation. A
+  **temporary** conversation (`assistant.settings` with `temporary: true`)
+  does the same until **New conversation**, which also deletes the agent's
+  session files in the assistant's home, as it does for every
+  conversation.
+- **Precedence:** your current message overrides a saved preference. A
+  preference never changes a setting and never chooses an account, a
+  fallback, a merge, a push or auto-approval. With auto-approval on, a launch
+  or message whose text contains a saved preference still shows its card.
+- **Scope:** a preference applies in all workspaces, or in one. A
+  preference for one workspace takes the workspace of the page your message
+  was sent from, which the message carries only while **Share the page I am
+  on with the assistant** is on. It belongs to you on this server and is not
+  synced to other servers.
+
+The assistant never saves anything you did not ask it to, never imports your
+agent's own memory files or past conversations, and never stores pull
+request, CI or run state. What forgetting does not remove is listed in
+[Privacy](privacy.md#assistant-preferences).
+
 ## Limits
 
 - One assistant per member, acting only for that member.

@@ -2248,6 +2248,25 @@ CREATE INDEX audit_kept ON audit(member_id, security, seq);
 CREATE INDEX audit_connector ON audit(connector_id, seq);
 CREATE INDEX audit_target ON audit(target, seq);
 `,
+	// v95: each member's private assistant preferences, the setting that
+	// lets the assistant use them, and temporary conversations that do not.
+	`
+CREATE TABLE member_preferences (
+	id           TEXT PRIMARY KEY,
+	member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	workspace_id TEXT,
+	text         TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 500),
+	enabled      INTEGER NOT NULL DEFAULT 1,
+	source       TEXT NOT NULL,
+	source_ref   TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	updated_at   INTEGER NOT NULL,
+	last_used_at INTEGER
+);
+CREATE INDEX idx_member_preferences_member ON member_preferences(member_id);
+ALTER TABLE assistant_settings ADD COLUMN preferences_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE assistant_sessions ADD COLUMN temporary INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

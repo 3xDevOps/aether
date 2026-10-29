@@ -362,6 +362,10 @@ var noReplay = map[string]bool{
 
 	protocol.MethodMissionWorkerRelease: true,
 
+	protocol.MethodPreferenceAdd:    true,
+	protocol.MethodPreferenceUpdate: true,
+	protocol.MethodPreferenceDelete: true,
+
 	protocol.MethodWorkspaceAdd:             true,
 	protocol.MethodWorkspaceDelete:          true,
 	protocol.MethodWorkspaceImport:          true,

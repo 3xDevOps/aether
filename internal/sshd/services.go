@@ -69,4 +69,6 @@ type Services struct {
 	Memory MemoryService
 	// Watches keeps each member's watches and notification preferences.
 	Watches WatchService
+	// Preferences keeps each member's private assistant preferences.
+	Preferences PreferenceService
 }

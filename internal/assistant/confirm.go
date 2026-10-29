@@ -148,7 +148,8 @@ func autoApprovable(c protocol.AssistantConfirmation) bool {
 }
 
 func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
-	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest, ShareView: st.ShareView}
+	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest, ShareView: st.ShareView,
+		PreferencesEnabled: st.PreferencesEnabled}
 }
 
 // approver passes a confirmed call at once when the member turned
@@ -184,12 +185,12 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 			}
 			return err
 		}
-		slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", false)
+		slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", false)
 		a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
 		if err = s.noteAction(ctx, conv, m, a, c.Method+" passed after you approved its card."); err != nil {
 			return fmt.Errorf("record the approval: %w", err)
 		}
-		m.actions.hold(conv, a, c.Params)
+		m.actions.hold(conv, a, c.Params, c.Shown)
 		return nil
 	}
 }
@@ -246,19 +247,19 @@ func (s *Service) autoApprove(ctx, conv context.Context, m *member, c protocol.A
 	if err != nil {
 		return false, fmt.Errorf("read the auto-approval setting: %w", err)
 	}
-	if !st.AutoApprove || !autoApprovable(c) {
+	if !st.AutoApprove || !autoApprovable(c) || s.carriesPreference(ctx, m.id, c) {
 		return false, nil
 	}
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
-	slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", true)
 	a := newAction(c)
+	slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", true)
 	a.Outcome, a.Approval, a.DecidedAt = protocol.AssistantActionAutoApproved, "auto", a.CreatedAt
 	if err = s.noteAction(ctx, conv, m, a, c.Method+" passed without a card: auto-approval is on."); err != nil {
 		return false, fmt.Errorf("record the approval: %w", err)
 	}
-	m.actions.hold(conv, a, c.Params)
+	m.actions.hold(conv, a, c.Params, c.Shown)
 	return true, nil
 }
 
@@ -267,7 +268,7 @@ func (s *Service) Settings(ctx context.Context, id domain.MemberID) (protocol.As
 	if err != nil {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
-	return settingsOf(st), nil
+	return s.withTemporary(ctx, id, settingsOf(st))
 }
 
 // SetSettings applies p and notes a change of auto-approval in the member's
@@ -301,6 +302,12 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		st.Approvals = 0
 		st.NoSuggest = true
 	}
+	if p.PreferencesEnabled != nil {
+		st.PreferencesEnabled = *p.PreferencesEnabled
+	}
+	if err = s.setTemporary(ctx, id, p.Temporary); err != nil {
+		return protocol.AssistantSettings{}, err
+	}
 	if p.AutoApprove != nil {
 		st.AutoApprove = *p.AutoApprove
 		if st.AutoApprove {
@@ -313,7 +320,7 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
 	if was == st.AutoApprove {
-		return settingsOf(st), nil
+		return s.withTemporary(ctx, id, settingsOf(st))
 	}
 	slog.Info("assistant auto-approval changed", "member", id, "auto", st.AutoApprove)
 	severity, title, body := "info", "Auto-approval turned off", "Launching, messaging and stopping runs and saving the environment wait for your approval again."
@@ -323,7 +330,7 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 	if err = s.note(ctx, m, acphost.Notice{Severity: severity, Title: title, Description: body}); err != nil && !errors.Is(err, ErrRemoving) {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %s, but noting it in the transcript failed: %w", strings.ToLower(title), err)
 	}
-	return settingsOf(st), nil
+	return s.withTemporary(ctx, id, settingsOf(st))
 }
 
 func newAction(c protocol.AssistantConfirmation) protocol.AssistantAction {
@@ -409,6 +416,7 @@ func (s *Service) noteOutcome(conv context.Context, m *member, a protocol.Assist
 type heldAction struct {
 	conv   context.Context
 	action protocol.AssistantAction
+	shown  time.Time
 }
 
 // heldActions are the actions whose call was allowed and has not run yet,
@@ -419,14 +427,14 @@ type heldActions struct {
 	held map[string][]heldAction
 }
 
-func (h *heldActions) hold(conv context.Context, a protocol.AssistantAction, params json.RawMessage) {
+func (h *heldActions) hold(conv context.Context, a protocol.AssistantAction, params json.RawMessage, shown time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.held == nil {
 		h.held = make(map[string][]heldAction)
 	}
 	key := a.Method + "\x00" + string(params)
-	h.held[key] = append(h.held[key], heldAction{conv, a})
+	h.held[key] = append(h.held[key], heldAction{conv, a, shown})
 }
 
 // take returns the oldest action held for the call, dropping those of a

@@ -105,13 +105,17 @@ var tiers = map[string]string{
 	protocol.MethodRunPRMerge:               tierConfirmed,
 	protocol.MethodMemoryPin:                tierConfirmed,
 	protocol.MethodMemoryUnpin:              tierConfirmed,
-	protocol.MethodWatchList:                tierRead,
-	protocol.MethodWatchGet:                 tierRead,
-	protocol.MethodWatchCreate:              tierReversible,
-	protocol.MethodWatchUpdate:              tierReversible,
-	protocol.MethodWatchDelete:              tierConfirmed,
-	protocol.MethodLaunchDefaultsGet:        tierRead,
-	protocol.MethodLaunchDefaultsSet:        tierConfirmed,
+
+	protocol.MethodAssistantPreferences: tierRead,
+	protocol.MethodAssistantRemember:    tierReversible,
+	protocol.MethodAssistantForget:      tierConfirmed,
+	protocol.MethodLaunchDefaultsGet:    tierRead,
+	protocol.MethodLaunchDefaultsSet:    tierConfirmed,
+	protocol.MethodWatchList:            tierRead,
+	protocol.MethodWatchGet:             tierRead,
+	protocol.MethodWatchCreate:          tierReversible,
+	protocol.MethodWatchUpdate:          tierReversible,
+	protocol.MethodWatchDelete:          tierConfirmed,
 }
 
 // Reversible reports whether the assistant may call method without a card

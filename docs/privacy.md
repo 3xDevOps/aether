@@ -469,6 +469,47 @@ now** copy the database to `<data-dir>/aether.db.pre-update` and delete
 that copy once the new release has started. A note deleted while the copy
 exists is still in it, and a rollback restores it.
 
+## Assistant preferences
+
+Preferences you ask the assistant to remember are kept in
+`<data-dir>/aether.db` (table `member_preferences`): the text, the
+workspace it applies to, whether it is on, where it came from (the assistant
+or Settings) with the id of the message it was quoted from, and when it was
+created, changed and last read.
+
+Only you can read, change or delete your preferences. Teammates and admins
+cannot through Aether, nor can your runs or connected apps. Server operators
+with access to the database file can read it.
+
+Forgetting a preference deletes its row. SQLite overwrites the deleted text
+(`secure_delete`) and the server checkpoints and truncates the write-ahead
+log; while another connection is reading, the forget still succeeds and the
+server retries the checkpoint in the background. The server also appends
+the preference's id, never its text, to `<data-dir>/preference-tombstones`
+before the delete commits, and does the same for an edit of its text,
+recording when the replaced row was last changed. When the server starts it
+deletes again every preference recorded as deleted, and every row no newer
+than one a committed edit replaced, so restoring an older database does not
+bring it back. If a forget's database commit fails after its tombstone was
+written, the next server start still deletes the preference. The file gains
+one short line per forget or edit and is never compacted. Forgetting does
+not remove:
+
+- the `aether.db.pre-update` copy an update keeps until the new release
+  starts;
+- backups an operator made of the data directory;
+- runs already launched with the text in their task;
+- the assistant transcript (`<data-dir>/assistant/<member>/items.jsonl`)
+  and the agent's session files in `home/` until you start a **New
+  conversation**, which deletes both but the sign-in, as it does for a
+  temporary conversation;
+- copies a connected app or an agent made elsewhere.
+
+Removing a member deletes their preferences in the same transaction and
+records each as deleted in the same file before it commits. Merging two members moves all of them to the member that
+remains, even past the 200 limit; new saves are then refused until enough
+are forgotten.
+
 ## Permissions
 
 `INTERNET` lets the app reach your server, or in Edge mode the edge.

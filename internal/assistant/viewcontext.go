@@ -143,6 +143,34 @@ func cleanPath(s string) string {
 	return s
 }
 
+// The tags around the view context for an agent that takes no embedded
+// resource.
+const (
+	viewOpen  = "<aether-view-context>"
+	viewClose = "</aether-view-context>"
+)
+
+// promptView is the view context among a prompt's blocks for the agent,
+// as promptBlocks wrote it, or nil.
+func promptView(blocks []acp.ContentBlock) *protocol.AssistantViewContext {
+	for _, b := range blocks {
+		var raw string
+		switch {
+		case b.Resource != nil && b.Resource.Resource.TextResourceContents != nil && b.Resource.Resource.TextResourceContents.Uri == ViewContextURI:
+			raw = b.Resource.Resource.TextResourceContents.Text
+		case b.Text != nil && strings.HasPrefix(strings.TrimSpace(b.Text.Text), viewOpen):
+			raw = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(b.Text.Text), viewOpen), viewClose)
+		default:
+			continue
+		}
+		var v protocol.AssistantViewContext
+		if json.Unmarshal([]byte(raw), &v) == nil {
+			return &v
+		}
+	}
+	return nil
+}
+
 // promptBlocks follows text with v, annotated for the agent alone so the
 // transcript records only the member's text: an embedded resource, or
 // delimited text for an agent that takes none.
@@ -157,7 +185,7 @@ func promptBlocks(text string, v *protocol.AssistantViewContext, embedded bool) 
 	}
 	agentOnly := &acp.Annotations{Audience: []acp.Role{acp.RoleAssistant}}
 	if !embedded {
-		block := acp.TextBlock("\n\n<aether-view-context>\n" + string(b) + "\n</aether-view-context>")
+		block := acp.TextBlock("\n\n" + viewOpen + "\n" + string(b) + "\n" + viewClose)
 		block.Text.Annotations = agentOnly
 		return append(blocks, block), nil
 	}

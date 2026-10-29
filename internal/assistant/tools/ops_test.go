@@ -78,6 +78,8 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 		return json.RawMessage(`{"candidate":{"candidate_id":"cand-1","mission_id":"mis-1","target_ref":"refs/heads/main"}}`), nil
 	case protocol.MethodMemoryShow:
 		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","scope":"member","title":"CI needs Docker","pinned_by":"m2","pinned_by_name":"Grace","pinned_at":"2026-10-26T10:00:00Z"}}`), nil
+	case protocol.MethodAssistantPreferenceShow:
+		return json.RawMessage(`{"id":"pref-1","text":"Prefer table output","scope":"all","source":"assistant"}`), nil
 	case protocol.MethodRunGet:
 		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t","member_id":"m2","mission_id":"mis-1"}}`), nil
 	case protocol.MethodWatchGet:
@@ -124,10 +126,11 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			Title: "Fix login", Draft: true},
 		protocol.MethodRunPRMerge: protocol.RunPRMergeParams{RunID: "run-1", Method: "squash", ExpectedHead: "fedcba9876543210", Repository: "acme/shop", Number: 7,
 			ExpectedBase: "main"},
-		protocol.MethodMemoryAdd:   protocol.MemoryAddParams{WorkspaceID: "ws-1", Kind: "gotcha", Text: "CI needs Docker.", Supersedes: "mem-0"},
-		protocol.MethodMemoryPin:   protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1", Scope: protocol.MemoryScopeMember},
-		protocol.MethodMemoryUnpin: protocol.MemoryUnpinParams{WorkspaceID: "ws-1", ID: "mem-1"},
-		protocol.MethodWatchDelete: protocol.WatchIDParams{WatchID: "w-1"},
+		protocol.MethodMemoryAdd:       protocol.MemoryAddParams{WorkspaceID: "ws-1", Kind: "gotcha", Text: "CI needs Docker.", Supersedes: "mem-0"},
+		protocol.MethodMemoryPin:       protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1", Scope: protocol.MemoryScopeMember},
+		protocol.MethodMemoryUnpin:     protocol.MemoryUnpinParams{WorkspaceID: "ws-1", ID: "mem-1"},
+		protocol.MethodAssistantForget: protocol.PreferenceIDParams{ID: "pref-1"},
+		protocol.MethodWatchDelete:     protocol.WatchIDParams{WatchID: "w-1"},
 		protocol.MethodLaunchDefaultsSet: protocol.LaunchDefaultsSetParams{Revision: 3, Defaults: &protocol.LaunchDefaults{AccountMemberID: "m2",
 			Agents:   map[string]protocol.AgentLaunchDefault{"claude": {Mode: "acp", Model: "opus"}, "codex": {}},
 			Fallback: &protocol.LaunchFallbackDefault{Policy: protocol.FallbackOrdered, Order: []string{"m1", "m3"}}}},
@@ -160,6 +163,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMemoryAdd:                `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0 ("CI needs Docker") and moving its pin`,
 		protocol.MethodMemoryPin:                `Pin, into new runs' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
 		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha), taking it out of Grace's briefs: "CI needs Docker"`,
+		protocol.MethodAssistantForget:          `Forget your preference pref-1: "Prefer table output"`,
 		protocol.MethodWatchDelete:              `Delete your watch w-1 on swarm "Ship the billing page" (needs_you, finished) and its 2 notices`,
 		protocol.MethodLaunchDefaultsSet: `Replace your saved launch choices: launch on Grace's (m2) account; run claude in acp mode with model opus; ` +
 			`run codex in its default mode with its default model; when usage runs out, move only to your own account, then m3's (m3) account`,

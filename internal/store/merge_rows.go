@@ -43,6 +43,7 @@ var memberRefs = map[string]bool{
 	"watches.member_id":                                    true,
 	"notify_prefs.member_id":                               true,
 	"watch_pr_snapshots.member_id":                         false,
+	"member_preferences.member_id":                         true,
 	"assistant_settings.member_id":                         false,
 	"launch_defaults.member_id":                            false,
 	"launch_defaults.account_member_id":                    true,
@@ -130,6 +131,7 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"watches", `UPDATE watches SET member_id = ?2, idempotency_key = NULL, version = version + 1 WHERE member_id = ?1`},
 		{"notification settings", `UPDATE OR IGNORE notify_prefs SET member_id = ?2 WHERE member_id = ?1`},
 		{"notification settings", `DELETE FROM notify_prefs WHERE member_id = ?1`},
+		{"assistant preferences", `UPDATE member_preferences SET member_id = ?2 WHERE member_id = ?1`},
 		{"launch defaults", `INSERT OR REPLACE INTO launch_defaults (member_id, agent, agents, account_member_id, fallback_policy, fallback_order, source, updated_at)
 			SELECT l.member_id, l.agent, l.agents, CASE l.account_member_id WHEN ?1 THEN ?2 ELSE l.account_member_id END, l.fallback_policy,
 				(SELECT json_group_array(member ORDER BY first) FROM (
