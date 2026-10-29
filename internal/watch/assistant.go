@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,8 +48,17 @@ func (s *Service) UseAssistant(a Assistant) { s.assistant = a }
 // A run relaunched after its watch was done gets a new watch, keyed by the
 // one before, since a done watch never announces the same end twice. A
 // need the run stands in now is taken as seen: the assistant just launched
-// the run or wrote to it, so only the next one is news.
+// the run or wrote to it, so only the next one is news. A live assistant
+// watch on the run's default conditions without the key, such as one
+// aether_watch made an assistant watch, is that watch too.
 func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain.RunID) (protocol.WatchResult, error) {
+	w, err := s.liveAssistantWatch(ctx, member, run)
+	if err != nil {
+		return protocol.WatchResult{}, err
+	}
+	if w != nil {
+		return s.result(ctx, w)
+	}
 	key := "assistant:" + string(run)
 	for {
 		res, err := s.create(ctx, member, protocol.WatchCreateParams{
@@ -75,6 +85,25 @@ func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain
 		}
 		return res, nil
 	}
+}
+
+func (s *Service) liveAssistantWatch(ctx context.Context, member domain.MemberID, run domain.RunID) (*store.Watch, error) {
+	conditions, err := s.normalize(protocol.WatchTargetRun, nil)
+	if err != nil {
+		return nil, err
+	}
+	watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: protocol.WatchTargetRun, RunID: run})
+	if err != nil {
+		return nil, err
+	}
+	i := slices.IndexFunc(watches, func(w *store.Watch) bool {
+		return w.Source == protocol.WatchSourceAssistant && slices.Equal(w.Conditions, conditions) &&
+			w.State != protocol.WatchDone && w.State != protocol.WatchExpired
+	})
+	if i < 0 {
+		return nil, nil
+	}
+	return watches[i], nil
 }
 
 // renew restarts member's expired assistant watch id for DefaultExpiry,

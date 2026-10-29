@@ -265,11 +265,13 @@ others:
 | `aether_integration` | A workspace's or swarm's [integration candidates](teams.md#combine-several-runs-into-one-result), or one with its verifications and delivery request | `read` |
 | `aether_changes` | What changed since a cursor: run status, reports, agent mail, pull requests, swarms and lifecycle, oldest first, paged with `next_cursor` | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
+| `aether_watches` | Your [watches](watches.md), each with its state, conditions and last notice; with `watch_id`, one watch with its 10 newest notices and where each was delivered | `read` |
 | `aether_launch_run`, `aether_launch_swarm` | Start a run, from a task or a saved [template](teams.md#task-templates-and-schedules), or a swarm with you as its accountable human, on any account you may use, with a fallback policy and extra repositories; an integrator given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
 | `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
 | `aether_run_lifecycle` | Relaunch a stopped run, protect or unprotect it, archive or restore it | `write` |
 | `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
+| `aether_watch`, `aether_unwatch` | Watch a run (`run_id`), swarm (`swarm_id`) or pull request (`pr`: `owner/name#7` or its GitHub URL) for `conditions`, or with `watch_id` change its conditions or `expires_at`, or pause or resume it; delete a watch and its notices | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
 | `aether_stop_run`, `aether_cancel_swarm` | Stop a run, or with `outcome` close it as merged or abandoned; cancel a swarm | `control` |
 | `aether_switch_run_mode` | Switch a live run to Standard or Enhanced, discarding the turn in progress | `control` |
@@ -293,6 +295,7 @@ Things to ask:
 - "Which runs touch the same files as the migration run?"
 - "Merge the login fix PR if CI is green."
 - "The billing swarm's integrator stopped; replace it."
+- "Tell me when the login fix run needs me or finishes."
 
 The connector tells ChatGPT and Claude to launch and write the task as
 Aether's assistant does: [What a launch's task holds](assistant.md#what-a-launchs-task-holds).
@@ -301,13 +304,15 @@ Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
 one-line summary followed by the result as JSON. Text that agents, teammates or
 GitHub users wrote, run titles, swarm goals, failing check names, the reasons
-runs wait and an integration candidate's target ref, delivery request and
-receipt included, comes back under an `untrusted` field; outside it are only
+runs wait, an integration candidate's target ref, delivery request and
+receipt, and a watch's receipt, observed state and notices included, comes back
+under an `untrusted` field; outside it are only
 fixed labels such as `The agent asks a question`, ids, states, counts, times,
 links, workspace and agent names, branch names, file paths and the server's own
 errors. Untrusted text is cut to 200 characters for titles, check names, commit
 subjects, a swarm task's blockers, a list row's reason, last report or swarm
-goal; 300 for each pull request review or comment; 2000 for a conversation item;
+goal, and a watch notice's title and body; 300 for each pull request review or
+comment; 2000 for a conversation item;
 12000 for a diff; and 600 for everything else, such as tasks, reports,
 questions, permission request text, terminal lines and memory notes. `search`
 and `fetch` keep OpenAI's shapes, with no `untrusted` field: their descriptions
@@ -584,10 +589,35 @@ without a key it derives one from the swarm, that generation and the agent, so a
 retry returns the first replacement even after it moved the generation, and a
 replacement someone else made in between fails with a conflict that says to call
 `aether_get_swarm`. A replacement on another agent given no `mode` starts in
-the first integrator mode that agent can take. `aether_memory_add` returns the
-existing note for a
-duplicate, and repeating a replacement (`supersedes`) that went through returns
-the note that replaced the old one.
+the first integrator mode that agent can take.
+`aether_watch` takes one target: `run_id`, `swarm_id`, or `pr`, optionally
+with `run_id` for the run that opened it; any other combination is refused
+with the fields named. Its `conditions` depend on the target, the defaults
+marked *:
+
+| Target | Conditions |
+| --- | --- |
+| `run_id` | `needs_you`*, `finished`*, `pr_merged`, `ci` |
+| `swarm_id` | `needs_you`*, `finished`*, `delivered` |
+| `pr` | `ci`*, `review`*, `merged`*, `closed` |
+
+A condition the target does not take, or `deployed`, fails with the server's
+error, which names the conditions to use
+([watches.md](watches.md#targets-and-conditions)). `expires_at` is an RFC 3339
+time at most 90 days ahead; without it a watch expires after 14 days.
+`aether_watch` takes no idempotency key: creating a watch the server already
+has live, the same target and conditions, returns that watch and resumes it if
+paused. Its result holds the watch's `state` and the server's one-line
+`receipt` under `untrusted`, since it carries the target's title; only
+`active` means it is watching. Its links open the watch in **Settings →
+Watches**. `aether_watches` lists the newest 50 watches and says how many
+more the dashboard lists there; one watch's notices come from the newest 50
+the server returns, so a full page reads `at least 50` and sets
+`more_notifications_capped`. `aether_unwatch` of a watch already deleted
+succeeds with `state: "not_found"`, so a retry is safe.
+`aether_memory_add` returns the existing note for a duplicate, and repeating
+a replacement (`supersedes`) that went through returns the note that replaced
+the old one.
 
 `aether_pr_merge` takes `repository`, `number` and `expected_head_oid`, the
 pull request's `repository`, `number` and `head_oid` `aether_pr_status`

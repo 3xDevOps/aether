@@ -67,12 +67,12 @@ var actOps = []Op{
 		calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunGet, protocol.MethodRunRelaunch, protocol.MethodRunProtect,
 			protocol.MethodRunArchive),
 	opOf("aether_switch_run_mode", "Switch run mode", ScopeControl, true, nextRuns,
-		"Use this when the user wants a live run switched to standard or enhanced mode; a turn in progress is discarded.", switchRunMode).
+		"Use this when the user wants a live run's mode switched; a turn in progress is discarded.", switchRunMode).
 		enum("mode", lifecycleStandard, lifecycleEnhanced).
 		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunModeSwitch),
 	opOf("aether_handoff_run", "Hand off run", ScopeControl, true, "",
-		"Use this when the user gives their run to a teammate, who then owns it; only they can hand it back.", handoffRun).
+		"Use this when the user gives their run to a teammate; only they can hand it back.", handoffRun).
 		hints(true, false).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodMemberList, protocol.MethodRunHandoff),
 	opOf("aether_swarm_manage", "Manage swarm", ScopeControl, true, nextSwarms,
@@ -81,7 +81,7 @@ var actOps = []Op{
 		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive),
 	opOf("aether_replace_integrator", "Replace integrator", ScopeControl, true, nextSwarms,
-		"Use this when a swarm's integrator stopped or is stuck: a new one starts from the swarm's agents; fails if it changed since expected_generation."+
+		"Use this when a swarm's integrator stopped or is stuck: a new one starts from the swarm's agents."+
 			idempotencyRule+"without one, a repeat is made once.", replaceIntegrator).
 		enum("mode", "tui", "acp").hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodAccountList, protocol.MethodAgentList, protocol.MethodMissionReplaceIntegrator),

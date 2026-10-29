@@ -21,7 +21,7 @@ type prCreateInput struct {
 type prMergeInput struct {
 	RunID           string `json:"run_id"`
 	Repo            string `json:"repo,omitempty"`
-	Number          int    `json:"number" jsonschema:"pr.number from aether_pr_status"`
+	Number          int    `json:"number" jsonschema:"its pr.number"`
 	Repository      string `json:"repository" jsonschema:"its pr.repository"`
 	ExpectedHeadOID string `json:"expected_head_oid" jsonschema:"its pr.head_oid"`
 	Method          string `json:"method,omitempty" jsonschema:"default squash"`
@@ -33,7 +33,7 @@ var prOps = []Op{
 		hints(false, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunPRStatus, protocol.MethodRunPRCreate),
 	opOf("aether_pr_merge", "Merge pull request", ScopeControl, true, nextRuns,
-		"Use this when the user wants a run's pull request merged after reviewing it with aether_pr_status; refused if its head moved.", prMerge).
+		"Use this when the user wants a run's pull request merged after aether_pr_status; refused if its head moved.", prMerge).
 		enum("method", "squash", "merge", "rebase").hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunPRFeedback, protocol.MethodRunPRMerge),
 }

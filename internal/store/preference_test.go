@@ -253,3 +253,33 @@ func TestTemporaryConversationEndsWithAReset(t *testing.T) {
 		t.Fatalf("after a reset: %+v, %v; want temporary cleared", row, err)
 	}
 }
+
+func TestRemovingAMemberRecordsItsConnectorsAndTombstonesPreferences(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	alice := mustCreateMember(t, db)
+	p := addPreference(t, db, alice.ID, "Prefer table output")
+	now := time.Now().UTC()
+	conn := &Connector{Member: alice.ID, ClientID: "client", ClientName: "Claude", RedirectHost: "claude.ai", Resource: "https://aether.test/mcp", CreatedAt: now}
+	if err := db.CreateConnector(ctx, conn, ConnectorTokens{Access: "a", AccessExpiresAt: now.Add(time.Hour), Refresh: "r", RefreshExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	var recorded []string
+	if err := db.DeleteMemberWithPreferences(ctx, alice.ID, func(ids []string) error {
+		recorded = ids
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorded) != 1 || recorded[0] != p.ID {
+		t.Fatalf("tombstoned %v, want %s", recorded, p.ID)
+	}
+	entries, err := db.ListAudit(ctx, AuditQuery{Member: alice.ID, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Method != AuditConnectorRemoved {
+		t.Fatalf("audit after the removal = %+v; want one connector.removed entry", entries)
+	}
+}

@@ -160,14 +160,13 @@ func swarmReceipt(m protocol.Mission, l links, book accountBook) *launchReceipt 
 
 type launchOptionsInput struct {
 	WorkspaceID     string `json:"workspace_id,omitempty" jsonschema:"add its templates"`
-	Models          string `json:"models,omitempty" jsonschema:"an agent name: add its models"`
+	Models          string `json:"models,omitempty" jsonschema:"an agent: add its models"`
 	AccountMemberID string `json:"account_member_id,omitempty"`
 }
 
 var launchOps = []Op{
 	opOf("aether_launch_options", "Launch options", ScopeRead, true, nextWorkspaces,
-		"Use this when choosing what to launch: workspaces, accounts with usage, agents and modes, swarm eligibility, fallback, saved defaults; "+
-			"templates with workspace_id, models with models.", launchOptions).
+		"Use this when choosing what to launch: workspaces, accounts with usage, agents and modes, swarm eligibility, fallback, saved defaults.", launchOptions).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodAccountList, protocol.MethodAgentList, protocol.MethodLaunchDefaultsGet,
 		protocol.MethodAccountUsage, protocol.MethodTemplateList, protocol.MethodAgentModels),
 }

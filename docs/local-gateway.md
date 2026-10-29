@@ -2937,7 +2937,8 @@ does not run its agent over ACP`. Every frame is JSON text.
    or counted, alone. The latest record of an `id` replaces the earlier
    ones. `approval` is `card`, `auto`, or absent for a pause or resume.
    `target` has the `workspace_id` and `run_id` the call named, none for
-   `env.save`; `other_owner` names the run's owner when it is another
+   `env.save`, the `watch_id` of a watch change or delete, and under
+   `watch` the `watch.create` target; `other_owner` names the run's owner when it is another
    member's; `error` is the failure's exact text; `result` holds the
    `run_id` and `workspace_id` of a launched run.
 4. Lease frames are the attach's: the client sends

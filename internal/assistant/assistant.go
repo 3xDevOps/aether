@@ -102,6 +102,9 @@ type member struct {
 	id       domain.MemberID
 	confirms *confirmations
 	actions  heldActions
+	// notesSettled closes once the agent has answered the last prompt that
+	// carried preference notes, so the next prompt takes any it refused.
+	notesSettled chan struct{}
 	// conv is cancelled when a reset discards the conversation, so an
 	// action record that outlived it is dropped. Read it under mu.
 	conv    context.Context
@@ -801,21 +804,35 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if err != nil {
 		return false, err
 	}
+	if m.notesSettled != nil {
+		select {
+		case <-m.notesSettled:
+		case <-ctx.Done():
+			return false, fmt.Errorf("assistant: wait for the last prompt's answer: %w", ctx.Err())
+		}
+	}
 	notes, restore, err := s.preferenceNotes(ctx, m.id)
 	if err != nil {
 		return false, err
 	}
 	// A caller that left before the agent answered took the prompt as
 	// dispatched; the agent may still refuse it.
+	settled := make(chan struct{})
+	if len(notes) > 0 {
+		m.notesSettled = settled
+	}
+	settle := sync.OnceFunc(func() { close(settled) })
 	restore = sync.OnceFunc(restore)
 	refused := func(err error) {
 		if err != nil {
 			restore()
 		}
+		settle()
 	}
 	defer func() {
 		if !dispatched {
 			restore()
+			settle()
 		}
 	}()
 	started, err := promptLive(ctx, live, text, view, notes, refused)

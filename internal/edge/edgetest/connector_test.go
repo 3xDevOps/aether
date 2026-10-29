@@ -280,8 +280,8 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 				}
 				names = append(names, tool.Name)
 			}
-			if len(names) != 36 {
-				t.Fatalf("tools = %v, want all 36", names)
+			if len(names) != 39 {
+				t.Fatalf("tools = %v, want all 39", names)
 			}
 			const task = "fix the flaky login test"
 			if out := callTool(t, session, "aether_list_runs", map[string]any{"mine": true}); strings.Contains(out, task) {

@@ -1,6 +1,7 @@
 // Wire types of assistant.* and /ws/assistant (internal/protocol/assistant.go).
 
 import type { SessionFrame } from '@/lib/session-types'
+import type { WatchTarget } from '@/lib/types'
 
 export type AssistantState = 'setup' | 'idle' | 'installing' | 'starting' | 'running' | 'failed'
 
@@ -34,6 +35,10 @@ export interface AssistantActionTarget {
   workspace_id?: string
   run_id?: string
   preference_id?: string
+  /** The watch a `watch.update` or `watch.delete` names. */
+  watch_id?: string
+  /** What a `watch.create` watches. */
+  watch?: WatchTarget
 }
 
 /** The server's record of one assistant action, on a transcript notice; a later record with the same `id` replaces an earlier one. */

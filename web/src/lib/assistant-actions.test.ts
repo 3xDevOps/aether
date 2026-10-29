@@ -103,6 +103,39 @@ describe('assistantView', () => {
       expect(view.rows).toEqual([])
     })
 
+    it("matches a watch call naming a search result's run: id to its record", () => {
+      const watch = (id: string, run: string): Partial<WorkItem> => ({ id, name: 'aether_watch', status: 'done', input: { run_id: run } })
+      const { records, rows } = notices(1,
+        record({ id: 'a1', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r2' } }, outcome: 'failed', approval: undefined, error: 'run r2 not found' }),
+        record({ id: 'a2', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r1' } }, outcome: 'succeeded', approval: undefined }),
+      )
+      const view = assistantView([block(watch('1:t0', 'run:r1'), watch('1:t1', 'run:r2')), ...rows], [], { records, calls: new Map() })
+      expect(view.actions.map((a) => [a.id, a.state, a.error])).toEqual([['1:t0', 'done', undefined], ['1:t1', 'failed', 'run r2 not found']])
+      expect(view.rows).toEqual([])
+    })
+
+    it('gives parallel watch calls the records of their own targets', () => {
+      const watch = (id: string, input: Record<string, unknown>, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_watch', status, input, result })
+      const { records, rows } = notices(1,
+        record({ id: 'a1', method: 'watch.create', target: { watch: { kind: 'pr', repo: 'Acme/API', number: 7 } }, outcome: 'failed', approval: undefined, error: 'pull request not found' }),
+        record({ id: 'a2', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r1' } }, outcome: 'succeeded', approval: undefined }),
+        record({ id: 'a3', method: 'watch.update', target: { watch_id: 'w-2' }, outcome: 'succeeded', approval: undefined }),
+      )
+      const view = assistantView([block(
+        watch('1:t0', { run_id: 'r1' }, 'done'),
+        watch('1:t1', { pr: 'https://github.com/acme/api/pull/7' }, 'failed', 'pull request not found'),
+        watch('1:t2', { watch_id: 'w-1', paused: true }, 'done'),
+        watch('1:t3', { watch_id: 'w-2', paused: true }, 'done'),
+      ), ...rows], [], { records, calls: new Map() })
+      expect(view.actions.map((a) => [a.id, a.state, a.error])).toEqual([
+        ['1:t0', 'done', undefined],
+        ['1:t1', 'failed', 'pull request not found'],
+        ['1:t2', 'done', undefined],
+        ['1:t3', 'done', undefined],
+      ])
+      expect(view.rows).toEqual([])
+    })
+
     it('gives identical calls of one block their records in the order they ran', () => {
       const message = (id: string, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status, input: { run_id: 'r1', message: 'go' }, result })
       const { records, rows } = notices(1,
@@ -190,12 +223,30 @@ describe('the lifecycle, swarm, pull request and memory tools', () => {
     ['aether_memory_pin', { id: 'mem-9', pin: false }, 'memory.unpin', 'Unpin note mem-9', 'Unpinned note mem-9'],
     ['aether_stop_run', { run_id: 'r1', outcome: 'merged' }, 'run.close', 'Close run r1 as merged', 'Closed run r1 as merged'],
     ['aether_decide_approval', { run_id: 'r1' }, 'run.input.respond', 'Decide an approval for run r1', 'Decided an approval for run r1'],
+    ['aether_watch', { swarm_id: 'swarm:mis-1' }, 'watch.create', 'Watch swarm mis-1', 'Started watching swarm mis-1'],
+    ['aether_watch', { watch_id: 'w-1', paused: true }, 'watch.update', 'Pause watch w-1', 'Paused watch w-1'],
+    ['aether_unwatch', { watch_id: 'w-1' }, 'watch.delete', 'Delete watch w-1', 'Deleted watch w-1'],
   ])('%s %j waits on %s and reads "%s", then "%s"', (tool, input, method, pending, done) => {
     const call = (status: 'running' | 'done') => block({ id: '1:t0', name: tool, status, input })
     const [waiting] = assistantView([call('running')], [confirm(method)]).actions
     expect([waiting!.state, actionSummary({ ...waiting!, state: 'failed' }, names)]).toEqual(['approval', pending])
     const [finished] = assistantView([call('done')], []).actions
     expect(actionSummary(finished!, names)).toBe(done)
+  })
+
+  it("shows a watch that cannot check its target as failed, with the server's error", () => {
+    const [created] = assistantView([block({ id: '1:t0', name: 'aether_watch', input: { pr: 'acme/api#7' }, result: { watch_id: 'w-1', state: 'error', error: 'GitHub is not connected' } })], []).actions
+    expect([created!.state, created!.error, actionSummary(created!, names)]).toEqual(['failed', 'GitHub is not connected', 'Watch PR acme/api#7'])
+  })
+
+  it('says a delete that found no watch deleted nothing', () => {
+    const [deleted] = assistantView([block({ id: '1:t0', name: 'aether_unwatch', input: { watch_id: 'w-1' }, result: { watch_id: 'w-1', state: 'not_found' } })], []).actions
+    expect(actionSummary(deleted!, names)).toBe('Found no watch w-1 to delete')
+  })
+
+  it('counts aether_watches as a read, not an action', () => {
+    const view = assistantView([block({ id: '1:t0', name: 'aether_watches', input: {}, result: { watches: [] } })], [])
+    expect(view.actions).toEqual([])
   })
 
   it('says a pull request GitHub may not have opened is unconfirmed, never done', () => {
