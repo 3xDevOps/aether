@@ -31,6 +31,7 @@ type Template struct {
 	Harness     string            `json:"harness"`
 	Mode        string            `json:"mode"`
 	Model       string            `json:"model,omitempty"`
+	Effort      string            `json:"effort,omitempty"`
 	Params      map[string]string `json:"params,omitempty"`
 	BudgetUSD   float64           `json:"budget_usd,omitempty"`
 	CreatedAt   string            `json:"created_at"`
@@ -68,6 +69,7 @@ type TemplateSaveParams struct {
 	Harness     string            `json:"harness"`
 	Mode        string            `json:"mode,omitempty"`
 	Model       string            `json:"model,omitempty"`
+	Effort      string            `json:"effort,omitempty"`
 	Params      map[string]string `json:"params,omitempty"`
 	BudgetUSD   float64           `json:"budget_usd,omitempty"`
 }

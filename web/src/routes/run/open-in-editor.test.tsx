@@ -103,7 +103,7 @@ describe('Open in editor', () => {
     await userEvent.click((await more()).getByRole('menuitem', { name: 'Open in editor…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Open in editor' }))
     expect(dialog.getByText('Connecting takes control of this swarm worker')).toBeDefined()
-    expect(dialog.getByText(/stops the integrator from steering it until control is released on the swarm page/)).toBeDefined()
+    expect(dialog.getByText(/stops the integrator from steering it until you disconnect or control is released on the swarm page/)).toBeDefined()
   })
 
   it('returns focus to More when the dialog closes', async () => {

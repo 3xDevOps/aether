@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -20,8 +22,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -165,6 +169,163 @@ func TestEnhancedRunContinuesOnAFallbackAccount(t *testing.T) {
 	})
 }
 
+// unreadableUsage fails every quota read, as a vendor read that timed out
+// does.
+type unreadableUsage struct{}
+
+func (unreadableUsage) Read(context.Context, domain.MemberID, bool) ([]quota.Provider, error) {
+	return nil, context.DeadlineExceeded
+}
+
+// An Enhanced run that hits Ada's usage limit continues on Grace's shared
+// account even when Grace's quota cannot be read: unknown usage is not
+// exhausted usage.
+func TestEnhancedRunContinuesOnAnAccountWithUnknownUsage(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, enhancedClaude)
+	e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	e.share(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+	e.assertMovedToOwner(t, run.ID, notes)
+}
+
+// A run on Grace's shared account whose usage cannot be read is moved to
+// Ada's own account only when Ada can sign the agent in there: with no login
+// and no key Claude reads it stays; with a workspace ANTHROPIC_API_KEY, or a
+// login another member could not borrow because it has a second hard link or
+// is reached through a relative symlink, the session continues there; an
+// empty login file or a dangling symlink is no login.
+func TestUnknownUsageOwnAccountNeedsALoginOrKey(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		secrets  map[string]string
+		login    string
+		hardLink bool
+		symlink  string
+		moves    bool
+	}{
+		{name: "signed out", moves: false},
+		{name: "workspace API key", secrets: map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, moves: true},
+		{name: "a login with another hard link", login: "{}", hardLink: true, moves: true},
+		{name: "an empty login with another hard link", login: "", hardLink: true, moves: false},
+		{name: "a login behind a relative symlink", symlink: "login.json", moves: true},
+		{name: "a dangling symlink at the login path", symlink: "gone", moves: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e, rt, notes := newFallbackEnv(t, enhancedClaude)
+			e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+			// An empty workspace value masks a key the test process exports.
+			secrets := map[string]string{"ANTHROPIC_API_KEY": ""}
+			maps.Copy(secrets, tc.secrets)
+			e.sched.cfg.Secrets = secretstore.New(t.TempDir())
+			if err := e.sched.cfg.Secrets.Put(e.ws.ID, secrets); err != nil {
+				t.Fatal(err)
+			}
+			if tc.hardLink {
+				writeHomeFiles(t, e.adaHome, ".claude/.credentials.json")
+				if err := os.WriteFile(filepath.Join(e.adaHome, ".claude", ".credentials.json"), []byte(tc.login), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Link(filepath.Join(e.adaHome, ".claude", ".credentials.json"), filepath.Join(e.adaHome, "credentials-copy")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e.share(t)
+			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.owner.ID, "", "claude", domain.LaunchACP)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+			if tc.symlink != "" {
+				dir := filepath.Join(e.adaHome, ".claude")
+				if err = os.WriteFile(filepath.Join(dir, "login.json"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Remove(filepath.Join(dir, ".credentials.json")); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Symlink(tc.symlink, filepath.Join(dir, ".credentials.json")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+			if tc.moves {
+				continued := continuationPrompt("Grace", "Ada")
+				waitFor(t, "the continuation prompt on Ada's account", func() bool {
+					execs := rt.all()
+					prompts := execs[len(execs)-1].wire.prompts(t)
+					return len(execs) == 2 && len(prompts) == 1 && prompts[0][0].Text != nil && prompts[0][0].Text.Text == continued
+				})
+				row, getErr := e.db.GetRun(t.Context(), run.ID)
+				c := e.rt.byName(string(run.ID))
+				if getErr != nil || row.AccountMemberID != e.member.ID || row.Status.Terminal() || c == nil ||
+					c.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.member.ID) || c.spec.Env["ANTHROPIC_API_KEY"] != tc.secrets["ANTHROPIC_API_KEY"] {
+					t.Fatalf("moved run = %+v, %v; replacement %+v; want it live on Ada's account with the workspace key", row, getErr, c)
+				}
+				return
+			}
+			waitFor(t, "the usage-limit reason", func() bool {
+				row, getErr := e.db.GetRun(t.Context(), run.ID)
+				return getErr == nil && strings.HasPrefix(row.Reason, "Usage limit reached")
+			})
+			got, err := e.db.GetRun(t.Context(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Reason != "Usage limit reached on Grace's account; no account that may have usage left can run claude here" ||
+				got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
+				t.Fatalf("run = reason %q account %s notes %v; want it kept on Grace's account", got.Reason, got.AccountMemberID, notes.all())
+			}
+		})
+	}
+}
+
+// Codex signs in from neither OPENAI_API_KEY nor, outside Background runs,
+// CODEX_API_KEY, so neither makes Ada's signed-out own account a fallback
+// for an Enhanced Codex run whose usage cannot be read.
+func TestUnknownUsageCodexIgnoresKeysItDoesNotSignInWith(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"OPENAI_API_KEY", "CODEX_API_KEY"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			e, _, notes := newFallbackEnv(t, func(cfg *Config) {
+				cfg.Harnesses["codex"] = HarnessSpec{HeadlessArgs: []string{"fake-agent", "-p", "{task}"}, ACPArgs: []string{"acp-mock"}}
+			})
+			writeHomeFiles(t, e.ownerHome, ".codex/auth.json")
+			e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+			e.sched.cfg.Secrets = secretstore.New(t.TempDir())
+			if err := e.sched.cfg.Secrets.Put(e.ws.ID, map[string]string{key: "sk-test"}); err != nil {
+				t.Fatal(err)
+			}
+			e.share(t)
+			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.owner.ID, "", "codex", domain.LaunchACP)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+			_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+			waitFor(t, "the usage-limit reason", func() bool {
+				row, getErr := e.db.GetRun(t.Context(), run.ID)
+				return getErr == nil && strings.HasPrefix(row.Reason, "Usage limit reached")
+			})
+			got, err := e.db.GetRun(t.Context(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
+				t.Fatalf("run = reason %q account %s notes %v; want it kept on Grace's account", got.Reason, got.AccountMemberID, notes.all())
+			}
+		})
+	}
+}
+
 // When the run does not move, the Enhanced run waits for its owner in the
 // container it had, with the real reason: no account qualifies, fallback is
 // off for the run, the replacement would not be admitted for capacity, or
@@ -176,7 +337,7 @@ func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 		setup        func(*shareEnv)
 		opts         domain.LaunchOptions
 	}{
-		{"no account qualifies", "Usage limit reached on Ada's account; no fallback has usage left", nil, domain.LaunchOptions{}},
+		{"no account qualifies", "Usage limit reached on Ada's account; no other account is shared to fall back on", nil, domain.LaunchOptions{}},
 		{"fallback off", "Usage limit reached on Ada's account; fallback is off for this run", nil,
 			domain.LaunchOptions{Fallback: domain.AccountFallback{Disabled: true}}},
 		{"no capacity for the replacement", "Usage limit reached on Ada's account; cannot continue on another account: ", func(e *shareEnv) {
@@ -245,7 +406,7 @@ func TestHandedOffRunMovesOnlyToAccountsSharedWithItsHome(t *testing.T) {
 	}
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if got.Reason != "Usage limit reached on Ada's account; no fallback has usage left" || len(notes.all()) != 0 {
+	if got.Reason != "Usage limit reached on Ada's account; no account that may have usage left can run claude here" || len(notes.all()) != 0 {
 		t.Fatalf("handed-off run = reason %q, notes %v; want it kept off Grace's account", got.Reason, notes.all())
 	}
 }
@@ -367,6 +528,79 @@ func TestEnhancedRunMovesAgainOnASecondLimit(t *testing.T) {
 	}
 }
 
+// Grace's login was never confirmed in the container that ran on her
+// account, as on a server from before the runtime checked it, so her usage
+// was never spent: when Lin's runs out the run goes back to Grace, in a
+// container that mounts only Grace's login. Once that container confirms
+// it, Grace counts as used, and her next limit has nowhere left to go.
+func TestUnconfirmedSharedLoginDoesNotUseUpTheAccount(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	lin := e.addRecipient(t)
+	linHome, err := e.cfg.Homes.Path(lin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFiles(t, linHome, ".claude/.credentials.json")
+	if err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10, lin.ID: 20}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	settled := func(account domain.MemberID) {
+		t.Helper()
+		waitFor(t, "the move to "+string(account), func() bool {
+			row, rowErr := e.db.GetRun(t.Context(), run.ID)
+			sc, scErr := e.sched.readSidecar(run.ID)
+			_, liveErr := e.sched.acp.live(run.ID)
+			return rowErr == nil && scErr == nil && liveErr == nil && row.AccountMemberID == account && sc.AccountSwap == nil
+		})
+	}
+	limit := func() {
+		_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+	}
+
+	limit()
+	e.assertMovedToOwner(t, run.ID, notes)
+	settled(e.owner.ID)
+	e.sched.mu.Lock()
+	e.sched.runs[run.ID].verifiedLogins = nil
+	e.sched.mu.Unlock()
+	limit()
+	settled(lin.ID)
+	limit()
+	settled(e.owner.ID)
+
+	spec := e.rt.byName(string(run.ID)).spec
+	e.assertOwnerExposedOnlyAt(t, spec, ".claude/.credentials.json")
+	if spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.owner.ID) || slices.ContainsFunc(spec.Mounts, func(m runtime.Mount) bool { return m.HostPath == linHome }) {
+		t.Fatalf("the container back on Grace's account = account %q, mounts %+v; want only Grace's login", spec.Env["AETHER_ACCOUNT_MEMBER_ID"], spec.Mounts)
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil || sc.LoginMember != string(e.owner.ID) || !slices.Equal(sc.VerifiedLogins, []domain.MemberID{lin.ID, e.owner.ID}) {
+		t.Fatalf("sidecar = login %q verified %v, %v; want Grace's login, Lin and Grace confirmed", sc.LoginMember, sc.VerifiedLogins, err)
+	}
+
+	limit()
+	waitFor(t, "Grace's limit with nowhere to go", func() bool {
+		row, rowErr := e.db.GetRun(t.Context(), run.ID)
+		return rowErr == nil && row.Status == domain.RunNeedsAttention && strings.HasPrefix(row.Reason, "Usage limit reached on Grace's account")
+	})
+	got, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || got.AccountMemberID != e.owner.ID {
+		t.Fatalf("run = %+v, %v; want it left on Grace's exhausted account", got, err)
+	}
+	segments, err := e.db.ListRunAccountSegments(t.Context(), run.ID)
+	if err != nil || len(segments) != 4 {
+		t.Fatalf("segments = %+v, %v; want Ada, Grace, Lin, Grace", segments, err)
+	}
+}
+
 // A headless Claude run whose output reported Ada's usage limit before it
 // exited resumes its session on Grace's account with the continuation as
 // its prompt, also when it exited while the server was down. The move holds
@@ -429,7 +663,7 @@ func TestHeadlessRunContinuesOnAFallbackAccount(t *testing.T) {
 				}
 				e.rt.byName(string(run.ID)).exitNow(1)
 				got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-				if got.Reason != "Usage limit reached on Ada's account; no fallback has usage left" {
+				if got.Reason != "Usage limit reached on Ada's account; no other account is shared to fall back on" {
 					t.Fatalf("reason %q", got.Reason)
 				}
 				waitFor(t, "the acted-on usage limit cleared", func() bool {
@@ -1282,5 +1516,24 @@ func TestStartStoppedDuringTheEventLogReadIsClean(t *testing.T) {
 				t.Fatalf("Start = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// Each stop reason names why no account took the run.
+func TestNoFallbackReason(t *testing.T) {
+	ada, grace := domain.MemberID("ada"), domain.MemberID("grace")
+	for _, tc := range []struct {
+		harness  string
+		measured fallback.Measured
+		want     string
+	}{
+		{"opencode", fallback.Measured{ada: 100}, "Aether cannot read opencode's usage, so its runs do not move to another account"},
+		{"claude", fallback.Measured{ada: 100}, "no other account is shared to fall back on"},
+		{"claude", fallback.Measured{ada: 100, grace: 97}, "no fallback has usage left"},
+		{"claude", fallback.Measured{ada: 100, grace: fallback.Unknown}, "no account that may have usage left can run claude here"},
+	} {
+		if got := noFallbackReason("Ada", tc.harness, tc.measured, ada); got != "Usage limit reached on Ada's account; "+tc.want {
+			t.Errorf("%s %v: %q, want the reason to end %q", tc.harness, tc.measured, got, tc.want)
+		}
 	}
 }

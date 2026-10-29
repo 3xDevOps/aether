@@ -39,13 +39,16 @@ export interface SessionStreamHandlers {
 export interface SessionStream {
   control: (write: boolean, opts?: { generation?: number }) => boolean
   takeover: (action: TakeoverAction, id: string, generation?: number) => boolean
-  close: () => void
+  /** Closes for good; a release generation first hands the lease back and waits for its answer. */
+  close: (release?: number) => void
 }
 
 const codeInvalidParams = -32602
 const codeConflict = -32003
 const resubscribe = 1012
 const policy = 1008
+// The server commits a release on the stream's context, so closing before the answer can cancel it.
+const releaseWaitMs = 2000
 
 /** Where a stream connects and what its header says; a run's by default. */
 export interface SessionEndpoint {
@@ -198,11 +201,30 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers, en
       takeover_id: id,
       ...(generation === undefined ? {} : { control_generation: generation }),
     }),
-    close: () => {
+    close: (release) => {
       closed = true
       stopWake()
       if (timer) clearTimeout(timer)
-      detach()
+      const ws = socket
+      if (!ws || release === undefined || !send({ type: 'control', write: false, control_generation: release })) {
+        detach()
+        return
+      }
+      const id = requestID
+      const done = setTimeout(detach, releaseWaitMs)
+      const finish = () => {
+        clearTimeout(done)
+        detach()
+      }
+      ws.onerror = ws.onclose = finish
+      ws.onmessage = (msg) => {
+        if (typeof msg.data !== 'string') return
+        try {
+          if (parse(msg.data).some((frame) => (frame as ControlFrame).request_id === id)) finish()
+        } catch {
+          finish()
+        }
+      }
     },
   }
 }

@@ -83,6 +83,17 @@ describe('assistant settings', () => {
     expect(toggle().getAttribute('aria-checked')).toBe('false')
   })
 
+  it('signs an agent in again for the assistant, as when its sign-in expired', async () => {
+    const user = userEvent.setup()
+    const client = show()
+    act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [{ name: 'claude', display_name: 'Claude Code', ready: true }], confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sign in again' }))
+    expect(screen.getByRole('region', { name: 'Sign in to Claude Code' })).toBeDefined()
+    await waitFor(() => expect(client.assistantLoginSocket).toHaveBeenCalledWith('claude'))
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('region', { name: 'Sign in to Claude Code' })).toBeNull()
+  })
+
   it('lists what auto-approval covers', () => {
     show()
     const scope = screen.getByLabelText('What auto-approval covers')

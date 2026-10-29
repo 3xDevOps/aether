@@ -149,10 +149,25 @@ describe('the session stream owner', () => {
     }
   })
 
-  it('resets the stream and lease when the last viewer leaves', async () => {
+  it('closes a stream whose release gets no answer after two seconds', () => {
+    const { stop, session } = setup()
+    session.open({ has_control: true, control_generation: 2 })
+    stop()
+    vi.advanceTimersByTime(1999)
+    expect(session.socket.closed).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(session.socket.closed).toBe(true)
+  })
+
+  it('releases the lease, then resets the stream and lease when the last viewer leaves', async () => {
     const { store, stop, session } = setup()
     session.open({ has_control: true, control_generation: 2 })
     stop()
+    const release = session.socket.frames().at(-1) as { request_id: number }
+    expect(release).toMatchObject({ type: 'control', write: false, control_generation: 2 })
+    expect(session.socket.closed).toBe(false)
+    session.send({ type: 'control', request_id: release.request_id, ok: true, has_control: false, control_generation: 2 })
+    expect(session.socket.closed).toBe(true)
     await vi.runAllTimersAsync()
     expect(store.getState().acpSessions.run_1).toMatchObject({ stream: 'connecting', control: undefined, takeover: undefined })
   })

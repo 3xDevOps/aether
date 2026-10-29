@@ -273,7 +273,7 @@ test('a diff snapshot refetches the patch and joins the Compare menu', async () 
   expect(api.runPatch).toHaveBeenCalledWith(active.id)
   openMenu('All changes')
   expect(screen.getByRole('menuitemradio', { name: /^All changes/ }).textContent).toContain('Against main @ abcdef1')
-  expect(screen.getByRole('menuitemradio', { name: /ago|now/ }).textContent).toContain('1 file')
+  expect(screen.getByRole('menuitemradio', { name: /ago|now/ }).textContent).toContain('Latest checkpoint')
   expect(screen.queryByRole('menuitemradio', { name: /Since the run started/ })).toBeNull()
 })
 
@@ -303,8 +303,8 @@ test('checkpoints load from history when the view opens, newest first, and older
   openMenu('All changes')
   const rows = screen.getAllByRole('menuitemradio').slice(1)
   expect(rows.map((row) => row.textContent)).toEqual([
-    expect.stringContaining('fix the parser'),
-    expect.stringMatching(/1 file · \+2\s*−1/),
+    expect.stringContaining('After fix the parser · latest checkpoint'),
+    expect.stringMatching(/Run had 1 file · \+2\s*−1/),
   ])
   expect(rows[0].textContent).toContain(clockTime(hour(11)))
 

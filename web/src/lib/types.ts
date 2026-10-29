@@ -39,6 +39,21 @@ export type RunStatusCause =
   | 'human'
   | 'disconnect'
 
+/** How far Aether can vouch for a reported wait; mirrors domain.WaitEvidence in internal/domain/wait.go. */
+export type WaitKind = 'condition' | 'source_unknown' | 'system_fault' | 'unverified'
+
+/**
+ * The evidence behind the reported wait a live run shows, from the conditions its agent named; mirrors
+ * domain.RunWait. `detail` and `error` are server text, `error` the source's or delivery's error
+ * verbatim; `verified_at` is the oldest last successful source read, absent when one was never read.
+ */
+export interface RunWait {
+  kind: WaitKind
+  detail?: string
+  verified_at?: string
+  error?: string
+}
+
 export type RunActivity =
   | 'working'
   | 'waiting-agents'
@@ -91,6 +106,7 @@ export interface Run {
   harness: string
   mode: string
   model?: string
+  effort?: string
   /** The connector client, such as ChatGPT, the run was launched through. */
   via?: string
   /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
@@ -102,6 +118,8 @@ export interface Run {
   cause?: RunStatusCause
   /** A live Enhanced run's turn, read from its agent session when the run was fetched; not pushed. */
   liveness?: RunLiveness
+  /** Set while `state` is a wait the agent reported. */
+  wait?: RunWait
   /** Increments on every change of status, state, reason or outcome flags. */
   status_seq: number
   branch: string
@@ -183,6 +201,7 @@ export interface MissionExecutionChoice {
   harness: string
   mode: string
   model?: string
+  effort?: string
 }
 
 export type MissionIntegrator = MissionExecutionChoice
@@ -316,6 +335,7 @@ export interface MissionAttempt {
   takeover_active?: boolean
   takeover_member_id?: string
   takeover_generation?: number
+  takeover_since?: string
   orchestration_hold?: boolean
   cancel_requested_at?: string | null
   cancellation_actor_run_id?: string
@@ -915,6 +935,8 @@ export interface RoomMessageListResult {
 
 export interface RoomController {
   member_id: string
+  /** The holder's control session; absent from a gateway older than the field. */
+  control_session_id?: string
   connected: boolean
   acquired_at: string
   expires_at?: string
@@ -1021,6 +1043,7 @@ export interface RunStatusPayload {
   cause?: RunStatusCause
   /** Only a newer read of the wait's sources; history leaves it out. */
   reread?: boolean
+  wait?: RunWait
   status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean
@@ -1090,6 +1113,9 @@ export interface RunTitlePayload {
 }
 export interface RunModelPayload {
   model: string
+}
+export interface RunEffortPayload {
+  effort: string
 }
 export interface RunProtectedPayload {
   protected: boolean
@@ -1306,6 +1332,7 @@ export interface Template {
   harness: string
   mode: string
   model?: string
+  effort?: string
   params?: Record<string, string>
   budget_usd?: number
   created_at: string
@@ -1386,6 +1413,8 @@ export interface AgentInfo {
   install_script?: string
   /** install_script followed by the pinned enhanced-mode adapter's install. */
   enhanced_install_script?: string
+  /** The levels a launch may send as `effort`, lowest first; absent when the agent has no effort setting. */
+  effort_levels?: string[]
 }
 
 /** One model agent.models discovered; `id` is what a launch sends as `model`. */

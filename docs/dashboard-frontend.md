@@ -536,8 +536,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   line under it says the assistant acts without asking, with **Change in
   Settings**.
 - **Body:** by `assistant.status` state. `setup` lists each agent with its
-  reason and opens `AgentSetup` in place; `needs_restart` is a callout with a
-  button that calls `assistant.start {restart_environment: true}`; `failed`
+  reason, and **Sign in** opens `AssistantSignIn` in place: a terminal on
+  `/ws/terminal?assistant_login=<agent>`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
   the run Session's `TimelineRow` and `useFlatRows`, with the Session's
@@ -675,8 +675,8 @@ conversation bumps; `assistantOpen` and `assistantWidth` persist.
 (`useIdentityKnown` in `store/hooks.ts`; `useAgentList` waits for it too, so
 neither read is sent under no identity and repeated), and on each open, then
 connects unless the
-state is `setup` or `needs_restart`. It stays connected with the panel closed
-only while the state is `running` or `starting`, or a confirmation or a
+state is `setup`. It stays connected with the panel closed
+only while the state is `running`, `installing` or `starting`, or a confirmation or a
 harness prompt is pending. After that, `status` frames carry the state and the
 whole confirmation set, so the UI makes no further status calls. A truncated
 item in the transcript is read with `assistant.item`. Each pending
@@ -1210,7 +1210,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
-  `run.title`, `run.model`, `run.protected` and `run.archived` follow the
+  `run.title`, `run.model`, `run.effort`, `run.protected` and `run.archived` follow the
   same fetch-first rule on a run the client has never seen; `run.controller`
   skips an unknown run, whose snapshot carries the holder. `run.account`
   likewise skips an unknown run, and on a known one replaces
@@ -1760,6 +1760,33 @@ run is live and shows the state the server chose, so not for a paused run,
 a swarm worker's question shown as "Waiting for the integrator", or a
 request shown as "Waiting for *name*".
 
+A run that shows a reported wait carries `wait`, what Aether verified about
+the conditions the agent named ([Waits Aether can
+check](failure-handling.md#waits-aether-can-check)). `waitLine` words it,
+and `stateWords` puts that in place of the agent's summary, even one that
+reads "Waiting for ...", which moves to the tooltip as "The agent reported:
+*summary*":
+
+| `wait.kind` | Detail | Dot |
+| --- | --- | --- |
+| `condition` | "Waiting on *detail* · checked 2m ago", aging with the half-minute clock | the state's |
+| `source_unknown` | "Waiting on *detail* since 01:10 — *error*": the local time of the last successful read and the source's error verbatim, never the last status as current | dashed clock, neutral |
+| `system_fault`, still waiting | "Wait fault: *detail* — *error*" | clock, failed colour |
+| `system_fault`, Needs you | the Needs you reason, then " — *error*" | amber ring |
+| `unverified` | the agent's summary; the tooltip adds "Not verified: the wait names no condition Aether can check." | the state's |
+
+`toneOf` picks the dot, and the tooltip gives the exact time of the last
+read. Only the server's `needs-you` state lists a broken wait in Needs you;
+a wait's kind never does. A phone's run header adds the wait's line, wrapped,
+under the header, since its state line truncates; for a broken wait that
+line is the Needs you reason with the error. A swarm card, which shows the
+swarm's progress instead, keeps the state tooltip while it shows a wait.
+Rereads (`reread: true` events) update `wait` in the run store but never
+count as a state change in the lanes or trace bars. A reported wait that went
+stale (`cause` `wait-expired`) reads "Reported waiting on *summary*, no
+update for 30m", and `stateName` labels it **Stale wait** rather than Turn
+ended.
+
 The run header's state line shows the words beyond the label the Workflow
 chip under it already shows, a CI wait's age first ("42m · PR 12 checks";
 a stale one's reason already says "No update for 30m"), since the header
@@ -1776,7 +1803,8 @@ running".
 | Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, an integrator with live workers or unread worker mail, or a `waiting --for agents` report | Working |
 | Waiting for CI | clock | `waiting-ci`: a `waiting --for ci` report | Working |
 | Waiting for process | clock | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
-| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason, or a waiting report went stale. Asks nothing | Working |
+| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason. Asks nothing | Working |
+| Stale wait | dashed ring | `waiting` with `cause` `wait-expired`: a waiting report went stale. Asks nothing | Working |
 | Waiting | dashed ring | a run whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
@@ -1852,7 +1880,8 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
-Needs you row does.
+Needs you row does. A control hold waits since the attempt's
+`takeover_since`.
 
 A device waiting for approval is not a run, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device
@@ -2300,6 +2329,14 @@ including for agents with no discovery. A saved model missing from the list
 stays selected. A model that is not a single argument is
 refused by `run.launch` and shown under "Launch failed".
 
+**Effort**, under Model, shows only for an agent whose `agent.list` entry has
+`effort_levels`. It is a select (`EffortPicker` in
+`src/components/launch/effort-picker.tsx`) of **Agent default**, which sends
+no `effort`, then those levels in the agent's order
+([per-agent levels](harnesses.md#choose-an-effort)). It starts at Agent
+default and is not remembered; switching to an agent without the chosen level
+resets it.
+
 The form remembers a mode and a model per agent in the `launchDefaults`
 slice (`{mode, model, at}` keyed by agent name), persisted per member in
 `savedLaunchDefaults`; defaults saved before persist version 10 had no
@@ -2448,8 +2485,8 @@ agent's last terminal or Enhanced session title,
 line, else the task's first line cut at 120 characters, with a lock for a
 protected run), then a one-line state line: the run branch with a copy
 icon (click copies the name), the agent's glyph and mode ("Standard"; the
-tooltip adds the `agent.list` display name and `run.model`, "Claude Code ·
-Standard · opus"), "On `<name>`'s account (fallback)" when the run carries
+tooltip adds the `agent.list` display name, `run.model` and `run.effort`,
+"Claude Code · Standard · opus · high"), "On `<name>`'s account (fallback)" when the run carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
 a `run.account` event updates it live when the run moves), the reason, and
 the owner. The state's dot and label are the Workflow chip's, on the row
@@ -2509,9 +2546,9 @@ copyable commands for whoever has not set the host up. For a swarm worker
 (`mission_role === 'worker'`) a `needs-you` callout above the buttons,
 **Connecting takes control of this swarm worker**, says that a shell,
 command or file transfer over SSH stops the integrator from steering it
-until control is released on the swarm page. The item is not offered for a
-run whose id is not one lowercase host label (`runHost`), the only kind the
-links and the command are built from. The dashboard calls
+until you disconnect or control is released on the swarm page. The item is
+not offered for a run whose id is not one lowercase host label (`runHost`),
+the only kind the links and the command are built from. The dashboard calls
 nothing: the server authorizes when the editor connects
 ([terminal.md](terminal.md#ssh-and-editors)). The desktop app lets exactly
 those three link shapes out of its window.
@@ -2579,7 +2616,12 @@ with their member name and `Avatar`, protection and the existing
 `ControlButton`: take a free lease, release it, or hold for three seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
-beside **You control** or **You control in another tab**.
+beside **You control** or **You control in another session since <time>**.
+That text appears when `run.room.status` names your member with a
+`control_session_id` other than this tab's: another tab, device or
+`aether attach`, held since the lease's `acquired_at`. On a swarm worker the
+strip then adds **Release**, which calls `mission.worker.release` with the
+attempt's `takeover_generation`, so you can free a hold from any tab.
 **Multiplayer** still opens Details for shared notes and run facts.
 The strip is one row whenever the controls fit beside a 6rem roster, which
 covers desktop windows. Only when they cannot, as on a phone with
@@ -2708,9 +2750,13 @@ for the lease once it has shown Session and the stream has acked, when the
 terminal would (the owner, not a phone, not a swarm worker). A refused
 automatic request shows no error: it retries with backoff while the holder is
 the viewer or nobody, and again when `run.controller` reports the lease free.
-Leaving the page releases a held lease, so a reload takes it straight back;
-closing the stream resets the run's stream and lease state. Frames go through
-`batchNotifications`, so a burst re-renders once per frame.
+Leaving the run page, by navigating elsewhere in the dashboard or by closing
+or reloading the tab, releases a held lease before the stream closes, so a
+reload takes it straight back and a swarm worker's hold does not outlive the
+page. Navigating away waits up to 2 s for the release's answer, because the
+server commits it on the stream's context. Closing the stream resets the
+run's stream and lease state. Frames go through `batchNotifications`, so a
+burst re-renders once per frame.
 
 An ack or history page's `truncated_before` displays the expired-prefix
 boundary. The page's `oldest_seq` stops older-page requests at the actual
@@ -2753,18 +2799,23 @@ block re-renders, code highlighted with the Lezer languages), `live`,
 `finished` and `agent-message`.
 
 `turnRows` splits a turn into segments at each person's message, wake and
-new agent session (`store/session-steps.ts`). In a segment, every step up to
-the last piece of work (a thought, tool call, plan, subagent launch or
-answered request) joins one `steps` block, and the prose after it is the
-answer. A segment without work, such as `ping` and `pong`, has no block. The
+new agent session (`store/session-steps.ts`). In a segment, the agent's
+prose stays in the conversation as `assistant` rows, and the work between
+two pieces of prose (thoughts, tool calls, plans, subagent launches and
+answered requests) joins one `steps` block. The prose after the last block
+is the answer. The `aether-internal report` call (or `aether_report` tool)
+that ends an Aether turn joins the block before the prose it follows, so a
+reply written before reporting stays the answer. A segment without work,
+such as `ping` and `pong`, has no block. The
 block's header names the work ("Read 12 files, ran 5 commands and edited 3
 files") with up to three tool icons, failures, plan progress and tools still
 running. While the turn is open and the stream live, the header carries the
 live state instead: the state dot, "Running npm test", "Waiting on 2
 subagents", "Waiting for your approval: <command>" (or "Waiting for your
-answer") in amber, else "Working", with the seconds since the segment began.
-A turn with no block yet keeps the `live` row. Steps sit on a rail: thoughts
-(a two-line preview that expands to the whole thought), narration, lookups
+answer") in amber, else "Working", with the seconds since the block's work
+began: the segment's start for its first block.
+A turn whose newest row is not a block keeps the `live` row. Steps sit on a
+rail: thoughts (a two-line preview that expands to the whole thought), lookups
 (consecutive reads, searches and fetches as chips; a chip for a file in the
 checkout opens Files,
 a page chip a new tab; four, then **+N more**), tool calls (the command, the
@@ -2779,8 +2830,9 @@ selection holds every line); a body cut to fit the wire is read whole with `run.
 A block over 40 steps shows its first 5 and last 30 around **Show N more
 steps**, which then reads **Show fewer steps**.
 
-A block is open while its turn is, or while a subagent in it runs, and shuts
-once the turn ends; the viewer's own choice for a block or step
+A block is open while it is the newest row of an open turn, or while a
+subagent in it runs, and shuts once the agent writes after it or the turn
+ends; the viewer's own choice for a block or step
 (`expandedRows`, kept until reload) wins. Those defaults, and how much of a
 growing block folds, change only while the view follows the newest row and
 focus is outside the block, so nothing moves under a reader scrolled up or a
@@ -3049,7 +3101,10 @@ controller approval. `useImplicitControl`
 (`agent-terminal.ts`) lets the owner of a run nobody controls act in one step
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10
-seconds). Pending requests dock above it
+seconds). On a swarm worker it never takes the lease: Send goes without it,
+which the server delivers at once while nobody controls the run, and a
+request's options wait for **Take control to answer**, so no action sets the
+worker's hold. Pending requests dock above it
 one at a time, oldest first, with "1 of N" and **Previous request** / **Next
 request** in the card header (`routes/run/request-dock.tsx`). The dock holds
 the card on screen by request id, so arrivals and other answers never swap
@@ -3448,10 +3503,11 @@ and the Environment keep native xterm scrollback.
   terminals and other members start as mirrors. The server grants write only
   when no controller exists; a second tab cannot become a second writer. A
   mirror shows who controls ("Nobody controls", "<name> controls", "You
-  control in another tab", with "(last known)" while the status is stale)
-  and **Take control**. Live, acknowledged local control reads "You control"
-  with an accent-filled **Release**, plus teal control dots behind the
-  terminal toolbar while input is writable ([styles.md](styles.md)). They
+  control in another session since <time>", with "(last known)" while the
+  status is stale) and **Take control**. Live, acknowledged local control
+  reads "You control" with an accent-filled **Release**, plus teal control
+  dots behind the terminal toolbar while input is writable
+  ([styles.md](styles.md)). They
   never change layout, and return to neutral during replay or history
   reading and after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
   ended runs show no control and replay their recording, or say **This run
@@ -3715,14 +3771,18 @@ both what it renders and the overlap set the conflict chips read.
   run merged upstream work: it requests `?from=<fork_tree>`, so it also
   counts that upstream work. Under **Changes since a checkpoint** every
   recorded `run.diff` snapshot is a row, newest first, labelled with its local
-  time (with the date when not today) and its age. Its description is the
+  time (with the date when not today) and its age. Its description is the run
+  at that checkpoint, not the size of what choosing it shows: "After" and the
   commit subject when `head` moved since the next older checkpoint, otherwise
-  the file count and `+a −d` totals, or the count alone for a `truncated`
-  snapshot. Choosing a row requests `?from=<tree>`: everything that changed
-  since that checkpoint up to now, which grows as the run goes on and
-  re-fetches on each new snapshot like the whole diff. The newest 50
-  checkpoints load from `workspace.timeline` (`types: ["run.diff"]`,
-  `newest: true`) when the view first opens for a run on this page, live
+  "Run had N files · +a −d", the run's totals then (the count alone for a
+  `truncated` snapshot). The newest row says "Latest checkpoint" in place of
+  the totals, after the subject when it has one, since choosing it shows only
+  edits not yet snapshotted. Choosing a row requests `?from=<tree>`:
+  everything that changed since that checkpoint up to now, which grows as the
+  run goes on and re-fetches on each new snapshot like the whole diff. The
+  newest 50 checkpoints load from `workspace.timeline`
+  (`types: ["run.diff"]`, `newest: true`) when the view first opens for a run
+  on this page, live
   snapshots join them, one row per tree, and **Show older checkpoints** pages
   back with `before_seq` while the timeline says `more`. A checkpoint keeps
   only its time, tree, head, subject and counts, never its file list. A
@@ -3799,7 +3859,8 @@ both what it renders and the overlap set the conflict chips read.
   sent again is delivered once, whatever went to the run in between.
   `useAgentSend` (`agent-send.ts`) wraps it for the review bar and the pull
   request panel: it passes the lease and, for the owner of a run nobody
-  controls, takes it first (`useImplicitControl`); anyone else's message
+  controls, takes it first (`useImplicitControl`), except on a swarm worker,
+  where it sends without the lease; anyone else's message
   waits 45 seconds for the controller, and both surfaces say so. **Send to
   agent** is disabled, with the composer's own sentence beside it, for a
   finished, starting or switching run, a Background run, a protected run and
@@ -4557,11 +4618,11 @@ remembered mode, shared with Run and saved when the swarm is created, else
 Enhanced when the agent can use it and Standard otherwise; Background disabled with the reason
 `mission.create` gives: it exits after one turn; Standard disabled with
 `agent.list`'s `swarm_standard_refusal` for an agent Aether cannot wake; with no
-mode left, **Create swarm** is disabled), **Integrator model**
-(the same field as Run), **Agents for workers** (a checkbox row per
+mode left, **Create swarm** is disabled), **Integrator model** and
+**Integrator effort** (the same fields as Run), **Agents for workers** (a checkbox row per
 installed agent and account, defaulting to the integrator account's first
-launchable agent; a ticked row has the same model picker, Agent default
-until changed) and **Worker mode**, which defaults to Enhanced and disables a
+launchable agent; a ticked row has the same model picker and, for an agent
+with levels, the effort select, both Agent default until changed) and **Worker mode**, which defaults to Enhanced and disables a
 mode no ticked worker can use. Each worker choice is sent in the worker mode
 when its agent can use it and otherwise in the first of Enhanced, Standard and
 Background it can; the row says so ("Runs Background: no idle wake in
@@ -4571,10 +4632,10 @@ the same reasons as the Run picker, and a ticked worker whose agent stops
 being launchable when the lists are read again is dropped.
 
 `mission.create` refuses an integrator whose exact account, `harness`, mode
-and `model` are not one of `execution_choices`, so the integrator's own
-choice is always sent; a worker choice with the same tuple is not sent twice,
-two choices that differ only in model are both sent, and the list is sorted
-by account, harness, mode and model, so the same set is always the same
+, `model` and `effort` are not one of `execution_choices`, so the
+integrator's own choice is always sent; a worker choice with the same tuple
+is not sent twice, two choices that differ only in model or effort are both
+sent, and the list is sorted by account, harness, mode, model and effort, so the same set is always the same
 request. **Create swarm** starts the integrator, not the workers, toasts
 `Swarm created` and navigates to `missions/<server-issued-id>`; a refusal,
 such as `mission: coordination is unavailable`, appears in the dialog verbatim
@@ -4742,8 +4803,9 @@ shows its error and is asked again on the next swarm refetch. Finished
 swarms show none of this; the server refuses a replacement there.
 
 **Replace integrator…** opens a dialog with the distinct accounts and
-agent-and-model pairs from `execution_choices` (each listed as
-"<agent> · <model>" when it has a model), sends the choice's model,
+agent, model and effort choices from `execution_choices` (each listed as
+"<agent> · <model> · <effort>", leaving out an empty model or effort), sends
+the choice's model and effort,
 sends the **Mode** control's mode (Enhanced where the agent can use it, with the
 integrator's refusals, judged from the selected account's `agent.list`; a failed
 list shows its error with **Retry** and no mode), pins
@@ -5432,7 +5494,7 @@ selects the next.
 
 The detail shows the name, the mode, **Edit** and a menu with **Schedule…**,
 **Duplicate** and **Delete**; a meta line with the agent, the model or
-"agent default", the schedule (`Scheduled <cron> UTC, next in 3 hours`) or
+"agent default", the effort when set, the schedule (`Scheduled <cron> UTC, next in 3 hours`) or
 when it was saved, and the advisory budget; then the task. Each `{{name}}`
 placeholder (the server's pattern in `internal/templates/render.go`) is an
 inline field at its first occurrence, prefilled with the template's default;
@@ -5455,7 +5517,8 @@ the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
 `<name> copy`. The form's agent select lists the agents from `agent.list` by
 display name and keeps the template's current agent as an extra option when
-the list omits it. Its **Parameters** group lists each `{{name}}` the task
+the list omits it. An **Effort** field, as in New run, shows for an agent with
+`effort_levels`, and picking an agent that lacks the chosen level clears it. Its **Parameters** group lists each `{{name}}` the task
 uses, live, with an optional default (clearing the field removes it); defaults for names the task no longer
 uses are dropped, and the template's budget hint is kept, so an edit never
 wipes either. With no templates the view says what one is and offers

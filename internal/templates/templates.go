@@ -198,6 +198,9 @@ func (s *Service) Save(ctx context.Context, t *store.Template) error {
 	if err := domain.ValidModel(t.Model); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidDefinition, err)
 	}
+	if err := domain.ValidEffort(t.Effort); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidDefinition, err)
+	}
 	if err := checkParams(t.Task, t.Params); err != nil {
 		return err
 	}
@@ -258,7 +261,7 @@ func (s *Service) launch(ctx context.Context, t *store.Template, member domain.M
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
-	run, err := s.runs.LaunchWithOptions(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode, domain.LaunchOptions{Model: t.Model, Created: created})
+	run, err := s.runs.LaunchWithOptions(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode, domain.LaunchOptions{Model: t.Model, Effort: t.Effort, Created: created})
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}

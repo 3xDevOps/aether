@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -758,5 +759,21 @@ func TestCoordWakeReportSubmissionOrdersAcceptedFrame(t *testing.T) {
 				t.Fatalf("report did not settle to submitted: %+v, %v", attempt, err)
 			}
 		})
+	}
+}
+
+func TestIntegratorInputRefusalNamesTheHoldersSession(t *testing.T) {
+	f := newWakeServerFixture(t, true)
+	lease, _, err := f.control.Acquire(string(f.run.ID), string(f.member.ID), "holder-tab", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.hold(); err != nil {
+		t.Fatal(err)
+	}
+	err = (missionControlService{store: f.db, control: f.control}).AdmitInput(context.Background(),
+		f.mission.CurrentIntegratorRunID, f.run.ID, f.mission.IntegratorGeneration, func() error { return nil })
+	if !errors.Is(err, store.ErrMissionTakeover) || !strings.HasSuffix(err.Error(), ", in control session "+lease.SessionID) {
+		t.Fatalf("integrator input while held = %v, want ErrMissionTakeover naming session %s", err, lease.SessionID)
 	}
 }

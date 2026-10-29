@@ -29,7 +29,7 @@ type Launcher interface {
 // launchValidator refuses, before anything is persisted, an integrator the
 // scheduler has no interactive command for.
 type launchValidator interface {
-	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model string) error
+	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model, effort string) error
 }
 
 // swarmJudge refuses a mode in which Aether could not wake a swarm agent.
@@ -68,6 +68,7 @@ type MissionLaunchRequest struct {
 	RequestedAccount domain.MemberID
 	Fallback         domain.AccountFallback
 	Model            string
+	Effort           string
 	ExtraWorkspaces  []domain.WorkspaceID
 	// Admitted is domain.LaunchOptions.Admitted: the caller releases
 	// AuthorizationMu and dispatchMu there.
@@ -407,7 +408,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 			if current.CurrentIntegratorRunID != req.RunID || current.IntegratorGeneration != req.IntegratorGeneration ||
 				current.Integrator.AccountMemberID != req.RequestedAccount || current.Integrator.Harness != req.Harness ||
 				current.Integrator.Mode != req.Mode || current.Integrator.Model != req.Model ||
-				current.IntegratorRunOwnerID != req.RunOwnerID {
+				current.Integrator.Effort != req.Effort || current.IntegratorRunOwnerID != req.RunOwnerID {
 				return fmt.Errorf("%w: recovered integrator assignment changed", store.ErrMissionStale)
 			}
 			if err = authorizeDeclared(); err == nil {
@@ -425,7 +426,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 				!attempt.State.HoldsConcurrency() || attempt.CancelRequestedAt != nil ||
 				attempt.RunOwnerID != req.RunOwnerID ||
 				attempt.AccountOwnerID != req.RequestedAccount || attempt.Harness != req.Harness ||
-				attempt.Mode != req.Mode || attempt.Model != req.Model {
+				attempt.Mode != req.Mode || attempt.Model != req.Model || attempt.Effort != req.Effort {
 				return fmt.Errorf("%w: recovered worker assignment changed", store.ErrMissionStale)
 			}
 			worker = attempt
@@ -523,7 +524,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 				IntegratorGeneration: mission.IntegratorGeneration,
 				RunID:                mission.CurrentIntegratorRunID, ActorRunID: mission.CurrentIntegratorRunID,
 				RunOwnerID: mission.IntegratorRunOwnerID, RequestedAccount: choice.AccountMemberID,
-				Task: mission.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
+				Task: mission.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model, Effort: choice.Effort,
 			})
 			if launchErr != nil {
 				slog.Warn("mission: recover integrator", "mission", mission.ID, "error", launchErr)
@@ -642,7 +643,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 			IntegratorGeneration: attempt.IntegratorGeneration,
 			RunID:                attempt.RunID, ActorRunID: attempt.ActorRunID,
 			RunOwnerID: attempt.RunOwnerID, RequestedAccount: attempt.AccountOwnerID,
-			Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode, Model: attempt.Model,
+			Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode, Model: attempt.Model, Effort: attempt.Effort,
 		})
 		if launchErr != nil {
 			slog.Warn("mission: recover worker", "mission", mission.ID, "attempt", attempt.ID, "error", launchErr)
@@ -843,7 +844,10 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		if modelErr := domain.ValidModel(c.Model); modelErr != nil {
 			return protocol.MissionCreateResult{}, invalidMissionParams("execution choice " + modelErr.Error())
 		}
-		choices = append(choices, domain.MissionExecutionChoice{AccountMemberID: domain.MemberID(c.AccountMemberID), Harness: c.Harness, Mode: mode, Model: c.Model})
+		if effortErr := domain.ValidEffort(c.Effort); effortErr != nil {
+			return protocol.MissionCreateResult{}, invalidMissionParams("execution choice " + effortErr.Error())
+		}
+		choices = append(choices, domain.MissionExecutionChoice{AccountMemberID: domain.MemberID(c.AccountMemberID), Harness: c.Harness, Mode: mode, Model: c.Model, Effort: c.Effort})
 	}
 	validateErr := s.swarmRefusal("integrator", choice.Harness, choice.Mode)
 	for _, c := range choices {
@@ -855,7 +859,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		validateErr = s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice)
 	}
 	if validateErr == nil {
-		validateErr = s.validateModelChoices(ctx, domain.MemberID(p.AccountableHumanID), choices)
+		validateErr = s.validateChoiceLaunches(ctx, domain.MemberID(p.AccountableHumanID), choices)
 	}
 	accounts := slices.Clone(policy.Order)
 	for _, c := range choices {
@@ -922,7 +926,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		ActorRunID: m.CurrentIntegratorRunID, RunOwnerID: m.IntegratorRunOwnerID,
 		RequestedAccount: admission.Account.ID, AccountOwner: account, Fallback: m.Fallback,
 		ExtraWorkspaces: m.ExtraWorkspaces,
-		Task:            m.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
+		Task:            m.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model, Effort: choice.Effort,
 		Admitted: func() { unlockDispatch(); unlockAuthorization() },
 	})
 	if err != nil {
@@ -1039,7 +1043,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 		ActorRunID: replaced.CurrentIntegratorRunID, RunOwnerID: replaced.IntegratorRunOwnerID,
 		RequestedAccount: admission.Account.ID, AccountOwner: account, Fallback: replaced.Fallback,
 		ExtraWorkspaces: replaced.ExtraWorkspaces,
-		Task:            replaced.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
+		Task:            replaced.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model, Effort: choice.Effort,
 		Admitted: func() { unlockDispatch(); unlockAuthorization() },
 	})
 	if err != nil {
@@ -1076,7 +1080,7 @@ func (s *Service) validateIntegratorLaunch(ctx context.Context, owner, account d
 	if !ok {
 		return nil
 	}
-	if err := v.ValidateMissionLaunch(ctx, owner, account, choice.Harness, choice.Mode, choice.Model); err != nil {
+	if err := v.ValidateMissionLaunch(ctx, owner, account, choice.Harness, choice.Mode, choice.Model, choice.Effort); err != nil {
 		return invalidMissionParams(fmt.Sprintf("integrator harness %s cannot launch in %s mode: %v", choice.Harness, choice.Mode, err))
 	}
 	return nil
@@ -1095,31 +1099,31 @@ func (s *Service) swarmRefusal(role, agent string, mode domain.LaunchMode) error
 	return nil
 }
 
-func (s *Service) validateModelChoices(ctx context.Context, owner domain.MemberID, choices []domain.MissionExecutionChoice) error {
+func (s *Service) validateChoiceLaunches(ctx context.Context, owner domain.MemberID, choices []domain.MissionExecutionChoice) error {
 	v, ok := s.cfg.Runs.(launchValidator)
 	if !ok {
 		return nil
 	}
 	for _, c := range choices {
-		if c.Model == "" {
+		if c.Model == "" && c.Effort == "" {
 			continue
 		}
-		if err := v.ValidateMissionLaunch(ctx, owner, c.AccountMemberID, c.Harness, c.Mode, c.Model); err != nil {
-			return invalidMissionParams(fmt.Sprintf("execution choice harness %s cannot launch in %s mode with model %s: %v", c.Harness, c.Mode, c.Model, err))
+		if err := v.ValidateMissionLaunch(ctx, owner, c.AccountMemberID, c.Harness, c.Mode, c.Model, c.Effort); err != nil {
+			return invalidMissionParams(fmt.Sprintf("execution choice harness %s cannot launch in %s mode with model %q and effort %q: %v", c.Harness, c.Mode, c.Model, c.Effort, err))
 		}
 	}
 	return nil
 }
 
-// replacementChoices offers every execution choice's account, harness and
-// model as an integrator in either interactive mode, whatever the choice's
+// replacementChoices offers every execution choice's account, harness, model
+// and effort as an integrator in either interactive mode, whatever the choice's
 // own mode: a mission created before integrators had to be interactive may
 // list only headless choices, and its integrator must still be replaceable.
 func replacementChoices(m *domain.Mission) []protocol.MissionExecutionChoice {
 	out := make([]protocol.MissionExecutionChoice, 0, 2*len(m.ExecutionChoices))
 	for _, c := range m.ExecutionChoices {
 		for _, mode := range []domain.LaunchMode{domain.LaunchTUI, domain.LaunchACP} {
-			out = append(out, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(mode), Model: c.Model})
+			out = append(out, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(mode), Model: c.Model, Effort: c.Effort})
 		}
 	}
 	return out
@@ -1136,12 +1140,15 @@ func executionChoice(in protocol.MissionIntegrator, choices []protocol.MissionEx
 	if err := domain.ValidModel(in.Model); err != nil {
 		return domain.MissionIntegrator{}, invalidMissionParams("integrator " + err.Error())
 	}
+	if err := domain.ValidEffort(in.Effort); err != nil {
+		return domain.MissionIntegrator{}, invalidMissionParams("integrator " + err.Error())
+	}
 	for _, c := range choices {
-		if c.AccountMemberID == in.AccountMemberID && c.Harness == in.Harness && c.Mode == in.Mode && c.Model == in.Model {
-			return domain.MissionIntegrator{AccountMemberID: domain.MemberID(in.AccountMemberID), Harness: in.Harness, Mode: mode, Model: in.Model}, nil
+		if c.AccountMemberID == in.AccountMemberID && c.Harness == in.Harness && c.Mode == in.Mode && c.Model == in.Model && c.Effort == in.Effort {
+			return domain.MissionIntegrator{AccountMemberID: domain.MemberID(in.AccountMemberID), Harness: in.Harness, Mode: mode, Model: in.Model, Effort: in.Effort}, nil
 		}
 	}
-	return domain.MissionIntegrator{}, fmt.Errorf("integrator choice account=%s harness=%s mode=%s model=%s must be one of execution_choices", in.AccountMemberID, in.Harness, in.Mode, in.Model)
+	return domain.MissionIntegrator{}, fmt.Errorf("integrator choice account=%s harness=%s mode=%s model=%s effort=%s must be one of execution_choices", in.AccountMemberID, in.Harness, in.Mode, in.Model, in.Effort)
 }
 
 func (s *Service) List(ctx context.Context, p protocol.MissionListParams) (protocol.MissionListResult, error) {

@@ -962,6 +962,21 @@ describe('applyEvent', () => {
     expect(store.getState().lastSeq).toBe(5)
   })
 
+  it('takes a wait\'s newer read from a reread without moving the state\'s change time', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const wait = (verified_at: string) => ({ kind: 'condition' as const, detail: 'pr:acme/web#582:checks: open', verified_at })
+    const status = { from: 'running', to: 'needs-attention', state: 'waiting-ci', reason: 'CI on #582', cause: 'report' }
+    await applyEvent(store, statusEvent({ payload: { ...status, wait: wait('2026-08-14T10:59:00Z'), status_seq: 7 } }), fakeApi())
+    await applyEvent(store, statusEvent({
+      seq: 6, time: '2026-08-14T11:05:00Z',
+      payload: { ...status, from: 'needs-attention', wait: wait('2026-08-14T11:04:30Z'), reread: true, status_seq: 8 },
+    }), fakeApi())
+    const record = store.getState().runs.run_1
+    expect(record.wait?.verified_at).toBe('2026-08-14T11:04:30Z')
+    expect(record.stateChangedAt).toBe('2026-08-14T11:00:00Z')
+  })
+
   it('drops a status event or snapshot older than the status_seq it holds', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ runList: vi.fn(async () => [run({ state: 'working', status_seq: 3 })]) }))
@@ -1323,6 +1338,16 @@ describe('applyEvent', () => {
     await applyEvent(store, titleEvent({ id: 'evt_model', type: 'run.model', payload: { model: 'opus' } }), fakeApi())
 
     expect(store.getState().runs.run_1.model).toBe('opus')
+    expect(store.getState().lastSeq).toBe(6)
+  })
+
+  it('updates a run effort from a run.effort event', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    await applyEvent(store, titleEvent({ id: 'evt_effort', type: 'run.effort', payload: { effort: 'high' } }), fakeApi())
+
+    expect(store.getState().runs.run_1.effort).toBe('high')
     expect(store.getState().lastSeq).toBe(6)
   })
   it('removes a run when the server publishes its deletion', async () => {

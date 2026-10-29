@@ -205,12 +205,11 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   await box.fill('subagents')
   await box.press('Enter')
   await expect(log.getByText('All three subagents finished.')).toBeVisible({ timeout: 30_000 })
-  // The finished turn's steps, its narration and subagent cards among them, sit behind the block header.
+  // The finished turn's subagent cards sit behind the block header; the agent's prose before them stays in view.
   const delegated = log.getByRole('button', { name: /^Delegated 3 tasks/ })
   await expect(delegated).toHaveAttribute('aria-expanded', 'false')
-  await expect(log.getByText('Splitting the work across subagents.')).toHaveCount(0)
-  await delegated.click()
   await expect(log.getByText('Splitting the work across subagents.')).toBeVisible()
+  await delegated.click()
   await expect(log.getByRole('button', { name: '3 subagents' })).toHaveAttribute('aria-expanded', 'true')
   const billing = log.getByRole('button', { name: 'Map the billing module, Explore, Done' })
   await expect(billing).toBeVisible()

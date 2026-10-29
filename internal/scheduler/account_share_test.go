@@ -146,12 +146,15 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
 	writeHomeFiles(t, e.ownerHome, append([]string{".claude/.credentials.json", ".omp/agent/agent.db"}, ownerState...)...)
+	// Ada's own Claude and Gemini logins stay pinned except where the
+	// borrowed login takes the Claude one's place.
 	for _, tc := range []struct {
 		harness, login string
 		dir            bool
+		mounts         int
 	}{
-		{"claude", ".claude/.credentials.json", false},
-		{"omp", ".omp/agent", true},
+		{"claude", ".claude/.credentials.json", false, 5},
+		{"omp", ".omp/agent", true, 6},
 	} {
 		run, err := e.launch(t, tc.harness)
 		if err != nil {
@@ -165,8 +168,8 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 		if spec.Image != launcherImage {
 			t.Fatalf("%s: image = %q, want the launcher's %q", tc.harness, spec.Image, launcherImage)
 		}
-		if len(spec.Mounts) != 4 {
-			t.Fatalf("%s: mounts = %+v, want launcher's home/cache and one borrowed login", tc.harness, spec.Mounts)
+		if len(spec.Mounts) != tc.mounts {
+			t.Fatalf("%s: mounts = %+v, want launcher's home/cache/scratch, its pins and one borrowed login", tc.harness, spec.Mounts)
 		}
 		if home := spec.Mounts[0]; home != (runtime.Mount{HostPath: e.adaHome, ContainerPath: "/root"}) {
 			t.Fatalf("%s: home mount = %+v, want the launcher's home %q at /root", tc.harness, home, e.adaHome)
@@ -205,15 +208,16 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 	}
 
 	// The owner's own launch is unchanged: their image, their whole home,
-	// nothing mounted by subpath.
+	// and by subpath only their own logins, pinned.
 	own, err := e.sched.Launch(t.Context(), e.ws.ID, e.owner.ID, e.owner.ID, "own", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("owner Launch: %v", err)
 	}
 	spec := e.rt.byName(string(own.ID)).spec
-	if spec.Image != ownerImage || len(spec.Mounts) != 3 ||
-		spec.Mounts[0] != (runtime.Mount{HostPath: e.ownerHome, ContainerPath: "/root"}) {
-		t.Fatalf("own launch = image %q mounts %+v, want %q and owner's home/cache", spec.Image, spec.Mounts, ownerImage)
+	if spec.Image != ownerImage || len(spec.Mounts) != 5 ||
+		spec.Mounts[0] != (runtime.Mount{HostPath: e.ownerHome, ContainerPath: "/root"}) ||
+		slices.ContainsFunc(subpathMounts(spec), func(m runtime.Mount) bool { return m.HostPath != e.ownerHome }) {
+		t.Fatalf("own launch = image %q mounts %+v, want %q and only the owner's home, pins and cache", spec.Image, spec.Mounts, ownerImage)
 	}
 }
 
@@ -229,8 +233,8 @@ func TestSharedLaunchWithoutOwnerLogin(t *testing.T) {
 		t.Fatalf("fake Launch: %v", err)
 	}
 	spec := e.rt.byName(string(run.ID)).spec
-	if len(spec.Mounts) != 3 || spec.Mounts[0].HostPath != e.adaHome {
-		t.Fatalf("fake mounts = %+v, want only launcher's home/cache", spec.Mounts)
+	if len(spec.Mounts) != 5 || spec.Mounts[0].HostPath != e.adaHome {
+		t.Fatalf("fake mounts = %+v, want only launcher's home, its pinned logins and cache", spec.Mounts)
 	}
 	e.assertOwnerExposedOnlyAt(t, spec)
 
@@ -289,10 +293,10 @@ func TestSharedLaunchCustomHarness(t *testing.T) {
 	if e.containerCount() != 0 {
 		t.Fatal("a container was created for the refused launch")
 	}
-	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.owner.ID, "aider", domain.LaunchHeadless, ""); err == nil || !strings.Contains(err.Error(), "runs only on your own account") {
+	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.owner.ID, "aider", domain.LaunchHeadless, "", ""); err == nil || !strings.Contains(err.Error(), "runs only on your own account") {
 		t.Fatalf("ValidateMissionLaunch = %v, want refusal", err)
 	}
-	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, ""); err != nil {
+	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "", ""); err != nil {
 		t.Fatalf("ValidateMissionLaunch on the member's own account: %v", err)
 	}
 
@@ -460,7 +464,7 @@ func TestSharedLaunchNonRootOwnershipAndReservation(t *testing.T) {
 	}
 	spec := e.rt.byName(string(run.ID)).spec
 	want := runtime.Mount{HostPath: e.ownerHome, Subpath: ".claude/.credentials.json", ContainerPath: "/home/aether/.claude/.credentials.json"}
-	if spec.User != "1000:1000" || len(spec.Mounts) != 4 || spec.Mounts[1] != want {
+	if spec.User != "1000:1000" || len(spec.Mounts) != 5 || spec.Mounts[1] != want {
 		t.Fatalf("spec user %q mounts %+v, want 1000:1000 and login %+v", spec.User, spec.Mounts, want)
 	}
 	if got := ownerOf(t, filepath.Join(e.ownerHome, ".claude", ".credentials.json")); got != 1000 {

@@ -16,7 +16,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
 type AssistantService interface {
@@ -38,6 +37,7 @@ type AssistantService interface {
 	Settings(ctx context.Context, member domain.MemberID) (protocol.AssistantSettings, error)
 	SetSettings(ctx context.Context, member domain.MemberID, p protocol.AssistantSettingsParams) (protocol.AssistantSettings, error)
 	SetShareView(ctx context.Context, member domain.MemberID, on bool) error
+	SignIn(ctx context.Context, member domain.MemberID, start func(context.Context) error) error
 }
 
 func init() {
@@ -303,8 +303,7 @@ func assistantError(err error) *protocol.Error {
 		return &protocol.Error{Code: protocol.CodeNotFound, Message: err.Error()}
 	case errors.Is(err, assistant.ErrTurnRunning):
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
-	case errors.Is(err, assistant.ErrNotRunning), errors.Is(err, assistant.ErrNoAgent), errors.Is(err, assistant.ErrClosed), errors.Is(err, assistant.ErrRemoving),
-		errors.Is(err, scheduler.ErrAssistantNeedsRestart):
+	case errors.Is(err, assistant.ErrNotRunning), errors.Is(err, assistant.ErrNoAgent), errors.Is(err, assistant.ErrClosed), errors.Is(err, assistant.ErrRemoving):
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
 	}
 	return acpError(err)

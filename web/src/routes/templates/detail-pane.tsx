@@ -99,6 +99,12 @@ export function DetailPane({
             <span>{agentName}</span>
             <span aria-hidden>·</span>
             <span className={template.model ? 'font-code' : undefined}>{template.model || 'agent default'}</span>
+            {template.effort && (
+              <>
+                <span aria-hidden>·</span>
+                <span>{template.effort}</span>
+              </>
+            )}
             <span aria-hidden>·</span>
             <span><Timing template={template} schedule={schedule} /></span>
             {template.budget_usd ? (

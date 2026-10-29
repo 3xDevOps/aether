@@ -164,3 +164,49 @@ func TestAttachShellMirrorRemainsReadOnly(t *testing.T) {
 	}
 	_ = term.Close()
 }
+
+type slowTerminalBackend struct {
+	stubBackend
+	term  *followTerminal
+	delay time.Duration
+	req   protocol.TerminalRequest
+}
+
+func (b *slowTerminalBackend) Terminal(_ context.Context, req protocol.TerminalRequest) (Terminal, protocol.TerminalResponse, error) {
+	b.req = req
+	time.Sleep(b.delay)
+	return b.term, protocol.TerminalResponse{OK: true, Framed: true, Cols: 80, Rows: 24}, nil
+}
+
+// A terminal whose start outlasts several ping rounds, as a first assistant
+// sign-in that installs its adapter does, keeps its socket: nothing reads the
+// socket to take the pong until the stream starts.
+func TestTerminalSurvivesASlowStart(t *testing.T) {
+	term := newFollowTerminal()
+	defer func() { _ = term.Close() }()
+	backend := &slowTerminalBackend{term: term, delay: 600 * time.Millisecond}
+	g, err := New(Config{Authorize: admitAll(backend), PingInterval: 50 * time.Millisecond, PingTimeout: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.Close() }()
+	ts := httptest.NewServer(g)
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/terminal?assistant_login=claude", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	if err := wsjson.Write(ctx, conn, protocol.DashAttachRequest{Cols: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	var ack protocol.TerminalResponse
+	if err := wsjson.Read(ctx, conn, &ack); err != nil || !ack.OK {
+		t.Fatalf("ack = %+v (%v), want the slow terminal's", ack, err)
+	}
+	if backend.req.AssistantLogin != "claude" {
+		t.Fatalf("request %+v, want the claude sign-in", backend.req)
+	}
+}

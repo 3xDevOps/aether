@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,6 +200,122 @@ func TestComposerModelChoiceIsRecorded(t *testing.T) {
 	}
 }
 
+func TestEnhancedRunSetsItsEffortAfterItsModelOnOpenAndRestore(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withMockClaude)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "claude", domain.LaunchACP, domain.LaunchOptions{Model: "opus", Effort: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	exec := rt.all()[0]
+	if got := exec.wire.setOption(t, "effort"); !slices.Equal(got, []any{"low"}) {
+		t.Fatalf("effort option set to %v, want [low]", got)
+	}
+	exec.wire.mu.Lock()
+	wire := exec.wire.data.String()
+	exec.wire.mu.Unlock()
+	if model, effort := strings.Index(wire, `"configId":"model"`), strings.Index(wire, `"configId":"effort"`); model < 0 || effort < model {
+		t.Fatalf("the effort was not set after the model: %s", wire)
+	}
+	if err = e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	startScheduler(t, s2)
+	waitFor(t, "resumed session", func() bool { return s2.acp.session(run.ID) != nil })
+	execs := rt.all()
+	if got := execs[len(execs)-1].wire.setOption(t, "effort"); !slices.Equal(got, []any{"low"}) {
+		t.Fatalf("restored session's effort option set to %v, want [low]", got)
+	}
+}
+
+func TestEnhancedRunReportsAnEffortTheAgentRefused(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withMockClaude)
+	// No configOptions, so the agent offers no effort option.
+	rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "claude", domain.LaunchACP, domain.LaunchOptions{Effort: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the effort notice", func(items []acphost.Item) bool {
+		return slices.ContainsFunc(items, func(it acphost.Item) bool {
+			return it.Kind == acphost.KindNotice && it.Notice.Severity == "error" && it.Notice.Title == "Effort not set" &&
+				it.Notice.Description == "acphost: the agent offers no effort option"
+		})
+	})
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+}
+
+func TestEnhancedCopilotTakesItsEffortAsAnAdapterFlag(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "copilot", domain.LaunchACP, domain.LaunchOptions{Effort: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	exec := rt.all()[0]
+	if want := []string{"copilot", "--acp", "--allow-all", "--reasoning-effort", "high"}; !slices.Equal(exec.argv, want) {
+		t.Fatalf("adapter argv = %v, want %v", exec.argv, want)
+	}
+	if got := exec.wire.setOption(t, "effort"); len(got) != 0 {
+		t.Fatalf("effort option set to %v, want none beside the flag", got)
+	}
+}
+
+func TestComposerEffortChoiceIsRecorded(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withMockClaude)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	sub := e.subscribe(t)
+	if err = e.sched.ACPSetOption(t.Context(), run.ID, "mode", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || row.Effort != "" {
+		t.Fatalf("after a mode change the run's effort is %q (%v), want none", row.Effort, err)
+	}
+	// The adapter's "default" is the agent's own level, which a run records
+	// as no effort.
+	for _, pick := range []struct{ value, want string }{{"medium", "medium"}, {"default", ""}} {
+		if err = e.sched.ACPSetOption(t.Context(), run.ID, "effort", pick.value); err != nil {
+			t.Fatal(err)
+		}
+		if row, err = e.db.GetRun(t.Context(), run.ID); err != nil || row.Effort != pick.want {
+			t.Fatalf("after picking %s the run's effort is %q (%v), want %q", pick.value, row.Effort, err, pick.want)
+		}
+		timer := time.NewTimer(3 * time.Second)
+		for published := false; !published; {
+			select {
+			case ev := <-sub.Events():
+				if p, ok := ev.Payload.(events.RunEffortPayload); ok && ev.RunID == run.ID {
+					if p.Effort != pick.want {
+						t.Fatalf("run.effort event = %q, want %q", p.Effort, pick.want)
+					}
+					published = true
+				}
+			case <-timer.C:
+				t.Fatalf("no run.effort event after picking %s", pick.value)
+			}
+		}
+		timer.Stop()
+	}
+}
+
 func TestEnhancedRunOfACustomAgentNamedApartFromItsCommand(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t)
@@ -210,10 +327,10 @@ func TestEnhancedRunOfACustomAgentNamedApartFromItsCommand(t *testing.T) {
 		ACPArgs:      []string{"agent", "acp"},
 		ACPMode:      "plan",
 	})
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchACP, "opus"); err != nil {
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchACP, "opus", ""); err != nil {
 		t.Fatalf("ValidateMissionLaunch of an Enhanced launch with a model: %v", err)
 	}
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchTUI, "opus"); err == nil {
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchTUI, "opus", ""); err == nil {
 		t.Fatal("ValidateMissionLaunch accepted a Standard launch with a model for an agent with no model flag")
 	}
 	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "mycursor", domain.LaunchACP, domain.LaunchOptions{Model: "opus"})
@@ -239,7 +356,7 @@ func TestEnhancedRunOfACustomAgentNamedApartFromItsCommand(t *testing.T) {
 func TestEnhancedMissionWorkerOfCursorRunsAgentACP(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t)
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchACP, "gpt-5"); err != nil {
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchACP, "gpt-5", ""); err != nil {
 		t.Fatalf("ValidateMissionLaunch of an Enhanced cursor worker with a model: %v", err)
 	}
 	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
@@ -266,7 +383,7 @@ func TestEnhancedMissionWorkerOfCursorRunsAgentACP(t *testing.T) {
 func TestEnhancedLaunchOfAntigravityIsRefused(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)
-	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", domain.LaunchACP, "")
+	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", domain.LaunchACP, "", "")
 	if err == nil {
 		t.Fatal("ValidateMissionLaunch accepted an Enhanced antigravity launch")
 	}

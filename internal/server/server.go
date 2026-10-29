@@ -95,6 +95,9 @@ type Config struct {
 	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
+	// AssistantIssuer is where assistant sign-ins are checked; the zero
+	// value is the vendors' own sign-in services.
+	AssistantIssuer scheduler.AssistantIssuer
 	// Usage overrides the vendor quota reader, primarily for tests.
 	Usage fallback.QuotaReader
 	// WaitConditions reads the conditions agents' waiting reports name;
@@ -428,6 +431,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		RunPidsLimit:         cfg.RunPidsLimit,
 		ServerBinary:         cfg.ServerBinary,
 		AssistantDir:         filepath.Join(cfg.DataDir, "assistant"),
+		AssistantIssuer:      cfg.AssistantIssuer,
 
 		HarnessUpdateDisabled: cfg.HarnessUpdateDisabled,
 	}); err != nil {
@@ -488,8 +492,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	s.assistant = assistant.New(assistant.Config{
 		Dir:         filepath.Join(cfg.DataDir, "assistant"),
 		Store:       s.db,
-		Homes:       homes,
 		Runs:        s.sched,
+		Host:        s.sched,
 		Caller:      func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
 		Bus:         s.bus,
 		Preferences: preferences,

@@ -25,7 +25,7 @@ import type { AgentInfo, LaunchMode, Mission, MissionExecutionChoice } from '@/l
 import { useStore } from '@/store'
 
 function agentKey(choice: MissionExecutionChoice): string {
-  return JSON.stringify([choice.harness, choice.model ?? ''])
+  return JSON.stringify([choice.harness, choice.model ?? '', choice.effort ?? ''])
 }
 
 function newKey(): string {
@@ -95,7 +95,7 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
       await client.missionReplaceIntegrator({
         mission_id: mission.id,
         expected_generation: mission.integrator_generation,
-        integrator: { account_member_id: account, harness: chosen.harness, mode, ...(chosen.model ? { model: chosen.model } : {}) },
+        integrator: { account_member_id: account, harness: chosen.harness, mode, ...(chosen.model ? { model: chosen.model } : {}), ...(chosen.effort ? { effort: chosen.effort } : {}) },
         idempotency_key: key.current,
       })
       toast.success('Integrator replaced')
@@ -133,7 +133,7 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
             <SelectContent>
               {options.map((choice) => (
                 <SelectItem key={agentKey(choice)} value={agentKey(choice)}>
-                  {agentLabel(agents?.find((info) => info.name === choice.harness), choice.harness)}{choice.model ? ` · ${choice.model}` : ''}
+                  {agentLabel(agents?.find((info) => info.name === choice.harness), choice.harness)}{choice.model ? ` · ${choice.model}` : ''}{choice.effort ? ` · ${choice.effort}` : ''}
                 </SelectItem>
               ))}
             </SelectContent>

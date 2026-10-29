@@ -1,4 +1,5 @@
 import { launchable } from '@/components/launch/agent-picker'
+import { EffortPicker } from '@/components/launch/effort-picker'
 import { agentLabel, modeLabel, modes, type Refusal, swarmRefusal } from '@/components/launch/modes'
 import { ModelPicker } from '@/components/launch/model-picker'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
@@ -8,10 +9,10 @@ import { Label } from '@/components/ui/label'
 import type { AgentInfo, LaunchMode, Member } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-export type WorkerChoice = { account_member_id: string; harness: string; model?: string }
+export type WorkerChoice = { account_member_id: string; harness: string; model?: string; effort?: string }
 
 export function sameWorker(a: WorkerChoice, b: WorkerChoice): boolean {
-  return a.account_member_id === b.account_member_id && a.harness === b.harness && (a.model ?? '') === (b.model ?? '')
+  return a.account_member_id === b.account_member_id && a.harness === b.harness && (a.model ?? '') === (b.model ?? '') && (a.effort ?? '') === (b.effort ?? '')
 }
 
 /** The mode a worker of `agent` runs in: `chosen` if it can, else the first of Enhanced, Standard and Background it can. */
@@ -45,6 +46,7 @@ export function WorkerAgents({
   ownAccountID,
   onToggle,
   onModel,
+  onEffort,
 }: {
   accounts: Member[]
   agentsByAccount: Record<string, AgentInfo[]> | null
@@ -54,6 +56,7 @@ export function WorkerAgents({
   ownAccountID: string
   onToggle: (choice: WorkerChoice, on: boolean) => void
   onModel: (choice: WorkerChoice, model: string) => void
+  onEffort: (choice: WorkerChoice, effort: string) => void
 }) {
   const rows = accounts.flatMap((member) => (agentsByAccount?.[member.id] ?? []).map((agent) => ({ member, agent })))
   return (
@@ -76,6 +79,7 @@ export function WorkerAgents({
             const runs = checked ? workerMode(agent, agent.name, mode) : mode
             const fallback = runs === mode ? null : swarmRefusal(agent, agent.name, mode)
             const name = accounts.length > 1 ? `${member.display_name} · ${agentLabel(agent, agent.name)}` : agentLabel(agent, agent.name)
+            const levels = agent.effort_levels ?? []
             return (
               <li key={`${member.id}:${agent.name}`}>
                 <label className={cn('flex min-h-7 min-w-0 items-center gap-2 rounded-control px-2 text-ui coarse:min-h-11', refused ? 'cursor-not-allowed text-muted' : 'cursor-pointer hover:bg-hover-chrome')}>
@@ -89,14 +93,24 @@ export function WorkerAgents({
                   )}
                 </label>
                 {picked && (
-                  <div className="pr-2 pb-1 pl-8">
+                  <div className="flex gap-2 pr-2 pb-1 pl-8">
                     <ModelPicker
                       aria-label={`Model for ${name}`}
+                      className="min-w-0 flex-1"
                       harness={agent.name}
                       accountMemberID={member.id === ownAccountID ? undefined : member.id}
                       value={picked.model ?? ''}
                       onChange={(model) => onModel(picked, model)}
                     />
+                    {levels.length > 0 && (
+                      <EffortPicker
+                        aria-label={`Effort for ${name}`}
+                        className="w-36 shrink-0"
+                        levels={levels}
+                        value={picked.effort ?? ''}
+                        onChange={(effort) => onEffort(picked, effort)}
+                      />
+                    )}
                   </div>
                 )}
               </li>

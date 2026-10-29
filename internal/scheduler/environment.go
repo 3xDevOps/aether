@@ -18,6 +18,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
+type subpathAPIChecker interface {
+	CheckSubpathAPI(context.Context) error
+}
+
 type imageCacheEnvironmentResolver interface {
 	ImageCacheEnvironment(context.Context, string) (map[string]string, error)
 }
@@ -682,19 +686,24 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 }
 
 // pinnedLogins mounts each harness's PinnedLogins in member's own home over
-// itself once member shares their account, except where the plan already
-// mounts another member's login. A login path that is a directory or
-// cannot be shared is left unpinned rather than refused: it cannot be shared
-// either, and refusing would keep the member from the terminal that fixes it.
-// A grantee still pending approval counts: approval takes effect while this
-// member's containers keep running.
+// itself, except where the plan mounts another member's login there. A
+// rename over a pinned login fails, so the CLI rewrites it in place: no
+// container replaces the file a run on a shared account mounts over (the
+// kernel would detach that mount), nor the login member shares. A login path
+// that is a directory or cannot be shared is left unpinned rather than
+// refused: it cannot be shared either, and refusing would keep the member
+// from the terminal that fixes it.
 func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, homePath, home string, planned []runtime.Mount) ([]runtime.Mount, error) {
-	grantees, err := s.cfg.Store.ListAccountGrantees(ctx, member)
-	if err != nil {
-		return nil, fmt.Errorf("scheduler: list account grantees: %w", err)
-	}
-	if len(grantees) == 0 {
-		return nil, nil
+	// An engine that cannot mount a subpath cannot mount a shared login
+	// either, so there is nothing to keep mounted.
+	if checker, ok := s.cfg.Runtime.(subpathAPIChecker); ok {
+		err := checker.CheckSubpathAPI(ctx)
+		if errors.Is(err, runtime.ErrSubpathAPI) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
 	}
 	var pins []runtime.Mount
 	for _, profile := range harness.Profiles() {

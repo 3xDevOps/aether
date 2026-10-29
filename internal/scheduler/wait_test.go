@@ -96,10 +96,8 @@ func TestClassifyWaitByItsConditions(t *testing.T) {
 			detail: checksSpec + ": resolved, waking the agent (merged)", verified: true},
 		{name: "errored, waking", conditions: []WaitCondition{errored}, kind: domain.WaitFault,
 			detail: checksSpec + ": error, waking the agent (merged)", err: "gh: pull request 582 not found", verified: true},
-		{name: "delivered", conditions: []WaitCondition{delivered}, kind: domain.WaitCondition,
-			detail: checksSpec + ": resolved, woke the agent (merged)", verified: true},
-		{name: "expired and told", conditions: []WaitCondition{expired}, kind: domain.WaitFault,
-			detail: checksSpec + ": expired, woke the agent (merged)", verified: true},
+		{name: "delivered", conditions: []WaitCondition{delivered}, kind: domain.WaitUnverified},
+		{name: "expired and told", conditions: []WaitCondition{expired}, kind: domain.WaitUnverified},
 		{name: "wake undelivered", conditions: []WaitCondition{undelivered}, kind: domain.WaitFault,
 			detail:   checksSpec + " resolved, but the agent was not woken (merged)",
 			err:      "coord: inbox write: disk full",
@@ -151,6 +149,38 @@ func TestAnEarlierTurnsConditionBacksNoWait(t *testing.T) {
 	pending.CreatedAt = now.Add(-time.Hour)
 	if wait, _ := classifyWait([]WaitCondition{pending, stranded}, turn, now); wait.Kind != domain.WaitCondition {
 		t.Errorf("a condition still pending from an earlier turn: got %+v, want condition", wait)
+	}
+}
+
+// A condition whose wake was delivered, even inside the agent's own
+// report so that no later turn starts, leaves the run waiting on its agent:
+// only another pending condition or a wake still on its way backs the wait.
+func TestADeliveredWakeBacksNoWait(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 27, 2, 0, 0, 0, time.UTC)
+	turn := now.Add(-20 * time.Minute)
+	returned := checking(now.Add(-10 * time.Minute))
+	returned.State, returned.Summary = waitResolved, "merged"
+	returned.ResolvedAt, returned.DeliveredAt = now.Add(-10*time.Minute), now.Add(-10*time.Minute)
+	if wait, stranded := classifyWait([]WaitCondition{returned}, turn, now); wait.Kind != domain.WaitUnverified || stranded != "" {
+		t.Errorf("returned in the report: got %+v stranded %q, want unverified", wait, stranded)
+	}
+	pending := checking(now.Add(-30 * time.Second))
+	if wait, stranded := classifyWait([]WaitCondition{returned, pending}, turn, now); wait.Kind != domain.WaitCondition ||
+		wait.Detail != checksSpec+": open, 3 checks running" || stranded != "" {
+		t.Errorf("delivered beside a pending condition: got %+v stranded %q, want condition on the pending one", wait, stranded)
+	}
+	told := returned
+	told.State, told.LastError = "error", "gh: pull request 582 not found"
+	inFlight := checking(now.Add(-time.Minute))
+	inFlight.State, inFlight.Summary, inFlight.ResolvedAt = waitResolved, "merged", now.Add(-time.Minute)
+	if wait, stranded := classifyWait([]WaitCondition{told, inFlight}, turn, now); wait.Kind != domain.WaitCondition ||
+		wait.Detail != checksSpec+": resolved, waking the agent (merged)" || wait.Error != "" || stranded != "" {
+		t.Errorf("a wake in flight: got %+v stranded %q, want condition, waking the agent", wait, stranded)
+	}
+	wantStranded := checksSpec + " resolved, but the agent was not woken"
+	if wait, stranded := classifyWait([]WaitCondition{told, inFlight}, turn, now.Add(wakeGrace)); wait.Kind != domain.WaitFault || stranded != wantStranded {
+		t.Errorf("a wake undelivered past its grace: got %+v stranded %q, want fault stranded %q", wait, stranded, wantStranded)
 	}
 }
 
@@ -256,7 +286,46 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 	if err = reboot.WaitChanged(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect("the wake delivered", domain.ActivityWaitingCI, events.CauseReport, "CI on #582", domain.WaitCondition)
+	expect("the wake delivered", domain.ActivityWaitingCI, events.CauseReport, "CI on #582", domain.WaitUnverified)
+}
+
+// A condition that resolved inside the agent's own report is delivered
+// with it and starts no turn; if the agent then ends its turn, the wait
+// goes stale like one with no condition instead of showing forever.
+func TestAWaitOnAConditionReturnedInTheReportGoesStale(t *testing.T) {
+	t.Parallel()
+	waits := &fakeWaits{}
+	e := newReportingEnv(t, func(cfg *Config) {
+		cfg.WaitConditions = waits
+		cfg.StallThreshold = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := row.StatusSeq
+	sub := e.subscribe(t)
+	returned := checking(time.Now())
+	returned.State, returned.Summary, returned.ResolvedAt, returned.DeliveredAt = waitResolved, "merged", time.Now(), time.Now()
+	waits.set(nil, returned)
+	if err = e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on #582", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+		t.Fatal(err)
+	}
+	p := nextActivity(t, sub, run.ID, &seq)
+	if p.Activity != domain.ActivityWaitingCI || p.Wait == nil || p.Wait.Kind != domain.WaitUnverified {
+		t.Fatalf("published %s wait %+v, want waiting for CI unverified", p.Activity, p.Wait)
+	}
+	quietFor(t, e)
+	p = nextActivity(t, sub, run.ID, &seq)
+	if p.Cause != events.CauseWaitExpired || p.Activity == domain.ActivityNeedsYou {
+		t.Fatalf("the wait went %s by %s %q, want it stale", p.Activity, p.Cause, p.Reason)
+	}
 }
 
 // The reason a broken wait shows names its stranded conditions in one

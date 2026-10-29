@@ -51,21 +51,21 @@ func (p Profile) EnhancedSupport() Enhanced {
 	return EnhancedNone
 }
 
-func (p Profile) ResumeCommand(session, model string) []string {
+func (p Profile) ResumeCommand(session, model, effort string) []string {
 	out := make([]string, len(p.ResumeArgs))
 	for i, a := range p.ResumeArgs {
 		out[i] = strings.ReplaceAll(a, SessionPlaceholder, session)
 	}
-	return append(out, p.ModelLaunchArgs(model)...)
+	return append(out, p.LaunchArgs(model, effort)...)
 }
 
 // HeadlessResumeCommand continues session as a headless run with prompt.
-func (p Profile) HeadlessResumeCommand(session, prompt, model string) []string {
+func (p Profile) HeadlessResumeCommand(session, prompt, model, effort string) []string {
 	out := make([]string, len(p.HeadlessResumeArgs))
 	for i, a := range p.HeadlessResumeArgs {
 		out[i] = strings.ReplaceAll(a, SessionPlaceholder, session)
 	}
-	return Argv(out, prompt, p.ModelLaunchArgs(model))
+	return Argv(out, prompt, p.LaunchArgs(model, effort))
 }
 
 // InstallCommand is the shell command that installs the agent into the member home.

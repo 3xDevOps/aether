@@ -141,6 +141,7 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 		overlaps[p.run] = p
 	}
 	seen := make(map[domain.RunID]bool)
+	var addErr error
 	add := func(r *store.RunSummary, state string, overlap authorizedPeer) {
 		if r == nil || r.ID == self.ID || seen[r.ID] {
 			return
@@ -172,6 +173,11 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 			last := &protocol.CoordSentMessage{
 				MessageID: m.ID, State: protocol.CoordSentStateSent, CreatedAt: m.CreatedAt.UTC().Format(time.RFC3339),
 			}
+			if held, heldErr := s.heldWorker(ctx, r.ID); heldErr != nil {
+				addErr = heldErr
+			} else if held {
+				last.State = protocol.CoordSentStateHeld
+			}
 			if m.DeliveredAt != nil {
 				last.State, last.DeliveredAt = protocol.CoordSentStateDelivered, m.DeliveredAt.UTC().Format(time.RFC3339)
 			}
@@ -199,6 +205,9 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 		if checkMessage(owner, ws, r.MemberID, r.Protected) == nil {
 			add(r, protocol.CoordPeerWorkspace, authorizedPeer{})
 		}
+	}
+	if addErr != nil {
+		return nil, 0, addErr
 	}
 	return peers, len(seen), nil
 }

@@ -62,7 +62,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
         nav.go('terminal')
         return
       }
-      const next = await api.runLaunch({ workspace_id: run.workspace_id, task: run.task, harness: run.harness, mode: 'tui', ...(run.model ? { model: run.model } : {}) })
+      const next = await api.runLaunch({ workspace_id: run.workspace_id, task: run.task, harness: run.harness, mode: 'tui', ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}) })
       useStore.getState().upsertRun(next)
       useStore.getState().upsertRun(await api.runClose(run.id, 'abandoned'))
       useStore.getState().navigate('run', { runId: next.id })

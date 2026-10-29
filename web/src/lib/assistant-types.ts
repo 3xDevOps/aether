@@ -2,7 +2,7 @@
 
 import type { SessionFrame } from '@/lib/session-types'
 
-export type AssistantState = 'setup' | 'needs_restart' | 'idle' | 'starting' | 'running' | 'failed'
+export type AssistantState = 'setup' | 'idle' | 'installing' | 'starting' | 'running' | 'failed'
 
 export interface AssistantAgent {
   name: string
@@ -82,7 +82,6 @@ export interface AssistantSettingsParams {
 
 export interface AssistantStartParams {
   agent?: string
-  restart_environment?: boolean
 }
 
 /** A session frame, or the whole status: sent after the ack and whenever the state or the pending confirmations change. */

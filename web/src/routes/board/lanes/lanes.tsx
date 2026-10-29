@@ -5,7 +5,7 @@ import { clockTime } from '@/lib/format'
 import { useKeybindings } from '@/lib/keybindings'
 import { playEntrance, play } from '@/lib/motion'
 import { prefersReducedMotion } from '@/lib/hooks'
-import { stateLabel } from '@/lib/status'
+import { stateWords } from '@/lib/status'
 import { cn, focusRingInset } from '@/lib/utils'
 import { ReplyComposer, cardAction } from '@/routes/board/card-action'
 import { ticks, xOf } from '@/routes/board/lanes/axis'
@@ -40,8 +40,8 @@ function treeLabel(lane: Lane, now: number): string {
       return `Swarm ${lane.title}, ${lane.detail}`
     case 'run': {
       const { card } = lane
-      const { state } = card
-      return [lane.title, lane.handle, stateLabel[state], card.reason !== stateLabel[state] && card.reason, `started ${clockTime(card.run.created_at, now)}`, elapsed(card.run.created_at, lane.end), card.owner?.display_name]
+      const words = stateWords(card, undefined, now)
+      return [lane.title, lane.handle, words.label, words.detail, `started ${clockTime(card.run.created_at, now)}`, elapsed(card.run.created_at, lane.end), card.owner?.display_name]
         .filter(Boolean).join(', ')
     }
     case 'agent':
