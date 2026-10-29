@@ -572,7 +572,7 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
 export type PreferenceFacts =
   | { kind: 'saved'; text: string; id: string; updated_at: string }
   | { kind: 'updated'; text: string; id: string; updated_at: string; previous: { text: string; workspace_id?: string } }
-  | { kind: 'forgotten'; text: string; workspace_id?: string; enabled: boolean }
+  | { kind: 'forgotten'; text: string; id: string; updated_at: string; workspace_id?: string; enabled: boolean }
   | { kind: 'used'; items: { id: string; text: string; scope: string }[] }
 
 /** What a finished preference tool did, read from its result; absent for any other call or a failed one. */
@@ -594,7 +594,7 @@ export function preferenceFacts(action: AssistantAction): PreferenceFacts | unde
   if (action.tool === 'aether_forget') {
     const gone = record(result.deleted)
     const body = text(gone.text)
-    return body ? { kind: 'forgotten', text: body, workspace_id: text(gone.workspace_id), enabled: gone.enabled !== false } : undefined
+    return body ? { kind: 'forgotten', text: body, id: text(gone.id) ?? '', updated_at: text(gone.updated_at) ?? '', workspace_id: text(gone.workspace_id), enabled: gone.enabled !== false } : undefined
   }
   if (action.tool === 'aether_my_preferences' && Array.isArray(result.preferences)) {
     return { kind: 'used', items: result.preferences.map((item) => ({ id: text(record(item).id) ?? '', text: text(record(item).text) ?? '', scope: text(record(item).scope) ?? 'all' })) }

@@ -656,16 +656,30 @@ describe('preference cards', () => {
     ])
   })
 
-  it('keeps Undone after the card is shown again', async () => {
-    localStorage.setItem('aether.preferences.undone', JSON.stringify(['1:t1']))
-    const aside = await openPanel([
+  it('keeps Undone after the card is shown again, and only on the change it undid', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [saved], enabled: true })
+    vi.mocked(api.preferenceDelete).mockResolvedValue({ deleted: saved } as never)
+    const conversation = (preference: typeof saved) => [
       item('turn_start', 1),
       say(1, 'user', 'Remember that I prefer table output'),
-      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
-    ])
-    const notice = await card(aside, /^Saved: Prefer table output\. Done$/)
+    ]
+    const reopen = async (preference: typeof saved) => {
+      cleanup()
+      act(() => useStore.setState({ assistantOpen: false, acpSessions: {} }))
+      return openPanel(conversation(preference))
+    }
+    const aside = await openPanel(conversation(saved))
+    await userEvent.click(within(await card(aside, /^Saved: Prefer table output\. Done$/)).getByRole('button', { name: 'Undo' }))
+    await within(aside).findByText('Undone')
+
+    const again = await reopen(saved)
+    const notice = await card(again, /^Saved: Prefer table output\. Done$/)
     expect(within(notice).queryByRole('button', { name: 'Undo' })).toBeNull()
     expect(within(notice).getByText('Undone')).toBeDefined()
+
+    const later = await reopen({ ...saved, id: 'pref-7' })
+    expect(within(await card(later, /^Saved: Prefer table output\. Done$/)).getByRole('button', { name: 'Undo' })).toBeDefined()
   })
 })

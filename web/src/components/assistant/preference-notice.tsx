@@ -46,8 +46,9 @@ async function undo(facts: Facts, progress: Restore): Promise<void> {
 }
 
 /** Undo for a saved, updated or forgotten preference, with the server's refusal shown as it came. */
-function UndoPreference({ actionID, facts }: { actionID: string; facts: Facts }) {
-  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'undone' } | { kind: 'failed'; error: string }>(() => undoneIDs().includes(actionID) ? { kind: 'undone' } : { kind: 'idle' })
+function UndoPreference({ facts }: { facts: Facts }) {
+  const undoneID = `${facts.kind}:${facts.id}:${facts.updated_at}`
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'undone' } | { kind: 'failed'; error: string }>(() => undoneIDs().includes(undoneID) ? { kind: 'undone' } : { kind: 'idle' })
   const progress = useRef<Restore>({})
   if (state.kind === 'undone') return <span role="status" className="text-ui-sm text-muted">Undone</span>
   return (
@@ -59,7 +60,7 @@ function UndoPreference({ actionID, facts }: { actionID: string; facts: Facts })
         onClick={() => {
           setState({ kind: 'busy' })
           undo(facts, progress.current).then(() => {
-            markUndone(actionID)
+            markUndone(undoneID)
             setState({ kind: 'undone' })
           }, (err: unknown) => setState({ kind: 'failed', error: errorSentence(err) }))
         }}
@@ -77,8 +78,8 @@ export function PreferenceDetail({ facts }: { facts: PreferenceFacts }) {
   return null
 }
 
-export function PreferenceUndo({ actionID, facts }: { actionID: string; facts: PreferenceFacts }) {
-  return facts.kind === 'used' ? null : <UndoPreference actionID={actionID} facts={facts} />
+export function PreferenceUndo({ facts }: { facts: PreferenceFacts }) {
+  return facts.kind === 'used' ? null : <UndoPreference facts={facts} />
 }
 
 /** "Read N of your preferences": the list is the reason the answer looks the way it does. */
