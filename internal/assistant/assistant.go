@@ -805,12 +805,20 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if err != nil {
 		return false, err
 	}
+	// A caller that left before the agent answered took the prompt as
+	// dispatched; the agent may still refuse it.
+	restore = sync.OnceFunc(restore)
+	refused := func(err error) {
+		if err != nil {
+			restore()
+		}
+	}
 	defer func() {
 		if !dispatched {
 			restore()
 		}
 	}()
-	started, err := promptLive(ctx, live, text, view, notes)
+	started, err := promptLive(ctx, live, text, view, notes, refused)
 	if errors.Is(err, acphost.ErrPromptUnsent) {
 		// The adapter died after ensure saw it alive and before the prompt
 		// left: once its session has ended, start a new one and send there.
@@ -822,7 +830,7 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
 			return false, err
 		}
-		started, err = promptLive(ctx, live, text, view, notes)
+		started, err = promptLive(ctx, live, text, view, notes, refused)
 	}
 	switch {
 	case err == nil && !started:
@@ -841,12 +849,13 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	return true, err
 }
 
-func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext, notes []acp.ContentBlock) (bool, error) {
+func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext, notes []acp.ContentBlock,
+	delivered func(error)) (bool, error) {
 	blocks, err := promptBlocks(text, view, live.acp.Info().PromptEmbedded)
 	if err != nil {
 		return false, err
 	}
-	return live.acp.PromptIdle(ctx, append(blocks, notes...), nil)
+	return live.acp.PromptIdle(ctx, append(blocks, notes...), delivered)
 }
 
 func (m *member) begin(key string) (*attempt, bool) {

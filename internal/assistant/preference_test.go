@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -626,5 +628,87 @@ func TestCarriesPreferenceMatchesWholeWords(t *testing.T) {
 		if got := f.svc.carriesPreference(t.Context(), f.m.id, protocol.AssistantConfirmation{Method: protocol.MethodRunLaunch, Params: params}); got != want {
 			t.Errorf("carriesPreference(%q) = %v, want %v", task, got, want)
 		}
+	}
+}
+
+// liveStore reads the settings and preferences a prompt's notes need
+// whatever its caller's context, so a prompt whose caller already left
+// still reaches the agent.
+type liveStore struct{ *store.DB }
+
+func (l liveStore) AssistantSettings(ctx context.Context, member domain.MemberID) (store.AssistantSettings, error) {
+	return l.DB.AssistantSettings(context.WithoutCancel(ctx), member)
+}
+
+func (l liveStore) ListPreferences(ctx context.Context, member domain.MemberID) ([]store.Preference, error) {
+	return l.DB.ListPreferences(context.WithoutCancel(ctx), member)
+}
+
+// A prompt the agent refuses after its caller left gives its change
+// notes back for the next prompt.
+func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
+	dir := t.TempDir()
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	alice := &domain.Member{DisplayName: "Alice", TailnetLogin: "alice@example.com", Color: "#3cb44b", Role: domain.RoleCollaborator}
+	if err = db.CreateMember(t.Context(), alice); err != nil {
+		t.Fatal(err)
+	}
+	prefs := preference.New(liveStore{db}, filepath.Join(dir, "preference-tombstones"))
+	s := New(Config{Dir: filepath.Join(dir, "assistant"), Store: newMemStore(), Host: &fakeHost{}, Preferences: prefs})
+	t.Cleanup(func() { _ = s.Close() })
+	m := s.member(alice.ID)
+	saved, err := prefs.Add(t.Context(), alice.ID, "Prefer table output", "", protocol.PreferenceSourceSettings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = prefs.Delete(t.Context(), alice.ID, saved.Preference.ID, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	fix, err := acpmock.Load("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fix.RefusePrompts = true
+	agentIn, hostOut := io.Pipe()
+	hostIn, agentOut := io.Pipe()
+	go acpmock.New(fix).Serve(agentIn, agentOut)
+	sess, err := acphost.Start(t.Context(), hostIn, hostOut, acphost.Config{LogPath: s.logPath(alice.ID), Cwd: t.TempDir(), Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		m.mu.Lock()
+		m.sess = nil
+		m.mu.Unlock()
+		_ = sess.Close()
+		_ = agentOut.Close()
+		_ = agentIn.Close()
+	})
+	m.mu.Lock()
+	m.sess = &session{acp: sess, ended: make(chan struct{})}
+	m.mu.Unlock()
+
+	left, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err = s.Prompt(left, alice.ID, "show my runs", "k1", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt of a caller that left = %v; want it cancelled", err)
+	}
+	forgotten := "preference " + saved.Preference.ID + " was forgotten"
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		notes := prefs.TakeChanges(t.Context(), alice.ID)
+		if slices.ContainsFunc(notes, func(n string) bool { return strings.Contains(n, forgotten) }) {
+			return
+		}
+		prefs.RestoreChanges(alice.ID, notes)
+		if time.Now().After(deadline) {
+			t.Fatalf("notes after the refusal = %q; want %q back", notes, forgotten)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
