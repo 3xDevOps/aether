@@ -333,7 +333,7 @@ type TargetNames = Partial<Record<'run_id' | 'workspace_id' | 'watch_id' | 'swar
 
 function inputNames(input: Record<string, unknown>): TargetNames {
   return {
-    run_id: text(input.run_id),
+    run_id: text(input.run_id)?.replace(/^run:/, ''),
     workspace_id: text(input.workspace_id),
     watch_id: text(input.watch_id),
     swarm: text(input.swarm_id)?.replace(/^swarm:/, ''),

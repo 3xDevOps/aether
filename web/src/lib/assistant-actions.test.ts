@@ -103,6 +103,17 @@ describe('assistantView', () => {
       expect(view.rows).toEqual([])
     })
 
+    it("matches a watch call naming a search result's run: id to its record", () => {
+      const watch = (id: string, run: string): Partial<WorkItem> => ({ id, name: 'aether_watch', status: 'done', input: { run_id: run } })
+      const { records, rows } = notices(1,
+        record({ id: 'a1', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r2' } }, outcome: 'failed', approval: undefined, error: 'run r2 not found' }),
+        record({ id: 'a2', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r1' } }, outcome: 'succeeded', approval: undefined }),
+      )
+      const view = assistantView([block(watch('1:t0', 'run:r1'), watch('1:t1', 'run:r2')), ...rows], [], { records, calls: new Map() })
+      expect(view.actions.map((a) => [a.id, a.state, a.error])).toEqual([['1:t0', 'done', undefined], ['1:t1', 'failed', 'run r2 not found']])
+      expect(view.rows).toEqual([])
+    })
+
     it('gives parallel watch calls the records of their own targets', () => {
       const watch = (id: string, input: Record<string, unknown>, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_watch', status, input, result })
       const { records, rows } = notices(1,
