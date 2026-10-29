@@ -29,7 +29,11 @@ pull request runs are in
 
 ## Unit tests
 
-`make test` runs `go test -race` over every package.
+`make test` runs `go test -race` over every package. `make test TEST_RACE=`
+drops the race detector; the SQLite driver is transpiled C, which the
+detector slows ten to twenty times (`internal/store` takes 26 s without it and
+over five minutes with it). CI runs pull requests without `-race` and the
+merge queue and `main` with it.
 
 ```sh
 make test                                   # everything
@@ -671,9 +675,8 @@ every merge queue entry and every push to `main`.
 | Job | Runs | Locally |
 | --- | --- | --- |
 | `audit` | `scripts/public-audit.sh` | `make public-audit` |
-| `lint` | Formatting, vet, workflow lint, `make lint`; `make vulncheck` as advice only | `make fmt-check vet lint-workflows lint` |
-| `build-and-test` | Unit tests, then `make build` | `make test build` |
-| `scripts` | Script and native hook tests | `make test-scripts test-native-hooks` |
+| `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on `main` pushes and merge queue runs only | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
+| `build-and-test` | Unit tests (`-race` on the merge queue and `main` only), then `make build` | `make test build` |
 | `smoke` | Standard image checks, then the `internal/harness` integration tests on the smoke image, amd64 and arm64 | [Real-agent smoke tests](#real-agent-smoke-tests) |
 | `agents` | [Real agents against a mock model](#real-agents-against-a-mock-model), amd64 | See that section |
 | `browser` | Companion image build and smoke, amd64 and arm64 | [The browser companion](#the-browser-companion) |

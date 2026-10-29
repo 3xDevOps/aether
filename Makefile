@@ -65,6 +65,12 @@ INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
 # shards the unit tests by setting TEST_PKGS or TEST_SKIP.
 TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|.|'))
 
+# Race detector for `test`. The SQLite driver is transpiled C, which the
+# detector slows ten to twenty times, so a pull request in CI sets this empty
+# and the merge queue and main keep -race. -parallel 16 lets the tests that
+# wait on a timer or a socket overlap instead of queueing behind GOMAXPROCS.
+TEST_RACE ?= -race
+
 # Release matrix. The server and the edge are Linux-only by design (see the
 # v1 cut-line); the CLI additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
@@ -195,7 +201,7 @@ browser-smoke:
 	$(BROWSER_RUN) --test /opt/aether-browser/companion.test.mjs
 
 test:
-	go test -race $(TEST_PKGS)
+	go test $(TEST_RACE) -parallel 16 $(TEST_PKGS)
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
 # carry them - the unit tests are `make test`'s job. CI shards it with

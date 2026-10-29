@@ -129,18 +129,40 @@ jobs:
           mode: restore
       - name: Check formatting
         run: make fmt-check
-      - name: Vet
-        run: make vet
       - name: Lint workflows
         run: make lint-workflows
       # Advisory only: the reachable Moby CVEs have no fixed release and
       # govulncheck cannot suppress individual findings, so a hard gate would
       # keep CI permanently red. Read the step output, do not ignore it.
       - name: Vulnerability scan (advisory)
+        if: ${{ github.event_name != 'pull_request' }}
         run: make vulncheck
         continue-on-error: true
+      - name: Restore golangci-lint analysis cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yml') }}-
+      # golangci-lint runs go vet's analyzers plus shadow over the default
+      # and edgeupgrade builds, so a separate `make vet` would compile the
+      # tree a second time for the same findings.
       - name: Lint
         run: make lint
+      - name: Save golangci-lint analysis cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yml') }}-${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Shell script tests
+        run: make test-scripts
+      - name: Native hook lifecycle tests
+        run: make test-native-hooks
 
   build-and-test:
     needs: changes
@@ -170,6 +192,8 @@ jobs:
         with:
           mode: restore
       - name: Unit tests
+        env:
+          TEST_RACE: ${{ github.event_name != 'pull_request' && '-race' || '' }}
         run: make test
       - name: Build binaries
         run: make build
@@ -188,30 +212,6 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           mode: save
-
-  scripts:
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Shell script tests
-        run: make test-scripts
-      - name: Native hook lifecycle tests
-        run: make test-native-hooks
 
   # internal/harness needs the agent images built here.
   smoke:
