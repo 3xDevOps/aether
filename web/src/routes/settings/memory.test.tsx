@@ -128,6 +128,16 @@ describe('memory in settings', () => {
     expect(screen.queryByRole('textbox', { name: 'Preference text' })).toBeNull()
   })
 
+  it("names a preference's own workspace when editing it from another", async () => {
+    const user = userEvent.setup()
+    useStore.setState({ workspaces: { [workspace.id]: workspace, 'ws-other': { ...workspace, id: 'ws-other', name: 'docs-site' } } })
+    show([pref({ workspace_id: 'ws-other' })])
+    await user.click(await screen.findByRole('button', { name: 'Edit' }))
+    const scope = within(document.getElementById('preference-pref-1')!).getByRole('radiogroup', { name: 'Applies to' })
+    expect(within(scope).getByRole('radio', { name: 'docs-site' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(scope).queryByRole('radio', { name: 'This workspace' })).toBeNull()
+  })
+
   it('turns a preference off and on without forgetting it', async () => {
     const user = userEvent.setup()
     const client = show([pref()], {
