@@ -27,6 +27,7 @@ export interface AssistantConfirmation {
 export interface AssistantActionTarget {
   workspace_id?: string
   run_id?: string
+  preference_id?: string
 }
 
 /** The server's record of one assistant action, on a transcript notice; a later record with the same `id` replaces an earlier one. */

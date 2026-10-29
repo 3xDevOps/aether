@@ -577,6 +577,38 @@ describe('preference cards', () => {
     expect(await within(notice).findByText('Undone')).toBeDefined()
   })
 
+  it("folds the server's record of a save into the card that made it", async () => {
+    const record: AssistantActionRecord = { id: 'a1', method: 'assistant.remember', summary: 'Saved your preference: "Prefer table output"', target: { preference_id: 'pref-1' }, outcome: 'succeeded', created_at: '2026-10-27T10:00:00Z' }
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'in_progress', { raw_input: { text: 'Prefer table output' } }),
+      item('notice', 1, { notice: { severity: 'info', title: record.summary, action: record } }),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    expect(await card(aside, /^Saved: Prefer table output\. Done$/)).toBeDefined()
+    expect(within(aside).queryByText(record.summary)).toBeNull()
+  })
+
+  it('gives each forget card the record of the preference it forgot', async () => {
+    const forgot = (id: string, preference: string, outcome: AssistantActionRecord['outcome']): AssistantActionRecord =>
+      ({ id, method: 'assistant.forget', summary: `Forget your preference: "${preference}"`, target: { preference_id: preference }, outcome, approval: 'card', created_at: '2026-10-27T10:00:00Z', ...(outcome === 'failed' ? { error: `preference ${preference} not found` } : {}) })
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Forget both'),
+      aether(1, 't1', 'aether_forget', 'in_progress', { raw_input: { id: 'pref-1' } }),
+      aether(1, 't2', 'aether_forget', 'in_progress', { raw_input: { id: 'pref-2' } }),
+      item('notice', 1, { notice: { severity: 'info', title: 'Failed: forget pref-2', action: forgot('a2', 'pref-2', 'failed') } }),
+      item('notice', 1, { notice: { severity: 'info', title: 'Forgot pref-1', action: forgot('a1', 'pref-1', 'succeeded') } }),
+      aether(1, 't1', 'aether_forget', 'completed', { raw_input: { id: 'pref-1' }, raw_output: { deleted: saved } }),
+      aether(1, 't2', 'aether_forget', 'failed', { raw_input: { id: 'pref-2' }, raw_output: 'preference pref-2 not found' }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const done = await card(aside, /^Forgotten: Prefer table output\. Done/)
+    expect(done.dataset.state).toBe('done')
+  })
+
   it('says how many preferences the assistant used and lists them on request', async () => {
     const aside = await openPanel([
       item('turn_start', 1),

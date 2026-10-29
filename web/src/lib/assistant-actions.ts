@@ -65,6 +65,7 @@ const toolMethods: Record<string, string | string[] | ((input: Record<string, un
   aether_swarm_manage: (input) => ({ release_worker: 'mission.worker.release', archive: 'mission.archive', unarchive: 'mission.unarchive' } as Record<string, string>)[text(input.action) ?? ''],
   aether_replace_integrator: 'mission.replace-integrator',
   aether_integration_decide: (input) => (input.action === 'deliver' ? 'integration.deliver' : 'integration.decide'),
+  aether_remember: 'assistant.remember',
   aether_forget: 'assistant.forget',
   aether_memory_add: 'memory.add',
   aether_memory_pin: (input) => (input.pin === false ? 'memory.unpin' : 'memory.pin'),
@@ -342,8 +343,8 @@ function callKey(action: AssistantAction): string | undefined {
  * The call a note belongs to. A record carries no tool call id; it is written
  * while its call runs, so it follows the call's first appearance. It goes to
  * the call that already holds its action, else to an unclaimed call of its
- * method whose input names no other run or workspace than its target: the
- * oldest such call of the newest block holding one, since a block's
+ * method that names no other run, workspace or preference than its target:
+ * the oldest such call of the newest block holding one, since a block's
  * identical calls are approved in turn and an older block's call may never
  * have been recorded. An older server's note names the run only in its
  * summary, so it goes to the one call that fits; with more, it stays a row.
@@ -361,10 +362,15 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
   // A call's idempotency key, which the record repeats, names it exactly; a call with another key is not it.
   const keyed = saved.idempotency_key ? open.find((d) => callKey(d.action) === saved.idempotency_key) : undefined
   if (keyed) return keyed
-  const fits = open.filter((d) => (!saved.idempotency_key || !callKey(d.action)) && (['run_id', 'workspace_id'] as const).every((key) => {
-    const named = text(d.action.input[key])
-    return !named || !saved.target?.[key] || named === saved.target[key]
-  }))
+  const fits = open.filter((d) => {
+    const preference = text(d.action.input.id) ?? text(record(record(d.action.result).preference).id)
+    return (!saved.idempotency_key || !callKey(d.action)) &&
+      (!preference || !saved.target?.preference_id || preference === saved.target.preference_id) &&
+      (['run_id', 'workspace_id'] as const).every((key) => {
+        const named = text(d.action.input[key])
+        return !named || !saved.target?.[key] || named === saved.target[key]
+      })
+  })
   const newest = fits.at(-1)?.block
   return fits.find((d) => d.block === newest)
 }
