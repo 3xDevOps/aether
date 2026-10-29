@@ -60,6 +60,11 @@ type AssistantConfirmation struct {
 	// auto-approval on.
 	OtherMember bool   `json:"other_member,omitempty"`
 	OtherOwner  string `json:"other_owner,omitempty"`
+	// Reason is the assistant's one line on why it launches, and Task a
+	// template launch's task as its params render it. Both are for the
+	// card only; the call sends neither.
+	Reason string `json:"reason,omitempty"`
+	Task   string `json:"task,omitempty"`
 }
 
 type AssistantStatus struct {
