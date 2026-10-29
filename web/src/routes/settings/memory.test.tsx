@@ -226,6 +226,24 @@ describe('memory in settings', () => {
     await waitFor(() => expect(screen.queryByText('Prefer table output')).toBeNull())
   })
 
+  it('does not put a forgotten preference back under a member who signed in meanwhile', async () => {
+    const user = userEvent.setup()
+    let read: (value: { preferences: Preference[]; enabled: boolean }) => void = () => {}
+    const listed = vi.fn().mockResolvedValueOnce({ preferences: [pref()], enabled: true }).mockReturnValueOnce(new Promise((resolve) => { read = resolve })).mockResolvedValue({ preferences: [], enabled: true })
+    const client = show([pref()], {
+      preferenceList: listed,
+      preferenceDelete: vi.fn(async () => ({ deleted: pref() })),
+      preferenceAdd: vi.fn(async (params) => ({ preference: pref({ id: 'pref-2', text: params.text }) })),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    await user.click(await screen.findByRole('button', { name: 'Undo' }))
+    act(() => useStore.setState({ identityKey: 'someone-else' }))
+    await act(async () => read({ preferences: [], enabled: true }))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(client.preferenceAdd).not.toHaveBeenCalled()
+  })
+
   it('refuses to put a forgotten preference back when the same text is already remembered', async () => {
     const user = userEvent.setup()
     const client = show([pref()], { preferenceDelete: vi.fn(async () => ({ deleted: pref() })) })
