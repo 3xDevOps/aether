@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
 import type { AssistantSettings } from '@/lib/assistant-types'
@@ -52,6 +52,15 @@ describe('memory in settings', () => {
     render(<SettingsRoute params={{ section: 'memory' }} client={client} />)
     expect(await screen.findByRole('heading', { name: 'Memory' })).toBeDefined()
     expect(await screen.findByText('Prefer table output')).toBeDefined()
+  })
+
+  it('offers the assistant switch in search only where the page shows it', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['preference.list'], ws: [] } })
+    render(<SettingsRoute params={{ section: 'memory' }} client={fakeApi({ preferenceList: vi.fn(async () => ({ preferences: [pref()], enabled: true })) })} />)
+    await screen.findByText('Prefer table output')
+    expect(screen.queryByRole('checkbox', { name: preferencesLabel })).toBeNull()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search settings' }), { target: { value: preferencesLabel } })
+    expect(screen.getByRole('status').textContent).toBe(`No settings match “${preferencesLabel}”`)
   })
 
   it('says who can see the preferences and lists each with its scope, source and times', async () => {
