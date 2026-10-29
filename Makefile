@@ -208,8 +208,9 @@ test:
 # INTEGRATION_PKGS, INTEGRATION_SKIP, INTEGRATION_RUN, and
 # INTEGRATION_SKIP_PATTERN. The run and skip patterns are optional; they are
 # quoted so the shell does not interpret their metacharacters.
+# A non-empty INTEGRATION_NORACE turns the race detector off.
 test-integration:
-	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS) \
+	go test $(if $(INTEGRATION_NORACE),,-race) -timeout=30m -tags integration $(INTEGRATION_PKGS) \
 		$(if $(INTEGRATION_RUN),-run '$(INTEGRATION_RUN)') \
 		$(if $(INTEGRATION_SKIP_PATTERN),-skip '$(INTEGRATION_SKIP_PATTERN)')
 
@@ -219,7 +220,7 @@ agents-image:
 # Real Claude Code and Codex runs in AGENTS_IMAGE against a mock model. It
 # needs Docker and real git, and `make agents-image` first.
 test-agents:
-	AETHER_AGENTS_IMAGE='$(AGENTS_IMAGE)' go test -race -count=1 -timeout=15m -tags integration \
+	AETHER_AGENTS_IMAGE='$(AGENTS_IMAGE)' go test $(if $(INTEGRATION_NORACE),,-race) -count=1 -timeout=15m -tags integration \
 		-run '^(TestIntegrationRealAgents|TestIntegrationSilentModelParksAsPossibleStall)$$' -v ./internal/server
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
