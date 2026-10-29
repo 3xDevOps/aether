@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -136,7 +137,7 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if perr != nil {
 		return nil, perr
 	}
-	p, perr := decodeParams[protocol.TemplateLaunchParams](params)
+	p, perr := decodeLaunchParams[protocol.TemplateLaunchParams](params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -147,10 +148,19 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if p.Name == "" {
 		return nil, invalidParams("name is required")
 	}
-	key := p.IdempotencyKey
-	p.IdempotencyKey = ""
+	// A retry of a launch keeps its receipt after the template changes, so
+	// the version is not part of the params it must repeat, nor is
+	// replay_only.
+	key, version, replayOnly := p.IdempotencyKey, p.ExpectedVersion, p.ReplayOnly
+	p.IdempotencyKey, p.ExpectedVersion, p.ReplayOnly = "", "", false
+	if replayOnly && key == "" {
+		return nil, invalidParams("replay_only needs the idempotency_key of the launch to return")
+	}
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
-		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, created)
+		if replayOnly {
+			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: no run was launched under idempotency_key %q", protocol.MethodTemplateLaunch, key)}
+		}
+		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, version, created)
 		if err != nil {
 			return nil, templateError(err)
 		}
@@ -249,6 +259,9 @@ func templateError(err error) *protocol.Error {
 		errors.Is(err, templates.ErrInvalidDefinition) {
 		return invalidParams(err.Error())
 	}
+	if errors.Is(err, templates.ErrChanged) {
+		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}
+	}
 	return rpcError(err)
 }
 
@@ -265,6 +278,7 @@ func templateWire(t *store.Template) protocol.Template {
 		Params:      t.Params,
 		BudgetUSD:   t.BudgetUSD,
 		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),
+		Version:     templates.Version(t),
 	}
 }
 

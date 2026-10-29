@@ -113,6 +113,10 @@ pushed to a registry.
   different settings than the container was created with (the standard image,
   environment variables, mounts, user or resource limits). Save before an
   admin changes them.
+- Upgrading to the release that moved the assistant into its own container
+  changes the environment's mounts (it no longer mounts the assistant's tool
+  socket), so each environment is recreated once at its next open after it
+  stops. Save first to keep unsaved changes.
 
 ## Reset to standard
 

@@ -5,7 +5,7 @@ import { ActionHistory } from '@/components/assistant/action-history'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
-import { AssistantFailed, AssistantRestart, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
+import { AssistantFailed, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
 import { AssistantSheet, AutoApproveSuggestion } from '@/components/assistant/suggestion'
 import { assistantRows, Transcript } from '@/components/assistant/transcript'
 import { Confirm } from '@/components/confirm'
@@ -32,8 +32,8 @@ import { assistantShareView, syncViewContext, trackViewContext } from '@/store/v
 
 const stateWord: Record<AssistantState, string> = {
   setup: 'Needs setup',
-  needs_restart: 'Restart needed',
   idle: 'Ready',
+  installing: 'Installing',
   starting: 'Starting',
   running: 'Generating…',
   failed: 'Failed',
@@ -41,8 +41,8 @@ const stateWord: Record<AssistantState, string> = {
 
 const stateTone: Record<AssistantState, Tone> = {
   setup: 'needs-you',
-  needs_restart: 'needs-you',
   idle: 'neutral',
+  installing: 'working',
   starting: 'working',
   running: 'working',
   failed: 'failed',
@@ -112,7 +112,6 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
     )
   }
   if (status.state === 'setup') return <AssistantSetup status={status} />
-  if (status.state === 'needs_restart') return <AssistantRestart />
 
   const failed = status.state === 'failed'
   const connection = session && connectionWord[session.stream]
@@ -165,7 +164,7 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
   const [confirming, setConfirming] = useState(false)
   const agent = status?.agents.find((item) => item.name === status.agent)?.display_name ?? status?.agent
   const announcement = useAnnouncement(agent || 'The assistant')
-  const ready = status !== null && status.state !== 'setup' && status.state !== 'needs_restart'
+  const ready = status !== null && status.state !== 'setup'
   const onRun = useStore((s) => s.route.name === 'run')
   return (
     <>
@@ -314,9 +313,9 @@ export function AssistantPanel() {
   const supported = useAssistantAvailable()
   const textarea = useRef<HTMLTextAreaElement>(null)
   const shown = supported && open
-  const hasSession = supported && state !== undefined && state !== 'setup' && state !== 'needs_restart'
+  const hasSession = supported && state !== undefined && state !== 'setup'
   // Closed, the stream stays up only while the assistant works or waits on an approval.
-  const streamable = hasSession && (open || state === 'running' || state === 'starting' || waiting)
+  const streamable = hasSession && (open || state === 'running' || state === 'installing' || state === 'starting' || waiting)
 
   const close = () => {
     setOpen(false)

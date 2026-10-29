@@ -4,29 +4,35 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // usageByName answers each account's Claude quota from its display name; an
-// account without an entry has no OAuth login, and one in modelOnly reports
-// only a per-model window.
+// account without an entry has no OAuth login, one in modelOnly reports
+// only a per-model window, and one in failing fails to read.
 type usageByName struct {
 	t         *testing.T
 	names     map[domain.MemberID]string
 	used      map[string]float64
 	modelOnly map[string]bool
+	failing   map[string]bool
 	reset     time.Time
 }
 
 func (u usageByName) Read(_ context.Context, account domain.MemberID, refresh bool) ([]quota.Provider, error) {
 	if refresh {
 		u.t.Errorf("selection refreshed %s's quota; it must use the cache", account)
+	}
+	if u.failing[u.names[account]] {
+		return nil, context.DeadlineExceeded
 	}
 	used, ok := u.used[u.names[account]]
 	if !ok {
@@ -147,6 +153,110 @@ func TestSelect(t *testing.T) {
 			got, excluded := Select(ctx, db, measured, launcher, ids[tc.requested], policy, launchable)
 			if got != ids[tc.want] || (excluded != nil) != (tc.failing != "") ||
 				(excluded != nil && !strings.Contains(excluded.Error(), "input/output error")) {
+				t.Fatalf("Select = %s, excluded %v; want %s", names[got], excluded, tc.want)
+			}
+			skipped := Skipped(excluded)
+			if tc.failing != "" && (len(skipped) != 1 || skipped[0].AccountMemberID != string(ids[tc.failing]) ||
+				skipped[0].Error != ReasonAgent) {
+				t.Fatalf("Skipped = %+v, want %s with the fixed reason", skipped, tc.failing)
+			}
+		})
+	}
+}
+
+func TestSkippedGivesFixedReasons(t *testing.T) {
+	t.Parallel()
+	excluded := errors.Join(
+		&Skip{Account: "mem-a", Reason: ReasonAccess, Err: errors.New("get member mem-b: database is locked")},
+		&Skip{Account: "mem-c", Reason: ReasonAgent, Err: errors.New("open /var/lib/aether/memberhome/mem-c/.claude: permission denied")},
+		errors.New("list fallback accounts: database is locked"))
+	got := Skipped(excluded)
+	want := []protocol.SkippedAccount{{AccountMemberID: "mem-a", Error: ReasonAccess}, {AccountMemberID: "mem-c", Error: ReasonAgent}, {Error: ReasonList}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Skipped = %+v, want %+v", got, want)
+	}
+}
+
+// A run whose agent reported the usage limit on Ada's account continues on
+// an account with usage known to be left, and only without one on an account
+// whose usage cannot be read, never on one it already used.
+func TestMeasureNextTriesUnknownUsageLast(t *testing.T) {
+	future := time.Now().Add(time.Hour)
+	for _, tc := range []struct {
+		name      string
+		harness   string
+		order     []string
+		used      []string
+		modelOnly []string
+		failing   []string
+		quota     map[string]float64
+		want      string
+	}{
+		{name: "an agent without quota windows does not move", harness: "opencode", want: "Ada"},
+		{name: "an unreadable account takes the run", quota: map[string]float64{"Lena": 97, "Cy": 99}, want: "Bo"},
+		{name: "usage known to be left wins", quota: map[string]float64{"Lena": 97, "Cy": 40}, want: "Cy"},
+		{name: "a failed read is unknown, not exhausted", failing: []string{"Cy"},
+			quota: map[string]float64{"Lena": 97, "Bo": 99, "Cy": 0}, want: "Cy"},
+		{name: "a row without the agent's windows is unknown", modelOnly: []string{"Bo"},
+			quota: map[string]float64{"Lena": 97, "Bo": 0, "Cy": 99}, want: "Bo"},
+		{name: "explicit order prefers known usage to an earlier unknown", order: []string{"Bo", "Cy"},
+			quota: map[string]float64{"Cy": 40}, want: "Cy"},
+		{name: "explicit order takes its first unknown", order: []string{"Cy", "Bo"},
+			quota: map[string]float64{"Lena": 0}, want: "Cy"},
+		{name: "every account exhausted keeps the run", quota: map[string]float64{"Lena": 97, "Bo": 99, "Cy": 96}, want: "Ada"},
+		{name: "an account the run used is not tried again", used: []string{"Bo"},
+			quota: map[string]float64{"Lena": 97, "Cy": 96}, want: "Ada"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, err := storetest.Open(filepath.Join(t.TempDir(), "fallback.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			ids := map[string]domain.MemberID{}
+			names := map[domain.MemberID]string{}
+			for _, name := range []string{"Lena", "Ada", "Bo", "Cy"} {
+				m := &domain.Member{DisplayName: name, TailnetLogin: strings.ToLower(name) + "@example.com", Color: "#3cb44b", Role: domain.RoleCollaborator}
+				if createErr := db.CreateMember(ctx, m); createErr != nil {
+					t.Fatal(createErr)
+				}
+				ids[name], names[m.ID] = m.ID, name
+			}
+			launcher := ids["Lena"]
+			for _, owner := range []string{"Ada", "Bo", "Cy"} {
+				if shareErr := db.ShareAccount(ctx, ids[owner], launcher); shareErr != nil {
+					t.Fatal(shareErr)
+				}
+			}
+			order := make([]string, 0, len(tc.order))
+			for _, name := range tc.order {
+				order = append(order, string(ids[name]))
+			}
+			policy, err := Policy(order, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			used := make([]domain.MemberID, 0, len(tc.used))
+			for _, name := range tc.used {
+				used = append(used, ids[name])
+			}
+			usage := usageByName{t: t, names: names, used: tc.quota, modelOnly: map[string]bool{}, failing: map[string]bool{}, reset: future}
+			for _, name := range tc.modelOnly {
+				usage.modelOnly[name] = true
+			}
+			for _, name := range tc.failing {
+				usage.failing[name] = true
+			}
+			harness := tc.harness
+			if harness == "" {
+				harness = "claude"
+			}
+			measured, err := MeasureNext(ctx, db, usage, launcher, ids["Ada"], used, harness, policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, excluded := Select(ctx, db, measured, launcher, ids["Ada"], policy, nil); got != ids[tc.want] || excluded != nil {
 				t.Fatalf("Select = %s, excluded %v; want %s", names[got], excluded, tc.want)
 			}
 		})

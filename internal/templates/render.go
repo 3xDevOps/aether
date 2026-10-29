@@ -2,7 +2,9 @@ package templates
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -61,6 +63,11 @@ func checkParams(task string, defaults map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// Placeholders are the parameter names task's prompt uses, sorted.
+func Placeholders(task string) []string {
+	return slices.Sorted(maps.Keys(params(task)))
 }
 
 func params(task string) map[string]struct{} {

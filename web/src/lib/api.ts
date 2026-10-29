@@ -12,8 +12,11 @@ import type {
   ChildLimits,
   ChildSettings,
   ChildSettingsParams,
+  LaunchDefaultsResult,
+  LaunchDefaultsSetParams,
   Connector,
   ConnectorCode,
+  ConnectorList,
   CoordMessagesListResult,
   DaemonInstallResult,
   DaemonStatusResult,
@@ -569,6 +572,8 @@ export const api = {
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   childSettings: (params: ChildSettingsParams = {}) => call<ChildSettings>('child.settings', params),
+  launchDefaultsGet: () => call<LaunchDefaultsResult>('launch.defaults.get'),
+  launchDefaultsSet: (params: LaunchDefaultsSetParams) => call<LaunchDefaultsResult>('launch.defaults.set', params),
   runChildren: (runID: string) => call<RunChildrenResult>('run.children', { run_id: runID }),
   runChildrenAllow: (runID: string, children: RunChildrenSetting) =>
     call<{ children: RunChildrenSetting }>('run.children.allow', { run_id: runID, children }),
@@ -1071,7 +1076,7 @@ export const api = {
   pushTest: (endpoint: string) => call<unknown>('push.test', { endpoint }),
   pushActive: () => call<unknown>('push.active'),
   connectorCode: () => call<ConnectorCode>('connector.code'),
-  connectorList: () => call<{ connectors: Connector[] }>('connector.list'),
+  connectorList: () => call<ConnectorList>('connector.list'),
   connectorRevoke: (connectorID: string) => call<{ connector: Connector }>('connector.revoke', { connector_id: connectorID }),
   slackStatus: () => call<SlackStatusResult>('slack.status'),
   slackLink: () => call<SlackLinkResult>('slack.link'),
@@ -1205,6 +1210,8 @@ export const api = {
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
+  assistantLoginSocket: (agent: string) =>
+    socketURL(`/ws/terminal?assistant_login=${encodeURIComponent(agent)}`),
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),

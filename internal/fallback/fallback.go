@@ -15,6 +15,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -41,6 +42,12 @@ type QuotaReader interface {
 var windows = map[string][]string{
 	"claude": {"five_hour", "seven_day"},
 	"codex":  {"primary", "secondary"},
+}
+
+// Reads reports whether Aether reads harness's usage, and so can move its
+// runs to another account.
+func Reads(harness string) bool {
+	return windows[harness] != nil
 }
 
 func Policy(order []string, disabled bool) (domain.AccountFallback, error) {
@@ -85,8 +92,12 @@ func ResolveLaunchAccount(ctx context.Context, st store.Store, actor domain.Memb
 }
 
 // Measured is the highest used share of each account's quota windows, for
-// the accounts whose usage could be read.
+// the accounts whose usage could be read, and Unknown for a candidate
+// MeasureNext could not read.
 type Measured map[domain.MemberID]float64
+
+// Unknown is the Measured value of a candidate whose usage could not be read.
+const Unknown = -1
 
 // Measure reads the usage Select decides on: the requested account's, and,
 // only when it is exhausted, every candidate's. It reads vendor quota, so
@@ -108,7 +119,7 @@ func Measure(ctx context.Context, st store.Store, usage QuotaReader, launcher do
 	if used < ExhaustedPercent {
 		return measured, nil
 	}
-	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured); err != nil {
+	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured, false); err != nil {
 		return nil, err
 	}
 	return measured, nil
@@ -117,7 +128,9 @@ func Measure(ctx context.Context, st store.Store, usage QuotaReader, launcher do
 // MeasureNext reads the usage Select decides on for a running run whose
 // vendor reported its current account's usage exhausted: current and every
 // account in used count as exhausted, so Select returns current when no
-// other candidate qualifies.
+// other candidate qualifies. A candidate whose usage cannot be read is
+// recorded as Unknown: the run has stopped either way, so Select tries it
+// when no candidate has usage known to be left.
 func MeasureNext(ctx context.Context, st store.Store, usage QuotaReader, launcher, current domain.MemberID, used []domain.MemberID, harness string, policy domain.AccountFallback) (Measured, error) {
 	if policy.Disabled || usage == nil {
 		return nil, nil
@@ -126,13 +139,15 @@ func MeasureNext(ctx context.Context, st store.Store, usage QuotaReader, launche
 	for _, account := range used {
 		measured[account] = 100
 	}
-	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured); err != nil {
+	// An agent with no quota windows is never measured, so its candidates
+	// stay out rather than all reading as Unknown.
+	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured, Reads(harness)); err != nil {
 		return nil, err
 	}
 	return measured, nil
 }
 
-func measureCandidates(ctx context.Context, st store.Store, usage QuotaReader, launcher domain.MemberID, harness string, policy domain.AccountFallback, measured Measured) error {
+func measureCandidates(ctx context.Context, st store.Store, usage QuotaReader, launcher domain.MemberID, harness string, policy domain.AccountFallback, measured Measured, unknown bool) error {
 	candidates, err := candidates(ctx, st, launcher, policy)
 	if err != nil {
 		return err
@@ -150,11 +165,16 @@ func measureCandidates(ctx context.Context, st store.Store, usage QuotaReader, l
 			continue
 		}
 		wait.Go(func() {
-			if used, ok := usedPercent(ctx, usage, candidate, harness); ok {
-				mu.Lock()
-				measured[candidate] = used
-				mu.Unlock()
+			used, ok := usedPercent(ctx, usage, candidate, harness)
+			if !ok && !unknown {
+				return
 			}
+			if !ok {
+				used = Unknown
+			}
+			mu.Lock()
+			measured[candidate] = used
+			mu.Unlock()
 		})
 	}
 	wait.Wait()
@@ -171,7 +191,8 @@ type Launchable func(ctx context.Context, account domain.MemberID) (bool, error)
 // holds the shared authorization mutex until the scheduler's durable launch
 // boundary, so each candidate needs only its account authorization checked
 // here; an account Measure could not read, or launchable refuses, is never
-// chosen. A nil launchable refuses nothing. When no candidate qualifies, the
+// chosen, and an Unknown one only when no candidate has usage known to be
+// left. A nil launchable refuses nothing. When no candidate qualifies, the
 // launch stays on the requested account. A candidate whose check fails is
 // left out like a refused one, so it never fails a launch that can stay on
 // the requested account; excluded joins those failures.
@@ -191,35 +212,45 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 		account domain.MemberID
 		used    float64
 	}
-	var found []usable
+	var (
+		found   []usable
+		unknown domain.MemberID
+	)
 	for _, candidate := range candidates {
 		if candidate == requested {
 			continue
 		}
 		if _, authErr := ResolveLaunchAccount(ctx, st, launcher, string(candidate)); authErr != nil {
 			if !errors.Is(authErr, permissions.ErrDenied) && !errors.Is(authErr, store.ErrNotFound) {
-				failures = append(failures, fmt.Errorf("account %s: %w", candidate, authErr))
+				failures = append(failures, &Skip{Account: candidate, Reason: ReasonAccess, Err: authErr})
 			}
 			continue
 		}
 		used, ok := measured[candidate]
-		if !ok || used >= ExhaustedPercent {
+		if !ok || used >= ExhaustedPercent || (used == Unknown && unknown != "") {
 			continue
 		}
 		if launchable != nil {
 			allowed, launchErr := launchable(ctx, candidate)
 			if launchErr != nil {
-				failures = append(failures, fmt.Errorf("account %s: %w", candidate, launchErr))
+				failures = append(failures, &Skip{Account: candidate, Reason: ReasonAgent, Err: launchErr})
 				continue
 			}
 			if !allowed {
 				continue
 			}
 		}
+		if used == Unknown {
+			unknown = candidate
+			continue
+		}
 		if len(policy.Order) > 0 {
 			return candidate, errors.Join(failures...)
 		}
 		found = append(found, usable{candidate, used})
+	}
+	if len(found) == 0 && unknown != "" {
+		return unknown, errors.Join(failures...)
 	}
 	if len(found) == 0 {
 		return requested, errors.Join(failures...)
@@ -231,6 +262,48 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 		return found[i].account < found[j].account
 	})
 	return found[0].account, errors.Join(failures...)
+}
+
+// The reasons Skipped gives launchers for a left-out account. The errors
+// behind them can name member homes and other members, so they stay in the
+// server log.
+const (
+	ReasonAccess = "your access to the account could not be checked"
+	ReasonAgent  = "the account's agent could not be checked"
+	ReasonList   = "the fallback accounts could not be listed"
+)
+
+// Skip is a fallback candidate Select left out because checking it failed.
+type Skip struct {
+	Account domain.MemberID
+	Reason  string
+	Err     error
+}
+
+func (s *Skip) Error() string { return fmt.Sprintf("account %s: %v", s.Account, s.Err) }
+
+func (s *Skip) Unwrap() error { return s.Err }
+
+// Skipped lists what excluded, Select's second result, left out, each with
+// its reason; a failure to list the candidates names no account.
+func Skipped(excluded error) []protocol.SkippedAccount {
+	if excluded == nil {
+		return nil
+	}
+	errs := []error{excluded}
+	if joined, ok := excluded.(interface{ Unwrap() []error }); ok {
+		errs = joined.Unwrap()
+	}
+	out := make([]protocol.SkippedAccount, 0, len(errs))
+	for _, err := range errs {
+		var skip *Skip
+		if errors.As(err, &skip) {
+			out = append(out, protocol.SkippedAccount{AccountMemberID: string(skip.Account), Error: skip.Reason})
+			continue
+		}
+		out = append(out, protocol.SkippedAccount{Error: ReasonList})
+	}
+	return out
 }
 
 func candidates(ctx context.Context, st store.Store, launcher domain.MemberID, policy domain.AccountFallback) ([]domain.MemberID, error) {

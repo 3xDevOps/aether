@@ -318,7 +318,7 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/acp/<run_id>` | the session item stream of a run with `acp: true` (WebSocket) |
 | `GET` | `/ws/assistant` | the caller's assistant session: `AssistantFrame` lines, each an item, a reset, or the whole `AssistantStatus` (WebSocket). A status frame follows the ack and every change of the state or the pending confirmations. Header `{"after_seq":0}`; the ack is an `ACPStreamResponse`. There is no control lease. Every end other than a revocation closes 1012 and the client resubscribes from its last seq |
-| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
+| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket); with `assistant_login=<agent>` instead, that agent's sign-in for the caller's assistant |
 | `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
 | `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
 | `GET` | `/api/v1/run/<run_id>/messages/<message_id>/attachments/<index>` | persisted chat image bytes; zero-based attachment index, requires View on the run |
@@ -557,9 +557,21 @@ take the fallback policy as `fallback_account_member_ids` (member IDs, tried
 in order) or `no_fallback: true`; omitting both orders the launcher's
 accounts by usage left, and sending both is refused with `-32602`
 `fallback_account_member_ids and no_fallback cannot both be set`. When no
-account qualifies, the run launches on the requested account. Swarm
-attempts carry `launch_account_id`, the account the worker's run launched
-on.
+account qualifies, the run launches on the requested account. Run snapshots
+and swarms carry the policy back in the same two fields. A fallback account
+whose check failed, rather than one that is exhausted or not shared, is left
+out, and `run.launch` and `mission.create` list it in
+`skipped_fallback_accounts` `[{account_member_id, error}]` (an entry with no
+account means listing the candidates failed); `error` is a fixed reason, such
+as `the account's agent could not be checked`, and the server log has the
+detail. A replay does not repeat them.
+Swarm attempts carry `launch_account_id`, the account the worker's run
+launched on.
+
+`run.launch`, `mission.create` and `template.launch` refuse a param they do
+not know with `-32602` `unknown param "<name>"; this server does not support
+it`, so a client never launches without an option it asked for. Other
+methods ignore unknown params.
 
 Run snapshots carry `status_changed_at` (RFC 3339): when the run entered its
 current `status`, or its current `reason` while it is `needs-attention`. A
@@ -1013,14 +1025,34 @@ again, so look the run up instead.
 
 `run.pr.status` and `run.pr.feedback` default an omitted `expected` to the
 checkout's branch and head, and an omitted `target` to the pull request the
-dashboard proposes: the branch's upstream (else `origin`, when the
-workspace sets an origin) as the head, into the run's base branch on the
-workspace's GitHub source, or on the head repository without one. A
-checkout with no GitHub push remote answers `error` saying to pass
-`target`, and one on a detached HEAD answers `error` saying to pass both. `run.pr.status`
-returns the `expected` and `target` it used, to pass to `run.pr.create`. Once a finished run's container is gone, both report the pull
-request the run last recorded (`number`, `url`, `state`); `run.pr.feedback`
-then has no checks or comments, and `error` says why.
+dashboard proposes: the branch's upstream (else `origin`, when the workspace
+sets an origin) as the head, into the run's base branch on the workspace's
+GitHub source, or on the head repository without one. A checkout with no GitHub
+push remote answers `error` saying to pass `target`, and one on a detached HEAD
+answers `error` saying to pass both. `run.pr.status` returns the `expected` and
+`target` it used, to pass to `run.pr.create`. Once a finished run's container is
+gone, both report the pull request the run last recorded (`number`, `url`,
+`state`). `run.pr.feedback` then reads the pull request, its checks and its
+reviews from GitHub in one read, with the GitHub login of the run's home, as
+`gh` in the run did, so `head_oid`, `state` and `merged_at` match the checks;
+it has no comments, `mergeable` or `merge_state_status`, and sets
+`comments_unavailable: true` so empty comment lists do not read as none,
+within the same `limit` and byte budget; `truncated` is also set when a review
+body was cut at 2000 characters, and `error` says why when that read fails.
+When only the reviews fail, it keeps the checks, sets
+`reviews_unavailable: true` and says why in `error`.
+
+A server without child runs answers their methods with `-32004` and
+`data: {"reason":"children_unavailable"}`.
+
+`template.list` gives each template a `version`, which changes whenever its
+task, agent, mode, model, effort or parameter defaults do. `template.launch` with
+`expected_version` fails with `-32003` `templates: template changed: <name>
+was saved again and is now version <new>, not <old>` instead of launching a
+template changed since it was read. A retry with the launch's `idempotency_key` replays its
+run whatever `expected_version` it names. With `replay_only: true` it launches
+nothing: it returns the key's run, or fails with `-32000` when the key started
+none.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the
@@ -1109,14 +1141,14 @@ unavailable owned source remains the server's protocol error.
 | `terminal.file` | `TerminalFileParams` (`{"run_id":"<run-id>","name":"notes.md","content":"<base64-file-bytes>"}`; `run_id` optional) | `TerminalUploadResult` (`{"path":"/home/<account>/.aether/terminal-files/<random>/notes.md"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
-| `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `needs_restart`, `idle`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the run belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `needs_restart` means the environment was created before the assistant existed and lacks its mounts |
-| `assistant.start` | `{"agent":"claude","restart_environment":false}` (both optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their own agent in their environment, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation. `restart_environment` stops and recreates the environment first |
+| `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `idle`, `installing`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the run belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `installing` means a start is installing the agent in the assistant's container |
+| `assistant.start` | `{"agent":"claude"}` (optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their agent in the caller's assistant container, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation |
 | `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `mission`, `pr`, `check`, `failure`, `task`) and any of `workspace_id`, `run_id`, `mission_id`, `task_id`, `attempt_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
 | `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's held view context, which the assistant reads with `aether_view_context` along with its `source` (`prompt` or `navigation`) and `age_seconds`, unless `share_view` is off. An update whose `captured_at` is before the held view's is dropped while that view is under 10 seconds old, so a late update never replaces the view a prompt just carried; after that the last one received wins, whatever the device's clock. One without `route` forgets the held view: the member removed the page from their draft. Kept in memory only |
 | `assistant.cancel` | none | empty result; cancels the turn in flight |
 | `assistant.answer` | `{"request_id":"...","option_id":"...","values":{}}` | empty result; answers one of the harness's permission prompts or questions |
 | `assistant.confirm` | `{"confirmation_id":"...","approve":true}` | empty result; answers a tool call waiting for approval. A confirmation expires after 10 minutes |
-| `assistant.reset` | none | `AssistantStatus` - stops the session and discards the conversation |
+| `assistant.reset` | none | `AssistantStatus` - stops the session, discards the conversation and deletes the agent's state in the assistant's home |
 | `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false}`) - the caller's own assistant settings. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's run. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
 | `assistant.history` | `{"before_seq":0,"limit":1000}` | like `run.acp.history`. A `notice` item may carry an `action` record, below |
 | `assistant.item` | `{"seq":12}` | like `run.acp.item` |
@@ -2911,6 +2943,12 @@ open as a viewer. A run accepts at most 32 of these sockets at once; the next is
 The member environment terminal uses the same binary-output and JSON-control
 framing as run attaches. The `tab` query is `main` or a client-selected name
 matching `^[a-z0-9-]{1,32}$`.
+
+With `assistant_login=claude` or `assistant_login=codex` the stream is that
+agent's sign-in, run in the caller's assistant container
+([assistant.md](assistant.md#first-use)), and `tab` is ignored. The server
+installs the adapter first if needed, so the ack can take a minute. The stream
+ends when the sign-in exits; there is no replay of an earlier sign-in.
 
 1. Client sends one text header with `cols` and `rows`, and `follow` where
    it means the same as it does for an attach. The gateway ensures the

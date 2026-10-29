@@ -144,25 +144,53 @@ export function asRow(step: Step): SessionRow {
 /** A boundary starts a segment: a person's message, a wake or a new agent session. */
 export type Part = { kind: 'boundary'; row: SessionRow } | { kind: 'step'; step: Step }
 
+/** Aether's end-of-turn report, run as a command or called as an MCP tool. */
+const reportCall = /(?:^|[;&|]\s*)(?:\S*\/)?aether-internal report\b|(?:^|[_.])aether_report$/
+
 /**
- * Splits a turn into segments at each boundary. Within a segment every step
- * up to the last piece of work joins one block; the prose after it is the
- * answer, outside the block. A segment without work keeps its rows as they are.
+ * Splits a turn into segments at each boundary. Within a segment the agent's
+ * prose stays in the conversation, and the work between two pieces of prose
+ * joins one block. A segment without work keeps its rows as they are.
  */
 export function segmentTurn(turn: number, parts: Part[], options: { start?: string; open: boolean; outcome?: Extract<SessionRow, { kind: 'finished' }> }): SessionRow[] {
   const rows: SessionRow[] = []
   let boundary: SessionRow | undefined
   let steps: Step[] = []
   const flush = (last: boolean) => {
-    let cut = -1
-    steps.forEach((step, index) => {
-      if (workKinds.has(step.kind)) cut = index
-    })
-    if (cut !== -1) {
-      const start = boundary?.at ?? options.start ?? steps[0]!.at
-      rows.push(stepsBlock(`steps:${turn}:${boundary?.id ?? 'start'}`, steps.slice(0, cut + 1), start, last && options.open))
+    // A report made after the reply, with the thinking just before it, joins the work ahead of the reply, so the reply ends the segment.
+    const ordered: Step[] = []
+    for (const step of steps) {
+      if (step.kind !== 'tool' || !reportCall.test(step.entry.name ?? step.entry.command ?? step.entry.label)) {
+        ordered.push(step)
+        continue
+      }
+      let at = ordered.length
+      while (at > 0 && ordered[at - 1]!.kind === 'thought') at--
+      const thinking = ordered.splice(at)
+      while (at > 0 && (ordered[at - 1]!.kind === 'narration' || ordered[at - 1]!.kind === 'event')) at--
+      ordered.splice(at, 0, ...thinking, step)
     }
-    rows.push(...steps.slice(cut + 1).map(asRow))
+    let start = boundary?.at ?? options.start
+    let run: Step[] = []
+    const close = (final: boolean) => {
+      let cut = -1
+      run.forEach((step, index) => {
+        if (workKinds.has(step.kind)) cut = index
+      })
+      if (cut !== -1) rows.push(stepsBlock(`steps:${turn}:${run[0]!.id}`, run.slice(0, cut + 1), start ?? run[0]!.at, final && last && options.open))
+      rows.push(...run.slice(cut + 1).map(asRow))
+      run = []
+    }
+    for (const step of ordered) {
+      if (step.kind !== 'narration') {
+        run.push(step)
+        continue
+      }
+      close(false)
+      rows.push(asRow(step))
+      start = undefined
+    }
+    close(true)
     steps = []
   }
   for (const part of parts) {

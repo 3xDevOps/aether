@@ -148,6 +148,11 @@ type RunController interface {
 	EnsureRunShellTabReserved(ctx context.Context, run domain.RunID, tab string, cols, rows uint) (ptyhost.ShellTabReservation, error)
 	EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
 	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
+	// StartAssistantLogin runs agent's sign-in for the member's assistant
+	// and returns the PTY session that streams it.
+	StartAssistantLogin(ctx context.Context, member domain.MemberID, agent string, cols, rows uint) (ptyhost.SessionKey, error)
+	// EndAssistantLogin removes the transcript of a sign-in that exited.
+	EndAssistantLogin(ctx context.Context, member domain.MemberID, agent string) error
 	StopTerminal(ctx context.Context, member domain.MemberID) error
 	// WithStoppedTerminal excludes terminal recreation through afterStop.
 	// The callback may lock member caches but must not reenter terminal lifecycle.

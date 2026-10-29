@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,6 +224,11 @@ func rawAttachRequest(t *testing.T, e *testEnv, signer ssh.Signer, req protocol.
 }
 func rawTerminal(t *testing.T, e *testEnv, signer ssh.Signer, withPTY bool, tab string) (rawAttachConn, protocol.TerminalResponse) {
 	t.Helper()
+	return rawTerminalRequest(t, e, signer, withPTY, protocol.TerminalRequest{Tab: tab})
+}
+
+func rawTerminalRequest(t *testing.T, e *testEnv, signer ssh.Signer, withPTY bool, req protocol.TerminalRequest) (rawAttachConn, protocol.TerminalResponse) {
+	t.Helper()
 	client, err := e.dialWith(signer, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -265,7 +272,7 @@ func rawTerminal(t *testing.T, e *testEnv, signer ssh.Signer, withPTY bool, tab 
 		t.Fatalf("subsystem: ok=%v err=%v", ok, rerr)
 	}
 	r := bufio.NewReader(ch)
-	header, err := json.Marshal(protocol.TerminalRequest{Tab: tab})
+	header, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal header: %v", err)
 	}
@@ -771,6 +778,52 @@ func TestTerminalDropsOnMembershipRevocation(t *testing.T) {
 		t.Fatalf("delete member: %v", err)
 	}
 	c.expectExit(t, protocol.AttachExitMembershipRevoked)
+}
+
+// signInOnly is an assistant service whose SignIn runs the start it is
+// given; nothing else is called.
+type signInOnly struct {
+	AssistantService
+	signedIn chan domain.MemberID
+}
+
+func (a signInOnly) SignIn(ctx context.Context, member domain.MemberID, start func(context.Context) error) error {
+	a.signedIn <- member
+	return start(ctx)
+}
+
+// An assistant sign-in goes through the assistant service, streams the
+// member's own sign-in session and never starts their environment terminal.
+// A viewer, who cannot prompt the assistant, cannot sign it in either.
+func TestTerminalAssistantLoginStartsOnlyTheSignIn(t *testing.T) {
+	t.Parallel()
+	svc := signInOnly{signedIn: make(chan domain.MemberID, 1)}
+	e := newTestEnv(t, func(c *Config) { c.Services.Assistant = svc })
+	collab, cm := addMember(t, e, "Sign-in user", domain.RoleCollaborator, false)
+	c, ack := rawTerminalRequest(t, e, collab, true, protocol.TerminalRequest{AssistantLogin: "claude"})
+	if !ack.OK {
+		t.Fatalf("ack = %+v, want ok", ack)
+	}
+	if got := <-svc.signedIn; got != cm.ID {
+		t.Fatalf("the service signed in %s, want %s", got, cm.ID)
+	}
+	calls := e.runs.Calls()
+	if len(calls) == 0 || calls[len(calls)-1] != "assistant-login:"+string(cm.ID)+":claude:80:24" {
+		t.Fatalf("RunController calls = %v, want the assistant sign-in", calls)
+	}
+	_ = c.ch.Close()
+	eventually(t, "the sign-in's end", func() bool {
+		return slices.Contains(e.runs.Calls(), "assistant-login-end:"+string(cm.ID)+":claude")
+	})
+	for _, call := range calls {
+		if strings.HasPrefix(call, "terminal") {
+			t.Fatalf("RunController calls = %v, want no environment terminal", calls)
+		}
+	}
+	viewer, _ := addMember(t, e, "Sign-in viewer", domain.RoleViewer, false)
+	if _, ack = rawTerminalRequest(t, e, viewer, true, protocol.TerminalRequest{AssistantLogin: "claude"}); ack.OK || ack.Code != protocol.CodeDenied {
+		t.Fatalf("viewer ack = %+v, want denied", ack)
+	}
 }
 
 // A collaborator typing into a teammate's terminal is demoted to viewer

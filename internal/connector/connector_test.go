@@ -94,7 +94,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if len(got) > 512 {
 		t.Errorf("the instructions are %d characters, over 512: %q", len(got), got)
 	}
-	for _, want := range []string{"aether_list_workspaces", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted", "not questions", "every must-not", "no added scope", "Assumption:"} {
+	for _, want := range []string{"aether_launch_options", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted", "not questions", "every must-not", "no added scope", "Assumption:"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions lack %q: %q", want, got)
 		}
@@ -250,6 +250,56 @@ func TestConnectorScopes(t *testing.T) {
 	e.callTool(t, writer.session, "aether_list_runs", nil)
 	e.skew.Store(int64(2 * time.Second))
 	e.callTool(t, writer.session, "aether_launch_run", launch)
+}
+
+// A launch through the connector on an account shared with the member runs
+// on that account and its receipt says so; the server refuses an account
+// not shared with them, with its own error.
+func TestConnectorLaunchOnSharedAccount(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	var info protocol.ServerInfoResult
+	if err := e.admin.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+		t.Fatal(err)
+	}
+	grace := &domain.Member{DisplayName: "Grace", PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#3cb44b",
+		Role: domain.RoleCollaborator}
+	bo := &domain.Member{DisplayName: "Bo", PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#ffe119",
+		Role: domain.RoleCollaborator}
+	for _, m := range []*domain.Member{grace, bo} {
+		if err := e.db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.db.ShareAccount(ctx, grace.ID, domain.MemberID(info.Member.ID)); err != nil {
+		t.Fatal(err)
+	}
+	writer := e.connect(t, "write")
+	out := e.callTool(t, writer.session, "aether_launch_run", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t",
+		"account_member_id": string(grace.ID), "no_fallback": true})
+	var res struct {
+		Launch struct {
+			Account  map[string]string `json:"account"`
+			Fallback map[string]string `json:"fallback"`
+		} `json:"launch"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.runs.launches(); !slices.Equal(got, []string{string(e.ws.ID) + " claude t via Test client on " + string(grace.ID)}) {
+		t.Fatalf("launches = %v", got)
+	}
+	if a := res.Launch.Account; a["member_id"] != string(grace.ID) || a["name"] != "Grace" || a["access"] != "shared" || res.Launch.Fallback["policy"] != "off" {
+		t.Fatalf("receipt = %s", out)
+	}
+	r, err := writer.session.CallTool(ctx, &mcp.CallToolParams{Name: "aether_launch_run", Arguments: map[string]any{"workspace_id": e.ws.ID,
+		"harness": "claude", "task": "t2", "account_member_id": string(bo.ID)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := r.Content[0].(*mcp.TextContent).Text; !r.IsError || !strings.Contains(text, "member "+string(bo.ID)+" has not shared their account with you") {
+		t.Fatalf("launch on an unshared account = %v %s", r.IsError, text)
+	}
 }
 
 // A connector granted an op's scope, and read, can make every call the op
@@ -685,7 +735,7 @@ type connection struct {
 var (
 	readTools = []string{"aether_list_workspaces", "aether_list_runs", "aether_get_run", "aether_run_history",
 		"aether_needs_attention", "aether_activity_summary", "aether_get_swarm", "aether_run_changes",
-		"aether_pr_status", "aether_overlaps", "aether_memory_search", "aether_integration", "search", "fetch"}
+		"aether_pr_status", "aether_overlaps", "aether_memory_search", "aether_integration", "search", "fetch", "aether_launch_options", "aether_changes"}
 	writeTools = []string{"aether_launch_run", "aether_launch_swarm", "aether_message_run", "aether_answer", "aether_pause_run",
 		"aether_resume_run", "aether_mark_reviewed", "aether_run_lifecycle", "aether_memory_add", "aether_memory_pin"}
 	controlTools = []string{"aether_decide_approval", "aether_stop_run", "aether_cancel_swarm", "aether_handoff_run",
@@ -942,11 +992,25 @@ type fakeRuns struct {
 	launched []string
 }
 
-func (f *fakeRuns) Launch(ctx context.Context, ws domain.WorkspaceID, member, _ domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (f *fakeRuns) Launch(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.launched = append(f.launched, fmt.Sprintf("%s %s %s via %s", ws, harness, task, domain.ViaFrom(ctx)))
-	return &domain.Run{ID: "run-launched", WorkspaceID: ws, MemberID: member, Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued}, nil
+	launch := fmt.Sprintf("%s %s %s via %s", ws, harness, task, domain.ViaFrom(ctx))
+	if account != member {
+		launch += " on " + string(account)
+	}
+	f.launched = append(f.launched, launch)
+	return &domain.Run{ID: "run-launched", WorkspaceID: ws, MemberID: member, AccountMemberID: account, Task: task, Harness: harness, Mode: mode,
+		Status: domain.RunQueued}, nil
+}
+
+func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode,
+	opts domain.LaunchOptions) (*domain.Run, error) {
+	r, err := f.Launch(ctx, ws, member, account, task, harness, mode)
+	if err == nil {
+		r.Fallback = opts.Fallback
+	}
+	return r, err
 }
 
 func (*fakeRuns) SwarmRefusal(string, domain.LaunchMode) error { return nil }

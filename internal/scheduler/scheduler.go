@@ -139,10 +139,13 @@ type Config struct {
 	// ServerBinary is staged into run and terminal containers for the
 	// coordination CLI; empty means DefaultServerBinary.
 	ServerBinary string
-	// AssistantDir holds each member's assistant directory. A new terminal
-	// mounts its sock subdirectory and the server binary for the assistant;
-	// empty creates terminals without them.
+	// AssistantDir holds each member's assistant directory: the home,
+	// instructions and tool socket of their assistant container. Empty
+	// leaves the assistant unable to start.
 	AssistantDir string
+	// AssistantIssuer is where assistant sign-ins are checked; the zero
+	// value is the vendors' own sign-in services.
+	AssistantIssuer AssistantIssuer
 	// HarnessUpdateDisabled stops pre-launch updates of shipped harnesses
 	// installed in the member home.
 	HarnessUpdateDisabled bool
@@ -228,6 +231,8 @@ type Scheduler struct {
 	developmentMu         sync.Mutex
 	development           *developmentState
 	terminalLocks         map[domain.MemberID]*sync.Mutex
+	assistantLocks        map[domain.MemberID]*sync.Mutex
+	assistantLoginLocks   map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
 	titleMu               sync.Mutex
@@ -306,6 +311,9 @@ type supervised struct {
 	// loginMember is the account owner whose login paths the container
 	// mounts; empty when none.
 	loginMember domain.MemberID
+	// verifiedLogins are the account owners whose own login a container of
+	// this run was started with, as the runtime confirmed at start.
+	verifiedLogins []domain.MemberID
 	// reporter is recovered from the sidecar, since only the launch or mode
 	// switch knew which command the container runs.
 	reporter harness.Reporter

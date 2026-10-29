@@ -271,13 +271,14 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				}
 				names = append(names, tool.Name)
 			}
-			if len(names) != 24 {
-				t.Fatalf("tools with read and write = %v, want 24", names)
+			if len(names) != 26 {
+				t.Fatalf("tools with read and write = %v, want 26", names)
 			}
 			t.Logf("tools/list on %s as %s: %d tools: %s", base, bobName, len(names), strings.Join(names, " "))
 			list := call[protocol.ConnectorListResult](t, bctl, protocol.MethodConnectorList, struct{}{})
-			if len(list.Connectors) != 1 || list.Connectors[0].LastUsedAt == "" {
-				t.Fatalf("connector.list = %+v, want one used connector", list)
+			if len(list.Connectors) != 1 || list.Connectors[0].LastUsedAt == "" || list.Connectors[0].Resource != base ||
+				list.URL != base || list.UniversalURL != base || list.SignIn != (policy == edgeproto.PolicyAccount) {
+				t.Fatalf("connector.list = %+v, want one used connector on %s, and signing in to replace the code only under account", list, base)
 			}
 
 			for _, tt := range []struct {

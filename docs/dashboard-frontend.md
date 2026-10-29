@@ -536,8 +536,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   line under it says the assistant acts without asking, with **Change in
   Settings**.
 - **Body:** by `assistant.status` state. `setup` lists each agent with its
-  reason and opens `AgentSetup` in place; `needs_restart` is a callout with a
-  button that calls `assistant.start {restart_environment: true}`; `failed`
+  reason, and **Sign in** opens `AssistantSignIn` in place: a terminal on
+  `/ws/terminal?assistant_login=<agent>`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
   the run Session's `TimelineRow` and `useFlatRows`, with the Session's
@@ -675,8 +675,8 @@ conversation bumps; `assistantOpen` and `assistantWidth` persist.
 (`useIdentityKnown` in `store/hooks.ts`; `useAgentList` waits for it too, so
 neither read is sent under no identity and repeated), and on each open, then
 connects unless the
-state is `setup` or `needs_restart`. It stays connected with the panel closed
-only while the state is `running` or `starting`, or a confirmation or a
+state is `setup`. It stays connected with the panel closed
+only while the state is `running`, `installing` or `starting`, or a confirmation or a
 harness prompt is pending. After that, `status` frames carry the state and the
 whole confirmation set, so the UI makes no further status calls. A truncated
 item in the transcript is read with `assistant.item`. Each pending
@@ -2337,15 +2337,51 @@ no `effort`, then those levels in the agent's order
 default and is not remembered; switching to an agent without the chosen level
 resets it.
 
-The form remembers a mode and a model per agent in the `launchDefaults`
-slice (`{mode, model, at}` keyed by agent name), persisted per member in
-`savedLaunchDefaults`; defaults saved before persist version 10 had no
-owner and are dropped. It
-preselects the launchable agent launched most recently, then the agent of
-the newest run, then the first launchable one, and starts in that agent's
-remembered mode, else Enhanced, with its remembered model; an Enhanced or
-remembered mode the agent cannot use (no Enhanced support, or its adapter
-not installed) shows as Standard.
+Where the gateway offers `launch.defaults.get`, the form starts from the
+member's [saved launch choices](teams.md#saved-launch-choices) on the
+server (`store/launch-defaults.ts`), so every browser and device opens on
+the same ones. Each open reads them again, since another device or the
+assistant may have saved since. The first pick waits for that read and for
+the saved account to be applied, then
+preselects the saved agent if it can launch, else the agent of the newest
+run, else the first launchable one, in that agent's saved mode, else
+Enhanced, with its saved model. A successful launch or swarm saves only the
+agent, mode and model through `launch.defaults.set` with the revision it
+read; when another device saved since, the refusal carries the current
+choices, and the form applies its change to those and saves once more. A
+failed save shows "Launch choices not saved: " and the server's error. The
+saved account is preselected when `account.list` still lists it and `get`
+does not mark it invalid, and the saved fallback policy fills the fallback
+list, keeping only listed accounts. A launch never saves the account or the
+fallback; **Save as my default** under **Options** does, and says "Saved
+for every device." until the account or fallback changes again. On the Run tab it saves the fallback list as the run sends
+it, without the selected account. **Run**, **Default mode** and **Set up** on
+Agents, and the onboarding wizard, save their agent and mode the same way
+(`rememberChoice`); **Default mode** leaves the preselected agent alone.
+Agents reads the saved choices too, and its **Default mode** and **Run** use
+the saved mode, else this browser's. Saves
+run one at a time, each from the last one's answer; a save after the
+signed-in member changes is refused, and a failed save reads the choices
+again. A read's answer is dropped when another read or a save started or
+stored its answer after the read began. A **Saved defaults not used** note lists each saved
+account, fallback member, agent, and the chosen agent's mode or model that
+`get` reports in `invalid`, with the server's reason.
+
+Where the gateway does not offer `launch.defaults.get`, the form uses this
+browser's copy instead: the `launchDefaults` slice (`{mode, model, at}`
+keyed by agent name), persisted per member in `savedLaunchDefaults`;
+defaults saved before persist version 10 had no owner and are dropped. It
+preselects the launchable agent launched most recently, then as above. When
+the read fails, the form says "Your saved launch choices could not be read."
+with the server's error and **Try again**, and starts from the copy last
+read from the server, else this browser's; a retry that reads them presets
+the agent, account and fallback from them again. Every launch also updates
+this copy; nothing copies it to the server. On a server that offers
+`launch.defaults.get` but has nothing saved for the member, the form ignores
+this browser's copy and uses the server's defaults, so a new device and an
+old one open on the same choices. The form starts over when a different
+member signs in while it is open. An Enhanced or remembered mode the agent cannot
+use (no Enhanced support, or its adapter not installed) shows as Standard.
 
 **Options** appears when `account.list` returns more than the caller and
 holds the **Account** select: the caller first as "(you)", then accounts
@@ -2799,18 +2835,23 @@ block re-renders, code highlighted with the Lezer languages), `live`,
 `finished` and `agent-message`.
 
 `turnRows` splits a turn into segments at each person's message, wake and
-new agent session (`store/session-steps.ts`). In a segment, every step up to
-the last piece of work (a thought, tool call, plan, subagent launch or
-answered request) joins one `steps` block, and the prose after it is the
-answer. A segment without work, such as `ping` and `pong`, has no block. The
+new agent session (`store/session-steps.ts`). In a segment, the agent's
+prose stays in the conversation as `assistant` rows, and the work between
+two pieces of prose (thoughts, tool calls, plans, subagent launches and
+answered requests) joins one `steps` block. The prose after the last block
+is the answer. The `aether-internal report` call (or `aether_report` tool)
+that ends an Aether turn joins the block before the prose it follows, so a
+reply written before reporting stays the answer. A segment without work,
+such as `ping` and `pong`, has no block. The
 block's header names the work ("Read 12 files, ran 5 commands and edited 3
 files") with up to three tool icons, failures, plan progress and tools still
 running. While the turn is open and the stream live, the header carries the
 live state instead: the state dot, "Running npm test", "Waiting on 2
 subagents", "Waiting for your approval: <command>" (or "Waiting for your
-answer") in amber, else "Working", with the seconds since the segment began.
-A turn with no block yet keeps the `live` row. Steps sit on a rail: thoughts
-(a two-line preview that expands to the whole thought), narration, lookups
+answer") in amber, else "Working", with the seconds since the block's work
+began: the segment's start for its first block.
+A turn whose newest row is not a block keeps the `live` row. Steps sit on a
+rail: thoughts (a two-line preview that expands to the whole thought), lookups
 (consecutive reads, searches and fetches as chips; a chip for a file in the
 checkout opens Files,
 a page chip a new tab; four, then **+N more**), tool calls (the command, the
@@ -2825,8 +2866,9 @@ selection holds every line); a body cut to fit the wire is read whole with `run.
 A block over 40 steps shows its first 5 and last 30 around **Show N more
 steps**, which then reads **Show fewer steps**.
 
-A block is open while its turn is, or while a subagent in it runs, and shuts
-once the turn ends; the viewer's own choice for a block or step
+A block is open while it is the newest row of an open turn, or while a
+subagent in it runs, and shuts once the agent writes after it or the turn
+ends; the viewer's own choice for a block or step
 (`expandedRows`, kept until reload) wins. Those defaults, and how much of a
 growing block folds, change only while the view follows the newest row and
 focus is outside the block, so nothing moves under a reader scrolled up or a
@@ -3765,14 +3807,18 @@ both what it renders and the overlap set the conflict chips read.
   run merged upstream work: it requests `?from=<fork_tree>`, so it also
   counts that upstream work. Under **Changes since a checkpoint** every
   recorded `run.diff` snapshot is a row, newest first, labelled with its local
-  time (with the date when not today) and its age. Its description is the
+  time (with the date when not today) and its age. Its description is the run
+  at that checkpoint, not the size of what choosing it shows: "After" and the
   commit subject when `head` moved since the next older checkpoint, otherwise
-  the file count and `+a −d` totals, or the count alone for a `truncated`
-  snapshot. Choosing a row requests `?from=<tree>`: everything that changed
-  since that checkpoint up to now, which grows as the run goes on and
-  re-fetches on each new snapshot like the whole diff. The newest 50
-  checkpoints load from `workspace.timeline` (`types: ["run.diff"]`,
-  `newest: true`) when the view first opens for a run on this page, live
+  "Run had N files · +a −d", the run's totals then (the count alone for a
+  `truncated` snapshot). The newest row says "Latest checkpoint" in place of
+  the totals, after the subject when it has one, since choosing it shows only
+  edits not yet snapshotted. Choosing a row requests `?from=<tree>`:
+  everything that changed since that checkpoint up to now, which grows as the
+  run goes on and re-fetches on each new snapshot like the whole diff. The
+  newest 50 checkpoints load from `workspace.timeline`
+  (`types: ["run.diff"]`, `newest: true`) when the view first opens for a run
+  on this page, live
   snapshots join them, one row per tree, and **Show older checkpoints** pages
   back with `before_seq` while the timeline says `more`. A checkpoint keeps
   only its time, tree, head, subject and counts, never its file list. A
@@ -6196,6 +6242,7 @@ while one of its entries is visible, so the nav and search never disagree.
 | Group | Category (`id`) | Sections and rows (anchor ids) |
 |---|---|---|
 | You | General (`general`) | Appearance: Theme (`theme`), Text size (`text-size`); Keyboard (`keyboard`); Profile (`profile`); Setup guide (`setup-guide`) |
+| You | Launch (`launch`) | Saved defaults (`saved-launch-defaults`) |
 | You | Connections (`connections`) | ChatGPT and Claude (`connectors`); GitHub (`github`) |
 | You | Notifications (`notifications`) | Push notifications (`push`); Watch notifications: push devices (`watch-push`), Quiet hours (`quiet-hours`); Slack (`slack`) |
 | You | Watches (`watches`) | Watches (`watch-list`) |
@@ -6256,16 +6303,38 @@ Categories:
   `connectors`): one exported `ConnectorsSection
   {client}`, remounted when `identityKey` changes so a code never outlives
   its member. A ChatGPT / Claude segmented control picks numbered steps.
-  **Get a code** calls `connector.code` and shows its `url` and code, the
-  code with `useCountdown`; before that, `server.edge` only says whether the
-  server has an edge or is connected to it. While the code lives,
-  `connector.list` is polled every 3 s, and once more when it expires; a
-  connector absent at mint time shows **<client> (<host>) connected** in the
-  section's one `role="status"` region and focuses its **Done** button. A
+  `connector.list` gives the URL to show at once (`url`), the edge's
+  `universal_url` and `sign_in`. With `sign_in` the third step mints no code
+  and **Watch for the connection** polls for 10 minutes, then says nothing
+  connected; otherwise **Get a
+  code** calls `connector.code` and shows its code with `useCountdown`. A
+  `url` other than `universal_url` adds how to link a GitHub account. Without
+  a `url`, `server.edge` only says whether the server has an edge or is
+  connected to it. While a code or watch lives, `connector.list` is polled
+  every 3 s, and once more when it ends; a
+  connector of the tab's app at the URL shown, absent at mint time, or for a
+  sign-in absent from the list shown before **Watch for the connection**,
+  since the sign-in may be done already, shows **<client> (<host>) connected** in the section's one `role="status"`
+  region and focuses its **Done** button. A
   failed poll shows its error until the next one succeeds. Rows list each
-  connector's scopes, added and last-used times, **Reconnect** (confirm,
-  a new code on that client's tab, then `connector.revoke`; a failed mint
-  revokes nothing) and **Revoke** (confirm). Errors show verbatim with a fix:
+  connector's scopes, its `resource` as **Universal URL** or the server's own
+  URL, added and last-used times, **Move to the universal URL** (where `url`
+  is universal and the connector's is not: confirm, start watching for a
+  connector at `universal_url` with the old one's `client_id`, preferring
+  one with a `last_used_at`, and `connector.revoke` the old connector only
+  once it has one; `localStorage` key `aether:connector-move-claims`
+  records which move took which new connector, so two tabs never revoke two
+  connectors for one; a move that ends without one says the old connector
+  was kept), **Reconnect** (confirm, then the same watch on that client's
+  tab, the tab from the `client_id` host or, from an older server, the
+  `redirect_host`, at the connector's own `resource`: a connector at the
+  server's own URL reconnects there with a code even under `sign_in`; a
+  failed mint revokes nothing) and **Revoke** (confirm). A move or
+  reconnect stays in progress past its code or watch, so **Get a code** or
+  **Watch for the connection** continues it at its URL, until its
+  replacement calls Aether or **Stop** ends it; until then the status region
+  names it and the other **Move** and **Reconnect** buttons are disabled.
+  Errors show verbatim with a fix:
   a server without `connector.list` (`-32601`) gets the update command and
   hides the steps, the no-edge and not-connected errors link `docs/edge.md`,
   anything else links the connector troubleshooting. The palette's **Connect
@@ -6302,6 +6371,20 @@ Categories:
   row. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
+- **Launch**, where the server offers `launch.defaults.get`: **Saved
+  defaults** says who saved them (you or the assistant) and when, or
+  "Nothing saved yet". It lists each agent's saved mode and model with
+  **Forget**, a **Not usable now** list of `invalid` choices with the
+  server's reason, and the `unknown` ones as "Not checked: " and the
+  reason. When the saved account or a fallback member is invalid, **Remove
+  unusable accounts** saves both repaired at once: your own account, and
+  the order without them, or fallback off when none are left. **Account** and **Fallback** (any account, off, or the saved
+  ordered list) save on change; the order itself is set in the launch
+  dialog with **Save as my default**. **Clear** asks first, then clears
+  them. Each change uses `launch.defaults.set` with the revision read and
+  retries once on a conflict, as the launch dialog does. The section starts
+  over, closing **Clear**'s confirmation, when a different member signs in. Child runs keep
+  their own choices in **Child runs**.
 - **Child runs**, where the server offers `child.settings`: **Let my runs
   start child runs** (`enabled`), with a **What child runs cover** list
   (what it allows, that swarms use their own choices, that budgets and

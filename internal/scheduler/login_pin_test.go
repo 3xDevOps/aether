@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -102,7 +104,7 @@ func (e *shareEnv) assertLoginMounts(t *testing.T, spec runtime.Spec, pool strin
 
 // A member who shares their account gets their own Claude and Gemini logins
 // mounted in place in their own run and environment terminal, created empty
-// when missing, and nothing else beyond what a non-sharer gets.
+// when missing, and nothing else.
 func TestSharerContainersPinTheirOwnLogin(t *testing.T) {
 	t.Parallel()
 	e := newSharerEnv(t)
@@ -141,20 +143,36 @@ func TestSharerPinLeavesExistingLoginUnchanged(t *testing.T) {
 	}
 }
 
-// A member with no outgoing share keeps their own HOME and isolated cache,
-// with no login pin or credential stub created.
-func TestNonSharerContainersAreUnchanged(t *testing.T) {
+// A member who shares nothing but launches on Grace's account pins their own
+// logins too. A run of theirs on Grace's account mounts Grace's login over
+// that same file, and the kernel detaches that mount when another container
+// renames over the file, as a CLI refreshing an unpinned login does; the run
+// would then sign in as them.
+func TestRecipientContainersPinTheirOwnLogin(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
 	if err := e.db.ShareAccount(t.Context(), e.owner.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
-	spec := e.ownRun(t)
-	e.assertLoginMounts(t, spec, "runs")
-	e.assertLoginMounts(t, e.terminal(t), "terminal")
-	if _, err := os.Lstat(filepath.Join(e.adaHome, ".claude")); !os.IsNotExist(err) {
-		t.Fatalf("non-sharer's home gained .claude: %v", err)
-	}
+	e.assertLoginMounts(t, e.ownRun(t), "runs", e.pins()...)
+	e.assertLoginMounts(t, e.terminal(t), "terminal", e.pins()...)
+}
+
+// preSubpathEngine is an engine older than Docker 26.0, which cannot mount
+// a path beneath a member home.
+type preSubpathEngine struct{ *fakeRuntime }
+
+func (preSubpathEngine) CheckSubpathAPI(context.Context) error {
+	return fmt.Errorf("runtime: docker engine API %q %w", "1.44", runtime.ErrSubpathAPI)
+}
+
+// On an engine that cannot mount a subpath, which cannot mount a shared
+// login either, nothing is pinned and the member's own run still starts.
+func TestOlderEngineLaunchesWithoutPins(t *testing.T) {
+	t.Parallel()
+	e := newSharerEnv(t)
+	e.sched.cfg.Runtime = preSubpathEngine{e.rt}
+	e.assertLoginMounts(t, e.ownRun(t), "runs")
 }
 
 // A sharer's run on another member's account mounts that member's login where
@@ -214,21 +232,6 @@ func TestSharerUnshareableLoginIsNotPinned(t *testing.T) {
 				t.Fatalf("terminal subpath mounts = %+v, want only %+v", got, gemini)
 			}
 		})
-	}
-}
-
-// Revoking the last share drops the pin from the next container.
-func TestRevokedShareDropsThePin(t *testing.T) {
-	t.Parallel()
-	e := newSharerEnv(t)
-	if got := subpathMounts(e.ownRun(t)); !slices.Equal(got, e.pins()) {
-		t.Fatalf("shared run subpath mounts = %+v, want the pins", got)
-	}
-	if err := e.db.RevokeAccountShare(t.Context(), e.member.ID, e.owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	if got := subpathMounts(e.ownRun(t)); len(got) != 0 {
-		t.Fatalf("run after revoke subpath mounts = %+v, want none", got)
 	}
 }
 

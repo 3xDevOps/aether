@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,6 +65,10 @@ func (r *assistantRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec 
 	r.execs = append(r.execs, e)
 	r.mu.Unlock()
 	return e, nil
+}
+
+func (r *assistantRuntime) Exec(context.Context, runtime.ID, []string, string) (int, string, string, error) {
+	return 0, "", "", nil
 }
 
 func (r *assistantRuntime) RecoverExec(_ context.Context, identity runtime.ExecIdentity) (runtime.ManagedExec, error) {
@@ -179,8 +185,8 @@ func (e *assistantEnv) stop() {
 	_ = e.srv.Close()
 }
 
-// startAssistantServer runs a server whose claude ACP command is the mock
-// agent; a non-nil prior reuses its data directory, runtime and member.
+// startAssistantServer runs a server whose runtime serves every adapter with
+// the mock agent; a non-nil prior reuses its data directory, runtime and member.
 func startAssistantServer(t *testing.T, ctx context.Context, prior *assistantEnv) *assistantEnv {
 	t.Helper()
 	env := &assistantEnv{t: t}
@@ -195,8 +201,7 @@ func startAssistantServer(t *testing.T, ctx context.Context, prior *assistantEnv
 		env.data = filepath.Join(t.TempDir(), "d")
 	}
 	srv, err := New(ctx, Config{
-		DataDir: env.data, Addr: "127.0.0.1:0", Runtime: env.rt, StandardImage: "e2e/fake",
-		Harnesses: map[string]scheduler.HarnessSpec{"claude": {ACPArgs: []string{"acp-mock"}}},
+		DataDir: env.data, Addr: "127.0.0.1:0", Runtime: env.rt, StandardImage: "e2e/fake", AssistantIssuer: fakeAssistantIssuer(t),
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -318,14 +323,14 @@ func TestIntegrationAssistant(t *testing.T) {
 	if len(execs) != 1 {
 		t.Fatalf("%d adapters started, want 1", len(execs))
 	}
-	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1 IS_SANDBOX=1" {
+	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 IS_SANDBOX=1" {
 		t.Fatalf("adapter env = %q", got)
 	}
-	if !strings.HasSuffix(execs[0].spec.WorkingDir, "/.aether/assistant") {
-		t.Fatalf("adapter working directory = %q, want $HOME/.aether/assistant", execs[0].spec.WorkingDir)
+	if execs[0].spec.WorkingDir != scheduler.AssistantCwd {
+		t.Fatalf("adapter working directory = %q, want %s", execs[0].spec.WorkingDir, scheduler.AssistantCwd)
 	}
 	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-		b, err := os.ReadFile(filepath.Join(env.data, "homes", string(env.member.ID), ".aether", "assistant", name))
+		b, err := os.ReadFile(filepath.Join(scheduler.AssistantInstructionsDir(filepath.Join(env.data, "assistant"), env.member.ID), name))
 		if err != nil || len(b) == 0 {
 			t.Fatalf("%s in the assistant directory = %q, %v", name, b, err)
 		}
@@ -416,7 +421,7 @@ func TestIntegrationAssistant(t *testing.T) {
 		return f.Status != nil && f.Status.State == protocol.AssistantStateIdle
 	})
 
-	sock := filepath.Join(env.data, "assistant", string(env.member.ID), "sock", "assistant.sock")
+	sock := filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock")
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
 		t.Fatalf("dial the tool socket: %v", err)
@@ -536,7 +541,23 @@ func TestIntegrationAssistant(t *testing.T) {
 	}
 }
 
-// seedAssistantMember adds a member whose claude agent is ready.
+// fakeAssistantIssuer is a Claude Code sign-in service that refreshes any
+// sign-in and names the same account each time.
+func fakeAssistantIssuer(t *testing.T) scheduler.AssistantIssuer {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/profile" {
+			_, _ = w.Write([]byte(`{"account":{"uuid":"account-ada"},"organization":{"uuid":"org-ada"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"access_token":"synthetic","refresh_token":"synthetic","expires_in":3600}`))
+	}))
+	t.Cleanup(srv.Close)
+	return scheduler.AssistantIssuer{ClaudeToken: srv.URL + "/token", ClaudeProfile: srv.URL + "/profile", CodexToken: srv.URL + "/token", Client: srv.Client()}
+}
+
+// seedAssistantMember adds a member signed in to Claude Code for the
+// assistant.
 func seedAssistantMember(t *testing.T, ctx context.Context, srv *Server, data string, role domain.Role) *domain.Member {
 	t.Helper()
 	_, signer := writeClientKey(t)
@@ -544,15 +565,20 @@ func seedAssistantMember(t *testing.T, ctx context.Context, srv *Server, data st
 	if err := srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
-	home := filepath.Join(data, "homes", string(member.ID))
-	for _, name := range []string{".local/bin/claude", ".local/bin/claude-agent-acp", ".claude/.credentials.json"} {
-		path := filepath.Join(home, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	login := filepath.Join(scheduler.AssistantHomeDir(filepath.Join(data, "assistant"), member.ID), ".claude", ".credentials.json")
+	if err := os.MkdirAll(filepath.Dir(login), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(login, []byte(`{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// As a finished sign-in leaves it: the next start records the sign-in.
+	pending := filepath.Join(data, "assistant", string(member.ID), "signin", "claude.pending")
+	if err := os.MkdirAll(filepath.Dir(pending), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pending, nil, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	return member
 }
@@ -660,7 +686,7 @@ func TestIntegrationAssistantCancelCards(t *testing.T) {
 	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: acpmock.PromptWait, IdempotencyKey: "w"}, nil); perr != nil {
 		t.Fatal(perr)
 	}
-	conn, err := net.Dial("unix", filepath.Join(env.data, "assistant", string(env.member.ID), "sock", "assistant.sock"))
+	conn, err := net.Dial("unix", filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}

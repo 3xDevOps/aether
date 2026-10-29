@@ -309,8 +309,8 @@ func (s *Server) checkReviewer(account edgeproto.Account, m *domain.Member) erro
 }
 
 func connectorToWire(c *store.Connector) protocol.Connector {
-	out := protocol.Connector{ID: c.ID, MemberID: string(c.Member), ClientName: c.ClientName, RedirectHost: c.RedirectHost,
-		DeviceID: string(c.Device), Scopes: c.Scopes, CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339)}
+	out := protocol.Connector{ID: c.ID, MemberID: string(c.Member), ClientID: c.ClientID, ClientName: c.ClientName, RedirectHost: c.RedirectHost,
+		DeviceID: string(c.Device), Resource: c.Resource, Scopes: c.Scopes, CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339)}
 	if c.LastUsedAt != nil {
 		out.LastUsedAt = c.LastUsedAt.UTC().Format(time.RFC3339)
 	}
@@ -326,7 +326,13 @@ func (s *Server) connectorList(ctx context.Context, member domain.MemberID, _ js
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := protocol.ConnectorListResult{Connectors: make([]protocol.Connector, 0, len(list))}
+	connectorURL, err := s.connectorURLFor(ctx, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	universal := s.UniversalConnectorURL()
+	out := protocol.ConnectorListResult{Connectors: make([]protocol.Connector, 0, len(list)), URL: connectorURL, UniversalURL: universal,
+		SignIn: universal != "" && connectorURL == universal && s.cfg.EdgeAccess == edgeproto.PolicyAccount}
 	for _, c := range list {
 		out.Connectors = append(out.Connectors, connectorToWire(c))
 	}

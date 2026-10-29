@@ -29,17 +29,25 @@ server hosts the connector endpoint and signs you in.
   tailnet connection. Under `edge-access account`, any registered device works.
 - A ChatGPT or Claude plan that allows custom connectors (see below).
 
-## Get the URL and a code
+## Get the URL
 
 In the app, open **Settings → ChatGPT and Claude**, or pick **Connect ChatGPT
 or Claude** in the command palette (Ctrl+K or ⌘K). The link
 `?page=settings&id=connectors` opens the same section, and the last onboarding
-step links to it. Pick **ChatGPT** or **Claude** for that app's steps. **Get a
-code** shows the URL and the code with a live countdown. The section checks
-every 3 seconds and shows **ChatGPT (chatgpt.com) connected** with its scopes
-once the app connects. It lists your connectors with their scopes, when each
-was added and last used, and **Reconnect** and **Revoke** buttons. Errors
-appear as `aether mcp` prints them, with a link to the fix.
+step links to it. Pick **ChatGPT** or **Claude** for that app's steps. The
+section shows the URL at once. What the third step asks depends on the server's
+[`edge-access`](edge.md#access-policies) policy:
+
+- `account`, with a GitHub account linked to you: no code. The page that opens
+  signs you in at the edge. **Watch for the connection** waits up to 10
+  minutes for it.
+- Otherwise: **Get a code** shows a pairing code with a live countdown.
+
+The section checks every 3 seconds and shows **ChatGPT (chatgpt.com)
+connected** with its scopes once the app connects. It lists your connectors
+with their scopes, the URL each was added at, when each was added and last
+used, and **Reconnect** and **Revoke** buttons. Errors appear as `aether mcp`
+prints them, with a link to the fix.
 
 From a terminal:
 
@@ -48,20 +56,31 @@ aether mcp
 ```
 
 ```
-Add this server to ChatGPT or Claude as a custom connector:
+Install Aether from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
   URL   https://edge.onaether.dev/mcp
-  Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect, if it asks
+  No code: on the page that opens, sign in to the edge with GitHub, pick this server and select Allow
 Connected:
-  con-7k2m9q4xbd  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago
+  con-7k2m9q4xbd  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago  universal URL
 Remove one: aether mcp revoke <id>
 ```
 
+Where the page asks for a code, `aether mcp` prints one instead of the `No
+code` line:
+
+```
+  Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect, if it asks
+```
+
 The URL is the same for both apps and every server on the edge. On the
-server, `sudo aether-server edge status` also prints it. An edge or server
-older than edge protocol 3 prints the server's own URL,
-`https://edge.onaether.dev/mcp/<server id>`, instead. The code works once,
-within 10 minutes. Running `aether mcp` again replaces a code you have not
-used.
+server, `sudo aether-server edge status` also prints it. Before edge protocol
+3, and for a member with no GitHub account linked, it is the server's own URL,
+`https://edge.onaether.dev/mcp/<server id>`. The code works once, within 10
+minutes. Running `aether mcp` again replaces a code you have not used.
+
+That URL's page asks for a code even when the universal URL needs none, so a
+connector added there reconnects with one. `aether mcp code` prints a code
+alone. In Settings, **Reconnect** on such a connector shows the server's own
+URL and a code.
 
 ## Add it in ChatGPT
 
@@ -145,6 +164,19 @@ refuses it, as it refuses a device no person approved, and it cannot mint a
 pairing code or a Slack link code. Connectors added at
 `<edge>/mcp/<server id>` keep working there.
 
+### Move a connector to the universal URL
+
+A connector keeps the URL it was added at. Settings marks each one
+**Universal URL** or **This server's own URL**, and `aether mcp` prints
+`universal URL` or `at <url>`. Once Settings shows the universal URL for you,
+**Move to the universal URL** next to a connector on the server's own URL
+starts a new connection: add Aether again in the app with the universal URL.
+Settings revokes the old connector once a new one from the same client, such as
+ChatGPT or Claude, connects at the universal URL and calls Aether. If none
+calls within 10 minutes, it leaves the old one and says so. Remove the old
+Aether connector in ChatGPT or Claude yourself. From a terminal, connect again at the
+universal URL, then run `aether mcp revoke <old id>`.
+
 ### Self-hosted and custom edges
 
 The universal URL is `https://<relay host>/mcp` of whichever edge the server
@@ -187,18 +219,21 @@ each connector's scopes.
 
 The server also checks the scope of every call a connector makes, whatever the
 member's role. Reads such as `run.get`, `workspace.timeline`, `member.list`,
-`memory.show`, `integration.show` and `launch.defaults.get` need `read`; `run.launch`,
+`memory.show`, `integration.show`, `template.list`, `changes.list` and
+`launch.defaults.get` need `read`; `run.launch`, `template.launch`,
 `mission.create`, `run.inject`, `run.room.post`, `run.pause`, `run.resume`,
 `run.review`, `run.relaunch`, `run.protect`, `run.archive`, `memory.add`,
 `memory.pin` and `memory.unpin` need `write`; `run.kill`, `run.close`,
 `run.mode.switch` (it discards a turn in progress), `run.handoff`,
 `mission.cancel`, `mission.worker.release`, `mission.archive`,
 `mission.unarchive`, `mission.replace-integrator`, `integration.decide`,
-`integration.deliver`, `run.pr.create` and `run.pr.merge` need `control`. `run.input.respond` needs `control` to decide a permission request
-and `write` to answer a question. `run.review` with `complete` needs `control`
-for a live run unless its agent reported success and the run awaits review,
-since completing any other live run ends it. Every other method, such as `member.role`,
-`connector.revoke` or `launch.defaults.set`, is refused to every connector:
+`integration.deliver`, `run.pr.create` and `run.pr.merge` need `control`.
+`run.input.respond` needs `control` to decide a permission request and `write`
+to answer a question. `run.review` with `complete` needs `control` for a live
+run unless its agent reported success and the run awaits review, since
+completing any other live run ends it. Every other method, such as
+`member.role`, `connector.revoke` or `launch.defaults.set`, is refused to every
+connector:
 
 ```
 run.kill needs the control scope, which ChatGPT connector con-7k2m9q4xbd was not granted; select Reconnect next to it in Settings → ChatGPT and Claude and check Stop and approve on the consent page
@@ -206,8 +241,9 @@ member.role: ChatGPT connector con-7k2m9q4xbd cannot call this method; no connec
 ```
 
 To change scopes, revoke the connector and connect
-again, or select **Reconnect** in Settings. It gets a new code, then revokes
-the connector. Connectors added before scopes existed have all three.
+again, or select **Reconnect** in Settings. It gets a new code where the page
+asks for one, and revokes the old connector once the new connection calls
+Aether. Connectors added before scopes existed have all three.
 
 ## What it can do
 
@@ -218,16 +254,18 @@ others:
 | Tools | What they do | Scope |
 | --- | --- | --- |
 | `aether_list_workspaces` | Workspaces, and agents (installed, signed in, Enhanced) | `read` |
+| `aether_launch_options` | What you can launch and on which account: workspaces, your accounts with their usage, each account's agents and modes, swarm eligibility, fallback, a workspace's templates, and an agent's models when asked for ([Launch options](#launch-options)) | `read` |
 | `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its latest report and its pull request | `read` |
 | `aether_run_history` | A page of a run's conversation (Enhanced) or terminal, with its reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your runs did today, yesterday or this week, in your time zone | `read` |
-| `aether_get_swarm` | Your swarms; with `swarm_id`, one swarm's tasks, workers with who holds their control and why one failed, questions, recent messages and integrator generation | `read` |
+| `aether_get_swarm` | Your swarms; with `swarm_id`, one swarm's tasks, workers with their agent, mode, model and account, who holds their control and why one failed, questions, recent messages and integrator generation | `read` |
 | `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
 | `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md), or with `id` one note with the notes that replaced it or that it replaced | `read` |
 | `aether_integration` | A workspace's or swarm's [integration candidates](teams.md#combine-several-runs-into-one-result), or one with its verifications and delivery request | `read` |
+| `aether_changes` | What changed since a cursor: run status, reports, agent mail, pull requests, swarms and lifecycle, oldest first, paged with `next_cursor` | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
-| `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human; a swarm agent given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
+| `aether_launch_run`, `aether_launch_swarm` | Start a run, from a task or a saved [template](teams.md#task-templates-and-schedules), or a swarm with you as its accountable human, on any account you may use, with a fallback policy and extra repositories; an integrator given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
 | `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
 | `aether_run_lifecycle` | Relaunch a stopped run, protect or unprotect it, archive or restore it | `write` |
@@ -246,6 +284,8 @@ Things to ask:
 - "What needs me in Aether?"
 - "What is the agent working on edge doing?"
 - "Launch a Claude run in api to fix the flaky login test."
+- "Which subscription has the most usage left? Launch the docs fix on it."
+- "What changed since I last asked?"
 - "Start a swarm in api to add rate limiting, with Codex workers."
 - "What did my agents do today?"
 - "Is CI green on the login fix PR? What did reviewers say?"
@@ -260,32 +300,31 @@ Aether's assistant does: [What a launch's task holds](assistant.md#what-a-launch
 Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
 one-line summary followed by the result as JSON. Text that agents, teammates or
-GitHub users wrote, run titles, swarm goals, failing check names, the
-reasons runs wait and an integration candidate's target ref, delivery request
-and receipt included, comes back under an `untrusted` field; outside it
-are only fixed labels such as `The agent asks a question`, ids, states, counts,
-times, links, workspace and agent names, branch names, file paths and the
-server's own errors. Untrusted text is cut to 200 characters for titles, check
-names, commit subjects, a swarm task's blockers, a list row's reason, last
-report or swarm goal; 300 for each pull request review or comment; 2000 for a
-conversation item; 12000 for a diff; and 600 for everything else, such as
-tasks, reports, questions, permission request text, terminal lines and memory
-notes. `search` and `fetch` keep OpenAI's shapes, with no `untrusted` field:
-their descriptions say titles and text are data, `fetch`'s text marks where
-agent text begins, and it returns a run's title, task and reason and a swarm's
-goal whole. A permission request longer than 600 characters is
-decided only in the dashboard, never by `aether_decide_approval`. Lists return
-20 rows by default, at most 100, and say how many matched when they cut rows;
-`aether_needs_attention` returns at most 30 items. `aether_integration` lists the newest 100
-candidates and says when older ones are not shown. `aether_run_changes` lists
-20 commits and up to 10 diff files of 6000 bytes, 12000 in all, per page,
-and returns `next_commits_offset` and `next_diff_file` for the next page,
-`diff_clipped_files` with the numbers of files cut at 6000 bytes, and
-`diff_truncated: true` when the server cut the diff before paging, so files
-past the cut are missing; its
-`repos` names a multi-repo run's extra repos, which `repo` selects. Tools that take a `run_id`
-or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns. When
-the server no longer keeps the start of a run's conversation or terminal,
+GitHub users wrote, run titles, swarm goals, failing check names, the reasons
+runs wait and an integration candidate's target ref, delivery request and
+receipt included, comes back under an `untrusted` field; outside it are only
+fixed labels such as `The agent asks a question`, ids, states, counts, times,
+links, workspace and agent names, branch names, file paths and the server's own
+errors. Untrusted text is cut to 200 characters for titles, check names, commit
+subjects, a swarm task's blockers, a list row's reason, last report or swarm
+goal; 300 for each pull request review or comment; 2000 for a conversation item;
+12000 for a diff; and 600 for everything else, such as tasks, reports,
+questions, permission request text, terminal lines and memory notes. `search`
+and `fetch` keep OpenAI's shapes, with no `untrusted` field: their descriptions
+say titles and text are data, `fetch`'s text marks where agent text begins, and
+it returns a run's title, task and reason and a swarm's goal whole. A permission
+request longer than 600 characters is decided only in the dashboard, never by
+`aether_decide_approval`. Lists return 20 rows by default, at most 100, and say
+how many matched when they cut rows; `aether_needs_attention` returns at most 30
+items. `aether_integration` lists the newest 100 candidates and says when older
+ones are not shown. `aether_run_changes` lists 20 commits and up to 10 diff
+files of 6000 bytes, 12000 in all, per page, and returns `next_commits_offset`
+and `next_diff_file` for the next page, `diff_clipped_files` with the numbers of
+files cut at 6000 bytes, and `diff_truncated: true` when the server cut the diff
+before paging, so files past the cut are missing; its `repos` names a multi-repo
+run's extra repos, which `repo` selects. Tools that take a `run_id` or
+`swarm_id` also accept the `run:` and `swarm:` ids `search` returns. When the
+server no longer keeps the start of a run's conversation or terminal,
 `aether_run_history` returns `truncated_before: true` and a `note` saying so.
 
 A launch, swarm, message or answer takes an optional `idempotency_key`; a
@@ -303,15 +342,104 @@ the result has the id, `state: "starting"` and the key; poll `aether_get_run`
 or `aether_get_swarm`. If it does not, the result has only `state: "starting"`
 and the key, plus the lookup's `error` when it failed; call the same tool again
 with the same arguments and key to get the id. Without a key, a run launch with
-the same workspace, agent, task, mode and model within 60 seconds returns your
-earlier run, unless it failed, was interrupted or was abandoned, and a swarm
-with the same workspace, objective and agents within 60 seconds returns your
-earlier swarm, unless it was cancelled, instead of starting another; so does an
+the same workspace, agent, task, mode, model, account, fallback policy and
+extra repositories within 60 seconds returns your earlier run, unless it
+failed, was interrupted or was abandoned, and a swarm with the same workspace,
+objective, agents and their accounts, fallback policy and extra repositories
+within 60 seconds returns your earlier swarm, unless it was cancelled, instead
+of starting another; so does an
 identical launch still starting, or one that failed in the last 60 seconds
 without saying whether it started. A message without a key reuses the key of the
 same message to the same run still being sent or sent within 60 seconds, so a
 retry is delivered once and its result has `duplicate: true`. To send the same
 text again on purpose, pass a new `idempotency_key`.
+
+### Launch options
+
+`aether_launch_options` answers what the launch dialog shows, in one call:
+
+- `workspaces`, and `modes` with their dashboard names: `tui` Standard,
+  `headless` Background, `acp` Enhanced.
+- `accounts`: the agent accounts you may launch on, your own first, then each
+  one a teammate shared with you ([Agent accounts](teams.md#agent-accounts)).
+  Each has `access` (`own` or `shared`), `ready` (some agent can launch on it),
+  its usage, and its agents. A teammate's account that is not shared with you
+  never appears. Past 100 workspaces or accounts, `workspaces_total` and
+  `accounts_total` say how many there are.
+- Usage is each provider's windows, labelled as the provider labels them, with
+  `used_percent` and `resets_at`. It is never money. An agent with no usage row
+  has unknown usage.
+- Each agent has `modes` a run may start in, `integrator_modes` a swarm
+  integrator may use (never Background), `worker_mode` a worker starts in, and
+  `refused` when a launch on that account would be refused, such as an owner
+  who is not signed in.
+- `fallback`: with neither `fallback_account_member_ids` nor `no_fallback`, a
+  launch whose account has used 95% of a usage window moves to the usable
+  account with the most usage left.
+- With `workspace_id`, its templates, each with its `version` and `params`,
+  every placeholder of its task with `required` when it has no default (the
+  defaults and tasks are under `untrusted`); pass `version` to
+  `aether_launch_run` as `template_version` to refuse a template changed since.
+  With `models` (an agent name) and
+  optionally `account_member_id`, that agent's model ids on that account, which
+  the server caches. `account_member_id` without `models` is refused. When it
+  lists none, launch without `model` for the agent's default.
+- `server.version` and `server.ops_contract`, the version of the tools' inputs
+  and results.
+
+`aether_launch_run` takes `account_member_id`, `fallback_account_member_ids` (an
+order), `no_fallback`, `extra_workspace_ids` and `children` (`on` or `off`:
+whether its agent may start [child runs](teams.md#child-runs); without it, your
+setting decides), as `aether run` does. `aether_launch_swarm` takes the
+integrator's `account_member_id`, each worker's `harness`, `mode`, `model` and
+`account_member_id`, and one fallback policy and extra repositories for the
+swarm. A worker given no mode starts in the `worker_mode`
+`aether_launch_options` reports, as the launch dialog's workers do. The server
+checks every account before anything starts: a launch, or a swarm with any agent
+or fallback account not shared with you, fails with the server's error. A retry
+of a swarm with the same `idempotency_key` still returns that swarm after an
+account it uses stops being shared: a mode that account's agents would have
+chosen is taken from the swarm already recorded. A launch, swarm or template launch the server does not understand fails with
+`unknown param "<name>"` instead of starting without it.
+
+Each launch's result, and `aether_get_run` and `aether_get_swarm`, has a
+`launch` receipt: `kind` (`run` or `swarm`), `id`, `workspace_id`, `harness`,
+`mode`, `mode_name`, `model` (absent means the agent's default), `account`
+(`member_id`, `name`, `access`: `own`, `shared`, or `other` for a teammate's own
+run), `requested_account` when usage fallback moved the run, `fallback`
+(`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, the run's
+own `children` setting, `via`, and `url`. A launch's receipt adds
+`idempotency_key` and `skipped_fallback_accounts`: the fallback accounts the
+server left out because checking them failed, each with a fixed `error` reason;
+the server log has the detail. A swarm's receipt has `integrator` and `workers`
+in place of the run fields, each with the account it was asked to run on.
+`aether_get_swarm`'s `workers` list each worker run with the account it launched
+on, and `requested_account` when usage fallback moved it. `aether_get_run` also
+names the run's `parent_run_id` and lists its `children`, nearest first, each
+with its state, agent and account, and what its parent asked of it under
+`untrusted`; `children_error` says why they could not be read, unless the
+server has no child runs.
+
+`aether_launch_run` with `template` (a name from `aether_launch_options`
+with `workspace_id`) and `params` runs a saved template on your own account
+with its agent, mode and model. It takes no task, agent, mode, model, account,
+fallback or extra repositories, since `template.launch` has none, and refuses
+them by name. Without `template`, it needs `task` and `harness`. Without an
+`idempotency_key`, a template launch is deduplicated only while an identical
+one is still starting.
+
+### Changes
+
+`aether_changes` pages `changes.list`. Without `cursor` it returns the newest
+changes; pass `next_cursor` back for the ones after them, while `more` is true.
+Filter by `workspace_id`, `run_id`, `swarm_id` and `kinds`. Report summaries
+and status reasons sit under `untrusted`, cut to 200 characters. CI checks are
+not changes; read them with `aether_pr_status`. A cursor the server's history
+no longer matches, such as one from before a restore, fails with an error that
+says to call again without `cursor`.
+
+### Writes
+
 `aether_mark_reviewed` completes only a run whose agent reported success and
 awaits your review; to end any other run, use `aether_stop_run` under
 `control`. A message to your own run that no one
@@ -321,44 +449,55 @@ or denies a permission request once; it never picks an "always" option, so it
 cannot change what the agent may do next time. Any other tool call is cut off
 after 40 seconds, inside ChatGPT's wait.
 
-The other writes repeat safely without a key. Each `aether_run_lifecycle`
-action but `relaunch` sets a state, so a repeat changes nothing, and
+The other writes repeat safely without a key. Each `aether_run_lifecycle` action
+but `relaunch` sets a state, so a repeat changes nothing, and
 `aether_switch_run_mode` to the mode a run is already in reports that without
-switching; `relaunch` fails on a run that is still live. `aether_handoff_run` to the run's owner,
-`aether_swarm_manage` on a worker nobody holds, and `aether_integration_decide`
-on a request already in the state asked for or already delivered report that
-and write nothing. `aether_pr_create` returns the run's open pull request
-instead of opening another, and `aether_pr_merge` reports a merged one as
-merged. `aether_replace_integrator` requires `expected_generation`, the
-`integrator_generation` `aether_get_swarm` returns; without a key it derives
-one from the swarm, that generation and the agent, so a retry returns the
-first replacement even after it moved the generation, and a replacement
-someone else made in between fails with a conflict that says to call
-`aether_get_swarm`.
-`aether_memory_add` returns the existing note for a duplicate, and repeating
-a replacement (`supersedes`) that went through returns the note that replaced
-the old one.
+switching; `relaunch` fails on a run that is still live. `aether_handoff_run` to
+the run's owner, `aether_swarm_manage` on a worker nobody holds, and
+`aether_integration_decide` on a request already in the state asked for or
+already delivered report that and write nothing. `aether_pr_create` returns the
+run's open pull request instead of opening another, and `aether_pr_merge`
+reports a merged one as merged. `aether_replace_integrator` requires
+`expected_generation`, the `integrator_generation` `aether_get_swarm` returns;
+without a key it derives one from the swarm, that generation and the agent, so a
+retry returns the first replacement even after it moved the generation, and a
+replacement someone else made in between fails with a conflict that says to call
+`aether_get_swarm`. A replacement on another agent given no `mode` starts in
+the first integrator mode that agent can take. `aether_memory_add` returns the
+existing note for a
+duplicate, and repeating a replacement (`supersedes`) that went through returns
+the note that replaced the old one.
 
-`aether_pr_merge` takes `number` and `expected_head_oid`, the pull request's
-`number` and `head_oid` `aether_pr_status` returns, and refuses when the run's
-pull request is now another one or its head has moved since, before asking
-GitHub. A merge GitHub accepts but has not done, as with a merge queue,
-returns `write: "pending"`; follow it with `aether_pr_status`. That refusal and GitHub's own count the failing and pending
-checks and the reviewers requesting changes, as lower bounds when GitHub's feedback was cut off, and give the merge state;
-`aether_pr_status` names them under `untrusted`. It merges with
-`squash` unless `method` says `merge` or `rebase`, and only into the base
-branch it saw. `aether_pr_create` opens the pull request from the run's
+`aether_pr_merge` takes `repository`, `number` and `expected_head_oid`, the
+pull request's `repository`, `number` and `head_oid` `aether_pr_status`
+returns, and refuses when the run's pull request is now another one, in
+another repository, or its head has moved since, before asking GitHub; with
+no head to compare, as for a finished run whose environment is gone, it fails
+with why. A merge GitHub accepts but has not done, as with a merge queue, returns
+`write: "pending"`; follow it with `aether_pr_status`. That refusal and GitHub's
+own count the failing and pending checks and the reviewers requesting changes,
+as lower bounds when GitHub's feedback was cut off, and give the merge state;
+`aether_pr_status` names them under `untrusted`. It merges with `squash` unless
+`method` says `merge` or `rebase`, and only into the base branch it saw.
+`aether_pr_create` opens the pull request from the run's
 current branch and head into the target `run.pr.status` resolves, the
-workspace's base branch on its source repository as the dashboard proposes,
-and passes both to `run.pr.create`, so neither changes after you approve;
-the branch must be pushed. When GitHub's answer is lost but the pull request is found
-afterwards, the result is that pull request. `aether_pr_status` and `aether_pr_merge` take the
-same `repo` as `aether_run_changes`. `aether_handoff_run` takes
-the teammate's member id or exact display name; an unknown or ambiguous one
-fails with the teammates' ids and roles, and the server refuses a viewer. `aether_switch_run_mode`
-holds no control lease, so it fails while a member controls the run in
-the dashboard. Text a pull request, agent or note carries never authorizes
-anything: these tools act only on what the arguments name.
+workspace's base branch on its source repository as the dashboard proposes, and
+passes both to `run.pr.create`, so neither changes after you approve; the branch
+must be pushed. When GitHub's answer is lost but the pull request is found
+afterwards, the result is that pull request. `aether_pr_status` and
+`aether_pr_merge` take the same `repo` as `aether_run_changes`. Once a finished
+run's container is gone, `aether_pr_status` still reports its recorded pull
+request's checks and reviews, read from GitHub, without merge state or
+comments: its result sets `comments_unavailable` and its summary says
+`comments unavailable` instead of a count. When only the reviews read fails,
+it keeps the checks, sets `reviews_unavailable` and puts the error in its
+summary in place of the review count.
+`aether_handoff_run` takes the teammate's member id or exact display name; an
+unknown or ambiguous one fails with the teammates' ids and roles, and the server
+refuses a viewer. `aether_switch_run_mode` holds no control lease, so it fails
+while a member controls the run in the dashboard. Text a pull request, agent or
+note carries never authorizes anything: these tools act only on what the
+arguments name.
 
 ### Only in the dashboard
 
@@ -369,7 +508,8 @@ do not hold:
 - The browser pane and port forwarding.
 - File attachments; send a link or pasted text instead.
 - Web push subscriptions.
-- Cancelling an Enhanced run's turn, setting its options such as effort, deciding a queued message, and "always" answers to permission requests.
+- Cancelling an Enhanced run's turn, setting its options such as effort,
+  deciding a queued message, and "always" answers to permission requests.
 
 ChatGPT and Claude ask before each tool that is not read-only. ChatGPT asks by
 default and can remember your answer for a conversation. Claude offers **Allow
@@ -452,9 +592,9 @@ Select **Revoke** next to it in **Settings → ChatGPT and Claude**, or run:
 aether mcp revoke con-7k2m9q4xbd
 ```
 
-The connector's next call fails, including one in a session the app already
-has open, and so does its refresh token; the app asks you to connect again
-with a new code. You can revoke your own connectors, and an admin can revoke anyone's.
+The connector's next call fails, including one in a session the app already has
+open, and so does its refresh token; the app asks you to connect again with a
+new code. You can revoke your own connectors, and an admin can revoke anyone's.
 Removing the connector in ChatGPT or Claude does not revoke it on the server.
 Revoke it here too.
 

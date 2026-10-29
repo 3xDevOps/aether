@@ -8,6 +8,7 @@ import { integratorModes } from '@/components/launch/modes'
 import { ExtraRepos } from '@/components/launch/extra-repos'
 import { EffortField, ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launch/run-limits'
+import { fallbackFromSaved, fallbackToSaved, SaveAccountDefault, SavedIssues } from '@/components/launch/saved-defaults'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { sameWorker, WorkerAgents, type WorkerChoice, workerMode, workerRefusals } from '@/components/launch/worker-agents'
 import { LoaderCircle } from '@/components/icons'
@@ -26,6 +27,7 @@ import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/li
 import { useReturnFocus } from '@/lib/hooks'
 import { sameIdentity, useStore } from '@/store'
 import { useChildSettingsRead } from '@/store/children'
+import { rememberChoice, saveLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
@@ -42,7 +44,6 @@ export function LaunchDialog() {
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
   const upsertRun = useStore((s) => s.upsertRun)
-  const rememberLaunch = useStore((s) => s.rememberLaunch)
   const self = useStore((s) => s.info?.member)
   const features = useStore((s) => s.info?.features)
   const capabilities = useStore((s) => s.capabilities)
@@ -64,15 +65,24 @@ export function LaunchDialog() {
     (features?.includes(kind === 'swarm' ? swarmReposFeature : multiRepoFeature) ?? false)
   const extraRepos = reposOffered && extras.length ? { extra_workspace_ids: extras } : {}
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
+  const [accountsRead, setAccountsRead] = useState(false)
   const [account, setAccount] = useState(self?.id ?? '')
   const [fallback, setFallback] = useState(automaticFallback)
+  const [savedAttempt, setSavedAttempt] = useState(0)
+  const savedRead = useLaunchDefaultsRead(api, savedAttempt)
+  const saved = savedRead.result
+  const savesDefaults = cap.hasMethod('launch.defaults.set')
+  // local: preset while the saved choices could not be read, so a later
+  // successful read presets again.
+  const [preset, setPreset] = useState<'pending' | 'local' | 'done'>('pending')
+  const [pick, setPick] = useState(0)
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
   const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
   const limitsOffered = cap.hasMethod('server.run_limits')
   const serverLimits = useServerRunLimits(api, limitsOffered)
   const [limits, setLimits] = useState(emptyLimits)
-  const choice = useAgentChoice({ account, ownAccountID })
+  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick })
   const { agents, agentError, agent, harness, mode, model, effort, effortLevels, noAgents } = choice
   const [task, setTask] = useState('')
   const [objective, setObjective] = useState('')
@@ -119,9 +129,24 @@ export function LaunchDialog() {
       if (!live) return
       setAccounts(access.accounts)
       setAccount((current) => current || access.accounts[0]?.id || '')
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => {
+      if (live) setAccountsRead(true)
+    })
     return () => { live = false }
   }, [])
+
+  useEffect(() => {
+    if (preset === 'done' || !savedRead.fresh || !accountsRead) return
+    if (preset === 'local' && (savedRead.error !== null || !saved)) return
+    if (preset === 'local') setPick((n) => n + 1)
+    setPreset(savedRead.error === null ? 'done' : 'local')
+    if (!saved) return
+    const { account_member_id: savedAccount, fallback: savedFallback } = saved.defaults
+    const refused = saved.invalid?.some((issue) => issue.field === 'account_member_id')
+    const usable = savedAccount && !refused && accounts.some((member) => member.id === savedAccount)
+    setAccount((current) => usable ? savedAccount : ownAccountID || current)
+    setFallback(fallbackFromSaved(savedFallback, accounts))
+  }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead, ownAccountID])
 
   useEffect(() => {
     if (kind !== 'swarm' || !accounts.length) return
@@ -144,6 +169,12 @@ export function LaunchDialog() {
     })
     return () => { live = false }
   }, [accounts, account, kind, ownAccountID])
+
+  const saveAccountDefault = () => saveLaunchDefaults((current) => ({
+    ...current,
+    account_member_id: account === ownAccountID ? '' : account,
+    fallback: fallbackToSaved(fallback, accounts, kind === 'swarm' ? '' : account),
+  }))
 
   const setUp = () => {
     close()
@@ -187,7 +218,7 @@ export function LaunchDialog() {
       ...(childRunsOffered && childRuns ? { children: childRuns } : {}),
       ...(Object.keys(parsedLimits.limits).length ? { limits: parsedLimits.limits } : {}),
     })
-    if (signedIn()) rememberLaunch(harness, mode, chosenModel)
+    if (signedIn()) rememberChoice(harness, mode, chosenModel)
     upsertRun(run)
     close()
     navigate('run', { runId: run.id })
@@ -237,7 +268,7 @@ export function LaunchDialog() {
     const signedIn = sameIdentity()
     const result = await api.missionCreate({ ...contents, idempotency_key: key })
     swarmKeys.delete(serialized)
-    if (signedIn()) rememberLaunch(harness, integratorMode, integratorModel)
+    if (signedIn()) rememberChoice(harness, integratorMode, integratorModel)
     close()
     navigate('missions', { missionId: result.mission.id })
     toast.success('Swarm created')
@@ -285,10 +316,21 @@ export function LaunchDialog() {
         </Callout>
       )}
       {agents && agentError === null && <RefusalNotes agents={agents} accountName={accountName} accountField={accountField} />}
+      {savedRead.error && (
+        <Callout
+          tone="failed"
+          role="alert"
+          title="Your saved launch choices could not be read."
+          actions={<Button type="button" size="sm" variant="secondary" onClick={() => setSavedAttempt((n) => n + 1)}>Try again</Button>}
+        >
+          {savedRead.error} {saved ? 'The choices shown are the ones last read from the server.' : 'The choices shown are this browser\'s last launch.'}
+        </Callout>
+      )}
+      {saved && <SavedIssues title="Saved defaults not used" issues={(saved.invalid ?? []).filter((issue) => !issue.field.startsWith('agents.') || issue.field.split('.')[1] === harness)} />}
     </>
   )
   const options = accounts.length > 1 && (
-    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} swarm={kind === 'swarm'} />
+    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} swarm={kind === 'swarm'} save={savesDefaults && <SaveAccountDefault choice={JSON.stringify([account, fallback])} onSave={saveAccountDefault} />} />
   )
 
   return (

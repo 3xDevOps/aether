@@ -58,6 +58,14 @@ func (e *RateLimitError) Error() string {
 	return "github: API rate limit: " + statusLine(e.Status, e.Message) + "; retry after " + e.RetryAt.UTC().Format(time.RFC3339)
 }
 
+// ReviewsError is a snapshot read that failed at the reviews, after the pull
+// request and its checks were read; the snapshot returned with it holds
+// those.
+type ReviewsError struct{ Err error }
+
+func (e *ReviewsError) Error() string { return "read reviews: " + e.Err.Error() }
+func (e *ReviewsError) Unwrap() error { return e.Err }
+
 func statusLine(status int, message string) string {
 	line := "HTTP " + strconv.Itoa(status) + " " + http.StatusText(status)
 	if message != "" && message != http.StatusText(status) {
