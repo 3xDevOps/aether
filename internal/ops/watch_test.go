@@ -95,6 +95,16 @@ func TestWatchCreate(t *testing.T) {
 	if got := g.acted().params; !strings.Contains(got, `"source":"assistant"`) {
 		t.Fatalf("assistant create sent %s, want source assistant", got)
 	}
+
+	// Without a dashboard URL the assistant still gets the watch's link,
+	// relative to the dashboard it runs in; a connector gets none.
+	g.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{})
+	if _, out := run(t, assistantSession(t, g.call), "aether_watch", map[string]any{"run_id": "run-1"}); out["url"] != testWatch.Link {
+		t.Fatalf("assistant url without a dashboard URL = %v, want %s", out["url"], testWatch.Link)
+	}
+	if _, out := run(t, connectorSession(t, g, ScopeWrite), "aether_watch", map[string]any{"run_id": "run-1"}); out["url"] != "" {
+		t.Fatalf("connector url without a dashboard URL = %v, want none", out["url"])
+	}
 }
 
 // The server's refusal of a condition it does not support reaches the
