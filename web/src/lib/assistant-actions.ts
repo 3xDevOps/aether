@@ -188,14 +188,10 @@ export function swarmTarget(id: string): ActionTarget {
   return { kind: 'swarm', id, route: { name: 'missions', params: { missionId: id } } }
 }
 
-export function preferenceTarget(id: string): ActionTarget {
-  return { kind: 'preference', id, route: { name: 'settings', params: { section: 'memory', entry: id } } }
-}
-
 function target(tool: string, input: Record<string, unknown>, result: Record<string, unknown>, saved?: AssistantActionRecord): ActionTarget | undefined {
   if (tool === 'aether_remember') {
     const id = text(record(result.preference).id)
-    return id ? preferenceTarget(id) : undefined
+    return id ? { kind: 'preference', id, route: { name: 'settings', params: { section: 'memory', entry: id } } } : undefined
   }
   if (tool === 'aether_forget' || tool === 'aether_my_preferences') return undefined
   if (tool === 'aether_pr_merge' || tool === 'aether_pr_create') {

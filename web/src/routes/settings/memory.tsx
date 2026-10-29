@@ -23,10 +23,6 @@ export const preferencesLabel = 'Use my preferences in the assistant'
 
 const highlightMs = 1500
 
-function newest(list: Preference[]): Preference[] {
-  return [...list].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
-}
-
 /** Settings › Memory: the member's private assistant preferences. Keyed by identity, so another member never inherits the list. */
 export function MemorySection({ client }: { client: Api }) {
   const identity = useStore((s) => s.identityKey)
@@ -97,7 +93,7 @@ function MemoryBody({ client }: { client: Api }) {
 
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-    return newest(list).filter((p) => words.every((word) => p.text.toLowerCase().includes(word)))
+    return [...list].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).filter((p) => words.every((word) => p.text.toLowerCase().includes(word)))
   }, [list, query])
 
   const put = (preference: Preference) => setList((current) => current.some((p) => p.id === preference.id) ? current.map((p) => p.id === preference.id ? preference : p) : [...current, preference])
