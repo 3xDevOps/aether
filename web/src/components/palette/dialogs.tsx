@@ -11,9 +11,11 @@ import { useStore } from '@/store'
 
 export function PaletteDialogs() {
   const dialog = useStore((s) => s.paletteDialog)
+  const identity = useStore((s) => s.identityKey)
   return (
     <>
-      {(dialog === 'launch' || dialog === 'swarm') && <LaunchDialog />}
+      {/* A different member's launch starts over from their own accounts and saved choices. */}
+      {(dialog === 'launch' || dialog === 'swarm') && <LaunchDialog key={identity ?? ''} />}
       {dialog === 'inject' && <InjectDialog />}
       {dialog === 'forward' && <ForwardDialog />}
       {dialog === 'close' && <CloseDialog />}

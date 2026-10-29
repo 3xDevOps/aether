@@ -43,7 +43,9 @@ act without asking by default.
 
 The dashboard remembers the mode you last chose for each agent, in **Set up**,
 in **New run** or in the **Default mode** select on the **Agents** page, and
-**New run** starts on it. For an agent with no remembered mode, **New run** and
+**New run** starts on it. A launch from **New run** or **New swarm** saves the
+agent, mode and model on the server, so every device starts from them
+([Saved launch choices](teams.md#saved-launch-choices)). For an agent with no remembered mode, **New run** and
 **New swarm** start on Enhanced when the agent's Enhanced mode is installed, and on Standard
 otherwise; `aether run`, `aether swarm create` and the connector do so
 whenever no mode is named. **New run** lists Enhanced first and marks it

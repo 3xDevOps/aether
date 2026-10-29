@@ -11,6 +11,7 @@ import type { Workspace } from '@/lib/types'
 import { Step } from '@/routes/onboarding/layout'
 import { CONNECTORS_SECTION_ID } from '@/routes/settings/connectors'
 import { sameIdentity, useStore } from '@/store'
+import { rememberChoice, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useIsAdmin, useSelfRole } from '@/store/hooks'
 
 function useSourceCheck(client: Api, workspaceID: string | undefined) {
@@ -58,14 +59,14 @@ export function FirstRunStep({
   const navigate = useStore((s) => s.navigate)
   const setOnboarded = useStore((s) => s.setOnboarded)
   const upsertRun = useStore((s) => s.upsertRun)
-  const rememberLaunch = useStore((s) => s.rememberLaunch)
   // The draft outlives this component: the header can jump to another step
   // and back, which unmounts it.
   const draft = useStore((s) => s.onboardingFirstRun)
   const setDraft = useStore((s) => s.setOnboardingFirstRun)
   const caps = useCapability()
   const launchable = canLaunch({ cap: caps, role: useSelfRole() })
-  const choice = useAgentChoice({ account: '', ownAccountID: '', preferred: draft.harness, preferredModel: draft.model, preferredEffort: draft.effort, client })
+  const saved = useLaunchDefaultsRead(client)
+  const choice = useAgentChoice({ account: '', ownAccountID: '', saved, preferred: draft.harness, preferredModel: draft.model, preferredEffort: draft.effort, client })
   const source = useSourceCheck(client, workspace?.id)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -120,7 +121,7 @@ export function FirstRunStep({
         ...(chosenModel ? { model: chosenModel } : {}),
         ...(effort ? { effort } : {}),
       })
-      if (signedIn()) rememberLaunch(harness, mode, chosenModel)
+      if (signedIn()) rememberChoice(harness, mode, chosenModel)
       upsertRun(run)
       setOnboarded(true)
       navigate('run', { runId: run.id })

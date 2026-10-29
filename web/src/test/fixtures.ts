@@ -531,6 +531,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
     childSettings: vi.fn<Api['childSettings']>(async () => ({ enabled: false, fallback: true, shared_when_missing: false, configured: false, nudge: 'show' })),
+    launchDefaultsGet: vi.fn<Api['launchDefaultsGet']>(async () => ({ revision: 0, defaults: {} })),
+    launchDefaultsSet: vi.fn<Api['launchDefaultsSet']>(async (params) => ({ revision: params.revision + 1, defaults: params.defaults ?? {} })),
     runChildren: vi.fn<Api['runChildren']>(async (runID) => ({
       root_run_id: runID,
       children: [],
