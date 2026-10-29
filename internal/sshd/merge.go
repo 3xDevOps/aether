@@ -319,8 +319,11 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 			}
 		}
 		var err error
-		merge, err = ms.AcceptMerge(ctx, accept)
-		return err
+		if merge, err = ms.AcceptMerge(ctx, accept); err != nil {
+			return err
+		}
+		noteChange(ctx)
+		return nil
 	}
 	// Only a run where either member holds the lease or a browser or shell
 	// surface has control the merge changes: the absorbed member's ends,

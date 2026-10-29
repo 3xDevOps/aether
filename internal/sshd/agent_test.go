@@ -402,7 +402,7 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	if _, perr := s.agentList(ctx, grantee.ID, raw); perr == nil || perr.Code != protocol.CodeDenied {
 		t.Fatalf("unshared account discovery = %v, want denied", perr)
 	}
-	if err = s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
+	if _, err = s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	agents := list(raw)

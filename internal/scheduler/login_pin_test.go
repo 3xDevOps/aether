@@ -26,7 +26,7 @@ func newSharerEnv(t *testing.T) *shareEnv {
 	e := newShareEnv(t, func(cfg *Config) {
 		cfg.Harnesses["codex"] = HarnessSpec{TUIArgs: []string{"fake-codex", "{task}"}}
 	})
-	if err := e.db.ShareAccount(t.Context(), e.member.ID, e.owner.ID); err != nil {
+	if _, err := e.db.ShareAccount(t.Context(), e.member.ID, e.owner.ID); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -151,7 +151,7 @@ func TestSharerPinLeavesExistingLoginUnchanged(t *testing.T) {
 func TestRecipientContainersPinTheirOwnLogin(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
-	if err := e.db.ShareAccount(t.Context(), e.owner.ID, e.member.ID); err != nil {
+	if _, err := e.db.ShareAccount(t.Context(), e.owner.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.assertLoginMounts(t, e.ownRun(t), "runs", e.pins()...)

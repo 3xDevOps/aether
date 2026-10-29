@@ -437,7 +437,7 @@ func TestInsightsGet(t *testing.T) {
 	// top2 ran on bob's shared agent login in alice's home, so gh there used
 	// alice's GitHub login.
 	exec(`UPDATE runs SET account_member_id = ? WHERE id = 'top2'`, bob)
-	if err := db.ShareAccount(ctx, bob, alice); err != nil {
+	if _, err := db.ShareAccount(ctx, bob, alice); err != nil {
 		t.Fatal(err)
 	}
 	pr("top2", 4, "open", "2026-03-09T00:00:00-07:00", nil, true)
@@ -484,7 +484,7 @@ func TestInsightsGet(t *testing.T) {
 	// Bob revoking his share while the read is between pages stops it,
 	// with the access error and nothing read after.
 	gh.betweenPages = func() {
-		if err := db.RevokeAccountShare(ctx, bob, alice); err != nil {
+		if _, err := db.RevokeAccountShare(ctx, bob, alice); err != nil {
 			t.Error(err)
 		}
 	}
@@ -494,7 +494,7 @@ func TestInsightsGet(t *testing.T) {
 		t.Errorf("run.pr.feedback revoked between pages = %s, %+v after lookups %v; want denied after one page", out, perr, gh.lookups[before:])
 	}
 	gh.betweenPages = nil
-	if err := db.ShareAccount(ctx, bob, alice); err != nil {
+	if _, err := db.ShareAccount(ctx, bob, alice); err != nil {
 		t.Fatal(err)
 	}
 	// A failed reviews read keeps the checks read before it.

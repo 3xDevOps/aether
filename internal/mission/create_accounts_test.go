@@ -17,7 +17,7 @@ func TestCreateRefusesAccountsNotSharedWithTheCaller(t *testing.T) {
 	f := newMissionFixture(t)
 	owner := regressionMember(t, f.db, "owner")
 	stranger := regressionMember(t, f.db, "stranger")
-	if err := f.db.ShareAccount(ctx, owner.ID, f.member.ID); err != nil {
+	if _, err := f.db.ShareAccount(ctx, owner.ID, f.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	self := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)}

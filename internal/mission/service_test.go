@@ -843,7 +843,7 @@ func TestLaunchValidationResolvesForTheRunOwner(t *testing.T) {
 	launcher := &validatingLauncher{recordingLauncher: f.launcher}
 	f.svc.cfg.Runs = launcher
 	owner := regressionMember(t, f.db, "owner")
-	if err := f.db.ShareAccount(ctx, owner.ID, f.member.ID); err != nil {
+	if _, err := f.db.ShareAccount(ctx, owner.ID, f.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(owner.ID), Harness: "claude", Mode: string(domain.LaunchTUI)}

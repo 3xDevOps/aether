@@ -212,6 +212,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 				return err
 			}
 			deleted = true
+			noteChange(ctx)
 			if err := s.removeAssistant(ctx, id); err != nil {
 				slog.Warn("sshd: member assistant cleanup failed", "member", id, "error", err)
 			}
