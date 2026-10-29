@@ -164,6 +164,14 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("connector after a reused refresh token = %d %s, want revoked", status, body)
 	}
 	e.refresh(t, second, next.RefreshToken, http.StatusBadRequest)
+	var audit protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{Limit: 1}, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit.Entries) != 1 || audit.Entries[0].Method != "connector.reused" || audit.Entries[0].Client != "Test client" ||
+		audit.Entries[0].ConnectorID == "" || audit.Entries[0].Target != audit.Entries[0].ConnectorID {
+		t.Fatalf("newest audit entry = %+v, want the reused connector's revocation", audit.Entries)
+	}
 
 	third := e.connect(t, allScopes...)
 	if err := e.db.RevokeDevice(ctx, e.deviceID); err != nil {
@@ -263,7 +271,7 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := e.db.ShareAccount(ctx, grace.ID, domain.MemberID(info.Member.ID)); err != nil {
+	if _, err := e.db.ShareAccount(ctx, grace.ID, domain.MemberID(info.Member.ID)); err != nil {
 		t.Fatal(err)
 	}
 	writer := e.connect(t, "write")
@@ -317,7 +325,8 @@ func TestOpsMethodsFitTheirConnectorScope(t *testing.T) {
 }
 
 // connector.revoke ends a connector at once: its open session, its
-// access token and its refresh token all fail on their next use.
+// access token and its refresh token all fail on their next use, and
+// audit history keeps its creation, its write calls and its revocation.
 func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 	e := newEnv(t)
 	c := e.connect(t, allScopes...)
@@ -344,6 +353,30 @@ func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 		t.Fatalf("launches = %v, want only the one before revoke", got)
 	}
 
+	var audit protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{}, &audit); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, a := range audit.Entries {
+		got = append(got, a.Via+" "+a.Method+" "+a.ConnectorID+" "+a.Target+" "+a.Outcome)
+	}
+	run := ""
+	if len(audit.Entries) == 3 {
+		run = audit.Entries[1].Target
+	}
+	want := []string{
+		"cli connector.revoke  " + id + " ok",
+		"connector run.launch " + id + " " + run + " ok",
+		"connector connector.create " + id + " " + id + " ok",
+	}
+	if !slices.Equal(got, want) || !strings.HasPrefix(run, "run-") {
+		t.Fatalf("audit.list = %q, want %q", got, want)
+	}
+	var filtered protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{ConnectorID: id}, &filtered); err != nil || len(filtered.Entries) != 3 {
+		t.Fatalf("audit.list for %s = %+v %v, want its calls and its revocation", id, filtered.Entries, err)
+	}
 }
 
 // Refreshes racing with one refresh token must rotate it once and keep

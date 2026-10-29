@@ -93,8 +93,10 @@ type Store interface {
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	DeleteMember(ctx context.Context, id domain.MemberID) error
 
-	ShareAccount(ctx context.Context, owner, grantee domain.MemberID) error
-	RevokeAccountShare(ctx context.Context, owner, grantee domain.MemberID) error
+	// ShareAccount and RevokeAccountShare report whether the grant changed:
+	// false for one that already existed or was already absent.
+	ShareAccount(ctx context.Context, owner, grantee domain.MemberID) (bool, error)
+	RevokeAccountShare(ctx context.Context, owner, grantee domain.MemberID) (bool, error)
 	AccountSharedWith(ctx context.Context, owner, grantee domain.MemberID) (bool, error)
 	ListAccountOwners(ctx context.Context, grantee domain.MemberID) ([]*domain.Member, error)
 	ListAccountGrantees(ctx context.Context, owner domain.MemberID) ([]*domain.Member, error)

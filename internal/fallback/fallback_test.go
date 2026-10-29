@@ -108,7 +108,7 @@ func TestSelect(t *testing.T) {
 			}
 			launcher := ids["Lena"]
 			for _, owner := range []string{"Ada", "Bo", "Cy"} {
-				if shareErr := db.ShareAccount(ctx, ids[owner], launcher); shareErr != nil {
+				if _, shareErr := db.ShareAccount(ctx, ids[owner], launcher); shareErr != nil {
 					t.Fatal(shareErr)
 				}
 			}
@@ -137,7 +137,7 @@ func TestSelect(t *testing.T) {
 			}
 			// A share revoked after the unlocked read is refused by Select.
 			if tc.revoke != "" {
-				if revokeErr := db.RevokeAccountShare(ctx, ids[tc.revoke], launcher); revokeErr != nil {
+				if _, revokeErr := db.RevokeAccountShare(ctx, ids[tc.revoke], launcher); revokeErr != nil {
 					t.Fatal(revokeErr)
 				}
 			}
@@ -225,7 +225,7 @@ func TestMeasureNextTriesUnknownUsageLast(t *testing.T) {
 			}
 			launcher := ids["Lena"]
 			for _, owner := range []string{"Ada", "Bo", "Cy"} {
-				if shareErr := db.ShareAccount(ctx, ids[owner], launcher); shareErr != nil {
+				if _, shareErr := db.ShareAccount(ctx, ids[owner], launcher); shareErr != nil {
 					t.Fatal(shareErr)
 				}
 			}

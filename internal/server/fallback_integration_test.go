@@ -52,7 +52,7 @@ func TestIntegrationWorkerFallsBackFromExhaustedAccount(t *testing.T) {
 	usage := &stubClaudeUsage{used: map[domain.MemberID]float64{}}
 	e := &coordEnv{rt: newE2ERuntime(), image: "e2e/fake", usage: usage}
 	srv := e.seed(ctx, t, false)
-	if err := srv.srv.Store().ShareAccount(ctx, e.bo.id, e.ada.id); err != nil {
+	if _, err := srv.srv.Store().ShareAccount(ctx, e.bo.id, e.ada.id); err != nil {
 		t.Fatalf("share Bo's account with Ada: %v", err)
 	}
 	usage.set(e.bo.id, 100)
@@ -127,7 +127,7 @@ func TestIntegrationHeadlessFallback(t *testing.T) {
 	rt := newE2ERuntime()
 	e := &coordEnv{rt: rt, image: "e2e/fake", usage: usage}
 	srv := e.seed(ctx, t, false)
-	if err := srv.srv.Store().ShareAccount(ctx, e.bo.id, e.ada.id); err != nil {
+	if _, err := srv.srv.Store().ShareAccount(ctx, e.bo.id, e.ada.id); err != nil {
 		t.Fatalf("share Bo's account with Ada: %v", err)
 	}
 	login := filepath.Join(e.dataDir, "homes", string(e.bo.id), ".claude", ".credentials.json")

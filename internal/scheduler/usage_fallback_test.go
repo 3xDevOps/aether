@@ -99,7 +99,7 @@ func enhancedClaude(cfg *Config) {
 
 func (e *shareEnv) share(t *testing.T) {
 	t.Helper()
-	if err := e.db.ShareAccount(t.Context(), e.owner.ID, e.member.ID); err != nil {
+	if _, err := e.db.ShareAccount(t.Context(), e.owner.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -393,7 +393,7 @@ func TestHandedOffRunMovesOnlyToAccountsSharedWithItsHome(t *testing.T) {
 	t.Parallel()
 	e, _, notes := newFallbackEnv(t, enhancedClaude)
 	lin := e.addRecipient(t)
-	if err := e.db.ShareAccount(t.Context(), e.owner.ID, lin.ID); err != nil {
+	if _, err := e.db.ShareAccount(t.Context(), e.owner.ID, lin.ID); err != nil {
 		t.Fatal(err)
 	}
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
@@ -502,7 +502,7 @@ func TestEnhancedRunMovesAgainOnASecondLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeHomeFiles(t, linHome, ".claude/.credentials.json")
-	if err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
+	if _, err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10, lin.ID: 20}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
@@ -543,7 +543,7 @@ func TestUnconfirmedSharedLoginDoesNotUseUpTheAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeHomeFiles(t, linHome, ".claude/.credentials.json")
-	if err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
+	if _, err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10, lin.ID: 20}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
@@ -658,7 +658,7 @@ func TestHeadlessRunContinuesOnAFallbackAccount(t *testing.T) {
 				sched.UseUsageFallback(seam)
 				startScheduler(t, sched)
 			case "no fallback":
-				if err = e.db.RevokeAccountShare(t.Context(), e.owner.ID, e.member.ID); err != nil {
+				if _, err = e.db.RevokeAccountShare(t.Context(), e.owner.ID, e.member.ID); err != nil {
 					t.Fatal(err)
 				}
 				e.rt.byName(string(run.ID)).exitNow(1)

@@ -417,14 +417,14 @@ func TestSharedSubscriptionOnlyWhenOwnIsMissingAndShared(t *testing.T) {
 	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
 		t.Fatalf("setting on but nothing shared = %v, want denied", err)
 	}
-	if err := h.db.ShareAccount(h.ctx, h.bob.ID, h.ada.ID); err != nil {
+	if _, err := h.db.ShareAccount(h.ctx, h.bob.ID, h.ada.ID); err != nil {
 		t.Fatal(err)
 	}
 	got := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
 	if got.AccountMemberID != string(h.bob.ID) || got.OwnerID != string(h.ada.ID) {
 		t.Fatalf("child = %+v, want Ada's run on Bob's shared account", got)
 	}
-	if err := h.db.RevokeAccountShare(h.ctx, h.bob.ID, h.ada.ID); err != nil {
+	if _, err := h.db.RevokeAccountShare(h.ctx, h.bob.ID, h.ada.ID); err != nil {
 		t.Fatal(err)
 	}
 	h.settle()

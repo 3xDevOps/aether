@@ -274,7 +274,7 @@ func TestWorkerStartFallsBackFromExhaustedDeclaredAccount(t *testing.T) {
 	f := newMissionFixture(t)
 	ctx := t.Context()
 	owner := regressionMember(t, f.db, "owner")
-	if err := f.db.ShareAccount(ctx, owner.ID, f.member.ID); err != nil {
+	if _, err := f.db.ShareAccount(ctx, owner.ID, f.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	f.svc.cfg.Usage = claudeUsage{f.member.ID: 100, owner.ID: 20}
@@ -305,13 +305,13 @@ func TestWorkerStartFallsBackFromExhaustedDeclaredAccount(t *testing.T) {
 	// The run hits its limit and moves to a third account: the worker is
 	// checked against the account it runs on now, not the one it launched on.
 	third := regressionMember(t, f.db, "third")
-	if err = f.db.ShareAccount(ctx, third.ID, f.member.ID); err != nil {
+	if _, err = f.db.ShareAccount(ctx, third.ID, f.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.db.SetRunAccount(ctx, run.ID, third.ID, "usage limit", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.db.RevokeAccountShare(ctx, owner.ID, f.member.ID); err != nil {
+	if _, err = f.db.RevokeAccountShare(ctx, owner.ID, f.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	attempt, err := f.db.GetAttempt(ctx, domain.AttemptID(out.Attempt.ID))
@@ -321,7 +321,7 @@ func TestWorkerStartFallsBackFromExhaustedDeclaredAccount(t *testing.T) {
 	if err = f.svc.authorizeMissionTaskActor(ctx, f.reloadMission(t), attempt); err != nil {
 		t.Fatalf("a moved worker is checked against the account it left: %v", err)
 	}
-	if err = f.db.RevokeAccountShare(ctx, third.ID, f.member.ID); err != nil {
+	if _, err = f.db.RevokeAccountShare(ctx, third.ID, f.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.svc.authorizeMissionTaskActor(ctx, f.reloadMission(t), attempt); err == nil {

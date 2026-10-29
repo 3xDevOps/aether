@@ -126,8 +126,15 @@ func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, para
 		return nil, perr
 	}
 	id := domain.MemberID(p.MemberID)
+	before, err := s.cfg.Store.GetMember(ctx, id)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	if approveErr := s.cfg.Store.ApproveMember(ctx, id); approveErr != nil {
 		return nil, rpcError(approveErr)
+	}
+	if before.Pending {
+		noteChange(ctx)
 	}
 	approved, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {
