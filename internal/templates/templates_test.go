@@ -298,7 +298,7 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	if len(tasks) != 1 || tasks[0] != "sweep go" || models[0] != "sonnet" || efforts[0] != "high" {
 		t.Fatalf("fired tasks = %v with models %v and efforts %v, want exactly [\"sweep go\"] with sonnet and high", tasks, models, efforts)
 	}
-	if _, err = svc.Launch(ctx, ws.ID, "sweep", m.ID, nil, nil); err != nil {
+	if _, err = svc.Launch(ctx, ws.ID, "sweep", m.ID, nil, "", nil); err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 	runs.mu.Lock()
@@ -307,6 +307,21 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	runs.mu.Unlock()
 	if len(models) != 2 || models[1] != "sonnet" || efforts[1] != "high" {
 		t.Fatalf("launched models = %v and efforts %v, want sonnet and high for the manual launch too", models, efforts)
+	}
+	saved, err := db.GetTemplate(ctx, ws.ID, "sweep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Launch(ctx, ws.ID, "sweep", m.ID, nil, Version(saved), nil); err != nil {
+		t.Fatalf("Launch at the current version: %v", err)
+	}
+	if _, err = svc.Launch(ctx, ws.ID, "sweep", m.ID, nil, "0123456789abcdef", nil); !errors.Is(err, ErrChanged) || runs.count() != 3 {
+		t.Fatalf("Launch at a stale version = %v after %d launches, want ErrChanged and no launch", err, runs.count())
+	}
+	resaved := *saved
+	resaved.Effort = "low"
+	if Version(&resaved) == Version(saved) {
+		t.Fatal("a template saved with another effort keeps its version, so a launch pinned to the old one runs the new effort")
 	}
 
 	// Editing the scheduled template into an undefaulted placeholder would

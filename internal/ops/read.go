@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -99,7 +100,8 @@ var readOps = []Op{
 		defaultOn(Assistant, "mine", false, "only runs the member launched; default false, every run they can see"),
 	opOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
 		"Use this when the user asks about one run, or to poll a launched run."+untrustedRule, getRun).
-		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline, protocol.MethodRunPRStatus),
+		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline,
+		protocol.MethodRunPRStatus, protocol.MethodRunChildren),
 	opOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run said or did: its conversation or terminal, and reports."+untrustedRule, runHistory).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodRunACPHistory, protocol.MethodTerminalHistory),
@@ -112,7 +114,7 @@ var readOps = []Op{
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodInsightsGet, protocol.MethodWorkspaceTimeline),
 	opOf("aether_get_swarm", "Get swarms", ScopeRead, true, nextSwarms,
 		"Use this when the user asks about their swarms, or one by swarm_id, or to poll a launched swarm."+untrustedRule, getSwarm).
-		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
+		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
 	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, its diff."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
@@ -362,13 +364,14 @@ type pullRequest struct {
 	Draft      bool   `json:"draft"`
 	BaseBranch string `json:"base_branch,omitempty"`
 	HeadOID    string `json:"head_oid,omitempty"`
+	Repository string `json:"repository,omitempty"`
 }
 
 func prOf(p *protocol.RunPullRequest) *pullRequest {
 	if p == nil {
 		return nil
 	}
-	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft, BaseBranch: p.BaseBranch, HeadOID: p.HeadOID}
+	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft, BaseBranch: p.BaseBranch, HeadOID: p.HeadOID, Repository: p.Repository}
 }
 
 func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
@@ -377,6 +380,10 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 		return "", nil, err
 	}
 	l, err := dashboardLinks(ctx, c.read)
+	if err != nil {
+		return "", nil, err
+	}
+	book, err := accounts(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
@@ -391,9 +398,10 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	row := rowOf(r, l, nil)
 	untrusted := map[string]any{"run": row.Untrusted, "task": clip(r.Task, maxText)}
 	row.Untrusted = nil
-	out := map[string]any{"run": row, "mode": r.Mode, "model": r.Model, "branch": r.Branch,
+	receipt := runReceipt(r, l, book)
+	out := map[string]any{"run": row, "launch": receipt, "branch": r.Branch,
 		"paused": r.Paused, "pending_inputs": len(r.PendingInputs), "finished_at": r.FinishedAt, "review": r.Review, "untrusted": untrusted}
-	summary := fmt.Sprintf("Run %s is %s.", r.ID, r.Status)
+	summary := fmt.Sprintf("Run %s is %s on %s.", r.ID, r.Status, accountName(receipt))
 	for _, it := range items {
 		if it.RunID == r.ID {
 			out["needs_you"] = attentionRowOf(it, l)
@@ -414,7 +422,54 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	if pr.Error != "" {
 		out["pr_error"] = pr.Error
 	}
+	if r.ParentRunID != "" {
+		out["parent_run_id"], out["parent_url"] = r.ParentRunID, l.run(r.ParentRunID)
+	}
+	addChildren(ctx, c.read, l, book, r.ID, out, untrusted)
 	return summary, out, nil
+}
+
+// childRow is a child run of a run, at depth 1 for its own children.
+type childRow struct {
+	RunID string `json:"run_id"`
+	Depth int    `json:"depth"`
+	State string `json:"state"`
+	choice
+	URL string `json:"url,omitempty"`
+}
+
+// addChildren adds run id's descendants, nearest first, to out, and what
+// their parents asked of them to untrusted; a failed read is part of the
+// result.
+func addChildren(ctx context.Context, read Call, l links, book accountBook, id string, out, untrusted map[string]any) {
+	var res protocol.RunChildrenResult
+	if err := read(ctx, protocol.MethodRunChildren, protocol.RunChildrenParams{RunID: id}, &res); err != nil {
+		// A server without child runs has none to list; any other failure,
+		// such as a lost connection, is reported.
+		var perr *protocol.Error
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		unsupported := errors.As(err, &perr) && (perr.Code == protocol.CodeMethodNotFound ||
+			perr.Code == protocol.CodeUnavailable && json.Unmarshal(perr.Data, &data) == nil && data.Reason == protocol.ErrorReasonChildrenUnavailable)
+		if !unsupported {
+			out["children_error"] = err.Error()
+		}
+		return
+	}
+	if len(res.Children) == 0 {
+		return
+	}
+	rows, purposes := []childRow{}, map[string]string{}
+	for _, ch := range res.Children[:min(len(res.Children), defaultRows)] {
+		rows = append(rows, childRow{RunID: ch.RunID, Depth: ch.Depth, State: ch.State, choice: choiceOf(ch.Harness, ch.Mode, ch.Model, ch.AccountMemberID, book),
+			URL: l.run(ch.RunID)})
+		purposes[ch.RunID] = clip(ch.Purpose, maxReport)
+	}
+	out["children"], untrusted["child_purposes"] = rows, purposes
+	if len(res.Children) > len(rows) {
+		out["children_total"] = len(res.Children)
+	}
 }
 
 const historyExpired = "The server no longer keeps this run's oldest history, so its start is missing."
@@ -614,9 +669,9 @@ func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error)
 		return "", nil, err
 	}
 	if in.SwarmID == "" {
-		missions, err := allSwarms(ctx, c.read, in.WorkspaceID)
-		if err != nil {
-			return "", nil, err
+		missions, listErr := allSwarms(ctx, c.read, in.WorkspaceID)
+		if listErr != nil {
+			return "", nil, listErr
 		}
 		rows := []swarmRow{}
 		for _, m := range missions[:min(len(missions), rowLimit(in.Limit))] {
@@ -630,7 +685,11 @@ func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error)
 		return fmt.Sprintf("%d swarms.", len(rows)), out, nil
 	}
 	var res protocol.MissionShowResult
-	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &res); err != nil {
+	if err = c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &res); err != nil {
+		return "", nil, err
+	}
+	book, err := accounts(ctx, c.read)
+	if err != nil {
 		return "", nil, err
 	}
 	m := res.Mission
@@ -649,9 +708,10 @@ func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error)
 		RunID     string `json:"run_id,omitempty"`
 		TaskID    string `json:"task_id"`
 		State     string `json:"state"`
-		Harness   string `json:"harness"`
-		HeldBy    string `json:"control_held_by,omitempty"`
-		URL       string `json:"url,omitempty"`
+		choice
+		RequestedAccount *accountRef `json:"requested_account,omitempty"`
+		HeldBy           string      `json:"control_held_by,omitempty"`
+		URL              string      `json:"url,omitempty"`
 	}
 	type question struct {
 		ID       string `json:"id"`
@@ -684,7 +744,11 @@ func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error)
 	workers := make([]worker, 0, len(res.Attempts))
 	var errs []workerError
 	for _, a := range res.Attempts {
-		w := worker{AttemptID: a.ID, RunID: a.RunID, TaskID: a.TaskID, State: a.State, Harness: a.Harness, URL: l.run(a.RunID)}
+		w := worker{AttemptID: a.ID, RunID: a.RunID, TaskID: a.TaskID, State: a.State,
+			choice: choiceOf(a.Harness, a.Mode, a.Model, cmp.Or(a.LaunchAccountID, a.AccountOwnerID), book), URL: l.run(a.RunID)}
+		if a.LaunchAccountID != "" && a.LaunchAccountID != a.AccountOwnerID {
+			w.RequestedAccount = book.ref(a.AccountOwnerID)
+		}
 		if a.LastError != "" {
 			errs = append(errs, workerError{AttemptID: a.ID, LastError: clip(a.LastError, maxText)})
 		}
@@ -702,7 +766,7 @@ func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error)
 		messages = append(messages, message{FromRunID: msg.FromRunID, ToRunID: msg.ToRunID, Kind: msg.Kind,
 			Body: clip(cmp.Or(msg.Summary, msg.Body), maxText), At: msg.CreatedAt})
 	}
-	out := map[string]any{"swarm": swarmRowOf(m, l, maxText), "integrator_generation": m.IntegratorGeneration,
+	out := map[string]any{"swarm": swarmRowOf(m, l, maxText), "launch": swarmReceipt(m, l, book), "integrator_generation": m.IntegratorGeneration,
 		"workers": workers, "untrusted": map[string]any{"tasks": tasks, "questions": questions, "messages": messages, "worker_errors": errs}}
 	if m.IntegratorLaunchError != "" {
 		out["integrator_launch_error"] = m.IntegratorLaunchError
@@ -797,15 +861,19 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 		case diff.Error != "":
 			out["diff_error"] = diff.Error
 		default:
+			// An unresolved conflict's file starts with a combined-diff
+			// header instead of diff --git.
 			var files []string
-			for part := range strings.SplitSeq(diff.Output.Stdout, "\ndiff --git ") {
-				if part == "" {
-					continue
+			var file strings.Builder
+			for line := range strings.Lines(diff.Output.Stdout) {
+				if file.Len() > 0 && (strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "diff --cc ") || strings.HasPrefix(line, "diff --combined ")) {
+					files = append(files, strings.TrimSuffix(file.String(), "\n"))
+					file.Reset()
 				}
-				if len(files) > 0 {
-					part = "diff --git " + part
-				}
-				files = append(files, part)
+				file.WriteString(line)
+			}
+			if file.Len() > 0 {
+				files = append(files, strings.TrimSuffix(file.String(), "\n"))
 			}
 			if in.DiffFile < 0 || (in.DiffFile > 0 && in.DiffFile >= len(files)) {
 				return "", nil, invalid("diff_file %d is past the diff's %d files", in.DiffFile, len(files))
@@ -914,8 +982,18 @@ func prStatus(ctx context.Context, c calls, in prStatusInput) (string, any, erro
 		out["truncated"] = true
 		counted = " (truncated: at least these many)"
 	}
-	return fmt.Sprintf("PR #%d is %s: %d checks passed, %d failing, %d pending; %d reviews, %d comments%s; merge state %s.",
-		pr.Number, pr.State, passed, len(failing), pending, len(reviews), len(comments), counted, cmp.Or(res.MergeStateStatus, "unknown")), out, nil
+	commented := fmt.Sprintf("%d comments", len(comments))
+	if res.CommentsUnavailable {
+		out["comments_unavailable"] = true
+		commented = "comments unavailable (the run's environment is gone)"
+	}
+	reviewed := fmt.Sprintf("%d reviews", len(reviews))
+	if res.ReviewsUnavailable {
+		out["reviews_unavailable"] = true
+		reviewed = "reviews unavailable (" + res.Error + ")"
+	}
+	return fmt.Sprintf("PR #%d is %s: %d checks passed, %d failing, %d pending; %s, %s%s; merge state %s.",
+		pr.Number, pr.State, passed, len(failing), pending, reviewed, commented, counted, cmp.Or(res.MergeStateStatus, "unknown")), out, nil
 }
 
 func overlaps(ctx context.Context, c calls, in overlapsInput) (string, any, error) {
