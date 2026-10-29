@@ -230,7 +230,7 @@ func RoleCard(g Guide) string {
 		b.WriteString("You are an Aether run. ")
 	}
 	b.WriteString("Before acting, run the shell command `aether-internal skill` (not a harness skill) for your live identity, capabilities, assignment and rules; `aether-internal status` or aether_status shows live state. " +
-		"Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. " +
+		"Your own shell tool's sessions never appear in the Aether dashboard, and a server restart can kill background commands they started; run long-running commands (dev servers, watchers, long builds) in an Aether terminal instead, which people can see and which keeps running through a restart: `aether-internal skill terminal`. " +
 		"Use only available capabilities.\n")
 	if g.Repos != "" {
 		b.WriteString("This run also has extra repositories beside the one in the working directory: " + g.Repos +
