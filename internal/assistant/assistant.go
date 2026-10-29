@@ -769,12 +769,13 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 			return ctx.Err()
 		}
 	}
-	if err := m.waitForNotes(ctx); err != nil {
+	conv := m.conversation()
+	if err := m.waitForNotes(ctx, conv); err != nil {
 		m.finish(key, a, err)
 		return err
 	}
 	m.share.RLock()
-	dispatched, err := s.send(ctx, m, text, key, view)
+	dispatched, err := s.send(ctx, m, conv, text, key, view)
 	m.share.RUnlock()
 	if err != nil && !dispatched {
 		m.finish(key, a, err)
@@ -788,9 +789,12 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 // check, the dispatch and saving the key under the generation it ran in.
 // dispatched is true once the agent may have the prompt; its key then stays
 // reserved even if the caller left or saving it failed.
-func (s *Service) send(ctx context.Context, m *member, text, key string, view *protocol.AssistantViewContext) (dispatched bool, err error) {
+func (s *Service) send(ctx context.Context, m *member, conv context.Context, text, key string, view *protocol.AssistantViewContext) (dispatched bool, err error) {
 	m.op.Lock()
 	defer m.op.Unlock()
+	if conv.Err() != nil {
+		return false, fmt.Errorf("assistant: %w while the prompt waited; send it again in the new conversation", errConversationEnded)
+	}
 	row, err := s.stored(ctx, m.id)
 	if err != nil {
 		return false, err
@@ -888,9 +892,9 @@ func promptLive(ctx context.Context, live *session, text string, view *protocol.
 // waitForNotes waits, outside the member's lock so a reset is not held up by
 // a silent agent, for the last prompt's preference notes to settle, or for the
 // conversation to be discarded.
-func (m *member) waitForNotes(ctx context.Context) error {
+func (m *member) waitForNotes(ctx, conv context.Context) error {
 	m.mu.Lock()
-	wait, conv := m.notesSettled, m.conv
+	wait := m.notesSettled
 	m.mu.Unlock()
 	if wait == nil {
 		return nil

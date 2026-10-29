@@ -829,7 +829,7 @@ func TestResetCompletesWhileAPromptWaitsForNotes(t *testing.T) {
 	m.notesSettled = make(chan struct{})
 	m.mu.Unlock()
 	waiting := make(chan error, 1)
-	go func() { waiting <- m.waitForNotes(t.Context()) }()
+	go func() { waiting <- m.waitForNotes(t.Context(), m.conversation()) }()
 	time.Sleep(50 * time.Millisecond)
 	reset := make(chan error, 1)
 	go func() {
@@ -842,5 +842,28 @@ func TestResetCompletesWhileAPromptWaitsForNotes(t *testing.T) {
 	}
 	if err := wait(t, waiting); err != nil {
 		t.Fatalf("the waiting prompt after the reset = %v; want it released", err)
+	}
+}
+
+// A prompt that waited through a reset belongs to the discarded conversation;
+// it is refused, not sent into the new one.
+func TestPromptThatWaitedThroughAResetIsRefused(t *testing.T) {
+	s := New(Config{Dir: t.TempDir(), Store: newMemStore(), Host: &fakeHost{}})
+	t.Cleanup(func() { _ = s.Close() })
+	m := s.member("m1")
+	m.mu.Lock()
+	m.notesSettled = make(chan struct{})
+	m.mu.Unlock()
+	waiting := make(chan error, 1)
+	go func() { waiting <- s.Prompt(t.Context(), m.id, "show my runs", "k4", nil) }()
+	time.Sleep(50 * time.Millisecond)
+	m.op.Lock()
+	err := s.resetLocked(t.Context(), m)
+	m.op.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = wait(t, waiting); !errors.Is(err, errConversationEnded) {
+		t.Fatalf("prompt that waited through a reset = %v; want it refused", err)
 	}
 }
