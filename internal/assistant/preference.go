@@ -274,7 +274,7 @@ func (c *preferenceCaller) forget(ctx context.Context, raw json.RawMessage) (any
 	}
 	var res protocol.PreferenceDeleteResult
 	if err == nil {
-		res, err = c.s.cfg.Preferences.Delete(ctx, c.m.id, p.ID, held.shown)
+		res, err = c.s.cfg.Preferences.Delete(ctx, c.m.id, protocol.PreferenceDeleteParams{ID: p.ID, ExpectedUpdatedAt: held.shown})
 	}
 	if !ok {
 		return res, err

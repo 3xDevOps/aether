@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,7 +64,7 @@ func TestPreferenceCapRefusesWithoutEvicting(t *testing.T) {
 	alice := mustCreateMember(t, db).ID
 	first := addPreference(t, db, alice, "Prefer table output 0")
 	for i := 1; i < MaxPreferences; i++ {
-		addPreference(t, db, alice, "Prefer table output")
+		addPreference(t, db, alice, fmt.Sprintf("Prefer table output %d", i))
 	}
 	p := Preference{MemberID: alice, Text: "One too many", Enabled: true, Source: "settings"}
 	if err := db.AddPreference(context.Background(), &p); !errors.Is(err, ErrPreferenceCap) {

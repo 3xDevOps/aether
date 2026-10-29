@@ -393,7 +393,9 @@ and connected apps such as ChatGPT cannot reach them.
   saves your own words from that message without a card, and the transcript
   shows **Saved** or **Updated** with the text. A preference is at least 3
   words and 12 characters and at most 500 characters; the assistant saves at
-  most 3 per message and you keep at most 200.
+  most 3 per message and you keep at most 200. Saving text you already keep
+  for the same workspace, or for all of them, fails with
+  `already remembered as preference <id>`.
 - **What it can quote:** only a run of whole words you typed in your latest
   message, stored as you wrote them. It refuses paraphrases, anything
   gitleaks flags as a secret, and text it treats as pasted: lines starting
@@ -407,7 +409,7 @@ and connected apps such as ChatGPT cannot reach them.
   off or the conversation is temporary. Forgetting deletes the preference;
   the assistant's next prompt tells it not to use the old text. If the
   preference changes while its card waits, approving the card forgets
-  nothing and the call fails with `changed after it was shown`.
+  nothing and the call fails with `changed since you saw it`.
 - **Turn off:** switch off preferences in **Settings → Memory**
   (`assistant.settings` with `preferences_enabled: false`). The assistant
   then neither reads nor saves them, and each of your messages tells it not

@@ -59,23 +59,35 @@ type PreferenceListResult struct {
 	Enabled bool `json:"enabled"`
 }
 
+// ExpectedMemberID, on each preference write, refuses the write unless
+// the caller is that member. ExpectedUpdatedAt refuses it unless the
+// preference was last updated then.
 type PreferenceAddParams struct {
-	Text        string `json:"text"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
+	Text             string `json:"text"`
+	WorkspaceID      string `json:"workspace_id,omitempty"`
+	ExpectedMemberID string `json:"expected_member_id,omitempty"`
 }
 
 // PreferenceUpdateParams changes each field that is set. ClearWorkspace
 // makes the preference apply in all workspaces.
 type PreferenceUpdateParams struct {
-	ID             string  `json:"id"`
-	Text           *string `json:"text,omitempty"`
-	WorkspaceID    string  `json:"workspace_id,omitempty"`
-	ClearWorkspace bool    `json:"clear_workspace,omitempty"`
-	Enabled        *bool   `json:"enabled,omitempty"`
+	ID                string    `json:"id"`
+	Text              *string   `json:"text,omitempty"`
+	WorkspaceID       string    `json:"workspace_id,omitempty"`
+	ClearWorkspace    bool      `json:"clear_workspace,omitempty"`
+	Enabled           *bool     `json:"enabled,omitempty"`
+	ExpectedMemberID  string    `json:"expected_member_id,omitempty"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at,omitzero"`
 }
 
 type PreferenceIDParams struct {
 	ID string `json:"id"`
+}
+
+type PreferenceDeleteParams struct {
+	ID                string    `json:"id"`
+	ExpectedMemberID  string    `json:"expected_member_id,omitempty"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at,omitzero"`
 }
 
 // PreferenceResult is the saved preference and, after an update, the row

@@ -17,6 +17,10 @@ const MaxPreferences = 200
 // ErrPreferenceCap means the member already keeps MaxPreferences.
 var ErrPreferenceCap = fmt.Errorf("store: %d preferences is the limit; forget one first", MaxPreferences)
 
+// ErrPreferenceExists means the member already keeps the same text for the
+// same workspace, or for all of them.
+var ErrPreferenceExists = errors.New("store: preference already exists")
+
 // Preference is one of a member's private assistant preferences. Every
 // query is keyed by the member, so another member's id reads as not found.
 type Preference struct {
@@ -37,7 +41,8 @@ type PreferenceStore interface {
 	ListPreferences(ctx context.Context, member domain.MemberID) ([]Preference, error)
 	// GetPreference returns ErrNotFound unless member owns id.
 	GetPreference(ctx context.Context, member domain.MemberID, id string) (Preference, error)
-	// AddPreference fills p's id and times; ErrPreferenceCap at the limit.
+	// AddPreference fills p's id and times; ErrPreferenceCap at the limit;
+	// ErrPreferenceExists, with p set to the row that holds the text.
 	AddPreference(ctx context.Context, p *Preference) error
 	// UpdatePreference applies edit to the member's preference id and
 	// stores it. commit runs with the old and new rows before the
@@ -137,6 +142,16 @@ func (d *DB) AddPreference(ctx context.Context, p *Preference) error {
 	}
 	if mergedInto != "" {
 		return fmt.Errorf("store: add preference: member %s was merged into %s: %w", p.MemberID, mergedInto, ErrNotFound)
+	}
+	existing, err := scanPreference(tx.QueryRowContext(ctx,
+		`SELECT `+preferenceColumns+` FROM member_preferences WHERE member_id = ? AND text = ? AND COALESCE(workspace_id, '') = ?`,
+		p.MemberID, p.Text, p.WorkspaceID))
+	if err == nil {
+		*p = existing
+		return ErrPreferenceExists
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("store: add preference: %w", err)
 	}
 	var count int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM member_preferences WHERE member_id = ?`, p.MemberID).Scan(&count); err != nil {

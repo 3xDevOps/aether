@@ -202,7 +202,7 @@ func TestRestoreReappliesTombstonesToAnOlderDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
-	if _, err = f.svc.Delete(ctx, f.alice, gone.ID, time.Time{}); err != nil {
+	if _, err = f.svc.Delete(ctx, f.alice, protocol.PreferenceDeleteParams{ID: gone.ID}); err != nil {
 		t.Fatal(err)
 	}
 	text := "Prefer quiet logs"
@@ -255,7 +255,7 @@ func TestDeleteRacingReads(t *testing.T) {
 				}
 			})
 		}
-		if _, err := f.svc.Delete(ctx, f.alice, p.ID, time.Time{}); err != nil {
+		if _, err := f.svc.Delete(ctx, f.alice, protocol.PreferenceDeleteParams{ID: p.ID}); err != nil {
 			t.Fatal(err)
 		}
 		wg.Wait()
@@ -274,7 +274,7 @@ func TestTombstoneAfterAPartialLine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.dir, "preference-tombstones"), []byte("pref-partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Delete(ctx, f.alice, p.ID, time.Time{}); err != nil {
+	if _, err := f.svc.Delete(ctx, f.alice, protocol.PreferenceDeleteParams{ID: p.ID}); err != nil {
 		t.Fatal(err)
 	}
 	deleted, _, _, err := f.svc.tombstones.read()
@@ -290,7 +290,7 @@ func TestCancelledDeleteStillCommits(t *testing.T) {
 	p := f.add(t, "Prefer table output")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := f.svc.Delete(ctx, f.alice, p.ID, time.Time{}); err != nil {
+	if _, err := f.svc.Delete(ctx, f.alice, protocol.PreferenceDeleteParams{ID: p.ID}); err != nil {
 		t.Fatalf("delete cancelled after its tombstone = %v", err)
 	}
 	if _, err := f.svc.Get(context.Background(), f.alice, p.ID); code(err) != protocol.CodeNotFound {
@@ -504,7 +504,7 @@ func TestForgetWhileAReaderHoldsTheLog(t *testing.T) {
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM member_preferences`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.svc.Delete(ctx, f.alice, p.ID, time.Time{}); err != nil {
+	if _, err = f.svc.Delete(ctx, f.alice, protocol.PreferenceDeleteParams{ID: p.ID}); err != nil {
 		t.Fatalf("forget while a reader holds the log = %v; want success", err)
 	}
 	if err = tx.Rollback(); err != nil {
@@ -642,5 +642,62 @@ func TestScrubRetriesAFailureDuringItsLastAttempt(t *testing.T) {
 	case <-fake.fourth:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the checkpoint that failed during the worker's last attempt was not retried")
+	}
+}
+
+// An update or delete that names when the member last saw the preference
+// changes nothing once it changed since.
+func TestStaleUpdateAndDeleteChangeNothing(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	seen := f.add(t, "Prefer table output")
+	text := "Prefer short answers"
+	res, err := f.svc.Update(ctx, f.alice, protocol.PreferenceUpdateParams{ID: seen.ID, Text: &text, ExpectedUpdatedAt: seen.UpdatedAt}, protocol.PreferenceSourceSettings, "")
+	if err != nil {
+		t.Fatalf("update as seen: %v", err)
+	}
+	other := "Prefer long answers"
+	if _, err = f.svc.Update(ctx, f.alice, protocol.PreferenceUpdateParams{ID: seen.ID, Text: &other, ExpectedUpdatedAt: seen.UpdatedAt}, protocol.PreferenceSourceSettings, ""); code(err) != protocol.CodeConflict ||
+		!strings.Contains(err.Error(), "changed since you saw it") {
+		t.Fatalf("stale update = %v, want a conflict", err)
+	}
+	if _, err = f.svc.Delete(ctx, f.alice, protocol.PreferenceDeleteParams{ID: seen.ID, ExpectedUpdatedAt: seen.UpdatedAt}); code(err) != protocol.CodeConflict ||
+		!strings.Contains(err.Error(), "changed since you saw it") {
+		t.Fatalf("stale delete = %v, want a conflict", err)
+	}
+	got, err := f.svc.Get(ctx, f.alice, seen.ID)
+	if err != nil || got.Text != text || !got.UpdatedAt.Equal(res.Preference.UpdatedAt) {
+		t.Fatalf("after the stale writes: %+v, %v; want the first update kept", got, err)
+	}
+	if _, err = f.svc.Delete(ctx, f.alice, protocol.PreferenceDeleteParams{ID: seen.ID, ExpectedUpdatedAt: res.Preference.UpdatedAt}); err != nil {
+		t.Fatalf("delete as seen: %v", err)
+	}
+}
+
+// Concurrent saves of the same text for the same scope keep one row, and
+// the others are refused with its id; another scope keeps its own.
+func TestConcurrentAddsOfTheSameTextKeepOne(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	const n = 8
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			_, errs[i] = f.svc.Add(ctx, f.alice, "Prefer table  output", "", protocol.PreferenceSourceSettings, "")
+		})
+	}
+	wg.Wait()
+	all, err := f.svc.List(ctx, f.alice, protocol.PreferenceListParams{IncludeDisabled: true})
+	if err != nil || len(all.Preferences) != 1 {
+		t.Fatalf("list = %+v, %v; want one row", all.Preferences, err)
+	}
+	for _, err := range errs {
+		if err != nil && (code(err) != protocol.CodeConflict || !strings.Contains(err.Error(), "already remembered as preference "+all.Preferences[0].ID)) {
+			t.Errorf("duplicate add = %v, want a conflict naming %s", err, all.Preferences[0].ID)
+		}
+	}
+	if _, err = f.svc.Add(ctx, f.alice, "Prefer table output", string(f.ws.ID), protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatalf("the same text for one workspace: %v", err)
 	}
 }

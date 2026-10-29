@@ -119,3 +119,50 @@ func TestMemberRemoveRecordsPreferencesDeleted(t *testing.T) {
 		t.Fatalf("tombstones = %q, %v; want %s recorded as deleted", b, err, added.Preference.ID)
 	}
 }
+
+// A write that names another member as the one it was meant for is refused
+// and changes nothing; naming the caller, and when it last saw the
+// preference, goes through.
+func TestPreferenceWritesRefuseADifferentMember(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(c *Config) {
+		db, ok := c.Store.(*store.DB)
+		if !ok {
+			t.Fatalf("store is %T, want *store.DB", c.Store)
+		}
+		c.Services.Preferences = preference.New(db, filepath.Join(t.TempDir(), "preference-tombstones"))
+	})
+	aliceKey, alice := addMember(t, e, "Alice", domain.RoleCollaborator, false)
+	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	c := controlAs(t, e, aliceKey)
+	var added protocol.PreferenceResult
+	if err := c.Call(protocol.MethodPreferenceAdd, protocol.PreferenceAddParams{Text: "Prefer table output", ExpectedMemberID: string(alice.ID)}, &added); err != nil {
+		t.Fatalf("add as alice: %v", err)
+	}
+	id, text := added.Preference.ID, "Prefer short answers"
+	other := string(bob.ID)
+	for method, params := range map[string]any{
+		protocol.MethodPreferenceAdd:    protocol.PreferenceAddParams{Text: "Prefer long answers", ExpectedMemberID: other},
+		protocol.MethodPreferenceUpdate: protocol.PreferenceUpdateParams{ID: id, Text: &text, ExpectedMemberID: other},
+		protocol.MethodPreferenceDelete: protocol.PreferenceDeleteParams{ID: id, ExpectedMemberID: other},
+	} {
+		var perr *protocol.Error
+		if err := c.Call(method, params, nil); !errors.As(err, &perr) || perr.Code != protocol.CodeDenied || perr.Message != "signed in as a different member" {
+			t.Errorf("%s for bob = %v, want denied", method, err)
+		}
+	}
+	var listed protocol.PreferenceListResult
+	if err := c.Call(protocol.MethodPreferenceList, protocol.PreferenceListParams{IncludeDisabled: true}, &listed); err != nil ||
+		len(listed.Preferences) != 1 || listed.Preferences[0].Text != "Prefer table output" {
+		t.Fatalf("list after the refused writes = %+v, %v", listed.Preferences, err)
+	}
+	var res protocol.PreferenceResult
+	if err := c.Call(protocol.MethodPreferenceUpdate, protocol.PreferenceUpdateParams{ID: id, Text: &text, ExpectedMemberID: string(alice.ID),
+		ExpectedUpdatedAt: added.Preference.UpdatedAt}, &res); err != nil {
+		t.Fatalf("update as alice: %v", err)
+	}
+	if err := c.Call(protocol.MethodPreferenceDelete, protocol.PreferenceDeleteParams{ID: id, ExpectedMemberID: string(alice.ID),
+		ExpectedUpdatedAt: res.Preference.UpdatedAt}, nil); err != nil {
+		t.Fatalf("delete as alice: %v", err)
+	}
+}
