@@ -245,17 +245,27 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 	return protocol.PreferenceResult{Preference: wire(cur), Previous: &previous}, nil
 }
 
-func (s *Service) Delete(ctx context.Context, member domain.MemberID, id string) (protocol.PreferenceDeleteResult, error) {
+// Delete forgets the member's preference id. A shown time is when the row
+// the member was asked about was last updated; a row changed since is kept.
+func (s *Service) Delete(ctx context.Context, member domain.MemberID, id string, shown time.Time) (protocol.PreferenceDeleteResult, error) {
 	if id == "" {
 		return protocol.PreferenceDeleteResult{}, invalid("id is required")
 	}
 	// Once the tombstone is synced the delete must commit: a cancelled
 	// caller would leave a tombstone for a delete it was told failed.
 	row, err := s.store.DeletePreference(context.WithoutCancel(ctx), member, id, func(row store.Preference) error {
+		if !shown.IsZero() && !row.UpdatedAt.Equal(shown) {
+			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+				"preference %s changed after it was shown, so it was not forgotten; show its current text and ask again", id)}
+		}
 		return s.tombstones.deleted(row.ID)
 	})
 	if errors.Is(err, store.ErrNotFound) {
 		return protocol.PreferenceDeleteResult{}, notFound(id)
+	}
+	var perr *protocol.Error
+	if errors.As(err, &perr) {
+		return protocol.PreferenceDeleteResult{}, err
 	}
 	if err != nil {
 		return protocol.PreferenceDeleteResult{}, fmt.Errorf("preference: %w", err)

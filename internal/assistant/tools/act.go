@@ -375,7 +375,7 @@ func (s *Server) summarizeForget(ctx context.Context, req protocol.Request, c *p
 	if rpcErr := s.call(ctx, protocol.MethodAssistantPreferenceShow, p, &pref); rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary = fmt.Sprintf("Forget your preference %s: %q", p.ID, pref.Text)
+	c.Summary, c.Shown = fmt.Sprintf("Forget your preference %s: %q", p.ID, pref.Text), pref.UpdatedAt
 	return nil
 }
 

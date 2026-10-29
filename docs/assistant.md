@@ -398,7 +398,9 @@ and connected apps such as ChatGPT cannot reach them.
 - **See, edit and forget:** **Settings → Memory** lists them. The assistant
   can also forget one after you approve its card, even while preferences are
   off or the conversation is temporary. Forgetting deletes the preference;
-  the assistant's next prompt tells it not to use the old text.
+  the assistant's next prompt tells it not to use the old text. If the
+  preference changes while its card waits, approving the card forgets
+  nothing and the call fails with `changed after it was shown`.
 - **Turn off:** switch off preferences in **Settings → Memory**
   (`assistant.settings` with `preferences_enabled: false`). The assistant
   then neither reads nor saves them. A **temporary** conversation

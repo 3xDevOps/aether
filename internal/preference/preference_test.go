@@ -202,7 +202,7 @@ func TestRestoreReappliesTombstonesToAnOlderDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.svc = New(f.db, filepath.Join(f.dir, "preference-tombstones"))
-	if _, err = f.svc.Delete(ctx, f.alice, gone.ID); err != nil {
+	if _, err = f.svc.Delete(ctx, f.alice, gone.ID, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	text := "Prefer quiet logs"
@@ -255,7 +255,7 @@ func TestDeleteRacingReads(t *testing.T) {
 				}
 			})
 		}
-		if _, err := f.svc.Delete(ctx, f.alice, p.ID); err != nil {
+		if _, err := f.svc.Delete(ctx, f.alice, p.ID, time.Time{}); err != nil {
 			t.Fatal(err)
 		}
 		wg.Wait()
@@ -274,7 +274,7 @@ func TestTombstoneAfterAPartialLine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.dir, "preference-tombstones"), []byte("pref-partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Delete(ctx, f.alice, p.ID); err != nil {
+	if _, err := f.svc.Delete(ctx, f.alice, p.ID, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	deleted, _, _, err := f.svc.tombstones.read()
@@ -290,7 +290,7 @@ func TestCancelledDeleteStillCommits(t *testing.T) {
 	p := f.add(t, "Prefer table output")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := f.svc.Delete(ctx, f.alice, p.ID); err != nil {
+	if _, err := f.svc.Delete(ctx, f.alice, p.ID, time.Time{}); err != nil {
 		t.Fatalf("delete cancelled after its tombstone = %v", err)
 	}
 	if _, err := f.svc.Get(context.Background(), f.alice, p.ID); code(err) != protocol.CodeNotFound {
@@ -504,7 +504,7 @@ func TestForgetWhileAReaderHoldsTheLog(t *testing.T) {
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM member_preferences`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.svc.Delete(ctx, f.alice, p.ID); err != nil {
+	if _, err = f.svc.Delete(ctx, f.alice, p.ID, time.Time{}); err != nil {
 		t.Fatalf("forget while a reader holds the log = %v; want success", err)
 	}
 	if err = tx.Rollback(); err != nil {

@@ -322,6 +322,40 @@ func TestForgetShowsTheTextAndTellsTheNextPrompt(t *testing.T) {
 	}
 }
 
+// A forget card approved after the member changed the preference forgets
+// nothing: the member approved the text the card showed.
+func TestForgetKeepsAPreferenceChangedWhileItsCardWaits(t *testing.T) {
+	f := newPrefFixture(t)
+	saved, err := f.prefs.Add(t.Context(), f.m.id, "Prefer table output", "", protocol.PreferenceSourceSettings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- coordtransport.Call(t.Context(), f.sock, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: saved.Preference.ID}, nil)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(f.m.confirms.snapshot()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no card was shown")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	text := "Prefer short answers"
+	if _, err = f.prefs.Update(t.Context(), f.m.id, protocol.PreferenceUpdateParams{ID: saved.Preference.ID, Text: &text}, protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.m.confirms.decide(f.m.confirms.snapshot()[0].ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = wait(t, done); errCode(err) != protocol.CodeInvalidState || !strings.Contains(err.Error(), "changed after it was shown") {
+		t.Fatalf("forget of the changed preference = %v; want refused", err)
+	}
+	if got, err := f.prefs.Get(t.Context(), f.m.id, saved.Preference.ID); err != nil || got.Text != text {
+		t.Fatalf("after the refused forget: %+v, %v; want the newer text kept", got, err)
+	}
+}
+
 // With auto-approval on, a launch carrying a saved preference still shows
 // its card; one without passes.
 func TestAutoApprovalNeverPassesAPreference(t *testing.T) {
