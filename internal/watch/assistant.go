@@ -52,12 +52,19 @@ func (s *Service) UseAssistant(a Assistant) { s.assistant = a }
 // watch on the run's default conditions without the key, such as one
 // aether_watch made an assistant watch, is that watch too.
 func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain.RunID) (protocol.WatchResult, error) {
-	w, err := s.liveAssistantWatch(ctx, member, run)
+	conditions, err := s.normalize(protocol.WatchTargetRun, nil)
 	if err != nil {
 		return protocol.WatchResult{}, err
 	}
-	if w != nil {
-		return s.result(ctx, w)
+	watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: protocol.WatchTargetRun, RunID: run})
+	if err != nil {
+		return protocol.WatchResult{}, err
+	}
+	if i := slices.IndexFunc(watches, func(w *store.Watch) bool {
+		return w.Source == protocol.WatchSourceAssistant && slices.Equal(w.Conditions, conditions) &&
+			w.State != protocol.WatchDone && w.State != protocol.WatchExpired
+	}); i >= 0 {
+		return s.result(ctx, watches[i])
 	}
 	key := "assistant:" + string(run)
 	for {
@@ -85,25 +92,6 @@ func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain
 		}
 		return res, nil
 	}
-}
-
-func (s *Service) liveAssistantWatch(ctx context.Context, member domain.MemberID, run domain.RunID) (*store.Watch, error) {
-	conditions, err := s.normalize(protocol.WatchTargetRun, nil)
-	if err != nil {
-		return nil, err
-	}
-	watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: protocol.WatchTargetRun, RunID: run})
-	if err != nil {
-		return nil, err
-	}
-	i := slices.IndexFunc(watches, func(w *store.Watch) bool {
-		return w.Source == protocol.WatchSourceAssistant && slices.Equal(w.Conditions, conditions) &&
-			w.State != protocol.WatchDone && w.State != protocol.WatchExpired
-	})
-	if i < 0 {
-		return nil, nil
-	}
-	return watches[i], nil
 }
 
 // renew restarts member's expired assistant watch id for DefaultExpiry,

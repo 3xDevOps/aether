@@ -193,8 +193,21 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 		case in.Paused != nil:
 			return "", nil, invalid("paused changes a watch; pass its watch_id")
 		case in.PR != "":
-			repo, number, ok := prRef(in.PR)
-			if !ok {
+			// owner/name#7, or a GitHub pull request URL such as
+			// https://github.com/owner/name/pull/7/files?w=1#issuecomment-1.
+			repo, n, ok := "", "", false
+			if path, isURL := strings.CutPrefix(strings.TrimPrefix(strings.TrimPrefix(in.PR, "https://"), "http://"), "github.com/"); isURL {
+				path, _, _ = strings.Cut(path, "#")
+				path, _, _ = strings.Cut(path, "?")
+				parts := strings.Split(path, "/")
+				if ok = len(parts) >= 4 && parts[2] == "pull"; ok {
+					repo, n = parts[0]+"/"+parts[1], parts[3]
+				}
+			} else {
+				repo, n, ok = strings.Cut(in.PR, "#")
+			}
+			number, nerr := strconv.Atoi(n)
+			if !ok || nerr != nil || number <= 0 || strings.Count(repo, "/") != 1 || strings.HasPrefix(repo, "/") || strings.HasSuffix(repo, "/") {
 				return "", nil, invalid("pr %q is not owner/name#number or a GitHub pull request URL", in.PR)
 			}
 			t = protocol.WatchTarget{Kind: protocol.WatchTargetPR, Repo: repo, Number: number, RunID: in.RunID}
@@ -232,31 +245,6 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 		summary = fmt.Sprintf("Watch %s is %s: %s.", w.ID, w.State, w.Error)
 	}
 	return summary, out, nil
-}
-
-// prRef reads owner/name#7, or a GitHub pull request URL such as
-// https://github.com/owner/name/pull/7/files?w=1#issuecomment-1.
-func prRef(s string) (repo string, number int, ok bool) {
-	n := ""
-	if path, isURL := strings.CutPrefix(strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://"), "github.com/"); isURL {
-		path, _, _ = strings.Cut(path, "#")
-		path, _, _ = strings.Cut(path, "?")
-		parts := strings.Split(path, "/")
-		if len(parts) < 4 || parts[2] != "pull" {
-			return "", 0, false
-		}
-		repo, n = parts[0]+"/"+parts[1], parts[3]
-	} else {
-		var found bool
-		if repo, n, found = strings.Cut(s, "#"); !found {
-			return "", 0, false
-		}
-	}
-	number, err := strconv.Atoi(n)
-	if err != nil || number <= 0 || strings.Count(repo, "/") != 1 || strings.HasPrefix(repo, "/") || strings.HasSuffix(repo, "/") {
-		return "", 0, false
-	}
-	return repo, number, true
 }
 
 func unwatch(ctx context.Context, c calls, in unwatchInput) (string, any, error) {
