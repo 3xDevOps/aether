@@ -490,8 +490,10 @@ before the delete commits, and does the same for an edit of its text,
 recording when the replaced row was last changed. When the server starts it
 deletes again every preference recorded as deleted, and every row no newer
 than one a committed edit replaced, so restoring an older database does not
-bring it back. The file gains one short line per forget or edit and is
-never compacted. Forgetting does not remove:
+bring it back. If a forget's database commit fails after its tombstone was
+written, the next server start still deletes the preference. The file gains
+one short line per forget or edit and is never compacted. Forgetting does
+not remove:
 
 - the `aether.db.pre-update` copy an update keeps until the new release
   starts;

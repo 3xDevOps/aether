@@ -82,6 +82,16 @@ func notFound(id string) *protocol.Error {
 	return &protocol.Error{Code: protocol.CodeNotFound, Message: "preference " + id + " not found"}
 }
 
+// stale refuses a change to preference id unless it was last updated at
+// expected, the time the member saw; a zero time accepts any.
+func stale(id string, expected, updated time.Time) error {
+	if expected.IsZero() || updated.Equal(expected) {
+		return nil
+	}
+	return &protocol.Error{Code: protocol.CodeConflict, Message: "preference " + id +
+		" changed since you saw it, so nothing was changed; show its current text and ask again"}
+}
+
 // clean normalizes text and refuses one that is empty, too long or holds a
 // secret. The refusal names the secret's kind, never its value.
 func clean(text string) (string, error) {
@@ -91,7 +101,7 @@ func clean(text string) (string, error) {
 		return "", invalid("text is required")
 	case n > MaxText:
 		return "", invalid("text is %d characters; the limit is %d", n, MaxText)
-	case tooShort(text):
+	case len(Words(text)) < MinWords || n < MinChars:
 		return "", invalid("a preference needs at least %d words and %d characters", MinWords, MinChars)
 	}
 	if hits := secretscan.Scan("", []byte(text)); len(hits) > 0 {
@@ -178,7 +188,9 @@ func (s *Service) Add(ctx context.Context, member domain.MemberID, text, workspa
 		return protocol.PreferenceResult{}, err
 	}
 	row := store.Preference{MemberID: member, WorkspaceID: workspaceID, Text: text, Enabled: true, Source: source, SourceRef: ref}
-	if err = s.store.AddPreference(ctx, &row); errors.Is(err, store.ErrPreferenceCap) {
+	if err = s.store.AddPreference(ctx, &row); errors.Is(err, store.ErrPreferenceExists) {
+		return protocol.PreferenceResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: "already remembered as preference " + row.ID}
+	} else if errors.Is(err, store.ErrPreferenceCap) {
 		return protocol.PreferenceResult{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	} else if err != nil {
 		return protocol.PreferenceResult{}, fmt.Errorf("preference: %w", err)
@@ -206,6 +218,9 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 		return protocol.PreferenceResult{}, err
 	}
 	old, cur, err := s.store.UpdatePreference(ctx, member, p.ID, func(row *store.Preference) error {
+		if err := stale(p.ID, p.ExpectedUpdatedAt, row.UpdatedAt); err != nil {
+			return err
+		}
 		if p.Text != nil && text != row.Text {
 			row.Text, row.Source, row.SourceRef = text, source, ref
 		}
@@ -228,6 +243,10 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 	if errors.Is(err, store.ErrNotFound) {
 		return protocol.PreferenceResult{}, notFound(p.ID)
 	}
+	var perr *protocol.Error
+	if errors.As(err, &perr) {
+		return protocol.PreferenceResult{}, err
+	}
 	if err != nil {
 		return protocol.PreferenceResult{}, fmt.Errorf("preference: %w", err)
 	}
@@ -245,18 +264,17 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 	return protocol.PreferenceResult{Preference: wire(cur), Previous: &previous}, nil
 }
 
-// Delete forgets the member's preference id. A shown time is when the row
-// the member was asked about was last updated; a row changed since is kept.
-func (s *Service) Delete(ctx context.Context, member domain.MemberID, id string, shown time.Time) (protocol.PreferenceDeleteResult, error) {
+// Delete forgets the member's preference p.ID.
+func (s *Service) Delete(ctx context.Context, member domain.MemberID, p protocol.PreferenceDeleteParams) (protocol.PreferenceDeleteResult, error) {
+	id := p.ID
 	if id == "" {
 		return protocol.PreferenceDeleteResult{}, invalid("id is required")
 	}
 	// Once the tombstone is synced the delete must commit: a cancelled
 	// caller would leave a tombstone for a delete it was told failed.
 	row, err := s.store.DeletePreference(context.WithoutCancel(ctx), member, id, func(row store.Preference) error {
-		if !shown.IsZero() && !row.UpdatedAt.Equal(shown) {
-			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-				"preference %s changed after it was shown, so it was not forgotten; show its current text and ask again", id)}
+		if err := stale(id, p.ExpectedUpdatedAt, row.UpdatedAt); err != nil {
+			return err
 		}
 		return s.tombstones.deleted(row.ID)
 	})

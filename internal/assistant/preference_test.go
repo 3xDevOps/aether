@@ -442,7 +442,7 @@ func TestForgetKeepsAPreferenceChangedWhileItsCardWaits(t *testing.T) {
 	if err = f.m.confirms.decide(f.m.confirms.snapshot()[0].ID, true); err != nil {
 		t.Fatal(err)
 	}
-	if err = wait(t, done); errCode(err) != protocol.CodeInvalidState || !strings.Contains(err.Error(), "changed after it was shown") {
+	if err = wait(t, done); errCode(err) != protocol.CodeConflict || !strings.Contains(err.Error(), "changed since you saw it") {
 		t.Fatalf("forget of the changed preference = %v; want refused", err)
 	}
 	if got, err := f.prefs.Get(t.Context(), f.m.id, saved.Preference.ID); err != nil || got.Text != text {
@@ -580,6 +580,9 @@ func TestWorkspacePreferencesFollowTheView(t *testing.T) {
 		if err != nil || saved.Preference.WorkspaceID != string(ws.ID) {
 			t.Fatalf("workspace_scoped with the message's view (embedded %v) = %+v, %v", embedded, saved, err)
 		}
+		if _, err = f.prefs.Delete(ctx, f.m.id, protocol.PreferenceDeleteParams{ID: saved.Preference.ID}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -696,7 +699,7 @@ func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = prefs.Delete(t.Context(), alice.ID, saved.Preference.ID, time.Time{}); err != nil {
+	if _, err = prefs.Delete(t.Context(), alice.ID, protocol.PreferenceDeleteParams{ID: saved.Preference.ID}); err != nil {
 		t.Fatal(err)
 	}
 

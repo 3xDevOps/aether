@@ -3,7 +3,6 @@ package sshd
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -17,7 +16,7 @@ type PreferenceService interface {
 	List(ctx context.Context, member domain.MemberID, p protocol.PreferenceListParams) (protocol.PreferenceListResult, error)
 	Add(ctx context.Context, member domain.MemberID, text, workspaceID, source, ref string) (protocol.PreferenceResult, error)
 	Update(ctx context.Context, member domain.MemberID, p protocol.PreferenceUpdateParams, source, ref string) (protocol.PreferenceResult, error)
-	Delete(ctx context.Context, member domain.MemberID, id string, shown time.Time) (protocol.PreferenceDeleteResult, error)
+	Delete(ctx context.Context, member domain.MemberID, p protocol.PreferenceDeleteParams) (protocol.PreferenceDeleteResult, error)
 	// DeleteMember deletes the member together with their preferences.
 	DeleteMember(ctx context.Context, member domain.MemberID) error
 }
@@ -27,14 +26,32 @@ func init() {
 		return svc.List(ctx, m, p)
 	}))
 	registerGuarded(protocol.MethodPreferenceAdd, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceAddParams) (any, error) {
+		if err := sameMember(m, p.ExpectedMemberID); err != nil {
+			return nil, err
+		}
 		return svc.Add(ctx, m, p.Text, p.WorkspaceID, protocol.PreferenceSourceSettings, "")
 	}))
 	registerGuarded(protocol.MethodPreferenceUpdate, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceUpdateParams) (any, error) {
+		if err := sameMember(m, p.ExpectedMemberID); err != nil {
+			return nil, err
+		}
 		return svc.Update(ctx, m, p, protocol.PreferenceSourceSettings, "")
 	}))
-	registerGuarded(protocol.MethodPreferenceDelete, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceIDParams) (any, error) {
-		return svc.Delete(ctx, m, p.ID, time.Time{})
+	registerGuarded(protocol.MethodPreferenceDelete, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceDeleteParams) (any, error) {
+		if err := sameMember(m, p.ExpectedMemberID); err != nil {
+			return nil, err
+		}
+		return svc.Delete(ctx, m, p)
 	}))
+}
+
+// sameMember refuses a write the client meant for another member, such as
+// a page left open across a sign-in as someone else.
+func sameMember(m domain.MemberID, expected string) error {
+	if expected != "" && expected != string(m) {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: "signed in as a different member"}
+	}
+	return nil
 }
 
 // preferenceMethod serves a preference method to the member in person: a

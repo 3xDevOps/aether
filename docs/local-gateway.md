@@ -1207,6 +1207,27 @@ outcome note publishes `add`, or `rewrite` when a later report rewrites
 it, and an answer note `answer`
 ([memory.md](memory.md#what-is-captured-automatically)).
 
+### Preference methods
+
+These read and change the caller's own [preferences](assistant.md#preferences).
+A connector is refused all of them (`-32001`). A `Preference` is
+`{"id":"pref-...","workspace_id":"...","text":"...","enabled":true,"source":"settings"|"assistant","source_ref":"...","created_at":"...","updated_at":"...","last_used_at":"..."}`.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `preference.list` | `{"workspace_id":"...","query":"...","include_disabled":false}` (each optional) | `{"preferences":[Preference],"enabled":true}` |
+| `preference.add` | `{"text":"...","workspace_id":"...","expected_member_id":"mem-..."}` (only `text` required) | `{"preference":Preference}` |
+| `preference.update` | `{"id":"pref-...","text":"...","workspace_id":"...","clear_workspace":false,"enabled":true,"expected_member_id":"mem-...","expected_updated_at":"..."}` (only `id` required) | `{"preference":Preference,"previous":Preference}` |
+| `preference.delete` | `{"id":"pref-...","expected_member_id":"mem-...","expected_updated_at":"..."}` (only `id` required) | `{"deleted":Preference}` |
+
+A write whose `expected_member_id` is not the caller fails with `-32001`
+`signed in as a different member`. An update or delete whose
+`expected_updated_at` is not the preference's `updated_at` fails with
+`-32003` `preference <id> changed since you saw it, ...`. Adding text the
+caller already keeps for the same `workspace_id`, or for none, fails with
+`-32003` `already remembered as preference <id>`. None of these writes
+anything.
+
 ### Run branch and pull request methods
 
 These run native `git` and `gh` in a live run's container, as the run's
