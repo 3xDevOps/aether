@@ -190,7 +190,7 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 		if err = s.noteAction(ctx, conv, m, a, c.Method+" passed after you approved its card."); err != nil {
 			return fmt.Errorf("record the approval: %w", err)
 		}
-		m.actions.hold(conv, a, c.Params)
+		m.actions.hold(conv, a, c.Params, c.Shown)
 		return nil
 	}
 }
@@ -259,7 +259,7 @@ func (s *Service) autoApprove(ctx, conv context.Context, m *member, c protocol.A
 	if err = s.noteAction(ctx, conv, m, a, c.Method+" passed without a card: auto-approval is on."); err != nil {
 		return false, fmt.Errorf("record the approval: %w", err)
 	}
-	m.actions.hold(conv, a, c.Params)
+	m.actions.hold(conv, a, c.Params, c.Shown)
 	return true, nil
 }
 
@@ -408,6 +408,8 @@ func (s *Service) noteOutcome(conv context.Context, m *member, a protocol.Assist
 type heldAction struct {
 	conv   context.Context
 	action protocol.AssistantAction
+	// shown is the confirmation's Shown.
+	shown time.Time
 }
 
 // heldActions are the actions whose call was allowed and has not run yet,
@@ -418,14 +420,14 @@ type heldActions struct {
 	held map[string][]heldAction
 }
 
-func (h *heldActions) hold(conv context.Context, a protocol.AssistantAction, params json.RawMessage) {
+func (h *heldActions) hold(conv context.Context, a protocol.AssistantAction, params json.RawMessage, shown time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.held == nil {
 		h.held = make(map[string][]heldAction)
 	}
 	key := a.Method + "\x00" + string(params)
-	h.held[key] = append(h.held[key], heldAction{conv, a})
+	h.held[key] = append(h.held[key], heldAction{conv, a, shown})
 }
 
 // take returns the oldest action held for the call, dropping those of a

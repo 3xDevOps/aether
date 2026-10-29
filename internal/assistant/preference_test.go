@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -263,6 +265,98 @@ func TestMemoryOffRefusesReadingAndSavingButNotForgetting(t *testing.T) {
 	check("the member turned preferences off", ids[1])
 }
 
+// A save waiting while the member turns preferences off falls after the
+// switch, and saves nothing.
+func TestSaveWaitingOnTheSwitchIsRefused(t *testing.T) {
+	f := newPrefFixture(t)
+	f.say(1, "remember that I prefer table output")
+	f.m.settings.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer table output"})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if err := f.db.PutAssistantSettings(t.Context(), f.m.id, store.AssistantSettings{ShareView: true}); err != nil {
+		t.Fatal(err)
+	}
+	f.m.settings.Unlock()
+	if err := wait(t, done); errCode(err) != protocol.CodeDenied {
+		t.Fatalf("a save racing the switch = %v; want memory is off", err)
+	}
+	if listed, _ := f.prefs.List(t.Context(), f.m.id, protocol.PreferenceListParams{IncludeDisabled: true}); len(listed.Preferences) != 0 {
+		t.Fatalf("saved past the switch: %+v", listed.Preferences)
+	}
+}
+
+// A save that finishes after New conversation notes nothing in the new
+// conversation.
+func TestSaveFinishingAfterAResetStaysInItsConversation(t *testing.T) {
+	f := newPrefFixture(t)
+	f.say(1, "remember that I prefer table output")
+	f.m.settings.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer table output"})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	f.m.op.Lock()
+	err := f.svc.resetLocked(t.Context(), f.m)
+	f.m.op.Unlock()
+	f.m.settings.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if got := actions(t, f.svc, f.m); len(got) != 0 {
+		t.Fatalf("the new conversation holds %+v; want nothing from the old one", got)
+	}
+}
+
+// A save whose Saved notice cannot be written says so, and that the
+// preference was saved.
+func TestSaveWhoseNoticeFailsIsReported(t *testing.T) {
+	f := newPrefFixture(t)
+	f.say(1, "remember that I prefer table output")
+	dir := filepath.Dir(f.svc.logPath(f.m.id))
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer table output"})
+	if err == nil || !strings.Contains(err.Error(), "was saved, but recording that in the transcript failed") {
+		t.Fatalf("remember with no transcript = %v; want the failed record reported", err)
+	}
+}
+
+// aether_my_preferences stays within its budget as encoded, field names
+// and timestamps included.
+func TestMyPreferencesFitTheirBudgetAsEncoded(t *testing.T) {
+	f := newPrefFixture(t)
+	for i := range 30 {
+		if _, err := f.prefs.Add(t.Context(), f.m.id, fmt.Sprintf("Prefer table output for report number %d in the weekly summary", i), "",
+			protocol.PreferenceSourceSettings, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var raw json.RawMessage
+	if err := coordtransport.Call(t.Context(), f.sock, protocol.MethodAssistantPreferences, protocol.AssistantPreferencesParams{}, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var res protocol.AssistantPreferencesResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) > maxShownBytes || len(res.Preferences) == 0 {
+		t.Fatalf("my preferences = %d bytes with %d preferences; want at most %d bytes", len(raw), len(res.Preferences), maxShownBytes)
+	}
+}
+
 // The forget card's own read of a preference is not a tool the agent can
 // call.
 func TestSocketRefusesTheForgetCardsRead(t *testing.T) {
@@ -313,12 +407,46 @@ func TestForgetShowsTheTextAndTellsTheNextPrompt(t *testing.T) {
 		a.Outcome != protocol.AssistantActionSucceeded || a.Target.PreferenceID != saved.Preference.ID {
 		t.Fatalf("forget record = %+v", a)
 	}
-	blocks, _ := f.svc.preferenceNotes(t.Context(), f.m.id)
+	blocks, _, _ := f.svc.preferenceNotes(t.Context(), f.m.id)
 	if len(blocks) != 1 || !strings.Contains(blocks[0].Text.Text, "preference "+saved.Preference.ID+" was forgotten; do not use the old text") {
 		t.Fatalf("next prompt's notes = %+v", blocks)
 	}
-	if blocks, _ = f.svc.preferenceNotes(t.Context(), f.m.id); len(blocks) != 0 {
+	if blocks, _, _ = f.svc.preferenceNotes(t.Context(), f.m.id); len(blocks) != 0 {
 		t.Fatal("the note went to a second prompt")
+	}
+}
+
+// A forget card approved after the member changed the preference forgets
+// nothing: the member approved the text the card showed.
+func TestForgetKeepsAPreferenceChangedWhileItsCardWaits(t *testing.T) {
+	f := newPrefFixture(t)
+	saved, err := f.prefs.Add(t.Context(), f.m.id, "Prefer table output", "", protocol.PreferenceSourceSettings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- coordtransport.Call(t.Context(), f.sock, protocol.MethodAssistantForget, protocol.PreferenceIDParams{ID: saved.Preference.ID}, nil)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(f.m.confirms.snapshot()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no card was shown")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	text := "Prefer short answers"
+	if _, err = f.prefs.Update(t.Context(), f.m.id, protocol.PreferenceUpdateParams{ID: saved.Preference.ID, Text: &text}, protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.m.confirms.decide(f.m.confirms.snapshot()[0].ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = wait(t, done); errCode(err) != protocol.CodeInvalidState || !strings.Contains(err.Error(), "changed after it was shown") {
+		t.Fatalf("forget of the changed preference = %v; want refused", err)
+	}
+	if got, err := f.prefs.Get(t.Context(), f.m.id, saved.Preference.ID); err != nil || got.Text != text {
+		t.Fatalf("after the refused forget: %+v, %v; want the newer text kept", got, err)
 	}
 }
 
@@ -344,6 +472,45 @@ func TestAutoApprovalNeverPassesAPreference(t *testing.T) {
 	got := actions(t, f.svc, f.m)
 	if len(got) < 2 || got[len(got)-2][0].Approval != "card" || got[len(got)-1][0].Approval != "auto" {
 		t.Fatalf("launch records = %+v; want the one carrying a preference carded and the other auto-approved", got)
+	}
+}
+
+// While memory is off every prompt tells the agent not to use the
+// preferences it read earlier in the conversation.
+func TestEveryPromptWhileMemoryIsOffSaysSo(t *testing.T) {
+	f := newPrefFixture(t)
+	if _, err := f.prefs.Add(t.Context(), f.m.id, "Prefer table output", "", protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	on, off := true, false
+	note := func() string {
+		t.Helper()
+		blocks, _, err := f.svc.preferenceNotes(t.Context(), f.m.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(blocks) == 0 {
+			return ""
+		}
+		return blocks[0].Text.Text
+	}
+	note()
+	for _, p := range []protocol.AssistantSettingsParams{{PreferencesEnabled: &off}, {PreferencesEnabled: &on, Temporary: &on}} {
+		if _, err := f.svc.SetSettings(t.Context(), f.m.id, p); err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			if got := note(); !strings.Contains(got, "memory is off for this message") ||
+				!strings.Contains(got, "do not use or mention any preference you read earlier in this conversation") {
+				t.Fatalf("prompt note with %+v = %q; want memory is off", p, got)
+			}
+		}
+	}
+	if _, err := f.svc.SetSettings(t.Context(), f.m.id, protocol.AssistantSettingsParams{Temporary: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if got := note(); got != "" {
+		t.Fatalf("prompt note with memory on = %q; want none", got)
 	}
 }
 
@@ -392,14 +559,27 @@ func TestWorkspacePreferencesFollowTheView(t *testing.T) {
 		t.Fatalf("with api in view = %+v; want both", list)
 	}
 
+	// The held view came from an earlier message; this one carried none.
+	f.m.holdView(view, viewFromPrompt, time.Now())
 	f.say(1, "from now on prefer bun for scripts")
 	if _, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true}); errCode(err) != protocol.CodeInvalidParams {
-		t.Fatalf("workspace_scoped with a navigation view = %v; want refused", err)
+		t.Fatalf("workspace_scoped with no view in the message = %v; want refused", err)
 	}
-	f.m.holdView(view, viewFromPrompt, time.Now())
-	saved, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true})
-	if err != nil || saved.Preference.WorkspaceID != string(ws.ID) {
-		t.Fatalf("workspace_scoped with the message's view = %+v, %v", saved, err)
+	for turn, embedded := range map[int64]bool{2: true, 3: false} {
+		blocks, err := promptBlocks("from now on prefer bun for scripts", view, embedded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.say(turn, "from now on prefer bun for scripts")
+		f.mu.Lock()
+		f.msg.Context = blocks[1:]
+		f.mu.Unlock()
+		// The dashboard sends the same page again once the prompt returns.
+		f.m.holdView(view, viewFromNavigation, time.Now())
+		saved, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true})
+		if err != nil || saved.Preference.WorkspaceID != string(ws.ID) {
+			t.Fatalf("workspace_scoped with the message's view (embedded %v) = %+v, %v", embedded, saved, err)
+		}
 	}
 }
 
@@ -427,25 +607,33 @@ func TestQuotedSkipsPastedText(t *testing.T) {
 		"unclosed fence":    "```go\nprefer table output always",
 		"indented code":     "see:\n    prefer table output always",
 		"tab indented code": "\tprefer table output always",
+		"mixed indentation": " \tprefer table output always",
 	} {
 		if span, err := quoted(message, want); err == nil {
 			t.Errorf("%s: quoted = %q, want refused", name, span)
 		}
 	}
 	for message, want := range map[string]string{
-		"From now on: always use C++.":      "always use C++",
-		"Remember (always use C#), please":  "always use C#",
-		"Keep coverage at 90%. Thanks":      "Keep coverage at 90%",
-		"I said \"always tag #ops first\"!": "always tag #ops first",
+		"From now on: always use C++.":           "always use C++",
+		"Remember (always use C#), please":       "always use C#",
+		"Keep coverage at 90%. Thanks":           "Keep coverage at 90%",
+		"I said \"always tag #ops first\"!":      "always tag #ops first",
+		"From now on: always use fmt.Println().": "always use fmt.Println()",
+		"(Always log with f(x)).":                "Always log with f(x)",
 	} {
 		if span, err := quoted(message, strings.Trim(want, "+#%")); err != nil || span != want {
 			t.Errorf("quoted(%q) = %q, %v; want %q", message, span, err, want)
 		}
 	}
+	const replaced = "We used to always use C# here. Remember: always use C++ here."
+	if span, err := quoted(replaced, "always use C++ here"); err != nil || span != "always use C++ here" {
+		t.Errorf("quoted(%q) = %q, %v; want the span the text quotes with its symbols", replaced, span, err)
+	}
 	for name, message := range map[string]string{
-		"after a quote":     "> from the review\n\nPrefer table output, always.",
-		"after a fence":     "````\nx\n```\n````\nPrefer table output, always.",
-		"after indentation": "    x := 1\nPrefer table output, always.",
+		"after a quote":           "> from the review\n\nPrefer table output, always.",
+		"after a fence":           "````\nx\n```\n````\nPrefer table output, always.",
+		"after indentation":       "    x := 1\nPrefer table output, always.",
+		"after an indented fence": "    ```sh\n\nPrefer table output, always.",
 	} {
 		if span, err := quoted(message, want); err != nil || span != "Prefer table output, always" {
 			t.Errorf("%s: quoted = %q, %v; want the member's own span", name, span, err)
@@ -471,5 +659,87 @@ func TestCarriesPreferenceMatchesWholeWords(t *testing.T) {
 		if got := f.svc.carriesPreference(t.Context(), f.m.id, protocol.AssistantConfirmation{Method: protocol.MethodRunLaunch, Params: params}); got != want {
 			t.Errorf("carriesPreference(%q) = %v, want %v", task, got, want)
 		}
+	}
+}
+
+// liveStore reads the settings and preferences a prompt's notes need
+// whatever its caller's context, so a prompt whose caller already left
+// still reaches the agent.
+type liveStore struct{ *store.DB }
+
+func (l liveStore) AssistantSettings(ctx context.Context, member domain.MemberID) (store.AssistantSettings, error) {
+	return l.DB.AssistantSettings(context.WithoutCancel(ctx), member)
+}
+
+func (l liveStore) ListPreferences(ctx context.Context, member domain.MemberID) ([]store.Preference, error) {
+	return l.DB.ListPreferences(context.WithoutCancel(ctx), member)
+}
+
+// A prompt the agent refuses after its caller left gives its change
+// notes back for the next prompt.
+func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
+	dir := t.TempDir()
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	alice := &domain.Member{DisplayName: "Alice", TailnetLogin: "alice@example.com", Color: "#3cb44b", Role: domain.RoleCollaborator}
+	if err = db.CreateMember(t.Context(), alice); err != nil {
+		t.Fatal(err)
+	}
+	prefs := preference.New(liveStore{db}, filepath.Join(dir, "preference-tombstones"))
+	s := New(Config{Dir: filepath.Join(dir, "assistant"), Store: newMemStore(), Host: &fakeHost{}, Preferences: prefs})
+	t.Cleanup(func() { _ = s.Close() })
+	m := s.member(alice.ID)
+	saved, err := prefs.Add(t.Context(), alice.ID, "Prefer table output", "", protocol.PreferenceSourceSettings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = prefs.Delete(t.Context(), alice.ID, saved.Preference.ID, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	fix, err := acpmock.Load("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fix.RefusePrompts = true
+	agentIn, hostOut := io.Pipe()
+	hostIn, agentOut := io.Pipe()
+	go acpmock.New(fix).Serve(agentIn, agentOut)
+	sess, err := acphost.Start(t.Context(), hostIn, hostOut, acphost.Config{LogPath: s.logPath(alice.ID), Cwd: t.TempDir(), Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		m.mu.Lock()
+		m.sess = nil
+		m.mu.Unlock()
+		_ = sess.Close()
+		_ = agentOut.Close()
+		_ = agentIn.Close()
+	})
+	m.mu.Lock()
+	m.sess = &session{acp: sess, ended: make(chan struct{})}
+	m.mu.Unlock()
+
+	left, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err = s.Prompt(left, alice.ID, "show my runs", "k1", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt of a caller that left = %v; want it cancelled", err)
+	}
+	forgotten := "preference " + saved.Preference.ID + " was forgotten"
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		notes := prefs.TakeChanges(t.Context(), alice.ID)
+		if slices.ContainsFunc(notes, func(n string) bool { return strings.Contains(n, forgotten) }) {
+			return
+		}
+		prefs.RestoreChanges(alice.ID, notes)
+		if time.Now().After(deadline) {
+			t.Fatalf("notes after the refusal = %q; want %q back", notes, forgotten)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

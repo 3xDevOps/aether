@@ -60,6 +60,9 @@ type AssistantConfirmation struct {
 	// auto-approval on.
 	OtherMember bool   `json:"other_member,omitempty"`
 	OtherOwner  string `json:"other_owner,omitempty"`
+	// Shown is when the row the summary shows was last updated, for a call
+	// that must act on that version only. It never leaves the server.
+	Shown time.Time `json:"-"`
 }
 
 type AssistantStatus struct {

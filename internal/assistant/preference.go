@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -25,7 +24,8 @@ import (
 const (
 	// maxSavesPerTurn bounds the preferences one message can save.
 	maxSavesPerTurn = 3
-	// maxShown and maxShownBytes bound what aether_my_preferences returns.
+	// maxShown and maxShownBytes bound what aether_my_preferences returns,
+	// the latter as encoded.
 	maxShown      = 40
 	maxShownBytes = 4 << 10
 )
@@ -94,34 +94,46 @@ func (c *preferenceCaller) configured() error {
 
 // memoryOff refuses reading and saving preferences while the member turned
 // them off or the conversation is temporary. Forgetting one is always
-// allowed.
+// allowed. The caller holds m.settings, so a switch falls wholly before or
+// after the call it decides.
 func (c *preferenceCaller) memoryOff(ctx context.Context) error {
 	if err := c.configured(); err != nil {
 		return err
 	}
-	enabled, err := c.s.cfg.Preferences.Enabled(ctx, c.m.id)
+	why, err := c.s.memoryOff(ctx, c.m.id)
 	if err != nil {
 		return err
 	}
-	if !enabled {
-		return &protocol.Error{Code: protocol.CodeDenied, Message: "memory is off: the member turned preferences off in Settings"}
-	}
-	row, err := c.s.stored(ctx, c.m.id)
-	if err != nil {
-		return err
-	}
-	if row.Temporary {
-		return &protocol.Error{Code: protocol.CodeDenied, Message: "memory is off: this is a temporary conversation"}
+	if why != "" {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: "memory is off: " + why}
 	}
 	return nil
 }
 
+// memoryOff says why the member's assistant may not use preferences now,
+// or is empty when it may.
+func (s *Service) memoryOff(ctx context.Context, id domain.MemberID) (string, error) {
+	enabled, err := s.cfg.Preferences.Enabled(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if !enabled {
+		return "the member turned preferences off in Settings", nil
+	}
+	row, err := s.stored(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if row.Temporary {
+		return "this is a temporary conversation", nil
+	}
+	return "", nil
+}
+
 // workspace is the workspace the member's held view is in, empty for none.
-// fromPrompt keeps only the view their latest message carried, not one a
-// later navigation replaced it with.
-func (c *preferenceCaller) workspace(fromPrompt bool) string {
+func (c *preferenceCaller) workspace() string {
 	held := c.s.View(c.m.id, time.Now())
-	if held.ViewContext == nil || (fromPrompt && held.Source != viewFromPrompt) {
+	if held.ViewContext == nil {
 		return ""
 	}
 	return held.ViewContext.Route.WorkspaceID
@@ -132,11 +144,13 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
+	c.m.settings.Lock()
+	defer c.m.settings.Unlock()
 	if err = c.memoryOff(ctx); err != nil {
 		return nil, err
 	}
 	out := protocol.AssistantPreferencesResult{Preferences: []protocol.AssistantPreference{}}
-	ws := c.workspace(false)
+	ws := c.workspace()
 	listed, err := c.s.cfg.Preferences.List(ctx, c.m.id, protocol.PreferenceListParams{WorkspaceID: ws, Query: p.Query})
 	if err != nil {
 		return nil, err
@@ -144,12 +158,17 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 	// With no workspace in view only the preferences for all of them apply.
 	listed.Preferences = slices.DeleteFunc(listed.Preferences, func(p protocol.Preference) bool { return ws == "" && p.WorkspaceID != "" })
 	var ids []string
-	size := 0
+	size := len(`{"preferences":[]}`)
 	for _, pref := range listed.Preferences {
-		if size += len(pref.Text) + len(pref.ID); len(out.Preferences) == maxShown || size > maxShownBytes {
+		item := shown(pref)
+		b, merr := json.Marshal(item)
+		if merr != nil {
+			return nil, merr
+		}
+		if size += len(b) + len(","); len(out.Preferences) == maxShown || size > maxShownBytes {
 			break
 		}
-		out.Preferences = append(out.Preferences, shown(pref))
+		out.Preferences = append(out.Preferences, item)
 		ids = append(ids, pref.ID)
 	}
 	if err = c.s.cfg.Preferences.Touch(ctx, c.m.id, ids); err != nil {
@@ -184,12 +203,16 @@ func shown(p protocol.Preference) protocol.AssistantPreference {
 }
 
 // remember saves a preference the member asked for in the message of the
-// turn running now, quoting it.
+// turn running now, quoting it, and notes it in the conversation the call
+// came in, which a reset may end before the save returns.
 func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (any, error) {
+	conv := c.m.conversation()
 	p, err := protocol.DecodeParams[protocol.AssistantRememberParams](raw)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
+	c.m.settings.Lock()
+	defer c.m.settings.Unlock()
 	if err = c.memoryOff(ctx); err != nil {
 		return nil, err
 	}
@@ -203,9 +226,12 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 	}
 	var ws string
 	if p.WorkspaceScoped {
-		if ws = c.workspace(true); ws == "" {
+		if v := promptView(msg.Context); v != nil {
+			ws = v.Route.WorkspaceID
+		}
+		if ws == "" {
 			return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "workspace_scoped needs the workspace the member's message was sent from, " +
-				"and it carried none or they have navigated since; save it for all workspaces or ask which workspace"}
+				"and it carried none; save it for all workspaces or ask which workspace"}
 		}
 	}
 	c.mu.Lock()
@@ -233,7 +259,10 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 	if res.Previous != nil {
 		summary = fmt.Sprintf("Updated your preference: %q, was %q", res.Preference.Text, res.Previous.Text)
 	}
-	c.note(protocol.MethodAssistantRemember, summary, res.Preference.ID, nil, nil)
+	if err = c.note(conv, newAction(protocol.AssistantConfirmation{Method: protocol.MethodAssistantRemember, Summary: summary, CreatedAt: time.Now()}),
+		res.Preference.ID, nil); err != nil {
+		return nil, fmt.Errorf("preference %s was saved, but recording that in the transcript failed: %w", res.Preference.ID, err)
+	}
 	return res, nil
 }
 
@@ -245,63 +274,84 @@ func (c *preferenceCaller) forget(ctx context.Context, raw json.RawMessage) (any
 	}
 	var res protocol.PreferenceDeleteResult
 	if err == nil {
-		res, err = c.s.cfg.Preferences.Delete(ctx, c.m.id, p.ID)
+		res, err = c.s.cfg.Preferences.Delete(ctx, c.m.id, p.ID, held.shown)
 	}
-	if ok {
-		c.note(protocol.MethodAssistantForget, held.action.Summary, p.ID, &held, err)
+	if !ok {
+		return res, err
+	}
+	if nerr := c.note(held.conv, held.action, p.ID, err); nerr != nil {
+		if err == nil {
+			return nil, fmt.Errorf("preference %s was forgotten, but recording that in the transcript failed: %w", p.ID, nerr)
+		}
+		return nil, fmt.Errorf("%v; recording that in the transcript failed too: %w", err, nerr)
 	}
 	return res, err
 }
 
-// note records a preference call's outcome in the conversation, after the
-// approval approver recorded for a held call.
-func (c *preferenceCaller) note(method, summary, id string, held *heldAction, err error) {
-	conv := c.m.conversation()
-	a := newAction(protocol.AssistantConfirmation{Method: method, Summary: summary, CreatedAt: time.Now()})
-	if held != nil {
-		conv, a = held.conv, held.action
-	}
+// note records the outcome of action a on preference id in conv, the
+// conversation the call came in.
+func (c *preferenceCaller) note(conv context.Context, a protocol.AssistantAction, id string, err error) error {
 	a.Target.PreferenceID, a.FinishedAt = id, time.Now().UTC()
 	a.Outcome = protocol.AssistantActionSucceeded
 	body := ""
 	if err != nil {
 		a.Outcome, a.Error, body = protocol.AssistantActionFailed, err.Error(), err.Error()
 	}
-	if nerr := c.s.noteOutcome(conv, c.m, a, body); nerr != nil {
-		slog.Warn("assistant: record the preference action", "member", c.m.id, "method", method, "action", a.ID, "error", nerr)
-	}
+	return c.s.noteOutcome(conv, c.m, a, body)
 }
 
 // quoted returns the span of message that text quotes: a contiguous run of
 // whole words of it, outside quoted lines and code blocks, ignoring case and
 // punctuation, long enough to be a preference. The span is the member's own
-// text, without the punctuation around it.
+// text, without the punctuation around it. Words ignore symbols, so of the
+// spans matching text, one text holds with its symbols wins: "use C++"
+// over an earlier "use C#".
 func quoted(message, text string) (string, error) {
-	want := preference.Words(preference.Normalize(text))
+	text = preference.Normalize(text)
+	want := preference.Words(text)
 	tooShort := &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf(
 		"a preference quotes at least %d words and %d characters of the member's message; ask them what to remember",
 		preference.MinWords, preference.MinChars)}
 	if len(want) < preference.MinWords {
 		return "", tooShort
 	}
+	text = strings.ToLower(text)
+	found := ""
+search:
 	for _, seg := range typedSegments(message) {
 		seg = preference.Normalize(seg)
 		words := preference.Words(seg)
-		if i := preference.Index(words, want); i >= 0 {
-			span := attached(seg, words[i].Start, words[i+len(want)-1].End)
-			if utf8.RuneCountInString(span) < preference.MinChars {
-				return "", tooShort
+		for from := 0; ; {
+			i := preference.Index(words[from:], want)
+			if i < 0 {
+				break
 			}
-			return span, nil
+			i += from
+			span := attached(seg, words[i].Start, words[i+len(want)-1].End)
+			exact := strings.Contains(text, strings.ToLower(span))
+			if found == "" || exact {
+				found = span
+			}
+			if exact {
+				break search
+			}
+			from = i + 1
 		}
 	}
-	return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "text must quote the member's own words from their latest message, " +
-		"outside quoted lines and code blocks; quote them exactly or ask what to remember"}
+	switch {
+	case found == "":
+		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "text must quote the member's own words from their latest message, " +
+			"outside quoted lines and code blocks; quote them exactly or ask what to remember"}
+	case utf8.RuneCountInString(found) < preference.MinChars:
+		return "", tooShort
+	}
+	return found, nil
 }
 
 // attached widens seg[start:end] to the symbols joined to its first and
 // last words, such as the "++" of "C++" or the "#" of "#ops", without the
-// quotes, brackets and sentence punctuation around them.
+// quotes, brackets and sentence punctuation around them. A closing bracket
+// the span opened stays, as in "fmt.Println()".
 func attached(seg string, start, end int) string {
 	symbol := func(r rune) bool { return !unicode.IsSpace(r) && !unicode.IsLetter(r) && !unicode.IsDigit(r) }
 	for start > 0 {
@@ -318,13 +368,28 @@ func attached(seg string, start, end int) string {
 		}
 		end += size
 	}
-	return strings.TrimRightFunc(seg[start:end], func(r rune) bool { return strings.ContainsRune(`.,;:!?…"')]}»”’`, r) })
+	span := seg[start:end]
+	for span != "" {
+		r, size := utf8.DecodeLastRuneInString(span)
+		if !strings.ContainsRune(`.,;:!?…"')]}»”’`, r) {
+			break
+		}
+		if open, ok := openers[r]; ok && strings.Count(span, string(open)) >= strings.Count(span, string(r)) {
+			break
+		}
+		span = span[:len(span)-size]
+	}
+	return span
 }
+
+var openers = map[rune]rune{')': '(', ']': '[', '}': '{', '»': '«', '”': '“', '’': '‘'}
 
 // typedSegments splits message into runs of lines the member wrote
 // themselves. Text pasted from elsewhere splits it and is dropped: quoted
 // lines starting with '>' and the lines continuing them up to a blank line,
-// fenced code blocks, and lines indented as code by a tab or four spaces.
+// fenced code blocks, and lines indented as code by four columns, counting
+// a tab to the next multiple of four. An indented fence is code, not a
+// fence.
 func typedSegments(message string) []string {
 	var out, cur []string
 	fence, quoting := "", false
@@ -336,13 +401,14 @@ func typedSegments(message string) []string {
 	}
 	for _, line := range strings.Split(message, "\n") {
 		trimmed := strings.TrimSpace(line)
+		indented := indent(line) >= 4
 		run := fenceRun(trimmed)
 		switch {
 		case fence != "":
-			if run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(trimmed[len(run):]) == "" {
+			if !indented && run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(trimmed[len(run):]) == "" {
 				fence = ""
 			}
-		case run != "":
+		case run != "" && !indented:
 			flush()
 			fence, quoting = run, false
 		case strings.HasPrefix(trimmed, ">"):
@@ -352,7 +418,7 @@ func typedSegments(message string) []string {
 			quoting = false
 			cur = append(cur, line)
 		case quoting:
-		case strings.HasPrefix(line, "\t"), strings.HasPrefix(line, "    "):
+		case indented:
 			flush()
 		default:
 			cur = append(cur, line)
@@ -360,6 +426,23 @@ func typedSegments(message string) []string {
 	}
 	flush()
 	return out
+}
+
+// indent is the width of line's leading spaces and tabs, a tab reaching the
+// next multiple of four columns.
+func indent(line string) int {
+	n := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			n++
+		case '\t':
+			n += 4 - n%4
+		default:
+			return n
+		}
+	}
+	return n
 }
 
 // fenceRun is the run of backticks or tildes that opens or closes a code
@@ -402,19 +485,29 @@ func (s *Service) carriesPreference(ctx context.Context, member domain.MemberID,
 }
 
 // preferenceNotes tells the agent, for its eyes only, which preferences
-// changed since its last prompt, so it stops using their old text. restore
-// puts the notes back for a prompt that was not sent.
-func (s *Service) preferenceNotes(ctx context.Context, member domain.MemberID) (blocks []acp.ContentBlock, restore func()) {
+// changed since its last prompt, so it stops using their old text, and,
+// while memory is off, not to use the preferences it read earlier in the
+// conversation. restore puts the changes back for a prompt that was not
+// sent.
+func (s *Service) preferenceNotes(ctx context.Context, member domain.MemberID) (blocks []acp.ContentBlock, restore func(), err error) {
 	if s.cfg.Preferences == nil {
-		return nil, func() {}
+		return nil, func() {}, nil
 	}
-	notes := s.cfg.Preferences.TakeChanges(ctx, member)
+	why, err := s.memoryOff(ctx, member)
+	if err != nil {
+		return nil, nil, fmt.Errorf("assistant: read whether memory is on: %w", err)
+	}
+	changes := s.cfg.Preferences.TakeChanges(ctx, member)
+	notes := changes
+	if why != "" {
+		notes = append(slices.Clip(notes), "memory is off for this message: "+why+"; do not use or mention any preference you read earlier in this conversation")
+	}
 	if len(notes) == 0 {
-		return nil, func() {}
+		return nil, func() {}, nil
 	}
 	block := acp.TextBlock("\n\n<aether-preference-changes>\n" + strings.Join(notes, "\n") + "\n</aether-preference-changes>")
 	block.Text.Annotations = &acp.Annotations{Audience: []acp.Role{acp.RoleAssistant}}
-	return []acp.ContentBlock{block}, func() { s.cfg.Preferences.RestoreChanges(member, notes) }
+	return []acp.ContentBlock{block}, func() { s.cfg.Preferences.RestoreChanges(member, changes) }, nil
 }
 
 // withTemporary adds whether the member's conversation is temporary to out.

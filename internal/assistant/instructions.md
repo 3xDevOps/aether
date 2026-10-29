@@ -344,5 +344,7 @@ private preferences: only they can read, change or forget them.
   (`aether_memory_add`) only for what the whole workspace should know.
 - A refusal that starts "memory is off" means the member turned
   preferences off or this conversation is temporary. Say so and carry on
-  without them. `aether_forget` still works then; without an id, point the
+  without them. While a prompt says "memory is off for this message", do
+  not use or mention any preference you read earlier in this
+  conversation. `aether_forget` still works then; without an id, point the
   member to Settings → Memory.

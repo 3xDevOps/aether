@@ -55,27 +55,31 @@ type MissionIntegrator struct {
 }
 
 type Mission struct {
-	ID                           string                   `json:"id"`
-	WorkspaceID                  string                   `json:"workspace_id"`
-	Objective                    string                   `json:"objective"`
-	AccountableHumanID           string                   `json:"accountable_human_id"`
-	Integrator                   MissionIntegrator        `json:"integrator"`
-	ExecutionChoices             []MissionExecutionChoice `json:"execution_choices"`
-	ExtraWorkspaceIDs            []string                 `json:"extra_workspace_ids,omitempty"`
-	CurrentIntegratorRunID       string                   `json:"current_integrator_run_id,omitempty"`
-	IntegratorAuthorizingHumanID string                   `json:"integrator_authorizing_human_id,omitempty"`
-	IntegratorRunOwnerID         string                   `json:"integrator_run_owner_id,omitempty"`
-	IntegratorGeneration         uint64                   `json:"integrator_generation"`
-	AcceptedSetVersion           uint64                   `json:"accepted_set_version"`
-	Phase                        string                   `json:"phase"`
-	OpenQuestions                int                      `json:"open_questions"`
-	IntegratorLaunchError        string                   `json:"integrator_launch_error,omitempty"`
-	IntegratorLaunchErrorAt      string                   `json:"integrator_launch_error_at,omitempty"`
-	IntegratorRunLaunched        bool                     `json:"integrator_run_launched"`
-	ChangeSeq                    uint64                   `json:"change_seq"`
-	CreatedAt                    string                   `json:"created_at"`
-	UpdatedAt                    string                   `json:"updated_at"`
-	ArchivedAt                   *string                  `json:"archived_at,omitempty"`
+	ID                 string                   `json:"id"`
+	WorkspaceID        string                   `json:"workspace_id"`
+	Objective          string                   `json:"objective"`
+	AccountableHumanID string                   `json:"accountable_human_id"`
+	Integrator         MissionIntegrator        `json:"integrator"`
+	ExecutionChoices   []MissionExecutionChoice `json:"execution_choices"`
+	ExtraWorkspaceIDs  []string                 `json:"extra_workspace_ids,omitempty"`
+	// FallbackAccountMemberIDs and NoFallback are the swarm's fallback
+	// policy, as on MissionCreateParams.
+	FallbackAccountMemberIDs     []string `json:"fallback_account_member_ids,omitempty"`
+	NoFallback                   bool     `json:"no_fallback,omitempty"`
+	CurrentIntegratorRunID       string   `json:"current_integrator_run_id,omitempty"`
+	IntegratorAuthorizingHumanID string   `json:"integrator_authorizing_human_id,omitempty"`
+	IntegratorRunOwnerID         string   `json:"integrator_run_owner_id,omitempty"`
+	IntegratorGeneration         uint64   `json:"integrator_generation"`
+	AcceptedSetVersion           uint64   `json:"accepted_set_version"`
+	Phase                        string   `json:"phase"`
+	OpenQuestions                int      `json:"open_questions"`
+	IntegratorLaunchError        string   `json:"integrator_launch_error,omitempty"`
+	IntegratorLaunchErrorAt      string   `json:"integrator_launch_error_at,omitempty"`
+	IntegratorRunLaunched        bool     `json:"integrator_run_launched"`
+	ChangeSeq                    uint64   `json:"change_seq"`
+	CreatedAt                    string   `json:"created_at"`
+	UpdatedAt                    string   `json:"updated_at"`
+	ArchivedAt                   *string  `json:"archived_at,omitempty"`
 }
 
 // MissionQuestion is one clarifying question the integrator asked the
@@ -264,8 +268,11 @@ type MissionCreateParams struct {
 	ExtraWorkspaceIDs []string `json:"extra_workspace_ids,omitempty"`
 }
 
+// MissionCreateResult's SkippedFallbackAccounts are as on RunLaunchResult,
+// for the integrator's launch.
 type MissionCreateResult struct {
-	Mission Mission `json:"mission"`
+	Mission                 Mission          `json:"mission"`
+	SkippedFallbackAccounts []SkippedAccount `json:"skipped_fallback_accounts,omitempty"`
 }
 
 type MissionListParams struct {
@@ -489,6 +496,7 @@ func MissionFromDomain(m *domain.Mission) Mission {
 	for _, id := range m.ExtraWorkspaces {
 		out.ExtraWorkspaceIDs = append(out.ExtraWorkspaceIDs, string(id))
 	}
+	out.FallbackAccountMemberIDs, out.NoFallback = FallbackIDs(m.Fallback), m.Fallback.Disabled
 	return out
 }
 

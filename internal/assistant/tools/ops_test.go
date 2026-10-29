@@ -93,7 +93,12 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 // an action on another member's run says whose it is.
 func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	params := map[string]any{
-		protocol.MethodRunLaunch:             protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it"},
+		protocol.MethodRunLaunch: protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", AccountMemberID: "m2",
+			FallbackAccountMemberIDs: []string{"m1"}, ExtraWorkspaceIDs: []string{"ws-2"}},
+		protocol.MethodTemplateLaunch: protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}},
+		protocol.MethodMissionCreate: map[string]any{"workspace_id": "ws-1", "objective": "ship it", "integrator": map[string]any{"harness": "claude", "mode": "acp"},
+			"execution_choices": []any{map[string]any{"harness": "claude", "mode": "acp"}, map[string]any{"account_member_id": "m2", "harness": "codex", "mode": "tui"}},
+			"idempotency_key":   "k", "reason": "the member asked for codex workers"},
 		protocol.MethodRunInject:             protocol.RunInjectParams{RunID: "run-1", Message: "hi", Attachments: []string{"shot.png"}, IdempotencyKey: "k"},
 		protocol.MethodRunKill:               protocol.RunIDParams{RunID: "run-1"},
 		protocol.MethodRunClose:              protocol.RunCloseParams{RunID: "run-1", Outcome: "abandoned"},
@@ -127,7 +132,10 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			Fallback: &protocol.LaunchFallbackDefault{Policy: protocol.FallbackOrdered, Order: []string{"m1", "m3"}}}},
 	}
 	want := map[string]string{
-		protocol.MethodRunLaunch:                `Launch claude (default mode) in shop: "fix it"`,
+		protocol.MethodRunLaunch:      `Launch claude (default mode) in shop on "Grace"'s account, falling back to your account in order, with repositories "web": "fix it"`,
+		protocol.MethodTemplateLaunch: `Launch template "triage" in shop: claude (acp, opus) on your account: "triage issue 42…"`,
+		protocol.MethodMissionCreate: `Start a swarm in shop with integrator claude (acp) on your account, agents claude (acp) on your account, codex (tui) on "Grace"'s account, may fall back to accounts shared with you: "ship it". ` +
+			`The assistant's reason: "the member asked for codex workers"`,
 		protocol.MethodRunInject:                `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
 		protocol.MethodRunKill:                  `Stop run run-1 ("Fix login"), owned by Grace`,
 		protocol.MethodRunClose:                 `Close run run-1 ("Fix login") as abandoned, owned by Grace`,
@@ -156,7 +164,8 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			`run codex in its default mode with its default model; when usage runs out, move only to your own account, then m3's (m3) account`,
 	}
 	var got protocol.AssistantConfirmation
-	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+	caller := &attentionCaller{}
+	s := &Server{Caller: caller, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
 		got = c
 		return nil
 	}}
@@ -175,9 +184,14 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			t.Errorf("%s: %v", method, perr)
 			continue
 		}
-		if got.Summary != want[method] || got.OtherMember != (strings.Contains(want[method], "owned by") || strings.Contains(want[method], "held by")) {
+		if got.Summary != want[method] || got.OtherMember != (strings.Contains(want[method], "owned by") || strings.Contains(want[method], "held by") ||
+			strings.Contains(want[method], "may fall back to accounts shared with you")) {
 			t.Errorf("%s summary = %q (other member %t), want %q", method, got.Summary, got.OtherMember, want[method])
 		}
+	}
+
+	if sent := string(caller.params[protocol.MethodMissionCreate]); strings.Contains(sent, "reason") || !strings.Contains(sent, `"accountable_human_id":"m1"`) {
+		t.Fatalf("mission.create reached the server as %s, want the reason taken off and the member accountable", sent)
 	}
 
 	raw, _ := json.Marshal(protocol.RunInputRespondParams{RunID: "run-1", RequestID: "gone", OptionID: "once"})
@@ -198,5 +212,61 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	raw, _ = json.Marshal(protocol.MissionQuestionAnswerParams{QuestionID: "q-x", Answer: "v2", IdempotencyKey: "k"})
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodMissionQuestionAnswer, Params: raw}); perr == nil || perr.Code != protocol.CodeNotFound || got.Summary != "" {
 		t.Fatalf("answering an unknown question = %v, card %q; want not found before any card", perr, got.Summary)
+	}
+}
+
+// A launch that may fall back automatically to a teammate's shared account
+// can spend usage nobody chose, so its card always asks; one that names a
+// shared account, to run on or in its fallback order, does not, and its
+// card still names the account's owner.
+func TestOnlyAutomaticFallbackToATeammateAlwaysAsks(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	raw, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", FallbackAccountMemberIDs: []string{"m2"}})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if got.OtherMember || !strings.Contains(got.Summary, `falling back to "Grace"'s account in order`) {
+		t.Fatalf("explicit fallback confirmation = %+v, want Grace named and the card the member's own", got)
+	}
+	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", AccountMemberID: "m2", NoFallback: true})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if got.OtherMember || !strings.Contains(got.Summary, `on "Grace"'s account`) {
+		t.Fatalf("explicit account confirmation = %+v, want Grace named and the card the member's own", got)
+	}
+	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it"})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if !got.OtherMember || got.OtherOwner != "Grace" || !strings.Contains(got.Summary, "may fall back to accounts shared with you") {
+		t.Fatalf("automatic fallback confirmation = %+v, want it marked as Grace's", got)
+	}
+	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", NoFallback: true})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if got.OtherMember {
+		t.Fatalf("no-fallback confirmation = %+v, want it the member's own", got)
+	}
+}
+
+// A launch card says when the run may start child runs.
+func TestLaunchCardNamesChildRuns(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	raw, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", NoFallback: true, Children: "on"})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if want := `Launch claude (default mode) in shop, no fallback, child runs on: "fix it"`; got.Summary != want {
+		t.Fatalf("summary = %q, want %q", got.Summary, want)
 	}
 }

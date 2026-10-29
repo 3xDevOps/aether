@@ -46,6 +46,10 @@ type Run struct {
 	// only when its usage was exhausted and the run launched on
 	// AccountMemberID instead.
 	RequestedAccountMemberID string `json:"requested_account_member_id,omitempty"`
+	// FallbackAccountMemberIDs and NoFallback are the run's fallback policy,
+	// as on RunLaunchParams.
+	FallbackAccountMemberIDs []string `json:"fallback_account_member_ids,omitempty"`
+	NoFallback               bool     `json:"no_fallback,omitempty"`
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused bool `json:"paused"`
@@ -270,7 +274,18 @@ func RunFromDomain(r *domain.Run) Run {
 		BaseCheckedAt:       rfc3339ValuePtr(r.BaseCheckedAt),
 
 		RequestedAccountMemberID: string(r.RequestedAccountMemberID),
+		FallbackAccountMemberIDs: FallbackIDs(r.Fallback),
+		NoFallback:               r.Fallback.Disabled,
 	}
+}
+
+// FallbackIDs is policy's order as member ids; nil when automatic.
+func FallbackIDs(policy domain.AccountFallback) []string {
+	var out []string
+	for _, id := range policy.Order {
+		out = append(out, string(id))
+	}
+	return out
 }
 
 func WorkspaceFromDomain(w *domain.Workspace) Workspace {
@@ -467,9 +482,19 @@ type RunLaunchParams struct {
 
 // RunLaunchResult is a RunResult; Replayed is true when IdempotencyKey
 // matched an earlier launch, whose run it is.
+// SkippedFallbackAccounts are the fallback accounts the launch left out
+// because checking them failed; a replay does not repeat them.
 type RunLaunchResult struct {
-	Run      Run  `json:"run"`
-	Replayed bool `json:"replayed,omitempty"`
+	Run                     Run              `json:"run"`
+	Replayed                bool             `json:"replayed,omitempty"`
+	SkippedFallbackAccounts []SkippedAccount `json:"skipped_fallback_accounts,omitempty"`
+}
+
+// SkippedAccount is a fallback account a launch left out and why; no
+// account means listing the candidates failed.
+type SkippedAccount struct {
+	AccountMemberID string `json:"account_member_id,omitempty"`
+	Error           string `json:"error"`
 }
 
 type RunListParams struct {

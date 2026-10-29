@@ -125,6 +125,7 @@ type Op struct {
 	Does                   string
 	enums                  map[string][]any
 	defaults               map[Surface]map[string]fieldDefault
+	hidden                 map[Surface][]string
 	add                    func(srv *mcp.Server, t *mcp.Tool, c calls, o Op)
 }
 
@@ -220,7 +221,7 @@ func (o Op) calling(methods ...string) Op {
 }
 
 // enum limits the input property at path, dotted through objects and
-// array items, to values.
+// array items, to values; an array property's items.
 func (o Op) enum(path string, values ...any) Op {
 	o.enums = maps.Clone(o.enums)
 	if o.enums == nil {
@@ -245,7 +246,18 @@ func (o Op) defaultOn(s Surface, field string, value any, description string) Op
 	return o
 }
 
-// shape applies the op's enums and s's defaults to its input schema.
+// hide leaves fields out of the op's input on s, which refuses them.
+func (o Op) hide(s Surface, fields ...string) Op {
+	o.hidden = maps.Clone(o.hidden)
+	if o.hidden == nil {
+		o.hidden = map[Surface][]string{}
+	}
+	o.hidden[s] = append(slices.Clone(o.hidden[s]), fields...)
+	return o
+}
+
+// shape applies the op's enums, s's defaults and s's hidden fields to its
+// input schema.
 func (o Op) shape(s Surface, schema *jsonschema.Schema) {
 	for path, values := range o.enums {
 		parent, prop := schema, schema
@@ -254,6 +266,10 @@ func (o Op) shape(s Surface, schema *jsonschema.Schema) {
 				parent = parent.Items
 			}
 			prop = parent.Properties[key]
+		}
+		if prop.Items != nil {
+			prop.Items.Enum = values
+			continue
 		}
 		// An optional value sent empty means its default, as it did
 		// before the enum.
@@ -264,6 +280,9 @@ func (o Op) shape(s Surface, schema *jsonschema.Schema) {
 	}
 	for field, d := range o.defaults[s] {
 		schema.Properties[field].Description = d.description
+	}
+	for _, field := range o.hidden[s] {
+		delete(schema.Properties, field)
 	}
 	// The handler refuses unknown arguments itself, which keeps the schema
 	// ChatGPT budgets for smaller.
@@ -286,7 +305,7 @@ func (o Op) description(s Surface) string {
 }
 
 // Ops is the registry: every op either surface serves.
-var Ops = slices.Concat(readOps, writeOps, controlOps, actOps, integrationOps, prOps, memoryOps, assistantOps, preferenceOps)
+var Ops = slices.Concat(readOps, launchOps, changesOps, writeOps, controlOps, actOps, integrationOps, prOps, memoryOps, assistantOps, preferenceOps)
 
 // RegisterConnector adds to srv the ops a ChatGPT or Claude connector
 // serves whose scope is granted, so tools/list shows none the connector

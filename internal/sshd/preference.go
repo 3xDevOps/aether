@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -16,7 +17,7 @@ type PreferenceService interface {
 	List(ctx context.Context, member domain.MemberID, p protocol.PreferenceListParams) (protocol.PreferenceListResult, error)
 	Add(ctx context.Context, member domain.MemberID, text, workspaceID, source, ref string) (protocol.PreferenceResult, error)
 	Update(ctx context.Context, member domain.MemberID, p protocol.PreferenceUpdateParams, source, ref string) (protocol.PreferenceResult, error)
-	Delete(ctx context.Context, member domain.MemberID, id string) (protocol.PreferenceDeleteResult, error)
+	Delete(ctx context.Context, member domain.MemberID, id string, shown time.Time) (protocol.PreferenceDeleteResult, error)
 	// DeleteMember deletes the member together with their preferences.
 	DeleteMember(ctx context.Context, member domain.MemberID) error
 }
@@ -32,7 +33,7 @@ func init() {
 		return svc.Update(ctx, m, p, protocol.PreferenceSourceSettings, "")
 	}))
 	registerGuarded(protocol.MethodPreferenceDelete, permissions.View, nil, preferenceMethod(func(svc PreferenceService, ctx context.Context, m domain.MemberID, p protocol.PreferenceIDParams) (any, error) {
-		return svc.Delete(ctx, m, p.ID)
+		return svc.Delete(ctx, m, p.ID, time.Time{})
 	}))
 }
 

@@ -664,8 +664,10 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 	s.proj.closeText()
 	var text strings.Builder
 	var attachments []Content
+	var forAgent []acp.ContentBlock
 	for _, b := range blocks {
 		if forAgentOnly(b) {
+			forAgent = append(forAgent, b)
 			continue
 		}
 		if b.Text != nil {
@@ -675,7 +677,7 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 		}
 	}
 	s.prompted = strings.Join(strings.Fields(text.String()), " ")
-	s.message = UserMessage{Turn: s.turn, MessageID: rand.Text(), Text: text.String()}
+	s.message = UserMessage{Turn: s.turn, MessageID: rand.Text(), Text: text.String(), Context: forAgent}
 	body, cut := cutTail(text.String(), maxTextSegment)
 	s.emitLocked(Item{Kind: KindMessage, Truncated: cut, Message: &Message{
 		Role: "user", MessageID: s.message.MessageID, Text: body, Attachments: attachments, Complete: true,
@@ -683,11 +685,13 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 }
 
 // UserMessage is the latest prompt's text as the member wrote it, without
-// the blocks meant for the agent alone, and the turn it was sent in.
+// the blocks meant for the agent alone, which Context holds, and the turn
+// it was sent in.
 type UserMessage struct {
 	Turn      int64
 	MessageID string
 	Text      string
+	Context   []acp.ContentBlock
 }
 
 // CurrentPrompt is the latest prompt while the turn it started or joined

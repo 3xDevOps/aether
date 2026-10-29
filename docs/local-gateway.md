@@ -557,9 +557,21 @@ take the fallback policy as `fallback_account_member_ids` (member IDs, tried
 in order) or `no_fallback: true`; omitting both orders the launcher's
 accounts by usage left, and sending both is refused with `-32602`
 `fallback_account_member_ids and no_fallback cannot both be set`. When no
-account qualifies, the run launches on the requested account. Swarm
-attempts carry `launch_account_id`, the account the worker's run launched
-on.
+account qualifies, the run launches on the requested account. Run snapshots
+and swarms carry the policy back in the same two fields. A fallback account
+whose check failed, rather than one that is exhausted or not shared, is left
+out, and `run.launch` and `mission.create` list it in
+`skipped_fallback_accounts` `[{account_member_id, error}]` (an entry with no
+account means listing the candidates failed); `error` is a fixed reason, such
+as `the account's agent could not be checked`, and the server log has the
+detail. A replay does not repeat them.
+Swarm attempts carry `launch_account_id`, the account the worker's run
+launched on.
+
+`run.launch`, `mission.create` and `template.launch` refuse a param they do
+not know with `-32602` `unknown param "<name>"; this server does not support
+it`, so a client never launches without an option it asked for. Other
+methods ignore unknown params.
 
 Run snapshots carry `status_changed_at` (RFC 3339): when the run entered its
 current `status`, or its current `reason` while it is `needs-attention`. A
@@ -1013,14 +1025,34 @@ again, so look the run up instead.
 
 `run.pr.status` and `run.pr.feedback` default an omitted `expected` to the
 checkout's branch and head, and an omitted `target` to the pull request the
-dashboard proposes: the branch's upstream (else `origin`, when the
-workspace sets an origin) as the head, into the run's base branch on the
-workspace's GitHub source, or on the head repository without one. A
-checkout with no GitHub push remote answers `error` saying to pass
-`target`, and one on a detached HEAD answers `error` saying to pass both. `run.pr.status`
-returns the `expected` and `target` it used, to pass to `run.pr.create`. Once a finished run's container is gone, both report the pull
-request the run last recorded (`number`, `url`, `state`); `run.pr.feedback`
-then has no checks or comments, and `error` says why.
+dashboard proposes: the branch's upstream (else `origin`, when the workspace
+sets an origin) as the head, into the run's base branch on the workspace's
+GitHub source, or on the head repository without one. A checkout with no GitHub
+push remote answers `error` saying to pass `target`, and one on a detached HEAD
+answers `error` saying to pass both. `run.pr.status` returns the `expected` and
+`target` it used, to pass to `run.pr.create`. Once a finished run's container is
+gone, both report the pull request the run last recorded (`number`, `url`,
+`state`). `run.pr.feedback` then reads the pull request, its checks and its
+reviews from GitHub in one read, with the GitHub login of the run's home, as
+`gh` in the run did, so `head_oid`, `state` and `merged_at` match the checks;
+it has no comments, `mergeable` or `merge_state_status`, and sets
+`comments_unavailable: true` so empty comment lists do not read as none,
+within the same `limit` and byte budget; `truncated` is also set when a review
+body was cut at 2000 characters, and `error` says why when that read fails.
+When only the reviews fail, it keeps the checks, sets
+`reviews_unavailable: true` and says why in `error`.
+
+A server without child runs answers their methods with `-32004` and
+`data: {"reason":"children_unavailable"}`.
+
+`template.list` gives each template a `version`, which changes whenever its
+task, agent, mode, model, effort or parameter defaults do. `template.launch` with
+`expected_version` fails with `-32003` `templates: template changed: <name>
+was saved again and is now version <new>, not <old>` instead of launching a
+template changed since it was read. A retry with the launch's `idempotency_key` replays its
+run whatever `expected_version` it names. With `replay_only: true` it launches
+nothing: it returns the key's run, or fails with `-32000` when the key started
+none.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the

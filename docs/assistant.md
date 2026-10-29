@@ -220,11 +220,12 @@ Save your environment as a new image; new runs and terminals start from it
 
 A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
-task, and how you hear back. The assistant launches on your own account, with
-automatic [usage fallback](teams.md#usage-fallback): if your account is nearly
-out of quota, the run starts on an account shared with you. With
-[auto-approval](#auto-approval) on, a launch passes without a card, fallback
-included.
+task, and how you hear back. Unless told otherwise, the assistant launches on
+your own account with automatic [usage fallback](teams.md#usage-fallback): if
+your account is nearly out of quota, the run starts on an account shared with
+you. With [auto-approval](#auto-approval) on, such a launch still asks while
+any account is shared with you; one that names its account or its fallback
+order, or sets no fallback, passes without a card.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was
@@ -290,9 +291,12 @@ not covered   the assistant's own shell and file tools, which never ask
 
 - Messaging or stopping another member's run always asks, with the owner named
   on the card.
-- An auto-approved launch may still use automatic
-  [usage fallback](teams.md#usage-fallback), which can pick an account shared
-  with you.
+- A launch that names a teammate's shared account itself, to run on or in its
+  fallback order, passes without a card; the transcript note names the account
+  and its owner.
+- A launch with automatic [usage fallback](teams.md#usage-fallback) while any
+  account is shared with you always asks, since it may move to an account
+  nobody chose.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as
@@ -322,7 +326,8 @@ agent asks you still appears as a card.
 
 ## Notifications
 
-Aether watches every run the assistant launches or messages for you: it
+Aether watches every run the assistant launches, relaunches or messages for
+you, and the integrator of every swarm it starts or gives a new integrator: it
 creates a [watch](watches.md#assistant-watches) with source `assistant`,
 listed in **Settings > Watches**, where you pause it to stop the notices. If
 the watch cannot be created, the conversation says so with the error. You do
@@ -394,25 +399,36 @@ and connected apps such as ChatGPT cannot reach them.
   gitleaks flags as a secret, and text it treats as pasted: lines starting
   with `>` and the lines after them up to a blank line, fenced code blocks
   (up to a fence at least as long as the opening one, or to the end of the
-  message), and lines indented by a tab or four spaces.
+  message), and lines indented by four columns or more, where a tab
+  reaches the next multiple of four; an indented fence is such a line, not
+  a fence.
 - **See, edit and forget:** **Settings → Memory** lists them. The assistant
   can also forget one after you approve its card, even while preferences are
   off or the conversation is temporary. Forgetting deletes the preference;
-  the assistant's next prompt tells it not to use the old text.
+  the assistant's next prompt tells it not to use the old text. If the
+  preference changes while its card waits, approving the card forgets
+  nothing and the call fails with `changed after it was shown`.
   **Undo** on a Saved, Updated or Forgotten card restores the earlier text
-  through Settings, so the preference then reads **Added in Settings**.
+  through Settings, so the preference then reads **Added in Settings**. It
+  refuses, and says why, when the preference changed since the card. The
+  **Temporary chat** switch appears only on servers that support it.
 - **Turn off:** switch off preferences in **Settings → Memory**
   (`assistant.settings` with `preferences_enabled: false`). The assistant
-  then neither reads nor saves them. A **temporary** conversation
-  (`assistant.settings` with `temporary: true`) does the same until **New
-  conversation**, which also deletes the agent's session files in the
-  assistant's home, as it does for every conversation.
+  then neither reads nor saves them, and each of your messages tells it not
+  to use the preferences it read earlier in the conversation. A
+  **temporary** conversation (`assistant.settings` with `temporary: true`)
+  does the same until **New conversation**, which also deletes the agent's
+  session files in the assistant's home, as it does for every
+  conversation.
 - **Precedence:** your current message overrides a saved preference. A
   preference never changes a setting and never chooses an account, a
   fallback, a merge, a push or auto-approval. With auto-approval on, a launch
   or message whose text contains a saved preference still shows its card.
-- **Scope:** a preference applies in all workspaces, or in one. It belongs
-  to you on this server and is not synced to other servers.
+- **Scope:** a preference applies in all workspaces, or in one. A
+  preference for one workspace takes the workspace of the page your message
+  was sent from, which the message carries only while **Share the page I am
+  on with the assistant** is on. It belongs to you on this server and is not
+  synced to other servers.
 
 The assistant never saves anything you did not ask it to, never imports your
 agent's own memory files or past conversations, and never stores pull
