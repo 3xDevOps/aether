@@ -424,19 +424,29 @@ func (s *Service) carriesPreference(ctx context.Context, member domain.MemberID,
 }
 
 // preferenceNotes tells the agent, for its eyes only, which preferences
-// changed since its last prompt, so it stops using their old text. restore
-// puts the notes back for a prompt that was not sent.
-func (s *Service) preferenceNotes(ctx context.Context, member domain.MemberID) (blocks []acp.ContentBlock, restore func()) {
+// changed since its last prompt, so it stops using their old text, and,
+// while memory is off, not to use the preferences it read earlier in the
+// conversation. restore puts the changes back for a prompt that was not
+// sent.
+func (s *Service) preferenceNotes(ctx context.Context, member domain.MemberID) (blocks []acp.ContentBlock, restore func(), err error) {
 	if s.cfg.Preferences == nil {
-		return nil, func() {}
+		return nil, func() {}, nil
 	}
-	notes := s.cfg.Preferences.TakeChanges(ctx, member)
+	why, err := s.memoryOff(ctx, member)
+	if err != nil {
+		return nil, nil, fmt.Errorf("assistant: read whether memory is on: %w", err)
+	}
+	changes := s.cfg.Preferences.TakeChanges(ctx, member)
+	notes := changes
+	if why != "" {
+		notes = append(slices.Clip(notes), "memory is off for this message: "+why+"; do not use or mention any preference you read earlier in this conversation")
+	}
 	if len(notes) == 0 {
-		return nil, func() {}
+		return nil, func() {}, nil
 	}
 	block := acp.TextBlock("\n\n<aether-preference-changes>\n" + strings.Join(notes, "\n") + "\n</aether-preference-changes>")
 	block.Text.Annotations = &acp.Annotations{Audience: []acp.Role{acp.RoleAssistant}}
-	return []acp.ContentBlock{block}, func() { s.cfg.Preferences.RestoreChanges(member, notes) }
+	return []acp.ContentBlock{block}, func() { s.cfg.Preferences.RestoreChanges(member, changes) }, nil
 }
 
 // withTemporary adds whether the member's conversation is temporary to out.

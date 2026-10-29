@@ -801,7 +801,10 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if err != nil {
 		return false, err
 	}
-	notes, restore := s.preferenceNotes(ctx, m.id)
+	notes, restore, err := s.preferenceNotes(ctx, m.id)
+	if err != nil {
+		return false, err
+	}
 	defer func() {
 		if !dispatched {
 			restore()

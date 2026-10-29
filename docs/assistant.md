@@ -403,10 +403,12 @@ and connected apps such as ChatGPT cannot reach them.
   nothing and the call fails with `changed after it was shown`.
 - **Turn off:** switch off preferences in **Settings → Memory**
   (`assistant.settings` with `preferences_enabled: false`). The assistant
-  then neither reads nor saves them. A **temporary** conversation
-  (`assistant.settings` with `temporary: true`) does the same until **New
-  conversation**, which also deletes the agent's session files in the
-  assistant's home, as it does for every conversation.
+  then neither reads nor saves them, and each of your messages tells it not
+  to use the preferences it read earlier in the conversation. A
+  **temporary** conversation (`assistant.settings` with `temporary: true`)
+  does the same until **New conversation**, which also deletes the agent's
+  session files in the assistant's home, as it does for every
+  conversation.
 - **Precedence:** your current message overrides a saved preference. A
   preference never changes a setting and never chooses an account, a
   fallback, a merge, a push or auto-approval. With auto-approval on, a launch

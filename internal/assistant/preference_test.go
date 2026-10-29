@@ -382,11 +382,11 @@ func TestForgetShowsTheTextAndTellsTheNextPrompt(t *testing.T) {
 		a.Outcome != protocol.AssistantActionSucceeded || a.Target.PreferenceID != saved.Preference.ID {
 		t.Fatalf("forget record = %+v", a)
 	}
-	blocks, _ := f.svc.preferenceNotes(t.Context(), f.m.id)
+	blocks, _, _ := f.svc.preferenceNotes(t.Context(), f.m.id)
 	if len(blocks) != 1 || !strings.Contains(blocks[0].Text.Text, "preference "+saved.Preference.ID+" was forgotten; do not use the old text") {
 		t.Fatalf("next prompt's notes = %+v", blocks)
 	}
-	if blocks, _ = f.svc.preferenceNotes(t.Context(), f.m.id); len(blocks) != 0 {
+	if blocks, _, _ = f.svc.preferenceNotes(t.Context(), f.m.id); len(blocks) != 0 {
 		t.Fatal("the note went to a second prompt")
 	}
 }
@@ -447,6 +447,45 @@ func TestAutoApprovalNeverPassesAPreference(t *testing.T) {
 	got := actions(t, f.svc, f.m)
 	if len(got) < 2 || got[len(got)-2][0].Approval != "card" || got[len(got)-1][0].Approval != "auto" {
 		t.Fatalf("launch records = %+v; want the one carrying a preference carded and the other auto-approved", got)
+	}
+}
+
+// While memory is off every prompt tells the agent not to use the
+// preferences it read earlier in the conversation.
+func TestEveryPromptWhileMemoryIsOffSaysSo(t *testing.T) {
+	f := newPrefFixture(t)
+	if _, err := f.prefs.Add(t.Context(), f.m.id, "Prefer table output", "", protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	on, off := true, false
+	note := func() string {
+		t.Helper()
+		blocks, _, err := f.svc.preferenceNotes(t.Context(), f.m.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(blocks) == 0 {
+			return ""
+		}
+		return blocks[0].Text.Text
+	}
+	note()
+	for _, p := range []protocol.AssistantSettingsParams{{PreferencesEnabled: &off}, {PreferencesEnabled: &on, Temporary: &on}} {
+		if _, err := f.svc.SetSettings(t.Context(), f.m.id, p); err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			if got := note(); !strings.Contains(got, "memory is off for this message") ||
+				!strings.Contains(got, "do not use or mention any preference you read earlier in this conversation") {
+				t.Fatalf("prompt note with %+v = %q; want memory is off", p, got)
+			}
+		}
+	}
+	if _, err := f.svc.SetSettings(t.Context(), f.m.id, protocol.AssistantSettingsParams{Temporary: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if got := note(); got != "" {
+		t.Fatalf("prompt note with memory on = %q; want none", got)
 	}
 }
 
