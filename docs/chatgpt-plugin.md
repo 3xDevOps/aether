@@ -160,9 +160,9 @@ search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-searc
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
 tools, and each tool's name, description and compact input schema at most 3500
-bytes, 15000 for all of them together. Today that is 39 tools, 14860 bytes and
-3549 o200k tokens, the largest tool `aether_launch_run` at 1318 bytes; the
-whole `tools/list` JSON is 21622 bytes and 5137 tokens. Measure offline with the
+bytes, 15000 for all of them together. Today that is 39 tools, 14958 bytes and
+3575 o200k tokens, the largest tool `aether_launch_run` at 1311 bytes; the
+whole `tools/list` JSON is 21720 bytes and 5163 tokens. Measure offline with the
 `o200k_base` tokenizer and update these numbers when tools change. Give each
 tool one "Use this when" sentence, describe a property only when its name does
 not say enough, and fold a read into a tool that already answers it, as
@@ -346,7 +346,7 @@ plaintext in memory while relaying.
 | Server, tokens | Access token valid 1 hour; refresh token 30 days, rotated on each use; reusing a rotated token revokes the connector | Hashes only |
 | Server log | One line per write call: connector, member, method, target id, result. Lines when a connector is authorized, created or revoked. Read calls are not logged | Server operator's log retention |
 | Server records | Runs and messages created through a connector record `via ChatGPT` or `via Claude` | With the run |
-| Server, audit history | Not yet implemented (#592). Planned: each write call through a connector or the assistant, refused ones included; and, from any client including the dashboard and CLI, connector creation and revocation, account shares and revocations, role changes and accepted member merges. Each entry: time, member, how the call arrived, method, workspace, target id and outcome; no tokens, parameters or message bodies | Planned: each member's newest 10,000 entries |
+| Server, audit history | Each write call through a connector or the assistant, refused ones included; connectors created, revoked, or removed with their member, device or edge sign-in; and, from any client including the dashboard and CLI, account shares and revocations, member approvals, removals and role changes, device and edge sign-in removals, member merges, and Slack link codes and unlinks ([connectors.md](connectors.md#audit-history)). Each entry: time, member, how the call arrived, method, workspace, target id and outcome; no tokens, parameters or message bodies | Per member, the newest 10,000 call entries and, separately, the newest 10,000 changes that took effect |
 
 **Controls.** `aether mcp` lists a member's connectors and `aether mcp revoke
 <id>` revokes one; the consent page grants `write` and `control` separately

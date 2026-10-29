@@ -153,7 +153,7 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range [][2]domain.MemberID{{a.ID, b.ID}, {b.ID, a.ID}, {b.ID, c.ID}, {c.ID, b.ID}, {c.ID, a.ID}} {
-		if err := db.ShareAccount(ctx, s[0], s[1]); err != nil {
+		if _, err := db.ShareAccount(ctx, s[0], s[1]); err != nil {
 			t.Fatal(err)
 		}
 	}

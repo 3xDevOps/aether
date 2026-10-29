@@ -250,6 +250,20 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if err := tailnet.Call(protocol.MethodMemberMergeList, struct{}{}, &list); err != nil || len(list.Merges) != 1 || list.Merges[0].ID != res.Merge.ID {
 		t.Fatalf("member.merge.list = %+v, %v", list, err)
 	}
+	var audit protocol.AuditListResult
+	if err := controlClient(t, e).Call(protocol.MethodAuditList, protocol.AuditListParams{}, &audit); err != nil {
+		t.Fatal(err)
+	}
+	var accepts []string
+	for _, a := range audit.Entries {
+		if a.Method == protocol.MethodMemberMergeAccept {
+			accepts = append(accepts, a.Outcome+" "+a.Target)
+		}
+	}
+	refused, accepted := "error "+proposal.ID, "ok "+gh.ID
+	if want := []string{refused, accepted, accepted, refused, refused}; !slices.Equal(accepts, want) {
+		t.Fatalf("member.merge.accept audit entries = %q, want %q", accepts, want)
+	}
 }
 
 func TestMergeRefusals(t *testing.T) {

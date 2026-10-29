@@ -96,7 +96,7 @@ func TestRunRepoHandlersRequireAccountUseEvenForAdminReads(t *testing.T) {
 	if perr == nil || perr.Code != protocol.CodeDenied || !strings.Contains(perr.Message, "has not shared") {
 		t.Fatalf("admin credential read without grant: %+v", perr)
 	}
-	if err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
+	if _, err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(fixture.dir, "selected"), []byte("shared content\n"), 0600); err != nil {
@@ -119,13 +119,13 @@ func TestRunRepoReadRechecksAccountGrantBetweenNativeCommands(t *testing.T) {
 	fixture, _ := newNativeRepoFixture(t)
 	e := newTestEnv(t, func(cfg *Config) { cfg.Services.RunRepo = fixture })
 	_, other := addMember(t, e, "Shared reader", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
+	if _, err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	fixture.native = runrepo.New(func(ctx context.Context, id runtime.ID, args []string, dir string) (int, string, string, error) {
 		code, out, stderr, err := repoLocalExec(ctx, id, args, dir)
 		if slices.Contains(args, "status") {
-			if revokeErr := e.store.RevokeAccountShare(ctx, e.member.ID, other.ID); revokeErr != nil {
+			if _, revokeErr := e.store.RevokeAccountShare(ctx, e.member.ID, other.ID); revokeErr != nil {
 				t.Fatal(revokeErr)
 			}
 		}
@@ -332,5 +332,17 @@ func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
 	prs, err := e.store.RunPullRequests(t.Context(), e.run.ID)
 	if err != nil || len(prs) != 1 || prs[0].State != "merged" || prs[0].MergedAt == nil {
 		t.Fatalf("recorded pull request = %+v, %v", prs, err)
+	}
+	value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunGet, repoParams(t, protocol.RunIDParams{RunID: string(e.run.ID)}))
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	var got protocol.RunResult
+	if err := json.Unmarshal(value, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PullRequests) != 1 || got.PullRequests[0].Repository != "acme/app" || got.PullRequests[0].Number != 7 || got.PullRequests[0].State != "merged" ||
+		got.PullRequests[0].MergedAt == nil || !got.PullRequests[0].CheckedAt.Equal(prs[0].ObservedAt) {
+		t.Fatalf("run.get pull_requests = %+v, want the recorded one with when it was checked", got.PullRequests)
 	}
 }

@@ -37,6 +37,7 @@ var memberRefs = map[string]bool{
 	"child_settings.member_id":                             false,
 	"schedules.member_id":                                  true,
 	"slack_links.member_id":                                true,
+	"audit.member_id":                                      false,
 	"assistant_sessions.member_id":                         false,
 	"assistant_prompt_keys.member_id":                      false,
 	"watches.member_id":                                    true,

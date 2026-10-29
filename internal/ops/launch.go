@@ -154,7 +154,7 @@ func swarmReceipt(m protocol.Mission, l links, book accountBook) *launchReceipt 
 
 type launchOptionsInput struct {
 	WorkspaceID     string `json:"workspace_id,omitempty" jsonschema:"add its templates"`
-	Models          string `json:"models,omitempty" jsonschema:"an agent name: add its models"`
+	Models          string `json:"models,omitempty" jsonschema:"an agent: add its models"`
 	AccountMemberID string `json:"account_member_id,omitempty"`
 }
 

@@ -34,7 +34,7 @@ type connectorLaunchInput struct {
 	WorkspaceID string            `json:"workspace_id"`
 	Task        string            `json:"task,omitempty" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
 	Harness     string            `json:"harness,omitempty"`
-	Template    string            `json:"template,omitempty" jsonschema:"a saved template to run instead of task"`
+	Template    string            `json:"template,omitempty" jsonschema:"a saved template instead of task"`
 	Params      map[string]string `json:"params,omitempty" jsonschema:"template placeholder values"`
 	// TemplateVersion pins the template as aether_launch_options read it.
 	TemplateVersion string `json:"template_version,omitempty" jsonschema:"refused if the template changed"`
@@ -79,7 +79,7 @@ type answerInput struct {
 	AnswerID string         `json:"answer_id"`
 	Answer   string         `json:"answer,omitempty"`
 	OptionID string         `json:"option_id,omitempty"`
-	Values   map[string]any `json:"values,omitempty" jsonschema:"form values"`
+	Values   map[string]any `json:"values,omitempty"`
 	// IdempotencyKey repeats a swarm or teammate answer safely; an agent's
 	// question takes one answer, so a repeat finds nothing pending.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
@@ -116,7 +116,7 @@ var writeOps = []Op{
 		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodMissionList, protocol.MethodMissionCreate),
 	opOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
-		"Use this when the user wants to tell a run's agent something, which cannot be taken back; it waits up to 45s if someone else controls the run."+
+		"Use this when the user wants to tell a run's agent something, which cannot be taken back; it waits up to 45s if another member controls the run."+
 			idempotencyRule+"without one, a repeat within 60s is sent once.", messageRun).hints(true, true).
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunInject),
 	opOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,

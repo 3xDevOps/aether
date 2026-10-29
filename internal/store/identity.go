@@ -212,6 +212,10 @@ func (d *DB) RemoveIdentity(ctx context.Context, provider, subject string) (doma
 	if member == "" && len(devices) == 0 {
 		return "", nil, ErrNotFound
 	}
+	if err := removeConnectors(ctx, tx, `(provider = ? AND subject = ?) OR device_id IN (SELECT id FROM member_devices WHERE provider = ? AND subject = ?)`,
+		provider, subject, provider, subject); err != nil {
+		return "", nil, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM member_devices WHERE provider = ? AND subject = ?`, provider, subject); err != nil {
 		return "", nil, fmt.Errorf("store: remove identity: %w", err)
@@ -219,10 +223,6 @@ func (d *DB) RemoveIdentity(ctx context.Context, provider, subject string) (doma
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM member_identities WHERE provider = ? AND subject = ?`, provider, subject); err != nil {
 		return "", nil, fmt.Errorf("store: remove identity: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM connectors WHERE provider = ? AND subject = ?`, provider, subject); err != nil {
-		return "", nil, fmt.Errorf("store: remove identity: delete connectors: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return "", nil, fmt.Errorf("store: commit remove identity: %w", err)
@@ -253,9 +253,8 @@ func (d *DB) UnlinkIdentity(ctx context.Context, member domain.MemberID, provide
 		 WHERE provider = ? AND subject = ? AND member_id = ?`, provider, subject, member); err != nil {
 		return nil, fmt.Errorf("store: unlink identity: revoke devices: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM connectors WHERE provider = ? AND subject = ? AND member_id = ?`, provider, subject, member); err != nil {
-		return nil, fmt.Errorf("store: unlink identity: delete connectors: %w", err)
+	if err := removeConnectors(ctx, tx, `provider = ? AND subject = ? AND member_id = ?`, provider, subject, member); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store: commit unlink identity: %w", err)

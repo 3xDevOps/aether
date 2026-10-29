@@ -103,7 +103,7 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 		t.Fatalf("native omp enhanced install script = %q, want none", got)
 	}
 
-	if err := s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
+	if _, err := s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	check(list(owner.ID), map[string]state{
@@ -134,7 +134,7 @@ func TestAgentListLeavesHomesAloneAndSurvivesAnUnreadableLogin(t *testing.T) {
 	}
 	s.cfg.Homes = homes
 	s.cfg.Runs = &fakeRuns{}
-	if err = s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
+	if _, err = s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	list := func(account domain.MemberID) map[string]protocol.AgentInfo {

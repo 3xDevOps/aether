@@ -27,7 +27,7 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 	boSigner, bo := addMember(t, e, "Bo", domain.RoleCollaborator, false)
 	_, cy := addMember(t, e, "Cy", domain.RoleCollaborator, false)
 	ana, boClient := controlClient(t, e), controlAs(t, e, boSigner)
-	if err := e.store.ShareAccount(ctx, bo.ID, e.member.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, bo.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,7 +112,7 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 		}
 	}
 
-	if err := e.store.RevokeAccountShare(ctx, bo.ID, e.member.ID); err != nil {
+	if _, err := e.store.RevokeAccountShare(ctx, bo.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := ana.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, &got); err != nil || got.Defaults.AccountMemberID != string(bo.ID) || got.Revision != saved.Revision {

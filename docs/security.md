@@ -149,6 +149,9 @@ their own entries.
   fallback, when it is created, so a member cannot queue a swarm on an account
   nobody shared with them:
   `permission denied: member <member-id> has not shared their account with you`.
+- Sharing and revoking are recorded in the
+  [audit history](connectors.md#audit-history), readable by the sharing member
+  and admins.
 
 > [!WARNING]
 > An `omp` share mounts your whole `~/.omp/agent` read-write, because omp
@@ -315,6 +318,9 @@ permissions, and it uses the account you signed it in to.
 - Transcripts it reads can carry injected instructions. With auto-approve off,
   a steered assistant still needs your click. With it on, a steered assistant
   can launch, message and stop your runs.
+
+Every write call the assistant makes, such as a launch, message, pause or stop,
+is recorded in the [audit history](connectors.md#audit-history) as `assistant`.
 
 Never sign the `aether` CLI in inside a run or your environment terminal. Its
 client key would sit in your home, where every run can read it and act as you,
@@ -575,6 +581,11 @@ there is no terminal, file, settings or git-writing tool.
   against `control`, and refuses every method outside its table
   ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
   then one every 2 seconds.
+- Audit history: a connector's write calls, refused ones included, and its
+  creation and revocation are recorded with the member, connector, method,
+  target and outcome, never the parameters
+  ([connectors.md](connectors.md#audit-history)). A member reads their own
+  entries; an admin reads all.
 - A connector minted over a member SSH key or a tailnet connection has no
   device: revoking a device does not cut it off. `aether mcp revoke` does.
 - TLS ends at the edge, because ChatGPT and Claude need a public certificate.
@@ -663,7 +674,8 @@ a connector does: with that member's role checks, judged by the device `aether
 slack link` ran on, and with audit records naming `Slack connector <Slack user
 id>`. It holds all three [scopes](connectors.md#scopes), since deciding a
 permission request takes `control`, and calls only the methods its buttons and
-replies need.
+replies need. Its write calls enter the
+[audit history](connectors.md#audit-history) as a connector's do.
 
 - It messages runs and answers requests once. It launches, stops and closes
   nothing, posts in no channel, and never picks an "always" option. A request

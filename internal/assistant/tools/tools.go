@@ -274,6 +274,7 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 		}
 		req.Params = c.Params
 		if reason != "" {
+			c.Reason = reason
 			c.Summary += fmt.Sprintf(". The assistant's reason: %q", reason)
 		}
 		if err := s.Confirm(ctx, c); err != nil {
@@ -694,6 +695,7 @@ func (s *Server) summarizeTemplate(ctx context.Context, req protocol.Request, c 
 	if t.Model != "" {
 		agent = fmt.Sprintf("%s (%s, %s)", truncate(t.Harness), cmp.Or(t.Mode, "headless"), truncate(t.Model))
 	}
+	c.Task = task
 	c.Summary = fmt.Sprintf("Launch template %q in %s: %s on your account: \"%s\"", truncate(p.Name), ws, agent, firstLine(task))
 	return nil
 }

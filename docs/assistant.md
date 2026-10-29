@@ -132,6 +132,14 @@ run.
 | Deliver and merge | Approve, reject or deliver an integration candidate; open or merge a run's pull request | Yes |
 | Team memory | Add a note, pin or unpin one; it cannot remove notes | Yes |
 
+Asked "what is left", "continue this" or "did we ship?", the assistant reads
+the run or swarm with its [progress evidence](connectors.md#progress-evidence)
+and answers requested, implemented, reviewed, merged, released and deployed
+on separate lines, each with its source and time, or "unknown" when Aether has
+no source, as for releases and deployments. An agent's success report alone
+is not proof. "Continue" never repeats a launch, message or merge; the
+assistant proposes the next step and launches only when you ask.
+
 Pausing and resuming run at once. The run's events name you as the actor.
 After each action the assistant says what it did, to which run, and the result.
 
@@ -220,7 +228,9 @@ Save your environment as a new image; new runs and terminals start from it
 
 A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
-task, and how you hear back. Unless told otherwise, the assistant launches on
+task, and how you hear back. A template launch's card shows the whole task its
+parameters fill in. When the assistant gives a one-line reason for a launch,
+the card shows it as a **Reason** row above the rest. Unless told otherwise, the assistant launches on
 your own account with automatic [usage fallback](teams.md#usage-fallback): if
 your account is nearly out of quota, the run starts on an account shared with
 you. With [auto-approval](#auto-approval) on, such a launch still asks while
