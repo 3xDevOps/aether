@@ -24,7 +24,7 @@ export const preferencesLabel = 'Use my preferences in the assistant'
 const highlightMs = 1500
 
 function newest(list: Preference[]): Preference[] {
-  return [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  return [...list].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
 }
 
 /** Settings › Memory: the member's private assistant preferences. Keyed by identity, so another member never inherits the list. */

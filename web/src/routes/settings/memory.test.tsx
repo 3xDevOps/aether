@@ -88,6 +88,12 @@ describe('memory in settings', () => {
     expect(row.textContent).not.toContain(new Date('2026-10-20T10:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
   })
 
+  it('lists the newest change first within the same second', async () => {
+    show([pref(), pref({ id: 'pref-2', text: 'Use pnpm here', updated_at: '2026-10-27T10:00:00.001Z' })])
+    const rows = within(await screen.findByRole('list', { name: 'Preferences' })).getAllByRole('listitem')
+    expect(rows.map((row) => row.id)).toEqual(['preference-pref-2', 'preference-pref-1'])
+  })
+
   it('filters by text', async () => {
     const user = userEvent.setup()
     show([pref(), pref({ id: 'pref-2', text: 'Use pnpm here' })])
