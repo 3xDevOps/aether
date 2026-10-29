@@ -29,17 +29,25 @@ server hosts the connector endpoint and signs you in.
   tailnet connection. Under `edge-access account`, any registered device works.
 - A ChatGPT or Claude plan that allows custom connectors (see below).
 
-## Get the URL and a code
+## Get the URL
 
 In the app, open **Settings → ChatGPT and Claude**, or pick **Connect ChatGPT
 or Claude** in the command palette (Ctrl+K or ⌘K). The link
 `?page=settings&id=connectors` opens the same section, and the last onboarding
-step links to it. Pick **ChatGPT** or **Claude** for that app's steps. **Get a
-code** shows the URL and the code with a live countdown. The section checks
-every 3 seconds and shows **ChatGPT (chatgpt.com) connected** with its scopes
-once the app connects. It lists your connectors with their scopes, when each
-was added and last used, and **Reconnect** and **Revoke** buttons. Errors
-appear as `aether mcp` prints them, with a link to the fix.
+step links to it. Pick **ChatGPT** or **Claude** for that app's steps. The
+section shows the URL at once. What the third step asks depends on the server's
+[`edge-access`](edge.md#access-policies) policy:
+
+- `account`, with a GitHub account linked to you: no code. The page that opens
+  signs you in at the edge. **Watch for the connection** waits up to 10
+  minutes for it.
+- Otherwise: **Get a code** shows a pairing code with a live countdown.
+
+The section checks every 3 seconds and shows **ChatGPT (chatgpt.com)
+connected** with its scopes once the app connects. It lists your connectors
+with their scopes, the URL each was added at, when each was added and last
+used, and **Reconnect** and **Revoke** buttons. Errors appear as `aether mcp`
+prints them, with a link to the fix.
 
 From a terminal:
 
@@ -48,20 +56,31 @@ aether mcp
 ```
 
 ```
-Add this server to ChatGPT or Claude as a custom connector:
+Install Aether from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
   URL   https://edge.onaether.dev/mcp
-  Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect, if it asks
+  No code: on the page that opens, sign in to the edge with GitHub, pick this server and select Allow
 Connected:
-  con-7k2m9q4xbd  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago
+  con-7k2m9q4xbd  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago  universal URL
 Remove one: aether mcp revoke <id>
 ```
 
+Where the page asks for a code, `aether mcp` prints one instead of the `No
+code` line:
+
+```
+  Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect, if it asks
+```
+
 The URL is the same for both apps and every server on the edge. On the
-server, `sudo aether-server edge status` also prints it. An edge or server
-older than edge protocol 3 prints the server's own URL,
-`https://edge.onaether.dev/mcp/<server id>`, instead. The code works once,
-within 10 minutes. Running `aether mcp` again replaces a code you have not
-used.
+server, `sudo aether-server edge status` also prints it. Before edge protocol
+3, and for a member with no GitHub account linked, it is the server's own URL,
+`https://edge.onaether.dev/mcp/<server id>`. The code works once, within 10
+minutes. Running `aether mcp` again replaces a code you have not used.
+
+That URL's page asks for a code even when the universal URL needs none, so a
+connector added there reconnects with one. `aether mcp code` prints a code
+alone. In Settings, **Reconnect** on such a connector shows the server's own
+URL and a code.
 
 ## Add it in ChatGPT
 
@@ -145,6 +164,19 @@ refuses it, as it refuses a device no person approved, and it cannot mint a
 pairing code or a Slack link code. Connectors added at
 `<edge>/mcp/<server id>` keep working there.
 
+### Move a connector to the universal URL
+
+A connector keeps the URL it was added at. Settings marks each one
+**Universal URL** or **This server's own URL**, and `aether mcp` prints
+`universal URL` or `at <url>`. Once Settings shows the universal URL for you,
+**Move to the universal URL** next to a connector on the server's own URL
+starts a new connection: add Aether again in the app with the universal URL.
+Settings revokes the old connector once a new one from the same client, such as
+ChatGPT or Claude, connects at the universal URL and calls Aether. If none
+calls within 10 minutes, it leaves the old one and says so. Remove the old
+Aether connector in ChatGPT or Claude yourself. From a terminal, connect again at the
+universal URL, then run `aether mcp revoke <old id>`.
+
 ### Self-hosted and custom edges
 
 The universal URL is `https://<relay host>/mcp` of whichever edge the server
@@ -209,8 +241,9 @@ member.role: ChatGPT connector con-7k2m9q4xbd cannot call this method; no connec
 ```
 
 To change scopes, revoke the connector and connect
-again, or select **Reconnect** in Settings. It gets a new code, then revokes
-the connector. Connectors added before scopes existed have all three.
+again, or select **Reconnect** in Settings. It gets a new code where the page
+asks for one, and revokes the old connector once the new connection calls
+Aether. Connectors added before scopes existed have all three.
 
 ## What it can do
 
