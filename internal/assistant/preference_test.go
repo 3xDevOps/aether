@@ -314,6 +314,24 @@ func TestSaveFinishingAfterAResetStaysInItsConversation(t *testing.T) {
 	}
 }
 
+// A save whose Saved notice cannot be written says so, and that the
+// preference was saved.
+func TestSaveWhoseNoticeFailsIsReported(t *testing.T) {
+	f := newPrefFixture(t)
+	f.say(1, "remember that I prefer table output")
+	dir := filepath.Dir(f.svc.logPath(f.m.id))
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer table output"})
+	if err == nil || !strings.Contains(err.Error(), "was saved, but recording that in the transcript failed") {
+		t.Fatalf("remember with no transcript = %v; want the failed record reported", err)
+	}
+}
+
 // The forget card's own read of a preference is not a tool the agent can
 // call.
 func TestSocketRefusesTheForgetCardsRead(t *testing.T) {

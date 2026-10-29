@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -254,8 +253,10 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 	if res.Previous != nil {
 		summary = fmt.Sprintf("Updated your preference: %q, was %q", res.Preference.Text, res.Previous.Text)
 	}
-	c.note(conv, newAction(protocol.AssistantConfirmation{Method: protocol.MethodAssistantRemember, Summary: summary, CreatedAt: time.Now()}),
-		res.Preference.ID, nil)
+	if err = c.note(conv, newAction(protocol.AssistantConfirmation{Method: protocol.MethodAssistantRemember, Summary: summary, CreatedAt: time.Now()}),
+		res.Preference.ID, nil); err != nil {
+		return nil, fmt.Errorf("preference %s was saved, but recording that in the transcript failed: %w", res.Preference.ID, err)
+	}
 	return res, nil
 }
 
@@ -269,24 +270,28 @@ func (c *preferenceCaller) forget(ctx context.Context, raw json.RawMessage) (any
 	if err == nil {
 		res, err = c.s.cfg.Preferences.Delete(ctx, c.m.id, p.ID, held.shown)
 	}
-	if ok {
-		c.note(held.conv, held.action, p.ID, err)
+	if !ok {
+		return res, err
+	}
+	if nerr := c.note(held.conv, held.action, p.ID, err); nerr != nil {
+		if err == nil {
+			return nil, fmt.Errorf("preference %s was forgotten, but recording that in the transcript failed: %w", p.ID, nerr)
+		}
+		return nil, fmt.Errorf("%v; recording that in the transcript failed too: %w", err, nerr)
 	}
 	return res, err
 }
 
 // note records the outcome of action a on preference id in conv, the
 // conversation the call came in.
-func (c *preferenceCaller) note(conv context.Context, a protocol.AssistantAction, id string, err error) {
+func (c *preferenceCaller) note(conv context.Context, a protocol.AssistantAction, id string, err error) error {
 	a.Target.PreferenceID, a.FinishedAt = id, time.Now().UTC()
 	a.Outcome = protocol.AssistantActionSucceeded
 	body := ""
 	if err != nil {
 		a.Outcome, a.Error, body = protocol.AssistantActionFailed, err.Error(), err.Error()
 	}
-	if nerr := c.s.noteOutcome(conv, c.m, a, body); nerr != nil {
-		slog.Warn("assistant: record the preference action", "member", c.m.id, "method", a.Method, "action", a.ID, "error", nerr)
-	}
+	return c.s.noteOutcome(conv, c.m, a, body)
 }
 
 // quoted returns the span of message that text quotes: a contiguous run of
