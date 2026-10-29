@@ -344,7 +344,8 @@ search:
 
 // attached widens seg[start:end] to the symbols joined to its first and
 // last words, such as the "++" of "C++" or the "#" of "#ops", without the
-// quotes, brackets and sentence punctuation around them.
+// quotes, brackets and sentence punctuation around them. A closing bracket
+// the span opened stays, as in "fmt.Println()".
 func attached(seg string, start, end int) string {
 	symbol := func(r rune) bool { return !unicode.IsSpace(r) && !unicode.IsLetter(r) && !unicode.IsDigit(r) }
 	for start > 0 {
@@ -361,8 +362,21 @@ func attached(seg string, start, end int) string {
 		}
 		end += size
 	}
-	return strings.TrimRightFunc(seg[start:end], func(r rune) bool { return strings.ContainsRune(`.,;:!?…"')]}»”’`, r) })
+	span := seg[start:end]
+	for span != "" {
+		r, size := utf8.DecodeLastRuneInString(span)
+		if !strings.ContainsRune(`.,;:!?…"')]}»”’`, r) {
+			break
+		}
+		if open, ok := openers[r]; ok && strings.Count(span, string(open)) >= strings.Count(span, string(r)) {
+			break
+		}
+		span = span[:len(span)-size]
+	}
+	return span
 }
+
+var openers = map[rune]rune{')': '(', ']': '[', '}': '{', '»': '«', '”': '“', '’': '‘'}
 
 // typedSegments splits message into runs of lines the member wrote
 // themselves. Text pasted from elsewhere splits it and is dropped: quoted

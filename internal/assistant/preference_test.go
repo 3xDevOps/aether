@@ -590,10 +590,12 @@ func TestQuotedSkipsPastedText(t *testing.T) {
 		}
 	}
 	for message, want := range map[string]string{
-		"From now on: always use C++.":      "always use C++",
-		"Remember (always use C#), please":  "always use C#",
-		"Keep coverage at 90%. Thanks":      "Keep coverage at 90%",
-		"I said \"always tag #ops first\"!": "always tag #ops first",
+		"From now on: always use C++.":           "always use C++",
+		"Remember (always use C#), please":       "always use C#",
+		"Keep coverage at 90%. Thanks":           "Keep coverage at 90%",
+		"I said \"always tag #ops first\"!":      "always tag #ops first",
+		"From now on: always use fmt.Println().": "always use fmt.Println()",
+		"(Always log with f(x)).":                "Always log with f(x)",
 	} {
 		if span, err := quoted(message, strings.Trim(want, "+#%")); err != nil || span != want {
 			t.Errorf("quoted(%q) = %q, %v; want %q", message, span, err, want)
