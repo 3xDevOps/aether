@@ -48,6 +48,7 @@ function MemoryBody({ client }: { client: Api }) {
   const [undoing, setUndoing] = useState(false)
   const reloaded = useRef<string | null>(null)
   const restore = useRef<Restore>({})
+  const writes = useRef(0)
   const [saving, setSaving] = useState(false)
   const navigate = useStore((s) => s.navigate)
   const [flash, setFlash] = useState<string | null>(null)
@@ -57,10 +58,16 @@ function MemoryBody({ client }: { client: Api }) {
 
   useEffect(() => {
     let live = true
+    const before = writes.current
     setLoad({ kind: 'loading' })
     client.preferenceList({ include_disabled: true }).then(
       (result) => {
         if (!live) return
+        // The read may predate a write that answered meanwhile.
+        if (writes.current !== before) {
+          setAttempt((n) => n + 1)
+          return
+        }
         setList(result.preferences)
         setEnabled(result.enabled)
         setLoad({ kind: 'ready' })
@@ -100,7 +107,10 @@ function MemoryBody({ client }: { client: Api }) {
     return () => clearTimeout(timer)
   }, [entry, linkedShown, navigate])
 
-  const put = (preference: Preference) => setList((current) => current.some((p) => p.id === preference.id) ? current.map((p) => p.id === preference.id ? preference : p) : [...current, preference])
+  const put = (preference: Preference) => {
+    writes.current++
+    setList((current) => current.some((p) => p.id === preference.id) ? current.map((p) => p.id === preference.id ? preference : p) : [...current, preference])
+  }
 
   const add = async () => {
     setAdding(true)
@@ -234,6 +244,7 @@ function MemoryBody({ client }: { client: Api }) {
                 highlighted={flash === preference.id}
                 onChanged={put}
                 onForgotten={(gone) => {
+                  writes.current++
                   setList((current) => current.filter((p) => p.id !== gone.id))
                   restore.current = {}
                   setForgotten({ preference: gone })

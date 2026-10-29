@@ -145,6 +145,20 @@ describe('memory in settings', () => {
     expect(box.value).toBe('Prefer table output')
   })
 
+  it('reads the list again when a save answers before an older read', async () => {
+    const user = userEvent.setup()
+    let read: (value: { preferences: Preference[]; enabled: boolean }) => void = () => {}
+    const added = pref({ id: 'pref-9', text: 'Reply in English please', source: 'settings' })
+    const listed = vi.fn().mockReturnValueOnce(new Promise((resolve) => { read = resolve })).mockResolvedValue({ preferences: [added], enabled: true })
+    show([], { preferenceList: listed, preferenceAdd: vi.fn(async () => ({ preference: added })) })
+    await user.type(screen.getByRole('textbox', { name: 'Add a preference' }), 'Reply in English please')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Reply in English please')).toBeDefined()
+    await act(async () => read({ preferences: [], enabled: true }))
+    await waitFor(() => expect(listed).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('Reply in English please')).toBeDefined()
+  })
+
   it('edits a preference in place and shows a refusal verbatim', async () => {
     const user = userEvent.setup()
     const client = show([pref()], {
