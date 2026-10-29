@@ -138,11 +138,24 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         run: make vulncheck
         continue-on-error: true
+      - name: Restore golangci-lint analysis cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yml') }}-
       # golangci-lint runs go vet's analyzers plus shadow over the default
       # and edgeupgrade builds, so a separate `make vet` would compile the
       # tree a second time for the same findings.
       - name: Lint
         run: make lint
+      - name: Save golangci-lint analysis cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', '.golangci.yml') }}-${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
