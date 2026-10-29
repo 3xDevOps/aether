@@ -220,11 +220,12 @@ Save your environment as a new image; new runs and terminals start from it
 
 A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
-task, and how you hear back. The assistant launches on your own account, with
-automatic [usage fallback](teams.md#usage-fallback): if your account is nearly
-out of quota, the run starts on an account shared with you. With
-[auto-approval](#auto-approval) on, a launch passes without a card, fallback
-included.
+task, and how you hear back. Unless told otherwise, the assistant launches on
+your own account with automatic [usage fallback](teams.md#usage-fallback): if
+your account is nearly out of quota, the run starts on an account shared with
+you. With [auto-approval](#auto-approval) on, such a launch still asks while
+any account is shared with you; one that names its account or its fallback
+order, or sets no fallback, passes without a card.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was
@@ -290,9 +291,12 @@ not covered   the assistant's own shell and file tools, which never ask
 
 - Messaging or stopping another member's run always asks, with the owner named
   on the card.
-- An auto-approved launch may still use automatic
-  [usage fallback](teams.md#usage-fallback), which can pick an account shared
-  with you.
+- A launch that names a teammate's shared account itself, to run on or in its
+  fallback order, passes without a card; the transcript note names the account
+  and its owner.
+- A launch with automatic [usage fallback](teams.md#usage-fallback) while any
+  account is shared with you always asks, since it may move to an account
+  nobody chose.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as
@@ -322,7 +326,8 @@ agent asks you still appears as a card.
 
 ## Notifications
 
-Aether watches every run the assistant launches or messages for you: it
+Aether watches every run the assistant launches, relaunches or messages for
+you, and the integrator of every swarm it starts or gives a new integrator: it
 creates a [watch](watches.md#assistant-watches) with source `assistant`,
 listed in **Settings > Watches**, where you pause it to stop the notices. If
 the watch cannot be created, the conversation says so with the error. You do

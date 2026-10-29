@@ -16,6 +16,11 @@ const (
 	// MethodChildSettings reads, or with fields set changes, the caller's
 	// own child-run setting.
 	MethodChildSettings = "child.settings"
+	// ErrorReasonChildrenUnavailable is the data.reason of the
+	// CodeUnavailable a server without child runs answers their methods
+	// with.
+	ErrorReasonChildrenUnavailable = "children_unavailable"
+
 	// MethodRunChildren lists a run's descendants with their usage.
 	MethodRunChildren = "run.children"
 	// MethodRunChildrenAllow sets a run's own child-run setting.

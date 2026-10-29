@@ -69,18 +69,23 @@ func TestConnectorProtocolThroughTheEdge(t *testing.T) {
 
 	resp, out := rpc(t, base, token.AccessToken, "tools/list", map[string]any{})
 	tools, _ := out["result"].(map[string]any)["tools"].([]any)
-	if resp.StatusCode != http.StatusOK || len(tools) != 34 || resp.Header.Get("Mcp-Session-Id") != "" {
+	if resp.StatusCode != http.StatusOK || len(tools) != 36 || resp.Header.Get("Mcp-Session-Id") != "" {
 		t.Fatalf("tools/list without initialize: %s %v", resp.Status, out)
 	}
-	raw, err := json.Marshal(tools)
-	if err != nil {
-		t.Fatal(err)
+	// The budget of docs/chatgpt-plugin.md#tool-list-budget, as a client
+	// receives the list: names, descriptions and input schemas.
+	counted := 0
+	for _, tool := range tools {
+		tool := tool.(map[string]any)
+		schema, err := json.Marshal(tool["inputSchema"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		counted += len(tool["name"].(string)) + len(tool["description"].(string)) + len(schema)
 	}
-	// ChatGPT budgets about 5000 tokens for a connector's tool
-	// definitions; JSON runs about 4 bytes a token.
-	t.Logf("tools/list: %d tools, %d bytes of definitions, about %d tokens", len(tools), len(raw), len(raw)/4)
-	if len(raw) > 5000*4 {
-		t.Errorf("tools/list is %d bytes, over ChatGPT's budget of about %d", len(raw), 5000*4)
+	t.Logf("tools/list: %d tools, %d bytes of names, descriptions and schemas", len(tools), counted)
+	if counted > 15000 {
+		t.Errorf("tools/list has %d bytes of names, descriptions and schemas, want at most 15000", counted)
 	}
 
 	resp, out = rpc(t, base, token.AccessToken, "tools/call", map[string]any{"name": "aether_list_workspaces", "arguments": map[string]any{}})
@@ -145,12 +150,20 @@ func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 	}
 
 	for name, args := range map[string]map[string]any{
-		"aether_launch_run":   {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "member_id": string(s.memberOf(t, alice).ID)},
-		"aether_list_runs":    {"member_id": string(s.memberOf(t, alice).ID)},
-		"aether_launch_swarm": {"workspace_id": string(ws.ID), "objective": "o", "harness": "claude", "workers": []any{map[string]any{"harness": "codex", "account_member_id": string(s.memberOf(t, alice).ID)}}},
+		"aether_launch_run": {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "member_id": string(s.memberOf(t, alice).ID)},
+		"aether_list_runs":  {"member_id": string(s.memberOf(t, alice).ID)},
 	} {
 		if failed, text := toolText(t, session, name, args); !failed || !strings.Contains(text, "member_id") {
 			t.Errorf("%s with a member id = %v %s, want refused", name, failed, text)
+		}
+	}
+	// Alice has not shared her agent account with bob.
+	for name, args := range map[string]map[string]any{
+		"aether_launch_run":   {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "account_member_id": string(s.memberOf(t, alice).ID)},
+		"aether_launch_swarm": {"workspace_id": string(ws.ID), "objective": "o", "harness": "claude", "workers": []any{map[string]any{"harness": "codex", "account_member_id": string(s.memberOf(t, alice).ID)}}},
+	} {
+		if failed, text := toolText(t, session, name, args); !failed || !strings.Contains(text, "not shared") {
+			t.Errorf("%s on an account not shared with bob = %v %s, want refused", name, failed, text)
 		}
 	}
 

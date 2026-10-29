@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -56,6 +58,14 @@ func TestInsightsGet(t *testing.T) {
 	}
 	gh := newGitHubRepositoryFixture()
 	gh.pr = githubservice.PullRequest{URL: "https://github.com/acme/app/pull/4", State: "merged", MergedAt: ptr("2026-03-09T08:00:00-07:00")}
+	gh.snap = githubservice.Snapshot{State: "merged", Draft: true, MergedAt: ptr("2026-03-09T08:00:00-07:00"), Title: "Fix login", URL: "https://github.com/acme/app/pull/4",
+		HeadSHA: "0123456789abcdef0123456789abcdef01234567", BaseRef: "main",
+		CheckRuns: []githubservice.CheckRun{{ID: 1, Name: "test", Status: "completed", Conclusion: "failure", SuiteID: 7, App: "GitHub Actions"},
+			{ID: 2, Name: "test", Status: "completed", Conclusion: "success", SuiteID: 7, App: "GitHub Actions"},
+			{ID: 3, Name: "lint", Status: "in_progress", SuiteID: 7, App: "GitHub Actions"}},
+		Statuses: []githubservice.CommitStatus{{ID: 4, Context: "ci/legacy", State: "failure"}},
+		Reviews:  []githubservice.Review{{ID: 5, State: "CHANGES_REQUESTED", User: "grace", Body: "rename it…", Clipped: true}},
+	}
 	e := newTestEnv(t, func(c *Config) {
 		c.Store = db
 		c.Services.RunRepo = goneRunRepo{}
@@ -454,6 +464,54 @@ func TestInsightsGet(t *testing.T) {
 	if perr != nil || again.PullRequest.State != "merged" || !reflect.DeepEqual(gh.lookups, lookup) {
 		t.Errorf("run.pr.status of a merged PR = %+v, %+v, lookups %v; want the recorded state without asking GitHub", again, perr, gh.lookups)
 	}
+	// Its checks and reviews come from GitHub, read with the same login.
+	out, perr := e.srv.dispatch(ctx, alice, protocol.MethodRunPRFeedback, repoParams(t, protocol.RunPRFeedbackParams{RunID: "top2", Limit: 30}))
+	var feedback protocol.RunPRFeedbackResult
+	if perr == nil {
+		if err := json.Unmarshal(out, &feedback); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantChecks := []protocol.RunPRCheck{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS"}, {Name: "lint", Status: "IN_PROGRESS"},
+		{Name: "ci/legacy", Status: "COMPLETED", Conclusion: "FAILURE"}}
+	if perr != nil || feedback.Error != "" || !feedback.Truncated || !feedback.CommentsUnavailable || feedback.PullRequest == nil ||
+		feedback.PullRequest.HeadOID != gh.snap.HeadSHA || feedback.PullRequest.BaseBranch != "main" || feedback.PullRequest.Title != "Fix login" ||
+		feedback.PullRequest.State != "merged" || feedback.PullRequest.MergedAt == nil || !feedback.PullRequest.Draft || feedback.Identity != "octocat" || !reflect.DeepEqual(feedback.Checks, wantChecks) ||
+		len(feedback.Reviews) != 1 || feedback.Reviews[0].Author != "grace" || feedback.Reviews[0].State != "CHANGES_REQUESTED" ||
+		gh.lookups[len(gh.lookups)-1] != "snapshot "+string(alice)+" acme/app#4 page 2" {
+		t.Errorf("run.pr.feedback of a finished run = %+v, %+v, lookups %v; want GitHub's checks and reviews, truncated by the clipped review, comments marked unavailable", feedback, perr, gh.lookups)
+	}
+	// Bob revoking his share while the read is between pages stops it,
+	// with the access error and nothing read after.
+	gh.betweenPages = func() {
+		if err := db.RevokeAccountShare(ctx, bob, alice); err != nil {
+			t.Error(err)
+		}
+	}
+	before := len(gh.lookups)
+	if out, perr = e.srv.dispatch(ctx, alice, protocol.MethodRunPRFeedback, repoParams(t, protocol.RunPRFeedbackParams{RunID: "top2", Limit: 30})); perr == nil ||
+		perr.Code != protocol.CodeDenied || len(gh.lookups) != before+1 {
+		t.Errorf("run.pr.feedback revoked between pages = %s, %+v after lookups %v; want denied after one page", out, perr, gh.lookups[before:])
+	}
+	gh.betweenPages = nil
+	if err := db.ShareAccount(ctx, bob, alice); err != nil {
+		t.Fatal(err)
+	}
+	// A failed reviews read keeps the checks read before it.
+	read := gh.snap
+	gh.snap.Reviews, gh.err = nil, &githubservice.ReviewsError{Err: errors.New("github: API request: HTTP 502 Bad Gateway")}
+	feedback = protocol.RunPRFeedbackResult{}
+	if out, perr = e.srv.dispatch(ctx, alice, protocol.MethodRunPRFeedback, repoParams(t, protocol.RunPRFeedbackParams{RunID: "top2", Limit: 30})); perr == nil {
+		if err := json.Unmarshal(out, &feedback); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if perr != nil || !feedback.ReviewsUnavailable || !reflect.DeepEqual(feedback.Checks, wantChecks) || len(feedback.Reviews) != 0 ||
+		feedback.Error != "read reviews from GitHub: github: API request: HTTP 502 Bad Gateway" || !feedback.Blockers().Partial {
+		t.Errorf("run.pr.feedback whose reviews read failed = %+v, %+v; want the checks, reviews marked unavailable with the error", feedback, perr)
+	}
+	gh.snap, gh.err = read, nil
+	lookup = slices.Clone(gh.lookups)
 	if _, perr = status("top6"); perr == nil || perr.Code != protocol.CodeInvalidState {
 		t.Errorf("run.pr.status without a live environment or a recorded PR: error = %+v, want invalid state", perr)
 	}

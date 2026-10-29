@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	githubservice "github.com/3xDevOps/Aether/internal/github"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runrepo"
@@ -65,6 +67,9 @@ type runRepoCall struct {
 	account     domain.MemberID
 	home        domain.MemberID
 	accountName string
+	// authorize rechecks the caller's access to the run and its account;
+	// it is set even when the run has no live execution.
+	authorize func(context.Context, bool) error
 }
 
 // repoOwner is the workspace of the extra repository the call acts on, empty
@@ -135,7 +140,7 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 	}
 	execution, executionErr := s.cfg.Services.RunRepo.Execution(ctx, *run)
 	if executionErr != nil {
-		call.run, call.repo, call.account, call.home = *run, repo, account, run.HomeMember()
+		call.run, call.repo, call.account, call.home, call.authorize = *run, repo, account, run.HomeMember(), authorize
 		return call, executionErr
 	}
 	if repo.WorkspaceID != run.WorkspaceID {
@@ -443,11 +448,38 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		if perr != nil {
 			return nil, perr
 		}
-		message := "checks and review feedback need the run's environment, which is gone: " + err.Error()
-		if status.Error != "" {
-			message += "; " + status.Error
+		out := protocol.RunPRFeedbackResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest,
+			Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, CommentsUnavailable: true, Error: status.Error}
+		if s.cfg.Services.GitHub == nil {
+			out.Error = strings.TrimSuffix("checks and review feedback need the run's environment, which is gone: "+err.Error()+"; "+status.Error, "; ")
+			return out, nil
 		}
-		return protocol.RunPRFeedbackResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest, Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Error: message}, nil
+		// With the run's environment gone, the server reads GitHub with the
+		// login of the run's home, as gh in it did; comments need the run.
+		if p.Limit < 0 || p.Limit > protocol.MaxRunPRFeedbackEntries {
+			return nil, invalidParams(fmt.Sprintf("limit must be between 1 and %d (or zero for the default)", protocol.MaxRunPRFeedbackEntries))
+		}
+		pr := status.PullRequest
+		account, snap, snapErr := s.cfg.Services.GitHub.MemberPullRequestSnapshot(ctx, call.home, pr.Repository, pr.Number,
+			func(ctx context.Context) error { return call.authorize(ctx, false) })
+		if errors.Is(snapErr, permissions.ErrDenied) {
+			return nil, rpcError(snapErr)
+		}
+		var reviewsErr *githubservice.ReviewsError
+		if snapErr != nil && !errors.As(snapErr, &reviewsErr) {
+			out.Error = strings.TrimSuffix("read checks and reviews from GitHub: "+repoError(snapErr)+"; "+status.Error, "; ")
+			return out, nil
+		}
+		// The pull request is described from the same read as its checks.
+		out.Identity = account.Login
+		out.PullRequest = &protocol.RunPullRequest{Number: pr.Number, URL: cmp.Or(snap.URL, pr.URL), State: snap.State, Title: snap.Title, Draft: snap.Draft,
+			Repository: pr.Repository, BaseBranch: snap.BaseRef, HeadOID: snap.HeadSHA, MergedAt: snap.MergedAt}
+		out.Checks, out.Reviews, out.Truncated = snapshotFeedback(snap, cmp.Or(p.Limit, protocol.MaxRunPRFeedbackEntries))
+		if reviewsErr != nil {
+			out.ReviewsUnavailable = true
+			out.Error = strings.TrimSuffix("read reviews from GitHub: "+repoError(reviewsErr.Err)+"; "+status.Error, "; ")
+		}
+		return out, nil
 	}
 	if err != nil {
 		return nil, rpcError(err)
