@@ -718,7 +718,10 @@ func (l liveStore) ListPreferences(ctx context.Context, member domain.MemberID) 
 
 // A prompt the agent refuses after its caller left gives its change
 // notes back for the next prompt.
-func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
+// refusingAssistant is a service whose agent refuses every prompt, and a
+// preference its member forgot, so the next prompt owes them a note.
+func refusingAssistant(t *testing.T) (*Service, *member, *preference.Service, protocol.PreferenceResult) {
+	t.Helper()
 	dir := t.TempDir()
 	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
@@ -765,22 +768,50 @@ func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
 	m.sess = &session{acp: sess, ended: make(chan struct{})}
 	m.mu.Unlock()
 
+	return s, m, prefs, saved
+}
+
+func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
+	s, m, prefs, saved := refusingAssistant(t)
 	left, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err = s.Prompt(left, alice.ID, "show my runs", "k1", nil); !errors.Is(err, context.Canceled) {
+	if err := s.Prompt(left, m.id, "show my runs", "k1", nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Prompt of a caller that left = %v; want it cancelled", err)
 	}
 	forgotten := "preference " + saved.Preference.ID + " was forgotten"
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		notes := prefs.TakeChanges(t.Context(), alice.ID)
+		notes := prefs.TakeChanges(t.Context(), m.id)
 		if slices.ContainsFunc(notes, func(n string) bool { return strings.Contains(n, forgotten) }) {
 			return
 		}
-		prefs.RestoreChanges(alice.ID, notes)
+		prefs.RestoreChanges(m.id, notes)
 		if time.Now().After(deadline) {
 			t.Fatalf("notes after the refusal = %q; want %q back", notes, forgotten)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The prompt after one still waiting for its answer takes the notes the
+// agent may refuse, instead of starting without them.
+func TestNextPromptWaitsForTheLastPromptsNotes(t *testing.T) {
+	s, m, prefs, saved := refusingAssistant(t)
+	m.notesSettled = make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- s.Prompt(t.Context(), m.id, "show my runs", "k2", nil) }()
+	select {
+	case err := <-done:
+		t.Fatalf("Prompt returned %v while the last prompt's answer was outstanding", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	notes := prefs.TakeChanges(t.Context(), m.id)
+	if want := "preference " + saved.Preference.ID + " was forgotten"; !slices.ContainsFunc(notes, func(n string) bool { return strings.Contains(n, want) }) {
+		t.Fatalf("notes while waiting = %q; want %q still owed", notes, want)
+	}
+	prefs.RestoreChanges(m.id, notes)
+	close(m.notesSettled)
+	if err := wait(t, done); err == nil {
+		t.Fatal("the refusing agent accepted the prompt")
 	}
 }
