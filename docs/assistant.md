@@ -7,10 +7,69 @@ permissions and asks before it launches, messages or stops a run, or saves your
 environment, unless you turn on [auto-approval](#auto-approval).
 
 The assistant is not a run. It is an [Enhanced](enhanced-runs.md) session of
-your own Claude Code or Codex, started in your
-[environment](environments.md) (the persistent container `aether terminal` opens,
-with your home at `$HOME`). It uses the login in that home, so its usage counts
-against your own subscription. It works before you have a workspace.
+Claude Code or Codex with a sign-in of its own, which you make once for it. Its
+usage counts against the account you sign it in to. It works before you have a
+workspace.
+
+## Where it runs
+
+Each member's assistant runs in a container of its own,
+`aether-assistant-<member>`, created from the server's standard image. Your
+runs and your [environment](environments.md) (the persistent container
+`aether terminal` opens) cannot see it:
+
+- Its home is `<data>/assistant/<member>/home` on the server. It mounts
+  nothing from your home or any other member's: no `CLAUDE.md`, `AGENTS.md`,
+  `~/.claude`, `~/.codex`, `~/.local/bin` and no agent login.
+- Its working directory is `/assistant`, which holds the server's
+  instructions and is read-only.
+- Its Enhanced adapter is in `<data>/assistant/<member>/install/<agent>`,
+  mounted read-only under `/opt/aether-assistant` and first in its `PATH`.
+- `/etc/claude-code` and `/etc/codex`, where the agents read managed
+  settings, are empty and read-only.
+- Claude Code's auto-memory is off for it.
+
+Each start of the assistant replaces its container, so nothing the agent
+changed outside its home survives. In the home it keeps only the sign-in file
+and the files that resume the conversation: `~/.claude/projects` for Claude
+Code; `~/.codex/sessions` and `archived_sessions` for Codex. Settings, hooks,
+instructions, MCP servers, skills, memories and Codex's `session_index.jsonl`
+and `state_*.sqlite` files are deleted, and `~/.claude.json` is written again
+with only the onboarding flag.
+
+The sign-in file must hold only what a sign-in writes. Claude Code's
+`.credentials.json` keeps `claudeAiOauth`; Codex's `auth.json` keeps
+`auth_mode` (`chatgpt` or `apikey`), `OPENAI_API_KEY`, `tokens` and
+`last_refresh`. Anything else, such as a gateway URL that would receive your
+prompts, is removed, and that start fails with the keys it removed. **Retry**
+starts with the rest. A sign-in file over 64 KiB is deleted.
+
+On every start the server itself checks the sign-in with the vendor before
+the container starts. It refreshes the token at the vendor's sign-in service
+(`platform.claude.com` for Claude Code, `auth.openai.com` for Codex), writes the
+new tokens back into the home, and asks which account they belong to: Claude
+Code's profile endpoint at `api.anthropic.com` names the account and
+organization, and Codex's new tokens name the ChatGPT account. A Codex API-key
+sign-in is not refreshed; its key is the identity. The first start of either
+agent after you sign in records that account outside the home, before any
+agent runs; one that cannot be verified then leaves that agent not signed in.
+Every later start must find the same account, or fails with `the assistant's sign-in changed since you signed in.
+Sign in again`.
+
+So the assistant cannot start without reaching the vendor: when it is
+unreachable or answers with an error, the start fails with `couldn't verify
+the assistant's sign-in with <vendor>: ...` and the sign-in stays. When the
+vendor refuses the refresh token, the agent is no longer signed in. A server
+that stops between refreshing and writing the new tokens back leaves a used
+refresh token, so the next start asks you to sign in again.
+
+On the first start, and after a server upgrade that pins a newer adapter, the
+panel shows **Installing** while a short-lived container,
+`aether-assistant-install-<member>`, runs `npm install` of the pinned adapter
+into that directory. It needs network access to the npm registry. The adapter
+carries the agent itself: the Claude Code binary of its Agent SDK, or Codex,
+which the install pins to 0.159.3. Neither updates on its own; both move when a
+server upgrade pins a newer version.
 
 ## Open it
 
@@ -28,34 +87,31 @@ it. On a phone it is a side sheet. Closing it keeps your unsent message.
 ## First use
 
 With no ready agent the panel shows **Needs setup** and lists Claude Code and
-Codex. An agent is ready when it is installed in your home, its Enhanced adapter
-is installed and a login file exists. Each row that is not ready says which
-piece is missing (`Not installed`, `Enhanced adapter not installed`,
-`No sign-in found`) and has **Set up**, which runs the same flow as the
-**Agents** page. From the CLI:
+Codex. An agent is ready when you signed it in for the assistant; a sign-in in
+your environment does not count, because your runs can change it. A row that
+is not ready says `Not signed in for the assistant` and has **Sign in**.
 
-```sh
-aether agent add claude --enhanced
-aether terminal
-```
+**Sign in** opens a terminal running the agent's sign-in in the assistant's
+container: `claude-agent-acp --cli auth login` for Claude Code, which prints a
+URL and asks for the code the page shows, or `codex login --device-auth` for
+Codex, which prints a URL and a code to enter there. It installs the adapter
+first if needed. Starting a sign-in deletes that agent's earlier sign-in, so
+what the server records is what the sign-in writes. The sign-in is written to
+the assistant's home only. Starting
+it stops a running assistant session; the next prompt starts it again, and a
+prompt sent while the sign-in runs fails until it exits. Select **Done** when
+it exits.
 
-Sign in to the agent inside `aether terminal`. The full flow is in
-[quickstart.md](quickstart.md#5-set-up-your-agent). The panel updates when
-setup finishes.
+Aether checks only that the sign-in file exists, not that it still works. When
+the sign-in expires or you want another account, use **Settings > Assistant >
+Sign-in > Sign in again**.
 
 The first conversation uses the first ready agent, Claude Code before Codex. A
 conversation keeps its agent, because another agent cannot continue it. If that
 agent stops being ready, a prompt fails with, for example, `Claude Code is not
-ready: No sign-in found; sign in again or start with another agent`. Sign in
-again, or select **New conversation**, which picks the first ready agent.
-
-### Restart the environment
-
-An environment created before the assistant existed cannot be given the mounts
-the assistant needs, so the panel shows **Restart your environment** with
-**Restart environment**. Restarting closes any shell open in it. Files in
-`$HOME` are kept. Anything installed outside `$HOME` is lost unless you
-[saved the environment](environments.md#save-the-environment).
+ready: Not signed in for the assistant; sign in again or start with another
+agent`. Sign in again, or select **New conversation**, which picks the first
+ready agent.
 
 ## What it can do
 
@@ -303,16 +359,34 @@ in the box; **Send** retries it under the same idempotency key, so it runs at
 most once. While a turn runs you cannot send another prompt.
 
 There is one conversation per member. It survives page reloads and server
-restarts. If the environment stops, the agent stops with it and the next prompt
-starts it again. **New conversation** asks **Start a new conversation?** and
-discards the transcript and the agent's session. What the assistant already did
-stays done.
+restarts. If the agent stops, the next prompt starts it again. **New
+conversation** asks **Start a new conversation?**, then deletes the transcript,
+removes the assistant's container and deletes everything in its home but the
+sign-in files: sessions, history, todos, file history, shell snapshots and
+logs. The installed adapter is outside the home and stays. What the assistant
+already did stays done.
+
+### Earlier assistant state in your home
+
+Before the assistant had its own container it ran in your environment, in
+`~/.aether/assistant`, and kept its sessions in your home. That state, and the
+login it borrowed from your home, are not moved, because any run could have
+changed them. Delete the old state from `aether terminal`; the session
+directory is named after your home's path, `-root--aether-assistant` when it
+is `/root`:
+
+```sh
+rm -rf ~/.aether/assistant ~/.claude/projects/*--aether-assistant
+```
+
+Codex sessions from that time are in `~/.codex/sessions` together with your
+runs' sessions.
 
 ## Limits
 
 - One assistant per member, acting only for that member.
-- It uses your own agent account. [Account sharing](security.md#account-sharing)
-  does not apply to it.
+- It uses the account you signed it in to.
+  [Account sharing](security.md#account-sharing) does not apply to it.
 - Sending a prompt needs the permission to launch runs (collaborator or
   admin).
 - Nothing enforces that it treats text from runs, files and web pages as data.
@@ -323,10 +397,15 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 
 | Message | Fix |
 | --- | --- |
-| `assistant: no agent is ready; install Claude Code or Codex with its Enhanced adapter and sign in` | [Set up an agent](#first-use) |
-| `scheduler: the environment was created before the assistant existed; restart it to add the assistant's mounts` | [Restart the environment](#restart-the-environment) |
+| `assistant: no agent is ready; sign in to Claude Code or Codex for the assistant` | [Sign in for the assistant](#first-use) |
+| `scheduler: couldn't verify the assistant's sign-in with Anthropic: ...` (or `OpenAI`) | The server could not reach the vendor's sign-in service, or it answered with an error; the detail follows. Check the server's network access, then **Retry** |
+| `scheduler: Anthropic answered 400 Bad Request: the sign-in service refused the assistant's sign-in. Sign in again` | The vendor refused the refresh token. [Sign in again](#first-use) |
+| `scheduler: not signed in for the assistant. Sign in for the assistant first` | No sign-in was recorded, or the sign-in wrote no usable file. [Sign in](#first-use) |
+| `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
+| `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
+| `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
-| `assistant: open the claude session; stderr: ...` | The adapter failed to start. Fix the agent in `aether terminal`, then **Retry** |
+| `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |
 | `the member did not answer within 10m0s` | The card timed out. Ask again |
 | `<method> was not approved: record the approval: <error>` | The approval could not be saved, so the action did not run. Try again |
 | `the assistant is not configured on this server` | The server runs without the assistant |

@@ -75,6 +75,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
         harness: run.harness,
         mode: 'tui',
         ...(run.model ? { model: run.model } : {}),
+        ...(run.effort ? { effort: run.effort } : {}),
         ...(own && account && account !== run.member_id ? { account_member_id: account } : {}),
         ...(own ? fallback : {}),
         ...(own && run.children ? { children: run.children } : {}),

@@ -102,7 +102,7 @@ func cancelSwarm(c *protocol.Client, w io.Writer, missionID, key string) error {
 	return nil
 }
 
-const swarmReplaceUsage = "usage: aether swarm replace-integrator <swarm-id> --agent <agent> [--mode standard|enhanced] [--model <model>] [--account <member-id>]"
+const swarmReplaceUsage = "usage: aether swarm replace-integrator <swarm-id> --agent <agent> [--mode standard|enhanced] [--model <model>] [--effort <level>] [--account <member-id>]"
 
 func swarmReplaceIntegrator(args []string) error {
 	missionID, rest, err := swarmTarget(args, swarmReplaceUsage)
@@ -113,6 +113,7 @@ func swarmReplaceIntegrator(args []string) error {
 	agent := fs.String("agent", "", "agent of the new integrator")
 	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+defaultModeHelp+")")
 	model := fs.String("model", "", "integrator "+modelHelp)
+	effort := fs.String("effort", "", "integrator "+effortHelp)
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: the current integrator's)")
 	if err = fs.Parse(rest); err != nil {
 		return err
@@ -125,7 +126,7 @@ func swarmReplaceIntegrator(args []string) error {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		return replaceSwarmIntegrator(c, os.Stdout, missionID, protocol.MissionIntegrator{AccountMemberID: *account, Harness: *agent, Mode: integratorMode, Model: *model}, cli.NewControlSessionID())
+		return replaceSwarmIntegrator(c, os.Stdout, missionID, protocol.MissionIntegrator{AccountMemberID: *account, Harness: *agent, Mode: integratorMode, Model: *model, Effort: *effort}, cli.NewControlSessionID())
 	})
 }
 

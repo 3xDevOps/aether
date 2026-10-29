@@ -200,6 +200,7 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		Switchable:      profile.Capabilities.ModeSwitch,
 		DefaultMode:     string(domain.LaunchTUI),
 		EnhancedDefault: profile.Capabilities.EnhancedDefault,
+		EffortLevels:    profile.EffortLevels,
 	}
 	if err := s.cfg.Runs.SwarmRefusal(profile.Name, domain.LaunchTUI); err != nil {
 		info.SwarmStandardRefusal = err.Error()

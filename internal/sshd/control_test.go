@@ -280,6 +280,29 @@ func TestControlLaunchTaskOptionalOnlyInTUI(t *testing.T) {
 	}
 }
 
+func TestControlLaunchPassesTheEffort(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	c := controlClient(t, e)
+
+	if err := c.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: string(e.ws.ID), Task: "fix it", Harness: "claude", Mode: "tui", Model: "opus", Effort: "high",
+	}, nil); err != nil {
+		t.Fatalf("launch with an effort: %v", err)
+	}
+	if opts := e.runs.LaunchOptions(); len(opts) != 1 || opts[0].Model != "opus" || opts[0].Effort != "high" {
+		t.Fatalf("launch options = %+v, want model opus and effort high", opts)
+	}
+
+	var pe *protocol.Error
+	err := c.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: string(e.ws.ID), Task: "fix it", Harness: "claude", Mode: "tui", Effort: "-high",
+	}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams || len(e.runs.LaunchOptions()) != 1 {
+		t.Fatalf("launch with effort -high = %v after %d launches, want CodeInvalidParams and no launch", err, len(e.runs.LaunchOptions()))
+	}
+}
+
 func TestControlHandoffAndPull(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) {
@@ -546,9 +569,9 @@ func TestLaunchRefusesUnknownParams(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams || !strings.Contains(pe.Message, `unknown param "fallback_acount_member_ids"`) {
 		t.Fatalf("run.launch with a misspelled param = %v, want invalid params naming it", err)
 	}
-	if _, perr := decodeLaunchParams[protocol.MissionCreateParams](json.RawMessage(`{"workspace_id":"w","objective":"o","integrator":{"harness":"claude","effort":"high"}}`)); perr == nil ||
-		!strings.Contains(perr.Message, `unknown param "effort"`) {
-		t.Errorf("mission.create with an integrator effort = %v, want refused", perr)
+	if _, perr := decodeLaunchParams[protocol.MissionCreateParams](json.RawMessage(`{"workspace_id":"w","objective":"o","integrator":{"harness":"claude","efort":"high"}}`)); perr == nil ||
+		!strings.Contains(perr.Message, `unknown param "efort"`) {
+		t.Errorf("mission.create with a misspelled integrator field = %v, want refused", perr)
 	}
 	if _, perr := decodeLaunchParams[protocol.TemplateLaunchParams](json.RawMessage(`{"workspace_id":"w","name":"n","account_member_id":"m"}`)); perr == nil ||
 		!strings.Contains(perr.Message, `unknown param "account_member_id"`) {

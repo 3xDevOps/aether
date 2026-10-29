@@ -391,7 +391,7 @@ func TestPrepareMissionCreate(t *testing.T) {
 	}
 	for params, field := range map[string]string{
 		`{"workspace_id":"ws-1","no_falback":true}`:                       `"no_falback"`,
-		`{"integrator":{"harness":"claude","effort":"high"}}`:             `"effort"`,
+		`{"integrator":{"harness":"claude","efort":"high"}}`:              `"efort"`,
 		`{"execution_choices":[{"harness":"claude","mode":"tui","x":1}]}`: `"x"`,
 	} {
 		if _, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(params)); err == nil || err.Error() != "unknown param "+field+"; this server does not support it" {

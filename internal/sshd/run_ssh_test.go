@@ -1136,14 +1136,17 @@ func TestRunSSHSessionTakesControlOfASwarmWorker(t *testing.T) {
 	}
 	held("after a session started")
 
-	// Leaving releases nothing: a person does, from the swarm page.
+	held("after the session ended, with the connection open")
+
+	// Once the connection closes nobody is in the worker, so the hold goes.
 	_ = client.Close()
-	eventually(t, "the connection to be released", func() bool {
-		e.srv.runSSHMu.Lock()
-		defer e.srv.runSSHMu.Unlock()
-		return len(e.srv.runSSHConns) == 0
+	eventually(t, "the hold to be released", func() bool {
+		assignment, aerr := db.GetMissionWorkerAssignment(ctx, e.run.ID)
+		return aerr == nil && !assignment.Active
 	})
-	held("after the member disconnected")
+	if aerr := authority.AdmitInput(ctx, mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error { return nil }); aerr != nil {
+		t.Fatalf("integrator input after the member disconnected = %v", aerr)
+	}
 
 	// A run outside any swarm gets no notice and has no hold to take.
 	plain := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "on its own", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}

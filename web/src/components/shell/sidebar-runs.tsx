@@ -15,7 +15,7 @@ import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { needsYou, type StateContext } from '@/lib/needs-you'
-import { groupOf, runLabel, stateTone, stateWords, type PresentationState } from '@/lib/status'
+import { groupOf, runLabel, stateWords, toneOf, type PresentationState } from '@/lib/status'
 import { chevronTurn, cn } from '@/lib/utils'
 import { targetRoute } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/run/views'
@@ -24,7 +24,7 @@ import { useDeviceNeeds, useRun, useRunPeople, useSidebarGroups, useStateContext
 import { isTerminal, type RunRecord } from '@/store/runs'
 import { childRunsText, stateContextOf, type RunTree, type SidebarGroup, type TreeSummary } from '@/store/selectors'
 import type { Route } from '@/store/ui'
-import type { RunStatusCause } from '@/lib/types'
+import type { RunStatusCause, RunWait } from '@/lib/types'
 
 export const runRowSelector = '#sidebar-runs [data-run-row]'
 
@@ -262,6 +262,7 @@ function RunRowItem({ tree }: { tree: RunTree }) {
       reason={tree.reason}
       next={tree.next}
       cause={tree.cause}
+      wait={tree.wait}
       since={tree.since}
       workspaceName={tree.workspaceName}
       swarm={tree.swarm}
@@ -278,6 +279,7 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   reason: string
   next?: string
   cause?: RunStatusCause
+  wait?: RunWait
   since: string
   workspaceName?: string
   swarm?: TreeSummary
@@ -290,13 +292,14 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
 
 const names = new Intl.ListFormat(undefined, { type: 'conjunction' })
 
-function RunRowButton({ run, state, waiting, reason, next, cause, since, workspaceName, swarm, childRuns, unread }: {
+function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, workspaceName, swarm, childRuns, unread }: {
   run: RunRecord
   state: PresentationState
   waiting: boolean
   reason: string
   next?: string
   cause?: RunStatusCause
+  wait?: RunWait
   since: string
   workspaceName?: string
   swarm?: TreeSummary
@@ -327,7 +330,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, since, workspa
   const controller = run.controller_member_id
   const watching = people.filter((id) => id !== controller).map((id) => (id === self ? 'you' : name(id)))
   useClock()
-  const words = stateWords({ state, reason })
+  const words = stateWords({ state, reason, cause, wait })
   const label = [
     words.label,
     workspaceName,
@@ -356,7 +359,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, since, workspa
     </span>
   )
   return (
-    <RunDetails run={run} state={state} waiting={waiting} reason={reason} next={next} cause={cause} since={since} counts={counts} people={people} label={label}>
+    <RunDetails run={run} state={state} waiting={waiting} reason={reason} next={next} cause={cause} wait={wait} since={since} counts={counts} people={people} label={label}>
       <ListRow
         data-run-row=""
         aria-label={label}
@@ -366,7 +369,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, since, workspa
         onClick={open}
         leading={
           <>
-            <StatusDot tone={stateTone[state]} />
+            <StatusDot tone={toneOf({ state, wait })} />
             <span
               data-slot="owner-mark"
               aria-hidden

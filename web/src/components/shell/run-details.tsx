@@ -5,12 +5,12 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { useIsMobile } from '@/lib/breakpoints'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
-import { clipLabel, runLabel, stateTitle, stateTone, type PresentationState } from '@/lib/status'
+import { clipLabel, runLabel, stateTitle, toneOf, type PresentationState } from '@/lib/status'
 import { cn, surface } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore } from '@/store'
 import { isTerminal, type RunRecord } from '@/store/runs'
-import type { RunStatusCause } from '@/lib/types'
+import type { RunStatusCause, RunWait } from '@/lib/types'
 
 interface Shown {
   run: RunRecord
@@ -20,6 +20,7 @@ interface Shown {
   reason: string
   next?: string
   cause?: RunStatusCause
+  wait?: RunWait
   since: string
   /** A swarm's worker counts, or a run's child-run counts. */
   counts: string
@@ -85,7 +86,7 @@ const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', tim
 // Default and Large text sizes. Larger text or a shorter window gives lines up in `Details`.
 const peopleLines = 7
 
-function Details({ run, state, waiting, reason, next, cause, since, counts, people }: Shown) {
+function Details({ run, state, waiting, reason, next, cause, wait, since, counts, people }: Shown) {
   const self = useStore((s) => s.info?.member.id)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
@@ -126,7 +127,7 @@ function Details({ run, state, waiting, reason, next, cause, since, counts, peop
         {/* An agent's own title has no length limit; every other title already stops where clipLabel does. */}
         <p className={cn('text-ui font-medium break-words', squeeze > peopleLines && 'line-clamp-3')}>{clipLabel(runLabel(run))}</p>
         <p className="flex gap-1.5">
-          <StatusDot tone={stateTone[state]} className="mt-0.75" />
+          <StatusDot tone={toneOf({ state, wait })} className="mt-0.75" />
           <span
             className={cn(
               'min-w-0 break-words',
@@ -134,7 +135,7 @@ function Details({ run, state, waiting, reason, next, cause, since, counts, peop
               !waiting && 'text-muted',
             )}
           >
-            {stateTitle({ state, reason, next, cause }, since)}
+            {stateTitle({ state, reason, next, cause, wait }, since)}
           </span>
         </p>
       </div>

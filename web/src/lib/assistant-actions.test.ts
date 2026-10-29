@@ -68,7 +68,7 @@ describe('assistantView', () => {
     const bash: WorkItem = { id: '1:x', tool: 'execute', label: 'Ran npm test', status: 'done', at, name: 'Bash' }
     const b = stepsBlock('b1', [
       { kind: 'tool', id: read.id, at, entry: read },
-      { kind: 'narration', id: 'n1', at, text: 'It is stuck on CI.', streaming: false },
+      { kind: 'thought', id: 't1', at, text: 'It is stuck on CI.', streaming: false },
       { kind: 'tool', id: bash.id, at, entry: bash },
     ], at)
     const view = assistantView([{ kind: 'user', id: 'u1', at, body: 'why?' }, b], [])

@@ -27,7 +27,7 @@ func (l *recordingLauncher) LaunchMission(ctx context.Context, req MissionLaunch
 	l.requests = append(l.requests, req)
 	r := &domain.Run{
 		ID: req.RunID, WorkspaceID: req.WorkspaceID, MemberID: req.RunOwnerID, AccountMemberID: req.AccountOwner,
-		Task: req.Task, Harness: req.Harness, Mode: req.Mode, Model: req.Model, Status: domain.RunQueued, Fallback: req.Fallback,
+		Task: req.Task, Harness: req.Harness, Mode: req.Mode, Model: req.Model, Effort: req.Effort, Status: domain.RunQueued, Fallback: req.Fallback,
 	}
 	if req.RequestedAccount != req.AccountOwner {
 		r.RequestedAccountMemberID = req.RequestedAccount

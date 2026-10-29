@@ -70,13 +70,15 @@ var ErrInvalidDefinition = errors.New("templates: invalid definition")
 // that has since been saved over.
 var ErrChanged = errors.New("templates: template changed")
 
-// Version identifies what a launch of t runs: its task, agent, mode, model
-// and parameter defaults.
+// Version identifies what a launch of t runs: its task, agent, mode, model,
+// effort and parameter defaults. An empty effort is left out, so templates
+// saved before effort existed keep their versions.
 func Version(t *store.Template) string {
 	b, _ := json.Marshal(struct {
 		Task, Harness, Mode, Model string
 		Params                     map[string]string
-	}{t.Task, t.Harness, string(t.Mode), t.Model, t.Params})
+		Effort                     string `json:",omitempty"`
+	}{t.Task, t.Harness, string(t.Mode), t.Model, t.Params, t.Effort})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
 }
@@ -216,6 +218,9 @@ func (s *Service) Save(ctx context.Context, t *store.Template) error {
 	if err := domain.ValidModel(t.Model); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidDefinition, err)
 	}
+	if err := domain.ValidEffort(t.Effort); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidDefinition, err)
+	}
 	if err := checkParams(t.Task, t.Params); err != nil {
 		return err
 	}
@@ -280,7 +285,7 @@ func (s *Service) launch(ctx context.Context, t *store.Template, member domain.M
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
-	run, err := s.runs.LaunchWithOptions(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode, domain.LaunchOptions{Model: t.Model, Created: created})
+	run, err := s.runs.LaunchWithOptions(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode, domain.LaunchOptions{Model: t.Model, Effort: t.Effort, Created: created})
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}

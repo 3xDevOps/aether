@@ -6,7 +6,7 @@ import { AccountOptions, automaticFallback, ChildRunsOption, type ChildRunsChoic
 import { ModeControl } from '@/components/launch/mode-control'
 import { integratorModes } from '@/components/launch/modes'
 import { ExtraRepos } from '@/components/launch/extra-repos'
-import { ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
+import { EffortField, ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launch/run-limits'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { sameWorker, WorkerAgents, type WorkerChoice, workerMode, workerRefusals } from '@/components/launch/worker-agents'
@@ -73,7 +73,7 @@ export function LaunchDialog() {
   const serverLimits = useServerRunLimits(api, limitsOffered)
   const [limits, setLimits] = useState(emptyLimits)
   const choice = useAgentChoice({ account, ownAccountID })
-  const { agents, agentError, agent, harness, mode, model, noAgents } = choice
+  const { agents, agentError, agent, harness, mode, model, effort, effortLevels, noAgents } = choice
   const [task, setTask] = useState('')
   const [objective, setObjective] = useState('')
   const [agentsByAccount, setAgentsByAccount] = useState<Record<string, AgentInfo[]> | null>(null)
@@ -160,6 +160,10 @@ export function LaunchDialog() {
     setWorkers((current) => current.map((item) => sameWorker(item, choice) ? { ...item, model: next } : item))
   }
 
+  const setWorkerEffort = (choice: WorkerChoice, next: string) => {
+    setWorkers((current) => current.map((item) => sameWorker(item, choice) ? { ...item, effort: next } : item))
+  }
+
   const launchRun = async () => {
     const trimmed = task.trim()
     const chosenModel = model.trim()
@@ -176,6 +180,7 @@ export function LaunchDialog() {
       ...(trimmed ? { task: trimmed } : {}),
       mode,
       ...(chosenModel ? { model: chosenModel } : {}),
+      ...(effort ? { effort } : {}),
       ...(sharedAccount ? { account_member_id: account } : {}),
       ...fallbackParams(fallback, accounts, account),
       ...extraRepos,
@@ -196,7 +201,13 @@ export function LaunchDialog() {
       throw new Error('Enter an objective and choose an integrator agent.')
     }
     const integratorModel = model.trim()
-    const integrator: MissionExecutionChoice = { account_member_id: account, harness, mode: integratorMode, ...(integratorModel ? { model: integratorModel } : {}) }
+    const integrator: MissionExecutionChoice = {
+      account_member_id: account,
+      harness,
+      mode: integratorMode,
+      ...(integratorModel ? { model: integratorModel } : {}),
+      ...(effort ? { effort } : {}),
+    }
     const workerChoices = workers.map((choice): MissionExecutionChoice => {
       const info = agentsByAccount?.[choice.account_member_id]?.find((item) => item.name === choice.harness)
       const workerModel = choice.model?.trim()
@@ -205,6 +216,7 @@ export function LaunchDialog() {
         harness: choice.harness,
         mode: workerMode(info, choice.harness, shownWorkerMode),
         ...(workerModel ? { model: workerModel } : {}),
+        ...(choice.effort ? { effort: choice.effort } : {}),
       }
     })
     const contents = {
@@ -215,7 +227,7 @@ export function LaunchDialog() {
       // Sorted: the idempotency key and the server's receipt check both
       // follow the serialized list.
       execution_choices: [integrator, ...workerChoices.filter((choice) => !sameWorker(choice, integrator) || choice.mode !== integrator.mode)]
-        .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode) || (a.model ?? '').localeCompare(b.model ?? '')),
+        .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode) || (a.model ?? '').localeCompare(b.model ?? '') || (a.effort ?? '').localeCompare(b.effort ?? '')),
       ...fallbackParams(fallback, accounts, ''),
       ...extraRepos,
     }
@@ -328,7 +340,8 @@ export function LaunchDialog() {
                 />
               )}
               {harness && <ModelField label="Integrator model" harness={harness} accountMemberID={choice.accountMemberID} value={model} onChange={(next) => { setError(null); choice.setModel(next) }} disabled={launching} />}
-              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={shownWorkerMode} ownAccountID={ownAccountID} onToggle={toggleWorker} onModel={setWorkerModel} />
+              {effortLevels.length > 0 && <EffortField label="Integrator effort" levels={effortLevels} value={effort} onChange={(next) => { setError(null); choice.setEffort(next) }} disabled={launching} />}
+              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={shownWorkerMode} ownAccountID={ownAccountID} onToggle={toggleWorker} onModel={setWorkerModel} onEffort={setWorkerEffort} />
               <ModeControl
                 label="Worker mode"
                 value={shownWorkerMode}

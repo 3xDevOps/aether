@@ -117,6 +117,7 @@ func (l schedulerLauncher) LaunchMission(ctx context.Context, req mission.Missio
 		Harness:      req.Harness,
 		Mode:         req.Mode,
 		Model:        req.Model,
+		Effort:       req.Effort,
 
 		RequestedAccount: req.RequestedAccount,
 		Fallback:         req.Fallback,
@@ -125,11 +126,11 @@ func (l schedulerLauncher) LaunchMission(ctx context.Context, req mission.Missio
 	})
 }
 
-func (l schedulerLauncher) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model string) error {
+func (l schedulerLauncher) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model, effort string) error {
 	if l.runs == nil {
 		return errors.New("mission: scheduler unavailable")
 	}
-	return l.runs.ValidateMissionLaunch(ctx, member, account, harnessName, mode, model)
+	return l.runs.ValidateMissionLaunch(ctx, member, account, harnessName, mode, model, effort)
 }
 
 func (l schedulerLauncher) SwarmRefusal(agent string, mode domain.LaunchMode) error {

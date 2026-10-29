@@ -62,11 +62,14 @@ const waitBrokenReasonPrefix = "wait broken: "
 // pending and whose wake was not delivered within wakeGrace, or one whose
 // source went unread for unreadBound, sorted so the store's order does not
 // matter. It is empty while another condition can still wake the agent:
-// one still pending and read, or one whose wake is on its way. It holds no time or source status, so the reason built from it
-// stays put while the run needs a member. A
-// condition that left pending before turn started backs no wait reported
-// since: its wake, or the message a member sent in its place, started a
-// later turn. Error is that of the highest-ranked condition with one.
+// one still pending and read, or one whose wake is on its way. It holds no
+// time or source status, so the reason built from it stays put while the
+// run needs a member. A condition that left pending before turn started
+// backs no wait reported since: its wake, or the message a member sent in
+// its place, started a later turn. Nor does one whose wake was delivered:
+// the agent has it, possibly in its own report, so the run waits on the
+// agent and no turn may ever start past it. Error is that of the
+// highest-ranked condition with one.
 func classifyWait(conditions []WaitCondition, turn, now time.Time) (wait domain.RunWait, stranded string) {
 	rank := map[domain.WaitEvidence]int{domain.WaitUnverified: 0, domain.WaitCondition: 1, domain.WaitSourceUnknown: 2, domain.WaitFault: 3}
 	wait.Kind = domain.WaitUnverified
@@ -74,7 +77,7 @@ func classifyWait(conditions []WaitCondition, turn, now time.Time) (wait domain.
 	var oldest time.Time
 	neverRead, errRank, live := false, -1, false
 	for _, c := range conditions {
-		if c.State == waitCancelled || c.State == waitSuperseded || (c.State != waitPending && c.ResolvedAt.Before(turn)) {
+		if c.State == waitCancelled || c.State == waitSuperseded || (c.State != waitPending && (c.ResolvedAt.Before(turn) || !c.DeliveredAt.IsZero())) {
 			continue
 		}
 		kind, detail, errText := domain.WaitCondition, c.Spec, ""
@@ -94,11 +97,6 @@ func classifyWait(conditions []WaitCondition, turn, now time.Time) (wait domain.
 			detail += ": status unknown"
 			if c.SourceCheckedAt.IsZero() {
 				detail = c.Spec + ": status never read"
-			}
-		case !c.DeliveredAt.IsZero():
-			detail += ": " + c.State + ", woke the agent"
-			if c.State != waitResolved {
-				kind, errText = domain.WaitFault, c.LastError
 			}
 		case now.Sub(c.ResolvedAt) > wakeGrace:
 			kind = domain.WaitFault

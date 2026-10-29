@@ -1,17 +1,14 @@
 import { useState } from 'react'
-import { enhancedSupported } from '@/components/agents/agent-copy'
-import { AgentSetup } from '@/components/agents/agent-setup'
+import { AssistantSignIn } from '@/components/assistant/sign-in'
 import { ArrowLeft } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import { Code } from '@/components/ui/code'
 import { StatusDot } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
 import type { AssistantStatus } from '@/lib/assistant-types'
 import { assistantAsk } from '@/lib/commands'
 import { message } from '@/lib/format'
-import { useAgentList } from '@/routes/agents/use-agents'
 import { useOpenPullRequest } from '@/routes/diff/publish-pr'
 import { useStore } from '@/store'
 import { refreshAssistant } from '@/store/assistant-stream'
@@ -53,23 +50,20 @@ function usePagePrompts(): Example[] {
 }
 
 export function AssistantSetup({ status }: { status: AssistantStatus }) {
-  const { agents, reload } = useAgentList(api, true)
-  const [setting, setSetting] = useState('')
-  const settingUp = agents?.find((agent) => agent.name === setting)
-  if (settingUp) {
+  const [signing, setSigning] = useState('')
+  const signingIn = status.agents.find((agent) => agent.name === signing)
+  if (signingIn) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         <div>
-          <Button size="sm" variant="ghost" onClick={() => setSetting('')}><ArrowLeft />Back</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSigning('')}><ArrowLeft />Back</Button>
         </div>
-        <AgentSetup
-          key={settingUp.name}
-          agent={settingUp}
+        <AssistantSignIn
+          key={signingIn.name}
+          agent={signingIn}
           client={api}
-          requireEnhanced
           onDone={() => {
-            reload()
-            setSetting('')
+            setSigning('')
             void refreshAssistant(useStore, api)
           }}
         />
@@ -79,7 +73,7 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <p className="text-ui">
-        The assistant runs on your own agent, in your environment. Set up Claude Code or Codex to start.
+        The assistant runs Claude Code or Codex in a container of its own, with a sign-in of its own. Sign in to one to start.
       </p>
       <ul aria-label="Agents" className="flex flex-col gap-3">
         {status.agents.map((agent) => (
@@ -92,43 +86,12 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
               </p>
               <p className="text-ui-sm break-words text-muted">{agent.ready ? 'Ready' : agent.reason}</p>
             </div>
-            {!agent.ready && agents?.some((item) => item.name === agent.name && enhancedSupported(item)) && (
-              <Button size="sm" variant="secondary" onClick={() => setSetting(agent.name)}>Set up</Button>
+            {!agent.ready && (
+              <Button size="sm" variant="secondary" onClick={() => setSigning(agent.name)}>Sign in</Button>
             )}
           </li>
         ))}
       </ul>
-      <div>
-        <Button size="sm" variant="link" onClick={() => useStore.getState().navigate('agents')}>Open Agents</Button>
-      </div>
-    </div>
-  )
-}
-
-export function AssistantRestart() {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
-  const restart = async () => {
-    setBusy(true)
-    setError(undefined)
-    try {
-      useStore.getState().setAssistantStatus(await api.assistantStart({ restart_environment: true }))
-    } catch (err) {
-      setError(message(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <div className="flex flex-col gap-3 p-4">
-      <Callout
-        tone="needs-you"
-        title="Restart your environment"
-        actions={<Button size="sm" disabled={busy} onClick={() => void restart()}>{busy ? 'Restarting…' : 'Restart environment'}</Button>}
-      >
-        The assistant needs a newer environment than the one running. Restarting it closes any shells open in it and discards anything installed outside your home since you last saved the environment. Run <Code>aether env save</Code> first to keep those changes.
-      </Callout>
-      {error && <Callout tone="failed" role="alert">{error}</Callout>}
     </div>
   )
 }

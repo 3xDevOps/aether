@@ -20,6 +20,7 @@ import type {
   RunArchivedPayload,
   RunControllerPayload,
   RunDiffPayload,
+  RunEffortPayload,
   RunInputPayload,
   RunPRPayload,
   RunModelPayload,
@@ -618,6 +619,19 @@ export async function applyEvent(
         }
       }
       store.getState().applyRunModel(ev.run_id, p.model)
+      break
+    }
+    case 'run.effort': {
+      const p = ev.payload as RunEffortPayload
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          noteUnreachable(store, client, err, signal)
+          return false
+        }
+      }
+      store.getState().applyRunEffort(ev.run_id, p.effort)
       break
     }
     case 'run.protected': {

@@ -3,6 +3,7 @@ package webgate
 import (
 	"context"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -45,6 +46,9 @@ type Socket struct {
 	// are read here and nowhere the ping goroutine could race a change.
 	pingInterval time.Duration
 	pingTimeout  time.Duration
+	// starting skips pings while a handler waits on the backend before it
+	// reads the socket: no read would consume the pong.
+	starting atomic.Bool
 }
 
 // Accept runs the prologue every WebSocket shares: authorize the
@@ -94,6 +98,9 @@ func (s *Socket) keepAlive() {
 		case <-s.Ctx.Done():
 			return
 		case <-ticker.C:
+			if s.starting.Load() {
+				continue
+			}
 			ctx, done := context.WithTimeout(s.Ctx, s.pingTimeout)
 			err := s.Conn.Ping(ctx)
 			done()

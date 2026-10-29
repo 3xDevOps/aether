@@ -376,18 +376,86 @@ func TestArgvModel(t *testing.T) {
 		got  []string
 		want []string
 	}{
-		{"before the task", Argv(claude.TUIArgs, "do it", claude.ModelLaunchArgs("opus")),
+		{"before the task", Argv(claude.TUIArgs, "do it", claude.LaunchArgs("opus", "")),
 			[]string{"claude", "--dangerously-skip-permissions", "--model", "opus", "do it"}},
-		{"before a prompt flag", Argv(opencode.TUIArgs, "do it", opencode.ModelLaunchArgs("anthropic/claude-sonnet-4-5")),
+		{"before a prompt flag", Argv(opencode.TUIArgs, "do it", opencode.LaunchArgs("anthropic/claude-sonnet-4-5", "")),
 			[]string{"opencode", "--model", "anthropic/claude-sonnet-4-5", "--prompt=do it"}},
-		{"appended without a task", Argv(claude.TUIArgs, "", claude.ModelLaunchArgs("opus")),
+		{"appended without a task", Argv(claude.TUIArgs, "", claude.LaunchArgs("opus", "")),
 			[]string{"claude", "--dangerously-skip-permissions", "--model", "opus"}},
-		{"appended to resume", claude.ResumeCommand("s1", "opus"),
+		{"appended to resume", claude.ResumeCommand("s1", "opus", ""),
 			[]string{"claude", "--dangerously-skip-permissions", "--resume", "s1", "--model", "opus"}},
 	}
 	for _, tt := range tests {
 		if !slices.Equal(tt.got, tt.want) {
 			t.Errorf("%s: argv = %v, want %v", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestArgvEffort(t *testing.T) {
+	claude, _ := Lookup("claude")
+	codex, _ := Lookup("codex")
+	copilot, _ := Lookup("copilot")
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{"claude after the model, before the task", Argv(claude.TUIArgs, "do it", claude.LaunchArgs("opus", "high")),
+			[]string{"claude", "--dangerously-skip-permissions", "--model", "opus", "--effort", "high", "do it"}},
+		{"claude appended without a task", Argv(claude.TUIArgs, "", claude.LaunchArgs("", "max")),
+			[]string{"claude", "--dangerously-skip-permissions", "--effort", "max"}},
+		{"claude appended to resume", claude.ResumeCommand("s1", "", "low"),
+			[]string{"claude", "--dangerously-skip-permissions", "--resume", "s1", "--effort", "low"}},
+		{"claude before a headless resume's prompt", claude.HeadlessResumeCommand("s1", "go on", "", "low"),
+			[]string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--resume", "s1", "--effort", "low", "go on"}},
+		{"codex before the task", Argv(codex.HeadlessArgs, "do it", codex.LaunchArgs("", "xhigh")),
+			[]string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=xhigh", "do it"}},
+		{"codex appended without a task", Argv(codex.TUIArgs, "", codex.LaunchArgs("", "low")),
+			[]string{"codex", "--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=low"}},
+		{"codex appended to resume", codex.ResumeCommand("s1", "gpt-5", "high"),
+			[]string{"codex", "resume", "s1", "--model", "gpt-5", "-c", "model_reasoning_effort=high"}},
+		{"copilot before a prompt flag", Argv(copilot.HeadlessArgs, "do it", copilot.LaunchArgs("", "high")),
+			[]string{"copilot", "--allow-all", "--reasoning-effort", "high", "--prompt=do it"}},
+		{"copilot appended without a task", Argv(copilot.TUIArgs, "", copilot.LaunchArgs("", "none")),
+			[]string{"copilot", "--allow-all", "--reasoning-effort", "none"}},
+	}
+	for _, tt := range tests {
+		if !slices.Equal(tt.got, tt.want) {
+			t.Errorf("%s: argv = %v, want %v", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestCheckEffort(t *testing.T) {
+	claude, _ := Lookup("claude")
+	opencode, _ := Lookup("opencode")
+	tests := []struct {
+		name    string
+		profile Profile
+		effort  string
+		acp     bool
+		want    string
+	}{
+		{"no effort", opencode, "", false, ""},
+		{"a listed level", claude, "xhigh", false, ""},
+		{"an unlisted level", claude, "ultra", true, `takes effort low, medium, high, xhigh, max, not "ultra"`},
+		{"no flag outside Enhanced", opencode, "high", false, "has no effort flag; launch it without an effort"},
+		{"the session option in Enhanced", opencode, "high", true, ""},
+	}
+	for _, tt := range tests {
+		err := tt.profile.CheckEffort(tt.effort, tt.acp)
+		if got := fmt.Sprint(err); (tt.want == "" && err != nil) || (tt.want != "" && got != tt.want) {
+			t.Errorf("%s: CheckEffort = %v, want %q", tt.name, err, tt.want)
+		}
+	}
+	for _, p := range Profiles() {
+		count := 0
+		for _, a := range p.EffortArgs {
+			count += strings.Count(a, EffortPlaceholder)
+		}
+		if len(p.EffortArgs) > 0 && (count != 1 || len(p.EffortLevels) == 0) || p.ACPEffortArgs && len(p.EffortArgs) == 0 {
+			t.Errorf("%s effort args %v carry %d placeholders with levels %v", p.Name, p.EffortArgs, count, p.EffortLevels)
 		}
 	}
 }
@@ -592,6 +660,9 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 	if !slices.Equal(override.ModelArgs, claude.ModelArgs) {
 		t.Errorf("override model args = %v, want %v", override.ModelArgs, claude.ModelArgs)
 	}
+	if !slices.Equal(override.EffortArgs, claude.EffortArgs) || !slices.Equal(override.EffortLevels, claude.EffortLevels) {
+		t.Errorf("override effort = %v %v, want %v %v", override.EffortArgs, override.EffortLevels, claude.EffortArgs, claude.EffortLevels)
+	}
 	// The copy must not alias the registry: a caller editing an override's
 	// environment would otherwise change every later launch.
 	override.Env["IS_SANDBOX"] = "0"
@@ -599,7 +670,7 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 		t.Fatalf("registry claude env mutated through an override: %v", again.Env)
 	}
 	// An unshipped name has no registry entry to inherit from.
-	if unknown := (Definition{Name: "aider", Executable: "aider"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 || len(unknown.ModelArgs) != 0 {
+	if unknown := (Definition{Name: "aider", Executable: "aider"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 || len(unknown.ModelArgs) != 0 || len(unknown.EffortLevels) != 0 {
 		t.Fatalf("unshipped definition inherited environment: %+v", unknown)
 	}
 	// The scheduler would run the shipped CLI's updater against a program

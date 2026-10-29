@@ -279,6 +279,28 @@ describe('needs you conditions', () => {
     expect(presented.needsYou?.action(parked)).toEqual({ kind: 'reply', label: 'Reply' })
   })
 
+  it.each([
+    ['condition', 'pr:o/r#12:checks: open, 3 checks running'],
+    ['source_unknown', 'pr:o/r#12:checks: status unknown'],
+    ['system_fault', 'pr:o/r#12:checks: error, waking the agent'],
+    ['system_fault', 'cannot read pr:o/r#12:checks for over 1h, so the agent will not be woken'],
+    ['unverified', undefined],
+  ] as const)('leaves a %s wait out of Needs you until the server parks it there (%j)', (kind, detail) => {
+    for (const state of ['waiting-agents', 'waiting-ci', 'waiting-tools'] as const) {
+      const parked = record({ status: 'needs-attention', state, reason: 'CI on #12', wait: { kind, detail, error: 'gh: HTTP 502' } })
+      expect(needsYou(parked, stateContext())).toBeUndefined()
+      expect(presentRun(parked, stateContext()).state).toBe(state)
+    }
+    const broken = record({
+      status: 'needs-attention', state: 'needs-you', cause: 'wait-fault',
+      reason: 'wait broken: pr:o/r#12:checks resolved, but the agent was not woken',
+      wait: { kind: 'system_fault', detail: 'pr:o/r#12:checks resolved, but the agent was not woken', error: 'deliver wake: session closed' },
+    })
+    expect(needsYou(broken, stateContext())?.id).toBe('needs-input')
+    // A swarm worker's broken wait is its integrator's to handle.
+    expect(needsYou({ ...broken, mission_role: 'worker' }, stateContext())).toBeUndefined()
+  })
+
   it("labels a disconnected agent with the server's reason", () => {
     const parked = record({ status: 'needs-attention', state: 'disconnected', reason: "enhanced session ended: the agent's ACP server exited with code 1" })
     expect(presentRun(parked, stateContext())).toMatchObject({ state: 'disconnected', reason: "Agent disconnected: the agent's ACP server exited with code 1" })
@@ -448,6 +470,20 @@ describe('viewer scoping', () => {
     const shown = presentRun(waiting, ctx)
     expect(shown).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for Bob' })
     expect(shown.cause).toBeUndefined()
+  })
+
+  it("names the teammate a run waits on over the wait Aether checks for it", () => {
+    const ctx = stateContext({
+      missions: { mission_1: mission({ accountable_human_id: bob.id, open_questions: 1 }) },
+      viewerID: 'mem_carol',
+      viewerRole: 'collaborator',
+    })
+    const wait = { kind: 'condition', detail: 'pr:o/r#12:checks: open', verified_at: '2026-08-14T10:00:00Z' } as const
+    const waiting = record({ ...integrator, status: 'needs-attention', state: 'waiting-agents', reason: 'reviewers', cause: 'report', wait })
+    const shown = presentRun(waiting, ctx)
+    expect(shown).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for Bob' })
+    expect(shown.wait).toBeUndefined()
+    expect(presentRun(waiting, stateContext({ viewerID: 'mem_carol', viewerRole: 'collaborator' })).wait).toEqual(wait)
   })
 
   it("keeps a paused integrator's open swarm question", () => {
