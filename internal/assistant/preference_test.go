@@ -426,14 +426,27 @@ func TestWorkspacePreferencesFollowTheView(t *testing.T) {
 		t.Fatalf("with api in view = %+v; want both", list)
 	}
 
+	// The held view came from an earlier message; this one carried none.
+	f.m.holdView(view, viewFromPrompt, time.Now())
 	f.say(1, "from now on prefer bun for scripts")
 	if _, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true}); errCode(err) != protocol.CodeInvalidParams {
-		t.Fatalf("workspace_scoped with a navigation view = %v; want refused", err)
+		t.Fatalf("workspace_scoped with no view in the message = %v; want refused", err)
 	}
-	f.m.holdView(view, viewFromPrompt, time.Now())
-	saved, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true})
-	if err != nil || saved.Preference.WorkspaceID != string(ws.ID) {
-		t.Fatalf("workspace_scoped with the message's view = %+v, %v", saved, err)
+	for turn, embedded := range map[int64]bool{2: true, 3: false} {
+		blocks, err := promptBlocks("from now on prefer bun for scripts", view, embedded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.say(turn, "from now on prefer bun for scripts")
+		f.mu.Lock()
+		f.msg.Context = blocks[1:]
+		f.mu.Unlock()
+		// The dashboard sends the same page again once the prompt returns.
+		f.m.holdView(view, viewFromNavigation, time.Now())
+		saved, err := f.remember(protocol.AssistantRememberParams{Text: "prefer bun for scripts", WorkspaceScoped: true})
+		if err != nil || saved.Preference.WorkspaceID != string(ws.ID) {
+			t.Fatalf("workspace_scoped with the message's view (embedded %v) = %+v, %v", embedded, saved, err)
+		}
 	}
 }
 

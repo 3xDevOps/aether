@@ -411,8 +411,11 @@ and connected apps such as ChatGPT cannot reach them.
   preference never changes a setting and never chooses an account, a
   fallback, a merge, a push or auto-approval. With auto-approval on, a launch
   or message whose text contains a saved preference still shows its card.
-- **Scope:** a preference applies in all workspaces, or in one. It belongs
-  to you on this server and is not synced to other servers.
+- **Scope:** a preference applies in all workspaces, or in one. A
+  preference for one workspace takes the workspace of the page your message
+  was sent from, which the message carries only while **Share the page I am
+  on with the assistant** is on. It belongs to you on this server and is not
+  synced to other servers.
 
 The assistant never saves anything you did not ask it to, never imports your
 agent's own memory files or past conversations, and never stores pull

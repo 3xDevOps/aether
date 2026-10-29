@@ -117,11 +117,9 @@ func (c *preferenceCaller) memoryOff(ctx context.Context) error {
 }
 
 // workspace is the workspace the member's held view is in, empty for none.
-// fromPrompt keeps only the view their latest message carried, not one a
-// later navigation replaced it with.
-func (c *preferenceCaller) workspace(fromPrompt bool) string {
+func (c *preferenceCaller) workspace() string {
 	held := c.s.View(c.m.id, time.Now())
-	if held.ViewContext == nil || (fromPrompt && held.Source != viewFromPrompt) {
+	if held.ViewContext == nil {
 		return ""
 	}
 	return held.ViewContext.Route.WorkspaceID
@@ -136,7 +134,7 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, err
 	}
 	out := protocol.AssistantPreferencesResult{Preferences: []protocol.AssistantPreference{}}
-	ws := c.workspace(false)
+	ws := c.workspace()
 	listed, err := c.s.cfg.Preferences.List(ctx, c.m.id, protocol.PreferenceListParams{WorkspaceID: ws, Query: p.Query})
 	if err != nil {
 		return nil, err
@@ -203,9 +201,12 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 	}
 	var ws string
 	if p.WorkspaceScoped {
-		if ws = c.workspace(true); ws == "" {
+		if v := promptView(msg.Context); v != nil {
+			ws = v.Route.WorkspaceID
+		}
+		if ws == "" {
 			return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "workspace_scoped needs the workspace the member's message was sent from, " +
-				"and it carried none or they have navigated since; save it for all workspaces or ask which workspace"}
+				"and it carried none; save it for all workspaces or ask which workspace"}
 		}
 	}
 	c.mu.Lock()
