@@ -47,7 +47,7 @@ type observation struct {
 	Source           string         `json:"source"`
 	PR               *pullRequest   `json:"pr,omitempty"`
 	Checks           map[string]int `json:"checks,omitempty"`
-	Approvals        int            `json:"approvals"`
+	Approvals        *int           `json:"approvals,omitempty"`
 	ChangesRequested int            `json:"changes_requested"`
 	MergeState       string         `json:"merge_state,omitempty"`
 	Partial          bool           `json:"partial,omitempty"`
@@ -99,16 +99,22 @@ func observe(ctx context.Context, read Call, runID, repo string, status *protoco
 			b := fb.Blockers()
 			o.Checks = map[string]int{"total": len(fb.Checks), "failing": b.FailingChecks, "pending": b.PendingChecks}
 			o.ChangesRequested, o.MergeState, o.Partial = b.ChangesRequested, fb.MergeStateStatus, b.Partial
-			latest := map[string]string{}
-			for _, rv := range fb.Reviews {
-				if rv.State == "APPROVED" || rv.State == "CHANGES_REQUESTED" || rv.State == "DISMISSED" {
-					latest[rv.Author] = rv.State
+			// A cut-off review list may omit a reviewer's later verdict, so its
+			// approvals are not current; Partial says so.
+			if !b.Partial {
+				latest := map[string]string{}
+				for _, rv := range fb.Reviews {
+					if rv.State == "APPROVED" || rv.State == "CHANGES_REQUESTED" || rv.State == "DISMISSED" {
+						latest[rv.Author] = rv.State
+					}
 				}
-			}
-			for _, state := range latest {
-				if state == "APPROVED" {
-					o.Approvals++
+				approvals := 0
+				for _, state := range latest {
+					if state == "APPROVED" {
+						approvals++
+					}
 				}
+				o.Approvals = &approvals
 			}
 		}
 	}
@@ -119,7 +125,7 @@ func observe(ctx context.Context, read Call, runID, repo string, status *protoco
 // include puts the pull request GitHub showed at into prs: in place of the
 // recorded one, or first when Aether has not recorded it, as for one opened
 // with gh in the run. A recorded merge is final and stays as recorded.
-func include(prs []mergedPR, shown *protocol.RunPullRequest, at time.Time) []mergedPR {
+func include(prs []mergedPR, shown *protocol.RunPullRequest, repo string, at time.Time) []mergedPR {
 	if shown == nil {
 		return prs
 	}
@@ -127,7 +133,7 @@ func include(prs []mergedPR, shown *protocol.RunPullRequest, at time.Time) []mer
 		return pr.Number == shown.Number && strings.EqualFold(pr.Repository, shown.Repository)
 	})
 	if i < 0 {
-		return append([]mergedPR{{RecordedPullRequest: protocol.RecordedPullRequest{Repository: shown.Repository, Number: shown.Number, URL: shown.URL,
+		return append([]mergedPR{{RecordedPullRequest: protocol.RecordedPullRequest{Repo: repo, Repository: shown.Repository, Number: shown.Number, URL: shown.URL,
 			State: shown.State, MergedAt: shown.MergedAt, CheckedAt: at}, Source: sourceGitHub}}, prs...)
 	}
 	if !merged(prs[i].State) {
@@ -208,7 +214,6 @@ func closedAs(r protocol.Run) string {
 	return ""
 }
 
-// fanOut calls f for 0..n-1, evidenceFanOut at a time.
 func fanOut(n int, f func(i int)) {
 	sem := make(chan struct{}, evidenceFanOut)
 	var wg sync.WaitGroup
@@ -230,7 +235,7 @@ func fanOut(n int, f func(i int)) {
 func addRunEvidence(ctx context.Context, read Call, r protocol.Run, recordedPRs []protocol.RecordedPullRequest, reps []report,
 	status *protocol.RunPRStatusResult, out map[string]any) string {
 	asOf, lookupErr := time.Now().UTC(), status.Error
-	prs := include(recorded(recordedPRs), liveShown(status.Identity, status.Error, status.PullRequest), asOf)
+	prs := include(recorded(recordedPRs), liveShown(status.Identity, status.Error, status.PullRequest), "", asOf)
 	ev := map[string]any{"as_of": asOf.Format(time.RFC3339)}
 	var o *observation
 	if repo, open := unmerged(prs); open {
@@ -238,12 +243,15 @@ func addRunEvidence(ctx context.Context, read Call, r protocol.Run, recordedPRs 
 			status = nil
 		}
 		got := observe(ctx, read, r.ID, repo, status)
-		prs = include(prs, got.shown, asOf)
+		prs = include(prs, got.shown, repo, asOf)
 		o = &got
 		ev["reviewed"] = got
 	}
 	unchecked := min(markUnchecked(prs, o), 1)
-	ev["pull_requests"] = prs
+	ev["pull_requests"] = prs[:min(len(prs), defaultRows)]
+	if len(prs) > defaultRows {
+		ev["pull_requests_total"] = len(prs)
+	}
 	if why := closedAs(r); why != "" {
 		ev["closed_as_merged"] = why
 	}
@@ -295,7 +303,6 @@ type swarmRun struct {
 	lookupErr string
 }
 
-// childSummary counts a run's descendants by state.
 type childSummary struct {
 	Total  int            `json:"total"`
 	Stale  int            `json:"stale,omitempty"`
@@ -321,20 +328,6 @@ func summarizeChildren(ctx context.Context, read Call, id string) (*childSummary
 		}
 	}
 	return s, ""
-}
-
-// counts reports whether attempt a's submission still decides whether its
-// run's work was accepted: a superseded or abandoned attempt, or one of an
-// abandoned task, no longer does.
-func counts(a protocol.Attempt, t protocol.Task) bool {
-	return a.State != "superseded" && a.State != "abandoned" && t.Status != "abandoned" && t.AbandonedAt == nil
-}
-
-// acceptedNow reports whether s is accepted for its task's current
-// revision, the rule integration uses; an acceptance of an earlier
-// revision does not count.
-func acceptedNow(s protocol.Submission, t protocol.Task) bool {
-	return s.State == "accepted" && s.Acceptance != nil && s.TaskRevision == t.CurrentRevision && s.Acceptance.TaskRevision == t.CurrentRevision
 }
 
 // swarmProgress is getSwarm's evidence of what was asked, done, reviewed
@@ -428,16 +421,19 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 	attempts := []attemptRow{}
 	for _, a := range res.Attempts {
 		t := byID[a.TaskID]
-		decides := counts(a, t) && a.RunID != ""
+		abandoned := t.Status == "abandoned" || t.AbandonedAt != nil
+		// A superseded or abandoned attempt, or one of an abandoned task, no
+		// longer decides whether its run's work was accepted.
+		decides := a.State != "superseded" && a.State != "abandoned" && !abandoned && a.RunID != ""
 		row := attemptRow{TaskID: a.TaskID, TaskRevision: a.TaskRevision, AttemptID: a.ID, RunID: a.RunID, State: a.State, StartedAt: a.StartedAt, FinishedAt: a.FinishedAt}
 		if _, seen := accepted[a.RunID]; !seen && decides {
 			accepted[a.RunID] = false
 		}
 		if s, ok := newest[a.ID]; ok {
-			sub := &submissionRow{ID: s.ID, State: s.State, TaskRevision: s.TaskRevision, Accepted: acceptedNow(s, t), ScopeViolations: len(s.ScopeViolations), CreatedAt: s.CreatedAt}
+			sub := &submissionRow{ID: s.ID, State: s.State, TaskRevision: s.TaskRevision, Accepted: !abandoned && s.State == "accepted" && s.Acceptance != nil && s.TaskRevision == t.CurrentRevision && s.Acceptance.TaskRevision == t.CurrentRevision, ScopeViolations: len(s.ScopeViolations), CreatedAt: s.CreatedAt}
 			if acc := s.Acceptance; acc != nil {
 				sub.AcceptedBy, sub.AcceptedAt, sub.AcceptedForRevision = "integrator run "+acc.AcceptedByRunID, acc.AcceptedAt, acc.TaskRevision
-				if acc.ScopeDisposition != "" {
+				if acc.ScopeDisposition != "" && len(attempts) < defaultRows {
 					dispositions[s.ID] = clip(acc.ScopeDisposition, maxReport)
 				}
 			}
@@ -507,7 +503,7 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 		repo, _ := unmerged(sr.prs)
 		o := observe(liveCtx, read, sr.run.ID, repo, nil)
 		at, _ := time.Parse(time.RFC3339, o.CheckedAt)
-		sr.prs = include(sr.prs, o.shown, at)
+		sr.prs = include(sr.prs, o.shown, repo, at)
 		if o.shown != nil || len(sr.prs) > 0 {
 			sr.observed = &o
 		} else {
@@ -610,6 +606,9 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 			}
 		}
 		delivery["receipts"], delivery["checked_at"] = receipts[:min(len(receipts), defaultRows)], asOf
+		if len(cands.Candidates) >= maxRows {
+			delivery["note"] = fmt.Sprintf("a delivery lands in Aether's own git, not on GitHub; only the newest %d candidates were read, so earlier deliveries may be missing", maxRows)
+		}
 		if len(receipts) > defaultRows {
 			delivery["receipts_total"] = len(receipts)
 		}

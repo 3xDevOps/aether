@@ -459,3 +459,45 @@ func TestRunEvidenceFromRecordWithoutGitHub(t *testing.T) {
 		t.Errorf("pull requests = %v, want acme/other#2 beside the recorded acme/shop#2", prs)
 	}
 }
+
+// Work on a task abandoned after its acceptance is not accepted; a review
+// list GitHub cut off leaves approvals unknown, since it may omit a later
+// verdict; and a pull request found in an extra repository keeps that
+// repository for follow-up lookups.
+func TestEvidenceAbandonedPartialAndExtraRepo(t *testing.T) {
+	f := newFake(t)
+	show := shopSwarm()
+	abandoned := "2026-10-26T10:00:00Z"
+	show.Tasks[0].Status, show.Tasks[0].AbandonedAt = "abandoned", &abandoned
+	f.answers[protocol.MethodMissionShow] = returns(show)
+	f.answers[protocol.MethodRunGet] = runsAt(map[string]protocol.RunResult{})
+	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "ana", Error: "no pull request"})
+	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Identity: "ana", Error: "no pull request"})
+	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{})
+	cs := connectorSession(t, f)
+	_, out := run(t, cs, "aether_get_swarm", map[string]any{"swarm_id": "mis-1", "evidence": true})
+	if sub := dig(t, out, "progress", "implemented", "attempts", 0, "submission").(map[string]any); sub["accepted"] != false {
+		t.Errorf("submission of an abandoned task = %v, want not accepted", sub)
+	}
+
+	extra := openPR(2)
+	extra.Repo = "ws-extra"
+	f.answers[protocol.MethodRunGet] = returns(runWith("run-1", "running", extra))
+	f.answers[protocol.MethodRunPRStatus] = answerTo(func(p protocol.RunPRStatusParams) any {
+		if p.Repo != "ws-extra" {
+			return protocol.RunPRStatusResult{Identity: "ana", Error: "no pull request"}
+		}
+		return shown(5, "OPEN")
+	})
+	cut := feedback("SUCCESS")
+	cut.PullRequest.Number, cut.Truncated = 5, true
+	f.answers[protocol.MethodRunPRFeedback] = returns(cut)
+	_, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	ev := out["evidence"].(map[string]any)
+	if r := dig(t, ev, "reviewed").(map[string]any); r["approvals"] != nil || r["partial"] != true {
+		t.Errorf("reviewed from a cut-off review list = %v, want approvals unknown and partial", r)
+	}
+	if pr := dig(t, ev, "pull_requests", 0).(map[string]any); pr["number"] != float64(5) || pr["repo"] != "ws-extra" {
+		t.Errorf("pull request found in the extra repository = %v, want its repo kept", pr)
+	}
+}

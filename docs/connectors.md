@@ -408,7 +408,8 @@ that the run's pull request changed.
 
 `aether_get_run`'s `evidence` has:
 
-- `pull_requests`: each pull request the run opened, as Aether recorded it
+- `pull_requests`: the first 20 pull requests the run opened
+  (`pull_requests_total` when there are more), as Aether recorded it
   (`source: "aether record"`, with the `checked_at` of that record), or as
   GitHub just showed it (`source: "github"`). Only a lookup that reached
   GitHub without an error relabels one; a finished run's lookup can answer
@@ -420,7 +421,9 @@ that the run's pull request changed.
   (`total`, `failing`, `pending`), `approvals` and `changes_requested` from
   the latest verdict of each reviewer, `merge_state` and `checked_at`. The
   checks belong to the `pr` and head shown; when the pull request moved
-  between the status and checks lookups, `error` says so.
+  between the status and checks lookups, `error` says so. When GitHub cut
+  the review list off, `partial` is set and `approvals` is left out, since
+  a later verdict may be missing.
 - `report`: the latest report's `outcome` and `at`, or `not in the last 100
   reports`.
 - `conflicts`: `success_with_failing_checks`, `success_with_pending_checks`,
@@ -453,7 +456,8 @@ that the run's pull request changed.
   are not listed.
 - `aether_delivery`: the swarm's first 20 delivery receipts
   (`receipts_total` when there are more), which land in Aether's own git,
-  not on GitHub.
+  not on GitHub. They come from the newest 100 candidates; `note` says
+  when earlier deliveries may be missing.
 - `flags`: `open_tasks_in_completed_swarm`, tasks neither done nor abandoned
   in a completed swarm, and `report_conflicts`, which adds
   `success_without_accepted_submission` for a worker with no submission
