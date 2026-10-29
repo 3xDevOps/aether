@@ -129,7 +129,7 @@ func TestLaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	launch := launchParams(t, e.ws.ID, e.member.ID)
@@ -178,7 +178,7 @@ func TestLaunchAdmissionSerializesAccountRevoke(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	started, release := e.runs.blockLaunch()
@@ -231,7 +231,7 @@ func TestAccountRevokeFencesAdmittedProvisioningRun(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) { cfg.Control = control.New(control.Config{}) })
 	ctx := context.Background()
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.runs.mu.Lock()
@@ -322,7 +322,7 @@ func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
 		t.Fatalf("scheduler calls after denied relaunch = %v, want none", calls)
 	}
 
-	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatalf("share account: %v", err)
 	}
 	result, perr := e.srv.runRelaunch(ctx, grantee.ID, params)
@@ -337,7 +337,7 @@ func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
 		t.Fatalf("scheduler calls after granted relaunch = %v, want addressed run", calls)
 	}
 
-	if err := e.store.RevokeAccountShare(ctx, e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.RevokeAccountShare(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatalf("revoke account share: %v", err)
 	}
 	if _, perr := e.srv.runRelaunch(ctx, grantee.ID, params); perr == nil ||
@@ -356,7 +356,7 @@ func TestRelaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
 		t.Fatalf("mark run retained: %v", err)
 	}
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatalf("share account: %v", err)
 	}
 	params, err := json.Marshal(protocol.RunIDParams{RunID: string(e.run.ID)})
@@ -419,7 +419,7 @@ func TestRelaunchAdmissionSerializesWorkspaceSteerRevocation(t *testing.T) {
 		t.Fatalf("mark run retained: %v", err)
 	}
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatalf("share account: %v", err)
 	}
 	params, err := json.Marshal(protocol.RunIDParams{RunID: string(e.run.ID)})
@@ -508,7 +508,7 @@ func TestRunLaunchFallsBackFromExhaustedAccount(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	usage := claudeUsage{grantee.ID: 96, e.member.ID: 10}

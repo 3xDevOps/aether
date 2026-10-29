@@ -153,7 +153,7 @@ func TestDevelopmentRetentionWithdrawnBeforePublication(t *testing.T) {
 				if err := e.db.UpdateRun(t.Context(), run); err != nil {
 					t.Fatal(err)
 				}
-				if err := e.db.ShareAccount(t.Context(), account.ID, actor.ID); err != nil {
+				if _, err := e.db.ShareAccount(t.Context(), account.ID, actor.ID); err != nil {
 					t.Fatal(err)
 				}
 				gate := &sync.Mutex{}
@@ -202,7 +202,7 @@ func TestDevelopmentRetentionWithdrawnBeforePublication(t *testing.T) {
 					actor.Pending = true
 					revokeErr = e.db.UpdateMember(t.Context(), actor)
 				case "account":
-					revokeErr = e.db.RevokeAccountShare(t.Context(), account.ID, actor.ID)
+					_, revokeErr = e.db.RevokeAccountShare(t.Context(), account.ID, actor.ID)
 				case "workspace-steer":
 					revokeErr = e.db.SetWorkspaceSteerOthers(t.Context(), e.ws.ID, domain.SteerOthersAdminsOnly)
 				case "removed-membership":

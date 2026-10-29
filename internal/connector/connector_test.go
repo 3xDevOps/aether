@@ -271,7 +271,7 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := e.db.ShareAccount(ctx, grace.ID, domain.MemberID(info.Member.ID)); err != nil {
+	if _, err := e.db.ShareAccount(ctx, grace.ID, domain.MemberID(info.Member.ID)); err != nil {
 		t.Fatal(err)
 	}
 	writer := e.connect(t, "write")

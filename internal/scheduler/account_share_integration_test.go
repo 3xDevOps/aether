@@ -289,7 +289,7 @@ func TestIntegrationSharedAccountRunDocker(t *testing.T) {
 func TestIntegrationSharerPinDocker(t *testing.T) {
 	e, docker, cli, owner := newShareDockerEnv(t, printLogin)
 	ctx := t.Context()
-	if err := e.db.ShareAccount(ctx, owner.ID, e.member.ID); err != nil {
+	if _, err := e.db.ShareAccount(ctx, owner.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	ownerHome, err := e.cfg.Homes.Path(owner.ID)
