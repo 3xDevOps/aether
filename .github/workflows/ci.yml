@@ -41,9 +41,10 @@ jobs:
   # scripts/ci-classify-changes.sh: a pull request can edit its own copy,
   # and that copy is not what this job runs. A rename is classified by its
   # old path as well as its new one, so a move into docs/ still runs the
-  # code jobs. The edge and desktop outputs follow the same rules with
-  # scripts/ci-classify-edge.sh and scripts/ci-classify-desktop.sh, and a
-  # failure of either classifier alone also fails open.
+  # code jobs. The edge, desktop, client, installer and release outputs
+  # follow the same rules with scripts/ci-classify-edge.sh,
+  # scripts/ci-classify-desktop.sh and scripts/ci-classify-platform.sh, and
+  # a failure of any classifier alone also fails open.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -51,6 +52,9 @@ jobs:
       code: ${{ steps.classify.outputs.code }}
       edge: ${{ steps.classify.outputs.edge }}
       desktop: ${{ steps.classify.outputs.desktop }}
+      client: ${{ steps.classify.outputs.client }}
+      installer: ${{ steps.classify.outputs.installer }}
+      release: ${{ steps.classify.outputs.release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,6 +64,7 @@ jobs:
             scripts/ci-classify-changes.sh
             scripts/ci-classify-desktop.sh
             scripts/ci-classify-edge.sh
+            scripts/ci-classify-platform.sh
           sparse-checkout-cone-mode: false
       - name: Classify changed paths
         id: classify
@@ -68,13 +73,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            printf '%s\n' code=true edge=true desktop=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' code=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # previous_filename covers a rename into docs/: the destination
           # alone would look like a docs-only change and skip the code jobs.
           if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
-            printf '%s\n' code=true edge=true desktop=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' code=true edge=true desktop=true client=true installer=true release=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           code=$(printf '%s\n' "$files" | sh scripts/ci-classify-changes.sh)
@@ -87,6 +92,12 @@ jobs:
             desktop=true
           fi
           echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
+          for mode in client installer release; do
+            if ! out=$(printf '%s\n' "$files" | sh scripts/ci-classify-platform.sh "$mode"); then
+              out=true
+            fi
+            echo "$mode=$out" >> "$GITHUB_OUTPUT"
+          done
 
   # Runs on every pull request, including a docs-only one. This is the
   # docs-only gate.
@@ -368,6 +379,8 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/edge-image.yml
+    with:
+      full: ${{ github.event_name != 'pull_request' }}
 
   # Four shards cover internal/server by test name, balanced by the durations
   # -v prints; scheduler is its own package; rest dynamically discovers every
@@ -613,7 +626,7 @@ jobs:
   # unpacks the sources embedded in the CLI and runs electron-builder.
   desktop:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -731,7 +744,7 @@ jobs:
   # pull requests skip this job. changes does not choose the runner.
   windows:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -771,12 +784,12 @@ jobs:
   # the exact-commit CI success required by release authorization.
   windows-install:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.installer == 'true') }}
     uses: ./.github/workflows/windows-install.yml
 
   release-build:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.release == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -826,7 +839,7 @@ jobs:
 
   android:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     # A wedged Gradle daemon must not hold the runner for the six-hour default.
     timeout-minutes: 45
