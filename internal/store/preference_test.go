@@ -173,6 +173,31 @@ func TestRemovingAMemberDeletesTheirPreferences(t *testing.T) {
 	}
 }
 
+// A removal the member's runs refuse records no preference as deleted.
+func TestRefusedRemovalKeepsThePreferences(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	alice := mustCreateMember(t, db)
+	p := addPreference(t, db, alice.ID, "Prefer table output")
+	run := &domain.Run{WorkspaceID: mustCreateWorkspace(t, db).ID, MemberID: mustCreateMember(t, db).ID, AccountMemberID: alice.ID,
+		Mode: domain.LaunchTUI, Status: domain.RunQueued}
+	if err := db.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	var recorded []string
+	err := db.DeleteMemberWithPreferences(ctx, alice.ID, func(ids []string) error {
+		recorded = ids
+		return nil
+	})
+	if !errors.Is(err, ErrInUse) || recorded != nil {
+		t.Fatalf("removal = %v, recorded %v; want ErrInUse and nothing recorded", err, recorded)
+	}
+	if _, err = db.GetPreference(ctx, alice.ID, p.ID); err != nil {
+		t.Fatalf("preference after the refused removal: %v", err)
+	}
+}
+
 func TestMergeMovesPreferencesToTheSurvivor(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
