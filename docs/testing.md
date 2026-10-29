@@ -85,16 +85,22 @@ Without `sudo`, run containers use your uid, because the scheduler hands the
 checkout to the container user and an unprivileged process can only hand
 files to itself.
 
-CI splits the suite into jobs. To repeat one that failed:
+`make test-integration` and `make test-agents` run with `-race`. A non-empty
+`INTEGRATION_NORACE` turns it off, as a CI pull request does; pushes to main and
+the merge queue race everything.
+
+CI splits the suite into three jobs. To repeat one that failed:
 
 | CI job | Variables |
 | --- | --- |
-| `integration (server-chaos)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationChaos` |
-| `integration (server-mission-coordination)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Mission\|Coordination)'` |
-| `integration (server-heavy)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(EndToEnd\|MultiMember\|ServerUpdate)'` |
-| `integration (scheduler)` | `INTEGRATION_PKGS=./internal/scheduler` |
-| `integration (rest)` | `INTEGRATION_SKIP="./internal/harness ./internal/scheduler ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'` |
-| `integration (server-rest)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos\|Coordination\|Mission\|EndToEnd\|MultiMember\|ServerUpdate)'` with the [browser image](#the-browser-companion) variables |
+| `integration (server-rest, browser)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos\|Coordination\|Mission\|EndToEnd\|MultiMember\|ServerUpdate)'` with the [browser image](#the-browser-companion) variables, after `make browser-smoke` |
+| `integration (server-flows, smoke)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Chaos\|Coordination\|Mission)'`, then the same with `'^TestIntegration(EndToEnd\|MultiMember\|ServerUpdate)'`, then the [smoke tests](#real-agent-smoke-tests) |
+| `integration (scheduler, rest, agents)` | `INTEGRATION_SKIP="./internal/harness ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'`, then [`make test-agents`](#real-agents-against-a-mock-model) |
+
+A pull request runs the Docker suites on amd64 only. A push to main and a
+merge-queue entry also run the `arm64` job: the standard-image and
+browser-image builds, the smoke tests, `make browser-smoke` and the browser
+runtime tests on a native arm64 runner.
 
 CI sets `GOFLAGS=-v`, so each test's duration is in the job log.
 
@@ -160,8 +166,9 @@ catches it.
 
 `TestSmokeHeadlessNoLogin` runs in CI. It launches each headless template
 with no credentials and passes when the run fails for want of a login, never
-for an unparseable command line. CI's `smoke` job builds the standard image,
-adds the agent CLIs at their current versions with `images/smoke/Dockerfile`,
+for an unparseable command line. CI's `integration (server-flows, smoke)` job
+builds the standard image, adds the agent CLIs at their current versions with
+`images/smoke/Dockerfile`,
 and runs:
 
 ```sh
@@ -282,7 +289,7 @@ approved API key and a trusted checkout. The Codex config also sets
 `model_auto_compact_token_limit`, so the `compaction` turn's claimed usage
 makes Codex compact.
 
-CI's `agents` job runs both as root. Run them the same way, with Docker and
+CI's `integration (scheduler, rest, agents)` job runs both as root. Run them the same way, with Docker and
 git:
 
 ```sh
@@ -677,10 +684,8 @@ every merge queue entry and every push to `main`.
 | `audit` | `scripts/public-audit.sh` | `make public-audit` |
 | `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on `main` pushes and merge queue runs only | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
 | `build-and-test` | Unit tests (`-race` on the merge queue and `main` only), then `make build` | `make test build` |
-| `smoke` | Standard image checks, then the `internal/harness` integration tests on the smoke image, amd64 and arm64 | [Real-agent smoke tests](#real-agent-smoke-tests) |
-| `agents` | [Real agents against a mock model](#real-agents-against-a-mock-model), amd64 | See that section |
-| `browser` | Companion image build and smoke, amd64 and arm64 | [The browser companion](#the-browser-companion) |
-| `integration`, `integration-server-rest` | [Integration tests](#integration-tests) in six jobs | See that table |
+| `integration (server-rest, browser)`, `integration (server-flows, smoke)`, `integration (scheduler, rest, agents)` | [Integration tests](#integration-tests), the [smoke tests](#real-agent-smoke-tests), [real agents against a mock model](#real-agents-against-a-mock-model) and [the browser companion](#the-browser-companion), on amd64 | See the table under Integration tests |
+| `arm64` | Standard and browser image builds, smoke tests and browser runtime tests on arm64; push to `main` and merge queue only | Same commands on an arm64 host |
 | `dashboard` | `bun run typecheck` and `bun run test` | Same, from `web/` |
 | `dashboard-e2e` | [End-to-end suite](#the-dashboard-end-to-end-suite) in four shards | `make test-e2e E2E_ARGS='--shard=N/4'` |
 | `desktop`, `desktop-windows` | `aether gui build` on Linux; the Windows desktop zip on amd64 and arm64 | [Desktop shell](../CONTRIBUTING.md#desktop-shell) |

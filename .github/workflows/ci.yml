@@ -26,7 +26,7 @@ concurrency:
 # main. Go module archives are separate from compiler archives, whose keys
 # also include their native or cross-build lane. Each lane has one writer;
 # build-and-test owns Linux amd64 native Go and bun, windows owns Windows
-# amd64 native Go, smoke owns Linux arm64 native Go, and the windows-install
+# amd64 native Go, arm64 owns Linux arm64 native Go, and the windows-install
 # arm64 update leg owns Windows arm64 Go. These four Go owners also save
 # modules for their host. desktop-windows owns the Windows npm caches.
 # runner.environment stays in every key so a self-hosted archive is never
@@ -213,21 +213,23 @@ jobs:
         with:
           mode: save
 
-  # internal/harness needs the agent images built here.
-  smoke:
+  # Three jobs hold every Docker suite on a pull request. Each builds only
+  # the images it uses, from the caches pushes to main write, and runs its
+  # steps even when an earlier one failed so one run reports every failure.
+  # Tests run as root, like an installed server. A pull request runs the
+  # server-rest, harness and agent suites without -race, which the unit suite
+  # already applies to the same packages; pushes to main and the merge queue
+  # run them with it. server-flows runs its server tests in two processes:
+  # TestIntegrationServerUpdateRollsBackAndCommits hangs for 120 s when it
+  # follows the chaos tests in one.
+  # The browser image and the browser, runtime and server-rest suites that use
+  # it.
+  integration-server-rest:
+    name: integration (server-rest, browser)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
-    # Native compilation and execution on both supported run architectures.
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -239,64 +241,49 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           mode: restore
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      # The standard image is what runs actually execute on, so the agent
-      # CLIs are smoke-tested on it and not on some thinner stand-in. It is
-      # built here rather than pulled so the test matches this checkout,
-      # and cached so only a Dockerfile change pays for it. Only pushes to
-      # main write this scope. A pull request restores that cache and does
-      # not write another copy of the image layers into the repository cache.
-      - name: Build the standard environment image
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the browser companion
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: images/standard/Dockerfile
+          file: images/browser/Dockerfile
           load: true
-          tags: aether-standard:ci
-          cache-from: type=gha,scope=standard-${{ matrix.arch }}-main
-          cache-to: ${{ github.event_name == 'push' && format('type=gha,mode=max,scope=standard-{0}-main', matrix.arch) || '' }}
-      - name: Prove standard environment tools and native Git
-        run: sh scripts/standard-image-smoke.sh aether-standard:ci
-      # The agent CLIs on top, at whatever version their vendors ship
-      # today: that is the drift this image exists to catch. It carries no
-      # credentials, which is exactly what TestSmokeHeadlessNoLogin needs.
-      #
-      # It has to build on the "default" builder, the one backed by the
-      # Docker daemon, because that is the only builder that can see the
-      # image the step above loaded. The container builder buildx sets up
-      # keeps its own store, so it would resolve BASE as a registry
-      # reference and go looking for it on Docker Hub.
-      - name: Build the agent smoke image
+          tags: aether/browser:test
+          cache-from: type=gha,scope=browser-amd64-main
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=browser-amd64-main' || '' }}
+      - name: Prove headless Chromium sandbox and companion behavior
+        run: make browser-smoke
+      # The installed server owns UID-1000 control directories as root.
+      # Match that authority, not a chmod 777 workaround for the test runner.
+      - name: Integration tests (real Docker, real git)
+        if: ${{ !cancelled() }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          GOFLAGS: -v
+          AETHER_BROWSER_TEST_IMAGE: aether/browser:test
+          AETHER_BROWSER_IMAGE: aether/browser:test
+          INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: |
-          opencode=$(gh release view --repo anomalyco/opencode --json tagName --jq '.tagName | ltrimstr("v")')
-          docker buildx build --builder default --load --no-cache \
-            --build-arg BASE=aether-standard:ci \
-            --build-arg "OPENCODE_VERSION=$opencode" \
-            --tag aether-smoke:ci \
-            --file images/smoke/Dockerfile .
-      - name: Real-harness smoke test (real Docker, real git)
-        env:
-          AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
-          AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
-          AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
-        run: make test-integration INTEGRATION_PKGS=./internal/harness
-      - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && matrix.arch == 'arm64' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        with:
-          mode: save
-          save-modules: 'true'
+          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
+            "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
+            "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
+            "INTEGRATION_NORACE=$INTEGRATION_NORACE" \
+            make test-integration INTEGRATION_PKGS=./internal/server \
+              INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'
+      - name: Exercise the real browser runtime
+        if: ${{ !cancelled() }}
+        run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
 
-  # The pinned agent CLIs in real runs against a mock model. The standard
-  # image is built from the cache the smoke job writes on main and never
-  # written here, so this job does not wait for that job.
-  agents:
+  # The server's long flows, and the agent CLIs at today's vendor versions on
+  # the standard image, which is what runs actually execute on. The smoke
+  # image carries no credentials, which is what TestSmokeHeadlessNoLogin
+  # needs. It builds on the "default" builder, the one backed by the Docker
+  # daemon, because only that builder sees the standard image loaded here.
+  integration-server-flows:
+    name: integration (server-flows, smoke)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -317,31 +304,48 @@ jobs:
           load: true
           tags: aether-standard:ci
           cache-from: type=gha,scope=standard-amd64-main
-      # The default builder is the one that sees the image loaded above.
-      - name: Build the pinned agents image
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=standard-amd64-main' || '' }}
+      - name: Integration tests (real Docker, real git)
         env:
-          BUILDX_BUILDER: default
-        run: make agents-image AGENTS_BASE=aether-standard:ci
-      # Root, like the integration jobs and an installed server.
-      - name: Real agents against a mock model (real Docker, real git)
-        run: sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
+          GOFLAGS: -v
+          INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
+        run: |
+          for run in '^TestIntegration(Chaos|Coordination|Mission)' '^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'; do
+            sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" "INTEGRATION_NORACE=$INTEGRATION_NORACE" \
+              make test-integration INTEGRATION_PKGS=./internal/server INTEGRATION_RUN="$run" || status=1
+          done
+          exit "${status:-0}"
+      - name: Prove standard environment tools and native Git
+        if: ${{ !cancelled() }}
+        run: sh scripts/standard-image-smoke.sh aether-standard:ci
+      - name: Build the agent smoke image
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          opencode=$(gh release view --repo anomalyco/opencode --json tagName --jq '.tagName | ltrimstr("v")')
+          docker buildx build --builder default --load --no-cache \
+            --build-arg BASE=aether-standard:ci \
+            --build-arg "OPENCODE_VERSION=$opencode" \
+            --tag aether-smoke:ci \
+            --file images/smoke/Dockerfile .
+      - name: Real-harness smoke test (real Docker, real git)
+        if: ${{ !cancelled() }}
+        env:
+          AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
+          AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
+          AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
+          INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
+        run: make test-integration INTEGRATION_PKGS=./internal/harness
 
-  # Build the same Dockerfile on both supported server architectures. This
-  # gate is display-free; browser libraries and Chromium exist only inside
-  # the image, and no registry write credentials enter a PR job.
-  browser:
+  # The scheduler and every other integration package, then the pinned agent
+  # CLIs in real runs against a mock model.
+  integration:
+    name: integration (scheduler, rest, agents)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -354,6 +358,81 @@ jobs:
         with:
           mode: restore
       - uses: docker/setup-buildx-action@v3
+      - name: Build the standard environment image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/standard/Dockerfile
+          load: true
+          tags: aether-standard:ci
+          cache-from: type=gha,scope=standard-amd64-main
+      - name: Integration tests (real Docker, real git)
+        env:
+          GOFLAGS: -v
+        # Preserve the root suite as well as the separate non-root unit suite:
+        # ownership and recovery tests exercise different privilege branches.
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
+            make test-integration INTEGRATION_SKIP="./internal/harness ./internal/server" \
+              INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
+      - name: Build the pinned agents image
+        if: ${{ !cancelled() }}
+        env:
+          BUILDX_BUILDER: default
+        run: make agents-image AGENTS_BASE=aether-standard:ci
+      - name: Real agents against a mock model (real Docker, real git)
+        if: ${{ !cancelled() }}
+        env:
+          INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "INTEGRATION_NORACE=$INTEGRATION_NORACE" make test-agents
+
+  # Native arm64 builds and runs of the standard and browser images. Only a
+  # push to main and a merge-queue entry pay for it: nothing here depends on
+  # the architecture except the images' own base layers and downloads. This
+  # job owns the Linux arm64 Go cache.
+  arm64:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the standard environment image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/standard/Dockerfile
+          load: true
+          tags: aether-standard:ci
+          cache-from: type=gha,scope=standard-arm64-main
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=standard-arm64-main' || '' }}
+      - name: Prove standard environment tools and native Git
+        run: sh scripts/standard-image-smoke.sh aether-standard:ci
+      - name: Build the agent smoke image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          opencode=$(gh release view --repo anomalyco/opencode --json tagName --jq '.tagName | ltrimstr("v")')
+          docker buildx build --builder default --load --no-cache \
+            --build-arg BASE=aether-standard:ci \
+            --build-arg "OPENCODE_VERSION=$opencode" \
+            --tag aether-smoke:ci \
+            --file images/smoke/Dockerfile .
+      - name: Real-harness smoke test (real Docker, real git)
+        env:
+          AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
+          AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
+          AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
+        run: make test-integration INTEGRATION_PKGS=./internal/harness
       - name: Build the browser companion
         uses: docker/build-push-action@v6
         with:
@@ -361,14 +440,17 @@ jobs:
           file: images/browser/Dockerfile
           load: true
           tags: aether/browser:test
-          cache-from: type=gha,scope=browser-${{ matrix.arch }}-main
-          cache-to: ${{ github.event_name == 'push' && format('type=gha,mode=max,scope=browser-{0}-main', matrix.arch) || '' }}
+          cache-from: type=gha,scope=browser-arm64-main
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=browser-arm64-main' || '' }}
       - name: Prove headless Chromium sandbox and companion behavior
         run: make browser-smoke
-      # The installed server owns UID-1000 control directories as root.
-      # Match that authority, not a chmod 777 workaround for the test runner.
       - name: Exercise the real browser runtime
         run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
+      - uses: ./.github/actions/go-cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        with:
+          mode: save
+          save-modules: 'true'
 
   # A pull request runs the edge image build and smoke test only when
   # scripts/ci-classify-edge.sh says a changed path can affect the image.
@@ -381,99 +463,6 @@ jobs:
     uses: ./.github/workflows/edge-image.yml
     with:
       full: ${{ github.event_name != 'pull_request' }}
-
-  # Four shards cover internal/server by test name, balanced by the durations
-  # -v prints; scheduler is its own package; rest dynamically discovers every
-  # other integration package. Only server-rest needs the browser image.
-  integration:
-    name: integration (${{ matrix.shard }})
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
-    # ubuntu-latest provides Docker for these real-runtime tests.
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - shard: server-chaos
-            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationChaos
-          - shard: server-mission-coordination
-            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Mission|Coordination)'
-          - shard: server-heavy
-            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'
-          - shard: scheduler
-            make: INTEGRATION_PKGS=./internal/scheduler
-          - shard: rest
-            make: INTEGRATION_SKIP="./internal/harness ./internal/scheduler ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      # The matrix values are literals from this file, passed as make
-      # assignments. -v prints each test's duration, which is what the
-      # shards are balanced by.
-      - name: Integration tests (real Docker, real git)
-        env:
-          GOFLAGS: -v
-          AETHER_BROWSER_TEST_IMAGE: aether/browser:test
-          AETHER_BROWSER_IMAGE: aether/browser:test
-        # Preserve the root suite as well as the separate non-root unit suite:
-        # ownership and recovery tests exercise different privilege branches.
-        run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
-            "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
-            "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
-            make test-integration ${{ matrix.make }}
-
-  integration-server-rest:
-    name: integration (server-rest)
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      # Built from the cache the browser job writes on main, never written
-      # here, so this job does not wait for that job.
-      - uses: docker/setup-buildx-action@v3
-      - name: Build the browser companion
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/browser/Dockerfile
-          load: true
-          tags: aether/browser:test
-          cache-from: type=gha,scope=browser-amd64-main
-      - name: Integration tests (real Docker, real git)
-        env:
-          GOFLAGS: -v
-          AETHER_BROWSER_TEST_IMAGE: aether/browser:test
-          AETHER_BROWSER_IMAGE: aether/browser:test
-        # The installed service runs as root to assign private browser control
-        # directories to UID 1000. Keep that boundary in real server scenarios.
-        run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
-            "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
-            "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
-            make test-integration INTEGRATION_PKGS=./internal/server \
-              INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'
 
   dashboard:
     needs: changes
