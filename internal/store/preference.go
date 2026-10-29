@@ -126,6 +126,17 @@ func (d *DB) AddPreference(ctx context.Context, p *Preference) error {
 		return fmt.Errorf("store: add preference: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	// A merge keeps the absorbed member's row, which the foreign key
+	// accepts, after it moved their preferences.
+	var mergedInto string
+	if err = tx.QueryRowContext(ctx, `SELECT merged_into FROM members WHERE id = ?`, p.MemberID).Scan(&mergedInto); errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("store: add preference: member %s: %w", p.MemberID, ErrNotFound)
+	} else if err != nil {
+		return fmt.Errorf("store: add preference: %w", err)
+	}
+	if mergedInto != "" {
+		return fmt.Errorf("store: add preference: member %s was merged into %s: %w", p.MemberID, mergedInto, ErrNotFound)
+	}
 	var count int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM member_preferences WHERE member_id = ?`, p.MemberID).Scan(&count); err != nil {
 		return fmt.Errorf("store: add preference: %w", err)

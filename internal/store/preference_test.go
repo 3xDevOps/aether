@@ -202,6 +202,11 @@ func TestMergeMovesPreferencesToTheSurvivor(t *testing.T) {
 	if _, err = db.GetPreference(ctx, a.ID, p.ID); err != nil {
 		t.Fatalf("the survivor's preference after the merge: %v", err)
 	}
+	// A save that checked the member before the merge commits after it.
+	late := Preference{MemberID: b.ID, Text: "Prefer short answers", Enabled: true, Source: "settings"}
+	if err = db.AddPreference(ctx, &late); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a save for the absorbed member = %v, want ErrNotFound", err)
+	}
 }
 
 func TestTemporaryConversationEndsWithAReset(t *testing.T) {
