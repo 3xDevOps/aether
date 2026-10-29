@@ -5,6 +5,7 @@ import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { AssistantActionRecord, AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
 import type { SessionItem } from '@/lib/session-types'
+import type { Preference } from '@/lib/types'
 import { useStore } from '@/store'
 import { item, resetItems, ScriptedSession, say, tool } from '@/test/acp-stream'
 import { alice, mission, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
@@ -521,9 +522,10 @@ describe('quiet outcomes and names', () => {
 })
 
 describe('preference cards', () => {
-  const saved = { id: 'pref-1', text: 'Prefer table output', enabled: true, source: 'assistant', created_at: '2026-10-27T10:00:00Z', updated_at: '2026-10-27T10:00:00Z' }
+  const saved: Preference = { id: 'pref-1', text: 'Prefer table output', enabled: true, source: 'assistant', created_at: '2026-10-27T10:00:00Z', updated_at: '2026-10-27T10:00:00Z' }
 
   it('shows what was saved, undoes it by deleting the row and edits it in Settings', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [saved], enabled: true })
     vi.mocked(api.preferenceDelete).mockResolvedValue({ deleted: { ...saved, source: 'assistant' } } as never)
     const aside = await openPanel([
       item('turn_start', 1),
@@ -541,6 +543,7 @@ describe('preference cards', () => {
   })
 
   it('shows an update with the text it replaced and undoes it back to that text', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [{ ...saved, text: 'Prefer JSON output' }], enabled: true })
     vi.mocked(api.preferenceUpdate).mockResolvedValue({ preference: saved } as never)
     const aside = await openPanel([
       item('turn_start', 1),
@@ -555,6 +558,28 @@ describe('preference cards', () => {
     expect(within(notice).getByText('was: Prefer table output')).toBeDefined()
     await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
     expect(api.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-1', text: 'Prefer table output', clear_workspace: true })
+  })
+
+  it('refuses to undo a save or an update the member changed since, and says why', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [{ ...saved, id: 'pref-2', text: 'Prefer YAML output', updated_at: '2026-10-27T10:05:00.001Z' }], enabled: true })
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      aether(1, 't2', 'aether_remember', 'completed', {
+        raw_input: { text: 'Prefer JSON output', replaces: 'pref-2' },
+        raw_output: { preference: { ...saved, id: 'pref-2', text: 'Prefer JSON output', updated_at: '2026-10-27T10:05:00Z' }, previous: { ...saved, id: 'pref-2' } },
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const save = await card(aside, /^Saved: Prefer table output\. Done$/)
+    await userEvent.click(within(save).getByRole('button', { name: 'Undo' }))
+    expect((await within(save).findByRole('alert')).textContent).toBe('This preference is already forgotten.')
+    const update = await card(aside, /^Updated: Prefer JSON output\. Done$/)
+    await userEvent.click(within(update).getByRole('button', { name: 'Undo' }))
+    expect((await within(update).findByRole('alert')).textContent).toBe('This preference has changed since, so Undo would lose that change. Edit it in Settings › Memory instead.')
+    expect(api.preferenceDelete).not.toHaveBeenCalled()
+    expect(api.preferenceUpdate).not.toHaveBeenCalled()
   })
 
   it('shows a forgotten preference, undoes it by adding the text again and shows a refusal verbatim', async () => {

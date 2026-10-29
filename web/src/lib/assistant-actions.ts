@@ -570,8 +570,8 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
 }
 
 export type PreferenceFacts =
-  | { kind: 'saved'; text: string; id: string }
-  | { kind: 'updated'; text: string; id: string; previous: { text: string; workspace_id?: string } }
+  | { kind: 'saved'; text: string; id: string; updated_at: string }
+  | { kind: 'updated'; text: string; id: string; updated_at: string; previous: { text: string; workspace_id?: string } }
   | { kind: 'forgotten'; text: string; workspace_id?: string; enabled: boolean }
   | { kind: 'used'; items: { id: string; text: string; scope: string }[] }
 
@@ -586,7 +586,10 @@ export function preferenceFacts(action: AssistantAction): PreferenceFacts | unde
     const id = text(preference.id)
     if (!body || !id) return undefined
     const before = text(previous.text)
-    return before ? { kind: 'updated', text: body, id, previous: { text: before, workspace_id: text(previous.workspace_id) } } : { kind: 'saved', text: body, id }
+    const version = text(preference.updated_at) ?? ''
+    return before
+      ? { kind: 'updated', text: body, id, updated_at: version, previous: { text: before, workspace_id: text(previous.workspace_id) } }
+      : { kind: 'saved', text: body, id, updated_at: version }
   }
   if (action.tool === 'aether_forget') {
     const gone = record(result.deleted)
