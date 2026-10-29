@@ -537,6 +537,7 @@ describe('preference cards', () => {
     await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
     expect(api.preferenceDelete).toHaveBeenCalledWith('pref-1')
     expect(await within(notice).findByText('Undone')).toBeDefined()
+    expect(useStore.getState().preferenceUndos).toBe(1)
 
     await userEvent.click(within(notice).getByRole('button', { name: 'Edit' }))
     expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'memory', entry: 'pref-1' } })

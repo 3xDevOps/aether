@@ -112,6 +112,9 @@ export interface AssistantSlice {
   /** Run notices from the assistant that arrived while the panel was closed. */
   assistantNotices: number
   noteAssistantNotice: () => void
+  /** Bumped when a card's Undo changes a preference, so Settings › Memory reads the list again. */
+  preferenceUndos: number
+  notePreferenceUndo: () => void
   setAssistantOpen: (open: boolean) => void
   setAssistantWidth: (width: number) => void
   setAssistantStatus: (status: AssistantStatus) => void
@@ -155,6 +158,8 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   assistantGeneration: 0,
   assistantNotices: 0,
   noteAssistantNotice: () => set((s) => (s.assistantOpen ? s : { assistantNotices: s.assistantNotices + 1 })),
+  preferenceUndos: 0,
+  notePreferenceUndo: () => set((s) => ({ preferenceUndos: s.preferenceUndos + 1 })),
   setAssistantOpen: (assistantOpen) => set(assistantOpen ? { assistantOpen, assistantNotices: 0 } : { assistantOpen }),
   setAssistantWidth: (width) => set({ assistantWidth: clampAssistantWidth(width) }),
   setAssistantStatus: (assistantStatus) =>

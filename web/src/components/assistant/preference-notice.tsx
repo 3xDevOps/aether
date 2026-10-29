@@ -61,6 +61,7 @@ function UndoPreference({ facts }: { facts: Facts }) {
           setState({ kind: 'busy' })
           undo(facts, progress.current).then(() => {
             markUndone(undoneID)
+            useStore.getState().notePreferenceUndo()
             setState({ kind: 'undone' })
           }, (err: unknown) => setState({ kind: 'failed', error: errorSentence(err) }))
         }}

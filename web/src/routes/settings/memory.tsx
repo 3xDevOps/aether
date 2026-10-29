@@ -18,6 +18,7 @@ import type { Preference } from '@/lib/types'
 import { forgetWarning, PreferenceRow, type Scope, ScopePills } from '@/routes/settings/memory-row'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
+import { assistantSessionID } from '@/store/assistant'
 
 export const preferencesLabel = 'Use my preferences in the assistant'
 
@@ -34,6 +35,9 @@ function MemoryBody({ client }: { client: Api }) {
   const entry = useStore((s) => (s.route.name === 'settings' ? s.route.params.entry : undefined))
   const workspaces = useStore((s) => s.workspaces)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const turns = useStore((s) => s.acpSessions[assistantSessionID]?.turns)
+  const assistantChanges = useMemo(() => (turns ?? []).flatMap((turn) => turn.items).filter((item) => item.notice?.action?.target?.preference_id).length, [turns])
+  const undos = useStore((s) => s.preferenceUndos)
   const [list, setList] = useState<Preference[]>([])
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [load, setLoad] = useState<{ kind: 'loading' } | { kind: 'ready' } | { kind: 'failed'; error: string }>({ kind: 'loading' })
@@ -46,7 +50,7 @@ function MemoryBody({ client }: { client: Api }) {
   const [toggleError, setToggleError] = useState<string | null>(null)
   const [forgotten, setForgotten] = useState<{ preference: Preference; error?: string } | null>(null)
   const [undoing, setUndoing] = useState(false)
-  const reloaded = useRef<string | null>(null)
+  const reloaded = useRef(entry)
   const restore = useRef<Restore>({})
   const writes = useRef(0)
   const [saving, setSaving] = useState(false)
@@ -77,15 +81,16 @@ function MemoryBody({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client, attempt])
+  }, [client, attempt, assistantChanges, undos])
 
   const found = entry !== undefined && list.some((p) => p.id === entry)
-  // The assistant may have saved it since the list was read.
+  // The assistant may have changed it since the list was read.
   useEffect(() => {
-    if (!entry || found || load.kind !== 'ready' || reloaded.current === entry) return
+    if (!entry) reloaded.current = undefined
+    if (!entry || load.kind !== 'ready' || reloaded.current === entry) return
     reloaded.current = entry
     setAttempt((n) => n + 1)
-  }, [entry, found, load.kind])
+  }, [entry, load.kind])
   useEffect(() => {
     if (found) setQuery('')
   }, [entry, found])

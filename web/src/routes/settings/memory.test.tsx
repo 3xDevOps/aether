@@ -308,6 +308,26 @@ describe('memory in settings', () => {
     expect((screen.getByRole('searchbox', { name: 'Search preferences' }) as HTMLInputElement).value).toBe('')
   })
 
+  it('reads the list again when a preference is opened from the assistant', async () => {
+    const listed = vi.fn().mockResolvedValueOnce({ preferences: [pref()], enabled: true }).mockResolvedValue({ preferences: [pref({ text: 'Prefer JSON output' })], enabled: true })
+    show([], { preferenceList: listed })
+    await screen.findByText('Prefer table output')
+    act(() => useStore.getState().navigate('settings', { section: 'memory', entry: 'pref-1' }))
+    expect(await screen.findByText('Prefer JSON output')).toBeDefined()
+  })
+
+  it('reads the list again after the assistant or a card changes a preference', async () => {
+    const listed = vi.fn().mockResolvedValue({ preferences: [pref()], enabled: true })
+    show([], { preferenceList: listed })
+    await screen.findByText('Prefer table output')
+    const record = { id: 'a1', method: 'assistant.forget', summary: 'Forget your preference', target: { preference_id: 'pref-1' }, outcome: 'succeeded', created_at: '2026-10-27T10:00:00Z' } as const
+    const notice = { seq: 3, epoch: 1, time: '2026-10-27T10:00:00Z', turn: 1, kind: 'notice', notice: { severity: 'info', title: record.summary, action: record } } as const
+    act(() => useStore.setState({ acpSessions: { assistant: { turns: [{ turn: 1, items: [notice], closed: false }] } as never } }))
+    await waitFor(() => expect(listed).toHaveBeenCalledTimes(2))
+    act(() => useStore.getState().notePreferenceUndo())
+    await waitFor(() => expect(listed).toHaveBeenCalledTimes(3))
+  })
+
   it('says so when the entry in the address no longer exists', async () => {
     seed('pref-gone')
     show([pref()])
