@@ -72,6 +72,13 @@ describe('memory in settings', () => {
     expect(rows[1]!.textContent).toContain('Not used yet')
   })
 
+  it('dates a quote only while the row is as first saved', async () => {
+    show([pref({ text: 'Prefer JSON output', created_at: '2026-10-20T10:00:00Z', updated_at: '2026-10-27T10:00:00Z' })])
+    const row = within(await screen.findByRole('list', { name: 'Preferences' })).getByRole('listitem')
+    expect(row.textContent).toContain('You said in the assistant')
+    expect(row.textContent).not.toContain(new Date('2026-10-20T10:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
+  })
+
   it('filters by text', async () => {
     const user = userEvent.setup()
     show([pref(), pref({ id: 'pref-2', text: 'Use pnpm here' })])

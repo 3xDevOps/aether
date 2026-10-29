@@ -27,9 +27,10 @@ export function ScopePills({ value, onChange, label, workspace = 'This workspace
 }
 
 export function sourceLine(preference: Preference): string {
-  const day = new Date(preference.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  if (preference.source === 'assistant') return `You said in the assistant · ${day}`
-  return 'Added in Settings'
+  if (preference.source !== 'assistant') return 'Added in Settings'
+  // No field dates the quoted message: created_at keeps the first save after a replace, and updated_at also moves on scope and on/off changes.
+  if (Date.parse(preference.updated_at) !== Date.parse(preference.created_at)) return 'You said in the assistant'
+  return `You said in the assistant · ${new Date(preference.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
 }
 
 type Mode = 'view' | 'edit' | 'forget'
