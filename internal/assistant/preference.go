@@ -94,26 +94,40 @@ func (c *preferenceCaller) configured() error {
 
 // memoryOff refuses reading and saving preferences while the member turned
 // them off or the conversation is temporary. Forgetting one is always
-// allowed.
+// allowed. The caller holds m.settings, so a switch falls wholly before or
+// after the call it decides.
 func (c *preferenceCaller) memoryOff(ctx context.Context) error {
 	if err := c.configured(); err != nil {
 		return err
 	}
-	enabled, err := c.s.cfg.Preferences.Enabled(ctx, c.m.id)
+	why, err := c.s.memoryOff(ctx, c.m.id)
 	if err != nil {
 		return err
 	}
-	if !enabled {
-		return &protocol.Error{Code: protocol.CodeDenied, Message: "memory is off: the member turned preferences off in Settings"}
-	}
-	row, err := c.s.stored(ctx, c.m.id)
-	if err != nil {
-		return err
-	}
-	if row.Temporary {
-		return &protocol.Error{Code: protocol.CodeDenied, Message: "memory is off: this is a temporary conversation"}
+	if why != "" {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: "memory is off: " + why}
 	}
 	return nil
+}
+
+// memoryOff says why the member's assistant may not use preferences now,
+// or is empty when it may.
+func (s *Service) memoryOff(ctx context.Context, id domain.MemberID) (string, error) {
+	enabled, err := s.cfg.Preferences.Enabled(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if !enabled {
+		return "the member turned preferences off in Settings", nil
+	}
+	row, err := s.stored(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if row.Temporary {
+		return "this is a temporary conversation", nil
+	}
+	return "", nil
 }
 
 // workspace is the workspace the member's held view is in, empty for none.
@@ -130,6 +144,8 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
+	c.m.settings.Lock()
+	defer c.m.settings.Unlock()
 	if err = c.memoryOff(ctx); err != nil {
 		return nil, err
 	}
@@ -188,6 +204,8 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
+	c.m.settings.Lock()
+	defer c.m.settings.Unlock()
 	if err = c.memoryOff(ctx); err != nil {
 		return nil, err
 	}

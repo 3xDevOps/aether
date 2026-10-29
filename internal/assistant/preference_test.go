@@ -263,6 +263,30 @@ func TestMemoryOffRefusesReadingAndSavingButNotForgetting(t *testing.T) {
 	check("the member turned preferences off", ids[1])
 }
 
+// A save waiting while the member turns preferences off falls after the
+// switch, and saves nothing.
+func TestSaveWaitingOnTheSwitchIsRefused(t *testing.T) {
+	f := newPrefFixture(t)
+	f.say(1, "remember that I prefer table output")
+	f.m.settings.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer table output"})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if err := f.db.PutAssistantSettings(t.Context(), f.m.id, store.AssistantSettings{ShareView: true}); err != nil {
+		t.Fatal(err)
+	}
+	f.m.settings.Unlock()
+	if err := wait(t, done); errCode(err) != protocol.CodeDenied {
+		t.Fatalf("a save racing the switch = %v; want memory is off", err)
+	}
+	if listed, _ := f.prefs.List(t.Context(), f.m.id, protocol.PreferenceListParams{IncludeDisabled: true}); len(listed.Preferences) != 0 {
+		t.Fatalf("saved past the switch: %+v", listed.Preferences)
+	}
+}
+
 // The forget card's own read of a preference is not a tool the agent can
 // call.
 func TestSocketRefusesTheForgetCardsRead(t *testing.T) {
