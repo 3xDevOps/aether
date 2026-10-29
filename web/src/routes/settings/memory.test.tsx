@@ -21,6 +21,8 @@ function pref(over: Partial<Preference> = {}): Preference {
   }
 }
 
+const seen = { expected_member_id: alice.id, expected_updated_at: '2026-10-27T10:00:00Z' }
+
 function seed(entry?: string) {
   useStore.setState({
     ...useStore.getInitialState(),
@@ -125,7 +127,7 @@ describe('memory in settings', () => {
 
     await user.click(screen.getByRole('radio', { name: 'This workspace' }))
     await user.click(screen.getByRole('button', { name: 'Add' }))
-    await waitFor(() => expect(client.preferenceAdd).toHaveBeenLastCalledWith({ text: 'Reply in English', workspace_id: workspace.id }))
+    await waitFor(() => expect(client.preferenceAdd).toHaveBeenLastCalledWith({ text: 'Reply in English', workspace_id: workspace.id, expected_member_id: alice.id }))
     expect(await screen.findByText('Added in Settings')).toBeDefined()
     expect((box as HTMLTextAreaElement).value).toBe('')
   })
@@ -174,7 +176,7 @@ describe('memory in settings', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('text looks like an API key (aws access key); not saved')
 
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenLastCalledWith({ id: 'pref-1', text: 'Prefer JSON output' }))
+    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenLastCalledWith({ id: 'pref-1', text: 'Prefer JSON output', ...seen }))
     expect(await screen.findByText('Prefer JSON output')).toBeDefined()
     expect(screen.queryByRole('textbox', { name: 'Preference text' })).toBeNull()
   })
@@ -195,10 +197,10 @@ describe('memory in settings', () => {
       preferenceUpdate: vi.fn(async (params) => ({ preference: pref({ enabled: params.enabled }), previous: pref() })),
     })
     await user.click(await screen.findByRole('button', { name: 'Turn off' }))
-    expect(client.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-1', enabled: false })
+    expect(client.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-1', enabled: false, ...seen })
     expect(await screen.findByText('Off')).toBeDefined()
     await user.click(screen.getByRole('button', { name: 'Turn on' }))
-    expect(client.preferenceUpdate).toHaveBeenLastCalledWith({ id: 'pref-1', enabled: true })
+    expect(client.preferenceUpdate).toHaveBeenLastCalledWith({ id: 'pref-1', enabled: true, ...seen })
   })
 
   it('asks before forgetting, says what forgetting does not undo, and offers undo', async () => {
@@ -213,14 +215,14 @@ describe('memory in settings', () => {
     expect(screen.getByText(new RegExp(`Forget this preference\\? ${forgetWarning.slice(0, 40)}`))).toBeDefined()
     expect(client.preferenceDelete).not.toHaveBeenCalled()
     await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
-    expect(client.preferenceDelete).toHaveBeenCalledWith('pref-1')
+    expect(client.preferenceDelete).toHaveBeenCalledWith('pref-1', seen)
     const notice = await screen.findByRole('status')
     expect(notice.textContent).toContain('Forgotten: Prefer table output')
     expect(notice.textContent).toContain(`Forgotten. ${forgetWarning}`)
     expect(screen.queryByRole('list', { name: 'Preferences' })).toBeNull()
 
     await user.click(within(notice).getByRole('button', { name: 'Undo' }))
-    expect(client.preferenceAdd).toHaveBeenCalledWith({ text: 'Prefer table output' })
+    expect(client.preferenceAdd).toHaveBeenCalledWith({ text: 'Prefer table output', expected_member_id: alice.id })
     expect(await screen.findByRole('list', { name: 'Preferences' })).toBeDefined()
   })
 
@@ -237,7 +239,7 @@ describe('memory in settings', () => {
     const notice = await screen.findByRole('status')
     expect(notice.textContent).toContain('Forgotten: Prefer JSON output')
     await user.click(within(notice).getByRole('button', { name: 'Undo' }))
-    await waitFor(() => expect(client.preferenceAdd).toHaveBeenCalledWith({ text: 'Prefer JSON output', workspace_id: workspace.id }))
+    await waitFor(() => expect(client.preferenceAdd).toHaveBeenCalledWith({ text: 'Prefer JSON output', workspace_id: workspace.id, expected_member_id: alice.id }))
   })
 
   it("keeps another preference's Forgotten notice when an earlier Undo finishes", async () => {
@@ -346,7 +348,7 @@ describe('memory in settings', () => {
     await user.click(await screen.findByRole('button', { name: 'Forget' }))
     await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
     await user.click(await screen.findByRole('button', { name: 'Undo' }))
-    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-2', enabled: false }))
+    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-2', enabled: false, expected_member_id: alice.id }))
   })
 
   it('drops another member\'s list when the identity changes', async () => {
@@ -356,32 +358,58 @@ describe('memory in settings', () => {
     await waitFor(() => expect(screen.queryByText('Prefer table output')).toBeNull())
   })
 
-  it('does not put a forgotten preference back under a member who signed in meanwhile', async () => {
+  it('puts a forgotten preference back only as the member who forgot it', async () => {
     const user = userEvent.setup()
-    let read: (value: { preferences: Preference[]; enabled: boolean }) => void = () => {}
-    const listed = vi.fn().mockResolvedValueOnce({ preferences: [pref()], enabled: true }).mockReturnValueOnce(new Promise((resolve) => { read = resolve })).mockResolvedValue({ preferences: [], enabled: true })
-    const client = show([pref()], {
-      preferenceList: listed,
-      preferenceDelete: vi.fn(async () => ({ deleted: pref() })),
-      preferenceAdd: vi.fn(async (params) => ({ preference: pref({ id: 'pref-2', text: params.text }) })),
+    let added: (value: { preference: Preference }) => void = () => {}
+    const client = show([pref({ enabled: false })], {
+      preferenceDelete: vi.fn(async () => ({ deleted: pref({ enabled: false }) })),
+      preferenceAdd: vi.fn(() => new Promise<{ preference: Preference }>((resolve) => { added = resolve })),
+      preferenceUpdate: vi.fn(async () => ({ preference: pref({ id: 'pref-2', enabled: false }) })),
     })
     await user.click(await screen.findByRole('button', { name: 'Forget' }))
     await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
     await user.click(await screen.findByRole('button', { name: 'Undo' }))
+    expect(client.preferenceAdd).toHaveBeenCalledWith({ text: 'Prefer table output', expected_member_id: alice.id })
     act(() => useStore.setState({ identityKey: 'someone-else' }))
-    await act(async () => read({ preferences: [], enabled: true }))
+    await act(async () => added({ preference: pref({ id: 'pref-2' }) }))
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(client.preferenceAdd).not.toHaveBeenCalled()
+    expect(client.preferenceUpdate).not.toHaveBeenCalled()
   })
 
-  it('refuses to put a forgotten preference back when the same text is already remembered', async () => {
+  it('shows the server refusing to put back text that is already remembered', async () => {
     const user = userEvent.setup()
-    const client = show([pref()], { preferenceDelete: vi.fn(async () => ({ deleted: pref() })) })
+    const client = show([pref()], {
+      preferenceDelete: vi.fn(async () => ({ deleted: pref() })),
+      preferenceAdd: vi.fn(async () => { throw new ApiError(409, 'preference.add: already remembered as preference pref-4') }),
+    })
     await user.click(await screen.findByRole('button', { name: 'Forget' }))
     await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
     await user.click(await screen.findByRole('button', { name: 'Undo' }))
-    expect((await screen.findAllByRole('alert')).at(-1)!.textContent).toBe('This preference is already remembered.')
-    expect(client.preferenceAdd).not.toHaveBeenCalled()
+    expect((await screen.findAllByRole('alert')).at(-1)!.textContent).toBe('already remembered as preference pref-4')
+    expect(client.preferenceAdd).toHaveBeenCalledExactlyOnceWith({ text: 'Prefer table output', expected_member_id: alice.id })
+  })
+
+  it('sends the signed-in member and the version each row shows with every edit, toggle and forget', async () => {
+    const user = userEvent.setup()
+    const shown = pref({ updated_at: '2026-10-27T10:05:00.123Z' })
+    const edited = pref({ text: 'Prefer JSON output', updated_at: '2026-10-27T10:06:00.456Z' })
+    const client = show([shown], {
+      preferenceUpdate: vi.fn()
+        .mockResolvedValueOnce({ preference: edited, previous: shown })
+        .mockResolvedValueOnce({ preference: { ...edited, enabled: false, updated_at: '2026-10-27T10:07:00.789Z' }, previous: edited }),
+      preferenceDelete: vi.fn(async () => ({ deleted: edited })),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Edit' }))
+    const box = screen.getByRole('textbox', { name: 'Preference text' })
+    await user.clear(box)
+    await user.type(box, 'Prefer JSON output')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(client.preferenceUpdate).toHaveBeenLastCalledWith({ id: 'pref-1', text: 'Prefer JSON output', expected_member_id: alice.id, expected_updated_at: shown.updated_at })
+    await user.click(await screen.findByRole('button', { name: 'Turn off' }))
+    expect(client.preferenceUpdate).toHaveBeenLastCalledWith({ id: 'pref-1', enabled: false, expected_member_id: alice.id, expected_updated_at: edited.updated_at })
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    expect(client.preferenceDelete).toHaveBeenCalledWith('pref-1', { expected_member_id: alice.id, expected_updated_at: '2026-10-27T10:07:00.789Z' })
   })
 
   it('retries only the turn-off when the second step of a restore failed', async () => {

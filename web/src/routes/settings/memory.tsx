@@ -122,7 +122,7 @@ function MemoryBody({ client }: { client: Api }) {
     setAddError(null)
     const sent = text.trim()
     try {
-      const result = await client.preferenceAdd({ text: sent, ...(scope === 'workspace' && activeWorkspace ? { workspace_id: activeWorkspace } : {}) })
+      const result = await client.preferenceAdd({ text: sent, ...(scope === 'workspace' && activeWorkspace ? { workspace_id: activeWorkspace } : {}), expected_member_id: useStore.getState().info?.member?.id })
       put(result.preference)
       setText((current) => (current.trim() === sent ? '' : current))
     } catch (err) {

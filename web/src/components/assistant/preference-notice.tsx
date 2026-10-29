@@ -32,16 +32,11 @@ function markUndone(id: string) {
 }
 
 async function undo(facts: Facts, progress: Restore): Promise<void> {
-  if (facts.kind !== 'forgotten') {
-    const { preferences } = await api.preferenceList({ include_disabled: true })
-    const row = preferences.find((p) => p.id === facts.id)
-    if (!row) throw new Error('This preference is already forgotten.')
-    if (Date.parse(row.updated_at) !== Date.parse(facts.updated_at)) throw new Error('This preference has changed since, so Undo would lose that change. Edit it in Settings › Memory instead.')
-  }
-  if (facts.kind === 'saved') await api.preferenceDelete(facts.id)
+  const member = useStore.getState().info?.member?.id
+  if (facts.kind === 'saved') await api.preferenceDelete(facts.id, { expected_member_id: member, expected_updated_at: facts.updated_at })
   else if (facts.kind === 'updated') {
     const { text, workspace_id } = facts.previous
-    await api.preferenceUpdate({ id: facts.id, text, ...(workspace_id ? { workspace_id } : { clear_workspace: true }) })
+    await api.preferenceUpdate({ id: facts.id, text, ...(workspace_id ? { workspace_id } : { clear_workspace: true }), expected_member_id: member, expected_updated_at: facts.updated_at })
   } else await restorePreference(api, facts, progress)
 }
 

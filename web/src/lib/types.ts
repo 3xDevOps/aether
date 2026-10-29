@@ -2531,12 +2531,20 @@ export interface PreferenceListResult {
   enabled: boolean
 }
 
+/** Refused with "signed in as a different member" when it is not the caller. */
+export interface PreferenceExpect {
+  expected_member_id?: string
+  /** Refused with "changed since you saw it" when the row's updated_at differs. */
+  expected_updated_at?: string
+}
+
 export interface PreferenceAddParams {
   text: string
   workspace_id?: string
+  expected_member_id?: string
 }
 
-export interface PreferenceUpdateParams {
+export interface PreferenceUpdateParams extends PreferenceExpect {
   id: string
   text?: string
   workspace_id?: string

@@ -11,6 +11,7 @@ import type { Api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import type { Preference } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { useStore } from '@/store'
 
 export const forgetWarning =
   "New conversations and launches won't use it. Runs already started keep the text they were given. Server backups and update snapshots taken earlier may still contain it until replaced. The current assistant conversation keeps it until New conversation. Copies a connected app or agent made aren't removed."
@@ -49,6 +50,8 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
   const [scope, setScope] = useState<Scope>(preference.workspace_id ? 'workspace' : 'all')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const member = useStore((s) => s.info?.member?.id)
+  const seen = { expected_member_id: member, expected_updated_at: preference.updated_at }
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true)
@@ -71,6 +74,7 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
     const workspaceID = preference.workspace_id ?? activeWorkspace
     const result = await client.preferenceUpdate({
       id: preference.id,
+      ...seen,
       ...(text !== preference.text ? { text } : {}),
       ...(scope === 'all' && preference.workspace_id ? { clear_workspace: true } : {}),
       ...(scope === 'workspace' && !preference.workspace_id ? { workspace_id: workspaceID } : {}),
@@ -78,9 +82,9 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
     onChanged(result.preference)
     setMode('view')
   })
-  const toggle = () => run(async () => onChanged((await client.preferenceUpdate({ id: preference.id, enabled: !preference.enabled })).preference))
+  const toggle = () => run(async () => onChanged((await client.preferenceUpdate({ id: preference.id, enabled: !preference.enabled, ...seen })).preference))
   const forget = () => run(async () => {
-    onForgotten((await client.preferenceDelete(preference.id)).deleted)
+    onForgotten((await client.preferenceDelete(preference.id, seen)).deleted)
   })
   const scopeLabel = preference.workspace_id ? workspaceName ?? 'One workspace' : 'All my workspaces'
   const changed = text !== preference.text || scope !== (preference.workspace_id ? 'workspace' : 'all')
