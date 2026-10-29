@@ -142,7 +142,9 @@ func (h *harness) startEdge() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rl, err := relay.New(context.Background(), svc.RelayConfig(0))
+	relayCfg := svc.RelayConfig(0)
+	relayCfg.DirectoryInterval = 200 * time.Millisecond
+	rl, err := relay.New(context.Background(), relayCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
