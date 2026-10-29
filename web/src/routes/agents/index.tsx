@@ -26,17 +26,19 @@ import { useAgentList } from '@/routes/agents/use-agents'
 import { GitHubConnect } from '@/routes/onboarding/github-connect'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
+import { rememberChoice, rememberedChoice, useLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability } from '@/store/hooks'
 
 const addScreen = '@add'
 const githubScreen = '@github'
 
 function DefaultMode({ agent }: { agent: AgentInfo }) {
-  const remembered = useStore((s) => s.launchDefaults[agent.name]?.mode)
-  const setLaunchDefault = useStore((s) => s.setLaunchDefault)
+  const saved = useLaunchDefaults((s) => s.result)
+  const local = useStore((s) => s.launchDefaults[agent.name]?.mode)
+  const remembered = saved ? saved.defaults.agents?.[agent.name]?.mode || undefined : local
   const value = defaultMode(agent, remembered)
   return (
-    <Select value={value} onValueChange={(mode) => setLaunchDefault(agent.name, mode as LaunchMode)}>
+    <Select value={value} onValueChange={(mode) => rememberChoice(agent.name, mode as LaunchMode, undefined, false)}>
       <SelectTrigger aria-label={`Default mode for ${label(agent)}`} className="w-auto">
         <SelectValue>Default: {modes.find((mode) => mode.value === value)?.label}</SelectValue>
       </SelectTrigger>
@@ -93,6 +95,7 @@ function AgentsSkeleton() {
 export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const { agents, error, reload } = useAgentList(client, true)
+  useLaunchDefaultsRead(client)
   const [screen, setScreen] = useState('')
   const [returnFocusTo, setReturnFocusTo] = useState('')
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
@@ -118,7 +121,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
 
   const run = (agent: AgentInfo) => {
     const state = useStore.getState()
-    state.rememberLaunch(agent.name, defaultMode(agent, state.launchDefaults[agent.name]?.mode))
+    rememberChoice(agent.name, defaultMode(agent, rememberedChoice(agent.name, useLaunchDefaults.getState().result).mode))
     state.openPaletteDialog('launch')
   }
 
