@@ -282,6 +282,18 @@ describe('memory in settings', () => {
     expect(document.getElementById('preference-pref-1')?.hasAttribute('data-highlight')).toBe(false)
   })
 
+  it('clears the search and scrolls to a linked preference it hid', async () => {
+    const user = userEvent.setup()
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    show([pref(), pref({ id: 'pref-2', text: 'Use pnpm here' })])
+    await user.type(await screen.findByRole('searchbox', { name: 'Search preferences' }), 'table')
+    expect(document.getElementById('preference-pref-2')).toBeNull()
+    act(() => useStore.getState().navigate('settings', { section: 'memory', entry: 'pref-2' }))
+    await waitFor(() => expect(scroll.mock.contexts).toContain(document.getElementById('preference-pref-2')))
+    expect((screen.getByRole('searchbox', { name: 'Search preferences' }) as HTMLInputElement).value).toBe('')
+  })
+
   it('says so when the entry in the address no longer exists', async () => {
     seed('pref-gone')
     show([pref()])

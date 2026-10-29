@@ -80,21 +80,25 @@ function MemoryBody({ client }: { client: Api }) {
     setAttempt((n) => n + 1)
   }, [entry, found, load.kind])
   useEffect(() => {
-    if (!entry || !found) return
+    if (found) setQuery('')
+  }, [entry, found])
+
+  const shown = useMemo(() => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+    return [...list].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).filter((p) => words.every((word) => p.text.toLowerCase().includes(word)))
+  }, [list, query])
+
+  const linkedShown = entry !== undefined && shown.some((p) => p.id === entry)
+  useEffect(() => {
+    if (!entry || !linkedShown) return
     document.getElementById(`preference-${entry}`)?.scrollIntoView?.({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
-    setQuery('')
     setFlash(entry)
     const timer = setTimeout(() => {
       setFlash(null)
       navigate('settings', { section: 'memory' })
     }, highlightMs)
     return () => clearTimeout(timer)
-  }, [entry, found, navigate])
-
-  const shown = useMemo(() => {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-    return [...list].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).filter((p) => words.every((word) => p.text.toLowerCase().includes(word)))
-  }, [list, query])
+  }, [entry, linkedShown, navigate])
 
   const put = (preference: Preference) => setList((current) => current.some((p) => p.id === preference.id) ? current.map((p) => p.id === preference.id ? preference : p) : [...current, preference])
 
