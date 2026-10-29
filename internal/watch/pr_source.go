@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +41,7 @@ const (
 type GitHub interface {
 	Credentials(ctx context.Context, member domain.MemberID) (string, github.Account, error)
 	PullRequestSnapshot(ctx context.Context, token, repo string, number int, prev *github.Snapshot) (github.Snapshot, error)
+	RequiredChecks(ctx context.Context, token string, prev, snap *github.Snapshot) error
 }
 
 // PRStore is the persistence pull request watches use.
@@ -80,6 +83,10 @@ type prMember struct {
 	token    string
 	tokenAt  time.Time
 	limitErr *prError
+	// refused is when each pull request, by repo#number, began answering
+	// 403 or 404; one alone may be GitHub's own glitch, and every read
+	// within prReuse of it counts as that one.
+	refused map[string]time.Time
 }
 
 // NewPRs builds the pull request source for Service.UsePRSource.
@@ -100,16 +107,21 @@ func NewPRs(cfg PRConfig) (*PRs, error) {
 }
 
 // prError is an evaluation failure as the watch shows it. A transient one
-// creates the watch in the error state instead of refusing it.
+// creates the watch in the error state instead of refusing it. A gone one
+// means the login cannot see the pull request any more, so it is not
+// retried on a timer.
 type prError struct {
 	msg       string
 	transient bool
+	gone      bool
 	retryAt   time.Time
 }
 
 func (e *prError) Error() string { return e.msg }
 
-func (e *prError) Is(target error) bool { return e.transient && target == ErrTransient }
+func (e *prError) Is(target error) bool {
+	return e.transient && target == ErrTransient || e.gone && target == errRevoked
+}
 
 // RetryAt is when GitHub accepts requests again after a rate limit; zero
 // otherwise.
@@ -126,7 +138,7 @@ func (p *PRs) member(id domain.MemberID) *prMember {
 	defer p.mu.Unlock()
 	m := p.members[id]
 	if m == nil {
-		m = &prMember{turn: make(chan struct{}, 1)}
+		m = &prMember{turn: make(chan struct{}, 1), refused: map[string]time.Time{}}
 		p.members[id] = m
 	}
 	return m
@@ -182,14 +194,17 @@ func (p *PRs) limited(m *prMember, err *github.RateLimitError) *prError {
 
 // snapshot reads repo#number with member's credentials, conditionally
 // against the last read, which it reuses outright when it is younger than
-// prReuse. moved reports a fresh read that differs from the last one.
-func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string, number int) (snap github.Snapshot, moved bool, err error) {
+// prReuse; when ci and that read skipped the required checks, it reads only
+// those. create is a read for watch.create, which a 403 or 404 refuses at
+// once. moved reports a fresh read that differs from the last one.
+func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci, create bool) (snap github.Snapshot, moved bool, err error) {
 	m := p.member(member)
 	if err = p.lock(ctx, m); err != nil {
 		return github.Snapshot{}, false, err
 	}
 	defer p.unlock(m)
 	var prev *github.Snapshot
+	checkedAt, recent := p.now(), false
 	saved, err := p.store.WatchPRSnapshot(ctx, member, repo, number)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -198,10 +213,13 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 	default:
 		var s github.Snapshot
 		if json.Unmarshal(saved.Snapshot, &s) == nil {
-			if p.now().Sub(saved.CheckedAt) < prReuse {
+			if recent = p.now().Sub(saved.CheckedAt) < prReuse; recent && (!ci || s.RequiredRead) {
 				return s, false, nil
 			}
 			prev = &s
+			if recent {
+				checkedAt = saved.CheckedAt
+			}
 		}
 	}
 	if m.limitErr != nil {
@@ -210,14 +228,18 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 		}
 		m.limitErr = nil
 	}
-	if snap, err = p.read(ctx, member, m, repo, number, prev); err != nil {
+	if snap, err = p.read(ctx, member, m, repo, number, prev, ci, recent, create); err != nil {
 		return github.Snapshot{}, false, err
+	}
+	snap.HeadSince = p.now()
+	if prev != nil && prev.HeadSHA == snap.HeadSHA && !prev.HeadSince.IsZero() {
+		snap.HeadSince = prev.HeadSince
 	}
 	data, err := json.Marshal(snap)
 	if err != nil {
 		return github.Snapshot{}, false, err
 	}
-	if err = p.store.SaveWatchPRSnapshot(ctx, &store.WatchPRSnapshot{MemberID: member, Repo: repo, Number: number, Snapshot: data, CheckedAt: p.now()}); err != nil {
+	if err = p.store.SaveWatchPRSnapshot(ctx, &store.WatchPRSnapshot{MemberID: member, Repo: repo, Number: number, Snapshot: data, CheckedAt: checkedAt}); err != nil {
 		return github.Snapshot{}, false, err
 	}
 	moved = prev == nil || prev.State != snap.State || prev.HeadSHA != snap.HeadSHA ||
@@ -225,20 +247,43 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 	return snap, moved, nil
 }
 
-func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, repo string, number int, prev *github.Snapshot) (github.Snapshot, error) {
+// read reads repo#number conditionally against prev, and the required
+// checks when ci; only the required checks when recent.
+func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, repo string, number int, prev *github.Snapshot, ci, recent, create bool) (github.Snapshot, error) {
 	cached := m.token != ""
 	token, err := p.token(ctx, member, m, false)
 	if err != nil {
 		return github.Snapshot{}, err
 	}
-	snap, err := p.github.PullRequestSnapshot(ctx, token, repo, number, prev)
+	get := func(token string) (github.Snapshot, error) {
+		if recent {
+			snap := *prev
+			return snap, p.github.RequiredChecks(ctx, token, prev, &snap)
+		}
+		snap, readErr := p.github.PullRequestSnapshot(ctx, token, repo, number, prev)
+		switch {
+		case readErr != nil:
+		case ci:
+			readErr = p.github.RequiredChecks(ctx, token, prev, &snap)
+		default:
+			snap.KeepRequired(prev)
+		}
+		return snap, readErr
+	}
+	snap, err := get(token)
 	if errors.Is(err, github.ErrUnauthorized) && cached {
 		if token, err = p.token(ctx, member, m, true); err != nil {
 			return github.Snapshot{}, err
 		}
-		snap, err = p.github.PullRequestSnapshot(ctx, token, repo, number, prev)
+		snap, err = get(token)
 	}
+	ref := fmt.Sprintf("%s#%d", repo, number)
+	firstRefused, refusedBefore := m.refused[ref]
+	delete(m.refused, ref)
 	var limited *github.RateLimitError
+	var apiErr *github.APIError
+	var pull *github.PullRequestError
+	ofPull := errors.As(err, &pull)
 	switch {
 	case err == nil:
 		return snap, nil
@@ -247,12 +292,33 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 	case errors.Is(err, github.ErrUnauthorized):
 		m.token = ""
 		return github.Snapshot{}, credentialsError(err)
-	case errors.Is(err, github.ErrNotFound), errors.Is(err, github.ErrMoved):
-		return github.Snapshot{}, &prError{msg: fmt.Sprintf("pull request %s#%d is not reachable with your GitHub login: %v", repo, number, err)}
+	case errors.Is(err, github.ErrSSO):
+		return github.Snapshot{}, &prError{transient: true, msg: fmt.Sprintf(
+			"read pull request %s: your GitHub token needs SAML single sign-on authorization for this organization (%v)", ref, err)}
+	case ofPull && errors.Is(err, github.ErrMoved):
+		return github.Snapshot{}, &prError{gone: true, msg: fmt.Sprintf(
+			"pull request %s is not reachable with your GitHub login: GitHub answers 301, the repository was renamed or transferred (%v); create the watch again under its new owner/name", ref, err)}
+	case ofPull && errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusForbidden):
+		cause := "GitHub answers 404, so the pull request or repository is gone or your login lost access to it"
+		if apiErr.Status == http.StatusForbidden {
+			cause = "GitHub answers 403, so your login may no longer read it"
+		}
+		msg := fmt.Sprintf("pull request %s is not reachable with your GitHub login: %s (%v); give that login access, or connect one that has it with aether github connect", ref, cause, err)
+		if !refusedBefore {
+			firstRefused = p.now()
+		}
+		if !create && p.now().Sub(firstRefused) < prReuse {
+			m.refused[ref] = firstRefused
+			return github.Snapshot{}, &prError{msg: msg + "; asking once more before the watch stops"}
+		}
+		return github.Snapshot{}, &prError{gone: true, msg: msg + ", then create the watch again"}
 	case ctx.Err() != nil:
 		return github.Snapshot{}, err
+	case errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden:
+		return github.Snapshot{}, &prError{transient: true, msg: fmt.Sprintf(
+			"read pull request %s: GitHub refuses its checks, statuses or reviews to your login (%v); a fine-grained token needs Checks, Commit statuses and Pull requests read", ref, err)}
 	}
-	return github.Snapshot{}, &prError{msg: fmt.Sprintf("read pull request %s#%d: %v", repo, number, err), transient: true}
+	return github.Snapshot{}, &prError{msg: fmt.Sprintf("read pull request %s: %v", ref, err), transient: true}
 }
 
 // Validate implements PRSource.
@@ -266,7 +332,7 @@ func (p *PRs) Validate(ctx context.Context, member domain.MemberID, target proto
 		_, err := p.token(ctx, member, m, false)
 		return "", err
 	}
-	snap, _, err := p.snapshot(ctx, member, strings.ToLower(target.Repo), target.Number)
+	snap, _, err := p.snapshot(ctx, member, strings.ToLower(target.Repo), target.Number, false, true)
 	if err != nil {
 		return "", err
 	}
@@ -299,16 +365,22 @@ func (p *PRs) Evaluate(ctx context.Context, check PRCheck) (PRResult, error) {
 	res := PRResult{Final: true}
 	var failed error
 	busy := false
+	ci := slices.Contains(check.Conditions, protocol.WatchCI)
 	for i, t := range targets {
-		snap, moved, err := p.snapshot(ctx, check.Member, t.repo, t.number)
+		snap, moved, err := p.snapshot(ctx, check.Member, t.repo, t.number, ci, false)
 		if err == nil && t.run != "" {
 			err = p.refreshRun(ctx, t, snap)
+		}
+		var gone *prError
+		if errors.As(err, &gone) && gone.gone && check.Target.Kind != protocol.WatchTargetPR {
+			// Its run still has conditions to watch.
+			err = &prError{msg: gone.msg}
 		}
 		if err != nil {
 			failed = cmp.Or(failed, err)
 			continue
 		}
-		r := evaluatePR(snap, check.Conditions, check.Since)
+		r := evaluatePR(snap, check.Conditions, check.Since, p.now())
 		res.Notices = append(res.Notices, r.notices...)
 		if i == 0 {
 			res.Title, res.Observed = r.title, r.observed

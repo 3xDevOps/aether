@@ -79,10 +79,22 @@ type WatchTarget struct {
 	Number    int    `json:"number,omitempty"`
 }
 
+// WatchChecks counts every check on the head commit.
 type WatchChecks struct {
-	Passed  int `json:"passed"`
-	Failed  int `json:"failed"`
-	Pending int `json:"pending"`
+	WatchCheckCounts
+	// RequiredOnly is whether ci decides on the checks the base branch
+	// requires, which Required then counts, instead of on every check.
+	RequiredOnly bool              `json:"required_only"`
+	Required     *WatchCheckCounts `json:"required,omitempty"`
+	// Missing names required checks nothing has reported yet.
+	Missing []string `json:"missing,omitempty"`
+}
+
+type WatchCheckCounts struct {
+	Passed    int `json:"passed"`
+	Failed    int `json:"failed"`
+	Pending   int `json:"pending"`
+	Cancelled int `json:"cancelled"`
 }
 
 // WatchObserved is what the last evaluation read about the target.
