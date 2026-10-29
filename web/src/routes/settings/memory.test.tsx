@@ -163,6 +163,22 @@ describe('memory in settings', () => {
     expect(await screen.findByRole('list', { name: 'Preferences' })).toBeDefined()
   })
 
+  it('offers to put back the row the server deleted, not the one the list showed', async () => {
+    const user = userEvent.setup()
+    const listed = vi.fn().mockResolvedValueOnce({ preferences: [pref()], enabled: true }).mockResolvedValue({ preferences: [], enabled: true })
+    const client = show([pref()], {
+      preferenceList: listed,
+      preferenceDelete: vi.fn(async () => ({ deleted: pref({ text: 'Prefer JSON output', workspace_id: workspace.id }) })),
+      preferenceAdd: vi.fn(async (params) => ({ preference: pref({ id: 'pref-2', text: params.text, workspace_id: params.workspace_id }) })),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    const notice = await screen.findByRole('status')
+    expect(notice.textContent).toContain('Forgotten: Prefer JSON output')
+    await user.click(within(notice).getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(client.preferenceAdd).toHaveBeenCalledWith({ text: 'Prefer JSON output', workspace_id: workspace.id }))
+  })
+
   it('keeps a preference and shows the error when forgetting fails', async () => {
     const user = userEvent.setup()
     show([pref()], { preferenceDelete: vi.fn(async () => { throw new ApiError(-32004, 'preference.delete: preference pref-1 not found') }) })

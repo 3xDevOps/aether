@@ -79,8 +79,7 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
   })
   const toggle = () => run(async () => onChanged((await client.preferenceUpdate({ id: preference.id, enabled: !preference.enabled })).preference))
   const forget = () => run(async () => {
-    await client.preferenceDelete(preference.id)
-    onForgotten(preference)
+    onForgotten((await client.preferenceDelete(preference.id)).deleted)
   })
   const scopeLabel = preference.workspace_id ? workspaceName ?? 'One workspace' : 'All my workspaces'
   const changed = text !== preference.text || scope !== (preference.workspace_id ? 'workspace' : 'all')
