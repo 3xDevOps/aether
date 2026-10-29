@@ -158,7 +158,7 @@ function SignInProgress({ signIn: { phase, error, starting, signIn } }: { signIn
       {error && <ErrorLine>{error}</ErrorLine>}
       {phase.name === 'signed-out' && (
         <Button size="sm" disabled={starting} onClick={() => void signIn()}>
-          {starting ? 'Signing in…' : 'Sign in'}
+          {starting ? 'Signing in…' : 'Sign in with GitHub'}
         </Button>
       )}
       {phase.name === 'waiting' && (
@@ -178,10 +178,12 @@ function SignInProgress({ signIn: { phase, error, starting, signIn } }: { signIn
           <p className="font-code text-title tracking-wider select-all">
             {phase.login.user_code}
           </p>
-          <p className="text-muted">
-            <span className="font-code">{edgeHost(phase.login.signin_origin)}</span> signs you in
-            for the edge <span className="font-code">{edgeHost(phase.login.edge)}</span>.
-          </p>
+          {edgeHost(phase.login.signin_origin) !== edgeHost(phase.login.edge) && (
+            <p className="text-muted">
+              <span className="font-code">{edgeHost(phase.login.signin_origin)}</span> signs you in
+              for the edge <span className="font-code">{edgeHost(phase.login.edge)}</span>.
+            </p>
+          )}
           <p role="status" className="text-muted">
             Waiting for you to confirm the code in the browser…
           </p>
@@ -201,7 +203,7 @@ export function LinkBeforeSignIn({ onHand }: { onHand: (link: HandedLink) => voi
         e.preventDefault()
         const link = text.trim()
         if (parseJoin(link)) onHand({ kind: 'join', link })
-        else if (parseClaim(link)?.edge) onHand({ kind: 'claim', link })
+        else if (parseClaim(link)) onHand({ kind: 'claim', link })
         else setError('That is not an invitation or claim link.')
       }}
     >
@@ -248,16 +250,21 @@ export function EdgeSignIn({
 
   return (
     <section aria-label="Sign in" className="flex min-w-0 flex-col items-start gap-3 text-ui">
-      <p className="text-text">
-        {claimEdge ? (
-          <>
-            Sign in to <span className="font-code">{linkHost(claimEdge)}</span>, the edge this claim link names, with
-            GitHub.
-          </>
-        ) : (
-          'Sign in with GitHub to reach your server through an edge relay: no VPN, open port or address to set up.'
-        )}
-      </p>
+      {phase.name !== 'signed-in' && (
+        <p className="text-text">
+          {claim !== undefined ? (
+            <>
+              Claim link received. Sign in{claimEdge && <> to <span className="font-code">{linkHost(claimEdge)}</span></>} with
+              GitHub to claim the server.
+            </>
+          ) : (
+            <>
+              This computer and the server both connect out to Aether&apos;s relay, the edge, so neither needs an open
+              port. Sign in with GitHub to see the servers your account reaches.
+            </>
+          )}
+        </p>
+      )}
       <SignInProgress signIn={signIn} />
       {phase.name === 'signed-in' && (
         <EdgeChoice
@@ -402,7 +409,7 @@ function JoinPanel({
   return (
     <section aria-label="Join" className="flex min-w-0 flex-col items-start gap-3 text-ui">
       <p className="font-medium">
-        Join <span className="font-code">{join.server}</span> as the invited account?
+        You are invited to the server <span className="font-code">{join.server}</span>.
       </p>
       {error && <ErrorLine>{error}</ErrorLine>}
       {account && resign ? (
@@ -427,8 +434,8 @@ function JoinPanel({
         phase.name !== 'checking' && (
           <>
             <p>
-              Sign in to <span className="font-code">{edgeHost(join.edge)}</span> with GitHub as the invited account
-              first.
+              Sign in to <span className="font-code">{edgeHost(join.edge)}</span> with the GitHub account your admin
+              invited.
             </p>
             <SignInProgress signIn={signIn} />
           </>
@@ -530,6 +537,37 @@ function ServerPicker({
     }
   }
 
+  const claimForm = (
+    <form
+      aria-label="Add a server"
+      className="flex min-w-0 max-w-sm flex-col items-start gap-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (parseJoin(code)) {
+          onHand({ kind: 'join', link: code.trim() })
+          return
+        }
+        const claim = parseClaim(code)
+        if (claim?.edge && !sameEdge(claim.edge, edge)) {
+          onHand({ kind: 'claim', link: code.trim() })
+          return
+        }
+        void link(() => client.localEdgeClaim(claim?.code ?? code.trim(), edge))
+      }}
+    >
+      <FormField
+        className="self-stretch"
+        label="Claim or invite link"
+        help={<>The <span className="font-code">aether://claim</span> link <span className="font-code">aether-server setup</span> printed, valid for 30 minutes (<span className="font-code">sudo aether-server edge claim-code</span> prints a new one), or an invite link from an admin. Claiming makes {accountName(account)} the server&apos;s admin.</>}
+      >
+        <Input className="font-code" autoComplete="off" value={code} disabled={busy} onChange={(e) => setCode(e.target.value)} />
+      </FormField>
+      <Button type="submit" size="sm" disabled={busy || !code.trim()}>
+        {busy ? 'Claiming…' : 'Claim and link'}
+      </Button>
+    </form>
+  )
+
   return (
     <div className="flex min-w-0 flex-col gap-3 self-stretch">
       <p>
@@ -548,8 +586,8 @@ function ServerPicker({
       )}
       {servers?.length === 0 && (
         <p className="text-muted">
-          Your account reaches no servers yet. Add one with its claim code under Other ways to link, or ask a
-          server&apos;s admin to invite {account.login ?? account.email ?? 'your account'}.
+          Your account reaches no servers yet. Paste the claim link <span className="font-code">aether-server setup</span>{' '}
+          printed, or the invite link an admin sent {account.login ?? account.email ?? 'your account'}.
         </p>
       )}
       {servers && servers.length > 0 && (
@@ -592,7 +630,8 @@ function ServerPicker({
           }
         />
       )}
-      <Collapsible defaultOpen={claim !== undefined}>
+      {claimForm}
+      <Collapsible>
         <CollapsibleTrigger>Other ways to link</CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-4 pt-2 pl-5">
           <form
@@ -612,34 +651,6 @@ function ServerPicker({
             </FormField>
             <Button type="submit" size="sm" variant="secondary" disabled={busy || !serverID.trim()}>
               Link by id
-            </Button>
-          </form>
-          <form
-            aria-label="Add a server"
-            className="flex min-w-0 max-w-sm flex-col items-start gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (parseJoin(code)) {
-                onHand({ kind: 'join', link: code.trim() })
-                return
-              }
-              const claim = parseClaim(code)
-              if (claim?.edge && !sameEdge(claim.edge, edge)) {
-                onHand({ kind: 'claim', link: code.trim() })
-                return
-              }
-              void link(() => client.localEdgeClaim(claim?.code ?? code.trim(), edge))
-            }}
-          >
-            <FormField
-              className="self-stretch"
-              label="Claim code or link"
-              help={<><span className="font-code">aether-server setup</span> printed it, valid for 30 minutes; <span className="font-code">sudo aether-server edge claim-code</span> prints a new one. Claiming makes {accountName(account)} the server&apos;s admin. An invitation&apos;s join link opens the Join panel.</>}
-            >
-              <Input className="font-code" autoComplete="off" value={code} disabled={busy} onChange={(e) => setCode(e.target.value)} />
-            </FormField>
-            <Button type="submit" size="sm" variant="secondary" disabled={busy || !code.trim()}>
-              {busy ? 'Claiming…' : 'Claim and link'}
             </Button>
           </form>
         </CollapsibleContent>
@@ -717,7 +728,7 @@ function ConfirmPin({
       <p className="text-ui-sm text-muted">
         From now on this link accepts only this host key, directly and through the edge. An edge that lists a false
         id can send a first link to another server: compare the id with the one{' '}
-        <span className="font-code">aether-server edge status</span> prints on the server.
+        <span className="font-code">aether-server edge status</span> prints on the server, or ask its admin.
       </p>
       <div className="flex min-w-0 flex-wrap gap-2">
         <Button size="sm" disabled={busy || fingerprint === null} onClick={onConfirm}>

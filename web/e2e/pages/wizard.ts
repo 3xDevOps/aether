@@ -42,11 +42,11 @@ export class ConnectStep extends Step {
   }
 
   byAddress(): Locator {
-    return this.section.getByRole('button', { name: /^Link by address/ })
+    return this.section.getByRole('radio', { name: 'SSH address', exact: true })
   }
 
   async link(addr: string, options: { invite?: string; name?: string } = {}): Promise<void> {
-    await this.expand('Link by address')
+    await this.byAddress().click()
     await this.section.getByLabel('Server address').fill(addr)
     if (options.invite) await this.section.getByLabel('Invite code').fill(options.invite)
     if (options.name) await this.section.getByLabel('Your name').fill(options.name)

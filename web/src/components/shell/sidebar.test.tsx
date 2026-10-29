@@ -67,7 +67,7 @@ describe('shell landmarks', () => {
     expect(launch.getAttribute('aria-disabled')).toBe('true')
     fireEvent.click(launch)
     expect(useStore.getState().paletteDialog).toBeNull()
-    const footer = screen.getByRole('button', { name: /^Not signed in/ })
+    const footer = screen.getByRole('button', { name: /^Not connected/ })
     expect(within(footer).queryByText('NI')).toBeNull()
   })
 

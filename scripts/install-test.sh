@@ -432,9 +432,10 @@ ran "aether-server setup"
 not_ran "aether gui build"
 printed "This machine is your Aether server"
 printed "$quickstart"
-printed "  aether login                   # from your own machine, sign in to the edge"
-printed "  aether link --claim <code>     # code from server setup or \`sudo aether-server edge claim-code\`"
-ends_with "  aether link <this-host>:2222   # instead, on a tailnet or without the edge"
+printed "  then, on your computer:"
+printed "  aether link <this-host>        # on a tailnet: the server's tailnet name"
+printed "  aether login                   # otherwise, sign in to the edge, Aether's relay"
+ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
 printed "  sudo aether-server setup       # config, systemd unit, and how to start it"
 plain
 
@@ -457,7 +458,7 @@ touch -t 200001010000 "$AETHER_UNIT_PATH"
 SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
 [ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
-ends_with "  aether link <this-host>:2222   # instead, on a tailnet or without the edge"
+ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
 
 reset "--role server as root, declined but a unit is already installed"
 touch -t 200001010000 "$AETHER_UNIT_PATH"
@@ -490,9 +491,9 @@ ran "aether gui build"
 not_ran "aether-server setup"
 printed "This machine is a client"
 printed "$quickstart"
-printed "  aether login                   # sign in to the edge"
-printed "  aether link --claim <code>     # code from server setup or \`sudo aether-server edge claim-code\`"
-ends_with "  aether link <server-host>:2222 # instead, on a tailnet or without the edge"
+printed "  open Aether from your applications to link your server, or in a terminal:"
+printed "  aether link <server-host>      # on a tailnet: the server's tailnet name"
+ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
 plain
 
 reset "--role client, gui build fails"
@@ -508,8 +509,8 @@ not_ran "aether gui build"
 not_ran "aether-server setup"
 printed "Nothing else was set up on this machine"
 printed "$quickstart"
-printed "  aether login                   # from a client, sign in to the edge"
-ends_with "  aether link <server>:2222      # instead, on a tailnet or without the edge"
+printed "  aether link <server>           # on a tailnet: the server's tailnet name"
+ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
 plain
 
 reset "--role none, unit already installed"
@@ -562,7 +563,7 @@ ran "aether-server setup"
 
 reset "prompt: server"
 answer server
-AETHER_TTY="$answers" sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
+DISPLAY="" WAYLAND_DISPLAY="" AETHER_TTY="$answers" sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
 printed "$question"
 printed "role [server]:"
 ran "aether-server setup"
@@ -576,9 +577,16 @@ not_ran "aether-server setup"
 
 reset "prompt: Enter takes server on linux"
 answer ""
-AETHER_TTY="$answers" sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
+DISPLAY="" WAYLAND_DISPLAY="" AETHER_TTY="$answers" sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
 printed "role [server]:"
 ran "aether-server setup"
+
+reset "prompt: Enter takes client on a Linux desktop"
+answer ""
+DISPLAY=:0 AETHER_TTY="$answers" sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
+printed "role [client]:"
+ran "aether gui build"
+not_ran "aether-server setup"
 
 # The platform default must not answer the question: a Mac gets the client
 # binary automatically and is still asked, with client as the default.
@@ -673,7 +681,7 @@ PATH="$no_node_path" sh "$script" --role client >"$out" 2>&1 || fail "installer 
 ran "aether gui build"
 not_ran "aether-server setup"
 printed "This machine is a client"
-printed "aether link <server-host>:2222"
+printed "aether link <server-host> "
 not_printed "Node.js 22+"
 printed "$quickstart"
 

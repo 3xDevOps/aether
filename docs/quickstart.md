@@ -55,11 +55,14 @@ platform, `--role none` (binaries only), upgrades and removal.
 Do this on the server. Answering `server` already ran setup. If you skipped it,
 run `sudo aether-server setup`.
 
-The **edge** is a relay the Aether project runs at `https://edge.onaether.dev`.
-The server and your computer both dial out to it, so neither needs an open
-port. SSH runs end to end through it: the edge cannot read your traffic, but
-sees host names, IP addresses and who signs in ([edge.md](edge.md)). Setup turns
-it on unless you answer yes to the tailnet question below;
+Setup decides how your computer reaches the server. **Tailscale** is the
+simplest: on a host where Tailscale runs, Enter at the tailnet question picks
+it, and people link by this host's tailnet name with their tailnet login
+([networking.md](networking.md#tailscale)). Otherwise setup turns on the
+**edge**, a relay the Aether project runs at `https://edge.onaether.dev`. The
+server and your computer both dial out to it, so neither needs an open port.
+SSH runs end to end through it: the edge cannot read your traffic, but sees
+host names, IP addresses and who signs in ([edge.md](edge.md));
 `aether-server config set edge-url ""` turns it off.
 
 Setup asks these questions. Enter accepts the default shown in brackets:
@@ -67,14 +70,17 @@ Setup asks these questions. Enter accepts the default shown in brackets:
 | Prompt | Answer |
 | --- | --- |
 | `Continue without Docker` | Asked only when Docker does not answer. Enter stops with nothing written. Install or start Docker, then run setup again. |
-| `SSH listen address` | Enter keeps `:2222`. |
+| `SSH listen address for Aether, not the system sshd` | Enter keeps `:2222`. |
 | `Data directory` | Enter keeps `/var/lib/aether`. |
-| `Will people reach this server over the tailnet ...` | Asked only when Tailscale runs on this host. A **tailnet** is a private network made with Tailscale. Enter (no) uses the edge. Yes signs people in by their tailnet login ([networking.md](networking.md)). |
+| `Use Tailscale to reach this server` | Asked only when Tailscale runs on this host. A **tailnet** is a private network made with Tailscale. Enter (yes) signs people in by their tailnet login; answer no when your computer is not on this tailnet, and setup uses the edge. |
+| `Let anyone on the tailnet join ...`, `Also require a registered SSH key ...`, `Dashboard HTTPS port` | Asked after a yes. Enter keeps admin approval for new members, no key requirement, and the dashboard on port 443 for phones ([networking.md](networking.md#who-is-let-in)). |
+| `Turn on the edge too` | Asked after a yes. Enter (no) keeps the edge off; yes also lets devices off the tailnet in. |
 | `Choose 1 or 2` | Who may reach the server through the edge. `1`: anyone you invite, by signing in with GitHub. `2`: each new device also waits for someone to approve it; setup recommends it for a team workspace holding code or credentials that must stay protected. No default. |
 | `Write it` | Enter writes `/etc/aether/server.conf` and the systemd unit. |
 | `Let agents use Docker inside their runs?` | Enter installs Sysbox, the container runtime that lets agents run Docker inside their runs (Ubuntu and Debian only). |
 
-Setup ends with a claim link and the commands left for you:
+Setup ends with the commands left for you. With the edge on, it prints a claim
+link first:
 
 ```
 claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid for 30 min, until 2026-10-25 15:04 UTC, 5 attempts)
@@ -82,12 +88,26 @@ claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server i
 next:
   1. start the server on this machine:
        sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
-  2. on your computer, open the claim link above with the Aether app, or paste it
-     into the app's Connect page; in a terminal:
+  2. on your computer, install Aether if it is not there yet (Windows: docs/install.md):
+       curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client
+  3. on your computer: in the Aether app's Connect step choose Aether relay, sign in
+     with GitHub and paste the claim link above; in a terminal:
        aether login
        aether link --claim <server id>-<secret>
-  3. to run agents from ChatGPT or Claude, on that computer:
+  4. optional, to run agents from ChatGPT or Claude, on that computer:
        aether mcp
+```
+
+On a tailnet, item 3 names this host instead, and the dashboard address when
+setup turned it on. With the edge on too, the claim follows as the
+alternative for a computer off the tailnet; do one or the other, because the
+first link makes its account the admin:
+
+```
+  3. on your computer, on the same tailnet: in the Aether app's Connect step choose
+     Tailscale and enter my-server.tail1234.ts.net; in a terminal:
+       aether link my-server.tail1234.ts.net
+     or, with nothing installed, open https://my-server.tail1234.ts.net/ in a browser there
 ```
 
 > [!WARNING]
@@ -95,13 +115,14 @@ next:
 > valid for 30 minutes and 5 attempts. `sudo aether-server edge claim-code`
 > prints a new one until someone has joined.
 
-Item 1 starts the server: run it now, on the server. Item 2 links your
-computer: that is step 3, so keep the claim link. Item 3 is optional
+Item 1 starts the server: run it now, on the server. Item 2 is step 1 on your
+computer, if you have not done it. Item 3 links your computer: that is step 3,
+so keep the claim link or host name. Item 4 is optional
 ([connectors.md](connectors.md)); skip it for now.
 
-Without the edge, item 2 is `aether link <this-host>:2222`. With the edge,
-linking by address before the claim works only on the server or through an SSH
-tunnel ([networking.md](networking.md#the-first-admin)).
+With neither, item 3 is `aether link <this-host>:2222`. With the edge, linking
+by address before the claim works only on the server or through an SSH tunnel
+([networking.md](networking.md#the-first-admin)).
 
 It worked if `sudo aether-server edge status` shows `connection  connected since
 <time>`, or without the edge, `systemctl status aether-server` shows `active`.
@@ -126,27 +147,31 @@ claim code goes to step 3: `aether login`, then `aether link --claim <code>`.
 
 ## 3. Link from your machine
 
-Do this on your computer, with the claim link from step 2 (without the edge, see
-the end of this step). Linking saves the server in your client config. The first
-person to link a fresh server becomes its **administrator** (admin); there is no
-password. In the desktop app:
+Do this on your computer, with what step 2 printed: a tailnet host name or a
+claim link. Linking saves the server in your client config. The first person to
+link a fresh server becomes its **administrator** (admin); there is no
+password. In the desktop app, which opens at **Onboarding → Connect** until it
+is linked, answer **How does this computer reach your server?**:
 
-1. Open **Aether**. Until it is linked, it opens at **Onboarding → Connect**.
-2. Paste the claim link into **Have an invitation or claim link?** and click
-   **Open link**. Opening the `aether://claim` link on your computer does the
-   same.
-3. Click **Sign in**, open the address shown, sign in with GitHub, and confirm
-   the code.
-4. Click **Claim and link**.
+| Choice | When | Then |
+| --- | --- | --- |
+| **Tailscale** (recommended) | This computer is on the server's tailnet. | Enter the name setup printed in **Server's tailnet name**, and click **Link**. |
+| **Aether relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
+| **SSH address** | This computer reaches the server's SSH port directly. | Enter `<server-host>:2222`, and an **Invite code** if an admin gave you one, then click **Link**. |
+
+Opening the `aether://claim` link on your computer opens the relay choice with
+the link filled in.
 
 Or in a terminal:
 
-1. Run `aether login`, open the address it prints, sign in with GitHub, and
-   enter the code on that edge page.
-2. Run `aether link --claim '<claim link>'`, or
-   `aether link --claim <server id>-<secret>`.
+- On a tailnet: `aether link <server-host>`.
+- Through the edge: run `aether login`, open the address it prints, sign in
+  with GitHub, and enter the code on that edge page. Then run
+  `aether link --claim '<claim link>'`, or
+  `aether link --claim <server id>-<secret>`.
 
-It worked if `aether link` ends with `linked to server <server id> through
+It worked if the step shows **Connected**, or `aether link` ends with `linked
+to <server>` and your role, such as `linked to server <server id> through
 edge.onaether.dev as <your name> (admin)`.
 
 `aether status` shows where you are:
@@ -162,11 +187,9 @@ edge.onaether.dev as <your name> (admin)`.
 cannot be reached, `aether status` prints what this computer holds and the
 error, then exits 1.
 
-On a tailnet, or to an SSH port you can reach, link by address instead:
-`aether link <server-host>:2222`. On a tailnet the server knows you by your
-tailnet login. Elsewhere it registers your SSH key: `~/.ssh/id_ed25519` (created
-when you have no key), a key in your ssh-agent, or `--key <path>`
-([networking.md](networking.md)).
+On a tailnet the server knows you by your tailnet login. Linking by SSH address
+registers your SSH key instead: `~/.ssh/id_ed25519` (created when you have no
+key), a key in your ssh-agent, or `--key <path>` ([networking.md](networking.md)).
 
 Optional: set the name and email your agents commit as (otherwise they commit
 as your display name at `<member-id>@aether.local`):

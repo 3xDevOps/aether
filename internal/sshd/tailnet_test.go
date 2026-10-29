@@ -431,6 +431,51 @@ func TestKeyBootstrapWithAnEdgeNeedsLoopback(t *testing.T) {
 	}
 }
 
+// Without an edge, a fresh tailnet server takes its first admin key over
+// the tailnet or from loopback, never from an address outside it.
+func TestKeyBootstrapOnATailnetNeedsTheTailnet(t *testing.T) {
+	t.Parallel()
+	public := &net.TCPAddr{IP: net.ParseIP("203.0.113.7"), Port: 50122}
+	tailnet := &net.TCPAddr{IP: net.ParseIP("100.64.0.7"), Port: 50122}
+	for name, tc := range map[string]struct {
+		addr  net.Addr
+		id    WhoIsIdentity
+		whois error
+		admit bool
+	}{
+		"outside the tailnet":        {public, WhoIsIdentity{}, errors.New("no such peer"), false},
+		"over the tailnet":           {tailnet, WhoIsIdentity{Login: "ada@example.com", NodeID: "n1"}, nil, true},
+		"a tagged node on a tailnet": {tailnet, WhoIsIdentity{NodeID: "n2", Tagged: true}, nil, true},
+		"from loopback":              {&net.TCPAddr{IP: net.IPv6loopback, Port: 50122}, WhoIsIdentity{}, errors.New("no such peer"), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			whois := &fakeWhoIs{}
+			whois.set(tc.id, tc.whois)
+			e := newFreshTestEnv(t, func(c *Config) { c.WhoIs = whois; c.TailnetRequireKey = true })
+			client, banner, err := dialRelayed(t, func(nc net.Conn) {
+				if !e.srv.beginHandler() {
+					return
+				}
+				defer e.srv.wg.Done()
+				e.srv.handleConn(context.Background(), remoteConn{nc, tc.addr})
+			}, e.signer, "ada")
+			if !tc.admit {
+				if err == nil || !strings.Contains(banner, "link it from a device on the tailnet") {
+					t.Fatalf("first key from %s: err %v, banner %q; want refused with the tailnet hint", tc.addr, err, banner)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("first key from %s: %v", tc.addr, err)
+			}
+			if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleAdmin) {
+				t.Fatalf("first key from %s joined as %q, want admin", tc.addr, m.Role)
+			}
+		})
+	}
+}
+
 // The publickey callback also fires for unsigned acceptability probes,
 // so on a fresh server it must not create the admin row - an attacker
 // could otherwise wedge bootstrap with a key nobody holds. The callback

@@ -40,7 +40,7 @@ func setup(args []string) error {
 		return err
 	}
 	docker := checkDocker(os.Stdout)
-	values, sysbox, err := askSetup(*configPath, docker)
+	values, sysbox, tailnetHost, err := askSetup(*configPath, docker)
 	if err != nil {
 		return err
 	}
@@ -48,14 +48,15 @@ func setup(args []string) error {
 		_, _ = fmt.Fprintln(os.Stdout, "nothing written")
 		return nil
 	}
-	return writeSetup(os.Stdout, *unitPath, *configPath, values, *force, sysbox, docker)
+	return writeSetup(os.Stdout, *unitPath, *configPath, values, *force, sysbox, docker, tailnetHost)
 }
 
 // askSetup asks whether to go on without Docker when docker is false, then
-// setup's questions, and whether to install Sysbox. A signal at a prompt
-// ends setup with nothing written; the handler ends with the questions so
-// that installSysbox can take Ctrl-C for itself.
-func askSetup(configPath string, docker bool) (map[string]string, bool, error) {
+// setup's questions, and whether to install Sysbox. It also returns this
+// host's MagicDNS name, or "" without a tailnet.
+// A signal at a prompt ends setup with nothing written; the handler ends
+// with the questions so that installSysbox can take Ctrl-C for itself.
+func askSetup(configPath string, docker bool) (map[string]string, bool, string, error) {
 	// Notify overrides inherited ignored signals while a prompt is blocked.
 	signals := make(chan os.Signal, 1)
 	done := make(chan struct{})
@@ -80,7 +81,7 @@ func askSetup(configPath string, docker bool) (map[string]string, bool, error) {
 	p := newPrompter(os.Stdout, os.Stdin)
 	if !docker {
 		if err := askWithoutDocker(p); err != nil {
-			return nil, false, err
+			return nil, false, "", err
 		}
 	}
 	var tailscaled *reachability.Tailscale
@@ -89,9 +90,17 @@ func askSetup(configPath string, docker bool) (map[string]string, bool, error) {
 	}
 	values, err := askServerOptions(p, configPath, tailscaled)
 	if values == nil || err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
-	return values, askSysbox(p, docker), nil
+	tailnetHost := ""
+	if tailscaled != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if node, err := tailscaled.Self(ctx); err == nil {
+			tailnetHost = node.DNSName
+		}
+	}
+	return values, askSysbox(p, docker), tailnetHost, nil
 }
 
 func askWithoutDocker(p *prompter) error {
@@ -108,7 +117,7 @@ func askWithoutDocker(p *prompter) error {
 // writeSetup issues the claim code after the slow Sysbox install, so the
 // code's 30 minutes start when the person can use it. Without Docker the
 // server cannot start, so it issues none and next: says how to get one.
-func writeSetup(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox, docker bool) error {
+func writeSetup(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox, docker bool, tailnetHost string) error {
 	if err := writeAndReport(w, unitPath, configPath, values, force); err != nil {
 		return err
 	}
@@ -124,7 +133,7 @@ func writeSetup(w io.Writer, unitPath, configPath string, values map[string]stri
 	if err != nil {
 		return err
 	}
-	return printNextSteps(w, configPath, options, claimCode, docker)
+	return printNextSteps(w, configPath, options, claimCode, docker, tailnetHost)
 }
 
 func askSysbox(p *prompter, docker bool) bool {
@@ -207,7 +216,7 @@ func askServerOptions(p *prompter, configPath string, tailscaled *reachability.T
 	}
 
 	values := map[string]string{}
-	values["addr"] = p.ask("addr", "SSH listen address", def("addr"))
+	values["addr"] = p.ask("addr", "SSH listen address for Aether, not the system sshd", def("addr"))
 	values["data-dir"] = p.ask("data-dir", "Data directory", def("data-dir"))
 
 	// Each config a yes writes has the edge off, a web-port or auto-join on,
@@ -215,30 +224,33 @@ func askServerOptions(p *prompter, configPath string, tailscaled *reachability.T
 	_, webPort := current["web-port"]
 	autoJoin, _ := strconv.ParseBool(current["tailnet-auto-join"])
 	wasTailnet := len(current) > 0 && (current["edge-url"] == "" || webPort || autoJoin)
-	tailnet := tailscaled != nil && askTailnet(p, tailscaled, wasTailnet)
+	tailnet, host := false, ""
+	if tailscaled != nil {
+		tailnet, host = askTailnet(p, tailscaled, len(current) == 0 || wasTailnet)
+	}
 	switch {
 	case tailnet:
-		_, _ = fmt.Fprintln(w, "\nWith tailnet auto-join on, anyone already on your tailnet becomes an")
-		_, _ = fmt.Fprintln(w, "approved member on first connect, with no admin approving them.")
-		values["tailnet-auto-join"] = p.ask("tailnet-auto-join",
-			"Auto-approve tailnet identities (true/false)", def("tailnet-auto-join"))
-
-		_, _ = fmt.Fprintln(w, "\nRequiring a pubkey on top of tailnet identity means a member must have")
-		_, _ = fmt.Fprintln(w, "linked a key before their tailnet identity is trusted.")
+		saved := func(key string) bool {
+			on, _ := strconv.ParseBool(def(key))
+			return on
+		}
+		values["tailnet-auto-join"] = strconv.FormatBool(p.confirm(
+			"\nLet anyone on the tailnet join without an admin approving them", saved("tailnet-auto-join")))
 		// A keyed tailnet server's config can match what a no writes, so a
 		// saved key requirement is offered back: Enter never drops it.
-		values["tailnet-require-key"] = p.ask("tailnet-require-key",
-			"Also require pubkey verification on tailnet connections (true/false)", def("tailnet-require-key"))
+		required := p.confirm("Also require a registered SSH key, for tailnet devices more than one person uses",
+			saved("tailnet-require-key"))
+		values["tailnet-require-key"] = strconv.FormatBool(required)
 
 		// The dashboard cannot present a key, so it is only offered where it
 		// could start: tailscaled on this host and no key requirement. Only a
 		// first run probes for the default: on a live server the dashboard
 		// itself holds the port.
-		if required, _ := strconv.ParseBool(values["tailnet-require-key"]); !required {
-			_, _ = fmt.Fprintln(w, "\nThe server can host the dashboard over HTTPS on its tailnet address, so a")
-			_, _ = fmt.Fprintln(w, "phone or any tailnet device opens https://<this host's MagicDNS name>/ with")
-			_, _ = fmt.Fprintln(w, "no token. The tailnet needs MagicDNS and HTTPS certificates enabled; 0 keeps")
-			_, _ = fmt.Fprintln(w, "the server SSH-only.")
+		if !required {
+			if host == "" {
+				host = "<this host's MagicDNS name>"
+			}
+			_, _ = fmt.Fprintf(w, "\nThe server can serve the dashboard at https://%s/ to phones and\nbrowsers on the tailnet, which needs MagicDNS and HTTPS certificates on.\n", host)
 			webDefault := def("web-port")
 			if _, ok := current["web-port"]; !ok {
 				webDefault = strconv.Itoa(dashboardPort)
@@ -247,7 +259,7 @@ func askServerOptions(p *prompter, configPath string, tailscaled *reachability.T
 					_, _ = fmt.Fprintf(w, "Defaulting to 0: %v, then run: sudo aether-server config set web-port %d\n", err, dashboardPort)
 				}
 			}
-			values["web-port"] = p.ask("web-port", "Dashboard HTTPS port on the tailnet (0 = off)", webDefault)
+			values["web-port"] = p.ask("web-port", "Dashboard HTTPS port (0 = off)", webDefault)
 		}
 	case tailscaled != nil:
 		values["tailnet-auto-join"] = "false"
@@ -277,21 +289,22 @@ func askServerOptions(p *prompter, configPath string, tailscaled *reachability.T
 }
 
 // askTailnet asks whether people reach this server over the tailnet
-// tailscaled is on, with def as the answer Enter gives.
-func askTailnet(p *prompter, tailscaled *reachability.Tailscale, def bool) bool {
+// tailscaled is on. Enter says yes when tailscaled names the tailnet and
+// def is set, and no otherwise. It also returns this host's MagicDNS name,
+// or "" when tailscaled cannot say.
+func askTailnet(p *prompter, tailscaled *reachability.Tailscale, def bool) (bool, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	tailnet := "this host's tailnet"
-	if node, err := tailscaled.Self(ctx); err != nil {
+	node, err := tailscaled.Self(ctx)
+	if err != nil {
 		_, _ = fmt.Fprintf(p.w, "\ntailscaled is installed, but setup cannot read which tailnet it is on: %v\n", err)
-	} else {
-		tailnet = "the tailnet " + node.Tailnet
-		_, _ = fmt.Fprintf(p.w, "\nThis host is on %s.\n", tailnet)
+		return p.confirm("Use Tailscale to reach this server", false), ""
 	}
-	_, _ = fmt.Fprintln(p.w, "On a tailnet, the server signs people in by their tailnet login, with no key.")
-	_, _ = fmt.Fprintln(p.w, "Answer no if Tailscale is here for something else: setup then turns tailnet")
-	_, _ = fmt.Fprintln(p.w, "sign-in off and the edge on.")
-	return p.confirm("Will people reach this server over "+tailnet, def)
+	_, _ = fmt.Fprintf(p.w, "\nThis host is on the tailnet %s.\n", node.Tailnet)
+	_, _ = fmt.Fprintln(p.w, "With Tailscale, people on it link by this host's name and sign in with their")
+	_, _ = fmt.Fprintln(p.w, "tailnet login: no keys, invite codes or relay. Answer no to use Aether's relay")
+	_, _ = fmt.Fprintln(p.w, "instead, such as when your computer is not on this tailnet.")
+	return p.confirm("Use Tailscale to reach this server", def), node.DNSName
 }
 
 // dashboardPort is the port that makes the dashboard https://<MagicDNS name>/.
@@ -338,7 +351,7 @@ func dashboardBlocked(tailscaled *reachability.Tailscale, port int) error {
 // tailnet - no tailscaled, or a no to askTailnet - the edge is the only
 // route a laptop or phone has to the server, so it is on and setup says
 // what that discloses; on a tailnet it is offered, off unless the config
-// already has it on. An edge-url the operator already set is kept or
+// already has it on, and the disclosure follows a yes. An edge-url the operator already set is kept or
 // offered as the answer. An empty one is kept only without tailscaled:
 // with tailscaled it is what declining the offer wrote.
 func askEdge(p *prompter, current map[string]string, tailscaled, tailnet bool, values map[string]string) {
@@ -356,48 +369,42 @@ func askEdge(p *prompter, current map[string]string, tailscaled, tailnet bool, v
 	if edgeURL == edgeagent.DefaultURL {
 		operator = ", run by the Aether project"
 	}
-	switch {
-	case tailnet:
-		_, _ = fmt.Fprintf(p.w, "\nDevices that are not on your tailnet can reach this server through the edge at\n%s%s.\n", edgeURL, operator)
-	case tailscaled:
-		_, _ = fmt.Fprintf(p.w, "\nTailnet sign-in is off, so setup turns on the edge at %s%s.\n", edgeURL, operator)
-	default:
-		_, _ = fmt.Fprintf(p.w, "\nTailscale is not installed, so setup turns on the edge at %s%s.\n", edgeURL, operator)
-	}
-	_, _ = fmt.Fprintln(p.w, "The edge is a relay: this server and your devices both dial out to it, so")
-	_, _ = fmt.Fprintln(p.w, "neither needs an open port. SSH runs end to end through it, so the edge cannot")
-	_, _ = fmt.Fprintln(p.w, "read it. It sees this server's host name, host key and IP address, who signs")
-	_, _ = fmt.Fprintln(p.w, "in, device names, client IP addresses, and when and how much traffic flows.")
-	if !tailnet {
-		_, _ = fmt.Fprintln(p.w, `Turn it off with: aether-server config set edge-url ""`)
+	if tailnet {
+		values["edge-url"] = ""
+		_, _ = fmt.Fprintf(p.w, "\nDevices off the tailnet can reach this server through the edge, Aether's relay\nat %s%s.\n", edgeURL, operator)
+		if !p.confirm("Turn on the edge too", configured != "") {
+			return
+		}
 		values["edge-url"] = edgeURL
+		printEdgeDisclosure(p.w)
 		return
 	}
-	values["edge-url"] = ""
-	if p.confirm("Reach this server through the edge too", configured != "") {
-		values["edge-url"] = edgeURL
+	switch {
+	case tailscaled:
+		_, _ = fmt.Fprintf(p.w, "\nSetup turns on the edge, Aether's relay at %s%s.\n", edgeURL, operator)
+	default:
+		_, _ = fmt.Fprintf(p.w, "\nTailscale is not installed, so setup turns on the edge, Aether's relay at\n%s%s. To use Tailscale\ninstead, install it (https://tailscale.com/download) and run setup again.\n", edgeURL, operator)
 	}
+	printEdgeDisclosure(p.w)
+	values["edge-url"] = edgeURL
+}
+
+func printEdgeDisclosure(w io.Writer) {
+	_, _ = fmt.Fprintln(w, "This server and your computer both dial out to the edge, so neither needs an")
+	_, _ = fmt.Fprintln(w, "open port. SSH runs end to end through it, so the edge cannot read it. It sees")
+	_, _ = fmt.Fprintln(w, "this server's host name, host key and IP address, who signs in, device names,")
+	_, _ = fmt.Fprintln(w, "client IP addresses, and when and how much traffic flows.")
+	_, _ = fmt.Fprintln(w, `Turn it off with: aether-server config set edge-url ""`)
 }
 
 const edgeAccessQuestion = `
 Who may reach this server through the edge?
-
-  1) Account access
-     Signing in with GitHub is enough. People you invite start on a new
-     device by signing in, and Aether creates and manages the device key.
-     Access is as strong as each person's GitHub account and the edge that
-     vouches for it.
-
-  2) Approved devices
-     Signing in says who someone is. It does not admit a device. Each new
-     device waits until it is approved: by that person from a device they
-     already use, by an admin, or by you on this machine. A taken-over
-     account, or a compromised edge, cannot add a device on its own.
-     Recommended for a team workspace holding code or credentials that
-     must stay protected.
-
-Both leave Tailscale and direct SSH key access as they are.
-Change it on this machine: aether-server config set edge-access <account|approved-devices>
+  1) Account access: anyone you invite, once they sign in with GitHub.
+  2) Approved devices: each new device also waits until that person, an admin
+     or you approve it, so a taken-over GitHub account or edge cannot add one.
+     Recommended for a team with code or credentials to protect.
+Tailscale and SSH key access stay as they are. Change it later with:
+  aether-server config set edge-access <account|approved-devices>
 `
 
 // askEdgeAccess sets edge-access. The question has no default: it repeats
@@ -460,24 +467,39 @@ func (p *prompter) ask(option, label, def string) string {
 }
 
 // confirm asks a yes/no question, showing def as the word an empty answer
-// takes.
+// takes, and asks again until the answer is yes, no or a boolean.
 func (p *prompter) confirm(label string, def bool) bool {
 	word := "no"
 	if def {
 		word = "yes"
 	}
-	switch strings.ToLower(p.readLine(label+" (yes/no)", word)) {
-	case "y", "yes", "true":
-		return true
-	case "n", "no", "false":
-		return false
-	default:
-		return def
+	for {
+		answer := strings.ToLower(p.readLine(label+" (yes/no)", word))
+		switch answer {
+		case "y", "yes":
+			return true
+		case "n", "no":
+			return false
+		}
+		if b, err := strconv.ParseBool(answer); err == nil {
+			return b
+		}
+		if p.err != nil || p.eof {
+			return def
+		}
+		_, _ = fmt.Fprintln(p.w, "  answer yes or no; try again")
 	}
 }
 
+// errInputEnded stops setup when input ends at a prompt, so Ctrl-D never
+// writes files or installs Sysbox on defaults nobody accepted.
+var errInputEnded = errors.New("setup: input ended before every question was answered; nothing written")
+
 func (p *prompter) readLine(label, def string) string {
-	if p.err != nil || p.eof {
+	if p.eof && p.err == nil {
+		p.err = errInputEnded
+	}
+	if p.err != nil {
 		return def
 	}
 	_, _ = fmt.Fprintf(p.w, "%s [%s]: ", label, def)
@@ -485,6 +507,9 @@ func (p *prompter) readLine(label, def string) string {
 	switch {
 	case err == io.EOF:
 		p.eof = true
+		if strings.TrimSpace(line) == "" {
+			p.err = errInputEnded
+		}
 	case err != nil:
 		p.err = err
 		return def

@@ -250,7 +250,7 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
 
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
-    fireEvent.click(await screen.findByRole('button', { name: /^Link by address/ }))
+    fireEvent.click(await screen.findByRole('radio', { name: 'SSH address' }))
     fireEvent.change(screen.getByLabelText('Server address'), {
       target: { value: 'host:2222' },
     })
@@ -272,6 +272,41 @@ describe('onboarding wizard', () => {
     expect(useStore.getState().connectionEpoch).toBe(1)
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(currentStep()).toContain('Repository')
+  })
+
+  it('says a pending member waits for an admin instead of calling the link done', async () => {
+    useStore.setState({ connectionEpoch: 0 })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => ({ server_configured: false, linked: false, addr: '', user: '', repo: '' })),
+      localLinkApply: vi.fn(async () => ({ addr: 'box:2222', user: 'aether', member: { id: 'mem_sam', display_name: 'Sam', role: 'collaborator', pending: true } })),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.change(await screen.findByLabelText("Server's tailnet name"), { target: { value: 'box' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }))
+
+    const callout = (await screen.findByText('Waiting for an admin to approve you')).closest('[data-tone]')
+    expect(callout?.textContent).toContain('Linked to box:2222 as Sam (collaborator, pending).')
+    expect(callout?.textContent).toContain('aether member approve mem_sam')
+    expect(useStore.getState().connectionEpoch).toBe(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(useStore.getState().connectionEpoch).toBe(1)
+  })
+
+  it('links the tailnet host of a pasted dashboard address', async () => {
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => ({ server_configured: false, linked: false, addr: '', user: '', repo: '' })),
+      localLinkApply: vi.fn(async () => ({ addr: 'box.tail1234.ts.net:2222', user: 'aether', member: { id: 'member_1', display_name: 'Alice', role: 'admin' } })),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.change(await screen.findByLabelText("Server's tailnet name"), { target: { value: ' https://box.tail1234.ts.net:8443/ ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }))
+
+    expect(client.localLinkApply).toHaveBeenCalledWith({ addr: 'box.tail1234.ts.net' })
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
   })
 
   it('shows a configured server without a repository and opens the repository choice', async () => {
@@ -340,7 +375,7 @@ describe('onboarding wizard', () => {
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    expect(await screen.findByRole('button', { name: /^Link by address/ })).toBeDefined()
+    expect(await screen.findByRole('radio', { name: 'Tailscale' })).toBeDefined()
 
     status = {
       server_configured: true,

@@ -67,7 +67,10 @@ export function RepositoryStep({
 
   const identity = hosted && caps.hasMethod('member.git') && (
     <section aria-labelledby="repository-git-identity" className="flex flex-col gap-2 border-b border-seam pb-4">
-      <h3 id="repository-git-identity" className="text-ui font-medium text-text">Git identity</h3>
+      <div className="flex items-baseline gap-2">
+        <h3 id="repository-git-identity" className="text-ui font-medium text-text">Git identity</h3>
+        <span className="text-ui-sm text-muted">Optional</span>
+      </div>
       <GitIdentityForm client={client} caps={caps} />
     </section>
   )

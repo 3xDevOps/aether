@@ -1631,7 +1631,7 @@ export interface EdgeLinkResult {
   edge: string
   addr?: string
   user: string
-  member: { id: string; display_name: string; role: string }
+  member: { id: string; display_name: string; role: string; pending?: boolean }
   /** The link is saved, but the clone's aether remote was not updated. */
   remote_error?: string
 }
@@ -1806,7 +1806,7 @@ export interface MemberMerge {
 export interface LinkApplyResult {
   addr: string
   user: string
-  member: { id: string; display_name: string; role: string }
+  member: { id: string; display_name: string; role: string; pending?: boolean }
   key_generated?: string
 }
 

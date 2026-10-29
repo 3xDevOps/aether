@@ -91,7 +91,7 @@ func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 	if values["tailnet-auto-join"] != "true" {
 		t.Errorf("tailnet-auto-join = %q, want the retyped true", values["tailnet-auto-join"])
 	}
-	if !strings.Contains(out.String(), "try again") {
+	if !strings.Contains(out.String(), "answer yes or no; try again") {
 		t.Errorf("a rejected answer must be re-asked:\n%s", out.String())
 	}
 }
@@ -180,53 +180,76 @@ func TestAskServerOptionsAsksNoTailnetQuestionsWithoutTailscale(t *testing.T) {
 	}
 }
 
-// tailscaled can be on a tailnet for something else, so the first tailnet
-// question names that tailnet, or says why it cannot, and Enter turns
-// tailnet sign-in off and the edge on, exactly as without Tailscale.
-func TestAskServerOptionsTurnsTailnetSignInOffByDefault(t *testing.T) {
+// Input that ends at a prompt writes nothing, even where every question
+// left has a default: Ctrl-D is not consent.
+func TestAskServerOptionsStopsWhenInputEnds(t *testing.T) {
+	for name, input := range map[string]string{"at the first prompt": "", "mid-way": "\n\n", "after an answer with no newline": "\n\nyes"} {
+		var out bytes.Buffer
+		values, err := askServerOptions(newPrompter(&out, strings.NewReader(input)), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
+		if !errors.Is(err, errInputEnded) || values != nil {
+			t.Errorf("%s: values %v, err %v; want nothing and errInputEnded", name, values, err)
+		}
+	}
+}
+
+// A first run on a host whose tailscaled names its tailnet takes Tailscale
+// on Enter. A no, or a tailnet setup cannot read, turns tailnet sign-in off
+// and the edge on, exactly as without Tailscale.
+func TestAskServerOptionsPrefersTailscale(t *testing.T) {
+	edgeOn := map[string]string{
+		"addr":                ":2222",
+		"data-dir":            "/var/lib/aether",
+		"tailnet-auto-join":   "false",
+		"tailnet-require-key": "true",
+		"edge-url":            edgeagent.DefaultURL,
+		"edge-access":         string(edgeproto.PolicyApprovedDevices),
+	}
+	named := func(t *testing.T) *reachability.Tailscale { return fakeTailscaled(t, true, startable) }
 	for name, tc := range map[string]struct {
 		tailscaled func(*testing.T) *reachability.Tailscale
-		want       []string
+		input      []string
+		values     map[string]string
+		say        []string
 	}{
-		"named tailnet": {
-			func(t *testing.T) *reachability.Tailscale { return fakeTailscaled(t, true, startable) },
-			[]string{"\nThis host is on the tailnet alice@example.com.\n",
-				"Will people reach this server over the tailnet alice@example.com (yes/no) [no]: "},
+		"named tailnet, Enter": {named, []string{"", "", "", "", "", "", "", "yes"},
+			map[string]string{"addr": ":2222", "data-dir": "/var/lib/aether", "tailnet-auto-join": "false",
+				"tailnet-require-key": "false", "web-port": "443", "edge-url": ""},
+			[]string{"\nThis host is on the tailnet alice@example.com.\nWith Tailscale, people on it link by this host's name",
+				"Use Tailscale to reach this server (yes/no) [yes]: "},
+		},
+		"named tailnet, no": {named, []string{"", "", "no", "2", "yes"}, edgeOn,
+			[]string{"Answer no to use Aether's relay",
+				"\nSetup turns on the edge, Aether's relay at https://edge.onaether.dev, run by the Aether project.\n",
+				"client IP addresses", `aether-server config set edge-url ""`},
 		},
 		"unreadable tailnet": {
 			func(t *testing.T) *reachability.Tailscale {
 				return reachability.NewTailscale(filepath.Join(t.TempDir(), "absent.sock"))
 			},
+			[]string{"", "", "", "2", "yes"}, edgeOn,
 			[]string{"\ntailscaled is installed, but setup cannot read which tailnet it is on: status: ",
 				"connect: no such file or directory\n",
-				"Will people reach this server over this host's tailnet (yes/no) [no]: "},
+				"Use Tailscale to reach this server (yes/no) [no]: "},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			values, err := askServerOptions(newPrompter(&out, answers("", "", "", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
+			values, err := askServerOptions(newPrompter(&out, answers(tc.input...)), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := map[string]string{
-				"addr":                ":2222",
-				"data-dir":            "/var/lib/aether",
-				"tailnet-auto-join":   "false",
-				"tailnet-require-key": "true",
-				"edge-url":            edgeagent.DefaultURL,
-				"edge-access":         string(edgeproto.PolicyApprovedDevices),
+			if !maps.Equal(values, tc.values) {
+				t.Errorf("values = %v, want %v", values, tc.values)
 			}
-			if !maps.Equal(values, want) {
-				t.Errorf("values = %v, want %v", values, want)
-			}
-			for _, say := range append(tc.want, "Answer no if Tailscale is here for something else",
-				"\nTailnet sign-in is off, so setup turns on the edge at https://edge.onaether.dev, run by the Aether project.\n",
-				"client IP addresses", `aether-server config set edge-url ""`) {
+			for _, say := range tc.say {
 				if !strings.Contains(out.String(), say) {
 					t.Errorf("setup does not say %q:\n%s", say, out.String())
 				}
 			}
-			for _, asked := range []string{"Auto-approve", "require pubkey", "Dashboard HTTPS port", "Reach this server through the edge too"} {
+			if tc.values["edge-url"] == "" {
+				return
+			}
+			for _, asked := range []string{"Let anyone on the tailnet", "registered SSH key", "Dashboard HTTPS port", "Turn on the edge too"} {
 				if strings.Contains(out.String(), asked) {
 					t.Errorf("asked %q after a no:\n%s", asked, out.String())
 				}
@@ -254,16 +277,16 @@ func TestAskServerOptionsAsksTheTailnetQuestionsOnYes(t *testing.T) {
 	if !maps.Equal(values, want) {
 		t.Errorf("values = %v, want %v", values, want)
 	}
-	for _, say := range []string{"anyone already on your tailnet", "Auto-approve tailnet identities (true/false) [false]: ",
-		"Reach this server through the edge too (yes/no) [no]: "} {
+	for _, say := range []string{"Let anyone on the tailnet join without an admin approving them (yes/no) [no]: ",
+		"https://box.tail1234.ts.net/", "Turn on the edge too (yes/no) [no]: "} {
 		if !strings.Contains(out.String(), say) {
 			t.Errorf("setup does not say %q:\n%s", say, out.String())
 		}
 	}
 }
 
-// A re-run defaults the tailnet question to yes only for a config that
-// shows tailnet use: the edge off, a web-port, or auto-join on.
+// A first run defaults the tailnet question to yes, and a re-run only for
+// a config that shows tailnet use: the edge off, a web-port, or auto-join on.
 func TestAskServerOptionsDefaultsTheTailnetQuestionToTheConfig(t *testing.T) {
 	edgeOn := map[string]string{"edge-url": edgeagent.DefaultURL, "edge-access": "approved-devices"}
 	with := func(kv ...string) map[string]string {
@@ -277,7 +300,7 @@ func TestAskServerOptionsDefaultsTheTailnetQuestionToTheConfig(t *testing.T) {
 		config map[string]string
 		want   string
 	}{
-		"first run":                        {nil, "no"},
+		"first run":                        {nil, "yes"},
 		"what a no writes":                 {with("tailnet-auto-join", "false", "tailnet-require-key", "true"), "no"},
 		"written without tailscaled":       {with("tailnet-auto-join", "false"), "no"},
 		"written by install with the edge": {with("addr", ":2222"), "no"},
@@ -296,7 +319,7 @@ func TestAskServerOptionsDefaultsTheTailnetQuestionToTheConfig(t *testing.T) {
 			}
 			var out bytes.Buffer
 			_, _ = askServerOptions(newPrompter(&out, answers("", "", "")), path, fakeTailscaled(t, true, startable))
-			if want := "over the tailnet alice@example.com (yes/no) [" + tc.want + "]: "; !strings.Contains(out.String(), want) {
+			if want := "Use Tailscale to reach this server (yes/no) [" + tc.want + "]: "; !strings.Contains(out.String(), want) {
 				t.Errorf("setup does not ask %q:\n%s", want, out.String())
 			}
 		})
@@ -307,7 +330,7 @@ func TestAskServerOptionsDefaultsTheTailnetQuestionToTheConfig(t *testing.T) {
 // whichever way the tailnet question was answered.
 func TestAskServerOptionsRerunKeepsTheTailnetAnswer(t *testing.T) {
 	for name, tc := range map[string]struct{ first, rerun []string }{
-		"no":                   {[]string{"", "", "", "2", "yes"}, []string{"", "", "", "2", "yes"}},
+		"no":                   {[]string{"", "", "no", "2", "yes"}, []string{"", "", "", "2", "yes"}},
 		"yes":                  {[]string{"", "", "yes", "true", "", "", "", "yes"}, []string{"", "", "", "", "", "", "", "yes"}},
 		"yes, a key, the edge": {[]string{"", "", "yes", "", "true", "yes", "2", "yes"}, []string{"", "", "", "2", "yes"}},
 		"yes, a key, edge off": {[]string{"", "", "yes", "", "true", "", "yes"}, []string{"", "", "", "", "", "", "yes"}},
@@ -345,7 +368,7 @@ func TestAskServerOptionsRerunChangesTheTailnetAnswer(t *testing.T) {
 			"tailnet-auto-join": "false", "tailnet-require-key": "true",
 			"edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices),
 		}},
-		"no, then yes": {[]string{"", "", "", "2", "yes"}, []string{"", "", "yes", "", "false", "", "", "2", "yes"}, map[string]string{
+		"no, then yes": {[]string{"", "", "no", "2", "yes"}, []string{"", "", "yes", "", "false", "", "", "2", "yes"}, map[string]string{
 			"tailnet-auto-join": "false", "tailnet-require-key": "false", "web-port": "443",
 			"edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices),
 		}},
@@ -453,7 +476,7 @@ func TestAskServerOptionsDefaultsTheDashboardOffWhereItCannotStart(t *testing.T)
 			if values["web-port"] != "0" || !strings.Contains(out.String(), tc.want) {
 				t.Errorf("web-port = %q, want 0 and the reason %q in:\n%s", values["web-port"], tc.want, out.String())
 			}
-			if !strings.Contains(out.String(), "Dashboard HTTPS port on the tailnet (0 = off) [0]: ") {
+			if !strings.Contains(out.String(), "Dashboard HTTPS port (0 = off) [0]: ") {
 				t.Errorf("the dashboard question is not asked with 0 as the default:\n%s", out.String())
 			}
 
@@ -595,8 +618,8 @@ func TestAskServerOptionsRequiresAnAccessPolicy(t *testing.T) {
 		t.Errorf("asked %d times for three unusable answers and a 2, want 4:\n%s", n, out.String())
 	}
 	for _, want := range []string{"Who may reach this server through the edge?", "1) Account access", "2) Approved devices",
-		"A taken-over\n     account, or a compromised edge, cannot add a device on its own.",
-		"Both leave Tailscale and direct SSH key access as they are.",
+		"a taken-over GitHub account or edge cannot add one",
+		"Tailscale and SSH key access stay as they are.",
 		"aether-server config set edge-access <account|approved-devices>"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("setup does not say %q:\n%s", want, out.String())
@@ -695,14 +718,15 @@ func TestWriteSetupWithoutDockerStartsNextOnDocker(t *testing.T) {
 	values := map[string]string{"data-dir": dataDir, "edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices)}
 	configPath := filepath.Join(dir, "server.conf")
 	var out bytes.Buffer
-	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), configPath, values, false, false, false); err != nil {
+	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), configPath, values, false, false, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	want := "  1. install or start Docker on this machine:\n       https://docs.docker.com/engine/install/\n" +
 		"  2. start the server on this machine:\n       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server\n" +
 		"  3. on this machine, print a claim code:\n       sudo aether-server edge claim-code --config " + configPath + "\n" +
-		"  4. on your computer, sign in and claim the server with that code:\n       aether login\n       aether link --claim <code>\n" +
-		mcpStep(5)
+		installStep(4) +
+		"  5. on your computer, sign in and claim the server with that code:\n       aether login\n       aether link --claim <code>\n" +
+		mcpStep(6)
 	if got := nextSteps(t, out.String()); got != want {
 		t.Errorf("next steps:\n%s\nwant:\n%s", got, want)
 	}
@@ -746,7 +770,7 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	dataDir := filepath.Join(dir, "data")
 	values := map[string]string{"data-dir": dataDir, "edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices)}
 	var out bytes.Buffer
-	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf"), values, false, true, true); err != nil {
+	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf"), values, false, true, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -759,11 +783,11 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	if sysboxAt < 0 || claimAt < sysboxAt || nextAt < claimAt {
 		t.Errorf("want Sysbox output, then the claim link, then the next steps:\n%s", got)
 	}
-	if !strings.HasSuffix(got, "\n       "+serversetup.ActivateCommand+"\n"+
-		"  2. on your computer, open the claim link above with the Aether app, or paste it\n"+
-		"     into the app's Connect page; in a terminal:\n"+
+	if !strings.HasSuffix(got, "\n       "+serversetup.ActivateCommand+"\n"+installStep(2)+
+		"  3. on your computer: in the Aether app's Connect step choose Aether relay, sign in\n"+
+		"     with GitHub and paste the claim link above; in a terminal:\n"+
 		"       aether login\n"+
-		"       aether link --claim "+code+"\n"+mcpStep(3)) {
+		"       aether link --claim "+code+"\n"+mcpStep(4)) {
 		t.Errorf("output does not end on starting the server, claiming it and adding it to ChatGPT or Claude:\n%s", got)
 	}
 	if n := strings.Count(got, "systemctl daemon-reload"); n != 1 {
@@ -774,10 +798,15 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	}
 }
 
+// installStep is the next step, numbered n, that installs the client.
+func installStep(n int) string {
+	return fmt.Sprintf("  %d. on your computer, install Aether if it is not there yet (Windows: docs/install.md):\n       curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client\n", n)
+}
+
 // mcpStep is the next step, numbered n, that a server with the edge on
 // ends with.
 func mcpStep(n int) string {
-	return fmt.Sprintf("  %d. to run agents from ChatGPT or Claude, on that computer:\n       aether mcp\n", n)
+	return fmt.Sprintf("  %d. optional, to run agents from ChatGPT or Claude, on that computer:\n       aether mcp\n", n)
 }
 
 // optionsOf is the serve options with values set, as configuredOptions
@@ -791,6 +820,66 @@ func optionsOf(t *testing.T, values map[string]string) *flag.FlagSet {
 	return fs
 }
 
+// On a tailnet the next steps name this host's MagicDNS name, with the
+// port only when aether link would not assume it, and the dashboard's
+// address when the server serves it.
+func TestPrintNextStepsNamesTheTailnetHost(t *testing.T) {
+	t.Setenv("SUDO_USER", "")
+	for _, tc := range []struct{ addr, web, link, open string }{
+		{":2222", "0", "box.tail1234.ts.net", ""},
+		{":2300", "0", "box.tail1234.ts.net:2300", ""},
+		{":2222", "443", "box.tail1234.ts.net", "     or, with nothing installed, open https://box.tail1234.ts.net/ in a browser there\n"},
+		{":2222", "8443", "box.tail1234.ts.net", "     or, with nothing installed, open https://box.tail1234.ts.net:8443/ in a browser there\n"},
+	} {
+		var out bytes.Buffer
+		o := optionsOf(t, map[string]string{"addr": tc.addr, "web-port": tc.web, "edge-url": ""})
+		if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net"); err != nil {
+			t.Fatal(err)
+		}
+		want := installStep(2) +
+			"  3. on your computer, on the same tailnet: in the Aether app's Connect step choose\n" +
+			"     Tailscale and enter " + tc.link + "; in a terminal:\n" +
+			"       aether link " + tc.link + "\n" + tc.open
+		if !strings.HasSuffix(out.String(), want) || strings.Contains(out.String(), "<this-host>") {
+			t.Errorf("addr %s, web-port %s: next steps do not end on linking %s:\n%s", tc.addr, tc.web, tc.link, out.String())
+		}
+	}
+}
+
+// A saved key requirement means a tailnet login alone does not link, and
+// SSH bound to one address answers only there, so neither gets the
+// tailnet line; with the edge on too, the claim is the alternative to the
+// tailnet link, not a step after it.
+func TestPrintNextStepsFollowsTheSavedTailnetConfig(t *testing.T) {
+	t.Setenv("SUDO_USER", "")
+	var out bytes.Buffer
+	o := optionsOf(t, map[string]string{"edge-url": "", "tailnet-require-key": "true"})
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "box.tail1234.ts.net") || !strings.Contains(out.String(), "aether link <this-host>:2222") {
+		t.Errorf("a key requirement still gets the tailnet line:\n%s", out.String())
+	}
+
+	out.Reset()
+	o = optionsOf(t, map[string]string{"addr": "192.168.1.10:2222", "edge-url": ""})
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "box.tail1234.ts.net") || !strings.Contains(out.String(), "aether link 192.168.1.10:2222") {
+		t.Errorf("SSH bound to one address does not send the link there:\n%s", out.String())
+	}
+
+	out.Reset()
+	o = optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": edgeagent.DefaultURL})
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "code", true, "box.tail1234.ts.net"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "aether link box.tail1234.ts.net\n  4. or, on a computer off the tailnet: in the Aether app's Connect step choose Aether relay") {
+		t.Errorf("the claim does not read as the alternative to the tailnet link:\n%s", out.String())
+	}
+}
+
 // Setup run through sudo gets a command its user can paste; a root shell
 // gets the bare one.
 func TestPrintNextStepsPrefixesSudoForASudoUser(t *testing.T) {
@@ -800,7 +889,7 @@ func TestPrintNextStepsPrefixesSudoForASudoUser(t *testing.T) {
 	} {
 		t.Setenv("SUDO_USER", sudoUser)
 		var out bytes.Buffer
-		if err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2300"}), "", true); err != nil {
+		if err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2300"}), "", true, ""); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(out.String(), want) || !strings.HasSuffix(out.String(), "\n       aether link <this-host>:2300\n") {
@@ -814,27 +903,27 @@ func TestPrintNextStepsPrefixesSudoForASudoUser(t *testing.T) {
 // signs in before claiming, on the server's edge: a claim code names none.
 func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	t.Setenv("SUDO_USER", "ubuntu")
-	claim := "  3. on your computer, sign in and claim the server with that code:\n       aether login\n       aether link --claim <code>\n"
+	claim := installStep(3) + "  4. on your computer, sign in and claim the server with that code:\n       aether login\n       aether link --claim <code>\n"
 	var out bytes.Buffer
 	o := optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": edgeagent.DefaultURL})
-	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true); err != nil {
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n"+claim+mcpStep(4)) {
+	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n"+claim+mcpStep(5)) {
 		t.Errorf("want step 2 to issue a claim code and step 3 to use it:\n%s", out.String())
 	}
 
 	out.Reset()
-	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, "", true); err != nil {
+	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n"+claim+mcpStep(4)) {
+	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n"+claim+mcpStep(5)) {
 		t.Errorf("want the claim command to name the config install wrote, shell-quoted:\n%s", out.String())
 	}
 
 	out.Reset()
 	o = optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": "https://edge.example"})
-	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true); err != nil {
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "\n       aether login --edge https://edge.example\n       aether link --claim <code> --edge https://edge.example\n") {
@@ -846,7 +935,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 // through it.
 func TestPrintNextStepsRefusesAnAddrWithoutAPortBeforePrinting(t *testing.T) {
 	var out bytes.Buffer
-	err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": "2222"}), "", true)
+	err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": "2222"}), "", true, "")
 	if err == nil || !strings.Contains(err.Error(), `addr "2222"`) || out.Len() != 0 {
 		t.Errorf("err = %v, output %q; want the addr error and nothing printed", err, out.String())
 	}

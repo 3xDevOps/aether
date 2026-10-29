@@ -46,7 +46,7 @@ host gets `421 Misdirected Request`.
 The edge is off until you turn it on. `aether-server setup` turns on
 `https://edge.onaether.dev` when the host has no Tailscale or you turn tailnet
 sign-in off, and prints what the edge can see. With tailnet sign-in on, it asks
-`Reach this server through the edge too`, defaulting to no. Otherwise use
+`Turn on the edge too`, defaulting to no. Otherwise use
 `aether-server install --edge-url <url> --edge-access <policy>` (it refuses
 `--edge-url` without `--edge-access`), or the config keys:
 

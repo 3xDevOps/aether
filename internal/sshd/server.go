@@ -359,6 +359,17 @@ func (s *Server) authenticate(cm ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Perm
 					Message: firstAdminBanner(edge.Origin(), cm),
 				}
 			}
+			// Without an edge, a tailnet server's port can still be open
+			// beyond the tailnet, so the first admin key must come over the
+			// tailnet or from loopback too.
+			if s.cfg.WhoIs != nil && !fromLoopback(cm) {
+				if _, err := s.cfg.WhoIs.WhoIs(ctx, cm.RemoteAddr().String()); err != nil {
+					return nil, &ssh.BannerError{
+						Err:     fmt.Errorf("sshd: a fresh tailnet server takes its first admin key only over the tailnet or from loopback: %w", err),
+						Message: "this server has no admin yet and takes the first one over its tailnet: link it from a device on the tailnet, or on the server itself\n",
+					}
+				}
+			}
 			return &ssh.Permissions{Extensions: map[string]string{bootstrapKeyExtension: keyLine}}, nil
 		}
 		if cm != nil {

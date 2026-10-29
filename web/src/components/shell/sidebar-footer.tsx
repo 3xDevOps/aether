@@ -53,7 +53,7 @@ export function SidebarFooter() {
   const checkForUpdates = useCheckForUpdates()
   const mobile = useIsMobile()
   const openProfile = useStore((s) => s.setProfileOpen)
-  const name = self?.display_name ?? 'Not signed in'
+  const name = self?.display_name ?? 'Not connected'
   const word = useConnectionWord()
 
   const themeItems = (

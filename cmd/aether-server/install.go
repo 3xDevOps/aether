@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
@@ -112,7 +113,7 @@ func writeInstall(w io.Writer, unitPath, configPath string, values map[string]st
 	if _, err := reportEdge(w, options, false); err != nil {
 		return err
 	}
-	return printNextSteps(w, configPath, options, "", docker)
+	return printNextSteps(w, configPath, options, "", docker, "")
 }
 
 // The least a run needs to start, from internal/scheduler/capacity.go: 2
@@ -234,8 +235,10 @@ func configuredOptions(configPath string) (*flag.FlagSet, error) {
 // it. It never runs systemctl itself: installing must not restart a live
 // server as a side effect (this is the `aether daemon install` convention
 // - render and tell). claimCode is the code reportEdge issued, or "";
-// docker is whether the Docker daemon answered.
-func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claimCode string, docker bool) error {
+// docker is whether the Docker daemon answered; tailnetHost is this host's
+// MagicDNS name, or "". The tailnet line follows the saved config: a key
+// requirement means a tailnet login alone does not link.
+func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claimCode string, docker bool, tailnetHost string) error {
 	sudo := sudoPrefix()
 	show := func(s string) string { return s }
 	// NO_COLOR: https://no-color.org
@@ -254,25 +257,52 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 		commands := claimCommands(edgeURL, code)
 		return show(commands[0]) + "\n       " + show(commands[1])
 	}
-	var reach []string
+	addr := options.Lookup("addr").Value.String()
+	listen, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("addr %q: %w", addr, err)
+	}
+	// SSH bound to one address answers only there, so that address is the
+	// one to link to, not the MagicDNS name.
+	if ip := net.ParseIP(listen); ip != nil && ip.IsUnspecified() {
+		listen = ""
+	}
+	var here, computer []string
+	tailnet := tailnetHost != "" && listen == "" && options.Lookup("tailnet-require-key").Value.String() == "false"
+	relayFrom := "on your computer"
+	if tailnet {
+		// Linking over the tailnet first makes an admin the claim cannot
+		// then bind to, so the relay is the alternative, not the next step.
+		relayFrom = "or, on a computer off the tailnet"
+		// aether link gives a bare name the port 2222.
+		host := tailnetHost
+		if port != "2222" {
+			host = net.JoinHostPort(host, port)
+		}
+		line := "on your computer, on the same tailnet: in the Aether app's Connect step choose\n" +
+			"     Tailscale and enter " + host + "; in a terminal:\n       " + show("aether link "+host)
+		if web := options.Lookup("web-port").Value.String(); web != "0" {
+			url := "https://" + tailnetHost + "/"
+			if web != "443" {
+				url = "https://" + net.JoinHostPort(tailnetHost, web) + "/"
+			}
+			line += "\n     or, with nothing installed, open " + show(url) + " in a browser there"
+		}
+		computer = append(computer, line)
+	}
 	switch {
 	case claimCode != "":
-		reach = []string{"on your computer, open the claim link above with the Aether app, or paste it\n" +
-			"     into the app's Connect page; in a terminal:\n       " + claim(claimCode)}
+		computer = append(computer, relayFrom+": in the Aether app's Connect step choose Aether relay, sign in\n"+
+			"     with GitHub and paste the claim link above; in a terminal:\n       "+claim(claimCode))
 	case edgeURL != "" && owner == nil:
-		reach = []string{
-			"on this machine, print a claim code:\n       " + show(sudo+"aether-server edge claim-code"+configFlag(configPath)),
-			"on your computer, sign in and claim the server with that code:\n       " + claim("<code>"),
-		}
-	default:
-		addr := options.Lookup("addr").Value.String()
-		_, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return fmt.Errorf("addr %q: %w", addr, err)
-		}
-		reach = []string{"on your computer (the first link on a fresh server becomes admin):\n       " +
-			show("aether link <this-host>:"+port)}
+		here = append(here, "on this machine, print a claim code:\n       "+show(sudo+"aether-server edge claim-code"+configFlag(configPath)))
+		computer = append(computer, relayFrom+", sign in and claim the server with that code:\n       "+claim("<code>"))
+	case !tailnet:
+		computer = append(computer, "on your computer (the first link on a fresh server becomes admin):\n       "+
+			show("aether link "+net.JoinHostPort(cmp.Or(listen, "<this-host>"), port)))
 	}
+	install := "on your computer, install Aether if it is not there yet (Windows: docs/install.md):\n       " + show(clientInstall)
+	reach := append(here, append([]string{install}, computer...)...)
 	steps := append([]string{
 		"start the server on this machine:\n       " + show(strings.ReplaceAll(serversetup.ActivateCommand, "systemctl", sudo+"systemctl")),
 	}, reach...)
@@ -280,7 +310,7 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 		steps = slices.Insert(steps, 0, "install or start Docker on this machine:\n       "+show(dockerInstall))
 	}
 	if edgeURL != "" {
-		steps = append(steps, "to run agents from ChatGPT or Claude, on that computer:\n       "+show("aether mcp"))
+		steps = append(steps, "optional, to run agents from ChatGPT or Claude, on that computer:\n       "+show("aether mcp"))
 	}
 	_, _ = fmt.Fprintf(w, "\n%s\n", show("next:"))
 	for i, step := range steps {
@@ -288,6 +318,8 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 	}
 	return nil
 }
+
+const clientInstall = "curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client"
 
 // A claim code names no edge, and the client falls back to the project's,
 // so a server on another edge needs --edge on both commands.

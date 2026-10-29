@@ -49,10 +49,12 @@ or invite code.
    Give your team the name it prints, such as `my-server.tailnet-name.ts.net`.
 
 2. Run `sudo aether-server setup` ([install.md](install.md#first-boot)). It
-   finds tailscaled and asks `Will people reach this server over the tailnet
-   <name>`. Answer `yes`. The default, no, turns tailnet sign-in off.
+   finds tailscaled, names its tailnet and asks `Use Tailscale to reach this
+   server`. Enter answers yes; no turns tailnet sign-in off. Setup ends by
+   printing the host name to link to.
 
-3. On each client, join the same tailnet and link:
+3. On each client, join the same tailnet and link: in the desktop app's
+   Connect step choose **Tailscale** and enter that name, or run:
 
    ```sh
    sudo tailscale up
@@ -73,7 +75,10 @@ The server asks the local Tailscale daemon who is on the other end of each
 connection, as Tailscale SSH does. The tailnet login becomes the member, and the
 part before the `@` becomes the display name.
 
-- The first tailnet identity to link a fresh server becomes its admin.
+- The first tailnet identity to link a fresh server becomes its admin. Until
+  then, a first admin SSH key is taken only over the tailnet or from the
+  server itself, so a port 2222 open beyond the tailnet cannot be used to take
+  admin first.
 - Everyone after that joins as a pending collaborator. `aether link` prints
   `linked to <server> as <name> (collaborator, pending); an admin runs: aether
   member approve <member-id>`, and every other command fails with `membership
@@ -150,9 +155,11 @@ With no tailnet and no edge, SSH keys and invite codes identify people.
 aether link 192.168.1.50:2222
 ```
 
-The first key to link a fresh server becomes the admin. Without an edge,
-until that first link any key that reaches port 2222 becomes admin, so link
-right after the server starts and keep the port closed to the internet.
+The first key to link a fresh server becomes the admin. Without an edge or
+tailnet sign-in, until that first link any key that reaches port 2222 becomes
+admin, so link right after the server starts and keep the port closed to the
+internet. With tailnet sign-in, the first key must arrive over the tailnet or
+from loopback.
 
 The CLI offers `~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
 `~/.ssh/id_ed25519` if it finds none. For another key:
