@@ -331,6 +331,80 @@ func TestRestoreKeepsARowWhoseEditFailed(t *testing.T) {
 	}
 }
 
+// failingText fails every text change after writing its tombstone, as
+// failingUpdate does, and passes other changes.
+type failingText struct{ *store.DB }
+
+func (f failingText) UpdatePreference(ctx context.Context, member domain.MemberID, id string, edit func(*store.Preference) error,
+	commit func(old, cur store.Preference) error) (store.Preference, store.Preference, error) {
+	return f.DB.UpdatePreference(ctx, member, id, edit, func(old, cur store.Preference) error {
+		if err := commit(old, cur); err != nil || cur.Text == old.Text {
+			return err
+		}
+		return errors.New("disk I/O error")
+	})
+}
+
+// reopen closes the database, writes snapshot over it when set, and opens
+// it again with a new service, as a restart does.
+func (f *fixture) reopen(t *testing.T, snapshot []byte) {
+	t.Helper()
+	if err := f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot != nil {
+		if err := os.WriteFile(f.dbPath(), snapshot, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := store.Open(f.dbPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.db, f.svc = db, New(db, filepath.Join(f.dir, "preference-tombstones"))
+}
+
+// A text edit that failed is not taken as committed once a later change,
+// such as turning the preference off, makes the row newer, whether that
+// change comes in the same process or after a restart.
+func TestAFailedEditNeverDeletesTheRowLater(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	p := f.add(t, "Prefer table output")
+	f.reopen(t, nil)
+	snapshot, err := os.ReadFile(f.dbPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(failingText{f.db}, filepath.Join(f.dir, "preference-tombstones"))
+	text, off, on := "Prefer short answers", false, true
+	edit := protocol.PreferenceUpdateParams{ID: p.ID, Text: &text}
+	if _, err = svc.Update(ctx, f.alice, edit, protocol.PreferenceSourceSettings, ""); err == nil {
+		t.Fatal("the failing edit succeeded")
+	}
+	if _, err = svc.Update(ctx, f.alice, protocol.PreferenceUpdateParams{ID: p.ID, Enabled: &off}, protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Update(ctx, f.alice, edit, protocol.PreferenceSourceSettings, ""); err == nil {
+		t.Fatal("the failing edit succeeded")
+	}
+	f.reopen(t, nil)
+	if n, rerr := f.svc.Restore(ctx); rerr != nil || n != 0 {
+		t.Fatalf("Restore after the failed edits = %d, %v; want nothing deleted", n, rerr)
+	}
+	if _, err = f.svc.Update(ctx, f.alice, protocol.PreferenceUpdateParams{ID: p.ID, Enabled: &on}, protocol.PreferenceSourceSettings, ""); err != nil {
+		t.Fatal(err)
+	}
+	f.reopen(t, nil)
+	if n, rerr := f.svc.Restore(ctx); rerr != nil || n != 0 {
+		t.Fatalf("Restore after turning it on = %d, %v; want nothing deleted", n, rerr)
+	}
+	f.reopen(t, snapshot)
+	if n, rerr := f.svc.Restore(ctx); rerr != nil || n != 0 {
+		t.Fatalf("Restore of a copy taken before the failed edits = %d, %v; want its unchanged row kept", n, rerr)
+	}
+}
+
 // An edit whose commit was not recorded, as after a crash right after it
 // committed, is found committed from the database and recorded, so a later
 // restored copy still loses its old text.

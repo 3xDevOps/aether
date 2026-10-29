@@ -217,6 +217,9 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 		}
 		return nil
 	}, func(old, cur store.Preference) error {
+		if err := s.tombstones.settle(old); err != nil {
+			return err
+		}
 		if cur.Text == old.Text {
 			return nil
 		}

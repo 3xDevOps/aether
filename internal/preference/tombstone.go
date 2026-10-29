@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // tombstones is an append-only file of the preferences deleted and of the
@@ -21,15 +23,20 @@ import (
 //	<id> deleted           the preference was deleted
 //	<id> edit <ms>         a text change of the row last updated at <ms> may commit
 //	<id> edited <ms>       that change committed
+//	<id> aborted <ms>      that change did not commit
 type tombstones struct {
 	path string
 	mu   sync.Mutex
+	// pending holds the edits this process recorded and has not yet
+	// recorded as committed or aborted, by id.
+	pending map[string]time.Time
 }
 
 const (
 	deletedMark = "deleted"
 	editMark    = "edit"
 	editedMark  = "edited"
+	abortedMark = "aborted"
 )
 
 func (t *tombstones) deleted(ids ...string) error {
@@ -43,12 +50,55 @@ func (t *tombstones) deleted(ids ...string) error {
 // edit records, before it commits, a text change of id from the row last
 // updated at was.
 func (t *tombstones) edit(id string, was time.Time) error {
-	return t.append(id + " " + editMark + " " + strconv.FormatInt(was.UnixMilli(), 10))
+	if err := t.append(editLine(id, editMark, was)); err != nil {
+		return err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.pending == nil {
+		t.pending = make(map[string]time.Time)
+	}
+	t.pending[id] = was
+	return nil
 }
 
 // edited records that the text change edit recorded committed.
 func (t *tombstones) edited(id string, was time.Time) error {
-	return t.append(id + " " + editedMark + " " + strconv.FormatInt(was.UnixMilli(), 10))
+	if err := t.append(editLine(id, editedMark, was)); err != nil {
+		return err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.pending[id].Equal(was) {
+		delete(t.pending, id)
+	}
+	return nil
+}
+
+// settle records whether this process's pending edit of row committed,
+// before the row changes again: any later change makes it newer than the
+// edit's row, which Restore would take as proof that the edit committed.
+func (t *tombstones) settle(row store.Preference) error {
+	t.mu.Lock()
+	was, ok := t.pending[row.ID]
+	t.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	if row.UpdatedAt.After(was) {
+		return t.edited(row.ID, was)
+	}
+	if err := t.append(editLine(row.ID, abortedMark, was)); err != nil {
+		return err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.pending, row.ID)
+	return nil
+}
+
+func editLine(id, mark string, was time.Time) string {
+	return id + " " + mark + " " + strconv.FormatInt(was.UnixMilli(), 10)
 }
 
 // append writes lines and syncs them before the change they record
@@ -99,16 +149,19 @@ func (t *tombstones) read() (deleted []string, edits, done map[edit]bool, err er
 		switch {
 		case len(fields) == 2 && fields[1] == deletedMark:
 			deleted = append(deleted, fields[0])
-		case len(fields) == 3 && (fields[1] == editMark || fields[1] == editedMark):
+		case len(fields) == 3:
 			ms, perr := strconv.ParseInt(fields[2], 10, 64)
 			if perr != nil {
 				continue
 			}
 			e := edit{id: fields[0], was: time.UnixMilli(ms).UTC()}
-			if fields[1] == editMark {
+			switch fields[1] {
+			case editMark:
 				edits[e] = true
-			} else {
+			case editedMark:
 				done[e] = true
+			case abortedMark:
+				delete(edits, e)
 			}
 		}
 	}
@@ -123,8 +176,9 @@ func (t *tombstones) read() (deleted []string, edits, done map[edit]bool, err er
 // last updated no later than the row a committed text change replaced is
 // deleted, since it holds text the member replaced. A change recorded
 // before its commit counts as committed only when the database holds a
-// later row, so an edit that failed or never committed deletes nothing.
-// It returns how many it deleted.
+// later row, so an edit that failed or never committed deletes nothing; it
+// is recorded as aborted, since a later change of the row would also make
+// it newer. It returns how many it deleted.
 func (s *Service) Restore(ctx context.Context) (int64, error) {
 	deleted, edits, done, err := s.tombstones.read()
 	if err != nil {
@@ -142,11 +196,18 @@ func (s *Service) Restore(ctx context.Context) (int64, error) {
 			return 0, fmt.Errorf("preference: %w", terr)
 		}
 		for e := range edits {
-			if updated, ok := at[e.id]; ok && !done[e] && updated.After(e.was) {
+			updated, ok := at[e.id]
+			switch {
+			case !ok || done[e]:
+			case updated.After(e.was):
 				if err = s.tombstones.edited(e.id, e.was); err != nil {
 					return 0, err
 				}
 				done[e] = true
+			default:
+				if err = s.tombstones.append(editLine(e.id, abortedMark, e.was)); err != nil {
+					return 0, err
+				}
 			}
 		}
 	}
