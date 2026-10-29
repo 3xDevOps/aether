@@ -34,10 +34,10 @@ type connectorLaunchInput struct {
 	WorkspaceID string            `json:"workspace_id"`
 	Task        string            `json:"task,omitempty" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
 	Harness     string            `json:"harness,omitempty"`
-	Template    string            `json:"template,omitempty" jsonschema:"a saved template to run instead of task"`
-	Params      map[string]string `json:"params,omitempty" jsonschema:"the template's placeholder values"`
+	Template    string            `json:"template,omitempty" jsonschema:"a saved template instead of task"`
+	Params      map[string]string `json:"params,omitempty" jsonschema:"template placeholder values"`
 	// TemplateVersion pins the template as aether_launch_options read it.
-	TemplateVersion string `json:"template_version,omitempty" jsonschema:"the template's version, refused if it changed"`
+	TemplateVersion string `json:"template_version,omitempty" jsonschema:"refused if the template changed"`
 	Mode            string `json:"mode,omitempty" jsonschema:"default acp if installed"`
 	Model           string `json:"model,omitempty"`
 	Children        string `json:"children,omitempty" jsonschema:"may the agent start child runs; default your setting"`
@@ -78,10 +78,10 @@ type connectorMessageInput struct {
 
 type answerInput struct {
 	RunID    string         `json:"run_id"`
-	AnswerID string         `json:"answer_id" jsonschema:"from aether_needs_attention"`
+	AnswerID string         `json:"answer_id"`
 	Answer   string         `json:"answer,omitempty"`
 	OptionID string         `json:"option_id,omitempty"`
-	Values   map[string]any `json:"values,omitempty" jsonschema:"form values"`
+	Values   map[string]any `json:"values,omitempty"`
 	// IdempotencyKey repeats a swarm or teammate answer safely; an agent's
 	// question takes one answer, so a repeat finds nothing pending.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
@@ -94,33 +94,33 @@ type reviewInput struct {
 
 type decideInput struct {
 	RunID    string `json:"run_id"`
-	AnswerID string `json:"answer_id" jsonschema:"from aether_needs_attention"`
+	AnswerID string `json:"answer_id"`
 	Decision string `json:"decision"`
 	Action   string `json:"action" jsonschema:"the item's untrusted.text, word for word"`
 }
 
 type stopInput struct {
 	RunID   string `json:"run_id"`
-	Outcome string `json:"outcome,omitempty" jsonschema:"close the run as this"`
+	Outcome string `json:"outcome,omitempty"`
 }
 
 const idempotencyRule = " Reuse idempotency_key on a retry; "
 
 var writeOps = []Op{
 	opOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
-		"Use this when starting an agent on a task or saved template, one call per task; options from aether_launch_options; then poll aether_get_run."+
+		"Use this when starting an agent on a task or saved template, one call per task; then poll aether_get_run."+
 			idempotencyRule+"without one, a repeat within 60s, or of a template while it starts, returns the first run.", launchRun).
 		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodAgentList, protocol.MethodRunList,
 		protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
 	opOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
-		"Use this when one goal is split across agents: an integrator plans tasks for workers; then poll aether_get_swarm."+
+		"Use this when one goal needs several agents: an integrator plans their tasks; then poll aether_get_swarm."+
 			idempotencyRule+"without one, a repeat within 60s returns the first swarm.", launchSwarm).
 		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodMissionList,
 		protocol.MethodMissionCreate, protocol.MethodRunGet),
 	opOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
-		"Use this when the user wants to tell a run's agent something, which cannot be taken back; it waits up to 45s for approval if someone else controls the run."+
+		"Use this when the user wants to tell a run's agent something, which cannot be taken back; it waits up to 45s if another member controls the run."+
 			idempotencyRule+"without one, a repeat within 60s is sent once.", messageRun).hints(true, true).
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunInject),
 	opOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,
@@ -145,7 +145,7 @@ var controlOps = []Op{
 		enum("decision", "allow", "deny").hints(true, true).
 		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodServerInfo, protocol.MethodRunInputRespond),
 	opOf("aether_stop_run", "Stop or close run", ScopeControl, true, nextRuns,
-		"Use this when the user wants a run's agent stopped now, or, with outcome, the run closed as merged or abandoned.", stopRun).
+		"Use this when the user wants a run stopped now, or with outcome closed as merged or abandoned.", stopRun).
 		enum("outcome", "merged", "abandoned").hints(true, false).
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunKill, protocol.MethodRunClose, protocol.MethodRunGet),
 	opOf("aether_cancel_swarm", "Cancel swarm", ScopeControl, true, nextSwarms,

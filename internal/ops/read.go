@@ -91,7 +91,7 @@ type memoryInput struct {
 	ID          string `json:"id,omitempty" jsonschema:"a note to show in full"`
 	Words       string `json:"words,omitempty"`
 	Kind        string `json:"kind,omitempty"`
-	File        string `json:"file,omitempty" jsonschema:"notes citing this path"`
+	File        string `json:"file,omitempty" jsonschema:"citing this path"`
 	All         bool   `json:"all,omitempty" jsonschema:"with replaced notes"`
 }
 
@@ -105,7 +105,7 @@ var readOps = []Op{
 		defaultOn(Connector, "mine", true, "only runs you launched; default true").
 		defaultOn(Assistant, "mine", false, "only runs the member launched; default false, every run they can see"),
 	opOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
-		"Use this when the user asks about one run, or to poll a launched run."+untrustedRule, getRun).
+		"Use this when the user asks about one run."+untrustedRule, getRun).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline,
 		protocol.MethodRunPRStatus, protocol.MethodRunChildren, protocol.MethodRunPRFeedback),
 	opOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
@@ -115,11 +115,11 @@ var readOps = []Op{
 		"Use this when the user asks what needs them; each item names the tool that answers it."+untrustedRule, needsAttention).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodAttentionList),
 	opOf("aether_activity_summary", "Activity summary", ScopeRead, true, "",
-		"Use this when the user asks what their agents did today, yesterday or this week."+untrustedRule, activitySummary).
+		"Use this when the user asks what their agents did in a period."+untrustedRule, activitySummary).
 		enum("period", "today", "yesterday", "week").
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodInsightsGet, protocol.MethodWorkspaceTimeline),
 	opOf("aether_get_swarm", "Get swarms", ScopeRead, true, nextSwarms,
-		"Use this when the user asks about their swarms, or one by swarm_id, or to poll a launched swarm."+untrustedRule, getSwarm).
+		"Use this when the user asks about their swarms, or one by swarm_id."+untrustedRule, getSwarm).
 		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList,
 		protocol.MethodRunGet, protocol.MethodRunChildren, protocol.MethodRunPRStatus, protocol.MethodRunPRFeedback, protocol.MethodWorkspaceTimeline, protocol.MethodIntegrationList),
 	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
@@ -132,7 +132,7 @@ var readOps = []Op{
 		"Use this when coordinating agents: pairs of active runs that touch the same files."+untrustedRule, overlaps).
 		offer(TierRead).calling(protocol.MethodRunOverlaps, protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodRunList),
 	opOf("aether_memory_search", "Search team memory", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what the team decided or learned in a workspace, or about one note by id."+untrustedRule, memorySearch).
+		"Use this when the user asks what the team decided or learned in a workspace."+untrustedRule, memorySearch).
 		enum("kind", "decision", "convention", "gotcha", "preference", "outcome").
 		offer(TierRead).calling(protocol.MethodMemorySearch, protocol.MethodMemoryShow),
 	opOf("search", "Search runs and swarms", ScopeRead, true, "",

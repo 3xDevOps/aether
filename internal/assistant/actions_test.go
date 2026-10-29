@@ -266,6 +266,39 @@ func TestReversibleCallIsRecordedWithoutApproval(t *testing.T) {
 	if a := got[0][0]; a.Outcome != protocol.AssistantActionSucceeded || a.Approval != "" || a.Summary != "Pause run run-1" || a.Target.RunID != "run-1" {
 		t.Fatalf("pause = %+v, want it succeeded with no approval", a)
 	}
+
+	// A watch only notifies the member, so creating or pausing one asks
+	// nothing either.
+	create := protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"}, Source: protocol.WatchSourceAssistant}
+	if err := callTool(t, sock, m, protocol.MethodWatchCreate, create, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := callTool(t, sock, m, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: "w-1", Paused: new(true)}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	got = actions(t, svc, m)
+	if len(got) != 3 || got[1][0].Summary != "Watch run run-1 for its default conditions" || got[2][0].Summary != "Pause watch w-1" ||
+		got[1][0].Approval != "" || got[2][0].Approval != "" {
+		t.Fatalf("records = %+v, want the watch created and paused with no approval", got)
+	}
+	if w := got[1][0].Target.Watch; w == nil || *w != create.Target || got[2][0].Target.WatchID != "w-1" {
+		t.Fatalf("targets = %+v and %+v, want the created watch's target and the paused watch's id", got[1][0].Target, got[2][0].Target)
+	}
+}
+
+func TestReversibleWatchSummaryNamesWhatItCanRead(t *testing.T) {
+	for _, tc := range []struct{ method, params, want string }{
+		{protocol.MethodWatchCreate, `{"target":{"kind":"pr","repo":"acme/shop","number":7},"conditions":["ci"]}`, "Watch pull request acme/shop#7 for ci"},
+		{protocol.MethodWatchCreate, `{"target":{"kind":"run"}}`, `Watch target {"kind":"run"} for its default conditions`},
+		{protocol.MethodWatchCreate, `{"target":{"kind":"deploy","run_id":"run-1"}}`, `Watch target {"kind":"deploy","run_id":"run-1"} for its default conditions`},
+		{protocol.MethodWatchCreate, `{"target":"run-1"}`, "Watch (unreadable parameters)"},
+		{protocol.MethodWatchUpdate, `{"watch_id":7}`, "Watch (unreadable parameters)"},
+		{protocol.MethodWatchUpdate, `{"watch_id":"w-1","paused":false}`, "Resume watch w-1"},
+	} {
+		if got := reversibleSummary(tc.method, json.RawMessage(tc.params), "", ""); got != tc.want {
+			t.Errorf("%s %s = %q, want %q", tc.method, tc.params, got, tc.want)
+		}
+	}
 }
 
 func TestCreatedNamesOnlyNewIDs(t *testing.T) {
