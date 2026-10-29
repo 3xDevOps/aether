@@ -689,12 +689,27 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 `audit` and nothing else. A Markdown file anywhere else counts as code.
 `edge-image` runs only when `scripts/ci-classify-edge.sh` says a changed path
 can affect the edge image, and `desktop-windows` only when
-`scripts/ci-classify-desktop.sh` finds a change under `desktop/`. All three
-classifiers run from the pull request's base revision, so a pull request
-cannot change its own classification, and a renamed file counts by its old
-path as well as its new one. A push to `main`, a merge queue entry and a
-failed classification run everything. To run the edge image jobs on a branch
-the classifier skips, with write access to the repository:
+`scripts/ci-classify-desktop.sh` finds a change under `desktop/`. On a pull
+request `edge-image` skips the upgrade qualification.
+`scripts/ci-classify-platform.sh` gates the rest by what each job builds:
+
+| Mode | Jobs | True for |
+| --- | --- | --- |
+| `client` | `windows`, `desktop`, `android` | The packages `cmd/aether` imports, `web/`, `desktop/`, `android/`, packaging and install scripts, `go.mod`, `Makefile` |
+| `installer` | `windows-install` | The CLI, self-update and local-ops packages, `desktop/`, `packaging/windows/`, the install and Defender scripts |
+| `release` | `release-build`, `windows-defender` | `Makefile`, `go.mod`, `packaging/`, `cmd/aether/` |
+
+A server-only change therefore skips every platform job. `build-and-test`
+covers the Linux build, and `release.yml` repeats `release-build`, the
+Defender scan and `android` for each tag. All classifiers run from the pull
+request's base revision, so a pull request cannot change its own
+classification, and a renamed file counts by its old path as well as its new
+one. A push to `main`, a merge queue entry and a failed classification run
+everything, upgrade qualification included. A skipped job reports as skipped,
+not failed. `ci-classify-platform-test.sh` fails when `cmd/aether` starts
+importing a package the `client` mode does not list.
+
+To run the edge image jobs on a branch the classifier skips, with write access to the repository:
 
 ```sh
 gh workflow run edge-image.yml --ref <branch>
