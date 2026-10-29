@@ -104,7 +104,9 @@ func editLine(id, mark string, was time.Time) string {
 
 // append writes lines and syncs them, and the directory when it created
 // the file, before the change they record commits. A leading newline ends
-// a partial line a crash left, which read skips.
+// a partial line a crash left, which read skips. Lines that fail to sync
+// are cut off again, so a change that failed is not applied at the next
+// start.
 func (t *tombstones) append(lines ...string) error {
 	if len(lines) == 0 {
 		return nil
@@ -117,6 +119,11 @@ func (t *tombstones) append(lines ...string) error {
 	if err != nil {
 		return fmt.Errorf("preference: record the change: %w", err)
 	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return fmt.Errorf("preference: record the change: %w", err)
+	}
 	if _, err = f.WriteString("\n" + strings.Join(lines, "\n") + "\n"); err == nil {
 		err = f.Sync()
 	}
@@ -127,6 +134,9 @@ func (t *tombstones) append(lines ...string) error {
 		err = syncDir(filepath.Dir(t.path))
 	}
 	if err != nil {
+		if terr := os.Truncate(t.path, info.Size()); terr != nil {
+			return fmt.Errorf("preference: record the change: %w; the change may still apply at the next start: %w", err, terr)
+		}
 		return fmt.Errorf("preference: record the change: %w", err)
 	}
 	return nil
