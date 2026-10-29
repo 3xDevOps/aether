@@ -63,6 +63,11 @@ type AssistantConfirmation struct {
 	// Shown is when the row the summary shows was last updated, for a call
 	// that must act on that version only. It never leaves the server.
 	Shown time.Time `json:"-"`
+	// Reason is the assistant's one line on why it launches, and Task a
+	// template launch's task as its params render it. Both are for the
+	// card only; the call sends neither.
+	Reason string `json:"reason,omitempty"`
+	Task   string `json:"task,omitempty"`
 }
 
 type AssistantStatus struct {
