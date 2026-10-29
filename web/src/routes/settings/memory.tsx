@@ -106,10 +106,11 @@ function MemoryBody({ client }: { client: Api }) {
   const add = async () => {
     setAdding(true)
     setAddError(null)
+    const sent = text.trim()
     try {
-      const result = await client.preferenceAdd({ text: text.trim(), ...(scope === 'workspace' && activeWorkspace ? { workspace_id: activeWorkspace } : {}) })
+      const result = await client.preferenceAdd({ text: sent, ...(scope === 'workspace' && activeWorkspace ? { workspace_id: activeWorkspace } : {}) })
       put(result.preference)
-      setText('')
+      setText((current) => (current.trim() === sent ? '' : current))
     } catch (err) {
       setAddError(errorSentence(err))
     } finally {

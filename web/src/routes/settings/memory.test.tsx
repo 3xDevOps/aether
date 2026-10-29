@@ -124,6 +124,21 @@ describe('memory in settings', () => {
     expect((box as HTMLTextAreaElement).value).toBe('')
   })
 
+  it('keeps a draft typed while the previous one saves', async () => {
+    const user = userEvent.setup()
+    let finish: (value: { preference: Preference }) => void = () => {}
+    show([], { preferenceAdd: vi.fn(() => new Promise<{ preference: Preference }>((resolve) => { finish = resolve })) })
+    await screen.findByRole('heading', { name: 'Nothing remembered yet' })
+    const box = screen.getByRole('textbox', { name: 'Add a preference' }) as HTMLTextAreaElement
+    await user.type(box, 'Reply in English please')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    await user.clear(box)
+    await user.type(box, 'Prefer table output')
+    await act(async () => finish({ preference: pref({ id: 'pref-9', text: 'Reply in English please', source: 'settings' }) }))
+    expect(await screen.findByText('Reply in English please')).toBeDefined()
+    expect(box.value).toBe('Prefer table output')
+  })
+
   it('edits a preference in place and shows a refusal verbatim', async () => {
     const user = userEvent.setup()
     const client = show([pref()], {
