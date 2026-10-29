@@ -11,21 +11,24 @@ import { assistantSessionID } from '@/store/assistant'
 
 type Facts = Exclude<PreferenceFacts, { kind: 'used' }>
 
-const undoneKey = 'aether.preferences.undone'
 const undoneKept = 200
 
-function undoneIDs(): string[] {
+/** Kept per member, so a shared browser holds no other member's preference ids. */
+const undoneKey = (member: string | undefined) => `aether.preferences.undone.${member ?? ''}`
+
+function undoneIDs(member: string | undefined): string[] {
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(undoneKey) ?? '[]')
+    localStorage.removeItem('aether.preferences.undone')
+    const stored: unknown = JSON.parse(localStorage.getItem(undoneKey(member)) ?? '[]')
     return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []
   } catch {
     return []
   }
 }
 
-function markUndone(id: string) {
+function markUndone(member: string | undefined, id: string) {
   try {
-    localStorage.setItem(undoneKey, JSON.stringify([...undoneIDs().filter((kept) => kept !== id), id].slice(-undoneKept)))
+    localStorage.setItem(undoneKey(member), JSON.stringify([...undoneIDs(member).filter((kept) => kept !== id), id].slice(-undoneKept)))
   } catch {
     // Without storage the notice still says Undone until it remounts.
   }
@@ -42,8 +45,9 @@ async function undo(facts: Facts, progress: Restore): Promise<void> {
 
 /** Undo for a saved, updated or forgotten preference, with the server's refusal shown as it came. */
 function UndoPreference({ facts }: { facts: Facts }) {
+  const member = useStore((s) => s.info?.member?.id)
   const undoneID = `${facts.kind}:${facts.id}:${facts.updated_at}`
-  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'undone' } | { kind: 'failed'; error: string }>(() => undoneIDs().includes(undoneID) ? { kind: 'undone' } : { kind: 'idle' })
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'undone' } | { kind: 'failed'; error: string }>(() => undoneIDs(member).includes(undoneID) ? { kind: 'undone' } : { kind: 'idle' })
   const progress = useRef<Restore>({})
   if (state.kind === 'undone') return <span role="status" className="text-ui-sm text-muted">Undone</span>
   return (
@@ -55,7 +59,7 @@ function UndoPreference({ facts }: { facts: Facts }) {
         onClick={() => {
           setState({ kind: 'busy' })
           undo(facts, progress.current).then(() => {
-            markUndone(undoneID)
+            markUndone(member, undoneID)
             useStore.getState().notePreferenceUndo()
             setState({ kind: 'undone' })
           }, (err: unknown) => setState({ kind: 'failed', error: errorSentence(err) }))

@@ -505,6 +505,11 @@ not remove:
   temporary conversation;
 - copies a connected app or an agent made elsewhere.
 
+The dashboard keeps, in the browser's `localStorage` under
+`aether.preferences.undone.<member>`, the ids and versions of the last 200
+changes whose **Undo** you used, so a card still reads **Undone** after a
+reload. It holds no preference text and is not sent to the server.
+
 Removing a member deletes their preferences in the same transaction and
 records each as deleted in the same file before it commits. Merging two members moves all of them to the member that
 remains, even past the 200 limit; new saves are then refused until enough

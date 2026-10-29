@@ -474,4 +474,14 @@ describe('memory in settings', () => {
     expect(useStore.getState().route.params).toEqual({ section: 'memory' })
     expect(screen.queryByText(/That preference no longer exists/)).toBeNull()
   })
+
+  it('takes the entry off the address without adding a history entry', async () => {
+    seed('pref-1')
+    window.history.replaceState(null, '', '/?page=settings&id=memory&entry=pref-1')
+    const before = window.history.length
+    show([pref()])
+    await waitFor(() => expect(useStore.getState().route.params).toEqual({ section: 'memory' }), { timeout: 4000 })
+    expect(window.location.search).toBe('?page=settings&id=memory')
+    expect(window.history.length).toBe(before)
+  })
 })

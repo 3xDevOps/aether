@@ -24,6 +24,14 @@ export const preferencesLabel = 'Use my preferences in the assistant'
 
 const highlightMs = 1500
 
+/** Takes ?entry= off the address without a history entry, so Back does not return to a link that highlights again. */
+function dropEntry() {
+  const url = new URL(window.location.href)
+  url.searchParams.delete('entry')
+  window.history.replaceState(window.history.state, '', url)
+  useStore.setState({ route: { name: 'settings', params: { section: 'memory' } } })
+}
+
 /** Settings › Memory: the member's private assistant preferences. Keyed by identity, so another member never inherits the list. */
 export function MemorySection({ client }: { client: Api }) {
   const identity = useStore((s) => s.identityKey)
@@ -54,7 +62,6 @@ function MemoryBody({ client }: { client: Api }) {
   const restore = useRef<Restore>({})
   const writes = useRef(0)
   const [saving, setSaving] = useState(false)
-  const navigate = useStore((s) => s.navigate)
   const [flash, setFlash] = useState<string | null>(null)
   const skeleton = useDelayed(load.kind === 'loading')
   const textID = useId()
@@ -107,10 +114,10 @@ function MemoryBody({ client }: { client: Api }) {
     setFlash(entry)
     const timer = setTimeout(() => {
       setFlash(null)
-      navigate('settings', { section: 'memory' })
+      dropEntry()
     }, highlightMs)
     return () => clearTimeout(timer)
-  }, [entry, linkedShown, navigate])
+  }, [entry, linkedShown])
 
   const put = (preference: Preference) => {
     writes.current++
@@ -253,7 +260,7 @@ function MemoryBody({ client }: { client: Api }) {
                   setList((current) => current.filter((p) => p.id !== gone.id))
                   restore.current = {}
                   setForgotten({ preference: gone })
-                  if (gone.id === entry) navigate('settings', { section: 'memory' })
+                  if (gone.id === entry) dropEntry()
                 }}
               />
             ))}

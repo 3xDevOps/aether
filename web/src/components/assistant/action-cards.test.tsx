@@ -713,4 +713,22 @@ describe('preference cards', () => {
     const later = await reopen({ ...saved, id: 'pref-7' })
     expect(within(await card(later, /^Saved: Prefer table output\. Done$/)).getByRole('button', { name: 'Undo' })).toBeDefined()
   })
+
+  it('keeps the Undone marker under the signed-in member and drops the old shared key', async () => {
+    vi.mocked(api.preferenceList).mockResolvedValue({ preferences: [saved], enabled: true })
+    vi.mocked(api.preferenceDelete).mockResolvedValue({ deleted: saved } as never)
+    localStorage.setItem('aether.preferences.undone', JSON.stringify([`saved:${saved.id}:${saved.updated_at}`]))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Saved: Prefer table output\. Done$/)
+    expect(within(notice).getByRole('button', { name: 'Undo' })).toBeDefined()
+    expect(localStorage.getItem('aether.preferences.undone')).toBeNull()
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    await within(aside).findByText('Undone')
+    expect(Object.keys(localStorage).filter((key) => key.startsWith('aether.preferences.undone'))).toEqual([`aether.preferences.undone.${serverInfo.member.id}`])
+  })
 })
