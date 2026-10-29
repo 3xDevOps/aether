@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -264,6 +265,9 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 
 func (c *preferenceCaller) forget(ctx context.Context, raw json.RawMessage) (any, error) {
 	held, ok := c.m.actions.take(protocol.MethodAssistantForget, raw)
+	if !ok {
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "the approval for this forget is gone, for example after a new conversation; ask the member again"}
+	}
 	p, err := protocol.DecodeParams[protocol.PreferenceIDParams](raw)
 	if err == nil {
 		err = c.configured()
@@ -271,9 +275,6 @@ func (c *preferenceCaller) forget(ctx context.Context, raw json.RawMessage) (any
 	var res protocol.PreferenceDeleteResult
 	if err == nil {
 		res, err = c.s.cfg.Preferences.Delete(ctx, c.m.id, protocol.PreferenceDeleteParams{ID: p.ID, ExpectedUpdatedAt: held.shown})
-	}
-	if !ok {
-		return res, err
 	}
 	if nerr := c.note(held.conv, held.action, p.ID, err); nerr != nil {
 		if err == nil {
@@ -399,14 +400,15 @@ func typedSegments(message string) []string {
 		trimmed := strings.TrimSpace(line)
 		indented := indent(line) >= 4
 		run := fenceRun(trimmed)
+		opens := fenceRun(listMarker.ReplaceAllString(trimmed, ""))
 		switch {
 		case fence != "":
 			if !indented && run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(trimmed[len(run):]) == "" {
 				fence = ""
 			}
-		case run != "" && !indented:
+		case opens != "" && !indented:
 			flush()
-			fence, quoting = run, false
+			fence, quoting = opens, false
 		case strings.HasPrefix(trimmed, ">"):
 			flush()
 			quoting = true
@@ -423,6 +425,10 @@ func typedSegments(message string) []string {
 	flush()
 	return out
 }
+
+// listMarker is a bullet or number that opens a list item, after which a
+// code fence may start.
+var listMarker = regexp.MustCompile(`^(?:[-*+]|\d+[.)])\s+`)
 
 // indent is the width of line's leading spaces and tabs, a tab reaching the
 // next multiple of four columns.

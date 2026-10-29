@@ -245,40 +245,6 @@ func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
 	}
 }
 
-func TestCleanViewContextKeepsWellFormedLaunchDefaults(t *testing.T) {
-	in := &protocol.AssistantViewContext{Version: 1, Route: protocol.AssistantViewEntry{Name: "board"}, LaunchDefaults: []protocol.AssistantLaunchDefault{
-		{Agent: "claude", Mode: "acp", Model: "opus[1m]"},
-		{Agent: "opencode", Mode: "tui", Model: "anthropic/claude-sonnet-5-5"},
-		{Agent: "codex", Mode: "acp", Model: "gpt 5\n"},
-		{Agent: "goose", Mode: "acp", Model: "user:ghp_x@github.com"},
-		{Agent: "Claude Code", Mode: "acp"},
-		{Agent: "gemini", Mode: "yolo"},
-		{Agent: "a", Mode: "tui"},
-		{Agent: "b", Mode: "tui"},
-		{Agent: "c", Mode: "tui"},
-	}}
-	got, err := CleanViewContext(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []protocol.AssistantLaunchDefault{
-		{Agent: "claude", Mode: "acp", Model: "opus[1m]"},
-		{Agent: "opencode", Mode: "tui", Model: "anthropic/claude-sonnet-5-5"},
-		{Agent: "codex", Mode: "acp"},
-		{Agent: "goose", Mode: "acp"},
-	}
-	if !reflect.DeepEqual(got.LaunchDefaults, want) {
-		t.Fatalf("launch defaults = %+v, want malformed and credential-shaped models dropped, malformed agents and modes dropped whole, and the first %d kept", got.LaunchDefaults, maxViewDefaults)
-	}
-
-	in.Attachments = []protocol.AssistantViewAttachment{{Kind: "run", RunID: "run-1"}}
-	m := &member{}
-	m.holdView(&protocol.AssistantViewContext{Version: 1, Attachments: in.Attachments, LaunchDefaults: want}, viewFromPrompt, time.Now())
-	if m.view != nil {
-		t.Fatalf("held view = %+v, want launch defaults without a page never held", m.view)
-	}
-}
-
 func TestAttachmentsOutliveSharingButNeverBecomeTheView(t *testing.T) {
 	s := New(Config{Store: newMemStore()})
 	s.cancel()

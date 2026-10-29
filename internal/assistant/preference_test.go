@@ -450,6 +450,30 @@ func TestForgetKeepsAPreferenceChangedWhileItsCardWaits(t *testing.T) {
 	}
 }
 
+// A forget whose held approval was discarded must not run.
+func TestForgetWithoutItsApprovalIsRefused(t *testing.T) {
+	f := newPrefFixture(t)
+	saved, err := f.prefs.Add(t.Context(), f.m.id, "Prefer table output", "", protocol.PreferenceSourceSettings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(protocol.PreferenceIDParams{ID: saved.Preference.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := f.svc.preferenceCaller(f.m, nil)
+	conv, cancel := context.WithCancel(context.Background())
+	f.m.actions.hold(conv, protocol.AssistantAction{Method: protocol.MethodAssistantForget}, raw, saved.Preference.UpdatedAt)
+	cancel()
+	var refused *protocol.Error
+	if _, err = c.forget(t.Context(), raw); !errors.As(err, &refused) || refused.Code != protocol.CodeDenied || !strings.Contains(err.Error(), "approval for this forget is gone") {
+		t.Fatalf("forget whose approval was discarded = %v; want refused", err)
+	}
+	if _, err = f.prefs.Get(t.Context(), f.m.id, saved.Preference.ID); err != nil {
+		t.Fatalf("the preference after the refused forget: %v; want it kept", err)
+	}
+}
+
 // With auto-approval on, a launch carrying a saved preference still shows
 // its card; one without passes.
 func TestAutoApprovalNeverPassesAPreference(t *testing.T) {
@@ -621,6 +645,8 @@ func TestQuotedSkipsPastedText(t *testing.T) {
 		"indented code":     "see:\n    prefer table output always",
 		"tab indented code": "\tprefer table output always",
 		"mixed indentation": " \tprefer table output always",
+		"list item fence":   "- ```\nprefer table output always",
+		"numbered fence":    "1. ```sh\nprefer table output always",
 	} {
 		if span, err := quoted(message, want); err == nil {
 			t.Errorf("%s: quoted = %q, want refused", name, span)
