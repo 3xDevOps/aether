@@ -41,6 +41,14 @@ func (f *savedFill) skip(field, reason string) {
 	f.Skipped = append(f.Skipped, defaultSkip{Field: field, Reason: reason})
 }
 
+// unchecked notes field as applied without a check when the agents could
+// not be listed; the server checks it at launch.
+func (f *savedFill) unchecked(field string, listErr error) {
+	if listErr != nil {
+		f.Unchecked = append(f.Unchecked, defaultSkip{Field: field, Reason: "could not list the agents to check it, so the server checks it at launch: " + listErr.Error()})
+	}
+}
+
 func (f savedFill) stamp(r *launchReceipt) {
 	r.DefaultsApplied, r.DefaultsSkipped, r.DefaultsUnchecked = f.Applied, f.Skipped, f.Unchecked
 }
@@ -155,11 +163,13 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 		fill.apply("fallback")
 	}
 	if *slots.harness == "" && d.Agent != "" {
-		if reason := agentRefused(d.Agent, a.AccountMemberID, agentsOn, book); reason != "" {
+		reason, err := agentRefused(d.Agent, a.AccountMemberID, agentsOn, book)
+		if reason != "" {
 			fill.skip("harness", reason)
 		} else {
 			*slots.harness = d.Agent
 			fill.apply("harness")
+			fill.unchecked("harness", err)
 		}
 	}
 	if *slots.harness == "" {
@@ -174,11 +184,13 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 		return fill, nil
 	}
 	if *slots.mode == "" && choice.Mode != "" {
-		if reason := modeRefused(*slots.harness, choice.Mode, slots.integrator, a.AccountMemberID, agentsOn, book); reason != "" {
+		reason, err := modeRefused(*slots.harness, choice.Mode, slots.integrator, a.AccountMemberID, agentsOn, book)
+		if reason != "" {
 			fill.skip("mode", reason)
 		} else {
 			*slots.mode = choice.Mode
 			fill.apply("mode")
+			fill.unchecked("mode", err)
 		}
 	}
 	if *slots.model == "" && choice.Model != "" {
@@ -198,51 +210,54 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 }
 
 // agentOn is harness as listed on account, or why it cannot be read.
-func agentOn(harness, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (protocol.AgentInfo, string) {
+// A failed agent list is listErr, not a refusal: agent.list fails whole
+// when any one agent cannot be read, and run.launch checks the one asked
+// for.
+func agentOn(harness, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (info protocol.AgentInfo, refusal string, listErr error) {
 	agents, err := agentsOn(cmp.Or(account, book.self()))
 	if err != nil {
-		return protocol.AgentInfo{}, "could not list the agents to check it: " + err.Error()
+		return protocol.AgentInfo{}, "", err
 	}
 	i := slices.IndexFunc(agents, func(info protocol.AgentInfo) bool { return info.Name == harness })
 	if i < 0 {
-		return protocol.AgentInfo{}, fmt.Sprintf("no agent named %q is available on this account", harness)
+		return protocol.AgentInfo{}, fmt.Sprintf("no agent named %q is available on this account", harness), nil
 	}
-	return agents[i], ""
+	return agents[i], "", nil
 }
 
 // agentRefused is why harness cannot launch on account, as
 // aether_launch_options says, or "".
-func agentRefused(harness, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) string {
-	info, reason := agentOn(harness, account, agentsOn, book)
-	if reason != "" {
-		return reason
+func agentRefused(harness, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (string, error) {
+	info, reason, err := agentOn(harness, account, agentsOn, book)
+	if reason != "" || err != nil {
+		return reason, err
 	}
-	return rowOfAgent(info).Refused
+	return rowOfAgent(info).Refused, nil
 }
 
 // modeRefused is why harness cannot start in mode on account, as
 // aether_launch_options lists its modes, or "".
-func modeRefused(harness, mode string, integrator bool, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) string {
-	info, reason := agentOn(harness, account, agentsOn, book)
-	if reason != "" {
-		return reason
+func modeRefused(harness, mode string, integrator bool, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (string, error) {
+	info, reason, err := agentOn(harness, account, agentsOn, book)
+	if reason != "" || err != nil {
+		return reason, err
 	}
 	row := rowOfAgent(info)
 	allowed := row.Modes
 	if integrator {
 		allowed = row.Integrator
 		if mode == "tui" && info.SwarmStandardRefusal != "" {
-			return info.SwarmStandardRefusal
+			return info.SwarmStandardRefusal, nil
 		}
 	}
 	if slices.Contains(allowed, mode) {
-		return ""
+		return "", nil
 	}
 	names := make([]string, len(allowed))
 	for j, m := range allowed {
 		names[j] = modeNames[m]
 	}
-	return fmt.Sprintf("%s cannot start in %s mode on this account; it offers %s", harness, cmp.Or(modeNames[mode], mode), cmp.Or(strings.Join(names, ", "), "none"))
+	return fmt.Sprintf("%s cannot start in %s mode on this account; it offers %s", harness, cmp.Or(modeNames[mode], mode), cmp.Or(strings.Join(names, ", "), "none")), nil
 }
 
 // savedConflict adds to a keyed retry's refusal that the saved choices it

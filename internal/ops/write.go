@@ -118,7 +118,7 @@ var writeOps = []Op{
 			idempotencyRule+"without one, a repeat within 60s returns the first swarm.", launchSwarm).
 		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodMissionList,
-		protocol.MethodMissionCreate),
+		protocol.MethodMissionCreate, protocol.MethodRunGet),
 	opOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
 		"Use this when the user wants to tell a run's agent something, which cannot be taken back; it waits up to 45s for approval if someone else controls the run."+
 			idempotencyRule+"without one, a repeat within 60s is sent once.", messageRun).hints(true, true).
@@ -621,6 +621,14 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	receipt := out["launch"].(*launchReceipt)
 	receipt.IdempotencyKey, receipt.Skipped = params.IdempotencyKey, res.SkippedFallbackAccounts
 	if !dup {
+		// mission.create does not say which account usage fallback started
+		// the integrator on; its run does.
+		if fill.modelCheckedOn != "" && m.CurrentIntegratorRunID != "" {
+			var ir protocol.RunResult
+			if c.read(ctx, protocol.MethodRunGet, protocol.RunIDParams{RunID: m.CurrentIntegratorRunID}, &ir) == nil {
+				fill.startedOn(ir.Run.AccountMemberID)
+			}
+		}
 		fill.stamp(receipt)
 	}
 	out["idempotency_key"] = params.IdempotencyKey

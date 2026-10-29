@@ -357,3 +357,31 @@ func TestRevokedSavedAccountFailsAtLaunch(t *testing.T) {
 		t.Fatalf("launch on a share revoked meanwhile = %q after %d launches", text, len(called(f, protocol.MethodRunLaunch)))
 	}
 }
+
+// When the agents cannot be listed, as when another agent's installation
+// cannot be read, the saved agent and mode still launch and the receipt
+// says they went unchecked; the server checks the agent asked for.
+func TestSavedAgentLaunchesWhenAgentsCannotBeListed(t *testing.T) {
+	f := savedFake(t, savedChoices)
+	f.errs[protocol.MethodAgentList] = &protocol.Error{Code: protocol.CodeInternal, Message: "read codex installation: permission denied"}
+	_, out := run(t, connectorSession(t, f, ScopeWrite), "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
+	if p := launchParams(t, f); p.Harness != "claude" || p.Mode != "acp" {
+		t.Fatalf("run.launch params = %+v, want the saved agent and mode", p)
+	}
+	unchecked := jsonOf(t, out["launch"].(map[string]any)["defaults_unchecked"])
+	if !strings.Contains(unchecked, `"field":"harness"`) || !strings.Contains(unchecked, `"field":"mode"`) || !strings.Contains(unchecked, "permission denied") {
+		t.Fatalf("defaults_unchecked = %s", unchecked)
+	}
+}
+
+// A swarm whose integrator usage fallback started on another account says
+// its saved model went unchecked there, as a run's receipt does.
+func TestFallbackMovedIntegratorReportsSavedModelUnchecked(t *testing.T) {
+	f := savedFake(t, savedChoices)
+	f.answers[protocol.MethodMissionCreate] = returns(protocol.MissionCreateResult{Mission: protocol.Mission{ID: "mis-1", CurrentIntegratorRunID: "run-int"}})
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: protocol.Run{ID: "run-int", AccountMemberID: "mem-me"}})
+	_, out := run(t, connectorSession(t, f, ScopeWrite), "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "idempotency_key": "s1"})
+	if unchecked := jsonOf(t, out["launch"].(map[string]any)["defaults_unchecked"]); !strings.Contains(unchecked, `"field":"model"`) || !strings.Contains(unchecked, "mem-me") {
+		t.Fatalf("defaults_unchecked = %s, want the saved model noted unchecked on mem-me", unchecked)
+	}
+}

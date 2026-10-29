@@ -74,8 +74,18 @@ export function launchRows(s: RootState, method: string, params: unknown, defaul
     rows.push(['Workers', workers.join('; ')])
   }
   if (defaults?.applied?.length) rows.push(['From your saved defaults', defaults.applied.map((field) => savedFields[field] ?? field).join(', ')])
-  for (const skip of defaults?.skipped ?? []) rows.push([`Saved ${savedFields[skip.field] ?? skip.field} not used`, skip.reason])
-  for (const note of defaults?.unchecked ?? []) rows.push([`Saved ${savedFields[note.field] ?? note.field} not checked`, note.reason])
+  // Several notes on one field, such as two fallback members that stopped
+  // sharing, share a label, so they are one row.
+  const noted = (notes: { field: string; reason: string }[] | undefined, verb: string) => {
+    const byLabel = new Map<string, string[]>()
+    for (const n of notes ?? []) {
+      const label = `Saved ${savedFields[n.field] ?? n.field} ${verb}`
+      byLabel.set(label, [...(byLabel.get(label) ?? []), n.reason])
+    }
+    for (const [label, reasons] of byLabel) rows.push([label, reasons.join('; ')])
+  }
+  noted(defaults?.skipped, 'not used')
+  noted(defaults?.unchecked, 'not checked')
   const brief = str(swarm ? p.objective : p.task)
   if (brief) rows.push([swarm ? 'Objective' : 'Task', brief])
   rows.push(['You hear back', swarm ? hearBack.swarm : hearBack.run])

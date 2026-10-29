@@ -435,13 +435,15 @@ describe('confirmations', () => {
     assistantSocket().send({ status: status({ confirmations: [
       { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in api on "Bob"\'s account (your saved default), no fallback: "Add the export"',
         params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', account_member_id: 'mem_bob', no_fallback: true, task: 'Add the export' },
-        defaults: { applied: ['harness', 'mode', 'account_member_id', 'fallback', 'model'], skipped: [{ field: 'mode', reason: 'enhanced mode is not installed' }],
+        defaults: { applied: ['harness', 'mode', 'account_member_id', 'fallback', 'model'], skipped: [{ field: 'mode', reason: 'enhanced mode is not installed' },
+          { field: 'fallback_account_member_ids', reason: 'mem_ada: not shared' }, { field: 'fallback_account_member_ids', reason: 'mem_cy: not shared' }],
           unchecked: [{ field: 'model', reason: 'no current model list' }] } },
     ] }) })
     const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude/ })
     const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
     expect(rows['From your saved defaults']).toBe('agent, mode, account, fallback, model')
     expect(rows['Saved mode not used']).toBe('enhanced mode is not installed')
+    expect(Object.values(rows).filter((v) => v?.includes('not shared'))).toEqual(['mem_ada: not shared; mem_cy: not shared'])
     expect(rows['Saved model not checked']).toBe('no current model list')
     expect(rows.Account).toBe("Bob's account, shared with you")
   })
