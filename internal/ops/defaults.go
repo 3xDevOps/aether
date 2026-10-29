@@ -261,10 +261,12 @@ func modeRefused(harness, mode string, integrator bool, account string, agentsOn
 }
 
 // savedConflict adds to a keyed retry's refusal that the saved choices it
-// was filled from may have changed since the key's first launch.
-func savedConflict(err error, fill savedFill, keyed bool) error {
+// was filled from may have changed since the key's first launch. It applies
+// whenever the launch reads saved choices, even when they fill nothing now:
+// the first attempt may have used choices since cleared.
+func savedConflict(err error, applies, keyed bool) error {
 	var perr *protocol.Error
-	if !keyed || len(fill.Applied) == 0 || !errors.As(err, &perr) || perr.Code != protocol.CodeConflict {
+	if !keyed || !applies || !errors.As(err, &perr) || perr.Code != protocol.CodeConflict {
 		return err
 	}
 	return &protocol.Error{Code: perr.Code, Data: perr.Data,

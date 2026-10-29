@@ -385,3 +385,30 @@ func TestFallbackMovedIntegratorReportsSavedModelUnchecked(t *testing.T) {
 		t.Fatalf("defaults_unchecked = %s, want the saved model noted unchecked on mem-me", unchecked)
 	}
 }
+
+// A save refused because another device cleared choices applies its change
+// to the newer choices alone, so the cleared account and agent stay
+// cleared; a keyed launch retried after the saved choices were cleared
+// still says how to recover the first launch.
+func TestClearedSavedChoicesStayCleared(t *testing.T) {
+	f := savedFake(t, savedChoices)
+	cleared, _ := json.Marshal(protocol.LaunchDefaultsResult{Revision: 5, Defaults: protocol.LaunchDefaults{Agent: "codex", Agents: map[string]protocol.AgentLaunchDefault{"codex": {Mode: "tui"}}}})
+	f.errs[protocol.MethodLaunchDefaultsSet] = &protocol.Error{Code: protocol.CodeConflict, Message: "launch.defaults.set: revision 4 is not current", Data: cleared}
+	try(t, assistantSession(t, f.call), "aether_save_launch_defaults", map[string]any{"fallback": "off"})
+	calls := called(f, protocol.MethodLaunchDefaultsSet)
+	var second protocol.LaunchDefaultsSetParams
+	if err := json.Unmarshal([]byte(calls[len(calls)-1].params), &second); err != nil {
+		t.Fatal(err)
+	}
+	if d := second.Defaults; second.Revision != 5 || d.AccountMemberID != "" || d.Agents["claude"] != (protocol.AgentLaunchDefault{}) {
+		t.Fatalf("retried save = %+v, want the cleared account and claude choice kept cleared", second)
+	}
+
+	f = savedFake(t, protocol.LaunchDefaultsResult{})
+	f.errs[protocol.MethodRunLaunch] = &protocol.Error{Code: protocol.CodeConflict,
+		Message: `run.launch: idempotency_key "k1" was used for a launch with other params; use a new key for a new launch`}
+	text, _, failed := try(t, connectorSession(t, f, ScopeWrite), "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "claude", "idempotency_key": "k1"})
+	if !failed || !strings.Contains(text, "your saved defaults may have changed since the first attempt") {
+		t.Fatalf("keyed retry after the saved choices were cleared = %q", text)
+	}
+}

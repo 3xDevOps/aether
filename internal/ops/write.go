@@ -353,7 +353,7 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	}
 	res, finished, err := launch[protocol.RunLaunchResult](ctx, c, protocol.MethodRunLaunch, withReason(params, in.Reason, c.surface, fill), done)
 	if err != nil && finished {
-		return "", nil, retryable(savedConflict(err, fill, in.IdempotencyKey != ""), params.IdempotencyKey)
+		return "", nil, retryable(savedConflict(err, in.SavedDefaults != savedIgnore, in.IdempotencyKey != ""), params.IdempotencyKey)
 	}
 	if res.Run.ID == "" {
 		return starting("aether_launch_run", params.IdempotencyKey, err)
@@ -611,7 +611,7 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	}
 	res, finished, err := launch[protocol.MissionCreateResult](ctx, c, protocol.MethodMissionCreate, withReason(params, in.Reason, c.surface, fill), done)
 	if err != nil && finished {
-		return "", nil, retryable(savedConflict(err, fill, in.IdempotencyKey != ""), params.IdempotencyKey)
+		return "", nil, retryable(savedConflict(err, in.SavedDefaults != savedIgnore, in.IdempotencyKey != ""), params.IdempotencyKey)
 	}
 	m := res.Mission
 	if m.ID == "" {

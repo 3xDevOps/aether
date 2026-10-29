@@ -158,8 +158,11 @@ func saveLaunchDefaults(ctx context.Context, c calls, in saveDefaultsInput) (str
 	}
 	err := save(current, &res)
 	var perr *protocol.Error
-	if errors.As(err, &perr) && perr.Code == protocol.CodeConflict && json.Unmarshal(perr.Data, &current) == nil {
-		err = save(current, &res)
+	// The conflict carries the newer saved choices whole; decoding them over
+	// current would keep fields another device cleared.
+	var newer protocol.LaunchDefaultsResult
+	if errors.As(err, &perr) && perr.Code == protocol.CodeConflict && json.Unmarshal(perr.Data, &newer) == nil {
+		err = save(newer, &res)
 	}
 	if err != nil {
 		return "", nil, err
