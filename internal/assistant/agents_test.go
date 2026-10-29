@@ -1,35 +1,34 @@
 package assistant
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-func listed(name string, installed, adapter, login bool) protocol.AgentInfo {
-	return protocol.AgentInfo{Name: name, DisplayName: name, Installed: installed, EnhancedInstalled: adapter, LoginFound: &login}
+func listed(name string, login bool) protocol.AgentInfo {
+	return protocol.AgentInfo{Name: name, DisplayName: name, Installed: true, EnhancedInstalled: true, LoginFound: &login}
 }
 
+// TestReadiness takes the login from the assistant's own rule, not from the
+// agent list, which looks in a shared account's home.
 func TestReadiness(t *testing.T) {
-	agents := readiness([]protocol.AgentInfo{
-		listed("opencode", true, true, true),
-		listed("codex", true, true, false),
-		listed("claude", true, false, true),
-	})
+	logins := map[string]bool{"claude": true}
+	agents, err := readiness([]protocol.AgentInfo{
+		listed("opencode", true),
+		listed("codex", true),
+		listed("claude", false),
+	}, func(agent string) (bool, error) { return logins[agent], nil })
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []protocol.AssistantAgent{
-		{Name: "claude", DisplayName: "claude", Reason: "Enhanced adapter not installed"},
-		{Name: "codex", DisplayName: "codex", Reason: "No sign-in found"},
+		{Name: "claude", DisplayName: "claude", Ready: true},
+		{Name: "codex", DisplayName: "codex", Reason: "Not signed in for the assistant"},
 	}
-	if len(agents) != len(want) {
-		t.Fatalf("readiness = %+v, want only claude and codex", agents)
-	}
-	for i := range want {
-		if agents[i] != want[i] {
-			t.Errorf("agent %d = %+v, want %+v", i, agents[i], want[i])
-		}
-	}
-	if got := readiness([]protocol.AgentInfo{listed("claude", false, false, false)}); got[0].Reason != "Not installed" {
-		t.Errorf("uninstalled agent reason = %q", got[0].Reason)
+	if !slices.Equal(agents, want) {
+		t.Fatalf("readiness = %+v, want %+v", agents, want)
 	}
 }
 

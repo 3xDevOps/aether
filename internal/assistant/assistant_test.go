@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -173,7 +173,8 @@ func TestPersistedPromptKeyIsIgnoredAfterRestart(t *testing.T) {
 func TestResetStartsANewGeneration(t *testing.T) {
 	dir := t.TempDir()
 	db := newMemStore()
-	s := New(Config{Dir: dir, Store: db})
+	host := &fakeHost{}
+	s := New(Config{Dir: dir, Store: db, Host: host})
 	m := s.member("m1")
 	log := func(items int) {
 		l, err := acphost.OpenLog(s.logPath("m1"))
@@ -198,6 +199,9 @@ func TestResetStartsANewGeneration(t *testing.T) {
 	if _, statErr := os.Stat(s.logPath("m1")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("log after reset: %v", statErr)
 	}
+	if !slices.Equal(host.discarded, []domain.MemberID{"m1"}) {
+		t.Fatalf("agent state discarded for %v, want m1", host.discarded)
+	}
 	if generation, _ := s.Generation(t.Context(), "m1"); generation != 1 {
 		t.Fatalf("generation = %d, want 1", generation)
 	}
@@ -221,18 +225,15 @@ func TestResetStartsANewGeneration(t *testing.T) {
 	}
 }
 
-func TestRemoveDeletesMemberFiles(t *testing.T) {
-	dir := t.TempDir()
-	s := New(Config{Dir: dir})
-	if err := os.MkdirAll(filepath.Join(dir, "m1", "sock"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+func TestRemoveForgetsTheMember(t *testing.T) {
+	host := &fakeHost{}
+	s := New(Config{Dir: t.TempDir(), Host: host})
 	s.member("m1")
 	if err := s.Remove(t.Context(), "m1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "m1")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member directory after Remove: %v", err)
+	if !slices.Equal(host.removed, []domain.MemberID{"m1"}) {
+		t.Fatalf("assistant removed for %v, want m1", host.removed)
 	}
 	if _, kept := s.members["m1"]; kept {
 		t.Fatal("member kept in memory")

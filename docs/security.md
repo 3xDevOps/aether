@@ -28,7 +28,7 @@ credentials out of the report.
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
-| [Assistant](#the-assistant) | Launching, messaging and stopping runs and saving the environment wait for your click. | Its shell runs any command in your environment without asking. Auto-approve removes the click. |
+| [Assistant](#the-assistant) | Its own container, home and sign-in, which your runs and account share recipients cannot see or change. Launching, messaging and stopping runs and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Candidate delivery](#candidate-verification-and-delivery) | Permission to push is checked again at delivery. A mirrored target gets a proposal branch, never an upstream push. | Verification runs with the member's home credentials. An agent can still push on its own outside Aether. |
@@ -271,10 +271,39 @@ someone who can run code in the workspace.
 
 ## The assistant
 
-The [assistant](assistant.md) is an agent that runs in your environment
-container, driven from the dashboard. Its Aether tools act as you, with your
-permissions, and it always uses your own agent account.
+The [assistant](assistant.md) is an agent that runs in a container of its own
+per member, driven from the dashboard. Its Aether tools act as you, with your
+permissions, and it uses the account you signed it in to.
 
+- Its home is `<data>/assistant/<member>/home` and its instructions are
+  read-only. No run, environment or other member's container mounts either,
+  and only the assistant's container mounts its tool socket. It mounts nothing
+  from any member's home, so a run that changes your `CLAUDE.md`, `~/.claude`
+  settings and hooks, `~/.codex/config.toml`, `.bashrc`, `~/.local/bin` or
+  agent login does not change the assistant.
+- Its sign-in is its own, made in its container and kept in its home. Your
+  runs, and the runs of members you share your account with, cannot read or
+  replace it. A login file carries more than tokens: Claude Code also reads a
+  gateway URL that receives every prompt, MCP tokens and plugin secrets from
+  `.credentials.json`.
+- The one remaining writer of that home is the assistant's own agent. Each
+  start therefore runs a new container, deletes everything in the home but the
+  sign-in and the session files, rewrites the sign-in file to the keys a
+  sign-in writes, and refuses the start if it removed any. Then the server
+  refreshes the sign-in with the vendor itself and asks the vendor which
+  account it belongs to, and refuses the start unless it is the account you
+  signed in with. The account is recorded at the first start of either
+  agent after you sign in, before any agent session runs, so neither agent's
+  session can rewrite the other's sign-in first. A sign-in the agent swapped
+  for another account's, in any field, is caught at the next start.
+- What a steered agent can still do, within the one session it runs in:
+  change what that session reads again (Claude Code rereads
+  `.credentials.json` and `~/.claude/settings.json`) and so point the rest of
+  the session at another endpoint or account, and write text into the session
+  files, which the same conversation reads back when it resumes, until
+  **New conversation**.
+- The assistant does not start when the server cannot reach the vendor's
+  sign-in service.
 - Reading runs and pausing or resuming them happen at once. Launching,
   messaging or stopping a run and saving your environment wait for you to
   approve a card. An unanswered card fails after 10 minutes.
@@ -282,17 +311,14 @@ permissions, and it always uses your own agent account.
   skips the card for your own runs. Messaging or stopping another member's run
   always asks. The assistant cannot turn auto-approve on or approve a card
   itself.
-- Its shell and file tools never ask. It can read your whole home, agent
-  logins included, and run any command in your environment.
+- Its shell and file tools never ask, inside its own container.
 - Transcripts it reads can carry injected instructions. With auto-approve off,
-  a steered assistant still needs your click. With it on, any code in your
-  environment can launch, message and stop your runs too: a package install
-  hook, or a `.bashrc` line or `~/.claude` hook one of your runs planted in
-  your shared home. Saving the environment then bakes that code into the image
-  new runs start from.
+  a steered assistant still needs your click. With it on, a steered assistant
+  can launch, message and stop your runs.
 
-Do not sign the `aether` CLI in inside your environment: that gives the
-assistant, and every run that mounts your home, a way to approve its own cards.
+Never sign the `aether` CLI in inside a run or your environment terminal. Its
+client key would sit in your home, where every run can read it and act as you,
+including approving the assistant's cards.
 
 ## Remote development and browser isolation
 

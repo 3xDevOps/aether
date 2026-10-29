@@ -1,6 +1,6 @@
 // Package assistant hosts each member's Aether assistant: an Enhanced session
-// of the member's own agent, run in their environment terminal and wired to a
-// member-scoped tool socket.
+// of the member's own agent, run in a container of its own with a
+// server-owned home and wired to a member-scoped tool socket.
 package assistant
 
 import (
@@ -26,7 +26,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -36,9 +35,8 @@ import (
 const (
 	// EpochStride separates conversation generations in the epoch viewers see.
 	EpochStride  = 1 << 20
-	workDir      = ".aether/assistant"
 	socketName   = "assistant.sock"
-	startTimeout = 2 * time.Minute
+	startTimeout = protocol.AssistantStartTimeout
 	stopGrace    = 3 * time.Second
 	stderrTail   = 4 << 10
 	maxKeys      = 128
@@ -56,14 +54,27 @@ var (
 )
 
 type Config struct {
-	// Dir is the host directory holding <member>/items.jsonl and
+	// Dir is the host directory holding <member>/items.jsonl and the
+	// assistant container's <member>/home, <member>/instructions and
 	// <member>/sock.
-	Dir    string
-	Store  store.AssistantStore
-	Homes  *memberhome.Manager
-	Runs   *scheduler.Scheduler
+	Dir   string
+	Store store.AssistantStore
+	Runs  *scheduler.Scheduler
+	// Host runs the assistant's container and adapter.
+	Host   Host
 	Caller func(domain.MemberID) tools.Caller
 	Bus    events.Bus
+}
+
+// Host is the scheduler's side of the assistant: its container and the
+// adapter in it.
+type Host interface {
+	AssistantAdapter(agent string) (scheduler.AssistantLaunch, error)
+	StartAssistantExec(ctx context.Context, member domain.MemberID, agent string, spec runtime.ExecSpec, installing func()) (runtime.ManagedExec, error)
+	StopAssistantExec(ctx context.Context, identity runtime.ExecIdentity) error
+	DiscardAssistantState(ctx context.Context, member domain.MemberID) error
+	RemoveAssistant(ctx context.Context, member domain.MemberID) error
+	AssistantLoginFound(member domain.MemberID, agent string) (bool, error)
 }
 
 type Service struct {
@@ -109,7 +120,9 @@ type member struct {
 	mu       sync.Mutex
 	sess     *session
 	starting bool
-	err      string
+	// installing is set while a start installs the agent.
+	installing bool
+	err        string
 	// changed is closed when the live session starts or ends, or the
 	// conversation is reset, so a viewer resubscribes.
 	changed chan struct{}
@@ -235,7 +248,7 @@ func (s *Service) agents(ctx context.Context, id domain.MemberID) ([]protocol.As
 	if err := json.Unmarshal(raw, &listed); err != nil {
 		return nil, fmt.Errorf("assistant: decode the agent list: %w", err)
 	}
-	return readiness(listed.Agents), nil
+	return readiness(listed.Agents, func(agent string) (bool, error) { return s.cfg.Host.AssistantLoginFound(id, agent) })
 }
 
 func (s *Service) stored(ctx context.Context, id domain.MemberID) (*store.AssistantSession, error) {
@@ -260,7 +273,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	}
 	m := s.member(id)
 	m.mu.Lock()
-	live, starting, failure := m.liveLocked(), m.starting, m.err
+	live, starting, installing, failure := m.liveLocked(), m.starting, m.installing, m.err
 	m.mu.Unlock()
 	settings, err := s.Settings(ctx, id)
 	if err != nil {
@@ -278,6 +291,9 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 			status.State = protocol.AssistantStateRunning
 		}
 		return status, nil
+	case installing:
+		status.State = protocol.AssistantStateInstalling
+		return status, nil
 	case starting:
 		status.State = protocol.AssistantStateStarting
 		return status, nil
@@ -293,17 +309,9 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	} else if err != nil {
 		return protocol.AssistantStatus{}, err
 	}
-	stale := false
-	if status.Agent != "" && status.Error == "" {
-		if stale, err = s.cfg.Runs.AssistantTerminalStale(ctx, id); err != nil {
-			return protocol.AssistantStatus{}, fmt.Errorf("assistant: %w", err)
-		}
-	}
 	switch {
 	case status.Agent == "":
 		status.State = protocol.AssistantStateSetup
-	case stale:
-		status.State = protocol.AssistantStateNeedsRestart
 	case failure != "" || status.Error != "":
 		status.State = protocol.AssistantStateFailed
 	default:
@@ -313,21 +321,9 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 }
 
 func (s *Service) Start(ctx context.Context, id domain.MemberID, p protocol.AssistantStartParams) (protocol.AssistantStatus, error) {
-	m := s.member(id)
-	if p.RestartEnvironment {
-		m.op.Lock()
-		err := s.stop(ctx, m)
-		m.op.Unlock()
-		if err != nil {
-			return protocol.AssistantStatus{}, err
-		}
-		if err = s.cfg.Runs.StopTerminal(ctx, id); err != nil {
-			return protocol.AssistantStatus{}, fmt.Errorf("assistant: restart the environment: %w", err)
-		}
-	}
 	_, err := s.ensure(ctx, id, p.Agent)
 	var notReady *AgentNotReadyError
-	if err != nil && !errors.Is(err, scheduler.ErrAssistantNeedsRestart) && !errors.Is(err, ErrNoAgent) && !errors.As(err, &notReady) {
+	if err != nil && !errors.Is(err, ErrNoAgent) && !errors.As(err, &notReady) {
 		return protocol.AssistantStatus{}, err
 	}
 	return s.Status(ctx, id)
@@ -403,11 +399,9 @@ func (s *Service) ensureLocked(ctx context.Context, m *member, requested string)
 	live, err := s.open(openCtx, m, agent, row)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.starting = false
+	m.starting, m.installing = false, false
 	if err != nil {
-		if !errors.Is(err, scheduler.ErrAssistantNeedsRestart) {
-			m.err = err.Error()
-		}
+		m.err = err.Error()
 		m.notify()
 		return nil, err
 	}
@@ -417,13 +411,16 @@ func (s *Service) ensureLocked(ctx context.Context, m *member, requested string)
 }
 
 func (s *Service) open(ctx context.Context, m *member, agent string, row *store.AssistantSession) (*session, error) {
-	launch, err := s.cfg.Runs.AssistantAdapter(ctx, m.id, agent)
+	launch, err := s.cfg.Host.AssistantAdapter(agent)
 	if err != nil {
 		return nil, fmt.Errorf("assistant: %w", err)
 	}
-	files := map[string]string{"AGENTS.md": Instructions, "CLAUDE.md": Instructions}
-	for name, content := range files {
-		if err = s.cfg.Homes.HomeUpload(m.id, workDir+"/"+name, []byte(content), true); err != nil {
+	dir := scheduler.AssistantInstructionsDir(s.cfg.Dir, m.id)
+	if err = os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("assistant: create the instructions directory: %w", err)
+	}
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if err = os.WriteFile(filepath.Join(dir, name), []byte(Instructions), 0o644); err != nil {
 			return nil, fmt.Errorf("assistant: write %s: %w", name, err)
 		}
 	}
@@ -469,9 +466,14 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 	if row.Agent == agent {
 		resume = row.HarnessSessionID
 	}
-	exec, cwd, err := s.cfg.Runs.StartAssistantExec(ctx, m.id, runtime.ExecSpec{
-		Argv: argv, WorkingDir: workDir, CreationKey: "assistant-" + rand.Text(),
+	exec, err := s.cfg.Host.StartAssistantExec(ctx, m.id, agent, runtime.ExecSpec{
+		Argv: argv, CreationKey: "assistant-" + rand.Text(),
 		Env: append([]string{"AETHER_ASSISTANT=1", "NO_BROWSER=1"}, launch.Env...),
+	}, func() {
+		m.mu.Lock()
+		m.installing = true
+		m.mu.Unlock()
+		m.notify()
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assistant: start %s: %w", argv[0], err)
@@ -489,7 +491,7 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 	go func() { _, _ = io.Copy(stderr, att.Stderr()) }()
 	acpSess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath: s.logPath(m.id),
-		Cwd:     cwd,
+		Cwd:     scheduler.AssistantCwd,
 		MCPServers: []acp.McpServer{{Stdio: &acp.McpServerStdio{
 			Name: "aether", Command: coordtransport.BinaryPath, Args: []string{"mcp", "--assistant"}, Env: []acp.EnvVariable{},
 		}}},
@@ -529,7 +531,7 @@ func (s *Service) stopStale(ctx context.Context, m *member, row *store.Assistant
 	if err := json.Unmarshal([]byte(row.ExecIdentity), &identity); err != nil {
 		return fmt.Errorf("assistant: decode the recorded adapter: %w", err)
 	}
-	if err := s.cfg.Runs.StopAssistantExec(ctx, identity); err != nil {
+	if err := s.cfg.Host.StopAssistantExec(ctx, identity); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}
 	return s.cfg.Store.ClearAssistantExec(ctx, m.id, row.Generation, row.ExecIdentity)
@@ -663,6 +665,9 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	if err = s.stopStale(ctx, m, row); err != nil {
 		return err
 	}
+	if err = s.cfg.Host.DiscardAssistantState(ctx, m.id); err != nil {
+		return fmt.Errorf("assistant: %w", err)
+	}
 	if _, err := s.cfg.Store.ResetAssistantSession(ctx, m.id); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}
@@ -718,8 +723,8 @@ func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {
 	s.mu.Lock()
 	delete(s.members, id)
 	s.mu.Unlock()
-	if err := os.RemoveAll(filepath.Join(s.cfg.Dir, string(id))); err != nil {
-		return fmt.Errorf("assistant: remove the member's files: %w", err)
+	if err := s.cfg.Host.RemoveAssistant(ctx, id); err != nil {
+		return fmt.Errorf("assistant: %w", err)
 	}
 	return nil
 }

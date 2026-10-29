@@ -536,8 +536,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   line under it says the assistant acts without asking, with **Change in
   Settings**.
 - **Body:** by `assistant.status` state. `setup` lists each agent with its
-  reason and opens `AgentSetup` in place; `needs_restart` is a callout with a
-  button that calls `assistant.start {restart_environment: true}`; `failed`
+  reason, and **Sign in** opens `AssistantSignIn` in place: a terminal on
+  `/ws/terminal?assistant_login=<agent>`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
   the run Session's `TimelineRow` and `useFlatRows`, with the Session's
@@ -675,8 +675,8 @@ conversation bumps; `assistantOpen` and `assistantWidth` persist.
 (`useIdentityKnown` in `store/hooks.ts`; `useAgentList` waits for it too, so
 neither read is sent under no identity and repeated), and on each open, then
 connects unless the
-state is `setup` or `needs_restart`. It stays connected with the panel closed
-only while the state is `running` or `starting`, or a confirmation or a
+state is `setup`. It stays connected with the panel closed
+only while the state is `running`, `installing` or `starting`, or a confirmation or a
 harness prompt is pending. After that, `status` frames carry the state and the
 whole confirmation set, so the UI makes no further status calls. A truncated
 item in the transcript is read with `assistant.item`. Each pending
