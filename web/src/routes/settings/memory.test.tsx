@@ -220,6 +220,27 @@ describe('memory in settings', () => {
     await waitFor(() => expect(client.preferenceAdd).toHaveBeenCalledWith({ text: 'Prefer JSON output', workspace_id: workspace.id }))
   })
 
+  it("keeps another preference's Forgotten notice when an earlier Undo finishes", async () => {
+    const user = userEvent.setup()
+    let read: (value: { preferences: Preference[]; enabled: boolean }) => void = () => {}
+    const second = pref({ id: 'pref-2', text: 'Use pnpm here' })
+    const listed = vi.fn().mockResolvedValueOnce({ preferences: [pref(), second], enabled: true }).mockReturnValueOnce(new Promise((resolve) => { read = resolve }))
+    show([], {
+      preferenceList: listed,
+      preferenceDelete: vi.fn(async (id: string) => ({ deleted: id === 'pref-1' ? pref() : second })),
+      preferenceAdd: vi.fn(async (params) => ({ preference: pref({ id: 'pref-3', text: params.text }) })),
+    })
+    const row = async (text: string) => (await screen.findByText(text)).closest('li')!
+    await user.click(within(await row('Prefer table output')).getByRole('button', { name: 'Forget' }))
+    await user.click(within(await row('Prefer table output')).getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    await user.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Undo' }))
+    await user.click(within(await row('Use pnpm here')).getByRole('button', { name: 'Forget' }))
+    await user.click(within(await row('Use pnpm here')).getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    await act(async () => read({ preferences: [], enabled: true }))
+    await screen.findByText('Prefer table output')
+    expect(screen.getByRole('status').textContent).toContain('Forgotten: Use pnpm here')
+  })
+
   it('keeps a preference and shows the error when forgetting fails', async () => {
     const user = userEvent.setup()
     show([pref()], { preferenceDelete: vi.fn(async () => { throw new ApiError(-32004, 'preference.delete: preference pref-1 not found') }) })

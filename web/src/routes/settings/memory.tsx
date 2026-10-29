@@ -48,8 +48,7 @@ function MemoryBody({ client }: { client: Api }) {
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [toggleError, setToggleError] = useState<string | null>(null)
-  const [forgotten, setForgotten] = useState<Preference | null>(null)
-  const [undoError, setUndoError] = useState<string | null>(null)
+  const [forgotten, setForgotten] = useState<{ preference: Preference; error?: string } | null>(null)
   const [undoing, setUndoing] = useState(false)
   const reloaded = useRef<string | null>(null)
   const restore = useRef<Restore>({})
@@ -137,15 +136,17 @@ function MemoryBody({ client }: { client: Api }) {
 
   const undoForget = async () => {
     if (!forgotten || undoing) return
-    setUndoError(null)
+    const gone = forgotten.preference
+    const settle = (next: { preference: Preference; error?: string } | null) => setForgotten((current) => (current?.preference === gone ? next : current))
+    settle({ preference: gone })
     setUndoing(true)
     try {
-      const back = await restorePreference(client, forgotten, restore.current)
+      const back = await restorePreference(client, gone, restore.current)
       if (back) put(back)
       restore.current = {}
-      setForgotten(null)
+      settle(null)
     } catch (err) {
-      setUndoError(errorSentence(err))
+      settle({ preference: gone, error: errorSentence(err) })
     } finally {
       setUndoing(false)
     }
@@ -198,7 +199,7 @@ function MemoryBody({ client }: { client: Api }) {
           <Callout
             tone="neutral"
             role="status"
-            title={`Forgotten: ${forgotten.text}`}
+            title={`Forgotten: ${forgotten.preference.text}`}
             actions={(
               <>
                 <Button size="sm" variant="secondary" disabled={undoing} onClick={() => void undoForget()}>Undo</Button>
@@ -207,7 +208,7 @@ function MemoryBody({ client }: { client: Api }) {
             )}
           >
             Forgotten. {forgetWarning}
-            {undoError && <span role="alert" className="mt-1 block text-state-failed">{undoError}</span>}
+            {forgotten.error && <span role="alert" className="mt-1 block text-state-failed">{forgotten.error}</span>}
           </Callout>
         )}
         {list.length > 0 && (
@@ -234,9 +235,8 @@ function MemoryBody({ client }: { client: Api }) {
                 onChanged={put}
                 onForgotten={(gone) => {
                   setList((current) => current.filter((p) => p.id !== gone.id))
-                  setUndoError(null)
                   restore.current = {}
-                  setForgotten(gone)
+                  setForgotten({ preference: gone })
                   if (gone.id === entry) navigate('settings', { section: 'memory' })
                 }}
               />
