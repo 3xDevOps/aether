@@ -132,6 +132,14 @@ run.
 | Deliver and merge | Approve, reject or deliver an integration candidate; open or merge a run's pull request | Yes |
 | Team memory | Add a note, pin or unpin one; it cannot remove notes | Yes |
 
+Asked "what is left", "continue this" or "did we ship?", the assistant reads
+the run or swarm with its [progress evidence](connectors.md#progress-evidence)
+and answers requested, implemented, reviewed, merged, released and deployed
+on separate lines, each with its source and time, or "unknown" when Aether has
+no source, as for releases and deployments. An agent's success report alone
+is not proof. "Continue" never repeats a launch, message or merge; the
+assistant proposes the next step and launches only when you ask.
+
 Pausing and resuming run at once. The run's events name you as the actor.
 After each action the assistant says what it did, to which run, and the result.
 

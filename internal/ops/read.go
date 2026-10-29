@@ -42,6 +42,11 @@ type runIDInput struct {
 	RunID string `json:"run_id"`
 }
 
+type getRunInput struct {
+	RunID    string `json:"run_id"`
+	Evidence bool   `json:"evidence,omitempty" jsonschema:"add PR, CI, review, report and child-run evidence"`
+}
+
 type historyInput struct {
 	RunID  string `json:"run_id"`
 	Before string `json:"before,omitempty" jsonschema:"next_before"`
@@ -62,6 +67,7 @@ type swarmsInput struct {
 	SwarmID     string `json:"swarm_id,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"default 20"`
+	Evidence    bool   `json:"evidence,omitempty" jsonschema:"with swarm_id: what was asked, done, reviewed and merged"`
 }
 
 type swarmInput struct {
@@ -101,7 +107,7 @@ var readOps = []Op{
 	opOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
 		"Use this when the user asks about one run, or to poll a launched run."+untrustedRule, getRun).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline,
-		protocol.MethodRunPRStatus, protocol.MethodRunChildren),
+		protocol.MethodRunPRStatus, protocol.MethodRunChildren, protocol.MethodRunPRFeedback),
 	opOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run said or did: its conversation or terminal, and reports."+untrustedRule, runHistory).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodRunACPHistory, protocol.MethodTerminalHistory),
@@ -114,7 +120,8 @@ var readOps = []Op{
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodInsightsGet, protocol.MethodWorkspaceTimeline),
 	opOf("aether_get_swarm", "Get swarms", ScopeRead, true, nextSwarms,
 		"Use this when the user asks about their swarms, or one by swarm_id, or to poll a launched swarm."+untrustedRule, getSwarm).
-		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
+		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList,
+		protocol.MethodRunGet, protocol.MethodRunChildren, protocol.MethodRunPRStatus, protocol.MethodRunPRFeedback, protocol.MethodWorkspaceTimeline, protocol.MethodIntegrationList),
 	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, its diff."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
@@ -374,11 +381,12 @@ func prOf(p *protocol.RunPullRequest) *pullRequest {
 	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft, BaseBranch: p.BaseBranch, HeadOID: p.HeadOID, Repository: p.Repository}
 }
 
-func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
-	r, err := getRunRecord(ctx, c.read, in.RunID)
-	if err != nil {
+func getRun(ctx context.Context, c calls, in getRunInput) (string, any, error) {
+	var got protocol.RunResult
+	if err := c.read(ctx, protocol.MethodRunGet, protocol.RunIDParams{RunID: in.RunID}, &got); err != nil {
 		return "", nil, err
 	}
+	r := got.Run
 	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
 		return "", nil, err
@@ -426,6 +434,13 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 		out["parent_run_id"], out["parent_url"] = r.ParentRunID, l.run(r.ParentRunID)
 	}
 	addChildren(ctx, c.read, l, book, r.ID, out, untrusted)
+	if in.Evidence {
+		unconfirmed := addRunEvidence(ctx, c.read, r, got.PullRequests, reps, &pr, out)
+		if cs := out["evidence"].(map[string]any)["conflicts"].([]string); len(cs) > 0 {
+			summary += " Its report conflicts with the evidence: " + strings.Join(cs, ", ") + "."
+		}
+		summary += unconfirmed
+	}
 	return summary, out, nil
 }
 
@@ -435,7 +450,9 @@ type childRow struct {
 	Depth int    `json:"depth"`
 	State string `json:"state"`
 	choice
-	URL string `json:"url,omitempty"`
+	Stale  bool              `json:"stale,omitempty"`
+	Report map[string]string `json:"report,omitempty"`
+	URL    string            `json:"url,omitempty"`
 }
 
 // addChildren adds run id's descendants, nearest first, to out, and what
@@ -444,15 +461,7 @@ type childRow struct {
 func addChildren(ctx context.Context, read Call, l links, book accountBook, id string, out, untrusted map[string]any) {
 	var res protocol.RunChildrenResult
 	if err := read(ctx, protocol.MethodRunChildren, protocol.RunChildrenParams{RunID: id}, &res); err != nil {
-		// A server without child runs has none to list; any other failure,
-		// such as a lost connection, is reported.
-		var perr *protocol.Error
-		var data struct {
-			Reason string `json:"reason"`
-		}
-		unsupported := errors.As(err, &perr) && (perr.Code == protocol.CodeMethodNotFound ||
-			perr.Code == protocol.CodeUnavailable && json.Unmarshal(perr.Data, &data) == nil && data.Reason == protocol.ErrorReasonChildrenUnavailable)
-		if !unsupported {
+		if !noChildRuns(err) {
 			out["children_error"] = err.Error()
 		}
 		return
@@ -460,16 +469,37 @@ func addChildren(ctx context.Context, read Call, l links, book accountBook, id s
 	if len(res.Children) == 0 {
 		return
 	}
-	rows, purposes := []childRow{}, map[string]string{}
+	rows, purposes, summaries := []childRow{}, map[string]string{}, map[string]string{}
 	for _, ch := range res.Children[:min(len(res.Children), defaultRows)] {
-		rows = append(rows, childRow{RunID: ch.RunID, Depth: ch.Depth, State: ch.State, choice: choiceOf(ch.Harness, ch.Mode, ch.Model, ch.AccountMemberID, book),
-			URL: l.run(ch.RunID)})
+		row := childRow{RunID: ch.RunID, Depth: ch.Depth, State: ch.State, choice: choiceOf(ch.Harness, ch.Mode, ch.Model, ch.AccountMemberID, book),
+			Stale: ch.Stale, URL: l.run(ch.RunID)}
+		if ch.Report != nil {
+			row.Report = map[string]string{"outcome": ch.Report.Outcome, "at": ch.Report.At}
+			summaries[ch.RunID] = clip(ch.Report.Summary, maxReport)
+		}
+		rows = append(rows, row)
 		purposes[ch.RunID] = clip(ch.Purpose, maxReport)
 	}
 	out["children"], untrusted["child_purposes"] = rows, purposes
+	if len(summaries) > 0 {
+		untrusted["child_reports"] = summaries
+	}
 	if len(res.Children) > len(rows) {
 		out["children_total"] = len(res.Children)
 	}
+}
+
+// noChildRuns reports whether err is from a server without child runs,
+// which has none to list.
+// noChildRuns reports a server without child runs, which has none to list;
+// any other failure, such as a lost connection, is reported.
+func noChildRuns(err error) bool {
+	var perr *protocol.Error
+	var data struct {
+		Reason string `json:"reason"`
+	}
+	return errors.As(err, &perr) && (perr.Code == protocol.CodeMethodNotFound ||
+		perr.Code == protocol.CodeUnavailable && json.Unmarshal(perr.Data, &data) == nil && data.Reason == protocol.ErrorReasonChildrenUnavailable)
 }
 
 const historyExpired = "The server no longer keeps this run's oldest history, so its start is missing."
@@ -766,12 +796,19 @@ func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error)
 		messages = append(messages, message{FromRunID: msg.FromRunID, ToRunID: msg.ToRunID, Kind: msg.Kind,
 			Body: clip(cmp.Or(msg.Summary, msg.Body), maxText), At: msg.CreatedAt})
 	}
+	untrusted := map[string]any{"tasks": tasks, "questions": questions, "messages": messages, "worker_errors": errs}
 	out := map[string]any{"swarm": swarmRowOf(m, l, maxText), "launch": swarmReceipt(m, l, book), "integrator_generation": m.IntegratorGeneration,
-		"workers": workers, "untrusted": map[string]any{"tasks": tasks, "questions": questions, "messages": messages, "worker_errors": errs}}
+		"workers": workers, "untrusted": untrusted}
 	if m.IntegratorLaunchError != "" {
 		out["integrator_launch_error"] = m.IntegratorLaunchError
 	}
-	return fmt.Sprintf("Swarm %s is %s: %d tasks, %d workers, %d open questions.", m.ID, m.Phase, len(tasks), len(workers), m.OpenQuestions), out, nil
+	summary := fmt.Sprintf("Swarm %s is %s: %d tasks, %d workers, %d open questions.", m.ID, m.Phase, len(tasks), len(workers), m.OpenQuestions)
+	if in.Evidence {
+		progress, said := swarmProgress(ctx, c.read, res, untrusted)
+		out["progress"], out["released"], out["deployed"] = progress, untracked, untracked
+		summary += said
+	}
+	return summary, out, nil
 }
 
 const (

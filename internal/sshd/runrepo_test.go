@@ -333,4 +333,16 @@ func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
 	if err != nil || len(prs) != 1 || prs[0].State != "merged" || prs[0].MergedAt == nil {
 		t.Fatalf("recorded pull request = %+v, %v", prs, err)
 	}
+	value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunGet, repoParams(t, protocol.RunIDParams{RunID: string(e.run.ID)}))
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	var got protocol.RunResult
+	if err := json.Unmarshal(value, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PullRequests) != 1 || got.PullRequests[0].Repository != "acme/app" || got.PullRequests[0].Number != 7 || got.PullRequests[0].State != "merged" ||
+		got.PullRequests[0].MergedAt == nil || !got.PullRequests[0].CheckedAt.Equal(prs[0].ObservedAt) {
+		t.Fatalf("run.get pull_requests = %+v, want the recorded one with when it was checked", got.PullRequests)
+	}
 }

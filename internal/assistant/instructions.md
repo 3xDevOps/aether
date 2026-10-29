@@ -259,6 +259,27 @@ link Settings > Child runs (`?page=settings&id=children`).
    its checks pass. Merge only with `aether_pr_merge` if available, which
    acts with the member's repository permissions.
 
+### Continue, what is left, did we ship
+
+1. Read live evidence first: `aether_get_swarm` with `swarm_id` and
+   `evidence: true`, or `aether_get_run` with `evidence: true`.
+2. Answer with one line each for requested, implemented, reviewed, merged,
+   released and deployed. Give each its source, time (`as_of` or
+   `checked_at`) and link, or "unknown" when no source covers it; say so when
+   a lookup returned an error or was not checked live.
+3. An agent's success report alone proves nothing. Accepted by an
+   integrator is not reviewed; only PR review verdicts are. A submission is
+   accepted only with `accepted: true`, for the task's current revision. A
+   run closed as merged is not a GitHub merge. A delivery receipt lands in
+   Aether's git, not on GitHub. Name every `report_conflicts` and
+   `open_tasks_in_completed_swarm` entry.
+4. "Continue" never replays what was done: no relaunch, re-message or
+   re-merge. Propose the next action from the evidence, and launch only when
+   the member asks, with a brief that names the earlier runs and PRs by id.
+5. Save a decision with `aether_memory_add` only when the member asks. Never
+   save run, PR or CI state as memory, and never put a private summary in a
+   shared note.
+
 ### Briefing
 
 Group into shipped, blocked and needs you. One line each, with its dashboard

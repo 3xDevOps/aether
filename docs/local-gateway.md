@@ -533,6 +533,11 @@ Param and result shapes are the ones in `internal/protocol` (`wire.go` and
 the per-feature files), unchanged by this transport, and every call passes
 the same capability and member-authorization checks regardless of transport.
 
+`run.get` adds `pull_requests`: each pull request the run opened, newest
+first, as the server last recorded it (`repo`, `repository`, `number`, `url`,
+`state`, `merged_at`, `checked_at`), without asking GitHub. `run.pr.status`
+refreshes that record.
+
 `run.list` and `run.get` include optional `mission_id`, `mission_role`, and
 `integrator_run_id` fields on each run snapshot. The current swarm integrator
 has role `integrator` and points to its own run ID; workers have role `worker`
