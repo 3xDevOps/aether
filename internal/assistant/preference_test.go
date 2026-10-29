@@ -334,6 +334,29 @@ func TestSaveWhoseNoticeFailsIsReported(t *testing.T) {
 	}
 }
 
+// aether_my_preferences stays within its budget as encoded, field names
+// and timestamps included.
+func TestMyPreferencesFitTheirBudgetAsEncoded(t *testing.T) {
+	f := newPrefFixture(t)
+	for i := range 30 {
+		if _, err := f.prefs.Add(t.Context(), f.m.id, fmt.Sprintf("Prefer table output for report number %d in the weekly summary", i), "",
+			protocol.PreferenceSourceSettings, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var raw json.RawMessage
+	if err := coordtransport.Call(t.Context(), f.sock, protocol.MethodAssistantPreferences, protocol.AssistantPreferencesParams{}, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var res protocol.AssistantPreferencesResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) > maxShownBytes || len(res.Preferences) == 0 {
+		t.Fatalf("my preferences = %d bytes with %d preferences; want at most %d bytes", len(raw), len(res.Preferences), maxShownBytes)
+	}
+}
+
 // The forget card's own read of a preference is not a tool the agent can
 // call.
 func TestSocketRefusesTheForgetCardsRead(t *testing.T) {

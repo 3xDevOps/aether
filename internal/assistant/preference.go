@@ -24,7 +24,8 @@ import (
 const (
 	// maxSavesPerTurn bounds the preferences one message can save.
 	maxSavesPerTurn = 3
-	// maxShown and maxShownBytes bound what aether_my_preferences returns.
+	// maxShown and maxShownBytes bound what aether_my_preferences returns,
+	// the latter as encoded.
 	maxShown      = 40
 	maxShownBytes = 4 << 10
 )
@@ -157,12 +158,17 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 	// With no workspace in view only the preferences for all of them apply.
 	listed.Preferences = slices.DeleteFunc(listed.Preferences, func(p protocol.Preference) bool { return ws == "" && p.WorkspaceID != "" })
 	var ids []string
-	size := 0
+	size := len(`{"preferences":[]}`)
 	for _, pref := range listed.Preferences {
-		if size += len(pref.Text) + len(pref.ID); len(out.Preferences) == maxShown || size > maxShownBytes {
+		item := shown(pref)
+		b, merr := json.Marshal(item)
+		if merr != nil {
+			return nil, merr
+		}
+		if size += len(b) + len(","); len(out.Preferences) == maxShown || size > maxShownBytes {
 			break
 		}
-		out.Preferences = append(out.Preferences, shown(pref))
+		out.Preferences = append(out.Preferences, item)
 		ids = append(ids, pref.ID)
 	}
 	if err = c.s.cfg.Preferences.Touch(ctx, c.m.id, ids); err != nil {
