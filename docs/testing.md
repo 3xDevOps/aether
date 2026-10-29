@@ -527,7 +527,7 @@ Playwright is the runner.
 ```sh
 (cd web && bunx playwright install chromium)        # once, from the repo root
 make test-e2e                                        # builds dist/ first
-make test-e2e E2E_ARGS='--shard=1/4'                 # one of CI's four shards
+make test-e2e E2E_ARGS='--shard=1/2'                 # one of CI's two shards
 make test-e2e E2E_ARGS='--project=chromium run-files.spec.ts'
 cd web && bunx playwright test --project=mobile      # reuse the binaries already in dist/
 ```
@@ -679,7 +679,7 @@ every merge queue entry and every push to `main`.
 | `browser` | Companion image build and smoke, amd64 and arm64 | [The browser companion](#the-browser-companion) |
 | `integration`, `integration-server-rest` | [Integration tests](#integration-tests) in six jobs | See that table |
 | `dashboard` | `bun run typecheck` and `bun run test` | Same, from `web/` |
-| `dashboard-e2e` | [End-to-end suite](#the-dashboard-end-to-end-suite) in four shards | `make test-e2e E2E_ARGS='--shard=N/4'` |
+| `dashboard-e2e` | [End-to-end suite](#the-dashboard-end-to-end-suite) in two shards | `make test-e2e E2E_ARGS='--shard=N/2'` |
 | `desktop`, `desktop-windows` | `aether gui build` on Linux; the Windows desktop zip on amd64 and arm64 | [Desktop shell](../CONTRIBUTING.md#desktop-shell) |
 | `windows`, `windows-install` | [Windows](#windows) | |
 | `release-build`, `android`, `windows-defender` | `make release-binaries`, `make android`, a Defender scan of the Windows binaries | `make release-binaries`, `make android` |
