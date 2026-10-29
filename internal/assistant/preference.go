@@ -198,8 +198,10 @@ func shown(p protocol.Preference) protocol.AssistantPreference {
 }
 
 // remember saves a preference the member asked for in the message of the
-// turn running now, quoting it.
+// turn running now, quoting it, and notes it in the conversation the call
+// came in, which a reset may end before the save returns.
 func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (any, error) {
+	conv := c.m.conversation()
 	p, err := protocol.DecodeParams[protocol.AssistantRememberParams](raw)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
@@ -252,7 +254,8 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 	if res.Previous != nil {
 		summary = fmt.Sprintf("Updated your preference: %q, was %q", res.Preference.Text, res.Previous.Text)
 	}
-	c.note(protocol.MethodAssistantRemember, summary, res.Preference.ID, nil, nil)
+	c.note(conv, newAction(protocol.AssistantConfirmation{Method: protocol.MethodAssistantRemember, Summary: summary, CreatedAt: time.Now()}),
+		res.Preference.ID, nil)
 	return res, nil
 }
 
@@ -267,19 +270,14 @@ func (c *preferenceCaller) forget(ctx context.Context, raw json.RawMessage) (any
 		res, err = c.s.cfg.Preferences.Delete(ctx, c.m.id, p.ID, held.shown)
 	}
 	if ok {
-		c.note(protocol.MethodAssistantForget, held.action.Summary, p.ID, &held, err)
+		c.note(held.conv, held.action, p.ID, err)
 	}
 	return res, err
 }
 
-// note records a preference call's outcome in the conversation, after the
-// approval approver recorded for a held call.
-func (c *preferenceCaller) note(method, summary, id string, held *heldAction, err error) {
-	conv := c.m.conversation()
-	a := newAction(protocol.AssistantConfirmation{Method: method, Summary: summary, CreatedAt: time.Now()})
-	if held != nil {
-		conv, a = held.conv, held.action
-	}
+// note records the outcome of action a on preference id in conv, the
+// conversation the call came in.
+func (c *preferenceCaller) note(conv context.Context, a protocol.AssistantAction, id string, err error) {
 	a.Target.PreferenceID, a.FinishedAt = id, time.Now().UTC()
 	a.Outcome = protocol.AssistantActionSucceeded
 	body := ""
@@ -287,7 +285,7 @@ func (c *preferenceCaller) note(method, summary, id string, held *heldAction, er
 		a.Outcome, a.Error, body = protocol.AssistantActionFailed, err.Error(), err.Error()
 	}
 	if nerr := c.s.noteOutcome(conv, c.m, a, body); nerr != nil {
-		slog.Warn("assistant: record the preference action", "member", c.m.id, "method", method, "action", a.ID, "error", nerr)
+		slog.Warn("assistant: record the preference action", "member", c.m.id, "method", a.Method, "action", a.ID, "error", nerr)
 	}
 }
 

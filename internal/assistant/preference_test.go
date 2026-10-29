@@ -287,6 +287,33 @@ func TestSaveWaitingOnTheSwitchIsRefused(t *testing.T) {
 	}
 }
 
+// A save that finishes after New conversation notes nothing in the new
+// conversation.
+func TestSaveFinishingAfterAResetStaysInItsConversation(t *testing.T) {
+	f := newPrefFixture(t)
+	f.say(1, "remember that I prefer table output")
+	f.m.settings.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.remember(protocol.AssistantRememberParams{Text: "I prefer table output"})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	f.m.op.Lock()
+	err := f.svc.resetLocked(t.Context(), f.m)
+	f.m.op.Unlock()
+	f.m.settings.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = wait(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if got := actions(t, f.svc, f.m); len(got) != 0 {
+		t.Fatalf("the new conversation holds %+v; want nothing from the old one", got)
+	}
+}
+
 // The forget card's own read of a preference is not a tool the agent can
 // call.
 func TestSocketRefusesTheForgetCardsRead(t *testing.T) {
