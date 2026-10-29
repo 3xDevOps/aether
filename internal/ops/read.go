@@ -44,7 +44,7 @@ type runIDInput struct {
 
 type getRunInput struct {
 	RunID    string `json:"run_id"`
-	Evidence bool   `json:"evidence,omitempty" jsonschema:"with PR, CI, reviews, reports, child runs"`
+	Evidence bool   `json:"evidence,omitempty" jsonschema:"add PR, CI, review and report evidence"`
 }
 
 type historyInput struct {
@@ -91,7 +91,7 @@ type memoryInput struct {
 	ID          string `json:"id,omitempty" jsonschema:"a note to show in full"`
 	Words       string `json:"words,omitempty"`
 	Kind        string `json:"kind,omitempty"`
-	File        string `json:"file,omitempty" jsonschema:"notes citing this path"`
+	File        string `json:"file,omitempty" jsonschema:"citing this path"`
 	All         bool   `json:"all,omitempty" jsonschema:"with replaced notes"`
 }
 

@@ -27,6 +27,8 @@ export interface AssistantConfirmation {
   reason?: string
   /** A template launch's task as its params render it; shown on the card, never sent with the call. */
   task?: string
+  /** What the member's saved launch defaults filled into a launch, each saved choice it skipped and each it could not check, with the reason. */
+  defaults?: { applied?: string[]; skipped?: { field: string; reason: string }[]; unchecked?: { field: string; reason: string }[] }
 }
 
 export interface AssistantActionTarget {
@@ -137,13 +139,5 @@ export interface ViewContext {
   route?: ViewEntry
   open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
   recent?: ViewEntry[]
-  /** The modes and models the member's launches remembered, newest first. They travel with the page. */
-  launch_defaults?: LaunchDefault[]
   attachments?: ViewAttachment[]
-}
-
-export interface LaunchDefault {
-  agent: string
-  mode: 'tui' | 'acp' | 'headless'
-  model?: string
 }

@@ -67,7 +67,7 @@ var actOps = []Op{
 		calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunGet, protocol.MethodRunRelaunch, protocol.MethodRunProtect,
 			protocol.MethodRunArchive),
 	opOf("aether_switch_run_mode", "Switch run mode", ScopeControl, true, nextRuns,
-		"Use this when the user wants a live run switched to standard or enhanced mode; a turn in progress is discarded.", switchRunMode).
+		"Use this when the user wants a live run's mode switched; a turn in progress is discarded.", switchRunMode).
 		enum("mode", lifecycleStandard, lifecycleEnhanced).
 		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunModeSwitch),

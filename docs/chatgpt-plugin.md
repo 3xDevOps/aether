@@ -160,9 +160,9 @@ search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-searc
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
 tools, and each tool's name, description and compact input schema at most 3500
-bytes, 15000 for all of them together. Today that is 39 tools, 14958 bytes and
-3575 o200k tokens, the largest tool `aether_launch_run` at 1311 bytes; the
-whole `tools/list` JSON is 21720 bytes and 5163 tokens. Measure offline with the
+bytes, 15000 for all of them together. Today that is 39 tools, 14970 bytes and
+3585 o200k tokens, the largest tool `aether_launch_run` at 1410 bytes; the
+whole `tools/list` JSON is 21732 bytes and 5173 tokens. Measure tokens offline with the
 `o200k_base` tokenizer and update these numbers when tools change. Give each
 tool one "Use this when" sentence, describe a property only when its name does
 not say enough, and fold a read into a tool that already answers it, as

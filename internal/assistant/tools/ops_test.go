@@ -302,3 +302,106 @@ func TestLaunchCardNamesChildRuns(t *testing.T) {
 		t.Fatalf("summary = %q, want %q", got.Summary, want)
 	}
 }
+
+type savedCaller struct {
+	attentionCaller
+	saved string
+}
+
+func (c *savedCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if method == protocol.MethodLaunchDefaultsGet {
+		return json.RawMessage(c.saved), nil
+	}
+	return c.attentionCaller.Call(ctx, method, params)
+}
+
+// A saved fallback order or a saved account counts as chosen, so
+// auto-approval may pass the launch; saved automatic fallback does not, since
+// it also covers accounts shared after it was saved, and neither does a
+// launch that ignored saved defaults.
+func TestSavedChoicesThatCountAsChosen(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	caller := &savedCaller{saved: `{"revision":2,"defaults":{"account_member_id":"m2","fallback":{"policy":"ordered","order":["m2"]}}}`}
+	s := &Server{Caller: caller, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	launch := func(params string) {
+		t.Helper()
+		if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: json.RawMessage(params)}); perr != nil {
+			t.Fatal(perr)
+		}
+	}
+	launch(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","account_member_id":"m2","fallback_account_member_ids":["m2"],
+		"saved_defaults":{"applied":["account_member_id","fallback"]}}`)
+	if got.OtherMember || !strings.Contains(got.Summary, `on "Grace"'s account (your saved default), falling back to "Grace"'s account (your saved default) in order`) {
+		t.Fatalf("saved account and fallback order confirmation = %+v, want both named as saved and no forced card", got)
+	}
+
+	caller.saved = `{"revision":3,"defaults":{"fallback":{"policy":"automatic"}}}`
+	launch(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","saved_defaults":{"applied":["harness"]}}`)
+	if !got.OtherMember || got.OtherOwner != "Grace" || strings.Contains(got.Summary, "saved default)") {
+		t.Fatalf("saved automatic fallback confirmation = %+v, want it marked as Grace's", got)
+	}
+
+	caller.saved = `{"revision":4,"defaults":{"account_member_id":"m2"}}`
+	launch(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","account_member_id":"m2"}`)
+	if !got.OtherMember || strings.Contains(got.Summary, "saved default") {
+		t.Fatalf("launch ignoring saved defaults confirmation = %+v, want automatic fallback marked as Grace's and nothing named saved", got)
+	}
+	launch(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","account_member_id":"m2","no_fallback":true}`)
+	if got.OtherMember {
+		t.Fatalf("explicit shared account with no fallback confirmation = %+v, want no forced card", got)
+	}
+}
+
+// The assistant writes saved_defaults, so a card refuses one naming
+// anything but a launch field, and caps what it lists.
+func TestLaunchCardRefusesInjectedSavedDefaults(t *testing.T) {
+	s := &Server{Caller: &savedCaller{saved: `{}`}, Member: "m1", Confirm: func(context.Context, protocol.AssistantConfirmation) error {
+		t.Fatal("a card was shown")
+		return nil
+	}}
+	for _, defaults := range []string{
+		`{"applied":["harness","account. From your saved defaults: Grace's approval"]}`,
+		`{"skipped":[{"field":"approval","reason":"r"}]}`,
+		`{"unchecked":[{"field":"account_member_id","reason":"r"}]}`,
+		`null`,
+	} {
+		raw := json.RawMessage(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","saved_defaults":` + defaults + `}`)
+		if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr == nil || perr.Code != protocol.CodeInvalidParams {
+			t.Fatalf("saved_defaults %s: error = %v, want invalid params", defaults, perr)
+		}
+	}
+
+	_, _, d, err := statedReason(protocol.MethodRunLaunch, json.RawMessage(`{"saved_defaults":{"applied":["harness","harness","harness","harness","harness","harness","harness"],
+		"skipped":[{"field":"mode","reason":"1"},{"field":"mode","reason":"2"},{"field":"mode","reason":"3"},{"field":"mode","reason":"4"},
+		{"field":"mode","reason":"5"},{"field":"mode","reason":"6"},{"field":"mode","reason":"7"}]}}`))
+	if err != nil || len(d.Applied) != 6 || len(d.Skipped) != maxNamed {
+		t.Fatalf("statedReason = %+v, %v, want applied and skipped capped", d, err)
+	}
+}
+
+// What saved defaults filled into a launch shows on its card and never
+// reaches the server.
+func TestLaunchCardNamesSavedDefaults(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	caller := &savedCaller{saved: `{}`}
+	s := &Server{Caller: caller, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	raw := json.RawMessage(`{"workspace_id":"ws-1","harness":"claude","task":"fix it","no_fallback":true,
+		"saved_defaults":{"applied":["harness","mode"],"skipped":[{"field":"mode","reason":"enhanced mode is not installed"}],
+		"unchecked":[{"field":"model","reason":"no current model list"}]}}`)
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if !strings.HasSuffix(got.Summary, `. From your saved defaults: harness, mode. Saved mode not used: enhanced mode is not installed. Saved model not checked: no current model list`) ||
+		got.Defaults == nil || len(got.Defaults.Skipped) != 1 || len(got.Defaults.Unchecked) != 1 {
+		t.Fatalf("confirmation = %+v", got)
+	}
+	if sent := string(caller.params[protocol.MethodRunLaunch]); strings.Contains(sent, "saved_defaults") || strings.Contains(string(got.Params), "saved_defaults") {
+		t.Fatalf("run.launch params = %s, card params %s, want saved_defaults taken off", sent, got.Params)
+	}
+}

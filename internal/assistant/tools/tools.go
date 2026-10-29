@@ -251,7 +251,7 @@ func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMe
 }
 
 func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (json.RawMessage, *protocol.Error) {
-	params, reason, err := statedReason(req.Method, req.Params)
+	params, reason, defaults, err := statedReason(req.Method, req.Params)
 	if err == nil {
 		params, err = Prepare(s.Member, req.Method, params)
 	}
@@ -268,11 +268,12 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 		if result, ok := s.replayTemplateLaunch(ctx, req); ok {
 			return result, nil
 		}
-		c := protocol.AssistantConfirmation{Method: req.Method, Params: req.Params, CreatedAt: time.Now().UTC()}
+		c := protocol.AssistantConfirmation{Method: req.Method, Params: req.Params, CreatedAt: time.Now().UTC(), Defaults: defaults}
 		if rpcErr := s.summarize(ctx, req, &c); rpcErr != nil {
 			return nil, rpcErr
 		}
 		req.Params = c.Params
+		c.Summary += defaultsNote(defaults)
 		if reason != "" {
 			c.Reason = reason
 			c.Summary += fmt.Sprintf(". The assistant's reason: %q", reason)
@@ -514,14 +515,17 @@ func (s *Server) call(ctx context.Context, method string, params, out any) *prot
 }
 
 // launchNames names the accounts and repositories a launch's card
-// mentions; shared are the teammates' accounts shared with the member.
+// mentions; shared are the teammates' accounts shared with the member, and
+// savedAccount the member's saved account when the launch was filled from
+// it.
 type launchNames struct {
 	member               string
 	accounts, workspaces map[string]string
 	shared               []string
+	savedAccount         string
 }
 
-func (s *Server) launchNames(ctx context.Context) (launchNames, *protocol.Error) {
+func (s *Server) launchNames(ctx context.Context, defaults *protocol.AssistantDefaultsUse) (launchNames, *protocol.Error) {
 	var accounts protocol.AccountListResult
 	if rpcErr := s.call(ctx, protocol.MethodAccountList, nil, &accounts); rpcErr != nil {
 		return launchNames{}, rpcErr
@@ -531,6 +535,13 @@ func (s *Server) launchNames(ctx context.Context) (launchNames, *protocol.Error)
 		return launchNames{}, rpcErr
 	}
 	n := launchNames{member: s.Member, accounts: map[string]string{}, workspaces: map[string]string{}}
+	if defaults != nil && slices.ContainsFunc(defaults.Applied, func(f string) bool { return f == "account_member_id" || f == "workers.account_member_id" }) {
+		var saved protocol.LaunchDefaultsResult
+		if rpcErr := s.call(ctx, protocol.MethodLaunchDefaultsGet, nil, &saved); rpcErr != nil {
+			return launchNames{}, rpcErr
+		}
+		n.savedAccount = saved.Defaults.AccountMemberID
+	}
 	for _, m := range accounts.Accounts {
 		n.accounts[m.ID] = cmp.Or(m.DisplayName, m.ID)
 		if m.ID != s.Member {
@@ -548,11 +559,14 @@ func (n launchNames) owner(id string) string {
 }
 
 // account is whose account id is. A shared account the launch names does
-// not mark the card: the member chose it, and the server refuses one not
-// shared with them.
+// not mark the card: the member chose it, in this launch or in their saved
+// defaults, and the server refuses one not shared with them.
 func (n launchNames) account(id string) string {
 	if id == "" || id == n.member {
 		return "your account"
+	}
+	if id == n.savedAccount {
+		return fmt.Sprintf("%q's account (your saved default)", n.owner(id))
 	}
 	return fmt.Sprintf("%q's account", n.owner(id))
 }
@@ -570,8 +584,9 @@ func named(items []string) string {
 
 // options names a launch's fallback order and extra repositories. Automatic
 // fallback while any account is shared with the member marks c as their
-// owners', since the launch may spend usage nobody chose; an explicit order
-// does not.
+// owners', since the launch may spend usage nobody chose, even when the
+// member saved automatic fallback: it also covers accounts shared after the
+// save. An explicit order does not.
 func (n launchNames) options(order []string, off bool, extras []string, c *protocol.AssistantConfirmation) string {
 	var out string
 	switch {
@@ -612,7 +627,7 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	if rpcErr != nil {
 		return rpcErr
 	}
-	n, rpcErr := s.launchNames(ctx)
+	n, rpcErr := s.launchNames(ctx, c.Defaults)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -641,7 +656,7 @@ func (s *Server) summarizeMission(ctx context.Context, req protocol.Request, c *
 	if rpcErr != nil {
 		return rpcErr
 	}
-	n, rpcErr := s.launchNames(ctx)
+	n, rpcErr := s.launchNames(ctx, c.Defaults)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -703,31 +718,105 @@ func (s *Server) summarizeTemplate(ctx context.Context, req protocol.Request, c 
 // maxReason bounds the assistant's stated reason on a card.
 const maxReason = 200
 
-// statedReason takes the assistant's one-line reason for a launch off its
-// params: it is for the member's card, and the server refuses params it
-// does not know.
-func statedReason(method string, params json.RawMessage) (json.RawMessage, string, error) {
+// savedApplied are the launch fields ops may say saved defaults filled, and
+// savedSkippable those it may say it skipped or could not check.
+var (
+	savedApplied   = []string{"harness", "mode", "model", "account_member_id", "fallback", "workers.account_member_id"}
+	savedSkippable = []string{"harness", "mode", "model", "fallback_account_member_ids"}
+)
+
+// statedReason takes the assistant's one-line reason for a launch, and
+// what saved defaults filled into it, off its params: they are for the
+// member's card, and the server refuses params it does not know. The
+// assistant writes both, so saved_defaults may name only launch fields, and
+// its reasons are cut to fit a card.
+func statedReason(method string, params json.RawMessage) (json.RawMessage, string, *protocol.AssistantDefaultsUse, error) {
 	if !slices.Contains([]string{protocol.MethodRunLaunch, protocol.MethodMissionCreate, protocol.MethodTemplateLaunch}, method) || len(params) == 0 || string(params) == "null" {
-		return params, "", nil
+		return params, "", nil, nil
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(params, &fields); err != nil {
-		return nil, "", errors.New("params must be an object")
+		return nil, "", nil, errors.New("params must be an object")
 	}
-	raw, ok := fields["reason"]
-	if !ok {
-		return params, "", nil
+	rawReason, stated := fields["reason"]
+	rawDefaults, noted := fields["saved_defaults"]
+	if !stated && !noted {
+		return params, "", nil, nil
 	}
 	var reason string
-	if err := json.Unmarshal(raw, &reason); err != nil {
-		return nil, "", errors.New("reason must be a string")
+	if stated {
+		if err := json.Unmarshal(rawReason, &reason); err != nil {
+			return nil, "", nil, errors.New("reason must be a string")
+		}
+	}
+	var defaults *protocol.AssistantDefaultsUse
+	if noted {
+		var err error
+		if defaults, err = savedUse(rawDefaults); err != nil {
+			return nil, "", nil, err
+		}
 	}
 	delete(fields, "reason")
+	delete(fields, "saved_defaults")
 	out, err := json.Marshal(fields)
 	if r := []rune(reason); len(r) > maxReason {
 		reason = string(r[:maxReason]) + "…"
 	}
-	return out, reason, err
+	return out, reason, defaults, err
+}
+
+func savedUse(raw json.RawMessage) (*protocol.AssistantDefaultsUse, error) {
+	var d *protocol.AssistantDefaultsUse
+	if err := json.Unmarshal(raw, &d); err != nil || d == nil {
+		return nil, errors.New("saved_defaults must be the fields saved defaults filled, skipped and left unchecked")
+	}
+	for _, field := range d.Applied {
+		if !slices.Contains(savedApplied, field) {
+			return nil, fmt.Errorf("saved_defaults.applied names %q, which is not one of %s", truncate(field), strings.Join(savedApplied, ", "))
+		}
+	}
+	d.Applied = d.Applied[:min(len(d.Applied), len(savedApplied))]
+	notes := func(list []protocol.AssistantDefaultSkip, name string) ([]protocol.AssistantDefaultSkip, error) {
+		list = list[:min(len(list), maxNamed)]
+		for i, n := range list {
+			if !slices.Contains(savedSkippable, n.Field) {
+				return nil, fmt.Errorf("saved_defaults.%s names %q, which is not one of %s", name, truncate(n.Field), strings.Join(savedSkippable, ", "))
+			}
+			list[i].Reason = truncate(n.Reason)
+		}
+		return list, nil
+	}
+	var err error
+	if d.Skipped, err = notes(d.Skipped, "skipped"); err != nil {
+		return nil, err
+	}
+	if d.Unchecked, err = notes(d.Unchecked, "unchecked"); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// defaultsNote says on a launch card which fields saved defaults filled,
+// which saved choices the launch skipped and why, and which it could not
+// check on the launch's account.
+func defaultsNote(d *protocol.AssistantDefaultsUse) string {
+	if d == nil {
+		return ""
+	}
+	var parts []string
+	if len(d.Applied) > 0 {
+		parts = append(parts, "From your saved defaults: "+strings.Join(d.Applied, ", "))
+	}
+	for _, skip := range d.Skipped {
+		parts = append(parts, fmt.Sprintf("Saved %s not used: %s", skip.Field, skip.Reason))
+	}
+	for _, n := range d.Unchecked {
+		parts = append(parts, fmt.Sprintf("Saved %s not checked: %s", n.Field, n.Reason))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return ". " + strings.Join(parts, ". ")
 }
 
 func (s *Server) workspaceName(ctx context.Context, id string) (string, *protocol.Error) {

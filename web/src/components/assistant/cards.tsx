@@ -71,7 +71,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const { harness } = useAssistantAgent()
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
   const reason: [string, string][] = confirmation.reason ? [['Reason', confirmation.reason]] : []
-  const rows = useLaunchRows(confirmation.method, confirmation.params)
+  const rows = useLaunchRows(confirmation.method, confirmation.params, confirmation.defaults)
   const launch = rows && [...reason, ...rows]
   const params: [string, string][] = rows ? [] : [...reason, ...(confirmation.task ? [['Task', confirmation.task] as [string, string]] : []), ...paramRows(confirmation.params)]
   const autoApprove = useStore((s) => s.assistantStatus?.auto_approve ?? false)

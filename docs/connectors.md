@@ -389,8 +389,14 @@ text again on purpose, pass a new `idempotency_key`.
   optionally `account_member_id`, that agent's model ids on that account, which
   the server caches. `account_member_id` without `models` is refused. When it
   lists none, launch without `model` for the agent's default.
+- `saved`: your [saved launch choices](teams.md#saved-launch-choices) as
+  `launch.defaults.get` returns them, with `invalid` and `unknown` listing each
+  choice a launch could not use or check, with the reason. `saved_error` holds
+  the error when they could not be read. Connectors can read them but not
+  change them.
 - `server.version` and `server.ops_contract`, the version of the tools' inputs
-  and results.
+  and results. It is 2 since launches fill omitted fields from your saved
+  choices.
 
 `aether_launch_run` takes `account_member_id`, `fallback_account_member_ids` (an
 order), `no_fallback`, `extra_workspace_ids` and `children` (`on` or `off`:
@@ -407,13 +413,50 @@ account it uses stops being shared: a mode that account's agents would have
 chosen is taken from the swarm already recorded. A launch, swarm or template launch the server does not understand fails with
 `unknown param "<name>"` instead of starting without it.
 
+A launch fills each field you leave out from your saved launch choices: what
+you pass wins, then what you saved, then the server's own defaults. `harness`
+may be left out when you saved an agent that can launch on the launch's
+account; the saved agent's mode and model apply to whichever agent the launch uses. A saved mode the agent
+cannot start in on the launch's account, or a saved fallback member
+`launch.defaults.get` reports as invalid, is skipped with its reason. A saved
+model is always used: `launch.defaults.get` checks it only on the saved account
+and can only report it unknown, and the agent refuses a model it does not
+offer when the run starts. A saved account you may no longer use fails the
+launch:
+
+```
+saved account mem-7k2m9q4xbd: permission denied: member mem-7k2m9q4xbd has not shared their account with you; pass account_member_id or clear it
+```
+
+A share revoked after that check fails at launch with the server's error; the
+launch never moves to another account. A swarm's saved agent, mode and model
+fill only its integrator; its saved account fills the integrator and each
+worker that names none, and its saved fallback applies to the whole swarm. With
+no agent passed and none saved, the launch fails with `harness is required: you
+have no saved agent`. Pass `saved_defaults: "ignore"` to send exactly the given
+fields. Leaving the fallback fields out cannot ask for automatic fallback while
+you saved an order or `off`: pass `saved_defaults: "ignore"` with every other
+field you want. Template launches never use saved choices. A keyed retry the
+server refuses as a different launch adds `your saved defaults may have changed
+since the first attempt; pass the fields explicitly`.
+
 Each launch's result, and `aether_get_run` and `aether_get_swarm`, has a
 `launch` receipt: `kind` (`run` or `swarm`), `id`, `workspace_id`, `harness`,
 `mode`, `mode_name`, `model` (absent means the agent's default), `account`
 (`member_id`, `name`, `access`: `own`, `shared`, or `other` for a teammate's own
 run), `requested_account` when usage fallback moved the run, `fallback`
 (`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, the run's
-own `children` setting, `via`, and `url`. A launch's receipt adds
+own `children` setting, `via`, and `url`. A new launch's receipt adds
+`defaults_applied`, the input fields your saved choices filled,
+`defaults_skipped`, each saved choice it did not use with `field` and `reason`,
+and `defaults_unchecked`, each saved agent, mode or model it used without
+being able to check it on the account the run started on, with `field` and
+`reason`: an agent or mode when the agents could not be listed, which the
+server then checks at launch, and a model the server could not check there. A duplicate or replayed run
+launch's receipt has none of them; a swarm launch replayed by its
+`idempotency_key` still lists them, since `mission.create` does not say it
+replayed.
+It adds
 `idempotency_key` and `skipped_fallback_accounts`: the fallback accounts the
 server left out because checking them failed, each with a fixed `error` reason;
 the server log has the detail. A swarm's receipt has `integrator` and `workers`
@@ -506,7 +549,8 @@ that the run's pull request changed.
 with `workspace_id`) and `params` runs a saved template on your own account
 with its agent, mode and model. It takes no task, agent, mode, model, account,
 fallback or extra repositories, since `template.launch` has none, and refuses
-them by name. Without `template`, it needs `task` and `harness`. Without an
+them by name. Without `template`, it needs `task`, and `harness` unless a saved
+agent fills it. Without an
 `idempotency_key`, a template launch is deduplicated only while an identical
 one is still starting.
 

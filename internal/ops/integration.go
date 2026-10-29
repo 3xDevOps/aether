@@ -25,7 +25,7 @@ type integrationDecideInput struct {
 
 var integrationOps = []Op{
 	opOf("aether_integration", "Integration candidates", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what a swarm's integrator wants to deliver, or one candidate by candidate_id."+untrustedRule, integration).
+		"Use this when the user asks what a swarm's integrator wants to deliver, or one by candidate_id."+untrustedRule, integration).
 		offer(TierRead).calling(protocol.MethodIntegrationList, protocol.MethodIntegrationShow),
 	opOf("aether_integration_decide", "Decide delivery", ScopeControl, true, "call aether_integration for candidate and request ids",
 		"Use this when the user approves or rejects a candidate's delivery request, or delivers an approved one, which cannot be taken back.", integrationDecide).

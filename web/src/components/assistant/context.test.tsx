@@ -287,25 +287,6 @@ describe('inspecting what is shared', () => {
     expect(sent()).toEqual(raw)
   })
 
-  it('sends the remembered launch choices with the page, newest first, and only with it', async () => {
-    useStore.setState({ launchDefaults: { codex: { mode: 'tui', model: 'me:ghp_x@github.com', at: 1 }, claude: { mode: 'acp', model: 'opus', at: 2 }, 'Bad Name': { mode: 'acp', at: 3 } } })
-    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
-    await userEvent.click(within(aside).getByRole('button', { name: 'Inspect what is shared' }))
-    const shared = await screen.findByRole('dialog', { name: 'What is shared' })
-    expect(within(shared).getByRole('region', { name: 'Sent with the next message' }).textContent).toContain('claude opus Enhanced, codex Standard')
-    await userEvent.keyboard('{Escape}')
-    await userEvent.type(box(aside), 'Build the export{Enter}')
-    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
-    expect(sent()?.launch_defaults).toEqual([{ agent: 'claude', mode: 'acp', model: 'opus' }, { agent: 'codex', mode: 'tui' }])
-
-    await userEvent.click(within(aside).getByRole('button', { name: /^Remove page / }))
-    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
-    await userEvent.type(box(aside), '{Enter}')
-    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
-    expect(sent(1)).toMatchObject({ attachments: [{ kind: 'check', check: 'lint' }] })
-    expect(sent(1)?.launch_defaults).toBeUndefined()
-  })
-
   it('stops sharing the page from the same place', async () => {
     vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: false })
     const aside = await openPanel()

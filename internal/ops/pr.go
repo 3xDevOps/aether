@@ -33,7 +33,7 @@ var prOps = []Op{
 		hints(false, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunPRStatus, protocol.MethodRunPRCreate),
 	opOf("aether_pr_merge", "Merge pull request", ScopeControl, true, nextRuns,
-		"Use this when the user wants a run's pull request merged after reviewing it with aether_pr_status; refused if its head moved.", prMerge).
+		"Use this when the user wants a run's pull request merged after aether_pr_status; refused if its head moved.", prMerge).
 		enum("method", "squash", "merge", "rebase").hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunPRFeedback, protocol.MethodRunPRMerge),
 }

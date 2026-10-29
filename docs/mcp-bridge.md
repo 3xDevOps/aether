@@ -270,7 +270,7 @@ with `mine` filters to the socket's member.
 | --- | --- |
 | Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_integration`, `aether_watches`, `aether_list_workspaces`, `aether_get_workspace`, `aether_launch_options`, `aether_changes`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
 | Reversible | `aether_pause_run`, `aether_resume_run`, `aether_watch` |
-| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin`, `aether_unwatch` |
+| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_save_launch_defaults`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin`, `aether_unwatch` |
 
 A confirmed call blocks until the member approves it in the dashboard, or runs
 at once when the member turned on [auto-approval](assistant.md#auto-approval),
@@ -282,7 +282,10 @@ card's `other_member` and `other_owner` name the accounts' owners. A launch
 that names a shared account itself, in `account_member_id` or
 `fallback_account_member_ids`, does not wait: the member chose it, the card
 names it and its owner, and the server refuses an account not shared with the
-member. The card names what the call acts on: the run's title and
+member. The same holds for an account or fallback order the member saved as
+[launch defaults](teams.md#saved-launch-choices), which the launch tools fill
+into those fields; saved automatic fallback still waits, since it also covers
+accounts shared after it was saved. The card names what the call acts on: the run's title and
 owner, the request and the option chosen, a message's attachments and anchor, a
 launch's account when it is a teammate's, its fallback (saying when it may fall
 back to accounts shared with the member), extra repositories and child-run
