@@ -599,6 +599,10 @@ func TestQuotedSkipsPastedText(t *testing.T) {
 			t.Errorf("quoted(%q) = %q, %v; want %q", message, span, err, want)
 		}
 	}
+	const replaced = "We used to always use C# here. Remember: always use C++ here."
+	if span, err := quoted(replaced, "always use C++ here"); err != nil || span != "always use C++ here" {
+		t.Errorf("quoted(%q) = %q, %v; want the span the text quotes with its symbols", replaced, span, err)
+	}
 	for name, message := range map[string]string{
 		"after a quote":     "> from the review\n\nPrefer table output, always.",
 		"after a fence":     "````\nx\n```\n````\nPrefer table output, always.",

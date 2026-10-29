@@ -297,28 +297,49 @@ func (c *preferenceCaller) note(conv context.Context, a protocol.AssistantAction
 // quoted returns the span of message that text quotes: a contiguous run of
 // whole words of it, outside quoted lines and code blocks, ignoring case and
 // punctuation, long enough to be a preference. The span is the member's own
-// text, without the punctuation around it.
+// text, without the punctuation around it. Words ignore symbols, so of the
+// spans matching text, one text holds with its symbols wins: "use C++"
+// over an earlier "use C#".
 func quoted(message, text string) (string, error) {
-	want := preference.Words(preference.Normalize(text))
+	text = preference.Normalize(text)
+	want := preference.Words(text)
 	tooShort := &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf(
 		"a preference quotes at least %d words and %d characters of the member's message; ask them what to remember",
 		preference.MinWords, preference.MinChars)}
 	if len(want) < preference.MinWords {
 		return "", tooShort
 	}
+	text = strings.ToLower(text)
+	found := ""
+search:
 	for _, seg := range typedSegments(message) {
 		seg = preference.Normalize(seg)
 		words := preference.Words(seg)
-		if i := preference.Index(words, want); i >= 0 {
-			span := attached(seg, words[i].Start, words[i+len(want)-1].End)
-			if utf8.RuneCountInString(span) < preference.MinChars {
-				return "", tooShort
+		for from := 0; ; {
+			i := preference.Index(words[from:], want)
+			if i < 0 {
+				break
 			}
-			return span, nil
+			i += from
+			span := attached(seg, words[i].Start, words[i+len(want)-1].End)
+			exact := strings.Contains(text, strings.ToLower(span))
+			if found == "" || exact {
+				found = span
+			}
+			if exact {
+				break search
+			}
+			from = i + 1
 		}
 	}
-	return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "text must quote the member's own words from their latest message, " +
-		"outside quoted lines and code blocks; quote them exactly or ask what to remember"}
+	switch {
+	case found == "":
+		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "text must quote the member's own words from their latest message, " +
+			"outside quoted lines and code blocks; quote them exactly or ask what to remember"}
+	case utf8.RuneCountInString(found) < preference.MinChars:
+		return "", tooShort
+	}
+	return found, nil
 }
 
 // attached widens seg[start:end] to the symbols joined to its first and
