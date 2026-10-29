@@ -91,7 +91,6 @@ func dig(t *testing.T, v any, path ...any) any {
 	return v
 }
 
-// byRun is the row of rows whose run_id is id.
 func byRun(t *testing.T, rows any, id string) map[string]any {
 	t.Helper()
 	for _, r := range rows.([]any) {
