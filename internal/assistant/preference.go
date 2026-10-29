@@ -130,15 +130,6 @@ func (s *Service) memoryOff(ctx context.Context, id domain.MemberID) (string, er
 	return "", nil
 }
 
-// workspace is the workspace the member's held view is in, empty for none.
-func (c *preferenceCaller) workspace() string {
-	held := c.s.View(c.m.id, time.Now())
-	if held.ViewContext == nil {
-		return ""
-	}
-	return held.ViewContext.Route.WorkspaceID
-}
-
 func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, error) {
 	p, err := protocol.DecodeParams[protocol.AssistantPreferencesParams](raw)
 	if err != nil {
@@ -150,12 +141,17 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, err
 	}
 	out := protocol.AssistantPreferencesResult{Preferences: []protocol.AssistantPreference{}}
-	ws := c.workspace()
+	var ws string
+	if msg, ok := c.prompt(); ok {
+		if v := promptView(msg.Context); v != nil {
+			ws = v.Route.WorkspaceID
+		}
+	}
 	listed, err := c.s.cfg.Preferences.List(ctx, c.m.id, protocol.PreferenceListParams{WorkspaceID: ws, Query: p.Query})
 	if err != nil {
 		return nil, err
 	}
-	// With no workspace in view only the preferences for all of them apply.
+	// With no workspace in the message only the preferences for all of them apply.
 	listed.Preferences = slices.DeleteFunc(listed.Preferences, func(p protocol.Preference) bool { return ws == "" && p.WorkspaceID != "" })
 	var ids []string
 	size := len(`{"preferences":[]}`)
@@ -510,7 +506,6 @@ func (s *Service) preferenceNotes(ctx context.Context, member domain.MemberID) (
 	return []acp.ContentBlock{block}, func() { s.cfg.Preferences.RestoreChanges(member, changes) }, nil
 }
 
-// withTemporary adds whether the member's conversation is temporary to out.
 func (s *Service) withTemporary(ctx context.Context, id domain.MemberID, out protocol.AssistantSettings) (protocol.AssistantSettings, error) {
 	row, err := s.stored(ctx, id)
 	if err != nil {

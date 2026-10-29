@@ -554,10 +554,20 @@ func TestWorkspacePreferencesFollowTheView(t *testing.T) {
 		t.Fatalf("with no workspace in view = %+v; want only the preference for all workspaces", list)
 	}
 	view := &protocol.AssistantViewContext{Version: 1, Route: protocol.AssistantViewEntry{Name: "workspace", WorkspaceID: string(ws.ID)}}
-	f.m.holdView(view, viewFromNavigation, time.Now())
-	if list, _ := f.mine(); len(list) != 2 {
-		t.Fatalf("with api in view = %+v; want both", list)
+	blocks, err := promptBlocks("what do you know about me", view, false)
+	if err != nil {
+		t.Fatal(err)
 	}
+	f.say(9, "what do you know about me")
+	f.mu.Lock()
+	f.msg.Context = blocks[1:]
+	f.mu.Unlock()
+	other := &protocol.AssistantViewContext{Version: 1, Route: protocol.AssistantViewEntry{Name: "workspace", WorkspaceID: "ws-elsewhere"}}
+	f.m.holdView(other, viewFromNavigation, time.Now())
+	if list, _ := f.mine(); len(list) != 2 {
+		t.Fatalf("with api in the message and another page browsed since = %+v; want both", list)
+	}
+	f.endTurn()
 
 	// The held view came from an earlier message; this one carried none.
 	f.m.holdView(view, viewFromPrompt, time.Now())
