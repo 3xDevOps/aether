@@ -2337,15 +2337,51 @@ no `effort`, then those levels in the agent's order
 default and is not remembered; switching to an agent without the chosen level
 resets it.
 
-The form remembers a mode and a model per agent in the `launchDefaults`
-slice (`{mode, model, at}` keyed by agent name), persisted per member in
-`savedLaunchDefaults`; defaults saved before persist version 10 had no
-owner and are dropped. It
-preselects the launchable agent launched most recently, then the agent of
-the newest run, then the first launchable one, and starts in that agent's
-remembered mode, else Enhanced, with its remembered model; an Enhanced or
-remembered mode the agent cannot use (no Enhanced support, or its adapter
-not installed) shows as Standard.
+Where the gateway offers `launch.defaults.get`, the form starts from the
+member's [saved launch choices](teams.md#saved-launch-choices) on the
+server (`store/launch-defaults.ts`), so every browser and device opens on
+the same ones. Each open reads them again, since another device or the
+assistant may have saved since. The first pick waits for that read and for
+the saved account to be applied, then
+preselects the saved agent if it can launch, else the agent of the newest
+run, else the first launchable one, in that agent's saved mode, else
+Enhanced, with its saved model. A successful launch or swarm saves only the
+agent, mode and model through `launch.defaults.set` with the revision it
+read; when another device saved since, the refusal carries the current
+choices, and the form applies its change to those and saves once more. A
+failed save shows "Launch choices not saved: " and the server's error. The
+saved account is preselected when `account.list` still lists it and `get`
+does not mark it invalid, and the saved fallback policy fills the fallback
+list, keeping only listed accounts. A launch never saves the account or the
+fallback; **Save as my default** under **Options** does, and says "Saved
+for every device." until the account or fallback changes again. On the Run tab it saves the fallback list as the run sends
+it, without the selected account. **Run**, **Default mode** and **Set up** on
+Agents, and the onboarding wizard, save their agent and mode the same way
+(`rememberChoice`); **Default mode** leaves the preselected agent alone.
+Agents reads the saved choices too, and its **Default mode** and **Run** use
+the saved mode, else this browser's. Saves
+run one at a time, each from the last one's answer; a save after the
+signed-in member changes is refused, and a failed save reads the choices
+again. A read's answer is dropped when another read or a save started or
+stored its answer after the read began. A **Saved defaults not used** note lists each saved
+account, fallback member, agent, and the chosen agent's mode or model that
+`get` reports in `invalid`, with the server's reason.
+
+Where the gateway does not offer `launch.defaults.get`, the form uses this
+browser's copy instead: the `launchDefaults` slice (`{mode, model, at}`
+keyed by agent name), persisted per member in `savedLaunchDefaults`;
+defaults saved before persist version 10 had no owner and are dropped. It
+preselects the launchable agent launched most recently, then as above. When
+the read fails, the form says "Your saved launch choices could not be read."
+with the server's error and **Try again**, and starts from the copy last
+read from the server, else this browser's; a retry that reads them presets
+the agent, account and fallback from them again. Every launch also updates
+this copy; nothing copies it to the server. On a server that offers
+`launch.defaults.get` but has nothing saved for the member, the form ignores
+this browser's copy and uses the server's defaults, so a new device and an
+old one open on the same choices. The form starts over when a different
+member signs in while it is open. An Enhanced or remembered mode the agent cannot
+use (no Enhanced support, or its adapter not installed) shows as Standard.
 
 **Options** appears when `account.list` returns more than the caller and
 holds the **Account** select: the caller first as "(you)", then accounts
@@ -6206,6 +6242,7 @@ while one of its entries is visible, so the nav and search never disagree.
 | Group | Category (`id`) | Sections and rows (anchor ids) |
 |---|---|---|
 | You | General (`general`) | Appearance: Theme (`theme`), Text size (`text-size`); Keyboard (`keyboard`); Profile (`profile`); Setup guide (`setup-guide`) |
+| You | Launch (`launch`) | Saved defaults (`saved-launch-defaults`) |
 | You | Connections (`connections`) | ChatGPT and Claude (`connectors`); GitHub (`github`) |
 | You | Notifications (`notifications`) | Push notifications (`push`); Watch notifications: push devices (`watch-push`), Quiet hours (`quiet-hours`); Slack (`slack`) |
 | You | Watches (`watches`) | Watches (`watch-list`) |
@@ -6312,6 +6349,20 @@ Categories:
   row. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
   Insights quota link opens `usage`.
+- **Launch**, where the server offers `launch.defaults.get`: **Saved
+  defaults** says who saved them (you or the assistant) and when, or
+  "Nothing saved yet". It lists each agent's saved mode and model with
+  **Forget**, a **Not usable now** list of `invalid` choices with the
+  server's reason, and the `unknown` ones as "Not checked: " and the
+  reason. When the saved account or a fallback member is invalid, **Remove
+  unusable accounts** saves both repaired at once: your own account, and
+  the order without them, or fallback off when none are left. **Account** and **Fallback** (any account, off, or the saved
+  ordered list) save on change; the order itself is set in the launch
+  dialog with **Save as my default**. **Clear** asks first, then clears
+  them. Each change uses `launch.defaults.set` with the revision read and
+  retries once on a conflict, as the launch dialog does. The section starts
+  over, closing **Clear**'s confirmation, when a different member signs in. Child runs keep
+  their own choices in **Child runs**.
 - **Child runs**, where the server offers `child.settings`: **Let my runs
   start child runs** (`enabled`), with a **What child runs cover** list
   (what it allows, that swarms use their own choices, that budgets and

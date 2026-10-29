@@ -545,6 +545,11 @@ most 8 member IDs, your own allowed), or `off`. They hold no credentials and
 grant nothing. `run.launch` does not read them: a client fills a launch from
 them, and the launch is authorized as if nothing were saved.
 
+The dashboard's launch dialog opens on them and saves the agent, mode and
+model of each launch. It saves the account and fallback only when you select
+**Save as my default** under **Options**. **Settings → Launch** shows them,
+with each invalid choice and its reason, and changes or clears them.
+
 `launch.defaults.get` returns your choices with a `revision`, which is 0 when
 none are saved. It also checks each choice now. `invalid` lists the choices a
 launch could not use, with the reason: an agent not installed on the account,

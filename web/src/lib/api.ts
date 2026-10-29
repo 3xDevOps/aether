@@ -12,6 +12,8 @@ import type {
   ChildLimits,
   ChildSettings,
   ChildSettingsParams,
+  LaunchDefaultsResult,
+  LaunchDefaultsSetParams,
   Connector,
   ConnectorCode,
   CoordMessagesListResult,
@@ -575,6 +577,8 @@ export const api = {
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   childSettings: (params: ChildSettingsParams = {}) => call<ChildSettings>('child.settings', params),
+  launchDefaultsGet: () => call<LaunchDefaultsResult>('launch.defaults.get'),
+  launchDefaultsSet: (params: LaunchDefaultsSetParams) => call<LaunchDefaultsResult>('launch.defaults.set', params),
   runChildren: (runID: string) => call<RunChildrenResult>('run.children', { run_id: runID }),
   runChildrenAllow: (runID: string, children: RunChildrenSetting) =>
     call<{ children: RunChildrenSetting }>('run.children.allow', { run_id: runID, children }),

@@ -236,3 +236,24 @@ func TestLaunchDefaultsSetRefusesOversizedShapesAndMembersWhoCannotLaunch(t *tes
 	wantDenied(t, pending.Call(protocol.MethodLaunchDefaultsSet, set, nil), "pending member launch.defaults.set")
 	wantDenied(t, pending.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, nil), "pending member launch.defaults.get")
 }
+
+// Settings' Forget saves the defaults with no agent, which clears the saved
+// agent and keeps the other agents' choices.
+func TestLaunchDefaultsSetWithNoAgentForgetsTheSavedAgent(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ana := controlClient(t, e)
+	var got protocol.LaunchDefaultsResult
+	first := protocol.LaunchDefaults{Agent: "claude", Agents: map[string]protocol.AgentLaunchDefault{"claude": {Mode: "acp"}, "codex": {Mode: "tui"}}}
+	if err := ana.Call(protocol.MethodLaunchDefaultsSet, protocol.LaunchDefaultsSetParams{Defaults: &first}, &got); err != nil {
+		t.Fatalf("launch.defaults.set: %v", err)
+	}
+	forget := protocol.LaunchDefaults{Agents: map[string]protocol.AgentLaunchDefault{"codex": {Mode: "tui"}}}
+	if err := ana.Call(protocol.MethodLaunchDefaultsSet, protocol.LaunchDefaultsSetParams{Defaults: &forget, Revision: got.Revision}, &got); err != nil {
+		t.Fatalf("launch.defaults.set with no agent: %v", err)
+	}
+	var read protocol.LaunchDefaultsResult
+	if err := ana.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, &read); err != nil || read.Defaults.Agent != "" || len(read.Defaults.Agents) != 1 || read.Defaults.Agents["codex"].Mode != "tui" {
+		t.Fatalf("launch.defaults.get after forgetting the agent = %+v, %v", read, err)
+	}
+}

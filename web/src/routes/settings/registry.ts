@@ -1,8 +1,8 @@
 import type { ComponentType } from 'react'
-import { Bell, Brain, Cable, Eye, Gauge, Globe, Monitor, Network, ServerCog, Settings, Sparkles } from '@/components/icons'
+import { Bell, Brain, Cable, Eye, Gauge, Globe, Monitor, Network, Rocket, ServerCog, Settings, Sparkles } from '@/components/icons'
 import type { Capability } from '@/store/hooks'
 
-export type CategoryID = 'general' | 'connections' | 'notifications' | 'watches' | 'memory' | 'assistant' | 'children' | 'usage' | 'this-computer' | 'server' | 'remote-access'
+export type CategoryID = 'general' | 'launch' | 'connections' | 'notifications' | 'watches' | 'memory' | 'assistant' | 'children' | 'usage' | 'this-computer' | 'server' | 'remote-access'
 
 export type Gates = { cap: Capability; admin: boolean; assistant: boolean; onboarding: boolean; member: boolean; workspace: boolean }
 
@@ -26,6 +26,7 @@ export type SettingEntry = {
 
 export const categories: Category[] = [
   { id: 'general', group: 'You', title: 'General', purpose: 'How this dashboard looks and responds, and who you are on this server.', Icon: Settings },
+  { id: 'launch', group: 'You', title: 'Launch', purpose: 'The agent, mode, model, account and fallback your launches start from, on every device.', Icon: Rocket },
   { id: 'connections', group: 'You', title: 'Connections', purpose: 'Services Aether works with on your behalf.', Icon: Cable },
   { id: 'notifications', group: 'You', title: 'Notifications', purpose: 'Where Aether reaches you when a run needs you.', Icon: Bell },
   { id: 'watches', group: 'You', title: 'Watches', purpose: 'Runs, swarms and pull requests the server watches for you, and what it told you.', Icon: Eye },
@@ -46,6 +47,7 @@ export const entries: SettingEntry[] = [
   { id: 'keyboard', category: 'general', label: 'Single-key shortcuts', help: 'Keys such as n, ? and g b.', keywords: 'keyboard keys speech hotkeys' },
   { id: 'profile', category: 'general', label: 'Profile', help: 'Name, colour and git identity.', keywords: 'display name git email avatar account sharing', visible: (g) => g.member },
   { id: 'setup-guide', category: 'general', label: 'Setup guide', help: 'Link this computer, add a repository, set up an agent and start a first run.', keywords: 'onboarding wizard', visible: (g) => g.onboarding },
+  { id: 'saved-launch-defaults', category: 'launch', label: 'Saved defaults', help: 'The agent, mode, model, account and fallback a launch starts from.', keywords: 'launch defaults agent mode model account fallback remember preselect shared', visible: (g) => g.member && g.cap.hasMethod('launch.defaults.get') },
   { id: 'connectors', category: 'connections', label: 'ChatGPT and Claude', help: 'Connect ChatGPT or Claude to Aether over MCP.', keywords: 'mcp connector chatgpt claude plugin oauth pairing code revoke' },
   { id: 'github', category: 'connections', label: 'GitHub', help: 'Connect GitHub to choose repositories and let runs publish changes.', keywords: 'github oauth repository import', visible: (g) => g.admin && g.cap.hasMethod('github.oauth.status') },
   { id: 'push', category: 'notifications', label: 'Notify this device when a run needs me', help: 'Push notifications on this device.', keywords: 'notification alert phone browser push' },
