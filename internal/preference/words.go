@@ -2,7 +2,6 @@ package preference
 
 import (
 	"unicode"
-	"unicode/utf8"
 
 	"golang.org/x/text/cases"
 )
@@ -54,10 +53,4 @@ func Index(words, want []Word) int {
 		}
 	}
 	return -1
-}
-
-// tooShort reports whether normalized text is shorter than a preference may
-// be.
-func tooShort(text string) bool {
-	return len(Words(text)) < MinWords || utf8.RuneCountInString(text) < MinChars
 }

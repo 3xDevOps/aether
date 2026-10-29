@@ -91,7 +91,7 @@ func clean(text string) (string, error) {
 		return "", invalid("text is required")
 	case n > MaxText:
 		return "", invalid("text is %d characters; the limit is %d", n, MaxText)
-	case tooShort(text):
+	case len(Words(text)) < MinWords || n < MinChars:
 		return "", invalid("a preference needs at least %d words and %d characters", MinWords, MinChars)
 	}
 	if hits := secretscan.Scan("", []byte(text)); len(hits) > 0 {
