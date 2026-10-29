@@ -775,8 +775,9 @@ func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
 	s, m, prefs, saved := refusingAssistant(t)
 	left, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := s.Prompt(left, m.id, "show my runs", "k1", nil); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Prompt of a caller that left = %v; want it cancelled", err)
+	// The caller's leaving races the agent's refusal; either ends the prompt, and the notes must come back both ways.
+	if err := s.Prompt(left, m.id, "show my runs", "k1", nil); !errors.Is(err, context.Canceled) && !errors.Is(err, domain.ErrPromptRefused) {
+		t.Fatalf("Prompt of a caller that left = %v; want it cancelled or refused", err)
 	}
 	forgotten := "preference " + saved.Preference.ID + " was forgotten"
 	deadline := time.Now().Add(5 * time.Second)
