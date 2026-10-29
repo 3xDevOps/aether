@@ -58,7 +58,7 @@ function Observed({ watch }: { watch: Watch }) {
   if (o.phase) rows.push(['Phase', o.phase])
   if (o.pr_state) rows.push(['Pull request', o.pr_state])
   if (o.head_sha) rows.push(['Head commit', <Code key="sha">{o.head_sha.slice(0, 12)}</Code>])
-  if (o.checks) rows.push(['Checks', `${o.checks.passed} passed, ${o.checks.failed} failed, ${o.checks.cancelled} cancelled, ${o.checks.pending} pending`])
+  if (o.checks) rows.push(['Checks', `${o.checks.passed} passed, ${o.checks.failed} failed, ${o.checks.cancelled ?? 0} cancelled, ${o.checks.pending} pending`])
   if (o.review_state) rows.push(['Review', o.review_state])
   rows.push(['Created', <RelativeTime key="created" at={watch.created_at} />])
   if (watch.state === 'done') rows.push(['Done', <RelativeTime key="done" at={watch.updated_at} />])

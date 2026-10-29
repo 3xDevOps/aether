@@ -282,7 +282,7 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 	var limited *github.RateLimitError
 	var apiErr *github.APIError
 	var pull *github.PullRequestError
-	refusal := errors.As(err, &pull) && errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusForbidden)
+	refusal := !errors.Is(err, github.ErrSSO) && errors.As(err, &pull) && errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusForbidden)
 	if !refusal {
 		delete(m.refused, ref)
 	}

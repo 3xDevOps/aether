@@ -752,6 +752,26 @@ func TestPRConfirmedRefusalStopsEveryWatchOnIt(t *testing.T) {
 	})
 }
 
+func TestPRSSORefusalBreaksTheRefusalCount(t *testing.T) {
+	p := newPRHarness(t)
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(w.ID)
+	p.gh.set(func(f *fakeGitHub) {
+		f.gone, f.refuse, f.sso = false, map[string]int{"/repos/acme/app/pulls/7": http.StatusForbidden}, true
+	})
+	p.poll(w.ID)
+	if got := p.watchState(w.ID); !strings.Contains(got.Error, "single sign-on") {
+		t.Fatalf("after an SSO refusal = %s %q, want the SSO error", got.State, got.Error)
+	}
+	p.gh.set(func(f *fakeGitHub) { f.gone, f.refuse, f.sso = true, nil, false })
+	p.poll(w.ID)
+	if got := p.watchState(w.ID); got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
+		t.Fatalf("a 404 after an SSO refusal = %s %q, next_check_at = %v; want it counted from one again", got.State, got.Error, got.NextCheckAt)
+	}
+}
+
 func TestPRMovedRepositoryStopsTheWatchAtOnce(t *testing.T) {
 	p := newPRHarness(t)
 	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
