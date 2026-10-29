@@ -4,6 +4,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,23 +59,37 @@ func TestIntegrationPreferences(t *testing.T) {
 
 	env.stop()
 	db := filepath.Join(env.data, "aether.db")
-	snapshot, err := os.ReadFile(db)
-	if err != nil {
-		t.Fatal(err)
+	// Rows the closed server left in the WAL belong to the older database too.
+	files := []string{db, db + "-wal", db + "-shm"}
+	snapshot := map[string][]byte{}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot[f] = data
 	}
 	env = startAssistantServer(t, ctx, env)
 	if perr := env.call(protocol.MethodPreferenceDelete, protocol.PreferenceIDParams{ID: gone.Preference.ID}, nil); perr != nil {
 		t.Fatalf("preference.delete: %v", perr)
 	}
 	env.stop()
-	for _, side := range []string{db + "-wal", db + "-shm"} {
-		_ = os.Remove(side)
-	}
-	if err = os.WriteFile(db, snapshot, 0o600); err != nil {
-		t.Fatal(err)
+	for _, f := range files {
+		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Fatal(err)
+		}
+		if data, ok := snapshot[f]; ok {
+			if err := os.WriteFile(f, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	env = startAssistantServer(t, ctx, env)
 	defer env.stop()
+	listed = protocol.PreferenceListResult{}
 	if perr := env.call(protocol.MethodPreferenceList, protocol.PreferenceListParams{}, &listed); perr != nil ||
 		len(listed.Preferences) != 1 || listed.Preferences[0].ID != kept.Preference.ID {
 		t.Fatalf("after restoring the older database = %+v, %v; want only %s", listed.Preferences, perr, kept.Preference.ID)
