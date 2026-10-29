@@ -46,6 +46,7 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
   onForgotten: (preference: Preference) => void
 }) {
   const [mode, setMode] = useState<Mode>('view')
+  const [editing, setEditing] = useState(preference.updated_at)
   const [text, setText] = useState(preference.text)
   const [scope, setScope] = useState<Scope>(preference.workspace_id ? 'workspace' : 'all')
   const [busy, setBusy] = useState(false)
@@ -65,6 +66,7 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
     }
   }
   const startEdit = () => {
+    setEditing(preference.updated_at)
     setText(preference.text)
     setScope(preference.workspace_id ? 'workspace' : 'all')
     setError(null)
@@ -75,6 +77,7 @@ export function PreferenceRow({ preference, client, workspaceName, activeWorkspa
     const result = await client.preferenceUpdate({
       id: preference.id,
       ...seen,
+      expected_updated_at: editing,
       ...(text !== preference.text ? { text } : {}),
       ...(scope === 'all' && preference.workspace_id ? { clear_workspace: true } : {}),
       ...(scope === 'workspace' && !preference.workspace_id ? { workspace_id: workspaceID } : {}),

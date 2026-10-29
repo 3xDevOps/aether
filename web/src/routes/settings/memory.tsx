@@ -146,6 +146,7 @@ function MemoryBody({ client }: { client: Api }) {
     try {
       const settings = await client.assistantSettings({ preferences_enabled: next })
       if (useStore.getState().identityKey !== identity) return
+      writes.current++
       setEnabled(settings.preferences_enabled !== false)
       const status = useStore.getState().assistantStatus
       if (status) useStore.getState().setAssistantStatus({ ...status, ...settings })

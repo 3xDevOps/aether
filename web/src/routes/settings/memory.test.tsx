@@ -4,7 +4,7 @@ import { ApiError } from '@/lib/api'
 import type { AssistantSettings } from '@/lib/assistant-types'
 import type { Preference } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
-import { forgetWarning } from '@/routes/settings/memory-row'
+import { forgetWarning, PreferenceRow } from '@/routes/settings/memory-row'
 import { MemorySection, preferencesLabel } from '@/routes/settings/memory'
 import { useStore } from '@/store'
 import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
@@ -483,5 +483,45 @@ describe('memory in settings', () => {
     await waitFor(() => expect(useStore.getState().route.params).toEqual({ section: 'memory' }), { timeout: 4000 })
     expect(window.location.search).toBe('?page=settings&id=memory')
     expect(window.history.length).toBe(before)
+  })
+
+  it('keeps the switch the member set when an older list read answers after it', async () => {
+    const user = userEvent.setup()
+    let stale: (value: { preferences: Preference[]; enabled: boolean }) => void = () => {}
+    const preferenceList = vi.fn()
+      .mockResolvedValueOnce({ preferences: [], enabled: true })
+      .mockImplementationOnce(() => new Promise((resolve) => { stale = resolve }))
+      .mockResolvedValue({ preferences: [pref()], enabled: false })
+    show([], {
+      preferenceList,
+      assistantSettings: vi.fn(async () => ({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, preferences_enabled: false })),
+    })
+    const toggle = await screen.findByRole('checkbox', { name: preferencesLabel })
+    await waitFor(() => expect(toggle).toHaveProperty('disabled', false))
+    act(() => useStore.getState().notePreferenceUndo())
+    await waitFor(() => expect(preferenceList).toHaveBeenCalledTimes(2))
+    await user.click(toggle)
+    await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('false'))
+    act(() => stale({ preferences: [], enabled: true }))
+    await screen.findByText('Prefer table output')
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('sends the version an edit started from, not one a later read brought', async () => {
+    const user = userEvent.setup()
+    const client = fakeApi({ preferenceUpdate: vi.fn(async () => ({ preference: pref({ text: 'Prefer JSON output please' }), previous: pref() })) })
+    const row = (updated_at: string) => (
+      <ul>
+        <PreferenceRow preference={pref({ updated_at })} client={client} workspaceName={undefined} activeWorkspace="" highlighted={false} onChanged={() => {}} onForgotten={() => {}} />
+      </ul>
+    )
+    const view = render(row('2026-10-27T10:00:00Z'))
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    const box = screen.getByRole('textbox', { name: 'Preference text' })
+    await user.clear(box)
+    await user.type(box, 'Prefer JSON output please')
+    view.rerender(row('2026-10-27T11:00:00Z'))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(client.preferenceUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'pref-1', expected_updated_at: '2026-10-27T10:00:00Z' }))
   })
 })
