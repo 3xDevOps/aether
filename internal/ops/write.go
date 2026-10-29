@@ -41,7 +41,7 @@ type connectorLaunchInput struct {
 	Mode            string `json:"mode,omitempty" jsonschema:"default acp if installed"`
 	Model           string `json:"model,omitempty"`
 	Children        string `json:"children,omitempty" jsonschema:"may the agent start child runs; default your setting"`
-	SavedDefaults   string `json:"saved_defaults,omitempty" jsonschema:"fill omitted fields from your saved launch defaults; default apply"`
+	SavedDefaults   string `json:"saved_defaults,omitempty" jsonschema:"ignore sends only the given fields"`
 	accountChoice
 	// Reason is the assistant's, for the member's confirmation card; the
 	// server never sees it.
@@ -63,7 +63,7 @@ type launchSwarmInput struct {
 	Mode          string        `json:"mode,omitempty"`
 	Model         string        `json:"model,omitempty"`
 	Workers       []swarmWorker `json:"workers,omitempty" jsonschema:"default the integrator's agent"`
-	SavedDefaults string        `json:"saved_defaults,omitempty" jsonschema:"fill omitted fields from your saved launch defaults; default apply"`
+	SavedDefaults string        `json:"saved_defaults,omitempty" jsonschema:"ignore sends only the given fields"`
 	accountChoice
 	Reason         string `json:"reason,omitempty" jsonschema:"one line on why, shown to the member"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
@@ -108,13 +108,13 @@ const idempotencyRule = " Reuse idempotency_key on a retry; "
 
 var writeOps = []Op{
 	opOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user asks to start an agent on a task or a saved template, one call per task; options from aether_launch_options; then poll aether_get_run."+
+		"Use this when starting an agent on a task or saved template, one call per task; options from aether_launch_options; then poll aether_get_run."+
 			idempotencyRule+"without one, a repeat within 60s, or of a template while it starts, returns the first run.", launchRun).
 		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodAgentList, protocol.MethodRunList,
 		protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
 	opOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user wants one goal split across agents: an integrator plans tasks for workers; then poll aether_get_swarm."+
+		"Use this when one goal is split across agents: an integrator plans tasks for workers; then poll aether_get_swarm."+
 			idempotencyRule+"without one, a repeat within 60s returns the first swarm.", launchSwarm).
 		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodMissionList,

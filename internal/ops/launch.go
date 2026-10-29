@@ -166,7 +166,7 @@ type launchOptionsInput struct {
 
 var launchOps = []Op{
 	opOf("aether_launch_options", "Launch options", ScopeRead, true, nextWorkspaces,
-		"Use this when choosing what to launch: workspaces, your accounts with usage, their agents and modes, swarm eligibility, fallback, your saved defaults; "+
+		"Use this when choosing what to launch: workspaces, accounts with usage, agents and modes, swarm eligibility, fallback, saved defaults; "+
 			"templates with workspace_id, models with models.", launchOptions).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodAccountList, protocol.MethodAgentList, protocol.MethodLaunchDefaultsGet,
 		protocol.MethodAccountUsage, protocol.MethodTemplateList, protocol.MethodAgentModels),
