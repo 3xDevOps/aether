@@ -400,7 +400,8 @@ func typedSegments(message string) []string {
 		trimmed := strings.TrimSpace(line)
 		indented := indent(line) >= 4
 		run := fenceRun(trimmed)
-		opens := fenceRun(listMarker.ReplaceAllString(trimmed, ""))
+		item := listMarker.ReplaceAllString(trimmed, "")
+		opens := fenceRun(item)
 		switch {
 		case fence != "":
 			if !indented && run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(trimmed[len(run):]) == "" {
@@ -409,7 +410,7 @@ func typedSegments(message string) []string {
 		case opens != "" && !indented:
 			flush()
 			fence, quoting = opens, false
-		case strings.HasPrefix(trimmed, ">"):
+		case strings.HasPrefix(item, ">"):
 			flush()
 			quoting = true
 		case trimmed == "":

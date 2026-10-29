@@ -258,6 +258,9 @@ func (d *DB) DeleteMemberWithPreferences(ctx context.Context, member domain.Memb
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
 		return fmt.Errorf("store: delete member: %w", err)
 	}
+	if err = removeConnectors(ctx, tx, `member_id = ?`, member); err != nil {
+		return err
+	}
 	if err = notFoundOnZeroRows(tx.ExecContext(ctx, `DELETE FROM members WHERE id = ?`, member)); err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			err = fmt.Errorf("store: delete member: %w", mapConstraint(err, ErrInUse))

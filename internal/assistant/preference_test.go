@@ -647,6 +647,8 @@ func TestQuotedSkipsPastedText(t *testing.T) {
 		"mixed indentation": " \tprefer table output always",
 		"list item fence":   "- ```\nprefer table output always",
 		"numbered fence":    "1. ```sh\nprefer table output always",
+		"list item quote":   "- > prefer table output always",
+		"numbered quote":    "1. > prefer table output always",
 	} {
 		if span, err := quoted(message, want); err == nil {
 			t.Errorf("%s: quoted = %q, want refused", name, span)
