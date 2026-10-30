@@ -175,3 +175,53 @@ func TestCallStopsRetryingWithContext(t *testing.T) {
 		t.Fatalf("err=%v; want unavailable stating nothing applied", err)
 	}
 }
+
+func TestCallSentStaysSentAfterLaterDialFailure(t *testing.T) {
+	path := socketPath(t)
+	var stop func()
+	var n atomic.Int32
+	stop = serveEach(t, path, func(c net.Conn, _ string) { n.Add(1); stop() })
+	// Unkeyed non-read: first attempt is sent then cut, never retried.
+	err := Call(context.Background(), path, protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{Kind: "text", Text: "x"}, nil)
+	if !strings.Contains(err.Error(), "may already have applied") || n.Load() != 1 {
+		t.Fatalf("err=%v attempts=%d", err, n.Load())
+	}
+	// Keyed: sent, cut, server stays down; the final message must not claim nothing applied.
+	path = socketPath(t)
+	stop = serveEach(t, path, func(c net.Conn, _ string) { stop() })
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	err = Call(ctx, path, protocol.MethodCoordSend, protocol.CoordSendParams{Body: "x", IdempotencyKey: "k"}, nil)
+	if err == nil || strings.Contains(err.Error(), "nothing applied") || !strings.Contains(err.Error(), "may already have applied") {
+		t.Fatalf("err=%v; want sent to stay sticky", err)
+	}
+}
+
+func TestNotRepeatableMethods(t *testing.T) {
+	for _, m := range []string{protocol.MethodMemoryAdd, protocol.MethodDevTerminalScreenshot, protocol.MethodDevBrowserScreenshot} {
+		if repeatable(m, nil) {
+			t.Errorf("%s must not be repeated after a send", m)
+		}
+	}
+}
+
+func TestMissingSocketGraceStartsAtFirstMiss(t *testing.T) {
+	path := socketPath(t)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	_ = ln.Close() // stale socket file: ECONNREFUSED
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		_ = os.Remove(path)
+		time.Sleep(1500 * time.Millisecond)
+		serveEach(t, path, func(c net.Conn, _ string) { _, _ = c.Write([]byte(okLine)) })
+	}()
+	// Refused for 1.5s, then missing for 1.5s: past 2s since the call began,
+	// inside 2s since the socket first went missing.
+	if err := Call(context.Background(), path, protocol.MethodCoordSend, protocol.CoordSendParams{Body: "x"}, nil); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+}

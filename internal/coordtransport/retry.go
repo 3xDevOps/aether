@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -23,7 +22,10 @@ const (
 	// A stopped server leaves its socket files on disk, so a restart shows
 	// as a refused connection. A path that does not exist at all is a CLI
 	// outside a run, or a rebind caught between unlink and listen; it gets
-	// a short grace and no more.
+	// a short grace, timed from the first ENOENT, and no more. A restart
+	// unlinks and re-listens in one step of the same boot, so the gap is
+	// milliseconds; 2s covers a slow disk, and a path still missing then
+	// was never a run's socket.
 	missingSocketWindow = 2 * time.Second
 	retryInitialDelay   = 100 * time.Millisecond
 	retryMaxDelay       = 2 * time.Second
@@ -45,13 +47,6 @@ func retryable(err error) bool {
 	return errors.As(err, &f) && !f.timedOut
 }
 
-func windowFor(err error) time.Duration {
-	if errors.Is(err, fs.ErrNotExist) {
-		return missingSocketWindow
-	}
-	return retryWindow
-}
-
 // repeatable reports whether sending the same request twice is safe once
 // the first may have been processed: it only reads, the server dedupes it
 // durably on the idempotency key it carries, or its effect is the same
@@ -69,18 +64,19 @@ func repeatable(method string, params json.RawMessage) bool {
 // repeatableMethods are the methods that read, or whose repeat is absorbed
 // server-side without a key. The inbox is among them: an unacknowledged
 // batch is stored with its ack token and delivered again until acked, so
-// a read cut off mid-response loses and duplicates nothing. memory.add
-// stores a note once per text and answers a repeat with the live note.
+// a read cut off mid-response loses and duplicates nothing. Screenshots
+// are not here: each call writes a new capture artifact. memory.add is
+// not either: a repeat hits the note cap or reports the note replaced.
 var repeatableMethods = map[string]bool{
 	protocol.MethodCoordStatus: true, protocol.MethodCoordHookStatus: true, protocol.MethodCoordInbox: true,
-	protocol.MethodMemoryAdd: true, protocol.MethodMemorySearch: true, protocol.MethodMemoryShow: true, protocol.MethodMemoryBrief: true,
+	protocol.MethodMemorySearch: true, protocol.MethodMemoryShow: true, protocol.MethodMemoryBrief: true,
 	protocol.MethodChildOptions: true, protocol.MethodChildList: true, protocol.MethodChildFetch: true,
 	protocol.MethodTaskShow: true, protocol.MethodTaskList: true, protocol.MethodWorkerList: true, protocol.MethodWorkerInspect: true,
 	protocol.MethodMissionPlanShow: true, protocol.MethodIntegrationShow: true,
 	protocol.MethodDevTerminalList: true, protocol.MethodDevTerminalOutput: true, protocol.MethodDevTerminalScreen: true,
-	protocol.MethodDevTerminalScreenshot: true, protocol.MethodDevTerminalWait: true,
+	protocol.MethodDevTerminalWait:  true,
 	protocol.MethodDevBrowserStatus: true, protocol.MethodDevBrowserPages: true, protocol.MethodDevBrowserSnapshot: true,
-	protocol.MethodDevBrowserInspect: true, protocol.MethodDevBrowserScreenshot: true, protocol.MethodDevBrowserConsole: true,
+	protocol.MethodDevBrowserInspect: true, protocol.MethodDevBrowserConsole: true,
 	protocol.MethodDevBrowserNetwork: true, protocol.MethodDevControlStatus: true,
 	protocol.MethodDevArtifactList: true, protocol.MethodDevArtifactGet: true, protocol.MethodDevPortList: true,
 }

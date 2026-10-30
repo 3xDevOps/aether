@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"slices"
@@ -154,31 +155,50 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 	timeout := callTimeout(method, params)
 
 	started, delay := time.Now(), retryInitialDelay
+	var missingSince time.Time
+	everSent := false
 	for {
 		sent, err := c.attempt(ctx, timeout, method, line, result)
 		if err == nil {
 			return nil
 		}
+		everSent = everSent || sent
 		if !retryable(err) {
 			var f *transportFailure
 			if errors.As(err, &f) {
+				if everSent {
+					return unavailableSent(method, f.cause)
+				}
 				return unavailable(method, f.cause)
 			}
 			return err
 		}
-		if sent && !safe {
+		if everSent && !safe {
 			return ambiguous(method, err)
 		}
-		if time.Since(started)+delay > windowFor(err) || ctx.Err() != nil {
-			if sent {
+		var window time.Duration
+		if errors.Is(err, fs.ErrNotExist) {
+			if missingSince.IsZero() {
+				missingSince = time.Now()
+			}
+			window = missingSocketWindow - time.Since(missingSince)
+		} else {
+			missingSince = time.Time{}
+			window = retryWindow - time.Since(started)
+		}
+		if window <= 0 || ctx.Err() != nil {
+			if everSent {
 				return unavailableSent(method, err)
 			}
 			return unavailableUnsent(method, err)
 		}
 		select {
 		case <-ctx.Done():
+			if everSent {
+				return unavailableSent(method, err)
+			}
 			return unavailableUnsent(method, err)
-		case <-time.After(delay):
+		case <-time.After(min(delay, window)):
 		}
 		delay = min(delay*2, retryMaxDelay)
 	}
