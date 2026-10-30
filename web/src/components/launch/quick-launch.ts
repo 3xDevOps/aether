@@ -22,7 +22,8 @@ export function useLastLaunch(): { last: LastLaunch | null; saved: LaunchDefault
     : Object.entries(local).sort(([, a], [, b]) => b.at - a.at)[0]?.[0]
   if (!harness) return { last: null, saved }
   const { mode, model } = rememberedChoice(harness, saved.result)
-  return { last: { harness, mode: mode ?? 'acp', ...(model ? { model } : {}) }, saved }
+  // Only the panel knows which mode an agent supports, so a launch that saved none is not offered one-click.
+  return { last: mode ? { harness, mode, ...(model ? { model } : {}) } : null, saved }
 }
 
 /** Whether the saved choices name `last` in a way a launch would refuse; the panel shows why. */
