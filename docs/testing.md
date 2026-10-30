@@ -173,6 +173,9 @@ working through a server restart or update, in three sizes:
   `dev.terminal.input`.
 - `TestIntegrationRestartCoordination` measures the coordination socket alone
   with one external probe.
+- `TestIntegrationRestartScaling` repeats two `SIGTERM` restarts with 2, 4 and 7
+  live Enhanced runs and prints the stream delay of each; it skips unless
+  `AETHER_RESTART_FULL=1`.
 - `TestIntegrationRestartAcceptance` is the full matrix for a release or an
   owner check; it skips unless `AETHER_RESTART_FULL=1`.
 

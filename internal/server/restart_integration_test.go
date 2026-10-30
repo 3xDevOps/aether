@@ -61,6 +61,8 @@ type soakProfile struct {
 	external bool
 	// burst fires keyed sends and one terminal input around every restart.
 	burst bool
+	// extra is how many idle Enhanced runs share the server.
+	extra int
 	// every is the probes' status interval.
 	every    time.Duration
 	duration time.Duration
@@ -580,6 +582,28 @@ func TestIntegrationRestartCoordination(t *testing.T) {
 	})
 }
 
+// TestIntegrationRestartScaling shows how the stream delay at a restart grows
+// with the number of live Enhanced runs.
+func TestIntegrationRestartScaling(t *testing.T) {
+	if os.Getenv(soakFullEnv) == "" {
+		t.Skipf("the scaling check takes five minutes; set %s=1", soakFullEnv)
+	}
+	for _, extra := range []int{0, 2, 5} {
+		t.Run(fmt.Sprintf("%d_live_runs", extra+2), func(t *testing.T) {
+			runRestartScenario(t, soakProfile{
+				probes: []string{"a", "b"}, mail: true, external: true, extra: extra, every: 4 * time.Second,
+				duration: 45 * time.Second, long: 50,
+				steps: func(e *soakEnv) []soakStep {
+					return []soakStep{
+						{"SIGTERM + restart", 6 * time.Second, e.restart("sigterm-1", e.term, nil)},
+						{"SIGTERM + restart", 20 * time.Second, e.restart("sigterm-2", e.term, nil)},
+					}
+				},
+			})
+		})
+	}
+}
+
 // TestIntegrationRestartAcceptance is the pre-release matrix: two mailing runs
 // and a pending permission request through repeated restarts, an update to a
 // second build, a rollback and a SIGKILL. It runs only with AETHER_RESTART_FULL=1.
@@ -666,6 +690,11 @@ func runRestartScenario(t *testing.T, prof soakProfile) {
 			_, _ = dockerOut("rm", "-f", containerName(r.ID))
 		}
 	})
+	for range prof.extra {
+		r := e.launch(t, "say pong")
+		runs = append(runs, r)
+		waitFor(t, time.Minute, "an idle run's first turn", func() bool { return soakTurnEnded(e, r.ID) })
+	}
 	// An external mailing probe "b" lives in run C, which also holds the
 	// permission request.
 	sharedC := prof.external && prof.mail
