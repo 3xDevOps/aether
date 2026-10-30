@@ -368,6 +368,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 	if pending := s.pending[run.ID]; pending != nil && pending.killRequested {
 		entry.killRequested = true
 		entry.killActor = pending.killActor
+		entry.killBy = pending.killBy
 	}
 	err := s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunQueued, domain.RunProvisioning, "", actor.ID)
 	if err == nil {
@@ -631,8 +632,9 @@ func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cau
 	entry := s.runs[run.ID]
 	killed := entry != nil && entry.killRequested
 	var killActor domain.MemberID
+	var killBy domain.RunID
 	if killed {
-		killActor = entry.killActor
+		killActor, killBy = entry.killActor, entry.killBy
 	}
 	s.mu.Unlock()
 	if killed && run.Worktree != "" {
@@ -646,7 +648,7 @@ func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cau
 	s.mu.Lock()
 	var err error
 	if killed {
-		err = s.transitionOutcomeLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunAbandoned, "killed", killActor, memberCause(killActor))
+		err = s.transitionOutcomeLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunAbandoned, killedReason(killBy), killActor, memberCause(killActor))
 	} else {
 		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunFailed,
 			"provisioning: "+cause.Error(), actor)

@@ -1355,8 +1355,8 @@ is prompted with each report as in [delivery](#delivery-acknowledgement-and-retr
 and with the same swarm-update instruction, naming what changed, as in
 [enhanced-runs.md](enhanced-runs.md#mail).
 
-A worker whose turn ends without a report, and does not start another turn
-within 15 seconds, sends a **provisional report** instead: its last message,
+A worker or child run whose turn ends without a report, and does not start
+another turn within 15 seconds, sends a **provisional report** instead: its last message,
 clipped to the 4 KiB body cap, as an ordinary message whose `correlation_id`
 starts with `provisional:` and whose body starts with `Provisional report:`.
 Each turn sends at most one; a turn that reported `waiting`, or that a human
@@ -1695,17 +1695,23 @@ Parent and child may always message each other with `send`, `ask` and
 `reply`; `status` lists them with state `lineage`. A child's success,
 failure or blocked report reaches its parent's inbox as an ordinary message
 whose `correlation_id` is the report ID, as a worker's report reaches its
-integrator. A child that ends without a report sends one message saying so.
+integrator. A child that ends without a final report sends one message saying
+so, with its latest report of any outcome (summary and time) and its branch.
 A child's `needs-input` question goes to its owner, and the parent is told in
 its inbox so it can answer within the task.
 
 While a parked parent has unfinished children (queued, starting, working,
 waiting or needing input), it is `waiting-agents` with the reason `waiting
 for 2 child runs`. Its `success` report is refused with `-32002` until it
-cancels or detaches them. When a parent run ends, killed, failed, closed or
-deleted, the server stops its attached children that are still working and
-cancels the queued ones; their own children follow. A child that already
-reported its result is detached instead and stays for review. Pausing a parent does not pause its children.
+cancels or detaches them. A child its parent cancels ends `completed` with the
+reason `stopped by parent run <id>`, and its page says who stopped it. When a
+person closes a parent (merged, abandoned, or completed and accepted), the
+server closes its children the same way: finished ones are relabeled, working
+ones are stopped first, and queued ones are cancelled. When a parent ends
+otherwise (failed, killed, interrupted or deleted), working children are
+stopped and queued ones cancelled; a child that already reported its result is
+detached instead and stays for review. Their own children follow. Pausing a
+parent does not pause its children.
 
 Refusals name the cause: child runs off for the owner, a Background parent
 (it exits before a result can reach it), a cancelled swarm, the depth or total

@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -152,8 +154,11 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	s.Kick()
 }
 
-// settle stops the attached children of ended parents and tells a parent
-// once when a child ended without a report.
+// settle ends the attached children of ended parents and tells a parent
+// once when a child ended without a final report. A parent a person closed
+// takes its children with it: finished ones are closed as it was, live ones
+// are stopped and closed. A parent that ended otherwise detaches children
+// that already reported and stops the rest.
 func (s *Service) settle(ctx context.Context) error {
 	list, err := s.cfg.Store.ChildrenToSettle(ctx)
 	if err != nil {
@@ -167,9 +172,16 @@ func (s *Service) settle(ctx context.Context) error {
 		}
 		child, childErr := s.cfg.Store.GetRun(ctx, c.RunID)
 		childLive := childErr == nil && !child.Status.Terminal()
-		if !c.Detached && (gone || parent.Status.Terminal()) && (c.State == domain.ChildQueued || childLive) {
+		parentEnded := gone || parent.Status.Terminal()
+		if !c.Detached && parentEnded && !gone && parentClosed(parent) && childErr == nil {
+			if closeErr := s.closeWithParent(ctx, c, parent); closeErr != nil {
+				slog.Warn("children: close the child of a closed run", "child", c.RunID, "parent", c.ParentRunID, "error", closeErr)
+			}
+			continue
+		}
+		if !c.Detached && parentEnded && (c.State == domain.ChildQueued || childLive) {
 			// A child that already delivered its result keeps it for review
-			// instead of being killed with its parent.
+			// instead of being stopped with its parent.
 			reported, err := s.cfg.Store.ChildReported(ctx, c.RunID)
 			if err != nil {
 				return err
@@ -181,7 +193,7 @@ func (s *Service) settle(ctx context.Context) error {
 				s.publish(ctx, c.RunID, "")
 				continue
 			}
-			if stopErr := s.stop(ctx, c, ""); stopErr != nil {
+			if stopErr := s.stop(ctx, c); stopErr != nil {
 				slog.Warn("children: stop the child of an ended run", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
 			}
 			continue
@@ -198,14 +210,8 @@ func (s *Service) settle(ctx context.Context) error {
 		if _, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		} else if err != nil {
-			reason := ""
-			if child.Reason != "" {
-				reason = ": " + child.Reason
-			}
 			// The notice's key makes a resend after a failed mark a no-op.
-			if err := s.notify(ctx, c.RunID, c.ParentRunID,
-				fmt.Sprintf("Child run %s (%s) ended %s without a report%s", c.RunID, c.Purpose, child.Status, reason),
-				"", "child-ended:"+string(c.RunID)); err != nil {
+			if err := s.notify(ctx, c.RunID, c.ParentRunID, s.endedNotice(ctx, c, child), "", "child-ended:"+string(c.RunID)); err != nil {
 				continue
 			}
 		}
@@ -214,6 +220,49 @@ func (s *Service) settle(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// parentClosed reports whether a person closed the run: they chose its
+// final disposition or accepted its completion.
+func parentClosed(r *domain.Run) bool {
+	switch r.Status {
+	case domain.RunMerged, domain.RunAbandoned:
+		return true
+	case domain.RunCompleted:
+		return r.Review == domain.ReviewAccepted
+	}
+	return false
+}
+
+// closeWithParent closes a child as its closed parent was. The child's
+// result was delivered to the parent and is part of its work.
+func (s *Service) closeWithParent(ctx context.Context, c *domain.ChildReservation, parent *domain.Run) error {
+	var err error
+	if parent.Status == domain.RunCompleted {
+		_, err = s.cfg.Runs.Review(ctx, c.RunID, c.OwnerID, protocol.RunReviewComplete, false)
+	} else {
+		err = s.cfg.Runs.CloseRun(ctx, c.RunID, c.OwnerID, parent.Status)
+	}
+	if err == nil {
+		s.publish(ctx, c.RunID, "")
+	}
+	return err
+}
+
+// endedNotice is what a parent is told of a child that ended without a
+// final report: the child's latest report of any outcome and its branch.
+func (s *Service) endedNotice(ctx context.Context, c *domain.ChildReservation, child *domain.Run) string {
+	msg := fmt.Sprintf("Child run %s (%s) ended %s without a final report", c.RunID, c.Purpose, child.Status)
+	if child.Reason != "" {
+		msg += ": " + child.Reason
+	}
+	if latest, err := s.cfg.Store.LatestReportOfAnyOutcome(ctx, c.RunID); err == nil {
+		msg += fmt.Sprintf("\nIts latest report, %s at %s: %s", latest.Outcome, latest.CreatedAt.UTC().Format(time.RFC3339), latest.Summary)
+	}
+	if child.Branch != "" {
+		msg += "\nIts branch: " + child.Branch
+	}
+	return msg
 }
 
 func finished(r *domain.Run) bool {

@@ -28,6 +28,7 @@ type fakeRuns struct {
 	launched []domain.LaunchOptions
 	accounts []domain.MemberID
 	killed   []domain.RunID
+	closed   []domain.RunID
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
@@ -48,13 +49,33 @@ func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID,
 	return r, nil
 }
 
-func (f *fakeRuns) Kill(ctx context.Context, run domain.RunID, _ domain.MemberID) error {
+func (f *fakeRuns) StopForParent(ctx context.Context, run, parent domain.RunID) error {
 	f.mu.Lock()
 	f.killed = append(f.killed, run)
 	f.mu.Unlock()
 	now := time.Now()
-	_, err := f.db.UpdateRunStatus(ctx, run, domain.RunFailed, "killed", "", nil, &now)
+	_, err := f.db.UpdateRunStatus(ctx, run, domain.RunCompleted, "stopped by parent run "+string(parent), "", nil, &now)
 	return err
+}
+
+func (f *fakeRuns) CloseRun(ctx context.Context, run domain.RunID, _ domain.MemberID, outcome domain.RunStatus) error {
+	f.mu.Lock()
+	f.closed = append(f.closed, run)
+	f.mu.Unlock()
+	now := time.Now()
+	_, err := f.db.UpdateRunStatus(ctx, run, outcome, "closed", "", nil, &now)
+	return err
+}
+
+func (f *fakeRuns) Review(ctx context.Context, run domain.RunID, _ domain.MemberID, _ string, _ bool) (*domain.Run, error) {
+	f.mu.Lock()
+	f.closed = append(f.closed, run)
+	f.mu.Unlock()
+	_, _, err := f.db.SetRunReview(ctx, run, domain.ReviewAccepted, "")
+	if err != nil {
+		return nil, err
+	}
+	return f.db.GetRun(ctx, run)
 }
 
 func (f *fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
@@ -487,7 +508,7 @@ func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	}
 	ended := 0
 	for _, m := range h.mail.sent {
-		if m.from == domain.RunID(stopped.RunID) && strings.Contains(m.body, "without a report") {
+		if m.from == domain.RunID(stopped.RunID) && strings.Contains(m.body, "without a final report") {
 			ended++
 		}
 	}
@@ -639,7 +660,7 @@ func TestNoticesSurviveAFailedDeliveryAndQueuedChildrenCannotDetach(t *testing.T
 	h.settle()
 	notices := 0
 	for _, m := range h.mail.sent {
-		if strings.Contains(m.body, first.RunID) && strings.Contains(m.body, "without a report") {
+		if strings.Contains(m.body, first.RunID) && strings.Contains(m.body, "without a final report") {
 			notices++
 		}
 	}
@@ -681,5 +702,29 @@ func TestFinishedChildrenOutliveTheirParent(t *testing.T) {
 	if kept.Status.Terminal() || !kept.Detached || !stopped.Status.Terminal() {
 		t.Fatalf("finished child %s detached=%v, busy child %s; want the finished one kept for review and the busy one stopped",
 			kept.Status, kept.Detached, stopped.Status)
+	}
+}
+
+func TestClosedParentClosesItsChildren(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	done := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "finished"})
+	live := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "live"})
+	h.settle()
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(done.RunID), domain.RunCompleted, "agent reported success", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunMerged, "closed", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	h.settle()
+	for _, id := range []string{done.RunID, live.RunID} {
+		r, _ := h.db.GetRun(h.ctx, domain.RunID(id))
+		if r.Status != domain.RunMerged {
+			t.Fatalf("child %s = %s, want merged with its parent", id, r.Status)
+		}
 	}
 }

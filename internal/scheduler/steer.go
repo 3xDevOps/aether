@@ -15,12 +15,23 @@ import (
 )
 
 func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
+	return s.kill(ctx, run, actor, "")
+}
+
+// StopForParent stops a child run on its parent's say-so. The child ends
+// completed with a reason naming the parent, not as an abandoned failure.
+func (s *Scheduler) StopForParent(ctx context.Context, run, parent domain.RunID) error {
+	return s.kill(ctx, run, "", parent)
+}
+
+func (s *Scheduler) kill(ctx context.Context, run domain.RunID, actor domain.MemberID, by domain.RunID) error {
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry == nil {
 		if pending := s.pending[run]; pending != nil {
 			pending.killRequested = true
 			pending.killActor = actor
+			pending.killBy = by
 			s.mu.Unlock()
 			return nil
 		}
@@ -52,6 +63,7 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	}
 	entry.killRequested = true
 	entry.killActor = actor
+	entry.killBy = by
 	workspace, cid := entry.workspaceID, entry.containerID
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: persist kill flag", "run", run, "error", err)

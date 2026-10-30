@@ -335,20 +335,19 @@ func (s *Service) cancelChild(ctx context.Context, c *domain.ChildReservation) (
 	if fresh.Detached {
 		return protocol.Child{}, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: child %s is detached and runs on its own", protocol.MethodChildCancel, c.RunID)}
 	}
-	if err := s.stop(ctx, fresh, ""); err != nil {
+	if err := s.stop(ctx, fresh); err != nil {
 		return protocol.Child{}, rpcErr(protocol.MethodChildCancel, err)
 	}
 	return s.wireOrErr(ctx, c.RunID, protocol.MethodChildCancel)
 }
 
-// stop cancels a queued child or kills a started one; actor is the human
-// who asked, or empty for the parent or the server.
-func (s *Service) stop(ctx context.Context, c *domain.ChildReservation, actor domain.MemberID) error {
+// stop cancels a queued child or stops a started one on its parent's say-so.
+func (s *Service) stop(ctx context.Context, c *domain.ChildReservation) error {
 	switch c.State {
 	case domain.ChildQueued:
 		err := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "cancelled before it started", domain.ChildQueued)
 		if err == nil {
-			s.publish(ctx, c.ParentRunID, actor)
+			s.publish(ctx, c.ParentRunID, "")
 		}
 		if !errors.Is(err, store.ErrConflict) {
 			return err
@@ -357,7 +356,7 @@ func (s *Service) stop(ctx context.Context, c *domain.ChildReservation, actor do
 		if getErr != nil {
 			return getErr
 		}
-		return s.stop(ctx, fresh, actor)
+		return s.stop(ctx, fresh)
 	case domain.ChildLaunching, domain.ChildStarted:
 		r, err := s.cfg.Store.GetRun(ctx, c.RunID)
 		if errors.Is(err, store.ErrNotFound) {
@@ -369,7 +368,7 @@ func (s *Service) stop(ctx context.Context, c *domain.ChildReservation, actor do
 		if err != nil {
 			return err
 		}
-		return s.cfg.Runs.Kill(ctx, c.RunID, actor)
+		return s.cfg.Runs.StopForParent(ctx, c.RunID, c.ParentRunID)
 	}
 	return nil
 }

@@ -46,7 +46,8 @@ type ChildStore interface {
 	ChildrenInState(ctx context.Context, state domain.ChildState) ([]*domain.ChildReservation, error)
 	// ChildrenToSettle returns started children whose run ended and whose
 	// parent was not told, and attached children still queued or live
-	// whose parent ended or was deleted.
+	// whose parent ended or was deleted, and completed children their
+	// closed parent left unreviewed.
 	ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, error)
 	// BusyChildren counts the parent's children that hold a slot.
 	BusyChildren(ctx context.Context, parent domain.RunID) (int, error)
@@ -65,6 +66,9 @@ type ChildStore interface {
 	// ChildReported reports whether a child's latest word is a success or
 	// failure report it was not woken from since.
 	ChildReported(ctx context.Context, run domain.RunID) (bool, error)
+	// LatestReportOfAnyOutcome is run's newest report, terminal or not, or
+	// ErrNotFound.
+	LatestReportOfAnyOutcome(ctx context.Context, run domain.RunID) (LatestReport, error)
 	// LatestCoordReport is run's newest finalized terminal report.
 	LatestCoordReport(ctx context.Context, run domain.RunID) (*CoordReport, error)
 	WorkspaceChildLimits(ctx context.Context, ws domain.WorkspaceID) (domain.ChildLimits, error)
@@ -212,6 +216,8 @@ func (d *DB) ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, 
 		 WHERE (rc.state = 'started' AND rc.end_notified = 0 AND child.status IN (`+terminalStatuses+`))
 		    OR (rc.detached = 0 AND (parent.id IS NULL OR parent.status IN (`+terminalStatuses+`))
 		        AND (rc.state = 'queued' OR (rc.state = 'started' AND child.status NOT IN (`+terminalStatuses+`))))
+		    OR (rc.detached = 0 AND rc.state = 'started' AND child.status = 'completed' AND child.review <> 'accepted'
+		        AND (parent.status IN ('merged', 'abandoned') OR (parent.status = 'completed' AND parent.review = 'accepted')))
 		 ORDER BY rc.depth, rc.created_at`)
 }
 
@@ -419,4 +425,32 @@ func (d *DB) ChildReported(ctx context.Context, run domain.RunID) (bool, error) 
 		return false, fmt.Errorf("store: child reported: %w", err)
 	}
 	return reported, nil
+}
+
+// LatestReport is what a run last reported and when.
+type LatestReport struct {
+	Outcome   string
+	Summary   string
+	CreatedAt time.Time
+}
+
+func (d *DB) LatestReportOfAnyOutcome(ctx context.Context, run domain.RunID) (LatestReport, error) {
+	var (
+		r  LatestReport
+		at int64
+	)
+	err := d.db.QueryRowContext(ctx,
+		`SELECT outcome, summary, created_at FROM (
+		   SELECT outcome, summary, created_at FROM coord_reports WHERE run_id = ?1 AND state = ?2 AND superseded_at IS NULL
+		   UNION ALL
+		   SELECT outcome, summary, created_at FROM coord_state_reports WHERE run_id = ?1 AND applied_at IS NOT NULL)
+		 ORDER BY created_at DESC LIMIT 1`, run, CoordReportFinalized).Scan(&r.Outcome, &r.Summary, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r, ErrNotFound
+	}
+	if err != nil {
+		return r, fmt.Errorf("store: latest report of any outcome: %w", err)
+	}
+	r.CreatedAt = decodeTime(at)
+	return r, nil
 }
