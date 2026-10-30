@@ -17,6 +17,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -862,15 +863,15 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 // positionalBody fills target (when no flag set it) and body (when no flag
 // set it) from the positional arguments: the first is the target, every other
-// one is the body. A trailing flag after the body is refused, since flag
+// one is the body. A flag after the body is refused, since flag
 // parsing stops at the body and would otherwise send the flag as text.
 func positionalBody(args []string, target, body *string) error {
 	if *target == "" && len(args) > 0 {
 		*target, args = args[0], args[1:]
 	}
-	if len(args) > 1 {
-		if last := args[len(args)-1]; len(last) > 1 && strings.HasPrefix(last, "-") {
-			return usageError(fmt.Sprintf("flag %s after the message body; put flags before the body", last))
+	for _, a := range args[min(1, len(args)):] {
+		if len(a) > 1 && a[0] == '-' && (a[1] == '-' || unicode.IsLetter(rune(a[1]))) {
+			return usageError(fmt.Sprintf("flag %s after the message body; put flags before the body", a))
 		}
 	}
 	if *body == "" && len(args) > 0 {

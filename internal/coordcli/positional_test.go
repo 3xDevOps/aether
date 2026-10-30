@@ -20,6 +20,7 @@ func TestPositionalBody(t *testing.T) {
 		{name: "body flag wins", args: []string{"run-1"}, body: "flagged", wantTarget: "run-1", wantBd: "flagged"},
 		{name: "trailing flag after body", args: []string{"hello", "--json"}, target: "run-1", wantErr: "flag --json after the message body; put flags before the body"},
 		{name: "trailing flag after target and body", args: []string{"run-1", "hello", "--json"}, wantErr: "flag --json after the message body"},
+		{name: "flag with a value after the body", args: []string{"hello", "--idempotency-key", "retry-1"}, target: "run-1", wantErr: "flag --idempotency-key after the message body"},
 		{name: "stdin dash is a body", args: []string{"-"}, target: "run-1", wantTarget: "run-1", wantBd: "-"},
 		{name: "no body", args: []string{}, target: "run-1", wantTarget: "run-1"},
 	} {

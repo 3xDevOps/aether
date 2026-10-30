@@ -1130,21 +1130,24 @@ created to make discovery appear to work.
   --idempotency-key send-example-1
 ```
 
-`--to` takes a peer `run_id` from `aether-internal status`; the user never
-has to supply one. Status lists only the runs this run may message, under the
-routes and limits described above.
+`--to` takes the `run_id` of any live run this run's owner may message, from
+`aether-internal status` or otherwise; the user never has to supply one.
 
 The result contains `message_id` and `recipient_status`. The receipt means the
 message is durably queued, not read; a `needs-attention` recipient may not
 read it soon. The peer's `last_sent` in `status` shows when it is delivered
 and acknowledged. A denial states its reason; check `status` instead of retrying.
 `--body-file path` reads a body from a file, and `--body-file -` reads it from
-standard input. A body can also be provided as the positional text after the
-peer run ID.
+standard input. A body can also be positional text: `send run-peer 'text'`
+takes the target from the first argument, and with `--to` every positional
+argument is the body. Put flags before the body: `send --to run-peer 'text'
+--json` is refused with `flag --json after the message body; put flags before
+the body`, because the flag would otherwise be sent as text. An empty body is
+refused. `ask` and `reply` (`--question-id`) follow the same rules.
 
 Coordinate before editing files another live run is touching or that a peer's
 task covers. The overlap hook warns even when that run is not in `status`;
-message it only if it is listed. Send a short, specific note: your plan, the
+message it by its run ID. Send a short, specific note: your plan, the
 files you own, the conflict you see, your status. Use `ask` when the decision
 is the peer's, and read the reply with `inbox --wait 30`.
 
