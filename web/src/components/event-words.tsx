@@ -263,7 +263,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     if (p.detached) return 'Detached from its parent run'
     if (p.children === 'on') return <><Who id={e.actor_id} /> allowed child runs for this run</>
     if (p.children === 'off') return <><Who id={e.actor_id} /> turned child runs off for this run</>
-    return p.child_refused ? 'The agent tried to start a child run while child runs were off' : 'Child runs follow the owner’s setting'
+    return 'Child runs follow the owner’s setting'
   },
   'run.protected': (p, e) => <><Who id={e.actor_id} /> {p.protected ? 'protected the run' : 'removed the run’s protection'}</>,
   'run.controller': (p, e) => {

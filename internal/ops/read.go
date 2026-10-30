@@ -447,10 +447,8 @@ func getRun(ctx context.Context, c calls, in getRunInput) (string, any, error) {
 // childRow is a child run of a run, at depth 1 for its own children.
 type childRow struct {
 	RunID string `json:"run_id"`
-	Depth int    `json:"depth"`
 	State string `json:"state"`
 	choice
-	Stale  bool              `json:"stale,omitempty"`
 	Report map[string]string `json:"report,omitempty"`
 	URL    string            `json:"url,omitempty"`
 }
@@ -471,8 +469,8 @@ func addChildren(ctx context.Context, read Call, l links, book accountBook, id s
 	}
 	rows, purposes, summaries := []childRow{}, map[string]string{}, map[string]string{}
 	for _, ch := range res.Children[:min(len(res.Children), defaultRows)] {
-		row := childRow{RunID: ch.RunID, Depth: ch.Depth, State: ch.State, choice: choiceOf(ch.Harness, ch.Mode, ch.Model, ch.AccountMemberID, book),
-			Stale: ch.Stale, URL: l.run(ch.RunID)}
+		row := childRow{RunID: ch.RunID, State: ch.State, choice: choiceOf(ch.Harness, ch.Mode, ch.Model, ch.AccountMemberID, book),
+			URL: l.run(ch.RunID)}
 		if ch.Report != nil {
 			row.Report = map[string]string{"outcome": ch.Report.Outcome, "at": ch.Report.At}
 			summaries[ch.RunID] = clip(ch.Report.Summary, maxReport)

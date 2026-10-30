@@ -16,8 +16,6 @@ export type ChildState =
 
 export interface ChildLimits {
   max_live: number
-  max_depth: number
-  max_total: number
 }
 
 export interface ChildReport {
@@ -30,7 +28,6 @@ export interface Child {
   run_id: string
   parent_run_id: string
   root_run_id: string
-  depth: number
   purpose: string
   harness: string
   mode: string
@@ -41,8 +38,6 @@ export interface Child {
   detached?: boolean
   branch?: string
   base_commit?: string
-  /** The parent's branch moved past `base_commit`. */
-  stale?: boolean
   report?: ChildReport
   error?: string
   created_at: string
@@ -75,21 +70,11 @@ export interface RunChildrenResult {
   usage: ChildUsage
 }
 
-export type ChildNudge = 'show' | 'snoozed' | 'never'
-
-/** `configured` is false until the member first saves the setting. */
 export interface ChildSettings {
   enabled: boolean
-  fallback: boolean
-  shared_when_missing: boolean
-  configured: boolean
-  nudge: ChildNudge
 }
 
 /** An absent field keeps its value. */
 export interface ChildSettingsParams {
   enabled?: boolean
-  fallback?: boolean
-  shared_when_missing?: boolean
-  nudge?: 'later' | 'never'
 }

@@ -13,51 +13,51 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// route names the first route that lets sender open a conversation with
-// target: its swarm assignment, the radar's active/grace set, or the
-// workspace. Every route requires a sender owner who may message; only the
-// workspace route honors protection and the workspace's steer-others
-// setting. Callers have checked that both runs
-// share a workspace and that target is live.
-func (s *Service) route(ctx context.Context, method string, sender, target *domain.Run) (string, *protocol.Error) {
+// authorize lets sender open a conversation with target: its owner may
+// message, and unless the runs are parent and child, swarm peers or overlap
+// on a file, the target's protection and its workspace's steer-others
+// setting allow it. Any
+// live run on the server qualifies, in any workspace and tree. Callers have
+// checked that target is live.
+func (s *Service) authorize(ctx context.Context, method string, sender, target *domain.Run) *protocol.Error {
 	owner, reason, err := s.messagingOwner(ctx, sender)
 	if err != nil {
-		return "", internalError(method, err)
+		return internalError(method, err)
 	}
 	if owner == nil {
-		return "", deniedPeer(method, sender.ID, target.ID, reason)
+		return deniedPeer(method, sender.ID, target.ID, reason)
 	}
 	if s.cfg.Children != nil {
 		related, relErr := s.cfg.Children.Related(ctx, sender.ID, target.ID)
 		if relErr != nil {
-			return "", internalError(method, relErr)
+			return internalError(method, relErr)
 		}
 		if related {
-			return protocol.CoordPeerLineage, nil
+			return nil
 		}
 	}
 	member, err := s.missionMember(ctx, sender.ID, target.ID)
 	if err != nil {
-		return "", missionRPCError(method, err)
+		return missionRPCError(method, err)
 	}
 	if member {
-		return protocol.CoordPeerMission, nil
+		return nil
 	}
 	peer, err := s.radar.authorized(ctx, sender.ID, target.ID)
 	if err != nil {
-		return "", internalError(method, err)
+		return internalError(method, err)
 	}
 	if peer.state != "" {
-		return peer.state, nil
+		return nil
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, target.WorkspaceID)
 	if err != nil {
-		return "", internalError(method, err)
+		return internalError(method, err)
 	}
 	if err := checkMessage(owner, ws, target.MemberID, target.Protected); err != nil {
-		return "", deniedPeer(method, sender.ID, target.ID, ownerDenial(owner, err))
+		return deniedPeer(method, sender.ID, target.ID, ownerDenial(owner, err))
 	}
-	return protocol.CoordPeerWorkspace, nil
+	return nil
 }
 
 // messagingOwner resolves run's owner for every non-reply route. An owner
@@ -97,12 +97,12 @@ func (s *Service) missionMember(ctx context.Context, run, peer domain.RunID) (bo
 	return false, nil
 }
 
-// statusPeers lists exactly the runs self may open a conversation with,
-// bounded to CoordMaxStatusPeers, with the unbounded total: live swarm
-// peers first, then the radar's active/grace peers, then the other live
-// runs in the workspace that self's owner may message, most recently active
-// first. A run whose owner may not message lists none; a run at its peer
-// cap lists only swarm peers and runs it already has a conversation with.
+// statusPeers lists the most relevant live runs self may message, bounded to
+// CoordMaxStatusPeers, with the unbounded total: parent and children, swarm
+// peers, the radar's active/grace peers, then the other live runs in the
+// workspace that self's owner may message, most recently active first. Any
+// other live run on the server can be messaged by ID without being listed. A
+// run whose owner may not message lists none.
 func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeers []protocol.CoordPeer, lineage []domain.RunID) ([]protocol.CoordPeer, int, error) {
 	peers := make([]protocol.CoordPeer, 0, protocol.CoordMaxStatusPeers)
 	owner, _, err := s.messagingOwner(ctx, self)
@@ -122,12 +122,6 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 	if err != nil {
 		return nil, 0, err
 	}
-	atCap, conversed := false, map[domain.RunID]bool(nil)
-	if ps, ok := s.cfg.Mail.(peerMessageStore); ok {
-		if atCap, conversed, err = ps.CoordConversationsAtCap(ctx, self.ID, maxPeers); err != nil {
-			return nil, 0, err
-		}
-	}
 	radarPeers, err := s.radar.authorizedSet(ctx, self.ID)
 	if err != nil {
 		return nil, 0, err
@@ -144,9 +138,6 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 	var addErr error
 	add := func(r *store.RunSummary, state string, overlap authorizedPeer) {
 		if r == nil || r.ID == self.ID || seen[r.ID] {
-			return
-		}
-		if atCap && state != protocol.CoordPeerMission && state != protocol.CoordPeerLineage && !conversed[r.ID] {
 			return
 		}
 		seen[r.ID] = true

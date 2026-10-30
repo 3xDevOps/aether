@@ -11,25 +11,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// ErrChildLimit is a tree that reached its depth or total child limit.
-var ErrChildLimit = errors.New("store: child run limit reached")
-
-// ChildSettings is a member's child-run setting and the state of the
-// suggestion to turn it on.
+// ChildSettings is a member's child-run setting. Child runs are on until
+// the member turns them off.
 type ChildSettings struct {
-	Enabled           bool
-	Fallback          bool
-	SharedWhenMissing bool
-	Configured        bool
-	Snoozes           int
-	SnoozedUntil      time.Time
-	NoNudge           bool
+	Enabled bool
 }
 
-// ChildCounts are one tree's reservations: busy children hold a slot,
-// queued ones wait for one, total is every reservation ever made.
+// ChildCounts are one parent's reservations: busy children hold a slot,
+// queued ones wait for one.
 type ChildCounts struct {
-	Busy, Queued, Total int
+	Busy, Queued int
 }
 
 // ChildStore persists child-run reservations and settings.
@@ -37,11 +28,11 @@ type ChildStore interface {
 	// ReserveChild inserts c under the depth and total limits, or returns
 	// the reservation already made under c's parent and idempotency key
 	// with replay true.
-	ReserveChild(ctx context.Context, c *domain.ChildReservation, limits domain.ChildLimits) (reserved *domain.ChildReservation, replay bool, err error)
+	ReserveChild(ctx context.Context, c *domain.ChildReservation) (reserved *domain.ChildReservation, replay bool, err error)
 	GetChild(ctx context.Context, run domain.RunID) (*domain.ChildReservation, error)
-	// ListChildren returns run's descendants, nearest first.
-	ListChildren(ctx context.Context, run domain.RunID, descendants bool) ([]*domain.ChildReservation, error)
-	ChildCounts(ctx context.Context, tree string) (ChildCounts, error)
+	// ListChildren returns run's children, oldest first.
+	ListChildren(ctx context.Context, run domain.RunID) ([]*domain.ChildReservation, error)
+	ChildCounts(ctx context.Context, parent domain.RunID) (ChildCounts, error)
 	// ChildrenInState returns every reservation in state, oldest first.
 	ChildrenInState(ctx context.Context, state domain.ChildState) ([]*domain.ChildReservation, error)
 	// ChildrenToSettle returns started children whose run ended and whose
@@ -49,8 +40,6 @@ type ChildStore interface {
 	// whose parent ended or was deleted, and completed children their
 	// closed parent left unreviewed.
 	ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, error)
-	// BusyChildren counts the parent's children that hold a slot.
-	BusyChildren(ctx context.Context, parent domain.RunID) (int, error)
 	// SetChildState moves a reservation from one of from to to.
 	SetChildState(ctx context.Context, run domain.RunID, to domain.ChildState, errText string, from ...domain.ChildState) error
 	DetachChild(ctx context.Context, run domain.RunID) error
@@ -62,7 +51,6 @@ type ChildStore interface {
 	ChildSettings(ctx context.Context, member domain.MemberID) (ChildSettings, error)
 	PutChildSettings(ctx context.Context, member domain.MemberID, settings ChildSettings) error
 	SetRunChildren(ctx context.Context, run domain.RunID, value string, setBy domain.MemberID) error
-	MarkChildRefused(ctx context.Context, run domain.RunID) error
 	// ChildReported reports whether a child's latest word is a success or
 	// failure report it was not woken from since.
 	ChildReported(ctx context.Context, run domain.RunID) (bool, error)
@@ -82,7 +70,7 @@ const detachTransferred = `UPDATE run_children SET detached = 1 WHERE (run_id = 
 const terminalStatuses = `'completed', 'merged', 'abandoned', 'failed', 'interrupted'`
 
 const childCols = `rc.run_id, rc.parent_run_id, rc.root_run_id, rc.tree_key, rc.mission_id, rc.workspace_id,
-	rc.owner_member_id, rc.account_member_id, rc.harness, rc.mode, rc.model, rc.purpose, rc.task, rc.depth,
+	rc.owner_member_id, rc.account_member_id, rc.harness, rc.mode, rc.model, rc.purpose, rc.task,
 	rc.base_commit, rc.base_branch, rc.fallback_disabled, rc.fallback_order, rc.idempotency_key, rc.request_hash, rc.state,
 	rc.detached, rc.error, rc.end_notified, rc.created_at, rc.started_at`
 
@@ -114,7 +102,7 @@ func scanChild(row interface{ Scan(...any) error }) (*domain.ChildReservation, e
 		startedAt *int64
 	)
 	if err := row.Scan(&c.RunID, &c.ParentRunID, &c.RootRunID, &c.TreeKey, &c.MissionID, &c.WorkspaceID,
-		&c.OwnerID, &c.AccountID, &c.Harness, &c.Mode, &c.Model, &c.Purpose, &c.Task, &c.Depth,
+		&c.OwnerID, &c.AccountID, &c.Harness, &c.Mode, &c.Model, &c.Purpose, &c.Task,
 		&c.BaseCommit, &c.BaseBranch, &c.Fallback.Disabled, &order, &c.IdempotencyKey, &c.RequestHash, &c.State,
 		&c.Detached, &c.Error, &c.EndNotified, &createdAt, &startedAt); err != nil {
 		return nil, err
@@ -127,7 +115,7 @@ func scanChild(row interface{ Scan(...any) error }) (*domain.ChildReservation, e
 	return &c, nil
 }
 
-func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation, limits domain.ChildLimits) (*domain.ChildReservation, bool, error) {
+func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation) (*domain.ChildReservation, bool, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("store: reserve child: %w", err)
@@ -141,16 +129,6 @@ func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation, limit
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, fmt.Errorf("store: reserve child: %w", err)
-	}
-	if c.Depth > limits.MaxDepth {
-		return nil, false, fmt.Errorf("%w: a child of this run would be %d levels deep; this workspace allows %d", ErrChildLimit, c.Depth, limits.MaxDepth)
-	}
-	var total int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_children WHERE tree_key = ?`, c.TreeKey).Scan(&total); err != nil {
-		return nil, false, fmt.Errorf("store: reserve child: %w", err)
-	}
-	if total >= limits.MaxTotal {
-		return nil, false, fmt.Errorf("%w: this tree already started %d child runs; this workspace allows %d", ErrChildLimit, total, limits.MaxTotal)
 	}
 	id, ts, err := prepareCreate("run", c.CreatedAt)
 	if err != nil {
@@ -167,11 +145,11 @@ func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation, limit
 	c.RunID, c.CreatedAt, c.State = domain.RunID(id), ts, domain.ChildQueued
 	if _, err = tx.ExecContext(ctx,
 		`INSERT INTO run_children (run_id, parent_run_id, root_run_id, tree_key, mission_id, workspace_id,
-			owner_member_id, account_member_id, harness, mode, model, purpose, task, depth, base_commit,
+			owner_member_id, account_member_id, harness, mode, model, purpose, task, base_commit,
 			base_branch, fallback_disabled, fallback_order, idempotency_key, request_hash, state, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.RunID, c.ParentRunID, c.RootRunID, c.TreeKey, c.MissionID, c.WorkspaceID, c.OwnerID, c.AccountID,
-		c.Harness, c.Mode, c.Model, c.Purpose, c.Task, c.Depth, c.BaseCommit, c.BaseBranch,
+		c.Harness, c.Mode, c.Model, c.Purpose, c.Task, c.BaseCommit, c.BaseBranch,
 		c.Fallback.Disabled, order, c.IdempotencyKey, c.RequestHash, c.State, createdAt); err != nil {
 		return nil, false, fmt.Errorf("store: reserve child: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -192,15 +170,9 @@ func (d *DB) GetChild(ctx context.Context, run domain.RunID) (*domain.ChildReser
 	return c, nil
 }
 
-func (d *DB) ListChildren(ctx context.Context, run domain.RunID, descendants bool) ([]*domain.ChildReservation, error) {
-	query := `SELECT ` + childCols + ` FROM run_children rc WHERE rc.parent_run_id = ? ORDER BY rc.created_at, rc.run_id`
-	if descendants {
-		query = `WITH RECURSIVE tree(id) AS (
-			SELECT run_id FROM run_children WHERE parent_run_id = ?
-			UNION SELECT c.run_id FROM run_children c JOIN tree ON c.parent_run_id = tree.id)
-		SELECT ` + childCols + ` FROM run_children rc JOIN tree ON tree.id = rc.run_id ORDER BY rc.depth, rc.created_at, rc.run_id`
-	}
-	return d.listChildren(ctx, "list children", query, run)
+func (d *DB) ListChildren(ctx context.Context, run domain.RunID) ([]*domain.ChildReservation, error) {
+	return d.listChildren(ctx, "list children",
+		`SELECT `+childCols+` FROM run_children rc WHERE rc.parent_run_id = ? ORDER BY rc.created_at, rc.run_id`, run)
 }
 
 func (d *DB) ChildrenInState(ctx context.Context, state domain.ChildState) ([]*domain.ChildReservation, error) {
@@ -219,7 +191,7 @@ func (d *DB) ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, 
 		    OR (rc.detached = 0 AND rc.state = 'started' AND child.status = 'completed' AND child.review <> 'accepted'
 		        AND (parent.status = 'merged' OR (parent.status = 'abandoned' AND parent.reason <> 'killed')
 		         OR (parent.status = 'completed' AND parent.review = 'accepted')))
-		 ORDER BY rc.depth, rc.created_at`)
+		 ORDER BY rc.created_at`)
 }
 
 func (d *DB) listChildren(ctx context.Context, what, query string, args ...any) ([]*domain.ChildReservation, error) {
@@ -242,24 +214,15 @@ func (d *DB) listChildren(ctx context.Context, what, query string, args ...any) 
 	return out, nil
 }
 
-func (d *DB) ChildCounts(ctx context.Context, tree string) (ChildCounts, error) {
+func (d *DB) ChildCounts(ctx context.Context, parent domain.RunID) (ChildCounts, error) {
 	var c ChildCounts
 	err := d.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(`+childBusy+`), 0), COALESCE(SUM(rc.state = 'queued'), 0), COUNT(*)
-		 FROM run_children rc WHERE rc.tree_key = ?`, tree).Scan(&c.Busy, &c.Queued, &c.Total)
+		`SELECT COALESCE(SUM(`+childBusy+`), 0), COALESCE(SUM(rc.state = 'queued'), 0)
+		 FROM run_children rc WHERE rc.parent_run_id = ?`, parent).Scan(&c.Busy, &c.Queued)
 	if err != nil {
 		return ChildCounts{}, fmt.Errorf("store: child counts: %w", err)
 	}
 	return c, nil
-}
-
-func (d *DB) BusyChildren(ctx context.Context, parent domain.RunID) (int, error) {
-	var n int
-	if err := d.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM run_children rc WHERE rc.parent_run_id = ? AND `+childBusy, parent).Scan(&n); err != nil {
-		return 0, fmt.Errorf("store: busy children: %w", err)
-	}
-	return n, nil
 }
 
 func (d *DB) SetChildState(ctx context.Context, run domain.RunID, to domain.ChildState, errText string, from ...domain.ChildState) error {
@@ -326,38 +289,22 @@ func (d *DB) UnfinishedChildren(ctx context.Context, parent domain.RunID, since 
 }
 
 func (d *DB) ChildSettings(ctx context.Context, member domain.MemberID) (ChildSettings, error) {
-	s := ChildSettings{Fallback: true}
-	var until *int64
-	err := d.db.QueryRowContext(ctx,
-		`SELECT enabled, fallback, shared_missing, configured, nudge_snoozes, nudge_until, nudge_off
-		 FROM child_settings WHERE member_id = ?`, member).
-		Scan(&s.Enabled, &s.Fallback, &s.SharedWhenMissing, &s.Configured, &s.Snoozes, &until, &s.NoNudge)
+	s := ChildSettings{Enabled: true}
+	err := d.db.QueryRowContext(ctx, `SELECT enabled FROM child_settings WHERE member_id = ?`, member).Scan(&s.Enabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s, nil
 	}
 	if err != nil {
 		return ChildSettings{}, fmt.Errorf("store: child settings: %w", err)
 	}
-	if until != nil {
-		s.SnoozedUntil = time.Unix(*until, 0).UTC()
-	}
 	return s, nil
 }
 
 func (d *DB) PutChildSettings(ctx context.Context, member domain.MemberID, s ChildSettings) error {
-	var until *int64
-	if !s.SnoozedUntil.IsZero() {
-		u := s.SnoozedUntil.Unix()
-		until = &u
-	}
 	_, err := d.db.ExecContext(ctx,
-		`INSERT INTO child_settings (member_id, enabled, fallback, shared_missing, configured, nudge_snoozes, nudge_until, nudge_off, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
-		 ON CONFLICT(member_id) DO UPDATE SET enabled = excluded.enabled, fallback = excluded.fallback,
-		   shared_missing = excluded.shared_missing, configured = excluded.configured,
-		   nudge_snoozes = excluded.nudge_snoozes, nudge_until = excluded.nudge_until,
-		   nudge_off = excluded.nudge_off, updated_at = excluded.updated_at`,
-		member, s.Enabled, s.Fallback, s.SharedWhenMissing, s.Configured, s.Snoozes, until, s.NoNudge)
+		`INSERT INTO child_settings (member_id, enabled, updated_at) VALUES (?, ?, unixepoch())
+		 ON CONFLICT(member_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`,
+		member, s.Enabled)
 	if err != nil {
 		return fmt.Errorf("store: put child settings: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -373,18 +320,10 @@ func (d *DB) SetRunChildren(ctx context.Context, run domain.RunID, value string,
 	return err
 }
 
-func (d *DB) MarkChildRefused(ctx context.Context, run domain.RunID) error {
-	if _, err := d.db.ExecContext(ctx, `UPDATE runs SET child_refused = 1 WHERE id = ?`, run); err != nil {
-		return fmt.Errorf("store: mark child refused: %w", err)
-	}
-	return nil
-}
-
 func (d *DB) WorkspaceChildLimits(ctx context.Context, ws domain.WorkspaceID) (domain.ChildLimits, error) {
 	var l domain.ChildLimits
 	err := d.db.QueryRowContext(ctx,
-		`SELECT child_max_live, child_max_depth, child_max_total FROM workspaces WHERE id = ?`, ws).
-		Scan(&l.MaxLive, &l.MaxDepth, &l.MaxTotal)
+		`SELECT child_max_live FROM workspaces WHERE id = ?`, ws).Scan(&l.MaxLive)
 	if errors.Is(err, sql.ErrNoRows) {
 		return l, ErrNotFound
 	}
@@ -396,8 +335,7 @@ func (d *DB) WorkspaceChildLimits(ctx context.Context, ws domain.WorkspaceID) (d
 
 func (d *DB) SetWorkspaceChildLimits(ctx context.Context, ws domain.WorkspaceID, l domain.ChildLimits) error {
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE workspaces SET child_max_live = ?, child_max_depth = ?, child_max_total = ? WHERE id = ?`,
-		l.MaxLive, l.MaxDepth, l.MaxTotal, ws))
+		`UPDATE workspaces SET child_max_live = ? WHERE id = ?`, l.MaxLive, ws))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("store: set workspace child limits: %w", err)
 	}

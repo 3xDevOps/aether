@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,51 +15,41 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// dispatch starts queued children while their tree has free slots, the
-// parent with the fewest busy children first, then the oldest request.
+// dispatch starts queued children while their parent has free slots, the
+// oldest request first.
 func (s *Service) dispatch(ctx context.Context) error {
 	queued, err := s.cfg.Store.ChildrenInState(ctx, domain.ChildQueued)
 	if err != nil {
 		return err
 	}
-	trees := map[string][]*domain.ChildReservation{}
-	var order []string
+	parents := map[domain.RunID][]*domain.ChildReservation{}
+	var order []domain.RunID
 	for _, c := range queued {
-		if trees[c.TreeKey] == nil {
-			order = append(order, c.TreeKey)
+		if parents[c.ParentRunID] == nil {
+			order = append(order, c.ParentRunID)
 		}
-		trees[c.TreeKey] = append(trees[c.TreeKey], c)
+		parents[c.ParentRunID] = append(parents[c.ParentRunID], c)
 	}
-	for _, key := range order {
-		list := trees[key]
+	for _, parent := range order {
+		list := parents[parent]
 		limits, err := s.cfg.Store.WorkspaceChildLimits(ctx, list[0].WorkspaceID)
 		if err != nil {
 			return err
 		}
-		counts, err := s.cfg.Store.ChildCounts(ctx, key)
+		counts, err := s.cfg.Store.ChildCounts(ctx, parent)
 		if err != nil {
 			return err
 		}
-		busy := map[domain.RunID]int{}
-		for _, c := range list {
-			if _, ok := busy[c.ParentRunID]; !ok {
-				if busy[c.ParentRunID], err = s.cfg.Store.BusyChildren(ctx, c.ParentRunID); err != nil {
-					return err
-				}
-			}
-		}
-		for free := limits.MaxLive - counts.Busy; free > 0 && len(list) > 0; {
-			sort.SliceStable(list, func(i, j int) bool { return busy[list[i].ParentRunID] < busy[list[j].ParentRunID] })
+		for free := limits.MaxLive - counts.Busy; free > 0 && len(list) > 0; free-- {
 			c := list[0]
 			list = list[1:]
 			if err := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildLaunching, "", domain.ChildQueued); err != nil {
 				if errors.Is(err, store.ErrConflict) {
+					free++
 					continue
 				}
 				return err
 			}
-			busy[c.ParentRunID]++
-			free--
 			go s.launch(ctx, c)
 		}
 	}
@@ -96,9 +85,6 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		return
 	case p.owner != c.OwnerID:
 		refuse(fmt.Sprintf("the parent run now belongs to %s, not %s, who asked for it", p.owner, c.OwnerID))
-		return
-	case p.mission == nil && c.AccountID != c.OwnerID && !p.settings.SharedWhenMissing:
-		refuse("\"Use subscriptions shared with me when I don't have my own\" was turned off before this child started")
 		return
 	}
 	if s.cfg.Cost != nil {

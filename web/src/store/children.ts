@@ -7,7 +7,7 @@ import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
-/** The viewer's child-run setting, which Settings and every nudge share; null until read. */
+/** The viewer's child-run setting, which Settings and the launch dialog share; null until read. */
 export const useChildSettings = create<{ settings: ChildSettings | null; error: string | null }>(() => ({ settings: null, error: null }))
 
 useStore.subscribe((state, previous) => {

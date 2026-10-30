@@ -17,10 +17,10 @@ const (
 	maxChildRequestBytes = 60 << 10
 )
 
-const childUsage = `usage: aether-internal child <options|start|list|cancel|detach|fetch> [options]
+const childUsage = `usage: aether-internal child <options|start|list|cancel|fetch> [options]
 
-Start child runs on other agents and models, within what this run's owner or
-swarm allows, and manage them.
+Dispatch fresh-context child runs on other agents and models, within what this
+run's owner or swarm allows, and manage them. A child cannot start children.
   options [--harness <agent>]   whether you may start children, the limits,
                                 and each agent and account with its state
                                 (ready, exhausted, not-installed, not-signed-in);
@@ -31,9 +31,8 @@ swarm allows, and manage them.
                                 start a child from your last published commit;
                                 commit first, uncommitted changes are not included
   list [--run-id <child>]       your children with state, latest report, branch,
-                                account and whether their base is stale
+                                and account
   cancel --run-id <child>       stop a child, or drop it from the queue
-  detach --run-id <child>       let a child run on without you
   fetch --run-id <child>        copy its branch to refs/remotes/children/<child>
 
 A child's report arrives in your inbox and wakes you; do not poll. Message a
@@ -65,7 +64,7 @@ func childCommand(ctx context.Context, socket string, args []string, in io.Reade
 		var out protocol.ChildListResult
 		err := coordtransport.Call(ctx, socket, protocol.MethodChildList, protocol.ChildListParams{RunID: *runID}, &out)
 		return out, err
-	case "cancel", "detach", "fetch":
+	case "cancel", "fetch":
 		fs := newFlags("child " + args[0])
 		runID := fs.String("run-id", "", "the child's run ID")
 		if err := parseFlags(fs, args[1:]); err != nil {
@@ -77,7 +76,7 @@ func childCommand(ctx context.Context, socket string, args []string, in io.Reade
 		if *runID == "" {
 			return nil, usageError("child " + args[0] + " requires --run-id <child>")
 		}
-		method := map[string]string{"cancel": protocol.MethodChildCancel, "detach": protocol.MethodChildDetach, "fetch": protocol.MethodChildFetch}[args[0]]
+		method := map[string]string{"cancel": protocol.MethodChildCancel, "fetch": protocol.MethodChildFetch}[args[0]]
 		if args[0] == "fetch" {
 			var out protocol.ChildFetchResult
 			err := coordtransport.Call(ctx, socket, method, protocol.ChildRunParams{RunID: *runID}, &out)
@@ -155,9 +154,10 @@ func readTask(task, file string, in io.Reader) (string, error) {
 func childSkill(status *protocol.CoordStatusResult) string {
 	switch {
 	case slices.Contains(status.Capabilities, protocol.MethodChildStart):
-		return "Child runs: you may start focused runs on other agents and models, e.g. an adversarial review by another agent (aether-internal child --help). " +
+		return "Child runs: `aether-internal child start` dispatches a session on any installed agent and model with a completely fresh context, which can orchestrate its own subagents (aether-internal child --help). " +
+			"Use one instead of your own subagents for a complex task that splits into parallel parts and benefits from fresh-context sessions: it is a dispatch-and-forget shortcut for firing off part of a very complex task, or for when the user asks for session or swarm orchestration. Your own subagents suit small lookups and edits. " +
 			"Run `aether-internal child options` once, then `child start`; honor the number of children and agents the user asks for. " +
-			"A child sees only its task text and your last commit. Its report reaches your inbox; account for unfinished children before reporting success.\n"
+			"A child sees only its task text and your last commit, and cannot start children. Its report reaches your inbox and wakes you; account for unfinished children before reporting success.\n"
 	case slices.Contains(status.Capabilities, protocol.MethodChildOptions):
 		return "Child runs: not available to this run now; `aether-internal child options` gives the reason. If the user asks for one, tell them that reason.\n"
 	}

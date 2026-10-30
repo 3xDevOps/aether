@@ -78,10 +78,9 @@ func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
 	}
 }
 
-// TestRoutesNeverCrossWorkspaces offers a run in another workspace through
-// every route at once - an overlap edge, a shared swarm, and the same
-// owner - and expects each direction refused and unlisted.
-func TestRoutesNeverCrossWorkspaces(t *testing.T) {
+// TestAnyRunMessagesARunInAnotherWorkspace expects a run to message a live
+// run in another workspace by ID, in both directions, without listing it.
+func TestAnyRunMessagesARunInAnotherWorkspace(t *testing.T) {
 	stub := &missionTransportStub{}
 	h := newHarness(t, 1, func(c *Config) { c.Mission = stub })
 	ctx := context.Background()
@@ -99,10 +98,19 @@ func TestRoutesNeverCrossWorkspaces(t *testing.T) {
 	h.peers.pair(local, foreign.ID, "src/auth.go")
 
 	for _, dir := range [][2]domain.RunID{{local, foreign.ID}, {foreign.ID, local}} {
-		_, err := h.svc.Send(ctx, dir[0], sendParams(dir[1], "across"))
-		wantDenied(t, err, "it is in a different workspace")
-		_, err = h.svc.Ask(ctx, dir[0], protocol.CoordAskParams{ToRunID: string(dir[1]), Body: "across?", IdempotencyKey: "ask-" + string(dir[0])})
-		wantDenied(t, err, "it is in a different workspace")
+		h.advance(sendRefill)
+		if _, err := h.svc.Send(ctx, dir[0], sendParams(dir[1], "across")); err != nil {
+			t.Fatalf("send %s -> %s: %v", dir[0], dir[1], err)
+		}
+		h.advance(sendRefill)
+		asked, err := h.svc.Ask(ctx, dir[0], protocol.CoordAskParams{ToRunID: string(dir[1]), Body: "across?", IdempotencyKey: "ask-" + string(dir[0])})
+		if err != nil {
+			t.Fatalf("ask %s -> %s: %v", dir[0], dir[1], err)
+		}
+		h.advance(sendRefill)
+		if _, err := h.svc.Reply(ctx, dir[1], protocol.CoordReplyParams{QuestionID: asked.QuestionID, Body: "yes", IdempotencyKey: "reply-" + string(dir[0])}); err != nil {
+			t.Fatalf("reply %s -> %s: %v", dir[1], dir[0], err)
+		}
 	}
 	st, err := h.svc.Status(ctx, local)
 	if err != nil || len(st.Peers) != 0 || st.PeerTotal != 0 {
@@ -111,12 +119,12 @@ func TestRoutesNeverCrossWorkspaces(t *testing.T) {
 }
 
 // TestSwarmAndIndependentRunsMessageEachOther covers the routes between a
-// swarm and a run launched on its own, and that an integrator reaches more
-// workers than the peer cap allows conversations without spending a slot.
+// swarm and a run launched on its own, and that an integrator reaches every
+// worker and more independent runs than status lists.
 func TestSwarmAndIndependentRunsMessageEachOther(t *testing.T) {
 	stub := &missionTransportStub{}
-	workers := maxPeers + 2
-	h := newHarness(t, workers+maxPeers+2, func(c *Config) { c.Mission = stub })
+	workers := 10
+	h := newHarness(t, workers+12, func(c *Config) { c.Mission = stub })
 	ctx := context.Background()
 	integrator, independent := h.run(0), h.run(workers+1)
 	stub.integrator = integrator
@@ -138,23 +146,11 @@ func TestSwarmAndIndependentRunsMessageEachOther(t *testing.T) {
 			t.Fatalf("integrator -> worker %d of %d: %v", i, workers, err)
 		}
 	}
-	for i := 0; i < maxPeers; i++ {
+	for i := 0; i < 10; i++ {
 		h.advance(sendRefill)
 		if _, err := h.svc.Send(ctx, integrator, sendParams(h.run(workers+1+i), "heads up")); err != nil {
 			t.Fatalf("integrator -> independent run %d after messaging every worker: %v", i, err)
 		}
-	}
-	h.advance(sendRefill)
-	_, err := h.svc.Send(ctx, integrator, sendParams(h.run(workers+1+maxPeers), "one too many"))
-	if err == nil || err.Code != protocol.CodeConflict || !strings.Contains(err.Message, "limit of 8 coordination peers") {
-		t.Fatalf("send past the peer cap = %v, want the peer limit", err)
-	}
-	// A worker that leaves the swarm but stays live is still an existing
-	// conversation for the integrator at its cap.
-	stub.mission = slices.DeleteFunc(stub.mission, func(id domain.RunID) bool { return id == worker })
-	h.advance(sendRefill)
-	if _, err := h.svc.Send(ctx, integrator, sendParams(worker, "still there?")); err != nil {
-		t.Fatalf("integrator -> former worker at the peer cap: %v", err)
 	}
 }
 
@@ -384,43 +380,5 @@ func TestAdminsOnlyLimitsTheWorkspaceRoute(t *testing.T) {
 	}
 	if len(listed) != 3 || st.PeerTotal != 3 || !listed[string(sibling)] || !listed[string(swarm)] || !listed[string(overlap)] {
 		t.Fatalf("status peers = %+v (total %d), want the sibling, swarm and overlap runs", st.Peers, st.PeerTotal)
-	}
-}
-
-// TestStatusAtThePeerCapListsOnlyReachableRuns fills the sender's peer
-// slots and expects status to list only its swarm peer and the runs it
-// already wrote to, exactly the runs send still accepts.
-func TestStatusAtThePeerCapListsOnlyReachableRuns(t *testing.T) {
-	stub := &missionTransportStub{}
-	n := maxPeers + 4
-	h := newHarness(t, n, func(c *Config) { c.Mission = stub })
-	ctx := context.Background()
-	self := h.run(0)
-	stub.mission = []domain.RunID{self, h.run(1)}
-	h.peers.pair(self, h.run(n-2), "src/auth.go")
-	for i := 2; i < 2+maxPeers; i++ {
-		h.advance(sendRefill)
-		if _, err := h.svc.Send(ctx, self, sendParams(h.run(i), "heads up")); err != nil {
-			t.Fatalf("send %d: %v", i, err)
-		}
-	}
-
-	st, err := h.svc.Status(ctx, self)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if len(st.Peers) != maxPeers+1 || st.PeerTotal != maxPeers+1 || st.PeersTruncated {
-		t.Fatalf("status = %d peers, total %d; want the swarm peer and %d conversations", len(st.Peers), st.PeerTotal, maxPeers)
-	}
-	listed := make(map[string]bool, len(st.Peers))
-	for _, p := range st.Peers {
-		listed[p.RunID] = true
-	}
-	for i := 1; i < n; i++ {
-		h.advance(sendRefill)
-		_, serr := h.svc.Send(ctx, self, sendParams(h.run(i), "again"))
-		if listed[string(h.run(i))] != (serr == nil) {
-			t.Fatalf("run %d listed=%v but send error=%v", i, listed[string(h.run(i))], serr)
-		}
 	}
 }

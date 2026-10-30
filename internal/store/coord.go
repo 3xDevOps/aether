@@ -22,10 +22,6 @@ var ErrInboxFull = errors.New("store: run inbox is full")
 // cannot turn a send retry into a question or reply receipt.
 var ErrIdempotencyConflict = errors.New("store: idempotency key belongs to another message kind")
 
-// ErrCoordPeerLimit means opening a new coordination conversation would
-// exceed the durable per-run peer cap.
-var ErrCoordPeerLimit = errors.New("store: coordination peer limit reached")
-
 // ErrCoordReportConflict means a run already holds an active terminal
 // report (success or failure) under a different idempotency key.
 var ErrCoordReportConflict = errors.New("store: run already has a terminal coordination report")
@@ -251,52 +247,13 @@ const senderMission = `COALESCE(
 const coordReportCols = `id, workspace_id, run_id, outcome, summary, next_action, evidence_refs, input_evidence_refs, idempotency_key, state, created_at, finalized_at, published_at, superseded_at`
 
 func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int) error {
-	_, err := d.AppendRunMessageWithPeer(ctx, m, maxUnacked, 0, false)
+	_, err := d.AppendRunMessageCreated(ctx, m, maxUnacked)
 	return err
 }
 
-// CoordConversationsAtCap reports whether from has opened maxPeers
-// coordination peers and, if so, the runs it already has a conversation
-// with: an opened peer or a send or question it delivered. Those are the
-// only runs outside its swarm that AppendRunMessageWithPeer still accepts.
-func (d *DB) CoordConversationsAtCap(ctx context.Context, from domain.RunID, maxPeers int) (bool, map[domain.RunID]bool, error) {
-	var opened int
-	if err := d.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM coord_peers WHERE from_run = ?`, from).Scan(&opened); err != nil {
-		return false, nil, fmt.Errorf("store: coord conversations: %w", err)
-	}
-	if opened < maxPeers {
-		return false, nil, nil
-	}
-	rows, err := d.db.QueryContext(ctx,
-		`SELECT to_run FROM coord_peers WHERE from_run = ?
-		 UNION SELECT to_run FROM run_messages WHERE from_run = ? AND kind <> ?`,
-		from, from, RunMessageKindReply)
-	if err != nil {
-		return false, nil, fmt.Errorf("store: coord conversations: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck // read-only iteration
-	conversed := make(map[domain.RunID]bool, opened)
-	for rows.Next() {
-		var id domain.RunID
-		if err := rows.Scan(&id); err != nil {
-			return false, nil, fmt.Errorf("store: coord conversations: %w", err)
-		}
-		conversed[id] = true
-	}
-	if err := rows.Err(); err != nil {
-		return false, nil, fmt.Errorf("store: coord conversations: %w", err)
-	}
-	return true, conversed, nil
-}
-
-// AppendRunMessageWithPeer atomically persists a message and, for a new
-// send/question, its sender-to-recipient peer relationship. The relationship
-// insert is rolled back with an inbox-cap failure, so failed enqueues never
-// spend a peer slot. A send or question the sender already delivered without
-// opening a peer, such as one to a swarm peer, is an existing conversation
-// and spends no slot.
-func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUnacked, maxPeers int, openPeer bool) (bool, error) {
+// AppendRunMessageCreated persists a message unless the recipient's unread
+// messages reached maxUnacked, and reports whether it is new.
+func (d *DB) AppendRunMessageCreated(ctx context.Context, m *RunMessage, maxUnacked int) (bool, error) {
 	if m == nil || m.WorkspaceID == "" || m.FromRun == "" || m.ToRun == "" {
 		return false, errors.New("store: append run message: workspace_id, from_run, and to_run are required")
 	}
@@ -305,9 +262,6 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 	}
 	if maxUnacked <= 0 {
 		return false, errors.New("store: append run message: maxUnacked must be positive")
-	}
-	if openPeer && maxPeers <= 0 {
-		return false, errors.New("store: append run message: maxPeers must be positive")
 	}
 	if m.Kind == "" {
 		m.Kind = RunMessageKindMessage
@@ -360,34 +314,6 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 	var mission string
 	if merr := tx.QueryRowContext(ctx, `SELECT `+senderMission, m.FromRun).Scan(&mission); merr != nil {
 		return false, fmt.Errorf("store: append run message: sender mission: %w", merr)
-	}
-
-	if openPeer {
-		var exists int
-		if peerErr := tx.QueryRowContext(ctx,
-			`SELECT EXISTS (SELECT 1 FROM coord_peers WHERE from_run = ? AND to_run = ?)
-			     OR EXISTS (SELECT 1 FROM run_messages WHERE from_run = ? AND to_run = ? AND kind <> ?)`,
-			m.FromRun, m.ToRun, m.FromRun, m.ToRun, RunMessageKindReply).Scan(&exists); peerErr != nil {
-			return false, fmt.Errorf("store: append run message: peer lookup: %w", peerErr)
-		}
-		if exists == 0 {
-			res, perr := tx.ExecContext(ctx,
-				`INSERT INTO coord_peers (from_run, to_run, created_at)
-				 SELECT ?, ?, ?
-				 WHERE (SELECT COUNT(*) FROM coord_peers WHERE from_run = ?) < ?
-				 ON CONFLICT DO NOTHING`,
-				m.FromRun, m.ToRun, createdAt, m.FromRun, maxPeers)
-			if perr != nil {
-				return false, fmt.Errorf("store: append run message: open peer: %w", mapConstraint(perr, ErrNotFound))
-			}
-			inserted, rerr := res.RowsAffected()
-			if rerr != nil {
-				return false, fmt.Errorf("store: append run message: open peer: %w", rerr)
-			}
-			if inserted == 0 {
-				return false, fmt.Errorf("store: append run message from %s: %w", m.FromRun, ErrCoordPeerLimit)
-			}
-		}
 	}
 
 	res, err := tx.ExecContext(ctx,

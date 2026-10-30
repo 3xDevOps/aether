@@ -79,8 +79,8 @@ func TestEnhancedChildRunForwardsItsLastMessageToItsParent(t *testing.T) {
 	reserved, _, err := e.db.ReserveChild(t.Context(), &domain.ChildReservation{
 		ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID), WorkspaceID: e.ws.ID,
 		OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "fake", Mode: domain.LaunchACP,
-		Purpose: "say pong", Task: "say pong", Depth: 1, IdempotencyKey: "k", RequestHash: "h",
-	}, domain.ChildLimits{MaxLive: 8, MaxDepth: 3, MaxTotal: 100})
+		Purpose: "say pong", Task: "say pong", IdempotencyKey: "k", RequestHash: "h",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

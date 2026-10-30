@@ -2404,10 +2404,7 @@ owner's when the caller has none.
 Where the server offers `run.children.allow`, the Run tab has a **Child
 runs** select: **Use my setting** (naming it, "(off)"), **Allow for this
 run** and **Off for this run**, sent as `run.launch` `children: "on"` or
-`"off"`; the first sends nothing. Under it, while two or more listed agents
-can launch, the member setting is off and its nudge is `show`, one line
-points to **Settings → Child runs** with **Not now** and **Don't show
-again**.
+`"off"`; the first sends nothing.
 
 Below the select, **Options** holds the [usage
 fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
@@ -2555,18 +2552,7 @@ The actions, in order:
 
 Kill and Delete of a run with unfinished child runs (live, not detached; the
 store's runs whose `parent_run_id` is this run) say "Its 2 unfinished child
-runs stop too, with any runs they started." and offer **Detach them and keep
-them running**. Ticked, the dashboard calls `run.child.detach` for each and
-then the verb; a refused detach stops there with a toast and nothing is
-killed.
-
-When the run's agent tried to start a child run while child runs were off
-(`child_refused`), the owner's member setting is off and its nudge is
-`show`, a callout under the header offers **Allow for this run**
-(`run.children.allow` `on`), **Open settings**, **Not now** and **Don't show
-again** (`child.settings` `nudge: "later"` or `"never"`; the server snoozes
-7 days, then 30, and stops after the third). No answer turns on the member
-setting.
+runs stop too." Closing a run closes its child runs with it.
 
 **Open in editor…** (`open-in-editor.tsx`) is offered for a live run the
 member may steer, by the same `allowed('steer', …)` question the run verbs
@@ -4443,14 +4429,11 @@ whatever opened it. Sections (`details.tsx`):
   purpose, state, agent and model, "On `<name>`'s account" plus "(fallback
   from `<name>`)" when the store's run carries `requested_account_member_id`,
   its cost or "Cost not reported", its latest report and error, and
-  **Detached** and **Stale review** (the parent's branch moved past the
-  child's start) badges. **Open** opens a started child; **Detach**
-  (`run.child.detach`, for whoever may kill the parent) keeps an unfinished
-  one running on its own. Under the list: the cost of this run and all its
+  a **Detached** badge. **Open** opens a started child. Under the list: the cost of this run and all its
   descendants, "At least $X: N runs report no cost" when some are unmetered
   and "Cost not reported" when none are metered, never $0; the split by
-  paying account; tokens; and on a root "1 of 8 busy, 1 queued, 2 of 100
-  started" against the workspace limits. The list rereads whenever a
+  paying account; tokens; and "1 of 8 busy, 1 queued" against the
+  workspace limit. The list rereads whenever a
   descendant the store holds changes.
 - **Agent messages**: the run-scoped agent mail, which the Session view also
   shows inline, with **Show older** and **Show all**.
@@ -6160,10 +6143,9 @@ server-fetched source with its mirror status and deploy key, the checkout
 Origin) with its Advanced part open; **Environment**, below; and **Team**,
 the budget with **Set budget…** (`budget.set`) and who may message others'
 runs with **Change…** (`workspace.settings`), and, where the server offers
-`workspace.child_limits`, the child-run limits ("8 busy at once, 3 levels
-deep, 100 per run tree"). The admin's **Change…** dialog edits them as
-**Busy at once**, **Levels deep** and **Per run tree**, saving only the
-changed ones with `workspace.child_limits`. Each button is gated by its
+`workspace.child_limits`, the child-run limit ("8 child runs busy at once per parent run"). The
+admin's **Change…** dialog edits it as **Busy at once**, saving with
+`workspace.child_limits`. Each button is gated by its
 server-side permission; a member without it reads the same facts. The page
 lists no runs: the board does.
 
@@ -6247,7 +6229,7 @@ while one of its entries is visible, so the nav and search never disagree.
 | You | Notifications (`notifications`) | Push notifications (`push`); Watch notifications: push devices (`watch-push`), Quiet hours (`quiet-hours`); Slack (`slack`) |
 | You | Watches (`watches`) | Watches (`watch-list`) |
 | You | Assistant (`assistant`) | Approvals (`auto-approve`) |
-| You | Child runs (`children`) | Child runs (`child-runs`): Allow automatic fallback (`child-fallback`), Use subscriptions shared with me (`child-shared`), Limits (`child-limits`) |
+| You | Child runs (`children`) | Child runs (`child-runs`): the on/off switch, Limits (`child-limits`) |
 | You | Usage (`usage`) | Subscription usage (`subscription-usage`) |
 | This computer | This computer (`this-computer`) | Link (`link`); Syncing: Sync daemon (`sync-daemon`), Mirror run files (`mirror`); Danger zone (`danger-zone`) |
 | Server | Server (`server`) | Status: Version (`version`), Tailnet dashboard, Disk and performance (`disk`); Admin: Docker inside runs (`docker`), Retained containers (`retained-containers`) |
@@ -6386,17 +6368,12 @@ Categories:
   over, closing **Clear**'s confirmation, when a different member signs in. Child runs keep
   their own choices in **Child runs**.
 - **Child runs**, where the server offers `child.settings`: **Let my runs
-  start child runs** (`enabled`), with a **What child runs cover** list
-  (what it allows, that swarms use their own choices, that budgets and
-  limits apply, how to override it for one run). The first time it is
-  turned on (`configured` false), **Let your runs start child runs?** asks
-  **Allow automatic fallback** (`fallback`, on by default) and **Use
-  subscriptions shared with me when I don't have my own**
-  (`shared_when_missing`, off) and saves all three together; afterwards each
-  is its own row and saves on change. A refused change rereads the setting
-  and keeps the error under the row. Where the server offers
-  `workspace.child_limits`, a read-only row gives the active workspace's
-  limits.
+  start child runs** (`enabled`, on by default), with a **What child runs
+  cover** list (what it allows, that swarms use their own choices, that
+  budgets and limits apply, how to override it for one run). The switch saves
+  on change; a refused change rereads the setting and keeps the error under
+  the row. Where the server offers `workspace.child_limits`, a read-only row
+  gives the active workspace's limit.
 - **Usage**: the subscription usage of your account, or of an account
   shared with you. A provider that reports `unauthenticated` keeps the
   server's error and adds **Sign in on Agents**.

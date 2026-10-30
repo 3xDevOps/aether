@@ -814,9 +814,6 @@ type Run struct {
 	// Limits override the server's run limits for this run; a zero field
 	// follows them.
 	Limits RunLimits
-	// ChildRefused records that the agent tried to start a child run while
-	// child runs were off.
-	ChildRefused bool
 	// ProfileSnapshotID is the agent-profile snapshot pinned at provisioning;
 	// empty means unpinned.
 	ProfileSnapshotID ProfileSnapshotID

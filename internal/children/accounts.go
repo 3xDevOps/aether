@@ -3,7 +3,6 @@ package children
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -52,39 +51,7 @@ func (s *Service) choices(ctx context.Context, p *policy) ([]protocol.ChildChoic
 	if s.cfg.Agents == nil || s.cfg.Agents() == nil {
 		return nil, fmt.Errorf("agent listing is unavailable")
 	}
-	own, err := s.agentChoices(ctx, p, p.owner)
-	if err != nil {
-		return nil, err
-	}
-	if !p.settings.SharedWhenMissing {
-		return own, nil
-	}
-	missing := map[string]bool{}
-	for _, c := range own {
-		if c.Status == choiceNotInstalled || c.Status == choiceNotSignedIn {
-			missing[c.Harness] = true
-		}
-	}
-	if len(missing) == 0 {
-		return own, nil
-	}
-	owners, err := s.cfg.Store.ListAccountOwners(ctx, p.owner)
-	if err != nil {
-		return nil, err
-	}
-	out := own
-	for _, owner := range owners {
-		shared, err := s.agentChoices(ctx, p, owner.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, c := range shared {
-			if missing[c.Harness] && (c.Status == choiceReady || c.Status == choiceExhausted) {
-				out = append(out, c)
-			}
-		}
-	}
-	return out, nil
+	return s.agentChoices(ctx, p, p.owner)
 }
 
 func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.MemberID) ([]protocol.ChildChoice, error) {
@@ -98,9 +65,6 @@ func (s *Service) agentChoices(ctx context.Context, p *policy, account domain.Me
 	}
 	out := make([]protocol.ChildChoice, 0, len(agents))
 	for _, a := range agents {
-		if account != p.owner && (a.OwnAccountOnly || a.Unavailable != "") {
-			continue
-		}
 		c := protocol.ChildChoice{AccountMemberID: string(account), AccountName: name, Harness: a.Name, Status: choiceReady}
 		c.Modes = []string{"standard", "background"}
 		c.DefaultMode = "standard"
@@ -183,54 +147,18 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 		}
 		return launchSpec{}, invalid("swarm %s has %d %s choices; name --model, --mode or --account to pick one", p.mission.ID, len(match), req.Harness)
 	}
-	spec := launchSpec{harness: req.Harness, account: p.owner, mode: mode, model: req.Model, fallback: p.parent.Fallback}
-	if !spec.fallback.Disabled && len(spec.fallback.Order) == 0 {
-		spec.fallback.Disabled = !p.settings.Fallback
+	if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) != p.owner {
+		return launchSpec{}, denied("child runs use the owner's own %s account", req.Harness)
 	}
+	spec := launchSpec{harness: req.Harness, account: p.owner, mode: mode, model: req.Model, fallback: p.parent.Fallback}
 	choices, err := s.choices(ctx, p)
 	if err != nil {
 		return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
 	}
-	var own *protocol.ChildChoice
-	var shared []protocol.ChildChoice
-	for i, c := range choices {
-		if c.Harness != req.Harness {
-			continue
+	for _, c := range choices {
+		if c.Harness == req.Harness && (c.Status == choiceNotInstalled || c.Status == choiceNotSignedIn) {
+			return launchSpec{}, denied("%s", c.Detail)
 		}
-		if domain.MemberID(c.AccountMemberID) == p.owner {
-			own = &choices[i]
-		} else {
-			shared = append(shared, c)
-		}
-	}
-	switch {
-	case own == nil:
-		// A server-wide definition or a test agent is not listed; the
-		// launch resolves it like any other, below.
-		if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) != p.owner {
-			return launchSpec{}, denied("agent %q runs only on the owner's own account", req.Harness)
-		}
-	case own.Status == choiceNotInstalled || own.Status == choiceNotSignedIn:
-		if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) == p.owner || len(shared) == 0 {
-			return launchSpec{}, denied("%s%s", own.Detail, sharedHint(p))
-		}
-		if req.AccountMemberID == "" {
-			slices.SortStableFunc(shared, func(a, b protocol.ChildChoice) int { return readyFirst(a) - readyFirst(b) })
-			spec.account = domain.MemberID(shared[0].AccountMemberID)
-			break
-		}
-		i := slices.IndexFunc(shared, func(c protocol.ChildChoice) bool { return c.AccountMemberID == req.AccountMemberID })
-		if i < 0 {
-			return launchSpec{}, denied("account %s is not shared with the owner or has no %s login", req.AccountMemberID, req.Harness)
-		}
-		spec.account = domain.MemberID(req.AccountMemberID)
-	case req.AccountMemberID == "" || domain.MemberID(req.AccountMemberID) == p.owner:
-	default:
-		i := slices.IndexFunc(shared, func(c protocol.ChildChoice) bool { return c.AccountMemberID == req.AccountMemberID })
-		if i < 0 {
-			return launchSpec{}, denied("child runs use the owner's own %s account; another member's account needs \"Use subscriptions shared with me when I don't have my own\" in Settings → Child runs, a share from that member, and no %s login of the owner's", req.Harness, req.Harness)
-		}
-		spec.account = domain.MemberID(req.AccountMemberID)
 	}
 	defaultMode, err := s.cfg.Runs.DefaultMode(ctx, p.owner, spec.account, spec.harness)
 	if err != nil {
@@ -242,24 +170,10 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 	return spec, nil
 }
 
-func sharedHint(p *policy) string {
-	if p.settings.SharedWhenMissing {
-		return "; no account shared with them has it signed in either"
-	}
-	return "; to use a teammate's shared subscription instead, the owner turns on \"Use subscriptions shared with me when I don't have my own\" in Settings → Child runs"
-}
-
 func trimPurpose(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if r := []rune(s); len(r) > 80 {
 		s = string(r[:80])
 	}
 	return s
-}
-
-func readyFirst(c protocol.ChildChoice) int {
-	if c.Status == choiceReady {
-		return 0
-	}
-	return 1
 }

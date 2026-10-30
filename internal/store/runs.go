@@ -148,7 +148,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt,
 		&r.Review, &reviewChangedAt, &r.ACP,
 		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.Effort, &r.Via,
-		&r.Children, &r.ChildrenSetBy, &r.ChildRefused, &r.Limits.CPUs, &r.Limits.MemoryBytes, &r.Limits.Pids, &r.UnansweredQuestions,
+		&r.Children, &r.ChildrenSetBy, &r.Limits.CPUs, &r.Limits.MemoryBytes, &r.Limits.Pids, &r.UnansweredQuestions,
 		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked,
 		&r.ParentRunID, &r.RootRunID, &r.ChildPurpose, &r.Detached); err != nil {
 		return nil, err
@@ -177,7 +177,7 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
 	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at,
 	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.effort, runs.via,
-	runs.children, runs.children_set_by, runs.child_refused,
+	runs.children, runs.children_set_by,
 	runs.cpu_limit, runs.memory_limit_bytes, runs.pids_limit`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions

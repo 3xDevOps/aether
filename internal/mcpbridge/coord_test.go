@@ -342,7 +342,7 @@ func TestBridgeGuidesAgentsBeforeAnyCall(t *testing.T) {
 				t.Errorf("%s.%s has no description", tool.Name, name)
 			}
 		}
-		for name, want := range map[string]string{toolSend: coordhooks.ReceiptRule, toolAsk: "listed by aether_status", toolInbox: coordhooks.UntrustedRule, toolReply: "reaches only the run that asked"} {
+		for name, want := range map[string]string{toolSend: coordhooks.ReceiptRule, toolAsk: "any live run_id", toolInbox: coordhooks.UntrustedRule, toolReply: "reaches only the run that asked"} {
 			if tool.Name == name && !strings.Contains(tool.Description, want) {
 				t.Errorf("%s description lacks %q: %q", name, want, tool.Description)
 			}

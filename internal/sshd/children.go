@@ -14,7 +14,6 @@ type ChildService interface {
 	Settings(ctx context.Context, member domain.MemberID) (protocol.ChildSettings, error)
 	SetSettings(ctx context.Context, member domain.MemberID, p protocol.ChildSettingsParams) (protocol.ChildSettings, error)
 	Allow(ctx context.Context, actor *domain.Member, run domain.RunID, value string) (protocol.RunChildrenAllowResult, error)
-	Detach(ctx context.Context, child domain.RunID) (protocol.Child, error)
 	Children(ctx context.Context, run domain.RunID) (protocol.RunChildrenResult, error)
 	Limits(ctx context.Context, ws domain.WorkspaceID) (protocol.ChildLimits, error)
 	SetLimits(ctx context.Context, p protocol.WorkspaceChildLimitsParams) (protocol.ChildLimits, error)
@@ -24,7 +23,6 @@ func init() {
 	registerMethod(protocol.MethodChildSettings, (*Server).childSettings)
 	registerGuarded(protocol.MethodRunChildren, permissions.View, runTarget, (*Server).runChildren)
 	registerMethod(protocol.MethodRunChildrenAllow, (*Server).runChildrenAllow)
-	registerGuarded(protocol.MethodRunChildDetach, permissions.Kill, runTarget, (*Server).runChildDetach)
 	registerMethod(protocol.MethodWorkspaceChildLimits, (*Server).workspaceChildLimits)
 }
 
@@ -45,7 +43,7 @@ func (s *Server) childSettings(ctx context.Context, member domain.MemberID, raw 
 	if perr != nil {
 		return nil, perr
 	}
-	if p.Enabled == nil && p.Fallback == nil && p.SharedWhenMissing == nil && p.Nudge == "" {
+	if p.Enabled == nil {
 		out, err := svc.Settings(ctx, member)
 		return childResult(out, err)
 	}
@@ -86,19 +84,6 @@ func (s *Server) runChildrenAllow(ctx context.Context, member domain.MemberID, r
 	return childResult(out, err)
 }
 
-func (s *Server) runChildDetach(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
-	svc, perr := s.children()
-	if perr != nil {
-		return nil, perr
-	}
-	p, perr := decodeParams[protocol.RunIDParams](raw)
-	if perr != nil {
-		return nil, perr
-	}
-	out, err := svc.Detach(ctx, domain.RunID(p.RunID))
-	return childResult(out, err)
-}
-
 // workspaceChildLimits reads limits for any member and changes them for an
 // admin.
 func (s *Server) workspaceChildLimits(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -113,7 +98,7 @@ func (s *Server) workspaceChildLimits(ctx context.Context, member domain.MemberI
 	if p.WorkspaceID == "" {
 		return nil, invalidParams("workspace_id is required")
 	}
-	if p.MaxLive == nil && p.MaxDepth == nil && p.MaxTotal == nil {
+	if p.MaxLive == nil {
 		out, err := svc.Limits(ctx, domain.WorkspaceID(p.WorkspaceID))
 		return childResult(out, err)
 	}

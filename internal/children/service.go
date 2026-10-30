@@ -20,6 +20,7 @@ import (
 // Runs is the scheduler side of a child run.
 type Runs interface {
 	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
+	SwarmRefusal(agent string, mode domain.LaunchMode) error
 	StopForParent(ctx context.Context, run, parent domain.RunID) error
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string, reportedOnly bool) (*domain.Run, error)
@@ -255,7 +256,7 @@ func rpcErr(method string, err error) *protocol.Error {
 	}
 	code := protocol.CodeInternal
 	switch {
-	case errors.Is(err, store.ErrChildLimit), errors.Is(err, store.ErrConflict):
+	case errors.Is(err, store.ErrConflict):
 		code = protocol.CodeConflict
 	case errors.Is(err, store.ErrNotFound):
 		code = protocol.CodeNotFound
@@ -275,7 +276,7 @@ func (s *Service) publish(ctx context.Context, run domain.RunID, actor domain.Me
 	}
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
 		WorkspaceID: r.WorkspaceID, RunID: r.ID, ActorID: actor,
-		Payload: events.RunChildrenPayload{Children: r.Children, ChildRefused: r.ChildRefused, Detached: r.Detached},
+		Payload: events.RunChildrenPayload{Children: r.Children, Detached: r.Detached},
 	}); err != nil {
 		slog.Warn("children: publish run.children", "run", run, "error", err)
 	}

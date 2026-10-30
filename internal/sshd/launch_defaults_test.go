@@ -32,7 +32,7 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 	}
 
 	children := e.store.(store.ChildStore)
-	childSettings := store.ChildSettings{Enabled: true, Fallback: false, Configured: true}
+	childSettings := store.ChildSettings{Enabled: true}
 	if err := children.PutChildSettings(ctx, e.member.ID, childSettings); err != nil {
 		t.Fatal(err)
 	}

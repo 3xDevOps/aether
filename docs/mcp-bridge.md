@@ -111,7 +111,7 @@ make MCP a Release B-parity interface.
 
 The bridge registers the child-run tools when the run's `coord.status`
 lists `child.options` as it starts; the server still refuses a start the
-run's owner or swarm does not allow. `child.detach` and `child.fetch` are
+run's owner or swarm does not allow. `child.fetch` is
 CLI-only.
 
 The two memory tools read and write the workspace's
@@ -134,7 +134,7 @@ that have no MCP tool. Its tool description tells the agent to run
 
 `aether_status` lists the peers described in
 [Wire v3](coordination.md#wire-v3); a peer's `run_id` is the `to_run_id` for
-`aether_send` and `aether_ask`, and only listed peers can be messaged. The
+`aether_send` and `aether_ask`; any live run's `run_id` works, listed or not. The
 `aether_send` and `aether_ask` descriptions tell the agent to announce its
 plan and owned files before editing what a peer touches, or a decision,
 progress or blocker that affects a peer; that a receipt means queued rather

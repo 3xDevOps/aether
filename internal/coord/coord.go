@@ -10,9 +10,8 @@
 // The same socket carries run.report, a harness lifecycle hook. Durable
 // worker outcomes use coord.report and remain available after the request
 // returns. Nothing here blocks, locks, or arbitrates. A send is authorized
-// by a swarm assignment, a live radar overlap (or its grace window), or the
-// sender owner's message permission on a live run in the same workspace;
-// it is size-capped, rate-limited, depth-capped, and stamped into the
+// by the sender owner's message permission on any live run on the server,
+// including a parent, child or swarm peer; it is size-capped, rate-limited, depth-capped, and stamped into the
 // workspace timeline;
 // beyond that the agents are on their own, and the radar chips remain the
 // human safety net.

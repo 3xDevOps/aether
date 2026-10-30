@@ -500,22 +500,6 @@ func TestHookWarnsOfOverlapsTheRunMayNotMessage(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
-		{"peer limit", func(t *testing.T, db *store.DB, run domain.RunID) {
-			r, err := db.GetRun(t.Context(), run)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for range 8 {
-				other := domain.Run{WorkspaceID: r.WorkspaceID, MemberID: r.MemberID, Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
-				if err = db.CreateRun(t.Context(), &other); err != nil {
-					t.Fatal(err)
-				}
-				msg := &store.RunMessage{WorkspaceID: r.WorkspaceID, FromRun: run, ToRun: other.ID, Body: "hello"}
-				if _, err = db.AppendRunMessageWithPeer(t.Context(), msg, 10, 8, true); err != nil {
-					t.Fatal(err)
-				}
-			}
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, socket, run := hookRun(t, nil, []string{"shared.go"}, false)

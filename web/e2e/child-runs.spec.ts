@@ -1,9 +1,8 @@
-// Child runs through the dashboard and a real server: the owner turns them
-// on in Settings, the parent run's agent starts a Codex child over the
+// Child runs through the dashboard and a real server: they are on by
+// default, the parent run's agent starts a Codex child over the
 // coordination CLI in its own container, the child shows under its parent
 // with its purpose and account, its report reaches the parent's inbox, and
-// killing the parent stops the child. A teammate who never turned child runs
-// on sees the refusal as a nudge that never turns the setting on.
+// killing the parent stops the child.
 //
 // The agents are shell shims that wait; the test runs `aether-internal` in
 // their containers, the same socket and admission path an agent uses.
@@ -52,17 +51,9 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   settings.searchParams.set('id', 'children')
   await page.goto(settings.toString())
   const toggle = page.getByRole('checkbox', { name: 'Let my runs start child runs' })
-  await expect(toggle).not.toBeChecked({ timeout: 30_000 })
-  await toggle.click()
-  const setup = page.getByRole('alertdialog', { name: 'Let your runs start child runs?' })
-  await expect(setup.getByText('Allow automatic fallback')).toBeVisible()
-  if (shots) await page.screenshot({ path: `${shots}/settings-setup.png` })
-  await setup.getByRole('button', { name: 'Turn on' }).click()
-  await expect(toggle).toBeChecked()
-  await expect(page.getByRole('checkbox', { name: 'Allow automatic fallback' })).toBeChecked()
-  await expect(page.getByRole('checkbox', { name: "Use subscriptions shared with me when I don't have my own" })).not.toBeChecked()
-  const saved = await alice.api.rpc<{ enabled: boolean; configured: boolean }>('child.settings', {})
-  expect(saved).toMatchObject({ enabled: true, configured: true })
+  await expect(toggle).toBeChecked({ timeout: 30_000 })
+  const saved = await alice.api.rpc<{ enabled: boolean }>('child.settings', {})
+  expect(saved).toEqual({ enabled: true })
   if (shots) await page.screenshot({ path: `${shots}/settings.png` })
 
   const { run: parent } = await alice.api.rpc<{ run: Run }>('run.launch', {
@@ -120,34 +111,4 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   await alice.api.rpc('run.kill', { run_id: parent.id })
   await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: 60_000 }).toBe('completed')
   expect((await runStatus(alice, second.run_id)).reason).toContain(`stopped by parent run ${parent.id}`)
-})
-
-test('a refused child run nudges its owner without turning child runs on', async ({ page, aether }) => {
-  const bob = await aether.member('bob')
-  await seedWorkspace(bob, aether.server.addr, await aether.seedRepo('nudge-project'), 'nudge-project')
-  const bobID = await memberID(bob)
-  aether.installAgent(bobID, 'claude', 'sleep 600')
-  const { workspaces } = await bob.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
-  const { run } = await bob.api.rpc<{ run: Run }>('run.launch', {
-    workspace_id: workspaces[0].id, task: 'Refactor the session store', harness: 'claude', mode: 'tui',
-  })
-  await waitForCoordCLI(run.id, aether.server.dataDir)
-  let refusal = ''
-  try {
-    runCoordCLI(run.id, ['child', 'start', '--harness', 'codex', '--purpose', 'review', '--task', 'review it'])
-  } catch (err) {
-    refusal = String((err as { stdout?: string }).stdout ?? err)
-  }
-  expect(refusal).toContain("child runs are off for this run's owner")
-
-  const url = new URL(bob.url)
-  url.searchParams.set('run', run.id)
-  await page.goto(url.toString())
-  const nudge = page.getByRole('group', { name: 'Let this run start child runs?' })
-  await expect(nudge).toBeVisible({ timeout: 60_000 })
-  if (shots) await page.screenshot({ path: `${shots}/nudge.png` })
-  await nudge.getByRole('button', { name: 'Not now' }).click()
-  await expect(page.getByText('You can turn child runs on later in')).toBeVisible()
-  const after = await bob.api.rpc<{ enabled: boolean; nudge: string }>('child.settings', {})
-  expect(after).toMatchObject({ enabled: false, nudge: 'snoozed' })
 })

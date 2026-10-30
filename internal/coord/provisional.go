@@ -62,7 +62,7 @@ func (s *Service) ProvisionalReport(ctx context.Context, run domain.RunID, since
 		Kind: store.RunMessageKindMessage, Body: provisionalHeader + message,
 		CorrelationID:  store.ProvisionalReportPrefix + turn,
 		IdempotencyKey: "coord-provisional:" + turn + ":" + string(target.ID),
-	}, false)
+	})
 	if err != nil {
 		return fmt.Errorf("enqueue provisional report: %w", err)
 	}

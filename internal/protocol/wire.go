@@ -99,9 +99,6 @@ type Run struct {
 	Detached     bool   `json:"detached,omitempty"`
 	// Children is the run's own child-run setting: "", "on" or "off".
 	Children string `json:"children,omitempty"`
-	// ChildRefused reports that the run's agent tried to start a child run
-	// while child runs were off.
-	ChildRefused bool `json:"child_refused,omitempty"`
 	// Immutable base provenance captured at launch.
 	BaseCommit    string  `json:"base_commit,omitempty"`
 	BaseBranch    string  `json:"base_branch,omitempty"`
@@ -267,7 +264,6 @@ func RunFromDomain(r *domain.Run) Run {
 		ChildPurpose:        r.ChildPurpose,
 		Detached:            r.Detached,
 		Children:            r.Children,
-		ChildRefused:        r.ChildRefused,
 		BaseCommit:          r.BaseCommit,
 		BaseBranch:          r.BaseBranch,
 		BaseSource:          r.BaseSource,

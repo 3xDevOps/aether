@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
-import { LaunchChildHint } from '@/components/child-nudge'
 import { AccountOptions, automaticFallback, ChildRunsOption, type ChildRunsChoice, fallbackParams, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
 import { integratorModes } from '@/components/launch/modes'
@@ -359,12 +358,7 @@ export function LaunchDialog() {
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
               {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-              {childRunsOffered && (
-                <>
-                  <ChildRunsOption value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} disabled={launching} />
-                  <LaunchChildHint launchable={agents?.filter(launchable).length ?? 0} onLeave={close} />
-                </>
-              )}
+              {childRunsOffered && <ChildRunsOption value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} disabled={launching} />}
             </TabsContent>
             <TabsContent value="swarm" className="flex flex-col gap-4">
               {swarmUnavailable && <Callout tone="needs-you" role="status" id="launch-swarm-unavailable">{swarmUnavailable}</Callout>}
