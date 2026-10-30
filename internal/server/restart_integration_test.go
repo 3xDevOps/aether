@@ -54,8 +54,11 @@ const (
 type soakProfile struct {
 	// probes are the agent names; "b" and the mail checks exist only when
 	// mail is set, and without it "a" sends to the permission run.
-	probes   []string
-	mail     bool
+	probes []string
+	mail   bool
+	// external runs the probe as a separate process in the container, not as
+	// the agent's turn, so it measures the coordination path alone.
+	external bool
 	duration time.Duration
 	long     int
 	steps    func(e *soakEnv) []soakStep
@@ -542,6 +545,22 @@ func TestIntegrationRestartSmoke(t *testing.T) {
 	})
 }
 
+// TestIntegrationRestartCoordination measures the coordination socket alone:
+// the probe is a detached docker exec process, not the agent, so it keeps
+// calling the server whatever happens to the agent session.
+func TestIntegrationRestartCoordination(t *testing.T) {
+	runRestartScenario(t, soakProfile{
+		probes: []string{"a"}, external: true, duration: 60 * time.Second, long: 70,
+		steps: func(e *soakEnv) []soakStep {
+			return []soakStep{
+				{"SIGTERM + restart", 8 * time.Second, e.restart("sigterm-1", e.term, nil)},
+				{"SIGTERM + restart", 24 * time.Second, e.restart("sigterm-2", e.term, nil)},
+				{"SIGKILL mid-request", 40 * time.Second, e.restart("sigkill", e.sigkill, nil)},
+			}
+		},
+	})
+}
+
 // TestIntegrationRestartAcceptance is the pre-release matrix: two mailing runs
 // and a pending permission request through repeated restarts, an update to a
 // second build, a rollback and a SIGKILL. It runs only with AETHER_RESTART_FULL=1.
@@ -597,14 +616,24 @@ func runRestartScenario(t *testing.T, prof soakProfile) {
 		}
 	})
 	for _, name := range prof.probes {
-		task := fmt.Sprintf("%s/workspace/soakagent -name %s -duration %s -long %d",
-			acpmock.PromptRunPrefix, name, prof.duration, prof.long)
+		probe := fmt.Sprintf("/workspace/soakagent -name %s -duration %s -long %d", name, prof.duration, prof.long)
 		if !prof.mail {
-			task += " -peer " + runC.ID
+			probe += " -peer " + runC.ID
+		}
+		task := acpmock.PromptRunPrefix + probe
+		if prof.external {
+			task = "say pong"
 		}
 		r := e.launch(t, task)
 		ids[name] = r.ID
 		runs = append(runs, r)
+		if prof.external {
+			waitFor(t, time.Minute, "the agent's first turn", func() bool { return soakTurnEnded(e, r.ID) })
+			args := append([]string{"exec", "-d", "-w", "/workspace", containerName(r.ID)}, strings.Fields(probe)...)
+			if out, err := dockerOut(args...); err != nil {
+				t.Fatalf("start the external probe: %v (%s)", err, out)
+			}
+		}
 	}
 	if prof.mail {
 		waitFor(t, 3*time.Minute, "both agents exchanging mail", func() bool {
@@ -615,15 +644,7 @@ func runRestartScenario(t *testing.T, prof soakProfile) {
 			return countKind(readEvents(ids["a"], "a"), "send") > 0
 		})
 	}
-	waitFor(t, time.Minute, "run C's first turn", func() bool {
-		items, _ := e.history(runC.ID)
-		for _, it := range items {
-			if it.Kind == acphost.KindTurnEnd {
-				return true
-			}
-		}
-		return false
-	})
+	waitFor(t, time.Minute, "run C's first turn", func() bool { return soakTurnEnded(e, runC.ID) })
 	if err := e.call(protocol.MethodRunInject, protocol.RunInjectParams{
 		RunID: runC.ID, Message: acpmock.PromptAskPermission, IdempotencyKey: "soak-ask-permission",
 	}, nil); err != nil {
@@ -711,6 +732,16 @@ func countKind(events []soakEvent, kind string) int {
 		}
 	}
 	return n
+}
+
+func soakTurnEnded(e *soakEnv, runID string) bool {
+	items, _ := e.history(runID)
+	for _, it := range items {
+		if it.Kind == acphost.KindTurnEnd {
+			return true
+		}
+	}
+	return false
 }
 
 func waitUntil(d time.Duration, ok func() bool) bool {
@@ -925,7 +956,7 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 				}
 			}
 			fmt.Fprintf(&report, "run %s: streamed ticks=%d missing=%d duplicated=%d\n", name, top, missing, dup)
-			if missing > 0 || dup > 0 || top == 0 {
+			if !prof.external && (missing > 0 || dup > 0 || top == 0) {
 				t.Errorf("run %s: the stream lost %d and repeated %d of %d lines", name, missing, dup, top)
 			}
 			w := watchers[name]
