@@ -26,14 +26,14 @@ const rowOf = (name: string) => screen.getByDisplayValue(name).closest('li')!
 
 describe('workspace environment', () => {
   it('sends only what an admin changed, and never a secret it was not given', async () => {
-    const after: WorkspaceEnvironment = { ...saved, setup_script: 'npm ci\nnpm session build\n' }
+    const after: WorkspaceEnvironment = { ...saved, setup_script: 'npm ci\nnpm run build\n' }
     const client = mount({ workspaceEnvironmentSet: vi.fn(async () => after) })
 
     const script = await screen.findByRole('textbox', { name: 'Setup script' })
     expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
     expect(screen.getByText(/Sessions launched after you save get this\. Containers that already exist keep what they started with\./)).toBeDefined()
 
-    fireEvent.change(script, { target: { value: 'npm ci\nnpm session build\n' } })
+    fireEvent.change(script, { target: { value: 'npm ci\nnpm run build\n' } })
     fireEvent.change(within(rowOf('NODE_ENV')).getByRole('textbox', { name: 'Value of NODE_ENV' }), { target: { value: 'ci' } })
     fireEvent.click(screen.getByRole('button', { name: 'Remove API_URL' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add variable' }))
@@ -46,7 +46,7 @@ describe('workspace environment', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(client.workspaceEnvironmentSet).toHaveBeenCalledWith({
       workspace_id: workspace.id,
-      setup_script: 'npm ci\nnpm session build\n',
+      setup_script: 'npm ci\nnpm run build\n',
       set: [{ name: 'NODE_ENV', value: 'ci' }, { name: 'SENTRY_DSN', value: 'dsn-value', secret: true }],
       unset: ['API_URL'],
     }))
