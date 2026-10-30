@@ -118,6 +118,13 @@ func launchDefaultsFromWire(d protocol.LaunchDefaults) (store.LaunchDefaults, er
 		}
 		out.Agents[name] = store.AgentLaunchDefault{Mode: mode, Model: a.Model}
 	}
+	if d.Permission != "" {
+		permission, err := domain.ParsePermission(d.Permission)
+		if err != nil {
+			return out, fmt.Errorf("permission: %w", err)
+		}
+		out.Permission = permission
+	}
 	if d.Fallback == nil {
 		return out, nil
 	}
@@ -174,6 +181,7 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 		Defaults: protocol.LaunchDefaults{
 			Agent:           saved.Agent,
 			AccountMemberID: string(saved.Account),
+			Permission:      string(saved.Permission),
 		},
 	}
 	if saved.FallbackPolicy != "" {

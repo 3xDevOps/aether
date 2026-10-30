@@ -148,6 +148,9 @@ func (e *supervised) answered() bool {
 // Background run has no terminal to answer a question in. The caller must
 // hold s.mu.
 func (e *supervised) asksMember() bool {
+	if len(e.sudo) > 0 {
+		return true
+	}
 	for _, request := range e.pendingInputs {
 		if request.Kind == "permission" || e.launchMode != domain.LaunchHeadless {
 			return true

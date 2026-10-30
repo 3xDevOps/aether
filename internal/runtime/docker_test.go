@@ -273,6 +273,38 @@ func TestContainerConfigSetupGate(t *testing.T) {
 	}
 }
 
+func TestContainerConfigSudo(t *testing.T) {
+	d := &Docker{namePrefix: defaultNamePrefix}
+	spec := validSpec()
+	spec.SetupScript = ""
+	cfg, hostCfg := d.containerConfig(spec, "")
+	if !slices.Equal(hostCfg.SecurityOpt, []string{"no-new-privileges=true"}) || cfg.Labels[labelSudo] != "" || cfg.Labels[labelSetupSentinel] != "" {
+		t.Fatalf("root without Sudo: SecurityOpt = %v, sudo label %q, gate %q; want no-new-privileges and nothing to prepare", hostCfg.SecurityOpt, cfg.Labels[labelSudo], cfg.Labels[labelSetupSentinel])
+	}
+	spec.User = "1000:1000"
+	cfg, _ = d.containerConfig(spec, "")
+	if cfg.Labels[labelSudo] != "" || cfg.Labels[labelSetupSentinel] == "" {
+		t.Fatalf("uid 1000 without Sudo: sudo label %q, gate %q; want the user prepared before the agent starts", cfg.Labels[labelSudo], cfg.Labels[labelSetupSentinel])
+	}
+	spec.Sudo = true
+	cfg, hostCfg = d.containerConfig(spec, "")
+	if len(hostCfg.SecurityOpt) != 0 || cfg.Labels[labelSudo] != "1" || cfg.Labels[labelSetupSentinel] == "" {
+		t.Fatalf("with Sudo: SecurityOpt = %v, sudo label %q, gate %q; want sudo allowed before the agent starts", hostCfg.SecurityOpt, cfg.Labels[labelSudo], cfg.Labels[labelSetupSentinel])
+	}
+}
+
+func TestContainerConfigOverlayMount(t *testing.T) {
+	d := &Docker{namePrefix: defaultNamePrefix}
+	spec := validSpec()
+	spec.Mounts = []Mount{{HostPath: "/srv/aether/homes/m1", ContainerPath: "/root", Overlay: "/srv/aether/scratch/run-1/home"}}
+	_, hostCfg := d.containerConfig(spec, "")
+	got := hostCfg.Mounts[len(hostCfg.Mounts)-1]
+	want := "lowerdir=/srv/aether/homes/m1,upperdir=/srv/aether/scratch/run-1/home/upper,workdir=/srv/aether/scratch/run-1/home/work"
+	if got.Type != mount.TypeVolume || got.Source != "" || got.Target != "/root" || got.VolumeOptions.DriverConfig.Options["type"] != "overlay" || got.VolumeOptions.DriverConfig.Options["o"] != want {
+		t.Fatalf("overlay mount = %+v (options %v), want an anonymous overlay volume at /root with o=%s", got, got.VolumeOptions.DriverConfig.Options, want)
+	}
+}
+
 func TestSetupOutputMasksSecretEnv(t *testing.T) {
 	d := &Docker{namePrefix: defaultNamePrefix}
 	spec := validSpec()

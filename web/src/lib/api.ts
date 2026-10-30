@@ -113,6 +113,7 @@ import type {
   FileDiff,
   FileRead,
   FilesTreeResult,
+  Permission,
   Run,
   RunPatch,
   Schedule,
@@ -568,6 +569,7 @@ export const api = {
     mode?: string
     model?: string
     effort?: string
+    permission?: Permission
     account_member_id?: string
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
@@ -740,6 +742,8 @@ export const api = {
       ...(values ? { values } : {}),
       ...lease,
     }),
+  runInputRespond: (runID: string, requestID: string, optionID: string) =>
+    call<unknown>('run.input.respond', { run_id: runID, request_id: requestID, option_id: optionID }),
   assistantStatus: () => call<AssistantStatus>('assistant.status', {}),
   assistantStart: (params: AssistantStartParams = {}) => call<AssistantStatus>('assistant.start', params),
   assistantPrompt: (text: string, idempotencyKey: string, viewContext?: ViewContext, signal?: AbortSignal) =>

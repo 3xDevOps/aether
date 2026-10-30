@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -28,11 +29,22 @@ func (d *Docker) ImageExists(ctx context.Context, ref string) (bool, error) {
 }
 
 // Commit snapshots a container as a tagged image without inheriting its
-// interactive shell command.
+// interactive shell command. It keeps the user of the image the container
+// was created from, not the unprivileged one it ran as: the image's user
+// decides where the home is mounted, which must not move when an
+// environment is saved.
 func (d *Docker) Commit(ctx context.Context, id ID, tag string) error {
-	_, err := d.cli.ContainerCommit(ctx, string(id), client.ContainerCommitOptions{
+	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
+	if err != nil {
+		return fmt.Errorf("runtime: inspect container %s: %w", id, err)
+	}
+	user, err := d.ImageUser(ctx, info.Container.Image)
+	if err != nil {
+		return err
+	}
+	_, err = d.cli.ContainerCommit(ctx, string(id), client.ContainerCommitOptions{
 		Reference: tag,
-		Changes:   []string{"CMD []", "ENTRYPOINT []"},
+		Changes:   []string{"CMD []", "ENTRYPOINT []", "USER " + cmp.Or(user, "0:0")},
 	})
 	if err != nil {
 		return fmt.Errorf("runtime: commit container %s as %s: %w", id, tag, err)

@@ -25,6 +25,7 @@ func init() {
 			"aether run --template <name> [--param <name=value>]... [--workspace <name>]\n" +
 			"aether run switch <run-id> --mode standard|enhanced",
 		example: "aether run \"fix the flaky login test\" --agent claude\n" +
+			"aether run \"review this dependency upgrade\" --agent claude --permission isolated\n" +
 			"aether run - --agent codex --idempotency-key fix-login-1 < task.md\n" +
 			"aether run --template nightly-audit\n" +
 			"aether run switch run-d6ay38tj8j --mode enhanced",
@@ -42,6 +43,7 @@ func runRun(args []string) error {
 	mode := fs.String("mode", "", launchModeHelp+" (default: "+defaultModeHelp+")")
 	model := fs.String("model", "", modelHelp)
 	effort := fs.String("effort", "", effortHelp)
+	permission := fs.String("permission", "", "root, default or isolated: root lets sudo run without asking, default asks you before each sudo, isolated keeps every change outside the checkout to the run (default: default)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	account := fs.String("account", "", "member ID whose shared agent account to use")
 	template := fs.String("template", "", "launch a saved task template instead of a prompt")
@@ -68,8 +70,8 @@ func runRun(args []string) error {
 		task = fs.Arg(0)
 	}
 	if *template != "" {
-		if task != "" || *agent != "" || *model != "" || *effort != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 || *idempotencyKey != "" || *children != "" {
-			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --effort, --account, --cached-base, --fallback, --no-fallback, --repo, --children, and --idempotency-key")
+		if task != "" || *agent != "" || *model != "" || *effort != "" || *permission != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 || *idempotencyKey != "" || *children != "" {
+			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --effort, --permission, --account, --cached-base, --fallback, --no-fallback, --repo, --children, and --idempotency-key")
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
@@ -88,7 +90,7 @@ func runRun(args []string) error {
 		return fmt.Errorf("invalid --children %q: want on or off", *children)
 	}
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: aether run [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--permission root|default|isolated] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
 	}
 	fromStdin := task == "-"
 	task, err = stdinText(task, "task", os.Stdin)
@@ -104,19 +106,23 @@ func runRun(args []string) error {
 		if err != nil {
 			return err
 		}
-		if len(repos) > 0 {
+		if len(repos) > 0 || *permission != "" {
 			var info protocol.ServerInfoResult
 			if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
 				return err
 			}
-			if !slices.Contains(info.Features, protocol.FeatureMultiRepo) {
+			if len(repos) > 0 && !slices.Contains(info.Features, protocol.FeatureMultiRepo) {
 				return fmt.Errorf("--repo: server %s does not support runs with several repositories; update the server with aether server update", info.ServerVersion)
+			}
+			if *permission != "" && !slices.Contains(info.Features, protocol.FeaturePermission) {
+				return fmt.Errorf("--permission: server %s runs every agent as root and has no permission tiers; update the server with aether server update", info.ServerVersion)
 			}
 		}
 		var res protocol.RunLaunchResult
 		params := launchParams(wsID, task, *agent, *mode, *model, *effort, *account, *cachedBase)
 		params.FallbackAccountMemberIDs, params.NoFallback = fallbacks, *noFallback
 		params.Children = *children
+		params.Permission = *permission
 		params.IdempotencyKey = cmp.Or(*idempotencyKey, cli.NewControlSessionID())
 		for _, repo := range repos {
 			id, err := workspaceIDIn(list.Workspaces, repo)
@@ -180,6 +186,9 @@ func launchCommand(params protocol.RunLaunchParams, fromStdin bool) string {
 	}
 	if params.Effort != "" {
 		args = append(args, "--effort", shellquote.Quote(params.Effort))
+	}
+	if params.Permission != "" {
+		args = append(args, "--permission", shellquote.Quote(params.Permission))
 	}
 	args = append(args, "--workspace", shellquote.Quote(params.WorkspaceID))
 	if params.AccountMemberID != "" {

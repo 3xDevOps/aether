@@ -251,6 +251,9 @@ func integrationEnvironment(d Deps) func(context.Context, integration.Actor, *do
 		if err != nil {
 			return runtime.Spec{}, fmt.Errorf("integration: build environment: %w", err)
 		}
+		if err := d.Runs.HandOver(ws, run, member.ID, plan); err != nil {
+			return runtime.Spec{}, fmt.Errorf("integration: hand the checkout to %s: %w", plan.User, err)
+		}
 		return runtime.Spec{
 			Image:             plan.Image,
 			Env:               plan.Env,
@@ -262,6 +265,9 @@ func integrationEnvironment(d Deps) func(context.Context, integration.Actor, *do
 			Mounts:            plan.Mounts,
 			User:              plan.User,
 			NestedDocker:      true,
+			// Verification ran as root before tiers, and a setup script
+			// installs system packages with sudo.
+			Sudo: true,
 		}, nil
 	}
 }

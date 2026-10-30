@@ -518,7 +518,7 @@ func (s *Scheduler) finishOverdueReports() {
 // atPrompt reports whether a permission or question parks the run mid-turn.
 // The caller must hold s.mu.
 func (e *supervised) atPrompt() bool {
-	return len(e.pendingInputs) != 0
+	return len(e.pendingInputs) != 0 || len(e.sudo) != 0
 }
 
 // asks reports whether the run's outcome is a question for its user. The

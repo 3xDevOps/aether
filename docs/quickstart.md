@@ -335,8 +335,13 @@ the setup ([environment-home.md](environment-home.md#from-the-cli)).
 A **run** is one agent on one task, in its own container and on its own git
 branch. It uses your home, so your agent login and configuration come along.
 
-In the dashboard, click **New run**, or continue to onboarding's **First run**.
-Enter the **Task**, pick the **Agent** and the **Mode**, and click **Launch**.
+In the dashboard, click **New run**, or continue to onboarding's **First run**,
+which always launches at Default. In **New run**, **Permission** at the top
+starts on **Default**: the agent runs unprivileged and every `sudo` waits for
+you to allow it. **Root access** lets `sudo` run
+without asking, and **Isolated** keeps every change outside the checkout
+inside the run ([permission tiers](security.md#permission-tiers)). Enter the
+**Task**, pick the **Agent** and the **Mode**, and click **Launch**.
 **Background** mode runs the task once with no interaction. From the CLI:
 
 ```sh
@@ -345,9 +350,11 @@ aether run "add a health check endpoint" --workspace myproject --agent claude
 
 It prints `run run-d6ay38tj8j running`. `--mode` picks `standard`, `enhanced`
 or `background`; without it, the run is Enhanced when the agent's Enhanced
-mode is installed, and Standard otherwise. `--model` picks the model and
+mode is installed, and Standard otherwise. `--model` picks the model,
 `--effort` the effort or thinking level
-([harnesses.md](harnesses.md#choose-an-effort)).
+([harnesses.md](harnesses.md#choose-an-effort)), and `--permission` what the
+agent may change outside its checkout: `root`, `default` (the default) or
+`isolated` ([permission tiers](security.md#permission-tiers)).
 The first run on a server pulls the environment image, so it starts slower. To
 give one objective to a group of agents, see swarms in [teams.md](teams.md).
 

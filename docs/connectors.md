@@ -414,7 +414,9 @@ chosen is taken from the swarm already recorded. A launch, swarm or template lau
 `unknown param "<name>"` instead of starting without it.
 
 A launch fills each field you leave out from your saved launch choices: what
-you pass wins, then what you saved, then the server's own defaults. `harness`
+you pass wins, then what you saved, then the server's own defaults. The saved
+permission tier is the exception: these launches always run at Default
+([permission tiers](security.md#permission-tiers)). `harness`
 may be left out when you saved an agent that can launch on the launch's
 account; the saved agent's mode and model apply to whichever agent the launch uses. A saved mode the agent
 cannot start in on the launch's account, or a saved fallback member

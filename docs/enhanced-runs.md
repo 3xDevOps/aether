@@ -188,6 +188,11 @@ composer, one at a time (`1 of N`). The composer stays shut until you answer.
   never always.
 - Answering needs permission to steer the run and control of it. The first
   answer wins. Cancelling the turn answers every pending request `cancelled`.
+- A Default run's `sudo` command is a request too, in Standard runs as well. It
+  shows under **Needs you** in the run's details, not in the dock: **Approve**
+  runs it once as root, **Deny** refuses it. Only the run's owner or an admin
+  may approve, and neither needs control
+  ([Sudo in a Default run](security.md#sudo-in-a-default-run)).
 
 A message sent during a turn waits for it to end (**Queued**), or joins it with
 **Steer**. If the agent refuses it, the message reads `not_sent` with the agent's

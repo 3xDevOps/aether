@@ -31,6 +31,10 @@ import (
 )
 
 func main() {
+	// First, so every argument list of a run's sudo reaches the shim.
+	if filepath.Base(os.Args[0]) == "sudo" {
+		os.Exit(coordcli.Sudo(os.Args[1:]))
+	}
 	// The lifecycle helper must precede the aether-internal basename dispatch:
 	// every run receives that read-only, version-matched staged binary.
 	if len(os.Args) > 1 && os.Args[1] == "dev-exec" {

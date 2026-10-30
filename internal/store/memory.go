@@ -845,6 +845,14 @@ func (d *DB) reportMemory(ctx context.Context, report *CoordReport) (*Memory, er
 	if report.Outcome != CoordOutcomeSuccess && report.Outcome != CoordOutcomeFailure {
 		return nil, nil
 	}
+	// An isolated run writes nothing other runs read.
+	var permission domain.Permission
+	if err := d.db.QueryRowContext(ctx, `SELECT permission FROM runs WHERE id = ?`, report.RunID).Scan(&permission); err != nil {
+		return nil, fmt.Errorf("read the permission of run %s: %w", report.RunID, err)
+	}
+	if permission == domain.PermissionIsolated {
+		return nil, nil
+	}
 	body := report.Summary
 	if report.NextAction != "" {
 		body += "\n\nNext action: " + report.NextAction

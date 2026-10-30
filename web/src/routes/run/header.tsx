@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Camera, Copy, Eye, GitBranch, Lock, PanelRight, ScrollText } from '@/components/icons'
+import { permissionLabel, permissions } from '@/components/launch/permission-control'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
 import { ConnectionLine } from '@/components/shell/connection'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PaneHeader } from '@/components/ui/pane-header'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -14,6 +16,7 @@ import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { extraRepoCount, repoLabel } from '@/lib/repos'
+import { isSudo } from '@/lib/run-requests'
 import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
@@ -77,8 +80,8 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
     case 'request': {
       if (action.label === terminalAction.label) return openTerminal()
       const steer = condition.id === 'queued-message' ? queuedSteers(room ?? []).find((m) => m.actor_id !== selfID) : undefined
-      const input = run.pending_inputs?.[0]
-      if (!steer && input && run.acp) return { label: action.label, act: () => nav.focusRequest() }
+      const input = run.pending_inputs?.find((request) => isSudo(request) === (condition.id === 'sudo'))
+      if (!steer && input && run.acp && !isSudo(input)) return { label: action.label, act: () => nav.focusRequest() }
       const card = steer ? requestCardID.steer(steer.id) : input ? requestCardID.input(input.id) : 'details-needs-you'
       return { label: action.label, act: () => nav.reveal(card) }
     }
@@ -165,6 +168,12 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
         <span className="sr-only">{agentName} · </span>
         <span className="min-w-0 truncate">{mode}</span>
       </span>
+      {run.permission && run.permission !== 'default' && (
+        <>
+          <span aria-hidden>·</span>
+          <Badge tone={run.permission === 'root' ? 'needs-you' : 'neutral'} title={permissions.find((p) => p.value === run.permission)?.detail}>{permissionLabel(run.permission)}</Badge>
+        </>
+      )}
       {accountID && (
         <>
           <span aria-hidden>·</span>

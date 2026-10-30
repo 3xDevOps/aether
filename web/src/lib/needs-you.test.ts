@@ -86,6 +86,12 @@ const rows: {
   state?: AttentionState
 }[] = [
   {
+    id: 'sudo',
+    run: record({ pending_inputs: [{ id: 'sudo-1', session_id: 'aether-sudo', kind: 'permission', title: 'Run as root in /workspace: apt-get install -y jq' }] }),
+    ctx: {},
+    reason: 'Permission requested',
+  },
+  {
     id: 'permission',
     run: record({ pending_inputs: [{ id: 'request_1', session_id: 's', kind: 'permission' }] }),
     ctx: {},

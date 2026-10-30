@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -53,7 +54,17 @@ type EnvironmentPlan struct {
 	// SecretEnv names the workspace secrets in Env.
 	SecretEnv []string
 	Egress    bool
+	Sudo      bool
 }
+
+// unprivilegedUser runs an image whose own user is root. A server that is not
+// root can hand files only to itself, so its containers run as its own user.
+var unprivilegedUser = func() string {
+	if os.Geteuid() == 0 {
+		return "1000:1000"
+	}
+	return fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid())
+}()
 
 // BuildEnvironmentPlan mounts the member's home. A run on another member's
 // shared account also mounts the harness's login paths from the owner's home
@@ -97,6 +108,11 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if home == "" {
 		home = "/root"
 	}
+	// The home stays at /root, so absolute paths saved in it keep working.
+	if uid, _, _ := strings.Cut(user, ":"); uid == "" || uid == "0" {
+		user = unprivilegedUser
+	}
+	isolated := purpose == EnvironmentPurposeRun && run != nil && run.Permission == domain.PermissionIsolated
 	var setupScript string
 	var secrets map[string]string
 	if ws != nil {
@@ -127,7 +143,8 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		SetupScript: setupScript,
 		SecretEnv:   slices.Sorted(maps.Keys(secrets)),
 		User:        user, Home: home, Path: env["PATH"],
-		Egress: purpose == EnvironmentPurposeRun && ws.Environment.Egress.On,
+		Egress: purpose == EnvironmentPurposeRun && (ws.Environment.Egress.On || isolated),
+		Sudo:   purpose == EnvironmentPurposeTerminal || (run != nil && run.Permission == domain.PermissionRoot),
 	}
 	var nestings map[string]string
 	if s.cfg.Homes != nil {
@@ -135,11 +152,21 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		if pathErr != nil {
 			return nil, fmt.Errorf("scheduler: resolve member home: %w", pathErr)
 		}
-		plan.Mounts = append(plan.Mounts, runtime.Mount{
-			HostPath:      homePath,
-			ContainerPath: home,
-			ReadOnly:      false,
-		})
+		homeMount := runtime.Mount{HostPath: homePath, ContainerPath: home}
+		if isolated {
+			var overlayErr error
+			if homeMount.Overlay, overlayErr = s.ensureOverlay(run.ID, "home"); overlayErr != nil {
+				return nil, overlayErr
+			}
+		}
+		plan.Mounts = append(plan.Mounts, homeMount)
+		if isolated && (run.AccountMemberID == "" || run.AccountMemberID == member.ID) {
+			logins, loginErr := ownLoginFiles(s.cfg.Homes, member.ID, profile, homePath, home)
+			if loginErr != nil {
+				return nil, loginErr
+			}
+			plan.Mounts = append(plan.Mounts, logins...)
+		}
 		if purpose == EnvironmentPurposeRun && run != nil && run.AccountMemberID != "" && run.AccountMemberID != member.ID {
 			logins, err := s.loginMounts(ctx, member.ID, run.AccountMemberID, profile, home)
 			if err != nil {
@@ -178,11 +205,20 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		if cacheErr != nil {
 			return nil, fmt.Errorf("scheduler: resolve member cache: %w", cacheErr)
 		}
-		plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: cachePath, ContainerPath: "/aether-cache"})
+		cacheMount := runtime.Mount{HostPath: cachePath, ContainerPath: "/aether-cache"}
+		if isolated {
+			var overlayErr error
+			if cacheMount.Overlay, overlayErr = s.ensureOverlay(run.ID, "cache"); overlayErr != nil {
+				return nil, overlayErr
+			}
+		}
+		plan.Mounts = append(plan.Mounts, cacheMount)
 		scratch := ""
 		switch {
 		case purpose == EnvironmentPurposeTerminal:
 			scratch = terminalScratchName(member.ID)
+		case isolated:
+			scratch = filepath.Join(string(run.ID), "tmp")
 		case run != nil && run.ID != "":
 			scratch = string(run.ID)
 		}
@@ -240,6 +276,13 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	// Capped, or a later append to plan.Mounts overwrites plan.Worktrees.
 	plan.Mounts, plan.Worktrees = mounts[:len(plan.Mounts):len(plan.Mounts)], mounts[len(plan.Mounts):]
 	return plan, nil
+}
+
+// HandOver gives plan's user the checkout and writable mounts of a container
+// the scheduler does not launch itself, as a launch does before it creates
+// the run's container.
+func (s *Scheduler) HandOver(ws *domain.Workspace, run *domain.Run, member domain.MemberID, plan *EnvironmentPlan) error {
+	return s.applyRunOwnership(ws, run, member, plan.Mounts, plan.User)
 }
 
 // workspaceEnvironment is ws as it is now, with its secrets. The caller read
@@ -538,6 +581,30 @@ type unshareableLoginError struct{ error }
 
 // accountLogins changes nothing in account's home. When every declared path is
 // missing it refuses, since the run could only start logged out.
+// ownLoginFiles mounts the agent's login files from the member's own home
+// over an isolated run's throwaway copy: agents replace their refresh token
+// on every refresh, so a refresh kept in the copy would revoke the real
+// login. A login that is a whole directory stays in the copy, since writing
+// it through would let the run change what later runs load.
+func ownLoginFiles(homes *memberhome.Manager, member domain.MemberID, profile harness.Profile, homePath, home string) ([]runtime.Mount, error) {
+	paths, err := profile.LoginPaths()
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+	var mounts []runtime.Mount
+	for _, rel := range paths {
+		dir, pathErr := homes.LoginPathIsDir(member, rel)
+		if errors.Is(pathErr, fs.ErrNotExist) || (pathErr == nil && dir) {
+			continue
+		}
+		if pathErr != nil {
+			return nil, fmt.Errorf("scheduler: %w", pathErr)
+		}
+		mounts = append(mounts, runtime.Mount{HostPath: homePath, Subpath: rel, ContainerPath: path.Join(home, rel)})
+	}
+	return mounts, nil
+}
+
 func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, profile harness.Profile) ([]accountLogin, error) {
 	paths, err := profile.LoginPaths()
 	if err != nil {

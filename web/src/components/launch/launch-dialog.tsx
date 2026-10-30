@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
 import { AccountOptions, automaticFallback, ChildRunsSwitch, type ChildRunsChoice, fallbackParams, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
+import { PermissionControl, permissionFeature } from '@/components/launch/permission-control'
 import { integratorModes } from '@/components/launch/modes'
 import { ExtraRepos } from '@/components/launch/extra-repos'
 import { EffortField, ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
@@ -24,7 +25,7 @@ import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import { randomID } from '@/lib/random'
 import { multiRepoFeature, multiRepoMethod, swarmReposFeature } from '@/lib/repos'
-import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/lib/types'
+import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice, Permission } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
 import { cn, surface } from '@/lib/utils'
 import { sameIdentity, useStore } from '@/store'
@@ -88,6 +89,10 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const limitsOffered = cap.hasMethod('server.run_limits')
   const serverLimits = useServerRunLimits(api, limitsOffered)
   const [limits, setLimits] = useState(emptyLimits)
+  const permissionOffered = features?.includes(permissionFeature) ?? false
+  const [permission, setPermission] = useState<Permission>('default')
+  // A saved choice read after the member picked a tier must not replace it.
+  const permissionPicked = useRef(false)
   const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick })
   const { agents, agentError, agent, harness, mode, model, effort, effortLevels, noAgents } = choice
   const [task, setTask] = useState('')
@@ -147,7 +152,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     if (preset === 'local') setPick((n) => n + 1)
     setPreset(savedRead.error === null ? 'done' : 'local')
     if (!saved) return
-    const { account_member_id: savedAccount, fallback: savedFallback } = saved.defaults
+    const { account_member_id: savedAccount, fallback: savedFallback, permission: savedPermission } = saved.defaults
+    if (savedPermission && !permissionPicked.current) setPermission(savedPermission)
     const refused = saved.invalid?.some((issue) => issue.field === 'account_member_id')
     const usable = savedAccount && !refused && accounts.some((member) => member.id === savedAccount)
     setAccount((current) => usable ? savedAccount : ownAccountID || current)
@@ -187,6 +193,12 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     navigate('agents')
   }
 
+  const choosePermission = (next: Permission) => {
+    permissionPicked.current = true
+    setPermission(next)
+    if (savesDefaults) saveLaunchDefaults((current) => ({ ...current, permission: next })).catch((err) => toast.error(`Permission not saved for your next launch: ${message(err)}`))
+  }
+
   const toggleWorker = (choice: WorkerChoice, on: boolean) => {
     setWorkers((current) => on
       ? current.some((item) => sameWorker(item, choice)) ? current : [...current, choice]
@@ -218,6 +230,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       mode,
       ...(chosenModel ? { model: chosenModel } : {}),
       ...(effort ? { effort } : {}),
+      ...(permissionOffered ? { permission } : {}),
       ...(sharedAccount ? { account_member_id: account } : {}),
       ...fallbackParams(fallback, accounts, account),
       ...extraRepos,
@@ -370,6 +383,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
             onSubmit={(event) => { event.preventDefault(); void submit() }}
           >
             <TabsContent value="run" className="flex flex-col gap-4">
+              {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
               {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
               {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background runs cannot start child runs.' : undefined} disabled={launching} />}

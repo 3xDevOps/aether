@@ -399,6 +399,18 @@ describe('the header primary action', () => {
     expect(useStore.getState().route.params.view).toBe('terminal')
   })
 
+  it('allows a sudo command from the Details card it reveals', async () => {
+    vi.mocked(api.runInputRespond).mockResolvedValue({ status: 'answered' })
+    const title = 'Run as root in /workspace: apt-get install -y jq'
+    open({ status: 'needs-attention', pending_inputs: [{ id: 'sudo-1', session_id: 'aether-sudo', kind: 'permission', title }] }, 'session')
+    expect(screen.getByText('Permission requested')).toBeDefined()
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Run actions' })).getByRole('button', { name: 'Answer' }))
+    const details = await screen.findByRole('dialog', { name: 'Run details' })
+    const card = within(details).getByText(title).closest('[data-slot=request-card]') as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(api.runInputRespond).toHaveBeenCalledWith('run_1', 'sudo-1', 'allow-once'))
+  })
+
   it('reviews an unseen failure on Changes', () => {
     open({ status: 'needs-attention', state: 'failed', outcome_unseen: true })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))

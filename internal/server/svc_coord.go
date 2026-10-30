@@ -41,6 +41,7 @@ func init() {
 			Reports:     d.Runs,
 			Waits:       d.Runs,
 			Outcomes:    d.Runs,
+			Sudo:        d.Runs,
 			Development: d.Runs,
 			Memory:      d.Memory,
 			// coord.report captures evidence before accepting the durable

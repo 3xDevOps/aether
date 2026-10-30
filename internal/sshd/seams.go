@@ -55,7 +55,7 @@ func launchWithOptions(ctx context.Context, runs RunController, workspace domain
 	if launcher, ok := runs.(RunLauncherWithOptions); ok {
 		return launcher.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 	}
-	if opts.CachedBase != "" || opts.Model != "" || opts.Effort != "" || len(opts.ExtraWorkspaces) > 0 || opts.Limits != (domain.RunLimits{}) {
+	if opts.CachedBase != "" || opts.Model != "" || opts.Effort != "" || len(opts.ExtraWorkspaces) > 0 || opts.Limits != (domain.RunLimits{}) || (opts.Permission != "" && opts.Permission != domain.PermissionDefault) {
 		return nil, errLaunchOptionsUnsupported
 	}
 	return runs.Launch(ctx, workspace, member, account, task, harness, mode)
@@ -115,6 +115,9 @@ type RunController interface {
 	// ACPAnswer resolves a pending request of an enhanced run's agent; the
 	// first answer wins. values is the form answer for an accepted question.
 	ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error
+	// DecideSudo answers a Default run's sudo request for member; the first
+	// decision wins, and a later one is scheduler.ErrSudoNotPending.
+	DecideSudo(ctx context.Context, run domain.RunID, request string, allow bool, member domain.MemberID) error
 	ACPCancel(ctx context.Context, run domain.RunID) error
 	ACPSetOption(ctx context.Context, run domain.RunID, optionID string, value any) error
 	// ACPHistory reads up to limit items before beforeSeq, oldest first;

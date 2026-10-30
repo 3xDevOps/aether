@@ -324,6 +324,9 @@ func (s *Service) runNeeds(run *domain.Run) []need {
 }
 
 func (s *Service) requestLine(run *domain.Run, input *domain.RunInputRequest, label string) string {
+	if input.Title != "" {
+		return label + ": " + input.Title
+	}
 	if run.ACP {
 		for _, p := range s.runs.ACPPending(run.ID) {
 			if p.ID == input.ID && strings.TrimSpace(p.Title) != "" {

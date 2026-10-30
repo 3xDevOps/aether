@@ -7,17 +7,21 @@ import { IconTile } from '@/components/ui/icon-tile'
 import { Clamped, RequestCard, RequestTimeBar } from '@/components/ui/request-card'
 import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { Textarea } from '@/components/ui/textarea'
+import { api } from '@/lib/api'
+import { message } from '@/lib/format'
 import { useSecondsUntil } from '@/lib/hooks'
+import { allowed } from '@/lib/permissions'
 import { memberNameOr, resolveMember } from '@/lib/member-name'
-import { inputHint, inputTitle } from '@/lib/run-requests'
+import { inputHint, inputTitle, isSudo, sudoOption } from '@/lib/run-requests'
 import type { SessionRequest } from '@/lib/session-types'
-import type { RoomMessage } from '@/lib/types'
+import type { RoomMessage, RunInputRequest } from '@/lib/types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionRequestCard } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
+import { useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 
@@ -40,8 +44,10 @@ export function useRunRequests(run: RunRecord) {
   const room = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
   const selfID = useStore((s) => s.info?.member.id)
   const sessionRequests = useStore((s) => (run.acp ? s.acpSessions[run.id]?.pending : undefined)) ?? emptyRequests
+  const inputs = run.pending_inputs ?? []
   return {
-    inputs: run.acp ? [] : run.pending_inputs ?? [],
+    inputs: run.acp ? [] : inputs.filter((input) => !isSudo(input)),
+    sudo: inputs.filter(isSudo),
     sessionRequests,
     steers: queuedSteers(room).filter((m) => m.actor_id !== selfID),
     questions: unansweredQuestions(room).filter((m) => m.actor_id !== run.member_id),
@@ -114,6 +120,43 @@ function SteerCard({ steer, name, agent, room, openTerminal }: {
   )
 }
 
+function SudoCard({ run, request }: { run: RunRecord; request: RunInputRequest }) {
+  const self = useSelf()
+  const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
+  const mayAllow = allowed('sudo', self, { owner: run.member_id })
+  const mayDeny = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
+  const [error, setError] = useState<string>()
+  const decide = async (allow: boolean) => {
+    setError(undefined)
+    try {
+      await api.runInputRespond(run.id, request.id, allow ? sudoOption.allow : sudoOption.deny)
+    } catch (err) {
+      setError(message(err))
+    }
+  }
+  return (
+    <RequestCard
+      id={requestCardID.input(request.id)}
+      avatar={<IconTile aria-hidden><AgentGlyph agent={run.harness} className="size-4" /></IconTile>}
+      title="The agent asks to run a command as root"
+      description={<Clamped className="max-h-[6lh]">{request.title}</Clamped>}
+      footer={(
+        <RequestFooter>
+          {mayAllow
+            ? <RequestActions><DecisionButtons decide={decide} /></RequestActions>
+            : (
+                <>
+                  <p className="text-ui-sm text-muted">Only the run&apos;s owner or an admin can allow it.</p>
+                  {mayDeny && <RequestActions><RequestAction label="Deny" onClick={() => void decide(false)} /></RequestActions>}
+                </>
+              )}
+          {error && <p role="alert" className="text-ui-sm text-state-failed">{error}</p>}
+        </RequestFooter>
+      )}
+    />
+  )
+}
+
 function MemberAvatar({ id, name }: { id: string; name: string }) {
   const member = useStore((s) => resolveMember(s, id).member)
   return <Avatar name={name} color={member?.color} size="header" />
@@ -128,7 +171,7 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
 }) {
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
-  const { inputs, sessionRequests, steers, questions } = useRunRequests(run)
+  const { inputs, sudo, sessionRequests, steers, questions } = useRunRequests(run)
   const name = (id: string, snapshot?: string) => memberNameOr({ members, mergedInto }, id, snapshot)
   const openTerminal = () => {
     nav.go('terminal')
@@ -137,6 +180,7 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
 
   return (
     <div className="flex flex-col gap-2">
+      {sudo.map((request) => <SudoCard key={request.id} run={run} request={request} />)}
       {docked && sessionRequests.length > 0 ? (
         <Button variant="link" size="sm" className="self-start" onClick={nav.focusRequest}>
           {sessionRequests.length === 1 ? '1 request' : `${sessionRequests.length} requests`}, shown below the timeline

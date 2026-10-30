@@ -154,6 +154,9 @@ func (s *Server) connectorAnswerRefusal(ctx context.Context, run domain.RunID, r
 		return nil
 	}
 	need := scopeWrite
+	if strings.HasPrefix(request, domain.SudoRequestPrefix) {
+		need = scopeControl
+	}
 	for _, r := range s.cfg.Runs.ACPPending(run) {
 		if r.ID == request && r.Kind == acphost.RequestPermission {
 			need = scopeControl

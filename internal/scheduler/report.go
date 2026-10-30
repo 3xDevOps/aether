@@ -297,7 +297,7 @@ func (s *Scheduler) publishPendingInputLocked(ctx context.Context, entry *superv
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
 		WorkspaceID: entry.workspaceID,
 		RunID:       entry.runID,
-		Payload:     events.RunInputPayload{PendingInputs: inputList(entry.pendingInputs)},
+		Payload:     events.RunInputPayload{PendingInputs: entry.inputs()},
 	}); err != nil {
 		return fmt.Errorf("scheduler: publish run input: %w", err)
 	}
@@ -322,14 +322,17 @@ func (s *Scheduler) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	if entry == nil || entry.status.Terminal() || entry.exitObserved || entry.retained || entry.destroyPending {
 		return []domain.RunInputRequest{}
 	}
-	return inputList(slices.Clone(entry.pendingInputs))
+	return entry.inputs()
 }
 
-func inputList(inputs []domain.RunInputRequest) []domain.RunInputRequest {
-	if inputs == nil {
-		return []domain.RunInputRequest{}
+// inputs is a new slice of the run's sudo requests, then its agent's. The
+// caller must hold s.mu.
+func (e *supervised) inputs() []domain.RunInputRequest {
+	out := make([]domain.RunInputRequest, 0, len(e.sudo)+len(e.pendingInputs))
+	for _, request := range e.sudo {
+		out = append(out, request.input)
 	}
-	return inputs
+	return append(out, e.pendingInputs...)
 }
 
 // reduceRunInputs never mutates the stored set. Small bounded sets keep exact

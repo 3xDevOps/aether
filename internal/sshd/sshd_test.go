@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -381,6 +382,7 @@ type fakeRuns struct {
 	unswitchable   map[string]bool
 	acpStream      scheduler.ACPStream
 	acpPending     map[domain.RunID][]acphost.Request
+	sudo           map[domain.RunID][]domain.RunInputRequest
 	readImage      func(context.Context, domain.RunID, string) ([]byte, string, error)
 }
 
@@ -686,7 +688,7 @@ func (f *fakeRuns) Wait(domain.RunID, domain.RunActivity) *domain.RunWait       
 func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	inputs := []domain.RunInputRequest{}
+	inputs := slices.Clone(f.sudo[run])
 	for _, r := range f.acpPending[run] {
 		in := domain.RunInputRequest{ID: r.ID, SessionID: "s1", Kind: "question"}
 		if r.Kind == acphost.RequestPermission {
@@ -695,6 +697,19 @@ func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 		inputs = append(inputs, in)
 	}
 	return inputs
+}
+
+func (f *fakeRuns) DecideSudo(_ context.Context, run domain.RunID, request string, allow bool, member domain.MemberID) error {
+	f.mu.Lock()
+	i := slices.IndexFunc(f.sudo[run], func(r domain.RunInputRequest) bool { return r.ID == request })
+	if i >= 0 {
+		f.sudo[run] = slices.Delete(f.sudo[run], i, i+1)
+	}
+	f.mu.Unlock()
+	if i < 0 {
+		return scheduler.ErrSudoNotPending
+	}
+	return f.record(fmt.Sprintf("sudo:%s:%s:%v:%s", run, request, allow, member))
 }
 
 func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {

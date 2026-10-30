@@ -45,18 +45,19 @@ paths:
 ```
 
 The first path serves the hidden MCP entry point and the existing agent
-lifecycle hook. The second path is the agent-facing coordination CLI. The
-coordination directory and both executable mounts are constructed by Aether,
-not requested by a run.
+lifecycle hook. The second path is the agent-facing coordination CLI. A
+Default or Isolated run also gets the binary at `/usr/local/bin/sudo`, the
+[sudo shim](security.md#sudo-in-a-default-run). The coordination directory
+and the executable mounts are constructed by Aether, not requested by a run.
 
 The container has no coordination token or identity flag. The mounted socket
 is the identity: a connection accepted by a run's socket is treated as that
 run. `aether-internal` has no socket, run-identity, login, or credential
 option and always uses `/run/aether/coord3.sock`.
 
-Caller-supplied mounts are validated before these mounts are appended. A caller mount may not target or nest under `/run/aether`, `/opt/aether`, or
-`/usr/local/bin/aether-internal`, so a credential home, profile, or worktree
-cannot shadow the socket or either executable. The server fails closed if it
+Caller-supplied mounts are validated before these mounts are appended. A caller mount may not target or nest under `/run/aether`, `/opt/aether`,
+`/usr/local/bin/aether-internal` or `/usr/local/bin/sudo`, so a credential
+home, profile, or worktree cannot shadow the socket or an executable. The server fails closed if it
 cannot stage and verify its binary: managed-container creation or launch is
 refused rather than proceeding without the canonical CLI or bridge. It hashes
 its own binary once per process, and re-hashes the staged copy only when that
@@ -95,6 +96,15 @@ Observer mode never returns bodies or acknowledgement tokens and never
 consumes the inbox. An admitted wake response is an input action; ordinary
 status is not. The CLI helper supplies its own 30-second default and always
 emits all four of its documented result fields.
+
+The sudo shim calls `run.sudo`, also internal and the last request on its
+connection. Its params are `argv`, `dir`, and optional `user` (empty is
+root), `stdin_bytes` and `non_interactive`; `stdin_bytes` raw bytes of the
+command's input, at most 1 MiB, follow the request line. The server answers
+with `run.sudo.output` notifications, `{stderr, data}` with `data` in base64,
+then the response `{exit_code}`, or an error whose message the shim prints
+after `sudo: `. Closing the connection withdraws the request or kills the
+command.
 
 Swarm runs additionally receive assignment-scoped `task.*` and `worker.*` methods
 published by `coord.status`; the current integrator also receives exactly

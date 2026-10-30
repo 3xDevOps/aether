@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useClock } from '@/lib/clock'
 import { deviceNeeds, type DeviceNeed, type StateContext } from '@/lib/needs-you'
+import { isSudo } from '@/lib/run-requests'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
 import type { GatewayCapabilities, Member, Run, RunStatusCause, RunWait } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
@@ -117,13 +118,15 @@ export function useRunInput(run: Run) {
   const requests = run.pending_inputs ?? []
   const native = requests.length
   const parts: string[] = []
+  const sudo = requests.filter(isSudo).length
+  if (sudo > 0) parts.push(`${sudo} sudo command${sudo === 1 ? '' : 's'} to allow`)
   for (const [kind, label] of [
     ['question', 'question'],
     ['permission', 'permission request'],
     ['form', 'form'],
     ['extension_ui', 'extension dialog'],
   ] as const) {
-    const count = requests.filter((request) => request.kind === kind).length
+    const count = requests.filter((request) => !isSudo(request) && request.kind === kind).length
     if (count > 0) parts.push(`${count} ${label}${count === 1 ? '' : 's'} in Terminal`)
   }
   if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in the run's notes`)

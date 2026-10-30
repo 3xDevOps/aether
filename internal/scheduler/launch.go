@@ -307,6 +307,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		Mode:            mode,
 		Model:           opts.Model,
 		Effort:          opts.Effort,
+		Permission:      opts.Permission,
 		Limits:          opts.Limits,
 		Via:             domain.ViaFrom(ctx),
 		ACP:             acp,

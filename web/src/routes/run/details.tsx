@@ -197,7 +197,7 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
   noteFocus: number
 }) {
   const requests = useRunRequests(run)
-  const waiting = requests.inputs.length + requests.sessionRequests.length + requests.steers.length + requests.questions.length
+  const waiting = requests.inputs.length + requests.sudo.length + requests.sessionRequests.length + requests.steers.length + requests.questions.length
   return (
     <div className="flex flex-col">
       {room.error && !room.errorFromComposer && (

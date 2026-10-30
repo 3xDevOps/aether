@@ -38,6 +38,14 @@ func TestIntegrationSharedAccountBorrowsInstallationDocker(t *testing.T) {
 	if err = os.Symlink("/root/"+version, filepath.Join(ownerHome, ".local", "bin", "claude")); err != nil {
 		t.Fatal(err)
 	}
+	// Grace's own containers have handed her home to the agent user.
+	uid, gid, err := parseNumericUser(unprivilegedUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = chownTree(ownerHome, uid, gid, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	shared := launchShareRun(t, e, docker, cli, e.member.ID, owner.ID, "borrowed install", "grace-login")
 	if out := e.pty.session(shared.run.ID).output(); !strings.Contains(out, "harness-path:/root/.aether/account/bin/claude") {

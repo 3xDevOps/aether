@@ -234,9 +234,19 @@ func (r *attentionRun) live() bool {
 	return r.run.Status.Live()
 }
 
+// firstInput is the agent's own oldest request of one of kinds.
 func (r *attentionRun) firstInput(kinds ...string) *domain.RunInputRequest {
 	for i := range r.inputs {
-		if slices.Contains(kinds, r.inputs[i].Kind) {
+		if r.inputs[i].SessionID != domain.SudoSessionID && slices.Contains(kinds, r.inputs[i].Kind) {
+			return &r.inputs[i]
+		}
+	}
+	return nil
+}
+
+func (r *attentionRun) sudoInput() *domain.RunInputRequest {
+	for i := range r.inputs {
+		if r.inputs[i].SessionID == domain.SudoSessionID {
 			return &r.inputs[i]
 		}
 	}
@@ -301,6 +311,14 @@ func since(t *time.Time) string {
 
 func (r *attentionRun) request(input *domain.RunInputRequest) *protocol.AttentionRequest {
 	out := &protocol.AttentionRequest{ID: input.ID, Kind: input.Kind}
+	if input.SessionID == domain.SudoSessionID {
+		out.Title = input.Title
+		out.Options = []protocol.AttentionOption{
+			{ID: domain.SudoAllow, Label: "Allow once", Kind: "allow_once"},
+			{ID: domain.SudoDeny, Label: "Deny", Kind: "reject_once"},
+		}
+		return out
+	}
 	for _, pending := range r.pending {
 		if pending.ID != input.ID {
 			continue
@@ -314,6 +332,18 @@ func (r *attentionRun) request(input *domain.RunInputRequest) *protocol.Attentio
 }
 
 var attentionRows = []attentionRow{
+	{
+		kind:       protocol.AttentionKindPermission,
+		background: true,
+		workers:    true,
+		admins:     true,
+		holds:      func(r *attentionRun) bool { return r.sudoInput() != nil },
+		resolvers:  owner,
+		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
+			item.Reason = "Permission requested"
+			item.Request = r.request(r.sudoInput())
+		},
+	},
 	{
 		kind:       protocol.AttentionKindPermission,
 		background: true,

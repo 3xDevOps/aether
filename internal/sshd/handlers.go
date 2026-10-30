@@ -52,7 +52,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetDashboardError: dashboardErr,
 		DashboardURL:          dashboardURL,
 		MinClientVersion:      s.minClientVersion(),
-		Features:              []string{protocol.FeatureMultiRepo, protocol.FeatureSwarmRepos},
+		Features:              []string{protocol.FeatureMultiRepo, protocol.FeatureSwarmRepos, protocol.FeaturePermission},
 	}, nil
 }
 
@@ -250,9 +250,13 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	if p.Limits != nil {
 		limits = domain.RunLimits{CPUs: p.Limits.CPUs, MemoryBytes: p.Limits.MemoryBytes, Pids: p.Limits.Pids}
 	}
+	permission, err := domain.ParsePermission(p.Permission)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: protocol.MethodRunLaunch + ": " + err.Error()}
+	}
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		Limits:     limits,
-		CachedBase: p.CachedBase, Model: p.Model, Effort: p.Effort, RequestedAccount: requested, Fallback: policy,
+		CachedBase: p.CachedBase, Model: p.Model, Effort: p.Effort, Permission: permission, RequestedAccount: requested, Fallback: policy,
 		Admitted: unlockAuthorization, Created: created,
 		ExtraWorkspaces: workspaceIDs(p.ExtraWorkspaceIDs),
 	})

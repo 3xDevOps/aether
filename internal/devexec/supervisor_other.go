@@ -8,3 +8,7 @@ import "errors"
 func Run(_ string, _ string, _ bool, _ []string) (int, error) {
 	return 125, errors.New("owned development executions require Linux")
 }
+
+func RunAttached(int, []string) (int, error) {
+	return 125, errors.New("attached executions require Linux")
+}

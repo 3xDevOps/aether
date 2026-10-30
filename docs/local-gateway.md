@@ -623,6 +623,14 @@ outside an Enhanced run, is refused with the scheduler's error. Run
 snapshots and templates carry `effort`, omitted when empty; a composer change
 publishes `run.effort` with `{"effort": "<level>"}`.
 
+`run.launch` takes an optional `permission`: `root`, `default` or `isolated`
+([permission tiers](security.md#permission-tiers)); empty is `default`.
+Another value is `-32602` with
+`run.launch: permission "x" is not root, default or isolated`. `server.info`
+lists the `permission` feature when `run.launch` takes it; an older server
+drops it and runs the agent as root. Run snapshots carry `permission`, and
+`launch.defaults` keeps the `permission` the launch form preselects.
+
 `run.launch` and `mission.create` take an optional `extra_workspace_ids`:
 other workspaces checked out at `/repos/<name>` in the run, or in a swarm's
 integrator and every worker. An empty id, the primary workspace or a repeated
@@ -703,6 +711,13 @@ conflicting operation fields are rejected rather than normalized or truncated.
 identity or request list; `replace` accepts no top-level request identity.
 Reports carry only correlation metadata, never prompts, answers, paths, or
 transcripts.
+
+A Default run's `sudo` command waiting for a person
+([security.md](security.md#sudo-in-a-default-run)) is in the same pending set,
+first: `{id, session_id: "aether-sudo", kind: "permission", title}`, where
+`id` starts with `sudo-` and `title` is `Run as root in <directory>: <command>`. It is never
+saved; a server restart ends the shim's wait. A report cannot open, close or
+replace one: the session ID and a `title` are refused.
 
 Repeated opens, closes, and unchanged replacements are idempotent. Turn
 completion, silence, prose, and idle execution do not clear outstanding input.
@@ -993,7 +1008,9 @@ worker whose control the caller holds. `permission` and
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
 run's `options` are `{id, label, kind}`, `kind` being `allow_once`,
 `allow_always`, `reject_once` or `reject_always` for a permission, and a
-Standard run's request has none: it is answered in the terminal. A link
+Standard run's request has none: it is answered in the terminal. A sudo
+request, in either mode, offers `allow-once` (`allow_once`) and `deny-once`
+(`reject_once`), and is listed only to the run's owner and admins. A link
 request is a `question` whose `request` also carries `url`: open that page,
 then accept or decline.
 `swarm-question`, `room-question` and `queued-message` carry
@@ -1012,6 +1029,11 @@ including during their reconnect window, it answers `-32003` with
 name in the message: the request is theirs, and taking control from them is
 a dashboard action with its hold and review. An unknown request is
 `-32000`.
+
+A sudo request is answered whoever holds control. `allow-once` needs the
+run's owner or an admin, `-32001` otherwise; `deny-once` needs only Steer.
+One already decided, withdrawn or timed out is `-32000`, so the gateway does
+not replay `run.input.respond`.
 
 `run.launch` and `template.launch` take an optional `idempotency_key`
 (at most 256 bytes). A retry by the same member with the same key and
