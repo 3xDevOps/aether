@@ -2,6 +2,7 @@ package acpkeeper
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -51,5 +52,19 @@ func TestCredential(t *testing.T) {
 		if _, err := credential(bad); err == nil {
 			t.Errorf("credential(%q) accepted", bad)
 		}
+	}
+}
+
+func TestPasswdHomeIsTheUsersOrDockersDefault(t *testing.T) {
+	t.Parallel()
+	root, err := user.LookupId("0")
+	if err != nil {
+		t.Skip(err)
+	}
+	if got := passwdHome(0); got != root.HomeDir {
+		t.Fatalf("passwdHome(0) = %q, want %q", got, root.HomeDir)
+	}
+	if got := passwdHome(2147483646); got != "/" {
+		t.Fatalf("passwdHome of a uid without an entry = %q, want /", got)
 	}
 }

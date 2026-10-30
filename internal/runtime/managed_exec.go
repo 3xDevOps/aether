@@ -20,6 +20,8 @@ type ManagedExecRuntime interface {
 	// carries separate stdin, stdout and stderr streams. Its stdout never
 	// drops bytes: a reader that falls behind slows the command instead.
 	StartExecPipe(context.Context, ID, ExecSpec) (ManagedExec, error)
+	// RecoverExec, and a ManagedExec's Status and Stop, fail with
+	// ErrNotFound only once the command provably no longer runs.
 	RecoverExec(context.Context, ExecIdentity) (ManagedExec, error)
 }
 

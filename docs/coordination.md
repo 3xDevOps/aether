@@ -861,8 +861,7 @@ app; `terminal stop` stops the owned process group. A server restart does not
 either: the terminal keeps its process, and output cursors, input and `wait`
 continue once the server is back
 ([terminal.md](terminal.md#reconnects-and-server-updates)). `terminal stop` on a
-terminal whose process Docker no longer knows removes it without a control
-lease.
+terminal whose process is provably gone removes it without a control lease.
 
 Browser startup is lazy and works on a standard **headless Ubuntu server**.
 There is no X11, Wayland, Xvfb, desktop session, host browser or disabled

@@ -133,9 +133,11 @@ type State struct {
 // the terminal started, and its geometry.
 type TermState struct {
 	// Start is the offset of the oldest retained byte, End the offset after
-	// the newest.
+	// the newest, and Sent the offset up to which earlier attachers were
+	// sent the output.
 	Start uint64 `json:"start"`
 	End   uint64 `json:"end"`
+	Sent  uint64 `json:"sent"`
 	Cols  uint16 `json:"cols"`
 	Rows  uint16 `json:"rows"`
 }
@@ -209,11 +211,12 @@ func ServeArgv(bin, socket, user string, adapter []string) []string {
 
 // TermArgv is the command that runs bin as the keeper of a terminal of cols
 // by rows that runs argv, listening on socket. With user, a "uid:gid", the
-// keeper starts argv as that user.
-func TermArgv(bin, socket, user string, cols, rows uint, argv []string) []string {
+// keeper starts argv as that user, with HOME set to home or, when it is
+// empty, the user's home in the container's /etc/passwd.
+func TermArgv(bin, socket, user, home string, cols, rows uint, argv []string) []string {
 	out := []string{bin, Command, "term", socket, strconv.FormatUint(uint64(cols), 10) + "x" + strconv.FormatUint(uint64(rows), 10)}
 	if user != "" {
-		out = append(out, "--user", user)
+		out = append(out, "--user", user, "--home", home)
 	}
 	return append(append(out, "--"), argv...)
 }

@@ -28,7 +28,7 @@ const termDrain = time.Second
 // leader of a PTY of cols by rows the keeper owns. A SIGTERM or SIGHUP to
 // the keeper hangs the terminal up, as stopping a terminal exec does. It
 // returns the program's exit code.
-func ServeTerm(socket, user string, cols, rows uint16, argv []string) int {
+func ServeTerm(socket, user, home string, cols, rows uint16, argv []string) int {
 	fail := func(code int, err error) int {
 		fmt.Fprintln(os.Stderr, "acp-keeper:", err)
 		return code
@@ -60,8 +60,17 @@ func ServeTerm(socket, user string, cols, rows uint16, argv []string) int {
 		return fail(125, err)
 	}
 	defer func() { _ = master.Close() }()
-	resize := func(cols, rows uint16) error {
-		return unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Col: cols, Row: rows})
+	raw, err := master.SyscallConn()
+	if err != nil {
+		return fail(125, err)
+	}
+	resize := func(cols, rows uint16) (err error) {
+		if ctlErr := raw.Control(func(fd uintptr) {
+			err = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, &unix.Winsize{Col: cols, Row: rows})
+		}); ctlErr != nil {
+			return ctlErr
+		}
+		return err
 	}
 	if err = resize(cols, rows); err != nil {
 		return fail(125, fmt.Errorf("size the terminal: %w", err))
@@ -70,6 +79,13 @@ func ServeTerm(socket, user string, cols, rows uint16, argv []string) int {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Pdeathsig: syscall.SIGKILL, Credential: cred}
+	if cred != nil {
+		// The keeper's own HOME is root's.
+		if home == "" {
+			home = passwdHome(cred.Uid)
+		}
+		cmd.Env = append(os.Environ(), "HOME="+home)
+	}
 	err = cmd.Start()
 	_ = slave.Close()
 	if err != nil {
@@ -87,7 +103,7 @@ func ServeTerm(socket, user string, cols, rows uint16, argv []string) int {
 		return fail(125, err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	t := NewTerm(TermConfig{Token: token, Input: master, Resize: resize, Cols: cols, Rows: rows, Logger: logger})
+	t := NewTerm(TermConfig{Token: token, Input: ptyInput{raw}, Resize: resize, Cols: cols, Rows: rows, Logger: logger})
 
 	hangup := make(chan os.Signal, 1)
 	signal.Notify(hangup, syscall.SIGTERM, syscall.SIGHUP)
@@ -145,9 +161,43 @@ func ServeTerm(socket, user string, cols, rows uint16, argv []string) int {
 	return code
 }
 
+// ptyInput writes to a non-blocking PTY master what fits.
+type ptyInput struct{ raw syscall.RawConn }
+
+func (p ptyInput) Write(b []byte) (n int, err error) {
+	if ctlErr := p.raw.Write(func(fd uintptr) bool {
+		n, err = unix.Write(int(fd), b)
+		return true
+	}); ctlErr != nil {
+		return 0, ctlErr
+	}
+	if errors.Is(err, unix.EAGAIN) {
+		return 0, ErrInputFull
+	}
+	return max(n, 0), err
+}
+
+// passwdHome is uid's home in /etc/passwd, or "/" as Docker defaults it.
+func passwdHome(uid uint32) string {
+	data, err := os.ReadFile("/etc/passwd")
+	if err != nil {
+		return "/"
+	}
+	want := strconv.FormatUint(uint64(uid), 10)
+	for line := range strings.Lines(string(data)) {
+		fields := strings.Split(strings.TrimRight(line, "\n"), ":")
+		if len(fields) >= 6 && fields[2] == want && fields[5] != "" {
+			return fields[5]
+		}
+	}
+	return "/"
+}
+
 // openPTY opens a new PTY whose terminal belongs to cred's user, when set.
+// Its master does not block, so the keeper's input check holds across a
+// write.
 func openPTY(cred *syscall.Credential) (master, slave *os.File, err error) {
-	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
+	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open a PTY: %w", err)
 	}

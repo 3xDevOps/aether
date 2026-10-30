@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // DefaultTermRetain bounds the terminal output a keeper retains for a server
@@ -16,11 +17,16 @@ const DefaultTermRetain = 2 << 20
 // termChunk bounds the data of one output or input frame.
 const termChunk = 32 << 10
 
+// ErrInputFull is a TermConfig.Input that cannot take more input yet.
+var ErrInputFull = errors.New("the terminal's input is full")
+
 // TermConfig describes the terminal a keeper relays.
 type TermConfig struct {
 	// Token authenticates attachers.
 	Token string
-	// Input is the PTY master the program reads its input from.
+	// Input is the PTY master the program reads its input from. It must not
+	// block: it writes what fits and fails with ErrInputFull when nothing
+	// does.
 	Input io.Writer
 	// Resize sets the PTY's geometry.
 	Resize     func(cols, rows uint16) error
@@ -40,8 +46,10 @@ type Term struct {
 	gen  uint64
 	att  *termAttacher
 	// buf holds the output from offset end-len(buf) to end.
-	buf        []byte
-	end        uint64
+	buf []byte
+	end uint64
+	// sent is the offset up to which an attacher was sent the output.
+	sent       uint64
 	cols, rows uint16
 	exit       *Exit
 	ended      chan struct{}
@@ -170,7 +178,7 @@ func (t *Term) attach(conn io.ReadWriteCloser, h frame) (*termAttacher, *frame) 
 	t.gen = h.Gen
 	// Ack names the offset the attacher replays from.
 	cursor := min(max(h.Ack, t.start()), t.end)
-	state := State{Term: &TermState{Start: t.start(), End: t.end, Cols: t.cols, Rows: t.rows}}
+	state := State{Term: &TermState{Start: t.start(), End: t.end, Sent: t.sent, Cols: t.cols, Rows: t.rows}}
 	a := &termAttacher{gen: h.Gen, conn: conn, cursor: cursor, ctrl: []frame{{T: frameWelcome, V: Version, Gen: h.Gen, State: &state}}}
 	t.att = a
 	t.cond.Broadcast()
@@ -178,16 +186,26 @@ func (t *Term) attach(conn io.ReadWriteCloser, h frame) (*termAttacher, *frame) 
 }
 
 func (t *Term) input(a *termAttacher, data []byte) {
-	t.mu.Lock()
-	current := t.att == a
-	t.mu.Unlock()
-	if !current || len(data) == 0 {
-		return
-	}
 	t.in.Lock()
 	defer t.in.Unlock()
-	if _, err := t.cfg.Input.Write(data); err != nil {
-		t.cfg.Logger.Warn("acpkeeper: write to the terminal", "error", err)
+	for len(data) > 0 {
+		// Input never blocks, so the check holds across the write: no input
+		// of a preempted attacher reaches the program after a newer one
+		// attached.
+		t.mu.Lock()
+		if t.att != a {
+			t.mu.Unlock()
+			return
+		}
+		n, err := t.cfg.Input.Write(data)
+		t.mu.Unlock()
+		data = data[max(n, 0):]
+		if errors.Is(err, ErrInputFull) {
+			time.Sleep(10 * time.Millisecond)
+		} else if err != nil {
+			t.cfg.Logger.Warn("acpkeeper: write to the terminal", "error", err)
+			return
+		}
 	}
 }
 
@@ -232,6 +250,7 @@ func (t *Term) send(a *termAttacher) {
 			}
 			t.cond.Wait()
 		}
+		sent := a.cursor
 		t.mu.Unlock()
 		var err error
 		for _, f := range batch {
@@ -243,6 +262,9 @@ func (t *Term) send(a *termAttacher) {
 			err = w.Flush()
 		}
 		t.mu.Lock()
+		if err == nil {
+			t.sent = max(t.sent, sent)
+		}
 		if a.exited && err == nil {
 			t.endOnce.Do(func() { close(t.ended) })
 		}

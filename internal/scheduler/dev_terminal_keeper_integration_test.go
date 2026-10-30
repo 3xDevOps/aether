@@ -86,7 +86,7 @@ func TestIntegrationDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
 		}
 		return string(out)
 	}
-	script := `trap 'echo got-int' INT; echo started; sleep 3; echo while-down; while read l; do echo "got:$l"; [ "$l" = size ] && stty size; [ "$l" = nap ] && sleep 60; done`
+	script := `trap 'echo got-int' INT; echo "user:$(id -u):$HOME"; echo started; sleep 3; echo while-down; while read l; do echo "got:$l"; [ "$l" = size ] && stty size; [ "$l" = nap ] && sleep 60; done`
 	var started protocol.DevTerminalStartResult
 	call(e.sched, protocol.MethodDevTerminalStart, protocol.DevTerminalStartParams{Name: "job", Command: []string{"/bin/sh", "-c", script}, Cols: 80, Rows: 24}, &started)
 	target := protocol.DevTerminalTarget{TerminalID: started.Terminal.TerminalID, Incarnation: started.Terminal.Incarnation}
@@ -96,6 +96,17 @@ func TestIntegrationDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
 		t.Fatalf("the terminal never started: %+v", waited)
 	}
 	cursor := waited.Position
+	// The keeper runs as root, yet the command gets the user and HOME a
+	// plain exec of the container gets.
+	plain, err := exec.CommandContext(ctx, "docker", "exec", container, "sh", "-c", `echo "user:$(id -u):$HOME"`).CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker exec: %v\n%s", err, plain)
+	}
+	var early protocol.DevTerminalOutputResult
+	call(e.sched, protocol.MethodDevTerminalOutput, protocol.DevTerminalOutputParams{DevTerminalTarget: target}, &early)
+	if want := strings.TrimSpace(string(plain)); !strings.Contains(early.Text, want+"\r\n") {
+		t.Fatalf("the terminal's identity = %q, want %q", early.Text, want)
+	}
 	before := ps()
 	if !strings.Contains(before, "acp-keeper term") {
 		t.Fatalf("the terminal runs without a keeper:\n%s", before)
