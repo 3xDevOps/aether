@@ -147,7 +147,9 @@ Two things in an Isolated run still reach outside it:
   Code and Codex replace the refresh token whenever they refresh, so a
   refresh kept only in the copy would leave your real login revoked. A login
   that is a whole directory, such as oh-my-pi's `~/.omp/agent`, stays in the
-  copy, so its refreshes are lost with the run.
+  copy, so its refreshes are lost with the run. On another member's shared
+  account such a login cannot stay in a copy, so the launch fails with
+  `scheduler: an isolated run cannot use another member's omp login: ~/.omp/agent is a whole directory the run could change for their later sessions; launch it at Default, or on your own account`.
 - The run can read your gh token and sign with your commit signing key. With
   GitHub unreachable it cannot use the token, and a signature only covers
   commits in its own checkout.

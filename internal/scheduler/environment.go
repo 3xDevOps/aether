@@ -168,6 +168,20 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			plan.Mounts = append(plan.Mounts, logins...)
 		}
 		if purpose == EnvironmentPurposeRun && run != nil && run.AccountMemberID != "" && run.AccountMemberID != member.ID {
+			// A shared login that is a whole directory would stay writable, and
+			// the account owner's later sessions load settings and extensions
+			// from it.
+			if isolated {
+				shared, err := s.accountLogins(ctx, run.AccountMemberID, profile)
+				if err != nil {
+					return nil, err
+				}
+				for _, login := range shared {
+					if login.dir {
+						return nil, fmt.Errorf("scheduler: an isolated run cannot use another member's %s login: ~/%s is a whole directory the run could change for their later sessions; launch it at Default, or on your own account", profile.Name, login.rel)
+					}
+				}
+			}
 			logins, err := s.loginMounts(ctx, member.ID, run.AccountMemberID, profile, home)
 			if err != nil {
 				return nil, err
