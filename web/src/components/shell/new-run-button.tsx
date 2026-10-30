@@ -40,7 +40,7 @@ function Half({ first, label, className, style, children, buttonRef, ...props }:
 } & Omit<ButtonProps, 'children' | 'style' | 'size'>) {
   return (
     <div className={cn('group/half pointer-events-none relative h-7 coarse:h-11', first ? 'min-w-0 flex-1' : 'w-11 shrink-0 coarse:w-14')} style={first ? undefined : { marginLeft: gap - lean }}>
-      <span aria-hidden style={clip(first, { fine: ring[0]!.fine, coarse: ring[0]!.coarse })} className={cn('absolute -inset-1 bg-accent invisible group-has-[button:focus-visible]/half:visible', clipped)} />
+      <span aria-hidden style={clip(first, { fine: ring[0]!.fine, coarse: ring[0]!.coarse })} className={cn('forced-color-adjust-none absolute -inset-1 bg-accent forced-colors:bg-[Highlight] invisible group-has-[button:focus-visible]/half:visible', clipped)} />
       <span aria-hidden style={clip(first, { fine: ring[1]!.fine, coarse: ring[1]!.coarse })} className={cn('absolute -inset-1 bg-chrome invisible group-has-[button:focus-visible]/half:visible', clipped)} />
       <Button
         ref={buttonRef}

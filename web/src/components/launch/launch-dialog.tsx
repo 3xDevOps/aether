@@ -66,7 +66,9 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   })
   const reposOffered = extraOptions.length > 0 && cap.hasMethod(multiRepoMethod) &&
     (features?.includes(kind === 'swarm' ? swarmReposFeature : multiRepoFeature) ?? false)
-  const extraRepos = reposOffered && extras.length ? { extra_workspace_ids: extras } : {}
+  // The panel stays open while the sidebar switches workspace, so the new primary may be among the picked extras.
+  const pickedExtras = extras.filter((id) => extraOptions.some((item) => item.id === id))
+  const extraRepos = reposOffered && pickedExtras.length ? { extra_workspace_ids: pickedExtras } : {}
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [accountsRead, setAccountsRead] = useState(false)
   const [account, setAccount] = useState(self?.id ?? '')
