@@ -35,7 +35,8 @@ run's owner allows, and manage them. A child cannot start children.
   cancel --run-id <child>       stop a child, or drop it from the queue
   fetch --run-id <child>        copy its branch to refs/remotes/children/<child>
 
-A child's report arrives in your inbox and wakes you; do not poll. Message a
+A child's report arrives in your inbox and wakes you; do not poll. So does a
+notice that a child sat idle or waiting over an hour. Message a
 child with send --to <child>; it asks you with ask --to <your run>.
 `
 
@@ -157,7 +158,7 @@ func childSkill(status *protocol.CoordStatusResult) string {
 		return "Child runs: `aether-internal child start` dispatches a session on any installed agent and model with a completely fresh context, which can orchestrate its own subagents (aether-internal child --help). " +
 			"Use one instead of your own subagents for a complex task that splits into parallel parts and benefits from fresh-context sessions: it is a dispatch-and-forget shortcut for firing off part of a very complex task, or for when the user asks for session orchestration. Your own subagents suit small lookups and edits. " +
 			"Run `aether-internal child options` once, then `child start`; honor the number of children and agents the user asks for. " +
-			"A child sees only its task text and your last commit, and cannot start children. Its report reaches your inbox and wakes you; account for unfinished children before reporting success.\n"
+			"A child sees only its task text and your last commit, and cannot start children. Its report reaches your inbox and wakes you; account for unfinished children before reporting success. A child idle or waiting for over an hour is reported to your inbox: check it, then wake it with `send --to <child>` or stop it with `child cancel`.\n"
 	case slices.Contains(status.Capabilities, protocol.MethodChildOptions):
 		return "Child runs: not available to this run now; `aether-internal child options` gives the reason. If the user asks for one, tell them that reason.\n"
 	}

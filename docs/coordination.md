@@ -1210,8 +1210,14 @@ retries until it fits. A turn that ends without a report forwards the child's
 last message to the parent as a provisional report; the child's own later
 report retires it while unread. A child that ends without a final report sends
 one message saying so, with its latest report of any outcome (summary and
-time) and its branch. A child's `needs-input` question goes to its owner, and
-the parent is told in its inbox so it can answer within the task.
+time) and its branch. A live attached child that has been waiting (for
+anything), `answered`, or waiting on a `needs-input` answer for over an hour
+while its parent is live sends the parent one message per quiet spell: its
+state and for how long, its status reason, its latest report, and the commands
+to wake it (`send --to <child>`) or stop it (`child cancel --run-id <child>`).
+New work starts a new spell. A child a person paused sends none. A child's
+`needs-input` question goes to its owner, and the parent is told in its inbox
+so it can answer within the task.
 
 Mail to a child run that a member controls (a control lease, from the
 dashboard terminal or `aether attach`; see [terminal.md](terminal.md))

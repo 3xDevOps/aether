@@ -599,7 +599,9 @@ shortcut, or when you ask for session orchestration; small lookups
 stay with the agent's own subagents. The child appears under its parent in the
 dashboard, with its purpose, agent, model, account and state, and you open,
 message, take over or stop it like any run. Its result reaches the parent's
-inbox. The agent commands are in [coordination.md](coordination.md#child-runs).
+inbox, as does a notice when it has sat idle or waiting for over an hour, so
+the parent can wake or stop it. The agent commands are in
+[coordination.md](coordination.md#child-runs).
 
 Child runs go one level deep: a child cannot start children. A parent must be
 a Standard or Enhanced run that wakes when mail arrives; `child start` from a

@@ -40,6 +40,10 @@ type ChildStore interface {
 	// whose parent ended or was deleted, and completed children their
 	// closed parent left unreviewed.
 	ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, error)
+	// IdleChildren returns the attached started children of a live parent
+	// whose live run has been quiet (domain.RunActivity.Quiet) since before
+	// cutoff, with when that spell began.
+	IdleChildren(ctx context.Context, cutoff time.Time) ([]IdleChild, error)
 	// SetChildState moves a reservation from one of from to to.
 	SetChildState(ctx context.Context, run domain.RunID, to domain.ChildState, errText string, from ...domain.ChildState) error
 	DetachChild(ctx context.Context, run domain.RunID) error
@@ -192,6 +196,80 @@ func (d *DB) ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, 
 		        AND (parent.status = 'merged' OR (parent.status = 'abandoned' AND parent.reason <> 'killed')
 		         OR (parent.status = 'completed' AND parent.review = 'accepted')))
 		 ORDER BY rc.created_at`)
+}
+
+// IdleChild is a child run in an unbroken quiet spell.
+type IdleChild struct {
+	Child *domain.ChildReservation
+	Run   *domain.Run
+	Since time.Time
+}
+
+func (d *DB) IdleChildren(ctx context.Context, cutoff time.Time) ([]IdleChild, error) {
+	live, args := liveStatusArgs()
+	cands, err := d.listChildren(ctx, "idle children",
+		`SELECT `+childCols+` FROM run_children rc
+		 JOIN runs child ON child.id = rc.run_id
+		 JOIN runs parent ON parent.id = rc.parent_run_id
+		 WHERE rc.detached = 0 AND rc.state = 'started'
+		   AND child.status IN (`+live+`) AND parent.status IN (`+live+`)
+		 ORDER BY rc.created_at`, append(args, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	var out []IdleChild
+	for _, c := range cands {
+		run, err := d.GetRun(ctx, c.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if !run.Activity.Quiet(run.Reason) {
+			continue
+		}
+		since, err := d.quietSince(ctx, c.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if !since.IsZero() && !since.After(cutoff) {
+			out = append(out, IdleChild{Child: c, Run: run, Since: since})
+		}
+	}
+	return out, nil
+}
+
+// quietSince is when the run's current unbroken quiet spell began: the
+// oldest of the newest transitions that are all quiet. A reason change
+// inside the spell keeps it going. It is zero when the newest transition is
+// not quiet.
+func (d *DB) quietSince(ctx context.Context, run domain.RunID) (time.Time, error) {
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT activity, reason, at FROM run_state_transitions WHERE run_id = ? ORDER BY rowid DESC`, run)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("store: read run %s transitions: %w", run, err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var since int64
+	for rows.Next() {
+		var (
+			activity domain.RunActivity
+			reason   string
+			at       int64
+		)
+		if err := rows.Scan(&activity, &reason, &at); err != nil {
+			return time.Time{}, fmt.Errorf("store: read run %s transitions: %w", run, err)
+		}
+		if !activity.Quiet(reason) {
+			break
+		}
+		since = at
+	}
+	if err := rows.Err(); err != nil {
+		return time.Time{}, fmt.Errorf("store: read run %s transitions: %w", run, err)
+	}
+	if since == 0 {
+		return time.Time{}, nil
+	}
+	return decodeTime(since), nil
 }
 
 func (d *DB) listChildren(ctx context.Context, what, query string, args ...any) ([]*domain.ChildReservation, error) {
