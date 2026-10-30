@@ -1379,8 +1379,7 @@ shows (`card-list.tsx`, virtua).
 
 In a flat run list (`run-list.tsx`) a root lists its workers and child runs
 at any depth under it with a toggle naming the count (**Show 2 child
-runs**). A swarm's workers start shown; child runs start folded, and a
-folded child that needs you still shows. Nested rows add the model to the
+runs**). Workers and child runs both start shown, and a folded one that needs you still shows. Nested rows add the model to the
 agent.
 
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
@@ -1632,9 +1631,10 @@ the window, a line above the lanes says so; the axis stays, so panning and
 zooming still reach older runs. A swarm lists as one header lane (objective,
 phase, worker counts) in the section of its most urgent member, followed by
 its integrator, then its workers in task order ("Worker 2"), retries after the
-first attempt. A run with child runs lists as its own lane followed by its
-child runs at any depth, oldest first, in the section of its most urgent
-member. It starts open while live with eight tasks or fewer, or when a
+first attempt. A run with child runs lists the same way: a header lane
+(the run's title, "N child runs" and their counts, with the Network glyph)
+followed by the run and its child runs at any depth, oldest first, in the
+section of its most urgent member. Either group starts open while live with eight tasks or fewer, or when a
 worker needs you; folded, it draws its integrator's bar and a strip of its
 workers' most urgent state over time, and still lists any worker that needs
 you. Disclosure choices last until the view unmounts.

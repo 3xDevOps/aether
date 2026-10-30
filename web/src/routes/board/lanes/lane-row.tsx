@@ -1,5 +1,5 @@
 import { memo, type CSSProperties, type ReactNode } from 'react'
-import { ChevronRight, Waypoints } from '@/components/icons'
+import { ChevronRight, Network, Waypoints } from '@/components/icons'
 import { modeLabel } from '@/components/launch/modes'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
@@ -250,7 +250,7 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
       label = (
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <Chevron open={lane.open} />
-          <Waypoints aria-hidden className="size-3.5 shrink-0 text-muted" />
+          {lane.missionID ? <Waypoints aria-hidden className="size-3.5 shrink-0 text-muted" /> : <Network aria-hidden className="size-3.5 shrink-0 text-muted" />}
           <span className="flex min-w-0 flex-col">
             <span className="truncate text-ui leading-4 font-medium">{lane.title}</span>
             <span className="truncate text-ui-sm text-muted">{lane.detail}</span>

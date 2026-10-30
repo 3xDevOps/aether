@@ -37,7 +37,7 @@ function treeLabel(lane: Lane, now: number): string {
     case 'summary':
       return lane.label
     case 'swarm':
-      return `Swarm ${lane.title}, ${lane.detail}`
+      return `${lane.missionID ? 'Swarm' : 'Run'} ${lane.title}, ${lane.detail}`
     case 'run': {
       const { card } = lane
       const words = stateWords(card, undefined, now)

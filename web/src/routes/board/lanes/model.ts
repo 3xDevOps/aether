@@ -38,11 +38,12 @@ export interface SummaryLane extends LaneBase {
 
 export interface SwarmLane extends LaneBase {
   kind: 'swarm'
-  missionID: string
+  /** Absent on the group of a run and its child runs. */
+  missionID?: string
   title: string
   detail: string
   open: boolean
-  /** Undefined when neither the swarm nor a listed run names its integrator. */
+  /** Undefined when neither the swarm nor a listed run names its integrator; a child-run group's is its parent. */
   integratorID?: string
   strip: Stretch[]
   /** The current integrator's bar, drawn while the swarm is folded. */
@@ -259,10 +260,11 @@ function tonesOf(lane: RunLane, least: number): Stretch[] {
   })
 }
 
-function swarmCounts(members: RunLane[]): string {
+function swarmCounts(members: RunLane[], counted: (lane: RunLane) => boolean = (lane) => lane.card.run.mission_role === 'worker'): string {
   const counts = { working: 0, needsYou: 0, done: 0, failed: 0 }
-  for (const { card } of members) {
-    if (card.run.mission_role !== 'worker') continue
+  for (const lane of members) {
+    const { card } = lane
+    if (!counted(lane)) continue
     if (card.group === 'needs-you') counts.needsYou++
     else if (card.group === 'working') counts.working++
     else if (endedBadly(card.state)) counts.failed++
@@ -381,9 +383,29 @@ export function buildLanes(input: LanesInput): LanesModel {
     for (const unit of section.units) {
       if (!unit.missionID) {
         const [parent, ...children] = unit.members
-        const headed = parent.card === unit.root
-        lanes.push(...withAgents({ ...parent, parentKey: key }))
-        for (const lane of children) lanes.push(...withAgents(headed ? { ...lane, level: 3, parentKey: parent.key } : { ...lane, parentKey: key }))
+        if (children.length === 0 || parent.card !== unit.root) {
+          for (const lane of unit.members) lanes.push(...withAgents({ ...lane, parentKey: key }))
+          continue
+        }
+        const familyKey = `family:${unit.key}`
+        const needs = children.filter((lane) => lane.card.group === 'needs-you')
+        const familyOpen = open.get(familyKey) ?? ((!parent.outcome && children.length <= swarmTasksOpen) || needs.length > 0)
+        lanes.push({
+          kind: 'swarm',
+          key: familyKey,
+          level: 2,
+          parentKey: key,
+          title: parent.title,
+          detail: [`${children.length} ${children.length === 1 ? 'child run' : 'child runs'}`, swarmCounts(children, () => true)].join(' · '),
+          open: familyOpen,
+          integratorID: parent.card.run.id,
+          strip: strongest(children.flatMap((lane) => tonesOf(lane, least)), swarmRank),
+          segments: parent.segments,
+          outcome: parent.outcome,
+        })
+        drawn.set(parent.card.run.id, familyKey)
+        for (const lane of children) drawn.set(lane.card.run.id, familyKey)
+        for (const lane of familyOpen ? [parent, ...children] : needs) lanes.push(...withAgents({ ...lane, level: 3, parentKey: familyKey }))
         continue
       }
       const mission = ctx.missions[unit.missionID]
