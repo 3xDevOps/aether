@@ -465,7 +465,7 @@ func (s *Service) wakeContext(parent context.Context, run domain.RunID, timeout 
 }
 
 func runClosing(method string) *protocol.Error {
-	return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": run is closing"}
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + protocol.CoordRunClosingSuffix}
 }
 func (s *Service) isRunClosing(run domain.RunID) bool {
 	s.mu.Lock()
