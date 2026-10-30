@@ -54,6 +54,52 @@ function setTask(task: string) {
   fireEvent.change(screen.getByLabelText('Task'), { target: { value: task } })
 }
 
+describe('reopening', () => {
+  it('starts a fresh form when New run opens again while the last panel is still leaving', async () => {
+    render(<PaletteDialogs />)
+    fireEvent.change(await screen.findByLabelText('Task'), { target: { value: 'first task' } })
+    act(() => useStore.setState({ paletteDialog: null }))
+    act(() => useStore.setState({ paletteDialog: 'launch' }))
+    expect(((await screen.findAllByLabelText('Task')).at(-1) as HTMLTextAreaElement).value).toBe('')
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  })
+})
+
+describe('child runs switch', () => {
+  const childSwitch = () => screen.getByRole('switch', { name: 'Child runs' })
+  beforeEach(() => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    vi.mocked(api.childSettings).mockResolvedValue({ enabled: true, fallback: 'ask', shared_when_missing: false, configured: true, nudge: 'show' } as never)
+  })
+
+  it('follows the member setting and sends nothing until flipped', async () => {
+    await open()
+    await waitFor(() => expect(childSwitch().getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalled())
+    expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).not.toHaveProperty('children')
+  })
+
+  it('sends off for this run only, and not the saved defaults', async () => {
+    await open()
+    await waitFor(() => expect(childSwitch().getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(childSwitch())
+    expect(childSwitch().getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalled())
+    expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).toMatchObject({ children: 'off' })
+    for (const [params] of vi.mocked(api.launchDefaultsSet).mock.calls) expect(JSON.stringify(params)).not.toContain('children')
+  })
+
+  it('is off and disabled for a Background run', async () => {
+    await open()
+    await waitFor(() => expect(childSwitch().getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(modeSegment('Background'))
+    expect(childSwitch().getAttribute('aria-checked')).toBe('false')
+    expect((childSwitch() as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
 describe('new run', () => {
   it('returns focus to what had it before the dialog opened', async () => {
     render(<button type="button">Board</button>)

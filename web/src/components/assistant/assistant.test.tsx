@@ -118,7 +118,7 @@ describe('opening the assistant', () => {
     render(<AppShell />)
     const sidebar = within(screen.getByRole('navigation', { name: 'Aether' }))
     const assistant = sidebar.getByRole('button', { name: 'Assistant' })
-    expect(assistant.parentElement?.parentElement).toBe(sidebar.getByRole('button', { name: /New run/ }).parentElement)
+    expect(assistant.parentElement?.parentElement).toBe(sidebar.getByRole('group', { name: 'New run' }).parentElement)
     expect(assistant.parentElement?.parentElement).not.toBe(sidebar.getByRole('button', { name: 'Search' }).parentElement)
     const header = screen.getAllByRole('banner')[0]!
     expect(within(header).queryByRole('button', { name: 'Assistant' })).toBeNull()

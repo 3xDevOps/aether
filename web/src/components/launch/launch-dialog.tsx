@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog as DialogPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
 import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
-import { AccountOptions, automaticFallback, ChildRunsOption, type ChildRunsChoice, fallbackParams, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
+import { AccountOptions, automaticFallback, ChildRunsSwitch, type ChildRunsChoice, fallbackParams, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
 import { integratorModes } from '@/components/launch/modes'
 import { ExtraRepos } from '@/components/launch/extra-repos'
@@ -10,12 +12,12 @@ import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launc
 import { fallbackFromSaved, fallbackToSaved, SaveAccountDefault, SavedIssues } from '@/components/launch/saved-defaults'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { sameWorker, WorkerAgents, type WorkerChoice, workerMode, workerRefusals } from '@/components/launch/worker-agents'
-import { LoaderCircle } from '@/components/icons'
+import { LoaderCircle, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SlideOut } from '@/components/ui/slide-out'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -24,8 +26,9 @@ import { randomID } from '@/lib/random'
 import { multiRepoFeature, multiRepoMethod, swarmReposFeature } from '@/lib/repos'
 import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
+import { cn, surface } from '@/lib/utils'
 import { sameIdentity, useStore } from '@/store'
-import { useChildSettingsRead } from '@/store/children'
+import { useChildSettings, useChildSettingsRead } from '@/store/children'
 import { rememberChoice, saveLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
@@ -36,7 +39,8 @@ type Kind = 'run' | 'swarm'
 // and resending the same contents under the same key replays it.
 const swarmKeys = new Map<string, string>()
 
-export function LaunchDialog() {
+/** `open` turns false when the panel starts to leave; the host unmounts it after the slide. */
+export function LaunchDialog({ open = true }: { open?: boolean }) {
   const returnFocus = useReturnFocus()
   const workspaceID = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
@@ -62,7 +66,9 @@ export function LaunchDialog() {
   })
   const reposOffered = extraOptions.length > 0 && cap.hasMethod(multiRepoMethod) &&
     (features?.includes(kind === 'swarm' ? swarmReposFeature : multiRepoFeature) ?? false)
-  const extraRepos = reposOffered && extras.length ? { extra_workspace_ids: extras } : {}
+  // The panel stays open while the sidebar switches workspace, so the new primary may be among the picked extras.
+  const pickedExtras = extras.filter((id) => extraOptions.some((item) => item.id === id))
+  const extraRepos = reposOffered && pickedExtras.length ? { extra_workspace_ids: pickedExtras } : {}
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [accountsRead, setAccountsRead] = useState(false)
   const [account, setAccount] = useState(self?.id ?? '')
@@ -77,6 +83,7 @@ export function LaunchDialog() {
   const [pick, setPick] = useState(0)
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
+  const childReadError = useChildSettings((s) => s.error)
   const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
   const limitsOffered = cap.hasMethod('server.run_limits')
   const serverLimits = useServerRunLimits(api, limitsOffered)
@@ -118,9 +125,9 @@ export function LaunchDialog() {
   }, [error])
 
   useEffect(() => {
-    shown.current = true
+    shown.current = open
     return () => { shown.current = false }
-  }, [])
+  }, [open])
 
   useEffect(() => {
     let live = true
@@ -214,7 +221,7 @@ export function LaunchDialog() {
       ...(sharedAccount ? { account_member_id: account } : {}),
       ...fallbackParams(fallback, accounts, account),
       ...extraRepos,
-      ...(childRunsOffered && childRuns ? { children: childRuns } : {}),
+      ...(childRunsOffered && childRuns && mode !== 'headless' ? { children: childRuns } : {}),
       ...(Object.keys(parsedLimits.limits).length ? { limits: parsedLimits.limits } : {}),
     })
     if (signedIn()) rememberChoice(harness, mode, chosenModel)
@@ -333,8 +340,15 @@ export function LaunchDialog() {
   )
 
   return (
-    <Dialog open onOpenChange={close}>
-      <DialogContent {...returnFocus} className="max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+    <Dialog open={open} modal={false} onOpenChange={close}>
+      <SlideOut open={open} width="26rem">
+      <DialogPrimitive.Content
+        {...returnFocus}
+        forceMount
+        // The panel stays open while the view behind it is used; only Escape and its own buttons close it.
+        onInteractOutside={(event) => event.preventDefault()}
+        className={cn(surface, 'relative grid h-full w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-none border-y-0 border-l-0 p-4 pt-[calc(1rem+var(--safe-top))] shadow-dialog outline-none')}
+      >
         <Tabs value={kind} onValueChange={(value) => { setKind(value as Kind); setError(null) }} className="contents">
           <DialogHeader>
             <DialogTitle>{kind === 'swarm' ? 'New swarm' : 'New run'}</DialogTitle>
@@ -358,7 +372,7 @@ export function LaunchDialog() {
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
               {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-              {childRunsOffered && <ChildRunsOption value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} disabled={launching} />}
+              {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background runs cannot start child runs.' : undefined} disabled={launching} />}
             </TabsContent>
             <TabsContent value="swarm" className="flex flex-col gap-4">
               {swarmUnavailable && <Callout tone="needs-you" role="status" id="launch-swarm-unavailable">{swarmUnavailable}</Callout>}
@@ -408,7 +422,13 @@ export function LaunchDialog() {
             {late ? stillWaiting : launching ? (kind === 'swarm' ? 'Creating swarm…' : 'Launching…') : kind === 'swarm' ? 'Create swarm' : 'Launch'}
           </Button>
         </DialogFooter>
-      </DialogContent>
+        <DialogPrimitive.Close asChild>
+          <Button variant="ghost" size="icon-sm" label="Close" className="absolute top-2 right-2">
+            <X />
+          </Button>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+      </SlideOut>
     </Dialog>
   )
 }

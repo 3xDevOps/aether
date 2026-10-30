@@ -161,6 +161,18 @@ terminal's hold-to-take control never scale.
 
 The other primitives with motion or a fixed size:
 
+- `Switch` is a 28×16px track with a 10px thumb that glides 12px in 150ms
+  (`ease-pop`, none under reduced motion); on is `bg-accent`, off a
+  `border-control` outline with an `icon-faint` thumb. Use it for a setting
+  that applies at once or for one run, beside its `Label`.
+- The split **New run** button is two 28px halves (44px coarse) cut on a
+  forward slash that leans 8px (about 16°) with 3px radii on the cut and 8px
+  on the outer corners, 2px apart; its clip paths come from `split-shape.ts`,
+  and the focus outline follows the cut. `SlideOut` (`slide-out.tsx`) is the
+  surface that slides out of the sidebar edge (220ms, `--ease-sheet`) for the
+  launch panel and the right half's preview: clipped at that edge, no scrim,
+  `shadow-dialog` for the panel, `shadow-overlay` for the preview. With the
+  sidebar hidden or on a phone it slides in from the window edge.
 - `Tabs` draws one `SlidingIndicator` per list: the underline look slides a
   2px accent bar, the segmented look a `bg-raised` pill with a seam ring. It
   follows keyboard selection and stays attached in a scrolling strip.
@@ -387,7 +399,7 @@ Use compact workbench geometry rather than landing-page ornament:
   in another is the outer one minus the inset: a 12px menu with 4px padding
   holds 8px items. Edges that meet another surface stay square: sheets at the
   screen edge, a run's details box where it docks, joined buttons and dock
-  tabs. `rounded-full` is for dots, radios, avatars, meters and the
+  tabs. `rounded-full` is for dots, radios, avatars, meters, switches and the
   composer's and the Notes field's send control only. The Context window's
   grid cells and legend swatches are 2px (`rounded-xs`).
 - Elevation: panes and headers have none; cards `shadow-card`, lifting to
