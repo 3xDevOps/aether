@@ -141,6 +141,19 @@ describe('buildLanes', () => {
     expect(drawn.get('done')).toBe('section:finished:summary')
   })
 
+  it('draws child runs beneath their parent, at any depth, and surfaces the parent for a child that needs you', () => {
+    const ctx = ctxOf([
+      run({ id: 'parent', task: 'parent work', created_at: at(5), started_at: at(5) }),
+      run({ id: 'c1', parent_run_id: 'parent', task: 'first', created_at: at(10), started_at: at(10) }),
+      run({ id: 'c2', parent_run_id: 'parent', task: 'second', status: 'completed', state: undefined, created_at: at(12), finished_at: at(20) }),
+      run({ id: 'g1', parent_run_id: 'c1', task: 'nested', status: 'needs-attention', state: 'needs-you', created_at: at(15), started_at: at(15) }),
+    ])
+    const { lanes } = buildLanes(input(ctx))
+    const runs = lanes.filter((l): l is RunLane => l.kind === 'run')
+    expect(runs.map((l) => [l.card.run.id, l.level])).toEqual([['parent', 2], ['c1', 3], ['c2', 3], ['g1', 3]])
+    expect(lanes.map((l) => l.kind === 'section' ? l.label : l.kind)[0]).toBe('Needs you')
+  })
+
   it('keeps a failure that ended as it started visible on the Finished strip', () => {
     const ctx = ctxOf([
       run({ id: 'done', status: 'merged', state: undefined, created_at: at(10), finished_at: at(40) }),
