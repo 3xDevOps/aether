@@ -40,7 +40,7 @@ func (s *Service) Lineage(ctx context.Context, run domain.RunID) ([]domain.RunID
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}
-	kids, err := s.cfg.Store.ListChildren(ctx, run, false)
+	kids, err := s.cfg.Store.ListChildren(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (s *Service) ValidateReport(ctx context.Context, run domain.RunID, outcome 
 		return nil
 	}
 	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-		"coord.report: %d child runs are unfinished (aether-internal child list); wait for their reports and report waiting --for agents, or stop them with child cancel or child detach", unfinished)}
+		"coord.report: %d child runs are unfinished (aether-internal child list); wait for their reports and report waiting --for agents, or stop them with child cancel", unfinished)}
 }
 
 // NeedsInput tells an attached child's parent what the child asked its

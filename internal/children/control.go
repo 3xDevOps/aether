@@ -2,35 +2,13 @@ package children
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
 )
-
-const (
-	firstSnooze  = 7 * 24 * time.Hour
-	secondSnooze = 30 * 24 * time.Hour
-)
-
-func settingsWire(st store.ChildSettings, now time.Time) protocol.ChildSettings {
-	out := protocol.ChildSettings{
-		Enabled: st.Enabled, Fallback: st.Fallback, SharedWhenMissing: st.SharedWhenMissing,
-		Configured: st.Configured, Nudge: protocol.ChildNudgeShow,
-	}
-	switch {
-	case st.NoNudge || st.Enabled:
-		out.Nudge = protocol.ChildNudgeNever
-	case now.Before(st.SnoozedUntil):
-		out.Nudge = protocol.ChildNudgeSnoozed
-	}
-	return out
-}
 
 // Settings is member's own child-run setting.
 func (s *Service) Settings(ctx context.Context, member domain.MemberID) (protocol.ChildSettings, error) {
@@ -38,11 +16,10 @@ func (s *Service) Settings(ctx context.Context, member domain.MemberID) (protoco
 	if err != nil {
 		return protocol.ChildSettings{}, err
 	}
-	return settingsWire(st, time.Now()), nil
+	return protocol.ChildSettings{Enabled: st.Enabled}, nil
 }
 
-// SetSettings changes member's own setting. Any saved change marks it
-// configured; a nudge answer only snoozes or stops the nudge.
+// SetSettings changes member's own setting.
 func (s *Service) SetSettings(ctx context.Context, member domain.MemberID, p protocol.ChildSettingsParams) (protocol.ChildSettings, error) {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
@@ -50,40 +27,14 @@ func (s *Service) SetSettings(ctx context.Context, member domain.MemberID, p pro
 	if err != nil {
 		return protocol.ChildSettings{}, err
 	}
-	switch p.Nudge {
-	case "":
-	case protocol.ChildNudgeLater:
-		st.Snoozes++
-		switch st.Snoozes {
-		case 1:
-			st.SnoozedUntil = time.Now().Add(firstSnooze).UTC()
-		case 2:
-			st.SnoozedUntil = time.Now().Add(secondSnooze).UTC()
-		default:
-			st.NoNudge = true
-		}
-	case protocol.ChildNudgeNever:
-		st.NoNudge = true
-	default:
-		return protocol.ChildSettings{}, invalid("nudge must be %q or %q", protocol.ChildNudgeLater, protocol.ChildNudgeNever)
-	}
-	if p.Enabled != nil || p.Fallback != nil || p.SharedWhenMissing != nil {
-		st.Configured = true
-	}
 	if p.Enabled != nil {
 		st.Enabled = *p.Enabled
-	}
-	if p.Fallback != nil {
-		st.Fallback = *p.Fallback
-	}
-	if p.SharedWhenMissing != nil {
-		st.SharedWhenMissing = *p.SharedWhenMissing
 	}
 	if err := s.cfg.Store.PutChildSettings(ctx, member, st); err != nil {
 		return protocol.ChildSettings{}, err
 	}
 	s.Kick()
-	return settingsWire(st, time.Now()), nil
+	return protocol.ChildSettings{Enabled: st.Enabled}, nil
 }
 
 // Allow sets run's own child-run setting. Only its owner turns it on: it
@@ -113,26 +64,14 @@ func (s *Service) Allow(ctx context.Context, actor *domain.Member, run domain.Ru
 	return protocol.RunChildrenAllowResult{Children: value}, nil
 }
 
-// Detach keeps child running on its own.
-func (s *Service) Detach(ctx context.Context, child domain.RunID) (protocol.Child, error) {
-	c, err := s.cfg.Store.GetChild(ctx, child)
-	if errors.Is(err, store.ErrNotFound) {
-		return protocol.Child{}, fmt.Errorf("%w: run %s is not a child run", store.ErrNotFound, child)
-	}
-	if err != nil {
-		return protocol.Child{}, err
-	}
-	return s.detach(ctx, c)
-}
-
-// Children lists run's descendants and the usage of run and all of them,
+// Children lists run's children and the usage of run and all of them,
 // each run counted once on the accounts that paid.
 func (s *Service) Children(ctx context.Context, run domain.RunID) (protocol.RunChildrenResult, error) {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
 		return protocol.RunChildrenResult{}, err
 	}
-	kids, err := s.cfg.Store.ListChildren(ctx, run, true)
+	kids, err := s.cfg.Store.ListChildren(ctx, run)
 	if err != nil {
 		return protocol.RunChildrenResult{}, err
 	}
@@ -147,7 +86,7 @@ func (s *Service) Children(ctx context.Context, run domain.RunID) (protocol.RunC
 			if w.MissionID != r.MissionID || w.MissionRole != "worker" {
 				continue
 			}
-			below, belowErr := s.cfg.Store.ListChildren(ctx, w.ID, true)
+			below, belowErr := s.cfg.Store.ListChildren(ctx, w.ID)
 			if belowErr != nil {
 				return protocol.RunChildrenResult{}, belowErr
 			}
@@ -229,7 +168,7 @@ func (s *Service) Limits(ctx context.Context, ws domain.WorkspaceID) (protocol.C
 	return limitsWire(l), err
 }
 
-// SetLimits changes the given limits within 1 and domain.MaxChildLimits.
+// SetLimits changes the given limit within 1 and domain.MaxChildLimits.
 func (s *Service) SetLimits(ctx context.Context, p protocol.WorkspaceChildLimitsParams) (protocol.ChildLimits, error) {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
@@ -238,23 +177,11 @@ func (s *Service) SetLimits(ctx context.Context, p protocol.WorkspaceChildLimits
 	if err != nil {
 		return protocol.ChildLimits{}, err
 	}
-	for _, f := range []struct {
-		name string
-		in   *int
-		out  *int
-		max  int
-	}{
-		{"max_live", p.MaxLive, &l.MaxLive, domain.MaxChildLimits.MaxLive},
-		{"max_depth", p.MaxDepth, &l.MaxDepth, domain.MaxChildLimits.MaxDepth},
-		{"max_total", p.MaxTotal, &l.MaxTotal, domain.MaxChildLimits.MaxTotal},
-	} {
-		if f.in == nil {
-			continue
+	if p.MaxLive != nil {
+		if *p.MaxLive < 1 || *p.MaxLive > domain.MaxChildLimits.MaxLive {
+			return protocol.ChildLimits{}, invalid("max_live must be between 1 and %d", domain.MaxChildLimits.MaxLive)
 		}
-		if *f.in < 1 || *f.in > f.max {
-			return protocol.ChildLimits{}, invalid("%s must be between 1 and %d", f.name, f.max)
-		}
-		*f.out = *f.in
+		l.MaxLive = *p.MaxLive
 	}
 	if err := s.cfg.Store.SetWorkspaceChildLimits(ctx, ws, l); err != nil {
 		return protocol.ChildLimits{}, err

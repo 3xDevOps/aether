@@ -102,8 +102,6 @@ export interface Run {
   detached?: boolean
   /** The run's own child-run setting; absent follows the owner's. */
   children?: RunChildrenSetting
-  /** The agent tried to start a child run while child runs were off. */
-  child_refused?: boolean
   task: string
   /** Latest terminal title, omitted by older servers and for empty titles. */
   title?: string

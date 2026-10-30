@@ -158,10 +158,10 @@ Commands:
   status    inspect this run and the peers it may message
   skill     print live assignment or a terminal/browser/git workflow topic
   hook      run a native inbox hook or print a copyable integration file
-  send      send a durable message to a peer listed by status
+  send      send a durable message to any live run
   inbox     read the at-least-once inbox
   ack       acknowledge the inbox batch you handled
-  ask       ask a peer listed by status a durable question
+  ask       ask any live run a durable question
   reply     answer a durable question
   mission   ask the accountable human and start the mission
   task      inspect and mutate mission task revisions
@@ -194,8 +194,8 @@ disconnected) with its reason, then the raw run_status, where needs-attention
 only means parked. A peer you wrote to has
 last_sent: your newest message to it, sent, held, delivered, acked or retired. Use
 a peer's run_id with send --to or ask --to. A viewer-owned run has no peers;
-it can only reply to questions it was asked. At the 8-peer cap, only swarm
-peers and existing conversations are listed.
+it can only reply to questions it was asked. status lists the most relevant
+peers; any other live run's run_id works with send --to and ask --to too.
 `,
 	"skill": `usage: aether-internal skill [terminal|browser|git]
        aether-internal skill --hooks
@@ -497,9 +497,9 @@ Stay within your assignment. aether-internal status lists the peers you may
 message with state mission (same swarm), active or grace (overlapping edits,
 with files) or workspace (same workspace), each task, and its activity and
 reason; run_status needs-attention only means parked, not needing a person.
-A viewer-owned run has no peers; at the 8-peer cap only swarm peers and
-existing conversations are listed. An overlap notice can appear without a
-matching peer in status; message only listed peers.
+A viewer-owned run has no peers. status lists only the most relevant peers;
+send --to and ask --to accept any live run's run_id on this server that your
+owner may message, including siblings and runs outside your tree.
 ` + coordhooks.PeerRule + `
   aether-internal ask --help
 ` + coordhooks.ReceiptRule + ` recipient_status is the peer's status when the
@@ -583,7 +583,7 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 			return ExitFailure, fmt.Errorf("write skill identity: %w", err)
 		}
 		if assignment == nil {
-			if _, err := io.WriteString(out, "No mission authority; coordinate only with peers listed by status.\n"); err != nil {
+			if _, err := io.WriteString(out, "No mission authority; coordinate with any live run you may message.\n"); err != nil {
 				return ExitFailure, fmt.Errorf("write skill ordinary scope: %w", err)
 			}
 		} else {

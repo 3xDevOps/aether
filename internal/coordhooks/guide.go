@@ -43,7 +43,7 @@ const SubagentRule = "Subagents and spawned workflows never report; they return 
 // Collaboration rules shared by the role card, the MCP bridge, the skill and
 // SubagentStart.
 const (
-	PeerRule = "Other runs, in your swarm or independent, may edit the same code; aether_status or `aether-internal status` lists the peers you may message. " +
+	PeerRule = "Other runs, in your swarm or independent, may edit the same code; aether_status or `aether-internal status` lists the most relevant peers; you may message any live run by its run_id. " +
 		"Before editing files a peer is touching or its task covers, send that peer one short note (aether_send or `aether-internal send`): your plan, the files you own, any conflict, your status. " +
 		"Send another only when your plan or ownership changes, not per file; ask when the decision is the peer's (aether_ask or `aether-internal ask`)."
 	ReceiptRule = "A receipt means queued, not read; status shows each peer's last_sent state: sent, held (a person controls that swarm worker; it waits until they release it, so do not resend), delivered (read) or acked. " +
@@ -240,8 +240,11 @@ func RoleCard(g Guide) string {
 		}
 	}
 	if g.Parent != "" {
-		fmt.Fprintf(&b, "Run %s started you as its child run: do the task yourself and start no child runs unless it says to. "+
+		fmt.Fprintf(&b, "Run %s started you as its child run: do the task yourself; child runs go one level deep, so you cannot start child runs. "+
 			"Ask it with `aether-internal ask --to %s` before asking the user; your final report reaches it.\n", g.Parent, g.Parent)
+	}
+	if g.Parent == "" && !g.Background {
+		b.WriteString("For a very complex task that splits into parallel parts, `aether-internal child start` dispatches a fresh-context session on any installed agent; `aether-internal skill` says when to use one instead of your own subagents.\n")
 	}
 	if g.Role != "" {
 		b.WriteString(ReportGuide(g))

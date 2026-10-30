@@ -305,7 +305,6 @@ type swarmRun struct {
 
 type childSummary struct {
 	Total  int            `json:"total"`
-	Stale  int            `json:"stale,omitempty"`
 	States map[string]int `json:"states"`
 }
 
@@ -323,9 +322,6 @@ func summarizeChildren(ctx context.Context, read Call, id string) (*childSummary
 	s := &childSummary{Total: len(res.Children), States: map[string]int{}}
 	for _, ch := range res.Children {
 		s.States[ch.State]++
-		if ch.Stale {
-			s.Stale++
-		}
 	}
 	return s, ""
 }

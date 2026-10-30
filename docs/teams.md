@@ -693,85 +693,85 @@ A candidate lives 30 days, and a passing verification is valid for 24 hours. See
 
 ## Child runs
 
-An agent can start a **child run**: a focused run on another agent or model,
-such as Codex reviewing what Claude wrote. The child appears under its parent
-in the dashboard, with its purpose, agent, model, account and state, and you
-open, message, take over or stop it like any run. Its result reaches the
-parent's inbox. The agent commands are in
-[coordination.md](coordination.md#child-runs).
+An agent can start a **child run**: a session with a completely fresh context
+on any agent and model you have installed, such as Codex reviewing what Claude
+wrote. A child can orchestrate its own subagents. Agents dispatch one for a
+complex task that splits into parallel parts, as a dispatch-and-forget
+shortcut, or when you ask for session or swarm orchestration; small lookups
+stay with the agent's own subagents. The child appears under its parent in the
+dashboard, with its purpose, agent, model, account and state, and you open,
+message, take over or stop it like any run. Its result reaches the parent's
+inbox. The agent commands are in [coordination.md](coordination.md#child-runs).
 
-### Turn child runs on
+Child runs go one level deep: a child cannot start children. A parent must be
+a Standard or Enhanced run that wakes when mail arrives; `child start` from a
+Standard run of an agent with no idle wake is refused with
+`<agent> in Standard mode has no idle wake; start it in Enhanced`. A
+Background run cannot start children.
 
-Child runs are off until you turn them on, and your choice covers only runs
-you own. **Settings → Child runs** or:
+### Turn child runs off
+
+Child runs are on for every Standard or Enhanced run you own. **Settings →
+Child runs** or:
 
 ```sh
-aether children on                          # every run you own
-aether children on --shared-when-missing on
-aether children off
-aether run "fix the login bug" --agent claude --children on   # this run only
+aether children off                         # every run you own
+aether children on
+aether run "fix the login bug" --agent claude --children off   # this run only
 ```
 
-The first time you turn them on, two choices come with it:
+A child runs on your own account and uses its parent's launch fallback
+policy: when its Claude or Codex account has used 95% of its quota, the
+child moves to the account with the most usage left among yours and those
+shared with you, as [usage fallback](#usage-fallback) does for every launch,
+unless the parent was launched with `--no-fallback`. The agent and model never
+change.
 
-- **Allow automatic fallback** (on by default): when a child's Claude or
-  Codex account has used 95% of its quota, at launch or mid-run, the child
-  moves to the account with the most usage left among yours and those shared
-  with you, as [usage fallback](#usage-fallback) does for every launch. The
-  agent and model never change. A parent launched with `--fallback` or
-  `--no-fallback` passes that policy to its children instead.
-- **Use subscriptions shared with me when I don't have my own** (off by
-  default): when you are not signed in to the agent a child asks for, the
-  child starts on a signed-in account a teammate [shared](#agent-accounts)
-  with you.
-
-Otherwise a child runs on your own account. **Allow child runs** in a run's
-**More** menu, or **Options → Child runs** in the launch dialog, allows or
-stops them for that one run and its children without changing your setting.
-Only the run's owner allows it, and a handoff to another member voids it. An
-admin can turn it off. Handing a run to another member detaches it from its
-parent and from its children, so no lineage spans two owners. The dashboard suggests the feature when an agent tried
-to start a child while it was off; **Not now** hides that for 7 days, then
-30, and **Don't show again** for good.
+**Allow child runs** in a run's **More** menu, or **Options → Child runs** in
+the launch dialog, allows or stops them for that one run without changing your
+setting. Only the run's owner allows it, and a handoff to another member voids
+it. An admin can turn it off. Handing a run to another member detaches it from
+its parent and from its children, so no lineage spans two owners.
 
 A swarm needs no setting: its runs and their children use only the swarm's
 own agent, mode, model and account choices and its fallback policy.
 
+When a parent is closed (merged, abandoned, or completed and accepted), its
+children are closed with it: finished ones are relabeled the same way and
+working ones are stopped first. A child its parent cancels ends `completed`
+with the reason `stopped by parent run <id>`.
+
 ### Limits and usage
 
-A workspace admin sets limits per tree of child runs:
+A workspace admin sets how many children each parent may have busy at once:
 
 ```sh
-aether workspace settings --child-max-live 8 --child-max-depth 3 --child-max-total 100
+aether workspace settings --child-max-live 8
 ```
 
-`--child-max-live` (default 8, at most 64) is how many children may be busy
-at once; more wait in a queue and start as slots free, the parent with the
-fewest busy children first. A child that reported or waits on its own
-children holds no slot. `--child-max-depth` (default 3, at most 8) bounds
-nesting, and `--child-max-total` (default 100, at most 2000) the children a
-tree starts in all. A swarm's runs share one tree. Only a started child can
-be detached; a queued one is cancelled with its parent. Every child is also
-admitted against the workspace [budget](#budgets) when it is queued and when
-it starts.
+`--child-max-live` (default 8, at most 64) counts a parent's busy children;
+more wait in a queue and start as slots free, oldest first. A child that
+reported or waits on a human holds no slot. A queued child is cancelled with
+its parent. Every child is also admitted against the workspace
+[budget](#budgets) when it is queued and when it starts.
 
 Each child's spend counts once, on the account that paid. `aether children
-<run-id>` and the parent's **Child runs** section add up the tree, split by
-account. A run that reports no cost (Codex, Gemini, pi) is counted as
-unmetered, so totals read "at least".
+<run-id>` and the parent's **Child runs** section add up the parent and its
+children, split by account. A run that reports no cost (Codex, Gemini, pi) is
+counted as unmetered, so totals read "at least".
 
-- A budget admits runs; it does not stop running ones. A tree can pass the
+- A budget admits runs; it does not stop running ones. A parent can pass the
   cap by what its live children spend.
 - A parked parent woken by other mail can work beside its busy children, so
-  a tree can briefly exceed `--child-max-live`.
+  it can briefly exceed `--child-max-live`.
 - A child gets the workspace's environment and secrets like any run of yours,
   but not its parent's transcript. It works in the parent's primary
   repository only, from the parent's last commit.
-- Deleting a child takes its spend out of the parent's tree total; the
+- Deleting a child takes its spend out of the parent's total; the
   workspace totals and `aether cost` keep it.
-- Revoking a share or turning child runs off stops queued children from
-  starting; running ones continue. Kill them from the parent's **Child runs**
-  section or with `aether kill <run-id>`.
+- Turning child runs off stops queued children from starting; running ones
+  continue. Kill them from the parent's **Child runs** section or with
+  `aether kill <run-id>`.
 
 ## Limits
 

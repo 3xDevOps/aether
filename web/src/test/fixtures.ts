@@ -530,7 +530,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
-    childSettings: vi.fn<Api['childSettings']>(async () => ({ enabled: false, fallback: true, shared_when_missing: false, configured: false, nudge: 'show' })),
+    childSettings: vi.fn<Api['childSettings']>(async () => ({ enabled: true })),
     launchDefaultsGet: vi.fn<Api['launchDefaultsGet']>(async () => ({ revision: 0, defaults: {} })),
     launchDefaultsSet: vi.fn<Api['launchDefaultsSet']>(async (params) => ({ revision: params.revision + 1, defaults: params.defaults ?? {} })),
     runChildren: vi.fn<Api['runChildren']>(async (runID) => ({
@@ -540,8 +540,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       usage: { runs: 1, metered_runs: 0, unmetered_runs: 1, input_tokens: 0, output_tokens: 0, cost_usd: 0, by_account: [] },
     })),
     runChildrenAllow: vi.fn<Api['runChildrenAllow']>(async (_, children) => ({ children })),
-    runChildDetach: vi.fn(async () => ({})),
-    workspaceChildLimits: vi.fn<Api['workspaceChildLimits']>(async (_, limits) => ({ max_live: 8, max_depth: 3, max_total: 100, ...limits })),
+    workspaceChildLimits: vi.fn<Api['workspaceChildLimits']>(async (_, limits) => ({ max_live: 8, ...limits })),
     runRelease: vi.fn(async () => ({})),
     runGitStatus: vi.fn<Api['runGitStatus']>(async () => ({
       ...gitStatus, changes: [], remotes: [], output: { ...gitStatus.output },

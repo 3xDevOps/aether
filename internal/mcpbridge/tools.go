@@ -78,7 +78,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 	}
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        toolStatus,
-		Description: "Report this run's v3 identity, assignment, capabilities, and the peers it may message, each with state mission, active, grace or workspace, task summary, overlapping files, activity (what it is doing: working, waiting-agents, waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or disconnected) with its reason, wait while it shows a reported wait: the condition's last checked status, why Aether cannot vouch for it, or not verified when the wait names no condition, which goes stale after 30 minutes with no activity by default, then run_status, where needs-attention only means parked, and, for peers you wrote to, last_sent: your newest message and whether it is sent, held (a person controls that swarm worker), delivered, acked or retired. A viewer-owned run has none; at the 8-peer cap only swarm peers and existing conversations are listed. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.",
+		Description: "Report this run's v3 identity, assignment, capabilities, and the peers it may message, each with state mission, active, grace or workspace, task summary, overlapping files, activity (what it is doing: working, waiting-agents, waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or disconnected) with its reason, wait while it shows a reported wait: the condition's last checked status, why Aether cannot vouch for it, or not verified when the wait names no condition, which goes stale after 30 minutes with no activity by default, then run_status, where needs-attention only means parked, and, for peers you wrote to, last_sent: your newest message and whether it is sent, held (a person controls that swarm worker), delivered, acked or retired. A viewer-owned run has none. It lists the most relevant peers; any other live run's run_id works with aether_send and aether_ask. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, protocol.CoordStatusResult, error) {
 		out := protocol.CoordStatusResult{Peers: []protocol.CoordPeer{}, Capabilities: []string{}}
 		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
@@ -95,7 +95,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolSend,
-		Description: "Send one durable, attributed message to a peer run_id listed by aether_status; you may message only those peers. " +
+		Description: "Send one durable, attributed message to any live run_id, listed by aether_status or not, that your owner may message. " +
 			"Use it before editing files a peer touches or its task covers (your plan, owned files and conflicts; keep it short), or when a decision, progress or blocker affects a peer. " +
 			coordhooks.ReceiptRule + " recipient_status is the peer's status when the receipt is returned, or held while a person controls that swarm worker. " +
 			"An explicit stable idempotency_key is required; retries with the same key return the original receipt.",
@@ -139,7 +139,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolAsk,
-		Description: "Ask a peer run_id listed by aether_status a durable, correlated question when the decision is theirs; this does not ask the user. " +
+		Description: "Ask any live run_id a durable, correlated question when the decision is theirs; this does not ask the user. " +
 			"The reply arrives in aether_inbox; delivery and denials work as for aether_send. " +
 			"To ask the user, call aether_report with outcome needs-input. " +
 			"An explicit stable idempotency_key is required; retries with the same key return the original question_id.",

@@ -32,9 +32,7 @@ import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 const everyone = 'everyone'
 
 const limitFields: { key: keyof ChildLimits; label: string; help: string }[] = [
-  { key: 'max_live', label: 'Busy at once', help: 'Child runs of one tree working at the same time; more wait in a queue.' },
-  { key: 'max_depth', label: 'Levels deep', help: 'A run’s children are level 1, their children level 2.' },
-  { key: 'max_total', label: 'Per run tree', help: 'Child runs one tree may ever start.' },
+  { key: 'max_live', label: 'Child runs busy at once per parent run (more queue)', help: 'Child runs of one parent run working at the same time; more wait in a queue.' },
 ]
 
 export function WorkspaceSettingsDialog({
@@ -66,7 +64,7 @@ export function WorkspaceSettingsDialog({
     client.workspaceChildLimits(workspaceID).then((read) => {
       if (!live) return
       setSavedLimits(read)
-      setLimits({ max_live: String(read.max_live), max_depth: String(read.max_depth), max_total: String(read.max_total) })
+      setLimits({ max_live: String(read.max_live) })
     }, (err: unknown) => live && setLimitsError(message(err)))
     return () => { live = false }
   }, [client, workspaceID, limitsOffered])

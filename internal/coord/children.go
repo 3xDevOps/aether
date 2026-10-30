@@ -60,7 +60,7 @@ func (s *Service) Notify(ctx context.Context, from, to domain.RunID, body, corre
 		WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to, Kind: store.RunMessageKindMessage,
 		Body: cleanCoordText(body, protocol.CoordMaxBodyBytes), CorrelationID: correlation, IdempotencyKey: key,
 	}
-	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, false)
+	created, err := appendRunMessage(ctx, s.cfg.Mail, msg)
 	if err != nil {
 		return fmt.Errorf("notify run %s: %w", to, err)
 	}
@@ -73,7 +73,7 @@ func (s *Service) Notify(ctx context.Context, from, to domain.RunID, body, corre
 func isChildMethod(method string) bool {
 	switch method {
 	case protocol.MethodChildOptions, protocol.MethodChildStart, protocol.MethodChildList,
-		protocol.MethodChildCancel, protocol.MethodChildDetach, protocol.MethodChildFetch:
+		protocol.MethodChildCancel, protocol.MethodChildFetch:
 		return true
 	}
 	return false

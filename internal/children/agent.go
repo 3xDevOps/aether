@@ -27,8 +27,7 @@ func (s *Service) Capabilities(ctx context.Context, run domain.RunID) ([]string,
 	if err != nil {
 		return nil, err
 	}
-	caps := []string{protocol.MethodChildOptions, protocol.MethodChildList, protocol.MethodChildCancel,
-		protocol.MethodChildDetach, protocol.MethodChildFetch}
+	caps := []string{protocol.MethodChildOptions, protocol.MethodChildList, protocol.MethodChildCancel, protocol.MethodChildFetch}
 	if p.refusal == "" {
 		caps = append(caps, protocol.MethodChildStart)
 	}
@@ -55,7 +54,7 @@ func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method stri
 			return nil, perr
 		}
 		return s.list(ctx, run, p)
-	case protocol.MethodChildCancel, protocol.MethodChildDetach, protocol.MethodChildFetch:
+	case protocol.MethodChildCancel, protocol.MethodChildFetch:
 		p, perr := decode[protocol.ChildRunParams](raw)
 		if perr != nil {
 			return nil, perr
@@ -67,11 +66,8 @@ func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method stri
 		if c.Detached {
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: child %s is detached from run %s and runs on its own", method, c.RunID, run)}
 		}
-		switch method {
-		case protocol.MethodChildCancel:
+		if method == protocol.MethodChildCancel {
 			return s.cancelChild(ctx, c)
-		case protocol.MethodChildDetach:
-			return s.detach(ctx, c)
 		}
 		return s.fetch(ctx, c)
 	}
@@ -94,13 +90,13 @@ func (s *Service) options(ctx context.Context, run domain.RunID, req protocol.Ch
 	if err != nil {
 		return protocol.ChildOptionsResult{}, rpcErr(protocol.MethodChildOptions, err)
 	}
-	counts, err := s.cfg.Store.ChildCounts(ctx, p.treeKey)
+	counts, err := s.cfg.Store.ChildCounts(ctx, p.parent.ID)
 	if err != nil {
 		return protocol.ChildOptionsResult{}, rpcErr(protocol.MethodChildOptions, err)
 	}
 	out := protocol.ChildOptionsResult{
-		Allowed: p.refusal == "", Reason: p.refusal, Scope: p.scope, OwnerID: string(p.owner), Depth: p.depth,
-		Limits: limitsWire(p.limits), Busy: counts.Busy, Queued: counts.Queued, Total: counts.Total,
+		Allowed: p.refusal == "", Reason: p.refusal, Scope: p.scope, OwnerID: string(p.owner),
+		Limits: limitsWire(p.limits), Busy: counts.Busy, Queued: counts.Queued,
 		Choices: []protocol.ChildChoice{},
 	}
 	if p.refusal != "" {
@@ -149,19 +145,7 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 		return protocol.ChildReceipt{}, rpcErr(method, err)
 	}
 	if p.refusal != "" {
-		if p.off && !p.parent.ChildRefused {
-			if markErr := s.cfg.Store.MarkChildRefused(ctx, run); markErr != nil {
-				return protocol.ChildReceipt{}, rpcErr(method, markErr)
-			}
-			s.publish(ctx, run, "")
-		}
 		return protocol.ChildReceipt{}, denied("%s: %s", method, p.refusal)
-	}
-	if loop, loopErr := s.loops(ctx, p, req); loopErr != nil || loop != "" {
-		if loopErr != nil {
-			return protocol.ChildReceipt{}, rpcErr(method, loopErr)
-		}
-		return protocol.ChildReceipt{}, &protocol.Error{Code: protocol.CodeConflict, Message: method + ": " + loop}
 	}
 	spec, perr := s.choose(ctx, p, req)
 	if perr != nil {
@@ -177,13 +161,13 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 	c := &domain.ChildReservation{
 		ParentRunID: p.parent.ID, RootRunID: p.root, TreeKey: p.treeKey, WorkspaceID: p.parent.WorkspaceID,
 		OwnerID: p.owner, AccountID: spec.account, Harness: spec.harness, Mode: spec.mode, Model: spec.model,
-		Purpose: req.Purpose, Task: req.Task, Depth: p.depth, BaseCommit: base, BaseBranch: p.parent.Branch,
+		Purpose: req.Purpose, Task: req.Task, BaseCommit: base, BaseBranch: p.parent.Branch,
 		Fallback: spec.fallback, IdempotencyKey: req.IdempotencyKey, RequestHash: requestHash(req),
 	}
 	if p.mission != nil {
 		c.MissionID = p.mission.ID
 	}
-	reserved, replay, err := s.cfg.Store.ReserveChild(ctx, c, p.limits)
+	reserved, replay, err := s.cfg.Store.ReserveChild(ctx, c)
 	if err != nil {
 		return protocol.ChildReceipt{}, rpcErr(method, err)
 	}
@@ -198,7 +182,7 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 // priorStart returns the reservation a retried start already made, so a
 // retry never re-runs policy that may since have changed.
 func (s *Service) priorStart(ctx context.Context, run domain.RunID, req protocol.ChildStartParams) (*domain.ChildReservation, error) {
-	kids, err := s.cfg.Store.ListChildren(ctx, run, false)
+	kids, err := s.cfg.Store.ListChildren(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -239,32 +223,9 @@ func (s *Service) receipt(ctx context.Context, c *domain.ChildReservation, err e
 	}
 	next := startNext
 	if child.State == protocol.ChildQueued {
-		next = "Queued until a slot frees in this tree (aether-internal child options shows the limits). " + next
+		next = "Queued until one of this run's children finishes (aether-internal child options shows the limits). " + next
 	}
 	return protocol.ChildReceipt{Child: child, Next: next}, nil
-}
-
-// loops refuses the same agent on the exact task of the parent or an
-// ancestor.
-func (s *Service) loops(ctx context.Context, p *policy, req protocol.ChildStartParams) (string, error) {
-	task := strings.TrimSpace(req.Task)
-	for r := p.parent; r != nil; {
-		if r.Harness == req.Harness && strings.TrimSpace(r.Task) == task {
-			return fmt.Sprintf("run %s already runs %s on this exact task; a child must narrow it", r.ID, req.Harness), nil
-		}
-		if r.ParentRunID == "" || r.MissionRole != "" {
-			return "", nil
-		}
-		next, err := s.cfg.Store.GetRun(ctx, r.ParentRunID)
-		if errors.Is(err, store.ErrNotFound) {
-			return "", nil
-		}
-		if err != nil {
-			return "", err
-		}
-		r = next
-	}
-	return "", nil
 }
 
 // admit checks the owner may launch on account and the budget admits them,
@@ -296,7 +257,7 @@ func (s *Service) list(ctx context.Context, run domain.RunID, req protocol.Child
 		}
 		return protocol.ChildListResult{Children: []protocol.Child{child}}, nil
 	}
-	kids, err := s.cfg.Store.ListChildren(ctx, run, false)
+	kids, err := s.cfg.Store.ListChildren(ctx, run)
 	if err != nil {
 		return protocol.ChildListResult{}, rpcErr(protocol.MethodChildList, err)
 	}
@@ -373,18 +334,6 @@ func (s *Service) stop(ctx context.Context, c *domain.ChildReservation) error {
 	return nil
 }
 
-func (s *Service) detach(ctx context.Context, c *domain.ChildReservation) (protocol.Child, error) {
-	if c.State != domain.ChildStarted {
-		return protocol.Child{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-			"%s: child %s has not started, so it has nothing to keep running; cancel it or detach it once it starts", protocol.MethodChildDetach, c.RunID)}
-	}
-	if err := s.cfg.Store.DetachChild(ctx, c.RunID); err != nil {
-		return protocol.Child{}, rpcErr(protocol.MethodChildDetach, err)
-	}
-	s.publish(ctx, c.RunID, "")
-	return s.wireOrErr(ctx, c.RunID, protocol.MethodChildDetach)
-}
-
 func (s *Service) fetch(ctx context.Context, c *domain.ChildReservation) (protocol.ChildFetchResult, error) {
 	const method = protocol.MethodChildFetch
 	if c.State != domain.ChildStarted {
@@ -421,11 +370,10 @@ func (s *Service) wireOrErr(ctx context.Context, id domain.RunID, method string)
 	return child, nil
 }
 
-// wire describes c with its run's live state, its latest report and whether
-// its parent moved past the commit it started from.
+// wire describes c with its run's live state and its latest report.
 func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protocol.Child, error) {
 	out := protocol.Child{
-		RunID: string(c.RunID), ParentRunID: string(c.ParentRunID), RootRunID: string(c.RootRunID), Depth: c.Depth,
+		RunID: string(c.RunID), ParentRunID: string(c.ParentRunID), RootRunID: string(c.RootRunID),
 		Purpose: c.Purpose, Harness: c.Harness, Mode: modeName(c.Mode), Model: c.Model, OwnerID: string(c.OwnerID),
 		AccountMemberID: string(c.AccountID), Detached: c.Detached, BaseCommit: c.BaseCommit, Error: c.Error,
 		CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339),
@@ -449,9 +397,6 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 			return protocol.Child{}, err
 		}
 		out.State, out.Branch, out.AccountMemberID = childState(r), r.Branch, string(r.AccountMember())
-	}
-	if parent, err := s.cfg.Store.GetRun(ctx, c.ParentRunID); err == nil && parent.LastCommit != "" && c.BaseCommit != "" {
-		out.Stale = parent.LastCommit != c.BaseCommit
 	}
 	if report, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err == nil && report != nil {
 		out.Report = &protocol.ChildReport{Outcome: string(report.Outcome), Summary: report.Summary, At: report.CreatedAt.UTC().Format(time.RFC3339)}

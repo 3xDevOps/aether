@@ -2267,6 +2267,24 @@ CREATE INDEX idx_member_preferences_member ON member_preferences(member_id);
 ALTER TABLE assistant_settings ADD COLUMN preferences_enabled INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE assistant_sessions ADD COLUMN temporary INTEGER NOT NULL DEFAULT 0;
 `,
+	// v96: child runs are on by default and one level deep, and any run
+	// may message any run: members who never saved the setting follow the
+	// default, and the depth, total, fallback, shared-account, nudge and
+	// peer-cap state goes away.
+	`
+UPDATE child_settings SET enabled = 1 WHERE configured = 0;
+ALTER TABLE child_settings DROP COLUMN fallback;
+ALTER TABLE child_settings DROP COLUMN shared_missing;
+ALTER TABLE child_settings DROP COLUMN configured;
+ALTER TABLE child_settings DROP COLUMN nudge_snoozes;
+ALTER TABLE child_settings DROP COLUMN nudge_until;
+ALTER TABLE child_settings DROP COLUMN nudge_off;
+ALTER TABLE workspaces DROP COLUMN child_max_depth;
+ALTER TABLE workspaces DROP COLUMN child_max_total;
+ALTER TABLE run_children DROP COLUMN depth;
+ALTER TABLE runs DROP COLUMN child_refused;
+DROP TABLE coord_peers;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Camera, Copy, Eye, GitBranch, Lock, PanelRight, ScrollText } from '@/components/icons'
-import { RunChildNudge } from '@/components/child-nudge'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
 import { ConnectionLine } from '@/components/shell/connection'
@@ -331,7 +330,6 @@ export function RunHeader({
       {mobile && !composing && <WaitLine run={run} />}
       <RunLineage run={run} />
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
-      <RunChildNudge run={run} />
       {!composing && (
         <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch view={view} views={views} />

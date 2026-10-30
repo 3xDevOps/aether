@@ -434,48 +434,17 @@ func TestGraceWindowRunsFromAWitnessedClear(t *testing.T) {
 	}
 }
 
-// TestSendPeerCap bounds the spray a manufactured overlap edge would buy.
-// The edge itself is computed from the two runs' own diff snapshots, so a
-// run that touches every tracked file is reported as overlapping with
-// every other run in the workspace and every one of them is authorized.
-// What the cap denies is talking to all of them.
-func TestSendPeerCap(t *testing.T) {
-	h := newHarness(t, maxPeers+3)
+// TestSendHasNoPeerCap sends to more distinct runs than status lists or any
+// conversation limit once allowed, as a run that touches every file would
+// reach.
+func TestSendHasNoPeerCap(t *testing.T) {
+	h := newHarness(t, 14)
 	ctx := context.Background()
-	spray := h.run(0)
-	targets := make([]domain.RunID, 0, maxPeers+2)
 	for i := 1; i < len(h.runs); i++ {
-		targets = append(targets, h.run(i))
-	}
-	h.peers.hub(spray, targets, "src/auth.go")
-
-	send := func(to domain.RunID) *protocol.Error {
-		// Step the clock so the send rate, a separate cap, is never what
-		// answers here.
 		h.advance(sendRefill)
-		_, err := h.svc.Send(ctx, spray, sendParams(to, "ping"))
-		return err
-	}
-
-	if st, err := h.svc.Status(ctx, spray); err != nil || len(st.Peers) != len(targets) {
-		t.Fatalf("status peers = %d (err %v), want all %d authorized", len(st.Peers), err, len(targets))
-	}
-	for i, to := range targets[:maxPeers] {
-		if err := send(to); err != nil {
-			t.Fatalf("send to peer %d of %d: %v", i+1, maxPeers, err)
+		if _, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(i), "ping")); err != nil {
+			t.Fatalf("send to run %d: %v", i, err)
 		}
-	}
-	err := send(targets[maxPeers])
-	if err == nil || err.Code != protocol.CodeConflict {
-		t.Fatalf("send to peer %d = %v, want CodeConflict", maxPeers+1, err)
-	}
-	if err = send(targets[maxPeers+1]); err == nil || err.Code != protocol.CodeConflict {
-		t.Fatalf("the cap did not hold for a second new peer: %v", err)
-	}
-	// A conversation already open is unaffected: the cap counts peers, not
-	// messages.
-	if err = send(targets[0]); err != nil {
-		t.Fatalf("send to an already-open peer: %v", err)
 	}
 }
 

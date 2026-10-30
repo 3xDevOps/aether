@@ -222,13 +222,11 @@ func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
 
 func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
 
-// RunChildrenPayload is a run's own child-run setting ("", "on" or "off"),
-// whether its agent tried to start a child while child runs were off, and
-// whether it is a child detached from its parent.
+// RunChildrenPayload is a run's own child-run setting ("", "on" or "off")
+// and whether it is a child detached from its parent.
 type RunChildrenPayload struct {
-	Children     string `json:"children,omitempty"`
-	ChildRefused bool   `json:"child_refused,omitempty"`
-	Detached     bool   `json:"detached,omitempty"`
+	Children string `json:"children,omitempty"`
+	Detached bool   `json:"detached,omitempty"`
 }
 
 func (RunChildrenPayload) EventType() Type { return TypeRunChildren }

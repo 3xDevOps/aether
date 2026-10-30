@@ -279,8 +279,8 @@ func TestRunEvidence(t *testing.T) {
 	f.answers[protocol.MethodRunPRFeedback] = returns(feedback("FAILURE"))
 	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-1", "success", "all green"))
 	f.answers[protocol.MethodRunChildren] = returns(protocol.RunChildrenResult{Children: []protocol.Child{
-		{RunID: "run-c1", Depth: 1, State: "succeeded", Stale: true, Report: &protocol.ChildReport{Outcome: "success", Summary: injection, At: "2026-10-26T09:00:00Z"}},
-		{RunID: "run-c2", Depth: 1, State: "running"},
+		{RunID: "run-c1", State: "succeeded", Report: &protocol.ChildReport{Outcome: "success", Summary: injection, At: "2026-10-26T09:00:00Z"}},
+		{RunID: "run-c2", State: "running"},
 	}})
 	cs := connectorSession(t, f)
 
@@ -296,7 +296,7 @@ func TestRunEvidence(t *testing.T) {
 		t.Errorf("evidence = %v", ev)
 	}
 	c1 := dig(t, out, "children", 0).(map[string]any)
-	if c1["stale"] != true || dig(t, c1, "report", "outcome") != "success" || dig(t, out, "untrusted", "child_reports", "run-c1") != injection || strings.Contains(trusted(t, out), injection) {
+	if dig(t, c1, "report", "outcome") != "success" || dig(t, out, "untrusted", "child_reports", "run-c1") != injection || strings.Contains(trusted(t, out), injection) {
 		t.Errorf("children = %v, untrusted %v", out["children"], out["untrusted"])
 	}
 	if out["released"].(map[string]any)["state"] != "unknown" {

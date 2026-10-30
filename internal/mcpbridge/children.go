@@ -31,7 +31,7 @@ func registerChildTools(ctx context.Context, srv *mcp.Server, socket string) {
 	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "aether_child_start",
-		Description: "Start a focused child run on another agent or model, e.g. an adversarial review, from your last published commit (commit first). " +
+		Description: "Dispatch a fresh-context child run on any installed agent and model, from your last published commit (commit first). Use it instead of your own subagents for a complex task that splits into parallel parts and benefits from completely fresh-context sessions, which can orchestrate their own subagents: a dispatch-and-forget shortcut for firing off part of a very complex task, or for when the user asks for session or swarm orchestration. A child cannot start children. " +
 			"The child sees only task, so include everything it needs. Its report arrives in aether_inbox and wakes you; follow the receipt's next. " +
 			"Honor the number of children and the agents the user asks for. A retry with the same idempotency_key returns the first receipt.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.ChildStartParams) (*mcp.CallToolResult, protocol.ChildReceipt, error) {
@@ -43,7 +43,7 @@ func registerChildTools(ctx context.Context, srv *mcp.Server, socket string) {
 	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "aether_children",
-		Description: "List your child runs, or one by run_id, with state, latest report, branch, the account it runs on and whether its base is stale. Message a child with aether_send.",
+		Description: "List your child runs, or one by run_id, with state, latest report, branch and the account it runs on. Message a child with aether_send.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.ChildListParams) (*mcp.CallToolResult, protocol.ChildListResult, error) {
 		out := protocol.ChildListResult{Children: []protocol.Child{}}
 		if err := coordtransport.Call(ctx, socket, protocol.MethodChildList, in, &out); err != nil {
@@ -53,7 +53,7 @@ func registerChildTools(ctx context.Context, srv *mcp.Server, socket string) {
 	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "aether_child_cancel",
-		Description: "Stop one of your child runs, or drop it from the queue. `aether-internal child detach` lets one run on without you instead.",
+		Description: "Stop one of your child runs, or drop it from the queue.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.ChildRunParams) (*mcp.CallToolResult, protocol.Child, error) {
 		var out protocol.Child
 		if err := coordtransport.Call(ctx, socket, protocol.MethodChildCancel, in, &out); err != nil {

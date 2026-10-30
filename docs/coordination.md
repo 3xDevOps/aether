@@ -138,25 +138,30 @@ capabilities come from the live development service, not the assignment.
 The sender is never a parameter. A run can open a conversation with
 `coord.send` or `coord.ask` only while its owner holds the `message`
 permission: a viewer's runs, and runs whose owner is no longer a member,
-reach no peer on any route. Three routes are then checked in order:
+reach no peer. Any other live run on the server can be messaged by its
+`run_id`, listed in `coord.status` or not, including siblings and runs outside
+the sender's swarm, workspace or child-run tree. Four checks are made in
+order:
 
-1. **Swarm**: a current assignment peer of a swarm run.
-2. **Radar**: a run the radar currently marks as overlapping, or one in its
+1. **Parent and child**: a run and the parent that started it.
+2. **Swarm**: a current assignment peer of a swarm run.
+3. **Radar**: a run the radar currently marks as overlapping, or one in its
    ten-minute overlap grace period.
-3. **Workspace**: any other live run in the same workspace, when the sender
-   run's owner holds the `message` permission on it. Admins hold it on every
-   run; collaborators hold it unless the target is a protected run of another
-   member or belongs to another member in a workspace whose message-others
-   policy is `admins-only`. Only this route checks protection and that
-   policy.
+4. **Anyone else**: the sender run's owner must hold the `message`
+   permission on the target. Admins hold it on every run; collaborators hold
+   it unless the target is a protected run of another member or belongs to
+   another member in a workspace whose message-others policy is
+   `admins-only`. Only this check applies protection and that policy, using
+   the target's workspace.
 
 The owner's role is re-read on every send.
 
-No route crosses a workspace boundary, and a finished run cannot be messaged.
-Status lists the reachable peers in route order: assignment peers with
+A finished run cannot be messaged. Status lists the most relevant peers in
+this order: parent and children with `state: "lineage"`; assignment peers with
 `state: "mission"`, carrying the overlapping files when the radar also
-reports one; radar peers with `state: "active"` or `"grace"`; then workspace
-peers with `state: "workspace"`, most recently active first. Every peer
+reports one; radar peers with `state: "active"` or `"grace"`; then other
+live runs in the sender's workspace with `state: "workspace"`, most recently
+active first. Sending never requires a run to be listed. Every peer
 carries its task summary, its `activity` (what it is doing) with its
 `reason` (`reason_truncated` when cut at 512 bytes), `wait` while it shows a
 reported wait (what Aether last verified about it, or why it cannot vouch for
@@ -164,14 +169,11 @@ it; see [Waits Aether can check](failure-handling.md#waits-aether-can-check)),
 and `run_status`. A `run_status` of `needs-attention` only means the
 agent is parked: read `activity` to tell waiting on agents, CI or a process
 from a request for a person. Each run appears once, under its first route,
-and status never lists a run the sender cannot message: finished runs, runs
-in another workspace, every peer of a viewer's run, and, once the sender has
-reached the peer cap, every radar or workspace run it has no conversation
-with are left out, and `peer_total` counts what remains. A question reply is the
-one correlation exception: `coord.reply` identifies its destination from the
-question and remains allowed for that question even after ordinary overlap
-grace expires. It cannot be used to send an unrelated message or cross a
-workspace boundary.
+and status never lists a run the sender cannot message: finished runs and
+every peer of a viewer's run are left out, and `peer_total` counts what
+remains. A question reply needs no check beyond the question: `coord.reply`
+identifies its destination from the question. It cannot be used to send an
+unrelated message.
 
 A peer the caller has written to also carries `last_sent`: the newest
 message, question, reply or forwarded report it sent that peer, with
@@ -196,22 +198,16 @@ inbox whatever the status. A refused send names its reason:
 
 | Error | Reason |
 | --- | --- |
-| `-32001` `run <to> is not an authorized peer of run <from>: it is in a different workspace; ...` | The target belongs to another workspace. |
 | `-32001` `run <to> is not an authorized peer of run <from>: member <id> (viewer) may not message it: <rule>; ...` | The sender run's owner is a viewer; no route applies. |
 | `-32001` `run <to> is not an authorized peer of run <from>: its owner <id> is no longer a member; ...` | The sender run's owner was removed; no route applies. |
-| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: run is protected: ...; ...` | No swarm or radar route, and the target is a protected run of another member. |
-| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: workspace restricts messaging others' runs ...; ...` | No swarm or radar route, and the workspace's message-others policy is `admins-only`. |
+| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: run is protected: ...; ...` | No parent, swarm or radar route, and the target is a protected run of another member. |
+| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: workspace restricts messaging others' runs ...; ...` | No parent, swarm or radar route, and the workspace's message-others policy is `admins-only`. |
 | `-32004` `run <to> has finished` | The target is no longer live. |
-| `-32003` `run <from> has reached its limit of 8 coordination peers; ...` | The peer cap below. |
 
 Denials end with ``run `aether-internal status` to list the runs it can
 message``.
 
-A run may open conversations with at most eight distinct peers over the radar
-and workspace routes. Swarm assignment peers do not count, so an integrator
-can message every worker it dispatched. Existing conversations remain usable
-when this limit has been reached: a run the sender already sent to or asked,
-including a former swarm peer that is still live, stays reachable. The server
+A run has no limit on how many distinct runs it messages. The server
 also enforces these bounds:
 
 - message, question, and reply bodies are at most 4 KiB;
@@ -1646,12 +1642,20 @@ run ID and question ID returned by the run's own status and inbox results.
 
 ### Child runs
 
-A **child run** is a run another run started to hand off a focused piece of
-work, such as an adversarial review by another agent. The caller is its
-**parent**; the top of the chain is its **root**. A child is an ordinary run
-with its own container, checkout and branch, owned by the parent's owner,
-and it appears under its parent in the dashboard. Who may start one is in
-[teams.md](teams.md#child-runs).
+A **child run** is a run another run started with a completely fresh context
+to take a piece of a complex task, such as parallel implementation slices or an
+adversarial review by another agent. It can orchestrate its own subagents. It
+is a dispatch-and-forget shortcut for firing off part of a very complex task,
+or for when the user asks for session or swarm orchestration; a run's own
+subagents suit small lookups and edits. The caller is its **parent**. A child
+is an ordinary run with its own container, checkout and branch, owned by the
+parent's owner, and it appears under its parent in the dashboard. Child runs
+are on by default and go one level deep: a child cannot start children, and
+`child start` from one is refused with `run <id> is itself a child run of
+<parent>, and child runs go one level deep; ...`. A parent must wake when
+mail arrives, so `child start` from a Standard run of an agent with no idle
+wake is refused with `<agent> in Standard mode has no idle wake; start it in
+Enhanced`. Who may turn them off is in [teams.md](teams.md#child-runs).
 
 ```sh
 /usr/local/bin/aether-internal child options
@@ -1663,8 +1667,8 @@ and it appears under its parent in the dashboard. Who may start one is in
 ```
 
 - `child options` says whether this run may start children and, if not,
-  the exact reason `child start` would give. It lists the limits, how many
-  children of the tree are busy, queued and started in all, and each agent
+  the exact reason `child start` would give. It lists the limit, how many
+  of this run's children are busy and queued, and each agent
   and account a child may use with its state: `ready`, `exhausted` (95% of
   its quota used), `not-installed` or `not-signed-in`, with the sentence
   that says how to fix it. `--harness` adds that agent's models.
@@ -1674,25 +1678,24 @@ and it appears under its parent in the dashboard. Who may start one is in
   standard|enhanced|background` and `--account <member-id>`. The server
   publishes the parent's branch and checks the child out from that commit;
   uncommitted changes are not included. The receipt carries the child's
-  `run_id`, its `state` (`queued` when the tree has no free slot) and `next`.
+  `run_id`, its `state` (`queued` when the run has no free slot) and `next`.
   A retry with the same `--idempotency-key` returns the first receipt; the
   same key with other inputs is refused with `-32003`. The CLI generates a
   key when none is given and prints it to stderr.
 - `child list` returns each child's `state` (`queued`, `starting`,
   `working`, `waiting`, `needs-you`, `finished`, `failed`, `ended`,
   `cancelled` or `refused`), its latest report, branch, the account it runs
-  on, its cost when metered, and `stale` when the parent's branch moved past
-  the commit the child started from.
+  on and its cost when metered.
 - `child cancel` stops a child or drops it from the queue; a child still
-  starting answers `-32002`, so cancel again a few seconds later. `child
-  detach` lets a started child run on without the parent, which then can no longer
-  cancel, fetch or message it outside the usual rules. A handoff of either
-  run detaches it the same way. `child fetch` publishes the child's
+  starting answers `-32002`, so cancel again a few seconds later. A handoff of
+  either run to another member detaches the child from its parent: the parent
+  can no longer cancel or fetch it. `child fetch` publishes the child's
   branch and copies it into the parent's checkout at
   `refs/remotes/children/<run-id>`.
 
 Parent and child may always message each other with `send`, `ask` and
-`reply`; `status` lists them with state `lineage`. A child's success,
+`reply`, as may any two runs; `status` lists them with
+state `lineage`. A child's success,
 failure or blocked report reaches its parent's inbox as an ordinary message
 whose `correlation_id` is the report ID, as a worker's report reaches its
 integrator. A child that ends without a final report sends one message saying
@@ -1703,7 +1706,7 @@ its inbox so it can answer within the task.
 While a parked parent has unfinished children (queued, starting, working,
 waiting or needing input), it is `waiting-agents` with the reason `waiting
 for 2 child runs`. Its `success` report is refused with `-32002` until it
-cancels or detaches them. A child its parent cancels ends `completed` with the
+cancels them. A child its parent cancels ends `completed` with the
 reason `stopped by parent run <id>`, and its page says who stopped it. When a
 person closes a parent (merged, abandoned, or completed and accepted), the
 server closes its children the same way: finished ones are relabeled, working
@@ -1714,9 +1717,9 @@ detached instead and stays for review. Their own children follow. Pausing a
 parent does not pause its children.
 
 Refusals name the cause: child runs off for the owner, a Background parent
-(it exits before a result can reach it), a cancelled swarm, the depth or total
-limit, the same agent on the exact task of the parent or an
-ancestor, an account outside the allowed set, or the workspace budget.
+(it exits before a result can reach it), a parent that is itself a child, a
+parent that cannot wake on mail, a cancelled swarm, an account outside the
+allowed set, or the workspace budget.
 
 ### Integrator candidate integration
 

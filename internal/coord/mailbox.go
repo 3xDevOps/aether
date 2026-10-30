@@ -43,11 +43,6 @@ const (
 	requestRefill = time.Second
 )
 
-// maxPeers is how many distinct runs one run may ever open a conversation
-// with over the radar and workspace routes. Existing conversations may
-// continue to send messages and replies; swarm peers are not counted.
-const maxPeers = 8
-
 var coordinationCapabilities = []string{
 	protocol.MethodCoordStatus,
 	protocol.MethodCoordSend,
@@ -801,7 +796,7 @@ func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordRe
 	if err = s.cfg.Mail.RetireProvisionalReports(ctx, report.RunID, target.ID, report.CreatedAt); err != nil {
 		return fmt.Errorf("enqueue worker report: %w", err)
 	}
-	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, false)
+	created, err := appendRunMessage(ctx, s.cfg.Mail, msg)
 	if err != nil {
 		return fmt.Errorf("enqueue worker report: %w", err)
 	}
@@ -1161,17 +1156,14 @@ func (s *Service) receiptStatus(ctx context.Context, method string, to domain.Ru
 // sendMessage is shared by send, ask, and reply. For replies, correlated is
 // true and route authorization is intentionally skipped only after the
 // question ownership check in Reply.
-type peerMessageStore interface {
-	AppendRunMessageWithPeer(context.Context, *store.RunMessage, int, int, bool) (bool, error)
-	CoordConversationsAtCap(context.Context, domain.RunID, int) (bool, map[domain.RunID]bool, error)
+type createdMessageStore interface {
+	AppendRunMessageCreated(context.Context, *store.RunMessage, int) (bool, error)
 }
 
-func appendRunMessage(ctx context.Context, mail store.MessageStore, msg *store.RunMessage, openPeer bool) (bool, error) {
-	if atomic, ok := mail.(peerMessageStore); ok {
-		return atomic.AppendRunMessageWithPeer(ctx, msg, protocol.CoordMaxUnread, maxPeers, openPeer)
+func appendRunMessage(ctx context.Context, mail store.MessageStore, msg *store.RunMessage) (bool, error) {
+	if atomic, ok := mail.(createdMessageStore); ok {
+		return atomic.AppendRunMessageCreated(ctx, msg, protocol.CoordMaxUnread)
 	}
-	// Compatibility for narrow test/integration stores that predate the
-	// durable peer seam. The production DB implements the atomic method.
 	wasEmpty := msg.ID == ""
 	if err := mail.AppendRunMessage(ctx, msg, protocol.CoordMaxUnread); err != nil {
 		return false, err
@@ -1213,41 +1205,26 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 	if rpcErr != nil {
 		return nil, "", rpcErr
 	}
-	if target.WorkspaceID != sender.WorkspaceID {
-		return nil, "", deniedPeer(method, from, to, "it is in a different workspace")
-	}
 	if target.Status.Terminal() {
 		return nil, "", &protocol.Error{
 			Code:    protocol.CodeUnavailable,
 			Message: fmt.Sprintf("%s: run %s has finished", method, to),
 		}
 	}
-	// A server-assigned swarm peer does not spend one of the sender's
-	// peer slots, so an integrator can reach every worker it dispatched.
-	openPeer := false
 	if !correlated {
-		route, rpcErr := s.route(ctx, method, sender, target)
-		if rpcErr != nil {
+		if rpcErr := s.authorize(ctx, method, sender, target); rpcErr != nil {
 			return nil, "", rpcErr
 		}
-		openPeer = route != protocol.CoordPeerMission && route != protocol.CoordPeerLineage
 	}
 	msg := &store.RunMessage{
-		WorkspaceID: sender.WorkspaceID, FromRun: from, ToRun: to, Body: body,
+		WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to, Body: body,
 		Kind: kind, CorrelationID: correlation, IdempotencyKey: idempotency,
 	}
-	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, openPeer)
+	created, err := appendRunMessage(ctx, s.cfg.Mail, msg)
 	if errors.Is(err, store.ErrIdempotencyConflict) {
 		return nil, "", &protocol.Error{
 			Code:    protocol.CodeConflict,
 			Message: fmt.Sprintf("%s: idempotency_key %q was used for another message kind", method, idempotency),
-		}
-	}
-	if errors.Is(err, store.ErrCoordPeerLimit) {
-		return nil, "", &protocol.Error{
-			Code: protocol.CodeConflict,
-			Message: fmt.Sprintf("%s: run %s has reached its limit of %d coordination peers; "+
-				"it can still message the runs it already wrote to and its swarm peers", method, from, maxPeers),
 		}
 	}
 	if errors.Is(err, store.ErrInboxFull) {
