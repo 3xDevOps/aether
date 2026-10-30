@@ -93,8 +93,8 @@ CI splits the suite into three jobs. To repeat one that failed:
 
 | CI job | Variables |
 | --- | --- |
-| `integration (server-rest, browser)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos\|Coordination\|Mission\|EndToEnd\|MultiMember\|ServerUpdate)'` with the [browser image](#the-browser-companion) variables, after `make browser-smoke` |
-| `integration (server-flows, smoke)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Chaos\|Coordination\|Mission)'`, then the same with `'^TestIntegration(EndToEnd\|MultiMember\|ServerUpdate)'`, then the [smoke tests](#real-agent-smoke-tests) |
+| `integration (server-rest, browser)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos\|Coordination\|EndToEnd\|MultiMember\|ServerUpdate)'` with the [browser image](#the-browser-companion) variables, after `make browser-smoke` |
+| `integration (server-flows, smoke)` | `INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Chaos\|Coordination)'`, then the same with `'^TestIntegration(EndToEnd\|MultiMember\|ServerUpdate)'`, then the [smoke tests](#real-agent-smoke-tests) |
 | `integration (scheduler, rest, agents)` | `INTEGRATION_SKIP="./internal/harness ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'`, then [`make test-agents`](#real-agents-against-a-mock-model) |
 
 A pull request runs the Docker suites on amd64 only. A push to main and a
@@ -147,10 +147,10 @@ script committed to the test repository).
 | `TestIntegrationEndToEnd` | One member: push, launch, attach, detach, steer, finish, pull |
 | `TestIntegrationMultiMember` | Joining, roles, handoff, budget caps, an agent crash |
 | `TestIntegrationChaos*` | The server killed mid-run, disk pressure, a stalled agent |
-| `TestIntegrationCoordination*`, `TestIntegrationMission*` | Messages between runs, swarms |
+| `TestIntegrationCoordination*` | Messages between runs |
 | `TestIntegrationServerUpdate*` | `aether-server update`: preflight, rollback, downgrade guards |
 | `TestIntegrationServerGateway` | The dashboard the server hosts on the tailnet |
-| `TestIntegrationConnectorFlows` | A ChatGPT connector, over OAuth and MCP, launching, messaging, answering and stopping enhanced runs and a swarm |
+| `TestIntegrationConnectorFlows` | A ChatGPT connector, over OAuth and MCP, launching, messaging, answering and stopping enhanced runs |
 
 ```sh
 sudo env "PATH=$PATH" "HOME=$HOME" make test-integration \
@@ -354,8 +354,7 @@ The scenarios and their expected checks are in
 question, a research-only request, a prohibition, hostile pasted text, a saved
 preference against a one-off override, two members with different defaults, a
 launch with no dashboard view, a shared account, an unavailable saved target,
-merged against released, a failing PR behind a success report, an open task in
-a completed swarm, and a reopened session. The checks are keyword and
+merged against released, a failing PR behind a success report, and a reopened session. The checks are keyword and
 tool-call tests, so they are deterministic but coarse: text matches are whole
 words (so `bo` does not match `both`), an invented-scope keyword does not count
 when the brief negates it ("no refactors"), and the same holds for words a brief must omit ("do not delete staging" does not copy the hostile instruction), and a question counts only when it
@@ -566,8 +565,7 @@ again on the same port and data directory, for specs about what survives a
 crash.
 
 Specs that open a real run need Docker and skip without it.
-`onboarding-github`,
-`remote-development-git/native.spec.ts` and `swarm.mobile.spec.ts` fail
+`onboarding-github` and `remote-development-git/native.spec.ts` fail
 without Docker instead. Some specs need more:
 
 | Spec | Needs |

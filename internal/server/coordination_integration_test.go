@@ -133,7 +133,7 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	attA := openAttach(t, adaClient, runA.ID)
 	attB := openAttach(t, boClient, runB.ID)
 
-	// The policy switch removes peer and mission authority, not authenticated
+	// The policy switch removes peer authority, not authenticated
 	// run discovery or the independent development broker.
 	e.assertRunAuthority(ctx, t, runA, true, runB.ID)
 	e.assertRunAuthority(ctx, t, runB, true, runA.ID)
@@ -141,17 +141,6 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID)
 	drain(sub, &seen)
 	assertNoCoordMessage(t, seen)
-	// A swarm needs the disabled mailbox authority.
-	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(e.ada.id), Harness: "claude", Mode: string(domain.LaunchTUI)}
-	createErr := adaCtrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
-		WorkspaceID: string(e.ws.ID), Objective: "swarm with coordination off", IdempotencyKey: "kill-switch-swarm",
-		Integrator:       protocol.MissionIntegrator(integrator),
-		ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
-	}, nil)
-	if createErr == nil {
-		t.Error("mission.create succeeded with coordination off")
-	}
-
 	// Off -> on restores coordination authority for recovered runs as well
 	// as new runs; all retain their run-scoped development identity.
 	srv.stop()
@@ -168,7 +157,7 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	waitOverlap(t, adaCtrl, runC.ID, runA.ID)
 
 	// On -> off recovers the same sockets, serving discovery and development
-	// while refusing mailbox and mission calls.
+	// while refusing mailbox calls.
 	srv.stop()
 	srv = e.start(ctx, t, true)
 	sub, seen = srv.subscribe(ctx, t), nil
@@ -439,8 +428,8 @@ func assertDevelopmentDiscovery(t *testing.T, status protocol.CoordStatusResult,
 		}
 	}
 	if disabled {
-		if len(status.Peers) != 0 || status.Unread != 0 || status.Assignment != nil {
-			t.Errorf("disabled coordination exposed peer or mission state: %+v", status)
+		if len(status.Peers) != 0 || status.Unread != 0 {
+			t.Errorf("disabled coordination exposed peer state: %+v", status)
 		}
 		for _, method := range status.Capabilities {
 			if method != protocol.MethodCoordStatus && !strings.HasPrefix(method, "dev.") && !strings.HasPrefix(method, "memory.") {
@@ -496,7 +485,6 @@ func (e *coordEnv) assertRunAuthority(ctx context.Context, t *testing.T, run pro
 	}{
 		{protocol.MethodCoordSend, protocol.CoordSendParams{ToRunID: peer, Body: "anyone there?"}},
 		{protocol.MethodCoordInbox, nil},
-		{protocol.MethodTaskList, nil},
 		{protocol.MethodRunReport, nil},
 	} {
 		err := coordtransport.Call(ctx, sock, call.method, call.params, nil)

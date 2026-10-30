@@ -28,9 +28,9 @@ type App = 'chatgpt' | 'claude'
 const scopeNames: Record<string, string> = { read: 'Read', write: 'Launch and message', control: 'Stop and approve' }
 
 const scopes: [string, string][] = [
-  ['Read, always', 'Workspaces, agents, every member’s runs and their history, swarms, pull requests and team memory.'],
-  ['Launch and message, checked by default', 'Launch runs and swarms; message, pause and resume runs; answer agents and teammates; mark runs reviewed.'],
-  ['Stop and approve, unchecked by default', 'Decide permission requests, stop and close runs, cancel swarms. Text an agent wrote could talk the assistant into approving or ending work without asking you.'],
+  ['Read, always', 'Workspaces, agents, every member’s runs and their history, pull requests and team memory.'],
+  ['Launch and message, checked by default', 'Launch runs; message, pause and resume runs; answer agents and teammates; mark runs reviewed.'],
+  ['Stop and approve, unchecked by default', 'Decide permission requests, stop and close runs. Text an agent wrote could talk the assistant into approving or ending work without asking you.'],
 ]
 
 type Failure = { text: string; fix: ReactNode; old?: boolean }

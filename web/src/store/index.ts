@@ -27,7 +27,6 @@ import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTraceSlice, type TraceSlice } from '@/store/trace-log'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
-import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
 import { createViewContextSlice, type ViewContextSlice } from '@/store/view-context'
 import { createWatchesSlice, type WatchesSlice } from '@/store/watches'
 import { createWorkflowSignalsSlice, type WorkflowSignalsSlice } from '@/store/workflow-signals'
@@ -81,7 +80,6 @@ export type RootState = ServerSlice &
   CollaborationSlice &
   LocalSlice &
   UpdatesSlice &
-  MissionsSlice &
   MessagesSlice &
   SessionsSlice &
   TraceSlice &
@@ -158,7 +156,6 @@ export function createRootStore() {
         ...createCollaborationSlice(...a),
         ...createLocalSlice(...a),
         ...createUpdatesSlice(...a),
-        ...createMissionsSlice(...a),
         ...createMessagesSlice(...a),
         ...createSessionsSlice(...a),
         ...createTraceSlice(...a),

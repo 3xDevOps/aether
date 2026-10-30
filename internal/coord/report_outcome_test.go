@@ -172,26 +172,15 @@ func TestCoordReportOutboxRetriesTheFinish(t *testing.T) {
 	}
 }
 
-// Mission workers keep their own lifecycle, integrators use the ordinary
-// outcome path, and a superseded report must not affect a reopened run.
-func TestCoordReportSkipsWorkerAndSupersededReports(t *testing.T) {
+// A superseded report must not affect a reopened run.
+func TestCoordReportSkipsSupersededReports(t *testing.T) {
 	ctx := context.Background()
 	outcomes := &recordingOutcomes{}
-	h := newHarness(t, 3, func(c *Config) {
+	h := newHarness(t, 1, func(c *Config) {
 		c.Evidence = &coordReportEvidenceCapture{id: "ev_skip"}
 		c.Outcomes = outcomes
 	})
-	worker, ordinary, integrator := h.run(0), h.run(1), h.run(2)
-	h.svc.cfg.Mission = missionTransportStub{mission: []domain.RunID{worker, integrator}, integrator: integrator}
-
-	report(t, h, worker, protocol.CoordOutcomeSuccess, "submitted", "worker-success")
-	if got := outcomes.recorded(); len(got) != 0 {
-		t.Fatalf("scheduler calls for a mission worker = %+v, want none", got)
-	}
-	done := report(t, h, integrator, protocol.CoordOutcomeSuccess, "delivered", "integrator-success")
-	if got := outcomes.recorded(); len(got) != 1 || got[0] != (outcomeCall{run: integrator, status: domain.RunCompleted, reportID: done.ReportID}) {
-		t.Fatalf("scheduler calls for a mission integrator = %+v, want one completed finish", got)
-	}
+	ordinary := h.run(0)
 
 	outcomes.fail(errors.New("not yet"))
 	result := report(t, h, ordinary, protocol.CoordOutcomeSuccess, "done", "ordinary-success")
@@ -202,8 +191,8 @@ func TestCoordReportSkipsWorkerAndSupersededReports(t *testing.T) {
 	if _, _, err := h.svc.drainOutboxPage(ctx); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	if got := outcomes.recorded(); len(got) != 1 {
-		t.Fatalf("scheduler calls after a superseded report = %+v, want only the integrator's", got)
+	if got := outcomes.recorded(); len(got) != 0 {
+		t.Fatalf("scheduler calls after a superseded report = %+v, want none", got)
 	}
 	pub, err := h.db.GetCoordReportPublication(ctx, result.ReportID)
 	if err != nil || pub.State != store.CoordReportPublicationPublished {
@@ -489,11 +478,6 @@ func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 			t.Fatalf("%s: err = %+v, want invalid params", name, rpcErr)
 		}
 	}
-	h.svc.cfg.Mission = missionTransportStub{mission: []domain.RunID{worker}}
-	_, rpcErr := h.svc.CoordReport(ctx, worker, protocol.CoordReportParams{Outcome: protocol.CoordOutcomeNeedsInput, Summary: "q?", IdempotencyKey: "k"})
-	if rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams || !strings.Contains(rpcErr.Message, "aether-internal ask") {
-		t.Fatalf("worker needs-input = %+v, want invalid params naming ask", rpcErr)
-	}
 	if got := outcomes.recorded(); len(got) != 3 {
 		t.Fatalf("scheduler calls = %+v, want only the accepted reports", got)
 	}
@@ -514,11 +498,11 @@ func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 	if got := outcomes.recorded(); len(got) != 5 || got[4] != want {
 		t.Fatalf("scheduler calls = %+v, want the waiting for ci report last", got)
 	}
-	result = report(t, h, worker, protocol.CoordOutcomeAnswered, "replied to the integrator", "answered-1")
+	result = report(t, h, worker, protocol.CoordOutcomeAnswered, "replied to the parent", "answered-1")
 	if result.ReportID != "" || result.Outcome != protocol.CoordOutcomeAnswered {
 		t.Fatalf("answered result = %+v, want an id-less answered echo", result)
 	}
-	want = outcomeCall{run: worker, reason: "answered: replied to the integrator", reportID: "answered:" + string(worker) + ":answered-1"}
+	want = outcomeCall{run: worker, reason: "answered: replied to the parent", reportID: "answered:" + string(worker) + ":answered-1"}
 	if got := outcomes.recorded(); len(got) != 6 || got[5] != want {
 		t.Fatalf("scheduler calls = %+v, want the worker's answered report last", got)
 	}

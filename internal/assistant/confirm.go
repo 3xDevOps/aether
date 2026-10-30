@@ -534,8 +534,6 @@ func reversibleSummary(method string, params json.RawMessage, run, owner string)
 		switch {
 		case t.Kind == protocol.WatchTargetRun && t.RunID != "":
 			target = "run " + t.RunID
-		case t.Kind == protocol.WatchTargetMission && t.MissionID != "":
-			target = "swarm " + t.MissionID
 		case t.Kind == protocol.WatchTargetPR && t.Repo != "":
 			target = fmt.Sprintf("pull request %s#%d", t.Repo, t.Number)
 		default:

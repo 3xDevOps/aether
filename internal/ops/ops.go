@@ -359,8 +359,8 @@ func knownArguments(req *mcp.CallToolRequest, schema *jsonschema.Schema) (map[st
 	return args, nil
 }
 
-// stripIDPrefixes drops the run: and swarm: prefixes search ids carry from
-// run_id and swarm_id inputs, so an id from search works everywhere.
+// stripIDPrefixes drops the run: prefix search ids carry from run_id inputs,
+// so an id from search works everywhere.
 func stripIDPrefixes(in any) {
 	v := reflect.ValueOf(in).Elem()
 	if v.Kind() != reflect.Struct {
@@ -371,8 +371,6 @@ func stripIDPrefixes(in any) {
 		switch v.Type().Field(i).Tag.Get("json") {
 		case "run_id", "run_id,omitempty":
 			f.SetString(strings.TrimPrefix(f.String(), runPrefix))
-		case "swarm_id", "swarm_id,omitempty":
-			f.SetString(strings.TrimPrefix(f.String(), swarmPrefix))
 		}
 	}
 }
@@ -439,13 +437,6 @@ func (l links) run(id string) string {
 		return ""
 	}
 	return string(l) + "/?run=" + url.QueryEscape(id)
-}
-
-func (l links) swarm(id string) string {
-	if l == "" || id == "" {
-		return ""
-	}
-	return string(l) + "/?page=missions&id=" + url.QueryEscape(id)
 }
 
 func clip(text string, n int) string {

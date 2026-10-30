@@ -23,60 +23,60 @@ describe('run list', () => {
   })
 })
 
-describe('run list swarms', () => {
-  const swarm = [
-    run({ id: 'run_int', task: 'integrate', mission_id: 'm1', mission_role: 'integrator' }),
-    run({ id: 'run_w1', task: 'worker one', mission_id: 'm1', mission_role: 'worker', integrator_run_id: 'run_int' }),
-    run({ id: 'run_w2', task: 'worker two', mission_id: 'm1', mission_role: 'worker', integrator_run_id: 'run_int' }),
+describe('run list child runs', () => {
+  const family = [
+    run({ id: 'run_parent', task: 'integrate' }),
+    run({ id: 'run_c1', task: 'child one', parent_run_id: 'run_parent' }),
+    run({ id: 'run_c2', task: 'child two', parent_run_id: 'run_parent' }),
     run({ id: 'run_solo', task: 'unrelated' }),
-    run({ id: 'run_orphan', task: 'orphan worker', mission_id: 'm2', mission_role: 'worker', integrator_run_id: 'run_gone' }),
+    run({ id: 'run_orphan', task: 'orphan child', parent_run_id: 'run_gone' }),
   ]
 
-  function renderSwarm() {
+  function renderFamily() {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false, route: { name: 'overview', params: {} } })
-    const rows = listedRuns('', stateContext({ runs: runRecords(...swarm) }))
+    const rows = listedRuns('', stateContext({ runs: runRecords(...family) }))
     return render(<RunList runs={rows} empty="No runs yet" />)
   }
 
-  it('nests workers under their integrator and keeps every other run top-level', () => {
-    renderSwarm()
-    const workers = screen.getByRole('list', { name: 'Workers of integrate' })
+  it('nests child runs under their parent and keeps every other run top-level', () => {
+    renderFamily()
+    const children = screen.getByRole('list', { name: 'Child runs of integrate' })
 
-    expect(within(workers).getByText('worker one')).toBeDefined()
-    expect(within(workers).getByText('worker two')).toBeDefined()
-    expect(within(workers).queryByText('orphan worker')).toBeNull()
-    expect(within(workers).queryByText('unrelated')).toBeNull()
-    for (const task of ['integrate', 'worker one', 'worker two', 'unrelated', 'orphan worker']) {
+    expect(within(children).getByText('child one')).toBeDefined()
+    expect(within(children).getByText('child two')).toBeDefined()
+    expect(within(children).queryByText('orphan child')).toBeNull()
+    expect(within(children).queryByText('unrelated')).toBeNull()
+    for (const task of ['integrate', 'child one', 'child two', 'unrelated', 'orphan child']) {
       expect(screen.getByText(task)).toBeDefined()
     }
   })
 
-  it('collapses and expands the workers of one integrator', () => {
-    renderSwarm()
-    fireEvent.click(screen.getByRole('button', { name: 'Hide 2 workers' }))
+  it('collapses and expands the child runs of one parent', () => {
+    renderFamily()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide 2 child runs' }))
 
-    expect(screen.queryByRole('list', { name: 'Workers of integrate' })).toBeNull()
-    expect(screen.getByText('orphan worker')).toBeDefined()
+    expect(screen.queryByRole('list', { name: 'Child runs of integrate' })).toBeNull()
+    expect(screen.getByText('orphan child')).toBeDefined()
     expect(useStore.getState().route.name).not.toBe('run')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show 2 workers' }))
-    expect(screen.getByRole('list', { name: 'Workers of integrate' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 2 child runs' }))
+    expect(screen.getByRole('list', { name: 'Child runs of integrate' })).toBeDefined()
   })
 
-  it('opens a nested worker run', () => {
-    renderSwarm()
-    fireEvent.click(screen.getByText('worker two'))
+  it('opens a nested child run', () => {
+    renderFamily()
+    fireEvent.click(screen.getByText('child two'))
 
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_w2' } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_c2' } })
   })
 })
 
-describe('run list swarm ordering', () => {
+describe('run list family ordering', () => {
   const runs = [
     run({ id: 'run_solo', task: 'solo', created_at: '2026-08-14T10:00:00Z' }),
-    run({ id: 'run_int', task: 'integrate', mission_id: 'm1', mission_role: 'integrator', created_at: '2026-08-14T10:01:00Z' }),
-    run({ id: 'run_ask', task: 'asking worker', mission_id: 'm1', mission_role: 'worker', integrator_run_id: 'run_int', mode: 'headless', status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access', created_at: '2026-08-14T10:02:00Z' }),
-    run({ id: 'run_busy', task: 'busy worker', mission_id: 'm1', mission_role: 'worker', integrator_run_id: 'run_int', created_at: '2026-08-14T10:03:00Z' }),
+    run({ id: 'run_parent', task: 'integrate', created_at: '2026-08-14T10:01:00Z' }),
+    run({ id: 'run_ask', task: 'asking child', parent_run_id: 'run_parent', mode: 'headless', status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access', created_at: '2026-08-14T10:02:00Z' }),
+    run({ id: 'run_busy', task: 'busy child', parent_run_id: 'run_parent', created_at: '2026-08-14T10:03:00Z' }),
   ]
 
   function renderAsking() {
@@ -93,21 +93,21 @@ describe('run list swarm ordering', () => {
     expect(within(top[1]).getByText('solo')).toBeDefined()
   })
 
-  it('keeps a worker that needs you visible when its integrator is folded', () => {
+  it('keeps a child run that needs you visible when its parent is folded', () => {
     renderAsking()
-    fireEvent.click(screen.getByRole('button', { name: 'Hide 1 worker' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide 1 child run' }))
 
-    expect(screen.getByText('asking worker')).toBeDefined()
-    expect(screen.queryByText('busy worker')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Show 1 worker' }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByText('asking child')).toBeDefined()
+    expect(screen.queryByText('busy child')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Show 1 child run' }).getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('offers no fold when every worker needs you', () => {
+  it('offers no fold when every child run needs you', () => {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false, route: { name: 'overview', params: {} } })
     const asking = runs.filter((item) => item.id !== 'run_busy')
     render(<RunList runs={listedRuns('', stateContext({ runs: runRecords(...asking) }))} empty="No runs yet" />)
 
-    expect(screen.getByText('asking worker')).toBeDefined()
+    expect(screen.getByText('asking child')).toBeDefined()
     expect(screen.queryByRole('button', { name: /^(Hide|Show) / })).toBeNull()
   })
 })

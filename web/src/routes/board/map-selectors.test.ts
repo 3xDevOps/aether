@@ -1,23 +1,22 @@
 import { act, renderHook } from '@testing-library/react'
 import { board, mapRuns, useMapRuns } from '@/routes/board/selectors'
 import { useStore } from '@/store'
-import { alice, bob, mission, otherWorkspace, run, runRecords, stateContext, workspace } from '@/test/fixtures'
+import { alice, bob, otherWorkspace, run, runRecords, stateContext, workspace } from '@/test/fixtures'
 import { toRecord } from '@/store/runs'
 
-it('exposes each swarm run while Board retains one triage card', () => {
+it('exposes each run of a family while Board retains one triage card', () => {
   const ctx = stateContext({
-    missions: { mission_1: mission() },
     runs: runRecords(
-      run({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' }),
-      run({ id: 'worker', member_id: bob.id, mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator' }),
-      run({ id: 'missing-root-worker', mission_id: 'mission_2', mission_role: 'worker', integrator_run_id: 'hidden' }),
+      run({ id: 'run_parent' }),
+      run({ id: 'child', member_id: bob.id, parent_run_id: 'run_parent' }),
+      run({ id: 'missing-parent-child', parent_run_id: 'hidden' }),
     ),
   })
   const input = { workspace: workspace.id, mineOnly: false, ctx }
   const cards = mapRuns(input).cards
-  expect(cards.map((card) => card.run.id).sort()).toEqual(['missing-root-worker', 'run_integrator', 'worker'])
-  expect(cards.every((card) => !card.swarm && card.children.length === 0)).toBe(true)
-  expect(board(input).columns.flatMap((column) => column.cards).map((card) => card.run.id).sort()).toEqual(['missing-root-worker', 'run_integrator'])
+  expect(cards.map((card) => card.run.id).sort()).toEqual(['child', 'missing-parent-child', 'run_parent'])
+  expect(cards.every((card) => !card.childRuns && card.children.length === 0)).toBe(true)
+  expect(board(input).columns.flatMap((column) => column.cards).map((card) => card.run.id).sort()).toEqual(['missing-parent-child', 'run_parent'])
 })
 
 it('keeps Needs you global while workspace and Mine filter individual working and finished runs', () => {

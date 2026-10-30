@@ -43,11 +43,10 @@ act without asking by default.
 
 The dashboard remembers the mode you last chose for each agent, in **Set up**,
 in **New run** or in the **Default mode** select on the **Agents** page, and
-**New run** starts on it. A launch from **New run** or **New swarm** saves the
+**New run** starts on it. A launch from **New run** saves the
 agent, mode and model on the server, so every device starts from them
-([Saved launch choices](teams.md#saved-launch-choices)). For an agent with no remembered mode, **New run** and
-**New swarm** start on Enhanced when the agent's Enhanced mode is installed, and on Standard
-otherwise; `aether run`, `aether swarm create` and the connector do so
+([Saved launch choices](teams.md#saved-launch-choices)). For an agent with no remembered mode, **New run** starts on Enhanced when the agent's Enhanced mode is installed, and on Standard
+otherwise; `aether run` and the connector do so
 whenever no mode is named. **New run** lists Enhanced first and marks it
 **Recommended**. Before an agent's Enhanced mode is installed, **Set up**
 suggests Enhanced for Codex, oh-my-pi, OpenCode, Copilot, Gemini and Cursor,
@@ -63,9 +62,7 @@ aether run "fix the flaky login test" --agent claude --mode enhanced --model opu
 ```
 
 `--mode` takes `standard`, `enhanced` or `background` on `aether run` and
-`aether template save`. On `aether swarm create`, `--mode standard|enhanced`
-sets the integrator, and `--worker codex:enhanced` (or
-`codex:enhanced+<effort>:<model>`) allows Enhanced workers. The task is the session's
+`aether template save`. The task is the session's
 first prompt. An agent with no ACP command is refused:
 
 ```text
@@ -256,15 +253,15 @@ prompt from the server:
 naming only the outcomes the run's role may use. It appears in the Session
 view as a message. The turn it starts is never
 reminded, so an agent that still does not report parks with
-`turn ended without a report`. A swarm worker's integrator then gets the
+`turn ended without a report`. A child run's parent then gets the
 last message of the reminded turn, not the reminder's.
 
 No reminder follows a turn that was cancelled, interrupted, failed or stopped
 on another stop reason, or one that background tasks or a request waiting on
 you hold. A message you sent during the turn starts the next turn instead. A
 run a member controls gets none: the next prompt is theirs. The reminder also
-waits on the same admission as a mail prompt: a protected run, a swarm worker
-a human holds, and a paused or switching run get none. Background
+waits on the same admission as a mail prompt: a protected run, a child run
+a member controls, and a paused or switching run get none. Background
 runs get none either: their turn end finishes the run.
 
 The reminder is a prompt, not a hook, so it works the same for every agent.
@@ -272,12 +269,10 @@ Claude Code's ACP adapter does forward `_meta.claudeCode.options.settings`,
 where a Stop hook could live, but that setting replaces the adapter's own
 settings and reaches only Claude Code.
 
-The prompt waits while a run is protected, a human holds a swarm worker, or the
+The prompt waits while a run is protected, a member controls a child run, or the
 run is paused or switching modes. Lifting protection, releasing control or
 **Resume** offers the mail that arrived meanwhile at once; otherwise the server
-retries a waiting prompt at least every 30 seconds. An Enhanced swarm
-integrator is also prompted when a human answers its question, a worker
-proposes a task or ends without a report, or a human cancels the swarm.
+retries a waiting prompt at least every 30 seconds.
 
 ## Restarts and failures
 
@@ -392,9 +387,7 @@ never with `allow_always`.
 
 When the turn ends, the run finishes like any Background run: commit, publish and
 `completed` or `failed`, with the reason `agent exited; results committed` or
-`agent exited 1: <cause>`. A swarm worker keeps its container and parks as
-**Needs you** instead, unless the agent never got the task: then it fails and its
-container frees the worker slot. Mail does not wake a Background run. A server
+`agent exited 1: <cause>`. Mail does not wake a Background run. A server
 restart mid-turn resumes the session and prompts the agent to continue.
 
 ## Instructions and the session log

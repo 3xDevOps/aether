@@ -116,10 +116,8 @@ aether: rpc error -32001: memory.pin: permission denied: note-z7c6ep47d5 is a me
   note with the first line of the summary as its title and the run's changed
   files. A later report from the same run rewrites the note and clears its
   pin.
-- When a member answers a swarm's question, the server writes a `decision`
-  note `Q: <question> A: <answer>`.
 
-Both are scanned for secrets first. A note that contains one is stored with
+It is scanned for secrets first. A note that contains one is stored with
 `(withheld: gitleaks rule <rule> at <line:col>)` as its text.
 
 Team memory never reads transcripts, terminal recordings, messages between
@@ -196,7 +194,7 @@ The CLI prints errors as `aether: rpc error <code>: <message>`. Agents see
 ## Remove what a bad run wrote
 
 Find the run in the `RUN` column of `aether memory ls`, then delete everything
-attributed to it, pinned notes, its outcome note and its swarm answers
+attributed to it, pinned notes and its outcome note
 included:
 
 ```sh
@@ -205,7 +203,7 @@ aether memory rm note-hwwtypyr97             # or one note
 ```
 
 Removal is permanent. Notes the bad run replaced become searchable again,
-unpinned. Deleting a run or a swarm deletes its unpinned notes, and deleting
+unpinned. Deleting a run deletes its unpinned notes, and deleting
 the workspace deletes all of its notes.
 
 ## Promote a note into AGENTS.md or CLAUDE.md

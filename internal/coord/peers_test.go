@@ -2,6 +2,7 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -27,8 +28,7 @@ func wantDenied(t *testing.T, err *protocol.Error, reason string) {
 // admins, a viewer-owned run reaches nobody on any route, and the sender
 // owner's role is re-read on every send.
 func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
-	stub := &missionTransportStub{}
-	h := newHarness(t, 4, func(c *Config) { c.Mission = stub })
+	h := newHarness(t, 4)
 	ctx := context.Background()
 	mine, sibling, theirs, adminRun := h.run(0), h.run(1), h.run(2), h.run(3)
 	h.ownBy(1, h.runs[0].MemberID, true)
@@ -64,8 +64,7 @@ func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
 	if uerr := h.db.UpdateMember(ctx, owner); uerr != nil {
 		t.Fatalf("demote owner: %v", uerr)
 	}
-	// A viewer-owned run reaches nobody, not even over a swarm or an overlap.
-	stub.mission = []domain.RunID{mine, sibling}
+	// A viewer-owned run reaches nobody, not even over an overlap.
 	h.peers.pair(mine, theirs, "src/auth.go")
 	viewer := fmt.Sprintf("member %s (viewer) may not message it: messaging another run requires the collaborator role", owner.ID)
 	for _, target := range []domain.RunID{sibling, theirs, adminRun} {
@@ -81,8 +80,7 @@ func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
 // TestAnyRunMessagesARunInAnotherWorkspace expects a run to message a live
 // run in another workspace by ID, in both directions, without listing it.
 func TestAnyRunMessagesARunInAnotherWorkspace(t *testing.T) {
-	stub := &missionTransportStub{}
-	h := newHarness(t, 1, func(c *Config) { c.Mission = stub })
+	h := newHarness(t, 1)
 	ctx := context.Background()
 	ws := &domain.Workspace{Name: "other", BaseBranch: domain.DefaultBaseBranch}
 	if err := h.db.CreateWorkspace(ctx, ws); err != nil {
@@ -94,7 +92,6 @@ func TestAnyRunMessagesARunInAnotherWorkspace(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 	local := h.run(0)
-	stub.mission = []domain.RunID{local, foreign.ID}
 	h.peers.pair(local, foreign.ID, "src/auth.go")
 
 	for _, dir := range [][2]domain.RunID{{local, foreign.ID}, {foreign.ID, local}} {
@@ -115,42 +112,6 @@ func TestAnyRunMessagesARunInAnotherWorkspace(t *testing.T) {
 	st, err := h.svc.Status(ctx, local)
 	if err != nil || len(st.Peers) != 0 || st.PeerTotal != 0 {
 		t.Fatalf("status = %+v (err %v), want the foreign run unlisted", st, err)
-	}
-}
-
-// TestSwarmAndIndependentRunsMessageEachOther covers the routes between a
-// swarm and a run launched on its own, and that an integrator reaches every
-// worker and more independent runs than status lists.
-func TestSwarmAndIndependentRunsMessageEachOther(t *testing.T) {
-	stub := &missionTransportStub{}
-	workers := 10
-	h := newHarness(t, workers+12, func(c *Config) { c.Mission = stub })
-	ctx := context.Background()
-	integrator, independent := h.run(0), h.run(workers+1)
-	stub.integrator = integrator
-	stub.mission = []domain.RunID{integrator}
-	for i := 1; i <= workers; i++ {
-		stub.mission = append(stub.mission, h.run(i))
-	}
-	worker := h.run(1)
-
-	if _, err := h.svc.Send(ctx, worker, sendParams(independent, "I am about to edit auth.go")); err != nil {
-		t.Fatalf("worker -> independent run: %v", err)
-	}
-	if _, err := h.svc.Send(ctx, independent, sendParams(worker, "so am I")); err != nil {
-		t.Fatalf("independent run -> worker: %v", err)
-	}
-	for i := 1; i <= workers; i++ {
-		h.advance(sendRefill)
-		if _, err := h.svc.Send(ctx, integrator, sendParams(h.run(i), "status?")); err != nil {
-			t.Fatalf("integrator -> worker %d of %d: %v", i, workers, err)
-		}
-	}
-	for i := 0; i < 10; i++ {
-		h.advance(sendRefill)
-		if _, err := h.svc.Send(ctx, integrator, sendParams(h.run(workers+1+i), "heads up")); err != nil {
-			t.Fatalf("integrator -> independent run %d after messaging every worker: %v", i, err)
-		}
 	}
 }
 
@@ -176,25 +137,14 @@ func TestSendReceiptCarriesRecipientStatus(t *testing.T) {
 	}
 }
 
-type heldWorkerMail struct {
-	*store.DB
-	held domain.RunID
-}
-
-func (m heldWorkerMail) GetMissionWorkerAssignment(_ context.Context, run domain.RunID) (*domain.MissionWorkerAssignment, error) {
-	if run != m.held {
-		return nil, store.ErrNotFound
-	}
-	return &domain.MissionWorkerAssignment{WorkerRunID: run, Active: true}, nil
-}
-
-// Mail to a swarm worker a person holds waits for them to let go, and the
+// Mail to a child run a person controls waits for them to let go, and the
 // sender is told so.
 func TestReceiptsAndStatusShowMailHeldForAPerson(t *testing.T) {
 	h := newHarness(t, 2)
 	ctx := context.Background()
 	a, b := h.run(0), h.run(1)
-	h.svc.cfg.Mail = heldWorkerMail{DB: h.db, held: b}
+	h.svc.cfg.Children = parentOf{child: b, parent: a}
+	h.svc.cfg.Controlled = func(run domain.RunID) bool { return run == b }
 	sent, err := h.svc.Send(ctx, a, sendParams(b, "ping"))
 	if err != nil || sent.RecipientStatus != protocol.CoordSentStateHeld {
 		t.Fatalf("send receipt = %+v (err %v), want recipient_status held", sent, err)
@@ -209,7 +159,7 @@ func TestReceiptsAndStatusShowMailHeldForAPerson(t *testing.T) {
 	}
 	i := slices.IndexFunc(st.Peers, func(p protocol.CoordPeer) bool { return p.RunID == string(b) })
 	if i < 0 || st.Peers[i].LastSent == nil || st.Peers[i].LastSent.State != protocol.CoordSentStateHeld {
-		t.Fatalf("status peers = %+v, want last_sent to the held worker held", st.Peers)
+		t.Fatalf("status peers = %+v, want last_sent to the held child held", st.Peers)
 	}
 }
 
@@ -285,18 +235,17 @@ func TestStatusShowsWhatHappenedToTheLastMessageSent(t *testing.T) {
 	}
 }
 
-// TestStatusBoundsAndDedupsAllThreeRoutes lists mission, radar, and
+// TestStatusBoundsAndDedupsAllThreeRoutes lists lineage, radar, and
 // workspace peers that overlap one another past the status bound: each run
 // appears once, in route order, the most recently active workspace run
 // first even though it was created earliest, and the total counts each
 // distinct peer once.
 func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
-	stub := &missionTransportStub{}
 	n := protocol.CoordMaxStatusPeers + 8
-	h := newHarness(t, n+1, func(c *Config) { c.Mission = stub })
+	h := newHarness(t, n+1)
 	ctx := context.Background()
 	self := h.run(0)
-	stub.mission = []domain.RunID{self, h.run(1), h.run(2), h.run(3)}
+	h.svc.cfg.Children = familyOf{self, h.run(1), h.run(2), h.run(3)}
 	h.peers.hub(self, []domain.RunID{h.run(3), h.run(4), h.run(5)}, "src/auth.go")
 	recent := 6
 	h.runs[recent].Task = strings.Repeat("é", protocol.CoordMaxStatusTaskBytes)
@@ -324,7 +273,7 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 		want := protocol.CoordPeerWorkspace
 		switch {
 		case i < 3:
-			want = protocol.CoordPeerMission
+			want = protocol.CoordPeerLineage
 		case i < 5:
 			want = protocol.CoordPeerActive
 		}
@@ -342,13 +291,12 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 
 // TestAdminsOnlyLimitsTheWorkspaceRoute covers message-others=admins_only:
 // a collaborator's run reaches only its owner's runs over the workspace
-// route, an admin-owned run reaches every run, and the swarm and overlap
+// route, an admin-owned run reaches every run, and the lineage and overlap
 // routes stay open.
 func TestAdminsOnlyLimitsTheWorkspaceRoute(t *testing.T) {
-	stub := &missionTransportStub{}
-	h := newHarness(t, 6, func(c *Config) { c.Mission = stub })
+	h := newHarness(t, 6)
 	ctx := context.Background()
-	mine, sibling, other, swarm, overlap, adminRun := h.run(0), h.run(1), h.run(2), h.run(3), h.run(4), h.run(5)
+	mine, sibling, other, child, overlap, adminRun := h.run(0), h.run(1), h.run(2), h.run(3), h.run(4), h.run(5)
 	for _, i := range []int{2, 3, 4} {
 		h.ownBy(i, h.member(domain.RoleCollaborator).ID, false)
 	}
@@ -356,12 +304,12 @@ func TestAdminsOnlyLimitsTheWorkspaceRoute(t *testing.T) {
 	if err := h.db.SetWorkspaceSteerOthers(ctx, h.workspace, domain.SteerOthersAdminsOnly); err != nil {
 		t.Fatalf("set steer_others: %v", err)
 	}
-	stub.mission = []domain.RunID{mine, swarm}
+	h.svc.cfg.Children = familyOf{mine, child}
 	h.peers.pair(mine, overlap, "src/auth.go")
 
 	_, err := h.svc.Send(ctx, mine, sendParams(other, "other member"))
 	wantDenied(t, err, "workspace restricts messaging others' runs to their owner and admins")
-	for _, target := range []domain.RunID{sibling, swarm, overlap} {
+	for _, target := range []domain.RunID{sibling, child, overlap} {
 		h.advance(sendRefill)
 		if _, err = h.svc.Send(ctx, mine, sendParams(target, "allowed")); err != nil {
 			t.Fatalf("send to %s under admins_only: %v", target, err)
@@ -378,7 +326,36 @@ func TestAdminsOnlyLimitsTheWorkspaceRoute(t *testing.T) {
 	for _, p := range st.Peers {
 		listed[p.RunID] = true
 	}
-	if len(listed) != 3 || st.PeerTotal != 3 || !listed[string(sibling)] || !listed[string(swarm)] || !listed[string(overlap)] {
-		t.Fatalf("status peers = %+v (total %d), want the sibling, swarm and overlap runs", st.Peers, st.PeerTotal)
+	if len(listed) != 3 || st.PeerTotal != 3 || !listed[string(sibling)] || !listed[string(child)] || !listed[string(overlap)] {
+		t.Fatalf("status peers = %+v (total %d), want the sibling, child and overlap runs", st.Peers, st.PeerTotal)
 	}
 }
+
+// familyOf is a ChildService whose members are all parent and child to one
+// another.
+type familyOf []domain.RunID
+
+func (f familyOf) Capabilities(context.Context, domain.RunID) ([]string, error) { return nil, nil }
+
+func (f familyOf) HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error) {
+	return nil, nil
+}
+
+func (f familyOf) Related(_ context.Context, a, b domain.RunID) (bool, error) {
+	return a != b && slices.Contains(f, a) && slices.Contains(f, b), nil
+}
+
+func (f familyOf) Lineage(_ context.Context, run domain.RunID) ([]domain.RunID, error) {
+	if !slices.Contains(f, run) {
+		return nil, nil
+	}
+	return slices.DeleteFunc(slices.Clone(f), func(id domain.RunID) bool { return id == run }), nil
+}
+
+func (f familyOf) ReportRecipient(context.Context, domain.RunID) (domain.RunID, error) {
+	return "", nil
+}
+
+func (f familyOf) ValidateReport(context.Context, domain.RunID, store.CoordOutcome) error { return nil }
+
+func (f familyOf) NeedsInput(context.Context, domain.RunID, string) {}

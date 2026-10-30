@@ -236,7 +236,6 @@ func (s *Service) Release(run domain.RunID) error {
 	delete(s.lifecycleBuckets, run)
 	delete(s.reportLocks, run)
 	delete(s.enhancedWoken, run)
-	delete(s.enhancedNotices, run)
 	delete(s.enhancedOpens, run)
 	delete(s.enhancedRefusals, run)
 	delete(s.enhancedOverlaps, run)
@@ -588,30 +587,13 @@ func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protoc
 			result, rpcErr = s.handleDevelopment(ctx, run, req.Method, req.Params)
 		} else if isChildMethod(req.Method) {
 			result, rpcErr = s.handleChild(ctx, run, req.Method, req.Params)
-		} else if isMissionMethod(req.Method) {
-			if s.cfg.Disabled {
-				resp.Error = unavailable(req.Method)
-				return resp
-			}
-			if s.cfg.Mission == nil {
-				resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
-				return resp
-			}
-			var missionErr error
-			result, missionErr = s.cfg.Mission.HandleAgent(ctx, run, req.Method, req.Params)
-			if missionErr != nil {
-				rpcErr = missionRPCError(req.Method, missionErr)
-			}
-			if rpcErr == nil {
-				break
-			}
 		} else {
 			resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
 			return resp
 		}
 	}
 	if rpcErr != nil {
-		resp.Error = missionRPCError(req.Method, rpcErr)
+		resp.Error = rpcError(req.Method, rpcErr)
 		return resp
 	}
 	var raw json.RawMessage
@@ -664,7 +646,7 @@ func (s *Service) handleDevelopment(ctx context.Context, run domain.RunID, metho
 		}
 	}
 	result, err := s.cfg.Development.HandleAgent(ctx, run, method, params)
-	return result, missionRPCError(method, err)
+	return result, rpcError(method, err)
 }
 
 func isDevelopmentMethod(method string) bool {
@@ -706,18 +688,6 @@ func (s *Service) refuseIsolated(ctx context.Context, run domain.RunID, method s
 	return nil
 }
 
-func isMissionMethod(method string) bool {
-	switch method {
-	case protocol.MethodTaskShow, protocol.MethodTaskList, protocol.MethodTaskPropose,
-		protocol.MethodTaskRevise, protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission,
-		protocol.MethodTaskAbandon, protocol.MethodWorkerStart, protocol.MethodWorkerList,
-		protocol.MethodWorkerInspect, protocol.MethodWorkerCancel, protocol.MethodWorkerRetry,
-		protocol.MethodMissionQuestionAsk, protocol.MethodMissionPlanShow, protocol.MethodMissionStart:
-		return true
-	default:
-		return false
-	}
-}
 func rateLimitedResponse(resp protocol.Response, method string) (protocol.Response, bool) {
 	if len(resp.ID) == 0 || bytes.Equal(bytes.TrimSpace(resp.ID), []byte("null")) {
 		return protocol.Response{}, false

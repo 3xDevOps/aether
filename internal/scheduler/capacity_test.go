@@ -331,9 +331,9 @@ func TestCapacityRefusalPrecedesRunMutationAndDoesNotEvict(t *testing.T) {
 	if captures != 1 {
 		t.Fatal("refused launch captured another base")
 	}
-	replayed, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, run.Task, run.Harness, run.Mode, domain.LaunchOptions{AssignedRunID: run.ID})
+	replayed, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, run.Task, run.Harness, run.Mode, domain.LaunchOptions{ReservedRunID: run.ID})
 	if err != nil || replayed.ID != run.ID {
-		t.Fatalf("idempotent assigned-run replay charged capacity: %+v, %v", replayed, err)
+		t.Fatalf("idempotent reserved-run replay charged capacity: %+v, %v", replayed, err)
 	}
 	runs, err := e.db.ListRunsByWorkspace(t.Context(), e.ws.ID)
 	if err != nil || len(runs) != 1 {
@@ -469,7 +469,7 @@ func TestThinkingWorkersAreNotChargedTheirMemoryCeilings(t *testing.T) {
 	rt.setHost(host)
 	for i := range 8 {
 		run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, fmt.Sprintf("worker %d", i), "fake", domain.LaunchHeadless,
-			domain.LaunchOptions{AssignedRunID: domain.RunID(fmt.Sprintf("capacity-worker-%d", i))})
+			domain.LaunchOptions{ReservedRunID: domain.RunID(fmt.Sprintf("capacity-worker-%d", i))})
 		if err != nil {
 			t.Fatalf("thinking worker %d charged prior maxima: %v", i, err)
 		}

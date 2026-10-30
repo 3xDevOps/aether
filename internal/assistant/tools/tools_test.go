@@ -292,17 +292,13 @@ func (c *launchCaller) Call(ctx context.Context, method string, params json.RawM
 	switch method {
 	case protocol.MethodRunLaunch:
 		return json.RawMessage(`{"run":{"id":"run-9"}}`), nil
-	case protocol.MethodMissionCreate:
-		return json.RawMessage(`{"mission":{"id":"mis-1","current_integrator_run_id":"run-int"}}`), nil
 	case protocol.MethodRunRelaunch:
 		return json.RawMessage(`{"run":{"id":"run-1"}}`), nil
-	case protocol.MethodMissionReplaceIntegrator:
-		return json.RawMessage(`{"mission":{"id":"mis-1"},"run_id":"run-int2"}`), nil
 	}
 	return c.fakeCaller.Call(ctx, method, params)
 }
 
-func TestFollowIsToldOnlyOfSuccessfulLaunchesSwarmsAndMessages(t *testing.T) {
+func TestFollowIsToldOnlyOfSuccessfulLaunchesAndMessages(t *testing.T) {
 	var followed []string
 	var verdict error
 	caller := &launchCaller{fail: map[string]bool{}}
@@ -337,20 +333,11 @@ func TestFollowIsToldOnlyOfSuccessfulLaunchesSwarmsAndMessages(t *testing.T) {
 	if perr := call(protocol.MethodRunInject, inject); perr != nil {
 		t.Fatal(perr)
 	}
-	swarm := protocol.MissionCreateParams{WorkspaceID: "ws-1", Objective: "o", Integrator: protocol.MissionIntegrator{Harness: "claude", Mode: "acp"},
-		ExecutionChoices: []protocol.MissionExecutionChoice{{Harness: "claude", Mode: "acp"}}}
-	if perr := call(protocol.MethodMissionCreate, swarm); perr != nil {
-		t.Fatal(perr)
-	}
 	if perr := call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: "run-1"}); perr != nil {
 		t.Fatal(perr)
 	}
-	if perr := call(protocol.MethodMissionReplaceIntegrator, protocol.MissionReplaceIntegratorParams{MissionID: "mis-1", ExpectedGeneration: 1,
-		Integrator: protocol.MissionIntegrator{AccountMemberID: "m1", Harness: "claude", Mode: "acp"}, IdempotencyKey: "k"}); perr != nil {
-		t.Fatal(perr)
-	}
 	_ = call(protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-1"})
-	if want := []string{"run-9", "run-1", "run-int", "run-1", "run-int2"}; !slices.Equal(followed, want) {
+	if want := []string{"run-9", "run-1", "run-1"}; !slices.Equal(followed, want) {
 		t.Fatalf("followed %v, want %v", followed, want)
 	}
 }
@@ -371,35 +358,6 @@ func TestViewContextIsServedFromTheMembersOwnSnapshot(t *testing.T) {
 	}
 }
 
-// A connector's mission.create names no actor: the caller is the swarm's
-// accountable human and the account of every agent that names none.
-// Naming accounts to launch on is the server's to check.
-func TestPrepareMissionCreate(t *testing.T) {
-	got, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(`{"workspace_id":"ws-1","objective":"o","integrator":{"harness":"claude","mode":"tui"},`+
-		`"execution_choices":[{"harness":"claude","mode":"tui"},{"account_member_id":"m2","harness":"codex","mode":"acp"}],"idempotency_key":"k",`+
-		`"fallback_account_member_ids":["m3"]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := protocol.DecodeParams[protocol.MissionCreateParams](got)
-	if err != nil || p.AccountableHumanID != "m1" || p.Integrator.AccountMemberID != "m1" || p.ExecutionChoices[0].AccountMemberID != "m1" ||
-		p.ExecutionChoices[1].AccountMemberID != "m2" || p.IdempotencyKey != "k" || !slices.Equal(p.FallbackAccountMemberIDs, []string{"m3"}) {
-		t.Fatalf("prepared mission.create = %s %v", got, err)
-	}
-	if _, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(`{"accountable_human_id":"m2"}`)); err == nil || !strings.Contains(err.Error(), "not accepted") {
-		t.Errorf("mission.create naming accountable_human_id = %v, want refused", err)
-	}
-	for params, field := range map[string]string{
-		`{"workspace_id":"ws-1","no_falback":true}`:                       `"no_falback"`,
-		`{"integrator":{"harness":"claude","efort":"high"}}`:              `"efort"`,
-		`{"execution_choices":[{"harness":"claude","mode":"tui","x":1}]}`: `"x"`,
-	} {
-		if _, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(params)); err == nil || err.Error() != "unknown param "+field+"; this server does not support it" {
-			t.Errorf("mission.create %s = %v, want %s refused", params, err, field)
-		}
-	}
-}
-
 // Prepare passes exactly the account fields through and refuses every other
 // member id, which would make the call act for or on another member.
 func TestPrepareAccountFields(t *testing.T) {
@@ -417,7 +375,6 @@ func TestPrepareAccountFields(t *testing.T) {
 		{protocol.MethodRunList, `{"account_member_id":"m2"}`, false},
 		{protocol.MethodTemplateLaunch, `{"account_member_id":"m2"}`, false},
 		{protocol.MethodRunLaunch, `{"to_member_id":"m2"}`, false},
-		{protocol.MethodMissionCreate, `{"accountable_human_id":"m2"}`, false},
 	} {
 		_, err := Prepare("m1", c.method, json.RawMessage(c.params))
 		if (err == nil) != c.ok {

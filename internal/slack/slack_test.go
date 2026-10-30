@@ -188,29 +188,6 @@ func TestNeedWithoutButtons(t *testing.T) {
 	}
 }
 
-func TestASwarmNeedReachesItsHumanWithTheSwarmLink(t *testing.T) {
-	h := newHarness(t)
-	h.link()
-	bob := &domain.Member{DisplayName: "Bob", TailnetLogin: "bob@example.com", Color: "#3cb44b", Role: domain.RoleCollaborator}
-	if err := h.db.CreateMember(bg, bob); err != nil {
-		t.Fatalf("CreateMember: %v", err)
-	}
-	run := &domain.Run{Title: "Ship the checkout", WorkspaceID: h.ws.ID, MemberID: bob.ID, Harness: "claude",
-		Mode: domain.LaunchTUI, Status: domain.RunRunning}
-	if err := h.db.CreateRun(bg, run); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-
-	h.need(run, push.Need{Member: h.ada.ID, Mission: "mis-1", Key: "k", Body: "The integrator asks: Which branch?"})
-	posts := h.slack.posts()
-	if len(posts) != 1 || posts[0].Channel != "D1" {
-		t.Fatalf("posts = %+v, want one in Ada's D1", posts)
-	}
-	if l := layoutOf(t, posts[0]); !strings.Contains(l.context, "<https://box.tail.ts.net/?page=missions&id=mis-1|Open in Aether>") {
-		t.Fatalf("context = %q, want the swarm's link", l.context)
-	}
-}
-
 func TestAgentTextIsEscaped(t *testing.T) {
 	h := newHarness(t)
 	h.link()

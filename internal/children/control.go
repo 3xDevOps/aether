@@ -75,24 +75,6 @@ func (s *Service) Children(ctx context.Context, run domain.RunID) (protocol.RunC
 	if err != nil {
 		return protocol.RunChildrenResult{}, err
 	}
-	// A swarm's workers are the integrator's through the swarm, not
-	// run_children, so their children join its tree here.
-	if r.MissionRole == "integrator" {
-		runs, listErr := s.cfg.Store.ListRunsByWorkspace(ctx, r.WorkspaceID)
-		if listErr != nil {
-			return protocol.RunChildrenResult{}, listErr
-		}
-		for _, w := range runs {
-			if w.MissionID != r.MissionID || w.MissionRole != "worker" {
-				continue
-			}
-			below, belowErr := s.cfg.Store.ListChildren(ctx, w.ID)
-			if belowErr != nil {
-				return protocol.RunChildrenResult{}, belowErr
-			}
-			kids = append(kids, below...)
-		}
-	}
 	limits, err := s.cfg.Store.WorkspaceChildLimits(ctx, r.WorkspaceID)
 	if err != nil {
 		return protocol.RunChildrenResult{}, err

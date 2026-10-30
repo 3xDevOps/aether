@@ -239,7 +239,7 @@ func (m *Manager) pump(workspace domain.WorkspaceID, run domain.RunID, a Adapter
 }
 
 // consume publishes what the adapter makes of line and hands a result it
-// ended a turn with to results: a swarm worker's supervisor keeps the PTY
+// ended a turn with to results: a supervisor that persists keeps the PTY
 // open after the agent exits.
 func (m *Manager) consume(workspace domain.WorkspaceID, run domain.RunID, a Adapter, line string) {
 	m.publish(workspace, run, a.ConsumeLine(line))

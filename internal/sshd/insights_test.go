@@ -98,31 +98,7 @@ func TestInsightsGet(t *testing.T) {
 		}
 	}
 
-	// Swarms reserve their runs' IDs before creating them.
 	nanos := func(s string) int64 { return at(s).UnixNano() }
-	mission := func(id string, owner domain.MemberID, ws domain.WorkspaceID, phase, created string) {
-		exec(`INSERT INTO missions (id, workspace_id, objective, accountable_human_id, idempotency_key, created_at, updated_at, phase, finished_at)
-			VALUES (?, ?, 'o', ?, ?, ?, ?, ?, ?)`, id, ws, owner, id, nanos(created), nanos(created), phase, nanos(created))
-		// Later updates to a finished swarm do not move it to another day.
-		exec(`UPDATE missions SET updated_at = ? WHERE id = ?`, nanos("2026-03-12T00:00:00-07:00"), id)
-	}
-	mission("m1", alice, alpha, "completed", "2026-03-07T11:30:00-08:00")
-	mission("m2", bob, beta, "cancelled", "2026-03-08T12:00:00-07:00")
-	exec(`UPDATE missions SET current_integrator_run_id = 'i2' WHERE id = 'm1'`)
-	exec(`INSERT INTO mission_create_receipts (workspace_id, idempotency_key, mission_id, objective, accountable_human_id,
-		integrator_account_member_id, integrator_harness, integrator_mode, execution_choices, created_at, initial_run_id)
-		VALUES (?, 'm1', 'm1', 'o', ?, ?, 'claude', 'headless', '[]', 0, 'i1')`, alpha, alice, alice)
-	exec(`INSERT INTO mission_integrator_replacements (mission_id, idempotency_key, account_member_id, harness, mode, generation, run_id, created_at)
-		VALUES ('m1', 'r1', ?, 'claude', 'headless', 2, 'i2', 0)`, alice)
-	attempt := func(id, mission, runID string, number int) {
-		exec(`INSERT INTO mission_attempts (id, mission_id, task_id, task_revision, number, dispatch_key, state, run_id, created_at, reserved_at)
-			VALUES (?, ?, 't', 1, ?, ?, 'completed', ?, 0, 0)`, id, mission, number, id, runID)
-	}
-	attempt("a1", "m1", "w1", 1)
-	attempt("a2", "m1", "w1b", 2)
-	attempt("a3", "m2", "wb", 1)
-	// Reserved, but the launch never created the run.
-	attempt("a4", "m1", "ghost", 3)
 
 	// Alice's top-level runs. top2 starts at 23:30 PDT on 03-08, which is
 	// 03-09 in UTC; top4 ends at 01:00 PST on 03-08, before the change.
@@ -132,26 +108,14 @@ func TestInsightsGet(t *testing.T) {
 	run("top3", alice, beta, "claude", "", domain.RunRunning, "", "2026-03-09T09:00:00-07:00", ptr("2026-03-09T09:00:00-07:00"), nil)
 	run("top4", alice, alpha, "claude", "", domain.RunAbandoned, "killed", "2026-03-06T12:00:00-08:00", ptr("2026-03-06T12:00:00-08:00"), ptr("2026-03-08T01:00:00-08:00"))
 	run("top6", alice, alpha, "claude", "", domain.RunNeedsAttention, "", "2026-03-01T12:00:00-08:00", ptr("2026-03-01T12:00:00-08:00"), nil)
-	// Alice's swarm: a failed worker, its retry, and two integrator
-	// generations; none of them is top-level.
-	run("w1", alice, alpha, "claude", "", domain.RunFailed, "", "2026-03-07T12:00:00-08:00", ptr("2026-03-07T12:00:00-08:00"), ptr("2026-03-07T13:00:00-08:00"))
-	run("w1b", alice, alpha, "claude", "", domain.RunCompleted, "", "2026-03-07T13:00:00-08:00", ptr("2026-03-07T13:00:00-08:00"), ptr("2026-03-07T14:00:00-08:00"))
-	run("i1", alice, alpha, "claude", "", domain.RunFailed, "", "2026-03-07T11:30:00-08:00", ptr("2026-03-07T11:30:00-08:00"), ptr("2026-03-07T11:45:00-08:00"))
-	run("i2", alice, alpha, "claude", "", domain.RunNeedsAttention, "", "2026-03-07T11:45:00-08:00", ptr("2026-03-07T11:45:00-08:00"), nil)
-	// Bob's runs and swarm.
 	// Needs you counts by domain.Run.NeedsAttention: top3's agent
-	// disconnected; paused top6 and integrator i2 waiting on its agents do not.
+	// disconnected; paused top6 does not.
 	exec(`UPDATE runs SET activity = 'disconnected' WHERE id = 'top3'`)
 	exec(`UPDATE runs SET activity = 'needs-you', reason = 'needs input: which?' WHERE id = 'top6'`)
-	exec(`UPDATE runs SET activity = 'waiting-agents' WHERE id = 'i2'`)
 	e.runs.setPaused("top6", true)
 	run("top5", bob, beta, "claude", "opus", domain.RunCompleted, "", "2026-03-08T09:00:00-07:00", ptr("2026-03-08T09:00:00-07:00"), ptr("2026-03-08T10:00:00-07:00"))
 	run("top7", bob, beta, "claude", "opus", domain.RunNeedsAttention, "", "2026-03-09T08:00:00-07:00", ptr("2026-03-09T08:00:00-07:00"), nil)
 	exec(`UPDATE runs SET activity = 'needs-you', reason = 'blocked: no token' WHERE id = 'top7'`)
-	run("wb", bob, beta, "claude", "", domain.RunAbandoned, "", "2026-03-08T12:00:00-07:00", ptr("2026-03-08T12:00:00-07:00"), ptr("2026-03-08T13:00:00-07:00"))
-
-	exec(`INSERT INTO mission_acceptances (submission_id, mission_id, task_id, task_revision, accepted_set_version, integrator_generation, accepted_by_run_id, accepted_at)
-		VALUES ('s1', 'm1', 't', 1, 1, 2, 'i2', 0)`)
 
 	transition := func(runID, from, to, when string) {
 		exec(`INSERT INTO run_state_transitions (run_id, workspace_id, from_status, to_status, reason, at) VALUES (?, ?, ?, ?, '', ?)`,
@@ -179,7 +143,7 @@ func TestInsightsGet(t *testing.T) {
 	// Recorded only from the middle of the run, so not measured.
 	transition("top2", "running", "failed", "2026-03-09T00:30:00-07:00")
 
-	// carol's integrator-like run parks waiting on its agents, then asks
+	// carol's run parks waiting on its agents, then asks
 	// her: only the needs-you stretch is waiting on her.
 	carol := member("carol")
 	run("top8", carol, alpha, "claude", "", domain.RunCompleted, "", "2026-03-12T09:59:00-07:00", ptr("2026-03-12T10:00:00-07:00"), ptr("2026-03-12T10:50:00-07:00"))
@@ -204,7 +168,6 @@ func TestInsightsGet(t *testing.T) {
 	cost("top1", 1, alpha, bob, 0.5, 500, 50, true)
 	cost("top2", 0, alpha, alice, 0, 0, 0, false)
 	cost("top5", 0, beta, bob, 2, 10, 1, true)
-	cost("w1", 0, alpha, alice, 10, 99, 9, true)
 
 	pr := func(runID string, number int, state, observed string, merged *time.Time, opened bool) {
 		p := &store.RunPullRequest{RunID: domain.RunID(runID), Repository: "acme/app", Number: number,
@@ -219,7 +182,6 @@ func TestInsightsGet(t *testing.T) {
 	}
 	pr("top1", 1, "open", "2026-03-07T11:00:00-08:00", nil, true)
 	pr("top1", 1, "merged", "2026-03-09T13:00:00-07:00", ptr("2026-03-09T12:00:00-07:00"), false)
-	pr("w1b", 2, "open", "2026-03-07T13:30:00-08:00", nil, true)
 	// Observed but never opened through run.pr.create: not recorded.
 	pr("top5", 3, "open", "2026-03-08T10:00:00-07:00", nil, false)
 
@@ -290,25 +252,24 @@ func TestInsightsGet(t *testing.T) {
 			{Harness: "claude", Launched: 2, Finished: 1},
 			{Harness: "codex", Model: "gpt-5", Launched: 1, Failed: 1},
 		}},
-		{"swarms", mine.Swarms, protocol.InsightsSwarms{Launched: 1, Completed: 1, Agents: 4, TasksAccepted: 1}},
 		{"durations", mine.Durations, protocol.InsightsDurations{RunsMeasured: 3, MedianRunSeconds: 3600, P90RunSeconds: 37 * 3600,
 			StateRunsMeasured: 2, MedianWorkingSeconds: 30 * 60, MedianWaitingSeconds: 300, MedianResponseSeconds: 300}},
-		{"cost", mine.Cost, protocol.InsightsCost{MeteredRuns: 1, UnmeteredRuns: 2, CostUSD: 2, InputTokens: 1500, OutputTokens: 150, TotalTokens: 1758,
+		{"cost", mine.Cost, protocol.InsightsCost{MeteredRuns: 1, UnmeteredRuns: 2, CostUSD: 2, InputTokens: 1500, OutputTokens: 150, TotalTokens: 1650,
 			ByAgent: []protocol.InsightsCostAgent{
-				{Harness: "claude", MeteredRuns: 1, UnmeteredRuns: 1, CostUSD: 2, InputTokens: 1500, OutputTokens: 150, TotalTokens: 1758},
+				{Harness: "claude", MeteredRuns: 1, UnmeteredRuns: 1, CostUSD: 2, InputTokens: 1500, OutputTokens: 150, TotalTokens: 1650},
 				{Harness: "codex", UnmeteredRuns: 1},
 			}}},
-		{"success", mine.Success, protocol.InsightsSuccess{Runs: protocol.InsightsSuccessCount{Succeeded: 1, Finished: 3}, Swarms: protocol.InsightsSuccessCount{Finished: 1}}},
+		{"success", mine.Success, protocol.InsightsSuccess{Runs: protocol.InsightsSuccessCount{Succeeded: 1, Finished: 3}}},
 		{"outcomes", mine.Outcomes, protocol.InsightsOutcomes{
-			Runs: protocol.InsightsOutcome{Done: 1, Failed: 1, Abandoned: 1}, Swarms: protocol.InsightsOutcome{Done: 1},
+			Runs: protocol.InsightsOutcome{Done: 1, Failed: 1, Abandoned: 1},
 			Series: []protocol.InsightsOutcomeBucket{
-				{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Done: 1}},
+				{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}},
 				{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Abandoned: 1}},
 				{Start: "2026-03-09", Runs: protocol.InsightsOutcome{Failed: 1}},
 			},
 			Members: []protocol.InsightsMemberOutcome{},
 		}},
-		{"pull requests", mine.PullRequests, protocol.InsightsPullRequests{Opened: 2, Merged: 1}},
+		{"pull requests", mine.PullRequests, protocol.InsightsPullRequests{Opened: 1, Merged: 1}},
 		{"recent order", recentIDs(mine.Recent), []string{"top2", "top4", "top1"}},
 		{"untitled recent top2", mine.Recent[0].Title, "fix the parser"},
 		{"recent top1", mine.Recent[2], protocol.InsightsRecentRun{RunID: "top1", Title: "title top1", WorkspaceID: string(alpha),
@@ -318,31 +279,30 @@ func TestInsightsGet(t *testing.T) {
 		{"coverage", mine.Coverage, protocol.InsightsCoverage{StateTimesSince: "2026-03-07T18:00:30Z", PullRequestsSince: "2026-03-07T19:00:00Z"}},
 
 		{"everyone totals", everyone.Totals, protocol.InsightsTotals{Launched: 5, Completed: 2, Failed: 1, Abandoned: 1, Killed: 1, Active: 2, Finished: 2}},
-		{"everyone swarms", everyone.Swarms, protocol.InsightsSwarms{Launched: 2, Completed: 1, Cancelled: 1, Agents: 5, TasksAccepted: 1}},
-		{"everyone cost", everyone.Cost, protocol.InsightsCost{MeteredRuns: 2, UnmeteredRuns: 2, CostUSD: 4, InputTokens: 1510, OutputTokens: 151, TotalTokens: 1769,
+		{"everyone cost", everyone.Cost, protocol.InsightsCost{MeteredRuns: 2, UnmeteredRuns: 2, CostUSD: 4, InputTokens: 1510, OutputTokens: 151, TotalTokens: 1661,
 			ByAgent: []protocol.InsightsCostAgent{
-				{Harness: "claude", MeteredRuns: 2, UnmeteredRuns: 1, CostUSD: 4, InputTokens: 1510, OutputTokens: 151, TotalTokens: 1769},
+				{Harness: "claude", MeteredRuns: 2, UnmeteredRuns: 1, CostUSD: 4, InputTokens: 1510, OutputTokens: 151, TotalTokens: 1661},
 				{Harness: "codex", UnmeteredRuns: 1},
 			}}},
-		{"everyone success", everyone.Success, protocol.InsightsSuccess{Runs: protocol.InsightsSuccessCount{Succeeded: 1, Finished: 4}, Swarms: protocol.InsightsSuccessCount{Finished: 2}}},
+		{"everyone success", everyone.Success, protocol.InsightsSuccess{Runs: protocol.InsightsSuccessCount{Succeeded: 1, Finished: 4}}},
 		{"everyone outcomes", everyone.Outcomes, protocol.InsightsOutcomes{
-			Runs: protocol.InsightsOutcome{Done: 2, Failed: 1, Abandoned: 1}, Swarms: protocol.InsightsOutcome{Done: 1, Abandoned: 1},
+			Runs: protocol.InsightsOutcome{Done: 2, Failed: 1, Abandoned: 1},
 			Series: []protocol.InsightsOutcomeBucket{
-				{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Done: 1}},
-				{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Done: 1, Abandoned: 1}, Swarms: protocol.InsightsOutcome{Abandoned: 1}},
+				{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}},
+				{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Done: 1, Abandoned: 1}},
 				{Start: "2026-03-09", Runs: protocol.InsightsOutcome{Failed: 1}},
 			},
 			Members: []protocol.InsightsMemberOutcome{
-				{MemberID: string(alice), DisplayName: "alice", Color: "#e6194b", Runs: protocol.InsightsOutcome{Done: 1, Failed: 1, Abandoned: 1}, Swarms: protocol.InsightsOutcome{Done: 1},
+				{MemberID: string(alice), DisplayName: "alice", Color: "#e6194b", Runs: protocol.InsightsOutcome{Done: 1, Failed: 1, Abandoned: 1},
 					Series: []protocol.InsightsOutcomeBucket{
-						{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Done: 1}},
+						{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}},
 						{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Abandoned: 1}},
 						{Start: "2026-03-09", Runs: protocol.InsightsOutcome{Failed: 1}},
 					}},
-				{MemberID: string(bob), DisplayName: "bob", Color: "#3cb44b", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Abandoned: 1},
+				{MemberID: string(bob), DisplayName: "bob", Color: "#3cb44b", Runs: protocol.InsightsOutcome{Done: 1},
 					Series: []protocol.InsightsOutcomeBucket{
 						{Start: "2026-03-07"},
-						{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Abandoned: 1}},
+						{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Done: 1}},
 						{Start: "2026-03-09"},
 					}},
 				{MemberID: string(carol), DisplayName: "carol", Color: "#4363d8", Series: []protocol.InsightsOutcomeBucket{
@@ -354,13 +314,11 @@ func TestInsightsGet(t *testing.T) {
 		{"everyone recent", recentIDs(everyone.Recent), []string{"top2", "top5", "top4", "top1"}},
 
 		{"bob totals", bobs.Totals, protocol.InsightsTotals{Launched: 2, Completed: 1, Active: 1, Finished: 1}},
-		{"bob swarms", bobs.Swarms, protocol.InsightsSwarms{Launched: 1, Cancelled: 1, Agents: 1}},
 		{"bob recent", recentIDs(bobs.Recent), []string{"top5"}},
 		{"bob pull requests", bobs.PullRequests, protocol.InsightsPullRequests{}},
 		{"bob needs you", bobs.NeedsYou, 1},
 
 		{"workspace filter", betaOnly.Totals, protocol.InsightsTotals{Launched: 1, Active: 1}},
-		{"workspace filter swarms", betaOnly.Swarms, protocol.InsightsSwarms{}},
 	}
 	for _, c := range checks {
 		if !reflect.DeepEqual(c.got, c.want) {
@@ -520,16 +478,8 @@ func TestInsightsGet(t *testing.T) {
 		t.Errorf("run.pr.status of a paused run with a recorded PR = %+v, %+v, lookups %v; want the paused error without asking GitHub", paused, perr, gh.lookups)
 	}
 	merged, perr := get(alice, week)
-	if perr != nil || merged.PullRequests != (protocol.InsightsPullRequests{Opened: 3, Merged: 2}) {
+	if perr != nil || merged.PullRequests != (protocol.InsightsPullRequests{Opened: 2, Merged: 2}) {
 		t.Errorf("pull requests after the merge was observed = %+v, %+v", merged.PullRequests, perr)
-	}
-
-	for _, table := range []string{"mission_attempts", "mission_create_receipts", "mission_integrator_replacements", "missions"} {
-		exec(`DELETE FROM ` + table)
-	}
-	unlinked, perr := get(alice, week)
-	if perr != nil || unlinked.Totals != mine.Totals || !reflect.DeepEqual(recentIDs(unlinked.Recent), recentIDs(mine.Recent)) {
-		t.Errorf("after deleting the swarm = totals %+v, recent %v, %+v; want its runs still not top-level", unlinked.Totals, recentIDs(unlinked.Recent), perr)
 	}
 
 	top5, getErr := db.GetRun(ctx, "top5")

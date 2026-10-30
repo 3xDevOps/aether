@@ -24,7 +24,6 @@ export function ClearDoneConfirm({
   onCancel: () => void
 }) {
   const n = plan.eligible.length
-  const swarmRuns = plan.eligible.some((run) => run.mission_id)
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
       <DialogContent className="max-w-[min(440px,calc(100%-2rem))]">
@@ -44,9 +43,8 @@ export function ClearDoneConfirm({
             )}
           </DialogDescription>
         </DialogHeader>
-        {(plan.notClosed > 0 || plan.notAllowed > 0 || swarmRuns) && (
+        {(plan.notClosed > 0 || plan.notAllowed > 0) && (
           <ul className="list-disc space-y-1 pl-4 text-ui leading-5 text-muted">
-            {swarmRuns && <li>Swarm runs are archived, but their swarms stay in Swarms; archive a swarm from its page.</li>}
             {plan.notClosed > 0 && (
               <li>
                 {plan.notClosed} {plan.notClosed === 1 ? 'run stays' : 'runs stay'}: completed but

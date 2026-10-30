@@ -11,7 +11,6 @@ test('header navigation preserves destinations and focus across resize and text-
 
   const navigation = page.getByRole('navigation', { name: 'Main navigation' })
   const board = navigation.getByRole('button', { name: 'Board', exact: true })
-  const swarms = navigation.getByRole('button', { name: 'Swarms', exact: true })
   const templates = navigation.getByRole('button', { name: 'Templates', exact: true })
   const more = navigation.getByRole('button', { name: 'More navigation' })
   const menu = page.getByRole('menu', { name: 'More navigation' })
@@ -20,7 +19,6 @@ test('header navigation preserves destinations and focus across resize and text-
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(more).toBeFocused()
   await expect(board).toBeVisible()
-  await expect(swarms).toBeVisible()
   await expect(templates).toBeHidden()
 
   await more.press('Enter')
@@ -35,14 +33,13 @@ test('header navigation preserves destinations and focus across resize and text-
   await expect(templates).toBeFocused()
   await expect(more).toBeHidden()
 
-  await page.setViewportSize({ width: 960, height: 900 })
+  await page.setViewportSize({ width: 864, height: 900 })
   await expect(templates).toBeVisible()
   await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByLabel('Text size', { exact: true }).click()
   await page.getByRole('option', { name: 'Larger', exact: true }).click()
   await expect(templates).toBeHidden()
   await expect(board).toBeVisible()
-  await expect(swarms).toBeVisible()
   await more.press('Enter')
   await expect(menu.getByRole('menuitem', { name: 'Templates', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')

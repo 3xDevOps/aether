@@ -74,7 +74,6 @@ type Insights struct {
 	Heatmap      []int
 	ByWorkspace  []*InsightsWorkspace
 	ByAgent      []*InsightsAgent
-	Swarms       InsightsSwarms
 	Durations    InsightsDurations
 	Cost         InsightsCost
 	PullRequests InsightsPullRequests
@@ -110,10 +109,6 @@ type InsightsAgent struct {
 	InsightsTally
 }
 
-type InsightsSwarms struct {
-	Launched, Completed, Cancelled, Agents, TasksAccepted int
-}
-
 // InsightsDurations are nearest-rank percentiles, zero when nothing was
 // measured.
 type InsightsDurations struct {
@@ -129,10 +124,7 @@ type InsightsCost struct {
 	MeteredRuns, UnmeteredRuns int
 	CostUSD                    float64
 	InputTokens, OutputTokens  int64
-	// SwarmTokens are the tokens of finished swarm worker and integrator
-	// runs, kept out of the fields above.
-	SwarmTokens int64
-	ByAgent     []*InsightsCostAgent
+	ByAgent                    []*InsightsCostAgent
 }
 
 // InsightsCostAgent is InsightsCost for the runs of one harness.
@@ -141,12 +133,10 @@ type InsightsCostAgent struct {
 	MeteredRuns, UnmeteredRuns int
 	CostUSD                    float64
 	InputTokens, OutputTokens  int64
-	SwarmTokens                int64
 }
 
-// InsightsOutcome is how runs or swarms ended: Done is completed or merged
-// runs and completed swarms, Failed failed runs, and Abandoned abandoned and
-// interrupted runs and cancelled swarms.
+// InsightsOutcome is how runs ended: Done is completed or merged runs,
+// Failed failed runs, and Abandoned abandoned and interrupted runs.
 type InsightsOutcome struct {
 	Done, Failed, Abandoned int
 }
@@ -157,13 +147,12 @@ type InsightsMemberOutcomes struct {
 	ID          domain.MemberID
 	Name, Color string
 	Runs        []InsightsOutcome
-	Swarms      []InsightsOutcome
 }
 
-// InsightsSuccess counts finished top-level runs and finished swarms, and
-// those among them with a merged pull request.
+// InsightsSuccess counts finished runs and those among them with a merged
+// pull request.
 type InsightsSuccess struct {
-	RunsSucceeded, RunsFinished, SwarmsSucceeded, SwarmsFinished int
+	RunsSucceeded, RunsFinished int
 }
 
 type InsightsPullRequests struct {
@@ -195,13 +184,6 @@ const (
 		COUNT(*) FILTER (WHERE ` + insightsFinished + ` AND r.status IN ('completed', 'merged')),
 		COUNT(*) FILTER (WHERE ` + insightsFinished + ` AND r.status = 'failed')`
 	insightsFinishedIn = insightsFinished + ` AND r.status IN ` + insightsTerminal
-
-	// insightsSwarmRuns pairs each swarm with every run it started.
-	insightsSwarmRuns = `SELECT mission_id, run_id FROM mission_attempts WHERE run_id IS NOT NULL AND run_id <> ''
-		UNION SELECT id, current_integrator_run_id FROM missions
-			WHERE current_integrator_run_id IS NOT NULL AND current_integrator_run_id <> ''
-		UNION SELECT mission_id, initial_run_id FROM mission_create_receipts WHERE initial_run_id <> ''
-		UNION SELECT mission_id, run_id FROM mission_integrator_replacements WHERE run_id <> ''`
 )
 
 func (q InsightsQuery) ownerScope() string {
@@ -213,10 +195,6 @@ func (q InsightsQuery) ownerScope() string {
 		where += " AND r.workspace_id = :workspace"
 	}
 	return where
-}
-
-func (q InsightsQuery) runScope() string {
-	return "r.swarm_run = 0 AND " + q.ownerScope()
 }
 
 func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error {
@@ -310,7 +288,7 @@ func (d *DB) Insights(ctx context.Context, q InsightsQuery) (*Insights, error) {
 	copy(out.Series, counts[2:])
 	steps := []func(context.Context, *sql.Tx, InsightsQuery, []any, *Insights) error{
 		insightsHeatmap, insightsByWorkspace, insightsByAgent, insightsFinishedRuns,
-		insightsStateTimes, insightsRecent, insightsSwarms, insightsPullRequests, insightsSuccess,
+		insightsStateTimes, insightsRecent, insightsPullRequests, insightsSuccess,
 		insightsMemberOutcomes, insightsLive,
 	}
 	for _, step := range steps {
@@ -374,7 +352,7 @@ func insightsCounts(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 		b(i, lo, hi) AS (SELECT key, json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(:buckets)),
 		s AS MATERIALIZED (
 			SELECT r.created_at, r.finished_at, r.status, r.reason FROM runs r
-			WHERE `+q.runScope()+`
+			WHERE `+q.ownerScope()+`
 			  AND ((r.created_at >= :lo AND r.created_at < :hi) OR (r.finished_at >= :lo AND r.finished_at < :hi)))
 		SELECT b.i,
 			COUNT(*) FILTER (WHERE `+in("created_at")+`),
@@ -415,7 +393,7 @@ func insightsHeatmap(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []an
 		d(i, lo, hi) AS (SELECT key, json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(:days)),
 		a AS MATERIALIZED (
 			SELECT COALESCE(r.started_at, r.created_at) AS s, COALESCE(r.finished_at, :now) AS e FROM runs r
-			WHERE `+q.runScope()+`
+			WHERE `+q.ownerScope()+`
 			  AND COALESCE(r.started_at, r.created_at) < :day_hi AND (r.finished_at IS NULL OR r.finished_at >= :day_lo))
 		SELECT d.i, COUNT(*) FROM d JOIN a ON a.s < d.hi AND a.e >= d.lo GROUP BY d.i`, args...)
 	if err != nil {
@@ -439,7 +417,7 @@ func insightsByWorkspace(ctx context.Context, tx *sql.Tx, q InsightsQuery, args 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.workspace_id, w.name, `+insightsTallyCols+`
 		FROM runs r JOIN workspaces w ON w.id = r.workspace_id
-		WHERE `+q.runScope()+` AND `+insightsInRange+`
+		WHERE `+q.ownerScope()+` AND `+insightsInRange+`
 		GROUP BY r.workspace_id ORDER BY 3 DESC, w.name, r.workspace_id`, args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: by workspace: %w", err)
@@ -458,7 +436,7 @@ func insightsByAgent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []an
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.harness, r.model, `+insightsTallyCols+`
 		FROM runs r
-		WHERE `+q.runScope()+` AND `+insightsInRange+`
+		WHERE `+q.ownerScope()+` AND `+insightsInRange+`
 		GROUP BY r.harness, r.model ORDER BY 3 DESC, r.harness, r.model`, args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: by agent: %w", err)
@@ -484,7 +462,7 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 			COALESCE(SUM(c.input_tokens) FILTER (WHERE c.metered = 1), 0),
 			COALESCE(SUM(c.output_tokens) FILTER (WHERE c.metered = 1), 0)
 		FROM runs r LEFT JOIN run_costs c ON c.run_id = r.id
-		WHERE `+q.runScope()+` AND `+insightsFinishedIn+`
+		WHERE `+q.ownerScope()+` AND `+insightsFinishedIn+`
 		GROUP BY r.id`, args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: finished runs: %w", err)
@@ -528,39 +506,11 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("store: insights: finished runs: %w", err)
 	}
-	swarm, swarmErr := tx.QueryContext(ctx, `
-		SELECT r.harness, COALESCE(SUM(c.input_tokens + c.output_tokens), 0)
-		FROM runs r JOIN run_costs c ON c.run_id = r.id AND c.metered = 1
-		WHERE r.swarm_run = 1 AND `+q.ownerScope()+` AND `+insightsFinishedIn+`
-		GROUP BY r.harness`, args...)
-	if swarmErr != nil {
-		return fmt.Errorf("store: insights: swarm tokens: %w", swarmErr)
-	}
-	defer swarm.Close() //nolint:errcheck // read-only iteration
-	for swarm.Next() {
-		var (
-			harness string
-			tokens  int64
-		)
-		if err := swarm.Scan(&harness, &tokens); err != nil {
-			return fmt.Errorf("store: insights: swarm tokens: %w", err)
-		}
-		agent := agents[harness]
-		if agent == nil {
-			agent = &InsightsCostAgent{Harness: harness}
-			agents[harness] = agent
-		}
-		agent.SwarmTokens = tokens
-		out.Cost.SwarmTokens += tokens
-	}
-	if err := swarm.Err(); err != nil {
-		return fmt.Errorf("store: insights: swarm tokens: %w", err)
-	}
 	for _, agent := range agents {
 		out.Cost.ByAgent = append(out.Cost.ByAgent, agent)
 	}
 	slices.SortFunc(out.Cost.ByAgent, func(a, b *InsightsCostAgent) int {
-		return cmp.Or(cmp.Compare(b.InputTokens+b.OutputTokens+b.SwarmTokens, a.InputTokens+a.OutputTokens+a.SwarmTokens), cmp.Compare(a.Harness, b.Harness))
+		return cmp.Or(cmp.Compare(b.InputTokens+b.OutputTokens, a.InputTokens+a.OutputTokens), cmp.Compare(a.Harness, b.Harness))
 	})
 	out.Durations.RunsMeasured = len(durations)
 	out.Durations.MedianRun = percentile(durations, 0.5)
@@ -590,7 +540,7 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 	rows, err := tx.QueryContext(ctx, `
 		SELECT t.run_id, t.from_status, t.to_status, t.activity, t.at
 		FROM runs r JOIN run_state_transitions t ON t.run_id = r.id
-		WHERE `+q.runScope()+` AND `+insightsFinishedIn+`
+		WHERE `+q.ownerScope()+` AND `+insightsFinishedIn+`
 		ORDER BY t.run_id, t.at, t.rowid`, args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: state times: %w", err)
@@ -697,7 +647,7 @@ func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 		FROM runs r
 		LEFT JOIN run_pull_requests p ON p.rowid = (
 			SELECT rowid FROM run_pull_requests WHERE run_id = r.id ORDER BY created_at DESC, rowid DESC LIMIT 1)
-		WHERE `+q.runScope()+` AND `+insightsFinishedIn+`
+		WHERE `+q.ownerScope()+` AND `+insightsFinishedIn+`
 		ORDER BY r.finished_at DESC, r.id DESC LIMIT 50`, args...)
 	if err != nil {
 		return fmt.Errorf("store: insights: recent: %w", err)
@@ -725,35 +675,8 @@ func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 	return nil
 }
 
-// insightsSwarms reports the swarms created in range, scoped by their
-// accountable human. Agents are the distinct runs they started; a reserved
-// run ID whose launch never created the run is not one.
-func insightsSwarms(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
-	where := "created_at >= :from AND created_at < :to"
-	if q.Member != "" {
-		where += " AND accountable_human_id = :member"
-	}
-	if q.Workspace != "" {
-		where += " AND workspace_id = :workspace"
-	}
-	err := tx.QueryRowContext(ctx, `WITH
-		m AS MATERIALIZED (SELECT id, phase FROM missions WHERE `+where+`),
-		agents AS (SELECT run_id FROM (`+insightsSwarmRuns+`) WHERE mission_id IN (SELECT id FROM m))
-		SELECT (SELECT COUNT(*) FROM m),
-			(SELECT COUNT(*) FROM m WHERE phase = 'completed'),
-			(SELECT COUNT(*) FROM m WHERE phase = 'cancelled'),
-			(SELECT COUNT(*) FROM agents WHERE run_id IN (SELECT id FROM runs)),
-			(SELECT COUNT(*) FROM mission_acceptances WHERE mission_id IN (SELECT id FROM m))`, args...,
-	).Scan(&out.Swarms.Launched, &out.Swarms.Completed, &out.Swarms.Cancelled, &out.Swarms.Agents, &out.Swarms.TasksAccepted)
-	if err != nil {
-		return fmt.Errorf("store: insights: swarms: %w", err)
-	}
-	return nil
-}
-
-// insightsPullRequests counts recorded PRs of every run in scope, swarm
-// runs included: a PR is one outcome however many agents or runs recorded
-// it.
+// insightsPullRequests counts recorded PRs of every run in scope: a PR is one
+// outcome however many agents or runs recorded it.
 func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(DISTINCT p.repo || '#' || p.number) FILTER (WHERE p.created_at >= :from AND p.created_at < :to),
@@ -767,44 +690,21 @@ func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 	return nil
 }
 
-// insightsSuccess counts the runs and swarms that finished in the range and
-// those with a merged pull request. A swarm finishes when it is completed or
-// cancelled, at the time it did.
+// insightsSuccess counts the runs that finished in the range and those with
+// a merged pull request.
 func insightsSuccess(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE r.status = 'merged' OR EXISTS (
 			SELECT 1 FROM run_pull_requests p WHERE p.run_id = r.id AND p.state = 'merged'))
-		FROM runs r WHERE `+q.runScope()+` AND `+insightsFinishedIn, args...,
+		FROM runs r WHERE `+q.ownerScope()+` AND `+insightsFinishedIn, args...,
 	).Scan(&out.Success.RunsFinished, &out.Success.RunsSucceeded)
 	if err != nil {
 		return fmt.Errorf("store: insights: run success: %w", err)
 	}
-	err = tx.QueryRowContext(ctx, `WITH
-		m AS MATERIALIZED (SELECT id FROM missions WHERE `+q.swarmFinished()+`)
-		SELECT (SELECT COUNT(*) FROM m),
-			(SELECT COUNT(*) FROM m WHERE EXISTS (
-				SELECT 1 FROM (`+insightsSwarmRuns+`) sr JOIN run_pull_requests p ON p.run_id = sr.run_id
-				WHERE sr.mission_id = m.id AND p.state = 'merged'))`, args...,
-	).Scan(&out.Success.SwarmsFinished, &out.Success.SwarmsSucceeded)
-	if err != nil {
-		return fmt.Errorf("store: insights: swarm success: %w", err)
-	}
 	return nil
 }
 
-// swarmFinished selects swarms that finished in [from, to).
-func (q InsightsQuery) swarmFinished() string {
-	where := "phase IN ('completed', 'cancelled') AND finished_at >= :from AND finished_at < :to"
-	if q.Member != "" {
-		where += " AND accountable_human_id = :member"
-	}
-	if q.Workspace != "" {
-		where += " AND workspace_id = :workspace"
-	}
-	return where
-}
-
-// insightsMemberOutcomes buckets how each member's runs and swarms ended. A
+// insightsMemberOutcomes buckets how each member's runs ended. A
 // scoped query lists only that member.
 func insightsMemberOutcomes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	members := "SELECT id, display_name, color FROM members WHERE merged_into = ''"
@@ -816,7 +716,7 @@ func insightsMemberOutcomes(ctx context.Context, tx *sql.Tx, q InsightsQuery, ar
 		return fmt.Errorf("store: insights: members: %w", err)
 	}
 	out.Members, err = collect(rows, func(row interface{ Scan(...any) error }) (*InsightsMemberOutcomes, error) {
-		m := &InsightsMemberOutcomes{Runs: make([]InsightsOutcome, len(q.Buckets)), Swarms: make([]InsightsOutcome, len(q.Buckets))}
+		m := &InsightsMemberOutcomes{Runs: make([]InsightsOutcome, len(q.Buckets))}
 		return m, row.Scan(&m.ID, &m.Name, &m.Color)
 	})
 	if err != nil {
@@ -838,17 +738,9 @@ func insightsMemberOutcomes(ctx context.Context, tx *sql.Tx, q InsightsQuery, ar
 				COUNT(*) FILTER (WHERE r.status = 'failed'),
 				COUNT(*) FILTER (WHERE r.status IN ('abandoned', 'interrupted'))
 			FROM runs r JOIN b ON r.finished_at >= b.lo AND r.finished_at < b.hi
-			WHERE ` + q.runScope() + ` AND r.status IN ` + insightsTerminal + `
+			WHERE ` + q.ownerScope() + ` AND r.status IN ` + insightsTerminal + `
 			GROUP BY r.member_id, b.i`,
 			func(m *InsightsMemberOutcomes) []InsightsOutcome { return m.Runs }},
-		{"swarms", `WITH ` + buckets + `
-			SELECT m.accountable_human_id, b.i,
-				COUNT(*) FILTER (WHERE m.phase = 'completed'), 0,
-				COUNT(*) FILTER (WHERE m.phase = 'cancelled')
-			FROM missions m JOIN b ON m.finished_at >= b.lo AND m.finished_at < b.hi
-			WHERE ` + q.swarmFinished() + `
-			GROUP BY m.accountable_human_id, b.i`,
-			func(m *InsightsMemberOutcomes) []InsightsOutcome { return m.Swarms }},
 	} {
 		if err := scanMemberOutcomes(ctx, tx, outcomes.query, args, byID, outcomes.pick); err != nil {
 			return fmt.Errorf("store: insights: member %s: %w", outcomes.name, err)
@@ -878,7 +770,7 @@ func scanMemberOutcomes(ctx context.Context, tx *sql.Tx, query string, args []an
 }
 
 // insightsLive reads what ignores the range: runs that need a member now,
-// swarm runs included as on the Board, and when this server started
+// and when this server started
 // recording transitions and PRs.
 func insightsLive(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	rows, err := tx.QueryContext(ctx, runSnapshotQuery(`runs.id IN (SELECT r.id FROM runs r WHERE `+q.ownerScope()+`

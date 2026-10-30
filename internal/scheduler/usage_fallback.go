@@ -325,8 +325,7 @@ func (s *Scheduler) awaitUsageLimit(entry *supervised) bool {
 
 // markUsageLimit records the adapter's usage-limit signal for a headless
 // run, in the sidecar too, so a restart that finds the agent exited still
-// knows why. A swarm worker's container outlives its agent, so its move
-// starts here rather than at the container's exit.
+// knows why.
 func (s *Scheduler) markUsageLimit(run domain.RunID, message, session string) {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -338,15 +337,10 @@ func (s *Scheduler) markUsageLimit(run domain.RunID, message, session string) {
 		}
 		s.setUsageLimitLocked(entry, message)
 	}
-	supervised := live && entry.missionAssigned
 	s.mu.Unlock()
 	if newSession {
 		s.recordAgentSession(context.Background(), entry)
 	}
-	if !supervised {
-		return
-	}
-	s.goMove(func() { s.continueWorker(entry, message) })
 }
 
 // setUsageLimitLocked records the agent's usage-limit message until a move
@@ -359,22 +353,6 @@ func (s *Scheduler) setUsageLimitLocked(entry *supervised, message string) {
 	}
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: persist the usage limit", "run", entry.runID, "error", err)
-	}
-}
-
-// continueWorker moves a swarm worker whose agent stopped on its usage limit
-// while its container lives on.
-func (s *Scheduler) continueWorker(entry *supervised, message string) {
-	outcome, reason := s.continueLiveRun(entry, false, message)
-	switch outcome {
-	case usageContinued, usageShutdown, usageSkipped:
-		return
-	}
-	s.clearUsageLimit(entry)
-	if outcome == usageNoFallback {
-		if err := s.ReportAgentState(context.Background(), entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: reason}); err != nil {
-			slog.Warn("scheduler: report the exhausted account", "run", entry.runID, "error", err)
-		}
 	}
 }
 
@@ -406,7 +384,7 @@ func (s *Scheduler) continueStandard(entry *supervised, message string) {
 // resources.
 func (s *Scheduler) resumeUsageMove(entry *supervised) {
 	s.mu.Lock()
-	message, mode, acp, assigned := entry.usageLimit, entry.launchMode, entry.acp, entry.missionAssigned
+	message, mode, acp := entry.usageLimit, entry.launchMode, entry.acp
 	s.mu.Unlock()
 	if message == "" {
 		return
@@ -422,8 +400,6 @@ func (s *Scheduler) resumeUsageMove(entry *supervised) {
 			s.acp.usageLimit(entry, mode == domain.LaunchHeadless, acphost.TurnState{Reason: "error", Failed: errors.New(message)}, message)
 		case mode == domain.LaunchTUI:
 			s.continueStandard(entry, message)
-		case assigned:
-			s.continueWorker(entry, message)
 		}
 	})
 }
@@ -822,8 +798,7 @@ func (s *Scheduler) commitMove(ctx context.Context, entry *supervised, f *UsageF
 }
 
 // replaceContainer removes the run's container, records the run on to, and
-// starts the replacement on to's login. A failure leaves no replacement and
-// no container the swarm keeps.
+// starts the replacement on to's login. A failure leaves no replacement.
 func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *UsageFallback, run *domain.Run, from, to domain.MemberID, session string) (usageOutcome, string) {
 	fromName, toName := s.memberName(ctx, from), s.memberName(ctx, to)
 	failure := func(err error) string {
@@ -839,7 +814,6 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		}
 		s.mu.Lock()
 		entry.accountSwap = nil
-		entry.noRetain = true
 		if entry.containerID != cid && !entry.destroyPending {
 			// startRunContainer destroyed the replacement it created. The
 			// old container stays the run's until it is confirmed gone, so
@@ -922,10 +896,9 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		return failed(err)
 	}
 	s.mu.Lock()
-	persistSupervisor := entry.missionAssigned
 	plan.Egress = entry.egress
 	s.mu.Unlock()
-	_, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, persistSupervisor, unlockCaches)
+	_, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, unlockCaches)
 	unlockCaches()
 	if err != nil {
 		return failed(err)
@@ -978,8 +951,6 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		})
 	case run.Mode == domain.LaunchTUI:
 		s.goMove(func() { s.continueStandard(entry, again) })
-	case persistSupervisor:
-		s.markUsageLimit(run.ID, again, "")
 	}
 	return usageContinued, ""
 }

@@ -310,22 +310,15 @@ it). Subagent sub-lanes use the same fills.
 | History not loaded | hollow, dotted `border-icon-faint` |
 
 Neighbouring spans that share a fill draw as one. A bar that starts before
-the window fades in over its first 32px (a mask, not a colour). Strips (a
-folded swarm's workers, folded Finished) are 6px and 8px `bg-current` pills
+the window fades in over its first 32px (a mask, not a colour). Strips (folded Finished) are 6px and 8px `bg-current` pills
 in the state's text colour, neighbours of one colour drawn as one; each
-stretch is at least 1/300 of the window, so a brief failure still shows. A
-folded swarm's strip takes the most urgent worker state at each moment, in
-the order Needs you, Failed, Working, Ready for review, Paused, Waiting,
-Done, Closed, so every worker in the window shows on it.
+stretch is at least 1/300 of the window, so a brief failure still shows.
 
 Links use the categorical series by meaning:
 
 | Link | Colour | Style | Ends |
 | --- | --- | --- | --- |
-| Integrator launched worker | `text-series-7` | solid 1.5px; dashed `5 3` across owners | arrowhead at the worker's bar |
 | Agent message | `text-series-5` | dotted, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a chip with the kind glyph and count |
-| Submission | `text-state-done` accepted, `text-state-failed` rejected, `text-muted` otherwise | solid 1.25px | open circle at the worker, arrowhead at the integrator, ✓ or ✕ chip |
-| Task dependency | `text-muted` | dashed `2 2` S-curve with 16px handles | none |
 | File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
 | Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
 
@@ -380,7 +373,7 @@ importing `lucide-react`. The same module holds `Claude`, the Claude mark that
 Use compact workbench geometry rather than landing-page ornament:
 
 - A branded header with horizontal navigation; destinations that do not fit
-  move into **More navigation**, except Board and Swarms. One sidebar, 260px
+  move into **More navigation**, except Board. One sidebar, 260px
   by default and resizable from 220px to 400px; under 768px it is a side
   sheet, opened from a second, 48px toolbar. The desktop window bar is 35px.
 - 44px view headers (`PaneHeader`), 56px for a run's header, 32px terminal
@@ -441,8 +434,7 @@ Use compact workbench geometry rather than landing-page ornament:
   for the larger text sizes, 20px taller on a coarse pointer) on a
   `bg-chrome` canvas: `bg-canvas` with `shadow-card`, a 22px `bg-chrome` agent
   tile, the state as a soft `Badge` led by its `StatusDot`, and no pulse.
-  Swarms are org charts joined by 1.5px `icon-faint` connectors with rounded
-  corners and an 8px ringed dot under the integrator. Owner sections, when
+  Owner sections, when
   there are two or more, and Needs you elsewhere are `border-seam` frames
   with no fill; identity colour stays on the shared avatars. The **N needs
   you** and **N failed** chips are small buttons on their state's soft fill,
@@ -482,7 +474,7 @@ The shell has a branded navigation header above one sidebar and the content
 view, with no icon rail or status bar. The Aether mark and title sit at its
 left; Board through Templates follow as horizontal `ListRow`s. Measure
 available width rather than assuming every label fits a breakpoint, and
-keep Board and Swarms outside the overflow menu. The header and sidebar use
+keep Board outside the overflow menu. The header and sidebar use
 `bg-chrome` with seams against the content; navigation rows have muted icons
 and the open page in `bg-selection`. **New run** at the sidebar's top is the
 only filled button in the shell.
@@ -492,10 +484,8 @@ agent's title, a compact age ("15m") in `text-ui-sm` muted tabular figures
 and a monochrome `AgentGlyph`. The people on a run follow as 16px avatars
 overlapping by 6px, the first one whole at the right edge, each ringed in
 the row's own background so the one in front cuts into the one behind.
-A swarm's root also has a `Waypoints` graph-node button before the age; it
-opens swarm controls while the row opens the run. Use
-the same icon for swarm navigation and commands. Swarm children are
-indented 26px under the root and joined to it by 1px `icon-faint` tree
+Child runs are
+indented 26px under their parent and joined to it by 1px `icon-faint` tree
 connectors: a trunk under the centre of the root's status dot, and for each
 child a wire from the trunk to the row's left edge, level with the child's
 dot. The trunk ends at the last child's wire. Connectors stay in the indent,
@@ -629,8 +619,7 @@ literal time or curve.
   coordinates on `--duration-glide` / `--ease-glide` (never DOM-measured,
   since the world is scaled), new cards rise 6px and fade in over 220ms after
   a 150ms hold, staggered by `--stagger-row` up to the eighth, and removed
-  cards fade out over 130ms. Folding fades workers out last to first before
-  the repack. Hydration and scope changes never animate.
+  cards fade out over 130ms. Hydration and scope changes never animate.
 - A popover may animate what it shows: the Context window tweens its token
   total over 500ms and recolours its grid cells on the glide curve, each 2ms
   after the one before (`--stagger-cell`). Nothing runs on open; the number and
@@ -650,7 +639,7 @@ literal time or curve.
   `TextSwap` and Copy's icon with `IconSwap`.
 - `state-pulse` (the run header's working dot, the Session view's live row
   and live steps header, a plan's step in progress, the dot under a streaming
-  answer and the working rows on a swarm's Tasks list) breathes: opacity to
+  answer) breathes: opacity to
   `--opacity-muted` and size to two thirds and back each second.
   `live-shimmer`, on those rows' reasons and on a working lane's activity in
   Board's Lanes, sweeps a light band across muted text in 1.4s of each 1.6s.

@@ -1,23 +1,20 @@
 import { flattenWorkflow } from '@/components/workflow/flatten'
 import type { SessionItem, SessionToolCall } from '@/lib/session-types'
 import { presentRun, runLabel } from '@/lib/status'
-import type { MissionAttempt, MissionSubmission, Run } from '@/lib/types'
-import type { MissionDetail } from '@/store/missions'
+import type { Run } from '@/lib/types'
 import { toRecord } from '@/store/runs'
 import { indexItems, noAgents } from '@/store/subagents'
 import {
   countsText,
   deriveRunWorkflow,
-  deriveSwarmWorkflow,
   needsYouBelow,
   runFacts,
   shareTree,
   type ChildRunFacts,
-  type RunFacts,
   type WorkflowNode,
 } from '@/store/workflow'
 import { resetItems, tool } from '@/test/acp-stream'
-import { mission, missionTask, missionTaskRevision, run, stateContext } from '@/test/fixtures'
+import { run, stateContext } from '@/test/fixtures'
 
 beforeEach(resetItems)
 
@@ -93,89 +90,6 @@ describe('run workflow', () => {
   })
 })
 
-function attempt(over: Partial<MissionAttempt>): MissionAttempt {
-  return {
-    id: 'att_1', mission_id: 'mission_1', task_id: 'task_1', task_revision: 1, number: 1, dispatch_key: 'k',
-    harness: 'claude', mode: 'acp', state: 'running', run_id: 'run_w1', authority_generation: 1,
-    integrator_generation: 1, created_at: '2026-08-14T10:03:00Z', reserved_at: '2026-08-14T10:03:00Z', ...over,
-  }
-}
-
-function submission(over: Partial<MissionSubmission>): MissionSubmission {
-  return {
-    id: 'sub_1', mission_id: 'mission_1', task_id: 'task_1', task_revision: 1, attempt_id: 'att_1',
-    ref: { workspace_id: 'ws', run_id: 'run_w1', evidence_ref: 'e', retained_revision: 'abc' },
-    evidence: [], state: 'proposed', proposed_by_run_id: 'run_w1', integrator_generation: 1, created_at: '2026-08-14T10:10:00Z', ...over,
-  }
-}
-
-const tasks = [
-  missionTask(),
-  missionTask({ id: 'task_2', revision: missionTaskRevision({ task_id: 'task_2', title: 'Second' }), status: 'ready', dependencies: [{ task_id: 'task_2', revision: 1, depends_on_task_id: 'task_1', depends_on_revision: 1 }] }),
-]
-
-function swarm(over: Partial<MissionDetail> = {}, runs: Record<string, RunFacts> = {}) {
-  const detail: MissionDetail = {
-    mission: mission({ current_integrator_run_id: 'run_int' }),
-    tasks,
-    attempts: [attempt({})],
-    submissions: [],
-    diagnostics: [],
-    questions: [],
-    ...over,
-  }
-  return deriveSwarmWorkflow({ detail, runs, integratorLabel: 'Integrator' })
-}
-
-describe('swarm workflow', () => {
-  it('links task to attempt to submission', () => {
-    const tree = swarm({ submissions: [submission({ state: 'accepted', decided_at: '2026-08-14T10:12:00Z' })] })
-    expect(tree.children.map((child) => child.id)).toEqual(['task:task_1', 'task:task_2'])
-    const task = byID(tree, 'task:task_1')!
-    expect(task.state).toBe('completed')
-    expect(task.children[0]).toMatchObject({ id: 'attempt:att_1', parentId: 'task:task_1', runId: 'run_w1' })
-    expect(task.children[0]!.children[0]).toMatchObject({ id: 'submission:sub_1', parentId: 'attempt:att_1', state: 'completed', label: 'Accepted' })
-    expect(countsText(tree.counts!)).toBe('1 of 2 tasks done')
-    expect(byID(tree, 'task:task_2')).toMatchObject({ state: 'pending', detail: 'No worker yet · Depends on rewrite the guest checkout flow' })
-    expect(byID(swarm(), 'task:task_2')).toMatchObject({ state: 'waiting', detail: 'Waiting on rewrite the guest checkout flow' })
-  })
-
-  it('counts a task done only for an accepted submission of its current revision', () => {
-    const stale = swarm({ tasks: [missionTask({ current_revision: 2 })], submissions: [submission({ state: 'accepted', task_revision: 1 })] })
-    expect(stale.counts).toMatchObject({ done: 0, total: 1 })
-    expect(stale.children[0]!.children[0]!.children[0]!.label).toBe('Accepted for revision 1')
-  })
-
-  it('reads a task from its current revision and names the prerequisites that block it', () => {
-    const revised = swarm({
-      tasks: [missionTask({ current_revision: 2, status: 'ready' }), { ...tasks[1]!, status: 'blocked', blockers: [{ kind: 'dependency', action: 'wait' }] }],
-      attempts: [attempt({ state: 'completed', task_revision: 1 })],
-    })
-    expect(byID(revised, 'task:task_1')).toMatchObject({ state: 'pending', detail: 'No worker yet' })
-    expect(byID(revised, 'task:task_2')).toMatchObject({ state: 'waiting', detail: 'Waiting on rewrite the guest checkout flow' })
-  })
-
-  it('surfaces a worker that needs you through its folded task', () => {
-    const asking = facts({ id: 'run_w1', status: 'needs-attention', state: 'needs-you', reason: 'approve a command' })
-    const tree = swarm({}, { run_w1: asking })
-    const task = byID(tree, 'task:task_1')!
-    expect(task.state).toBe('needs-you')
-    expect(needsYouBelow(tree).map((node) => node.id)).toEqual(['attempt:att_1'])
-    const rows = flattenWorkflow(tree, new Map([['task:task_1', false]]))
-    const surfaced = rows.find((row) => row.surfaced)
-    expect(surfaced).toMatchObject({ key: 'task:task_1>attempt:att_1', level: 3, parentKey: 'task:task_1' })
-  })
-
-  it('keeps the other tasks when one worker changes state', () => {
-    const working = facts({ id: 'run_w1', status: 'running', state: 'working' })
-    const detail = { attempts: [attempt({}), attempt({ id: 'att_2', task_id: 'task_2', run_id: 'run_w2' })] }
-    const prev = swarm(detail, { run_w1: working, run_w2: working })
-    const next = shareTree(prev, swarm(detail, { run_w1: working, run_w2: facts({ id: 'run_w2', status: 'running', state: 'waiting-ci' }) }))
-    expect(byID(next, 'task:task_1')).toBe(byID(prev, 'task:task_1'))
-    expect(byID(next, 'task:task_2')!.state).toBe('waiting-ci')
-  })
-})
-
 describe('child runs', () => {
   const childFacts = (runId: string, parentRunId: string, over: Partial<Run> = {}): ChildRunFacts =>
     ({ ...facts({ id: runId, child_purpose: `review ${runId}`, ...over }), runId, parentRunId })
@@ -185,16 +99,6 @@ describe('child runs', () => {
     expect(byID(tree, 'run:c1')).toMatchObject({ parentId: 'run:run_1', kind: 'run', label: 'review c1', runId: 'c1' })
     expect(byID(tree, 'run:c2')).toMatchObject({ parentId: 'run:c1', state: 'needs-you' })
     expect(needsYouBelow(tree).map((node) => node.id)).toEqual(['run:c2'])
-  })
-
-  it('nests a worker\'s child runs under its attempt and the integrator\'s under the root', () => {
-    const detail: MissionDetail = { mission: mission({ current_integrator_run_id: 'run_int' }), tasks, attempts: [attempt({})], submissions: [], diagnostics: [], questions: [] }
-    const tree = deriveSwarmWorkflow({
-      detail, runs: {}, integratorLabel: 'Integrator',
-      childRuns: [childFacts('wc', 'run_w1'), childFacts('ic', 'run_int')],
-    })
-    expect(byID(tree, 'run:wc')?.parentId).toBe('attempt:att_1')
-    expect(byID(tree, 'run:ic')?.parentId).toBe('integrator:mission_1')
   })
 })
 

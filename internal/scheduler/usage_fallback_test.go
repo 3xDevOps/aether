@@ -1066,45 +1066,6 @@ func TestShutdownDuringAMoveLeavesTheRunForRecovery(t *testing.T) {
 	}
 }
 
-// A swarm worker whose replacement container cannot be created has no
-// container left to retain: it fails at once with the real error and leaves
-// the scheduler, so its attempt settles instead of holding a swarm slot.
-func TestWorkerWhoseMoveFailsFinishesWithoutRetention(t *testing.T) {
-	t.Parallel()
-	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
-	e.share(t)
-	startScheduler(t, e.sched)
-	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-		WorkspaceID: e.ws.ID, RunID: "moving-worker", Actor: e.member.ID,
-		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
-		Harness: "claude", Mode: domain.LaunchHeadless,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-e.sched.RecoveryReady()
-	e.rt.mu.Lock()
-	e.rt.createErr = errors.New("no space left on device")
-	e.rt.mu.Unlock()
-	if _, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
-		Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: create container: no space left on device" {
-		t.Fatalf("reason %q", got.Reason)
-	}
-	waitFor(t, "the worker released", func() bool {
-		e.sched.mu.Lock()
-		defer e.sched.mu.Unlock()
-		return e.sched.runs[run.ID] == nil
-	})
-	if _, err := e.sched.readSidecar(run.ID); !os.IsNotExist(err) || len(notes.all()) != 0 || e.containerCount() != 0 {
-		t.Fatalf("sidecar %v, notes %v, %d containers; want the worker gone without a move", err, notes.all(), e.containerCount())
-	}
-}
-
 // A move that cannot remove the exhausted container fails the run, which
 // keeps owning that container: it may still run with Ada's login mounted.
 func TestMoveThatCannotRemoveTheOldContainerKeepsIt(t *testing.T) {
@@ -1137,11 +1098,10 @@ func TestMoveThatCannotRemoveTheOldContainerKeepsIt(t *testing.T) {
 
 // A server that stops while a live run's move reads quota keeps the run's
 // usage limit, and the next server moves the run once it has recovered it:
-// a swarm worker whose container outlives its agent, a Standard run and an
-// Enhanced run.
+// a Standard run and an Enhanced run.
 func TestRestartResumesALiveRunsMove(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []string{"worker", "standard", "enhanced"} {
+	for _, tc := range []string{"standard", "enhanced"} {
 		t.Run(tc, func(t *testing.T) {
 			t.Parallel()
 			mutate := func(cfg *Config) { delete(cfg.Harnesses, "claude") }
@@ -1162,12 +1122,6 @@ func TestRestartResumesALiveRunsMove(t *testing.T) {
 			var run *domain.Run
 			var err error
 			switch tc {
-			case "worker":
-				run, err = e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-					WorkspaceID: e.ws.ID, RunID: "resumed-worker", Actor: e.member.ID,
-					RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
-					Harness: "claude", Mode: domain.LaunchHeadless,
-				})
 			case "standard":
 				run, err = e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix it", "claude", domain.LaunchTUI)
 			default:
@@ -1178,10 +1132,6 @@ func TestRestartResumesALiveRunsMove(t *testing.T) {
 			}
 			<-e.sched.RecoveryReady()
 			switch tc {
-			case "worker":
-				_, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
-					Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
-				}})
 			case "standard":
 				if err = e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: "sess-1"}); err != nil {
 					t.Fatal(err)
@@ -1344,45 +1294,6 @@ func TestDuplicateLimitDuringAMoveKeepsTheMark(t *testing.T) {
 	}
 	if got := session.Load(); got != "sess-1" {
 		t.Fatalf("session after the old agent's repeat = %v, want it taken for the old container's and ignored", got)
-	}
-}
-
-// A swarm worker whose old container cannot be removed fails with that
-// error, stays on its account, and keeps the container for cleanup to retry
-// rather than for the swarm.
-func TestWorkerWhoseOldContainerCannotBeRemovedFails(t *testing.T) {
-	t.Parallel()
-	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
-	e.share(t)
-	startScheduler(t, e.sched)
-	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-		WorkspaceID: e.ws.ID, RunID: "stuck-worker", Actor: e.member.ID,
-		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
-		Harness: "claude", Mode: domain.LaunchHeadless,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-e.sched.RecoveryReady()
-	first := e.rt.byName(string(run.ID))
-	e.rt.mu.Lock()
-	e.rt.destroyErr = errors.New("daemon busy")
-	e.rt.mu.Unlock()
-	if _, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
-		Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: remove the container on Ada's account: daemon busy" || got.AccountMemberID != e.member.ID {
-		t.Fatalf("worker = reason %q account %s", got.Reason, got.AccountMemberID)
-	}
-	waitFor(t, "the old container kept for cleanup", func() bool {
-		sc, scErr := e.sched.readSidecar(run.ID)
-		return scErr == nil && sc.DestroyPending && sc.ContainerID == string(first.id)
-	})
-	if segments, err := e.db.ListRunAccountSegments(t.Context(), run.ID); err != nil || len(segments) != 0 || len(notes.all()) != 0 {
-		t.Fatalf("segments %+v, %v, notes %v; want no move recorded", segments, err, notes.all())
 	}
 }
 

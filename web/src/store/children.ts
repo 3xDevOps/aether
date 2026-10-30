@@ -54,5 +54,5 @@ export function useChildSettingsRead(client: Api = api, attempt = 0): ChildSetti
 /** Stopping `run` stops these too: its direct child runs that are still going and not detached. */
 export function unfinishedChildren(runs: Record<string, RunRecord>, run: RunRecord): RunRecord[] {
   return Object.values(runs).filter((child) =>
-    child.parent_run_id === run.id && child.mission_role !== 'worker' && !child.detached && !isTerminal(child.status))
+    child.parent_run_id === run.id && !child.detached && !isTerminal(child.status))
 }

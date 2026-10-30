@@ -25,7 +25,6 @@ type attentionRow struct {
 	Kind        string         `json:"kind"`
 	Reason      string         `json:"reason"`
 	RunID       string         `json:"run_id"`
-	MissionID   string         `json:"mission_id,omitempty"`
 	WorkspaceID string         `json:"workspace_id"`
 	Harness     string         `json:"harness"`
 	Since       string         `json:"since,omitempty"`
@@ -45,18 +44,15 @@ type attentionText struct {
 }
 
 var attentionLabels = map[string]string{
-	protocol.AttentionKindPermission:     "The agent asks permission",
-	protocol.AttentionKindQuestion:       "The agent asks a question",
-	protocol.AttentionKindQueuedMessage:  "A message awaits your approval to deliver",
-	protocol.AttentionKindRoomQuestion:   "A teammate asked a question",
-	protocol.AttentionKindSwarmQuestion:  "The integrator has a question",
-	protocol.AttentionKindIntegratorDown: "The swarm's integrator stopped",
-	protocol.AttentionKindControlHold:    "You hold control of a worker",
-	protocol.AttentionKindDisconnected:   "Agent disconnected",
-	protocol.AttentionKindBlocked:        "The agent reports it is blocked",
-	protocol.AttentionKindNeedsInput:     "The agent needs your input",
-	protocol.AttentionKindReady:          "The agent reports the task finished",
-	protocol.AttentionKindFailed:         "The agent reported failure",
+	protocol.AttentionKindPermission:    "The agent asks permission",
+	protocol.AttentionKindQuestion:      "The agent asks a question",
+	protocol.AttentionKindQueuedMessage: "A message awaits your approval to deliver",
+	protocol.AttentionKindRoomQuestion:  "A teammate asked a question",
+	protocol.AttentionKindDisconnected:  "Agent disconnected",
+	protocol.AttentionKindBlocked:       "The agent reports it is blocked",
+	protocol.AttentionKindNeedsInput:    "The agent needs your input",
+	protocol.AttentionKindReady:         "The agent reports the task finished",
+	protocol.AttentionKindFailed:        "The agent reported failure",
 }
 
 func attentionLabel(kind string) string {
@@ -65,7 +61,7 @@ func attentionLabel(kind string) string {
 
 func attentionRowOf(it protocol.AttentionItem, l links) attentionRow {
 	text := &attentionText{Title: clip(it.Title, maxReport), Reason: clip(it.Reason, maxText)}
-	row := attentionRow{Kind: it.Kind, Reason: attentionLabel(it.Kind), RunID: it.RunID, MissionID: it.MissionID, WorkspaceID: it.WorkspaceID,
+	row := attentionRow{Kind: it.Kind, Reason: attentionLabel(it.Kind), RunID: it.RunID, WorkspaceID: it.WorkspaceID,
 		Harness: it.Harness, Since: it.Since, URL: l.run(it.RunID), Untrusted: text}
 	switch {
 	case it.Request != nil:
@@ -96,7 +92,7 @@ func answerWith(it protocol.AttentionItem) string {
 			return "open untrusted.link_url, then aether_answer with an option"
 		}
 		return "aether_answer"
-	case protocol.AttentionKindSwarmQuestion, protocol.AttentionKindRoomQuestion:
+	case protocol.AttentionKindRoomQuestion:
 		if it.Message != nil {
 			return "aether_answer"
 		}
@@ -107,10 +103,6 @@ func answerWith(it protocol.AttentionItem) string {
 		return "aether_pr_status, then aether_mark_reviewed or aether_stop_run with outcome"
 	case protocol.AttentionKindFailed:
 		return "aether_get_run, then aether_message_run or aether_stop_run with outcome"
-	case protocol.AttentionKindIntegratorDown:
-		return "aether_replace_integrator"
-	case protocol.AttentionKindControlHold:
-		return "aether_swarm_manage with release_worker"
 	}
 	return dashboard
 }

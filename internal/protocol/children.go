@@ -63,8 +63,8 @@ type ChildChoice struct {
 	Harness         string   `json:"harness"`
 	Modes           []string `json:"modes"`
 	DefaultMode     string   `json:"default_mode"`
-	// Model is the exact model a swarm choice fixes; empty with Models
-	// empty means any model the agent accepts.
+	// Model is the exact model a choice fixes; empty with Models empty
+	// means any model the agent accepts.
 	Model  string   `json:"model,omitempty"`
 	Models []string `json:"models,omitempty"`
 	// Status is "ready", "exhausted" (usage at the fallback threshold),
@@ -85,10 +85,7 @@ type ChildOptionsResult struct {
 	Allowed bool `json:"allowed"`
 	// Reason is the exact refusal child.start would return; empty when
 	// allowed.
-	Reason string `json:"reason,omitempty"`
-	// Scope is "swarm" (the swarm's choices) or "member" (the owner's
-	// child-run setting).
-	Scope   string        `json:"scope"`
+	Reason  string        `json:"reason,omitempty"`
 	OwnerID string        `json:"owner_member_id"`
 	Limits  ChildLimits   `json:"limits"`
 	Busy    int           `json:"busy"`

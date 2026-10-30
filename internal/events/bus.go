@@ -40,9 +40,6 @@ type Filter struct {
 	// Runs matches events carrying any of these run IDs, and agent messages
 	// addressed to one of them. Empty means all.
 	Runs []domain.RunID
-	// Mission also matches mission.changed and integration.changed events
-	// of this mission, which carry no run.
-	Mission domain.MissionID
 	// Types matches only events whose Type is listed. Empty means all.
 	Types []Type
 }
@@ -55,7 +52,7 @@ func (f Filter) Matches(e Event) bool {
 	if f.Run != "" && e.RunID != f.Run {
 		return false
 	}
-	if (len(f.Runs) > 0 || f.Mission != "") && !f.matchesRuns(e) {
+	if len(f.Runs) > 0 && !f.matchesRuns(e) {
 		return false
 	}
 	if len(f.Types) == 0 {
@@ -76,8 +73,6 @@ func (f Filter) matchesRuns(e Event) bool {
 	switch p := e.Payload.(type) {
 	case CoordMessagePayload:
 		return slices.Contains(f.Runs, p.ToRunID)
-	case MissionChangedPayload:
-		return f.Mission != "" && p.MissionID == f.Mission
 	}
 	return false
 }

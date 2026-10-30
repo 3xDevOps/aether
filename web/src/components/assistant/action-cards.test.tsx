@@ -8,7 +8,7 @@ import type { SessionItem } from '@/lib/session-types'
 import type { Preference } from '@/lib/types'
 import { useStore } from '@/store'
 import { item, resetItems, ScriptedSession, say, tool } from '@/test/acp-stream'
-import { alice, mission, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
+import { alice, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -188,21 +188,18 @@ describe('action cards', () => {
     expect(within(aside).getByText('Auto-approved: Stop run run_x')).toBeDefined()
   })
 
-  it('opens a merged pull request in a new tab and a swarm from a dashboard link on another host in the app', async () => {
+  it('opens a merged pull request in a new tab', async () => {
     const opened = vi.fn()
     vi.stubGlobal('open', opened)
     const aside = await openPanel([
       item('turn_start', 1),
-      say(1, 'user', 'Merge and start a swarm'),
+      say(1, 'user', 'Merge it'),
       aether(1, 't1', 'aether_pr_merge', 'completed', { raw_input: { run_id: 'run_fix' }, content: [{ type: 'text', text: JSON.stringify({ number: 42, url: 'https://github.com/acme/api/pull/42' }) }] }),
-      aether(1, 't2', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { url: 'https://aether.example/?page=missions&id=mis_7', ids: { mission_id: 'mis_7' } } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const merged = await card(aside, /^Merged PR #42\. Done$/)
     await userEvent.click(within(merged).getByRole('button', { name: 'Open pull request' }))
     expect(opened).toHaveBeenCalledWith('https://github.com/acme/api/pull/42', '_blank', 'noopener,noreferrer')
-    await userEvent.click(within(await card(aside, /^Launched swarm on main-repo\. Working in the background$/)).getByRole('button', { name: 'Open swarm' }))
-    expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mis_7' } })
   })
 
   it("shows a launch receipt and a watch's state, conditions and last delivery", async () => {
@@ -467,54 +464,6 @@ describe('quiet outcomes and names', () => {
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     expect(await card(aside, /^Stopped run Fix the flaky login test\. Done$/)).toBeDefined()
-  })
-
-  it('reads a launched swarm it has not loaded, working until the swarm says it finished', async () => {
-    let finish!: (value: Awaited<ReturnType<typeof api.missionShow>>) => void
-    vi.mocked(api.missionShow).mockReturnValue(new Promise((resolve) => { finish = resolve }))
-    const aside = await openPanel([
-      item('turn_start', 1),
-      say(1, 'user', 'Start a swarm'),
-      aether(1, 't1', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { ids: { mission_id: 'mis_7' } } }),
-      item('turn_end', 1, { stop_reason: 'end_turn' }),
-    ])
-    expect(await card(aside, /^Launched swarm on main-repo\. Working in the background$/)).toBeDefined()
-    expect(api.missionShow).toHaveBeenCalledWith('mis_7')
-    act(() => finish({ mission: mission({ id: 'mis_7', phase: 'completed' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] }))
-    expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
-    act(() => useStore.setState({ missions: {} }))
-    expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
-  })
-
-  it('shows why a launched swarm could not be read instead of calling it working', async () => {
-    vi.mocked(api.missionShow).mockRejectedValue(new Error('mission.get: mission mis_7 not found (-32004)'))
-    const aside = await openPanel([
-      item('turn_start', 1),
-      say(1, 'user', 'Start a swarm'),
-      aether(1, 't1', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { ids: { mission_id: 'mis_7' } } }),
-      item('turn_end', 1, { stop_reason: 'end_turn' }),
-    ])
-    const launched = await card(aside, /^Launched swarm on main-repo\. Done$/)
-    expect(within(launched).getByText('Could not read swarm mis_7: mission.get: mission mis_7 not found (-32004)')).toBeDefined()
-  })
-
-  it('reads a launched swarm again on each of its changes, so the card and the history agree', async () => {
-    vi.mocked(api.missionShow).mockResolvedValue({ mission: mission({ id: 'mis_7', phase: 'active' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })
-    const aside = await openPanel([
-      item('turn_start', 1),
-      say(1, 'user', 'Start a swarm'),
-      aether(1, 't1', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { ids: { mission_id: 'mis_7' } } }),
-      item('turn_end', 1, { stop_reason: 'end_turn' }),
-    ])
-    expect(await card(aside, /^Launched swarm on main-repo\. Working in the background$/)).toBeDefined()
-    await waitFor(() => expect(useStore.getState().missions.mis_7?.phase).toBe('active'))
-
-    vi.mocked(api.missionShow).mockResolvedValue({ mission: mission({ id: 'mis_7', phase: 'completed' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })
-    act(() => useStore.getState().bumpWorkflowSignal('missionSeq', 'mis_7'))
-    expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
-    await userEvent.click(within(aside).getByRole('button', { name: 'Actions' }))
-    const history = await screen.findByRole('dialog', { name: 'Actions in this conversation' })
-    expect(within(history).getByText(/^Done · opens the swarm$/)).toBeDefined()
   })
 
   it('says what a launch started without a receipt, and how the member hears back', async () => {

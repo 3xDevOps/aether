@@ -1,28 +1,25 @@
 # Insights
 
 **Insights** in the dashboard sidebar shows what your agents did over the last
-7 days: runs and swarms that finished, how many ended in a merged pull
+7 days: runs that finished, how many ended in a merged pull
 request, time spent, tokens and cost. The server computes the numbers from its
 own database, and nothing is sent anywhere else.
 
-A **run** is one agent session in its own container. A **swarm** is a group of
-runs: one integrator run splits an objective into tasks and starts worker runs
-for them (see [teams.md](teams.md#swarms)).
+A **run** is one agent session in its own container.
 
 ## What the page shows
 
 The page opens on your active workspace. With two or more workspaces, a
 selector at the top switches workspace or shows **All workspaces**. It has two
 blocks of tiles, each with a daily chart:
-**My statistics** counts runs you own and swarms you are accountable for, and
+**My statistics** counts runs you own, and
 **Team statistics** counts every member's, with each member's color in the
 chart. Below them:
 
 | Section | What it shows |
 | --- | --- |
-| Runs / swarms completed | How many ended, plus how many failed or were abandoned |
-| Success rate | Share of finished runs and swarms that merged a pull request |
-| Swarm tasks accepted | Tasks the integrators of your swarms accepted |
+| Runs completed | How many ended, plus how many failed or were abandoned |
+| Success rate | Share of finished runs that merged a pull request |
 | Total tokens used | Tokens across all runs, and the agent that used the most |
 | Finished work | Your runs that ended in the last 7 days, newest first, up to 50 |
 | Last 26 weeks | A heatmap of how many runs were active each day |
@@ -35,34 +32,28 @@ none. The sections below the tiles cover only your runs.
 
 ## Which runs count
 
-Run counts include only top-level runs: runs that are not part of a swarm. A
-swarm's runs are counted once, as the swarm, so a worker that is retried or an
-integrator that is replaced never adds a run. Two numbers include swarm runs:
-**Total tokens used** and the count of runs that need you, which follows the
-[Needs you](failure-handling.md#needs-you) rule. A
-[child run](teams.md#child-runs) outside a swarm is a top-level run and
-counts on its own.
+Every run counts on its own, [child runs](teams.md#child-runs) included. The
+count of runs that need you follows the
+[Needs you](failure-handling.md#needs-you) rule.
 
 A run counts on the day it finished, even if it started before the 7 days. A
 relaunched run is one run: while it is live again it counts in no finished
 total, and after it closes again it counts once, on the day of its latest
 finish, with that outcome.
 
-How a run or swarm ended:
+How a run ended:
 
-| Counted as | Run | Swarm |
-| --- | --- | --- |
-| Completed | `completed` or `merged` | completed |
-| Failed | `failed` | never: a swarm has no failed state |
-| Abandoned | `abandoned` or `interrupted` | cancelled |
+| Counted as | Run |
+| --- | --- |
+| Completed | `completed` or `merged` |
+| Failed | `failed` |
+| Abandoned | `abandoned` or `interrupted` |
 
 A run you stop yourself is abandoned.
 
 ## Success rate
 
-A run or swarm succeeds when it ended with a merged pull request. For a run,
-the run's status is `merged` or a pull request it opened is merged. For a
-swarm, any of its runs, worker or integrator, has a merged pull request.
+A run succeeds when its status is `merged` or a pull request it opened is merged.
 
 Only pull requests opened through Aether count. A pull request an agent opens
 with `gh` directly is not counted. A merge is counted only after Aether has
@@ -83,7 +74,7 @@ Time covers runs that finished in the period.
 - Waiting on you: time a run waited for an answer or an approval.
 - Your response time: how long runs waited for you before working again.
 
-A swarm integrator waiting for its workers counts as working, not as waiting
+A parent run waiting for its child runs counts as working, not as waiting
 on you.
 
 ## Cost

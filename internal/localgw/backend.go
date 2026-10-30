@@ -359,9 +359,6 @@ var noReplay = map[string]bool{
 	protocol.MethodTemplateLaunch:  true,
 	protocol.MethodTemplateDelete:  true,
 	protocol.MethodScheduleDelete:  true,
-	protocol.MethodMissionDelete:   true,
-
-	protocol.MethodMissionWorkerRelease: true,
 
 	protocol.MethodPreferenceAdd:    true,
 	protocol.MethodPreferenceUpdate: true,

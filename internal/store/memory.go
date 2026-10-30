@@ -42,7 +42,6 @@ const (
 	MemoryFromAgent  MemorySource = "agent"
 	MemoryFromMember MemorySource = "member"
 	MemoryFromReport MemorySource = "report"
-	MemoryFromAnswer MemorySource = "answer"
 )
 
 // A pin costs its brief line: its title plus MemoryPinLineOverhead, which
@@ -325,12 +324,9 @@ func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
 		return false, fmt.Errorf("store: insert memory: %w", err)
 	}
 	if inserted == 0 {
-		existing := `source IN ('agent', 'member') AND workspace_id = ? AND hash = ? AND invalid_at IS NULL`
-		args := []any{m.WorkspaceID, hash}
-		if m.Source == MemoryFromAnswer {
-			existing, args = `source = 'answer' AND source_ref = ?`, []any{m.SourceRef}
-		}
-		if err = tx.QueryRowContext(ctx, `SELECT id FROM memory WHERE `+existing, args...).Scan(&id); err != nil {
+		if err = tx.QueryRowContext(ctx,
+			`SELECT id FROM memory WHERE source IN ('agent', 'member') AND workspace_id = ? AND hash = ? AND invalid_at IS NULL`,
+			m.WorkspaceID, hash).Scan(&id); err != nil {
 			return false, fmt.Errorf("store: insert memory: read the note it duplicates: %w", err)
 		}
 	}
@@ -716,8 +712,7 @@ type MemoryBrief struct {
 
 // MemoryBriefRun is a run that finished since the query's Since. Outcome
 // is its standing success or failure report, empty without one. Task is
-// the first line of its task, or of its mission's objective for a swarm
-// run.
+// the first line of its task.
 type MemoryBriefRun struct {
 	ID         domain.RunID
 	MemberName string
@@ -756,11 +751,7 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 			COALESCE((SELECT outcome FROM coord_reports WHERE run_id = r.id AND state = 'finalized'
 				AND outcome IN ('success', 'failure') AND superseded_at IS NULL ORDER BY created_at DESC LIMIT 1), ''),
 			r.branch, COALESCE(pr.number, 0), COALESCE(pr.state, ''), r.finished_at,
-			COALESCE((SELECT objective FROM missions WHERE id IN (
-				SELECT id FROM missions WHERE current_integrator_run_id = r.id
-				UNION SELECT mission_id FROM mission_attempts WHERE run_id = r.id
-				UNION SELECT mission_id FROM mission_integrator_replacements WHERE run_id = r.id
-				UNION SELECT mission_id FROM mission_create_receipts WHERE initial_run_id = r.id) LIMIT 1), r.task)
+			r.task
 		FROM runs r
 		LEFT JOIN members member ON member.id = r.member_id
 		LEFT JOIN run_pull_requests pr ON pr.rowid = (
@@ -906,18 +897,4 @@ func upsertReportMemory(ctx context.Context, tx *sql.Tx, m *Memory) (OutcomeNote
 	}
 	rewritten := note == live
 	return OutcomeNote{ID: note, Rewritten: rewritten, Unpinned: rewritten && pinned}, nil
-}
-
-// answerMemory prepares the decision note an answer to a mission question
-// writes, attributed to the answering member and the asking run.
-func (d *DB) answerMemory(ctx context.Context, questionID domain.MissionQuestionID, member domain.MemberID, answer string) (*Memory, error) {
-	q, err := d.GetMissionQuestion(ctx, questionID)
-	if err != nil {
-		return nil, err
-	}
-	body, _ := withholdSecret("Q: "+q.Body+" A: "+answer, nil)
-	return &Memory{
-		Kind: MemoryDecision, Scope: MemoryScopeWorkspace, Source: MemoryFromAnswer, SourceRef: string(questionID),
-		Body: body, AuthorID: member, RunID: q.AskedByRunID,
-	}, nil
 }

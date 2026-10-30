@@ -205,9 +205,9 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   const board = surfaces.getByRole('button', { name: 'Board', exact: true })
   await board.focus()
   await page.keyboard.press('Tab')
-  const missions = surfaces.getByRole('button', { name: 'Swarms', exact: true })
-  await expect(missions).toBeFocused()
-  expectVisibleFocus('the Swarms navigation button', await indicator(missions))
+  const activity = surfaces.getByRole('button', { name: 'Activity', exact: true })
+  await expect(activity).toBeFocused()
+  expectVisibleFocus('the Activity navigation button', await indicator(activity))
 
   await closeFirstRun(page)
   await page.keyboard.press('Escape')
@@ -219,8 +219,8 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
 
   // Nor may any other key followed by a scripted focus move, as when Enter sends.
   await page.keyboard.press('Shift')
-  await missions.focus()
-  expect((await indicator(missions)).outlineStyle).toBe('none')
+  await activity.focus()
+  expect((await indicator(activity)).outlineStyle).toBe('none')
 })
 
 test('resizing the sidebar follows the pointer delta and keeps minimum controls reachable', async ({

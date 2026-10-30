@@ -28,7 +28,7 @@ func (p hookPeers) Overlaps(context.Context) ([]overlap.Entry, error) { return p
 
 func hookMailbox(t *testing.T) (*coord.Service, *store.DB, string, domain.RunID) {
 	t.Helper()
-	return hookRun(t, nil, nil, true)
+	return hookRun(t, nil, true)
 }
 
 // outsideEnhancedRun keeps an AETHER_ENHANCED inherited from an Aether run
@@ -38,7 +38,7 @@ func outsideEnhancedRun(t *testing.T) {
 	t.Setenv(coordtransport.EnhancedEnv, "")
 }
 
-func hookRun(t *testing.T, mission coord.MissionService, files []string, unread bool) (*coord.Service, *store.DB, string, domain.RunID) {
+func hookRun(t *testing.T, files []string, unread bool) (*coord.Service, *store.DB, string, domain.RunID) {
 	t.Helper()
 	outsideEnhancedRun(t)
 	dir, err := os.MkdirTemp("", "ah-")
@@ -78,7 +78,7 @@ func hookRun(t *testing.T, mission coord.MissionService, files []string, unread 
 	}
 	admission := control.New(control.Config{})
 	service, err := coord.New(coord.Config{
-		Dir: filepath.Join(dir, "coord"), Store: db, Mail: db, Bus: bus, Peers: peers, Mission: mission,
+		Dir: filepath.Join(dir, "coord"), Store: db, Mail: db, Bus: bus, Peers: peers,
 		WakeAdmission: func(_ context.Context, run domain.RunID, dispatch func() error) error {
 			return admission.Admit(string(run), dispatch)
 		},
@@ -231,98 +231,46 @@ func TestHookDoesNotHideBrokenSocket(t *testing.T) {
 	}
 }
 
-// hookMission supplies only the assignment read side of the real socket service.
-// An unexpected mission mutation fails rather than simulating persistence.
-type hookMission struct {
-	coord.MissionService
-	assignment protocol.CoordMissionAssignment
-	reads      atomic.Int32
-}
-
-func (m *hookMission) Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error) {
-	m.reads.Add(1)
-	return m.assignment, nil
-}
-
-func (m *hookMission) Peers(context.Context, domain.RunID) ([]protocol.CoordPeer, error) {
-	return nil, nil
-}
-
-func TestHookStopRefreshesIntegratorWithEmptyInboxOnce(t *testing.T) {
+func TestHookStopWithEmptyInboxDoesNotContinue(t *testing.T) {
 	for _, tc := range []struct {
-		name, role string
-		files      []string
+		name  string
+		files []string
 	}{
-		{name: "integrator", role: "integrator"},
-		{name: "worker", role: "worker"},
 		{name: "ordinary"},
 		{name: "overlap-only", files: []string{"shared.go"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			mission := &hookMission{}
-			if tc.role != "" {
-				mission.assignment = protocol.CoordMissionAssignment{
-					MissionID: "mission-current", Role: tc.role, Phase: "active",
-				}
-			}
-			_, db, socket, run := hookRun(t, mission, tc.files, false)
+			_, db, socket, run := hookRun(t, tc.files, false)
 			for _, native := range []struct {
-				harness, event, input, repeated, decision string
+				harness, event, input, repeated string
 			}{
-				{"claude", "Stop", `{}`, `{"stop_hook_active":true}`, "block"},
-				{"codex", "Stop", `{}`, `{"stop_hook_active":true}`, "block"},
-				{"copilot", "agentStop", `{}`, `{"stop_hook_active":true}`, "block"},
-				{"gemini", "AfterAgent", `{}`, `{"stop_hook_active":true}`, "deny"},
-				{"cursor", "stop", `{"status":"completed"}`, `{"status":"completed","loop_count":1}`, ""},
+				{"claude", "Stop", `{}`, `{"stop_hook_active":true}`},
+				{"codex", "Stop", `{}`, `{"stop_hook_active":true}`},
+				{"copilot", "agentStop", `{}`, `{"stop_hook_active":true}`},
+				{"gemini", "AfterAgent", `{}`, `{"stop_hook_active":true}`},
+				{"cursor", "stop", `{"status":"completed"}`, `{"status":"completed","loop_count":1}`},
 			} {
 				t.Run(native.harness, func(t *testing.T) {
 					var out bytes.Buffer
 					args := []string{"hook", native.harness, native.event}
-					code, err := Run(t.Context(), args, Config{Socket: socket, In: strings.NewReader(native.input), Out: &out})
-					if err != nil || code != ExitOK {
-						t.Fatalf("first Stop = %d, %v", code, err)
-					}
-					if tc.role == "integrator" {
-						var response struct {
-							Decision string `json:"decision"`
-							Reason   string `json:"reason"`
-							Followup string `json:"followup_message"`
+					for _, input := range []string{native.input, native.repeated} {
+						out.Reset()
+						code, err := Run(t.Context(), args, Config{Socket: socket, In: strings.NewReader(input), Out: &out})
+						if err != nil || code != ExitOK || out.Len() != 0 {
+							t.Fatalf("empty %s Stop must not continue: code=%d err=%v output=%q", tc.name, code, err, out.String())
 						}
-						if decodeErr := json.Unmarshal(out.Bytes(), &response); decodeErr != nil {
-							t.Fatalf("missing native mission continuation: %q: %v", out.String(), decodeErr)
-						}
-						text := response.Reason
-						if native.harness == "cursor" {
-							text = response.Followup
-						}
-						if response.Decision != native.decision ||
-							!strings.Contains(text, "/usr/local/bin/aether-internal mission plan show") ||
-							!strings.Contains(text, "/usr/local/bin/aether-internal worker list --mission-id mission-current") ||
-							strings.Contains(text, "/usr/local/bin/aether-internal inbox") {
-							t.Fatalf("incorrect mission continuation: %s", out.String())
-						}
-					} else if out.Len() != 0 {
-						t.Fatalf("empty %s Stop must not continue: %s", tc.name, out.String())
-					}
-
-					reads := mission.reads.Load()
-					out.Reset()
-					code, err = Run(t.Context(), args, Config{Socket: socket, In: strings.NewReader(native.repeated), Out: &out})
-					if err != nil || code != ExitOK || out.Len() != 0 || mission.reads.Load() != reads {
-						t.Fatalf("repeated Stop reprocessed mission: code=%d err=%v output=%q reads=%d->%d", code, err, out.String(), reads, mission.reads.Load())
 					}
 				})
 			}
 			if count, err := db.CountUnackedRunMessages(t.Context(), run); err != nil || count != 0 {
-				t.Fatalf("empty mission inbox changed: count=%d err=%v", count, err)
+				t.Fatalf("empty inbox changed: count=%d err=%v", count, err)
 			}
 		})
 	}
 }
 
 func TestCommandHooksAnnounceUnchangedStateOnce(t *testing.T) {
-	mission := &hookMission{assignment: protocol.CoordMissionAssignment{MissionID: "mission-current", Role: "integrator", Phase: "active"}}
-	_, _, socket, _ := hookRun(t, mission, []string{"shared.go"}, true)
+	_, _, socket, _ := hookRun(t, []string{"shared.go"}, true)
 	hook := func(event, input string) string {
 		t.Helper()
 		var out bytes.Buffer
@@ -333,7 +281,7 @@ func TestCommandHooksAnnounceUnchangedStateOnce(t *testing.T) {
 		return out.String()
 	}
 	first := hook("PostToolBatch", "{}")
-	for _, want := range []string{"aether-internal inbox", "mission plan show", "overlapping edits"} {
+	for _, want := range []string{"aether-internal inbox", "overlapping edits"} {
 		if !strings.Contains(first, want) {
 			t.Fatalf("first hook lacks %q: %s", want, first)
 		}
@@ -342,23 +290,19 @@ func TestCommandHooksAnnounceUnchangedStateOnce(t *testing.T) {
 		t.Fatalf("unchanged state was announced again: %s", again)
 	}
 	stop := hook("Stop", "{}")
-	if !strings.Contains(stop, `"decision":"block"`) || !strings.Contains(stop, "aether-internal inbox") || strings.Contains(stop, "mission plan show") {
+	if !strings.Contains(stop, `"decision":"block"`) || !strings.Contains(stop, "aether-internal inbox") {
 		t.Fatalf("Stop must block only for the unread mail: %s", stop)
-	}
-	mission.assignment.Phase = "integrating"
-	if changed := hook("PostToolBatch", "{}"); !strings.Contains(changed, "mission plan show") || strings.Contains(changed, "aether-internal inbox") {
-		t.Fatalf("a mission change must be announced alone: %s", changed)
 	}
 	var pi bytes.Buffer
 	if code, err := Run(t.Context(), []string{"hook", "pi", "context"}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &pi}); err != nil || code != ExitOK || !strings.Contains(pi.String(), "aether-internal inbox") {
 		t.Fatalf("per-call context must keep repeating: %d, %v, %q", code, err, pi.String())
 	}
 	resumed := hook("SessionStart", `{"hook_event_name":"SessionStart","source":"resume"}`)
-	if !strings.Contains(resumed, "role: integrator") || strings.Contains(resumed, "overlapping edits") || strings.Contains(resumed, "Mission update") {
+	if !strings.Contains(resumed, "role: interactive") || strings.Contains(resumed, "overlapping edits") || strings.Contains(resumed, "Mission update") {
 		t.Fatalf("SessionStart(resume) must carry the role card and no announced notice: %s", resumed)
 	}
 	compacted := hook("SessionStart", `{"hook_event_name":"SessionStart","source":"compact"}`)
-	for _, want := range []string{"role: integrator", "never report waiting", "mission plan show --wait 30", coordhooks.PeerRule, coordhooks.UntrustedRule, "aether-internal inbox", "mission plan show", "overlapping edits"} {
+	for _, want := range []string{"role: interactive", "never report waiting", coordhooks.PeerRule, coordhooks.UntrustedRule, "aether-internal inbox", "overlapping edits"} {
 		if !strings.Contains(strings.ToLower(compacted), strings.ToLower(want)) {
 			t.Fatalf("SessionStart(compact) lacks %q: %s", want, compacted)
 		}
@@ -374,7 +318,7 @@ func TestCommandHooksAnnounceUnchangedStateOnce(t *testing.T) {
 		t.Fatalf("SessionStart(startup) repeated a card the system prompt carries: %s", started)
 	}
 	compacted = hook("SessionStart", `{"hook_event_name":"SessionStart","source":"compact"}`)
-	if strings.Contains(compacted, "role: integrator") || !strings.Contains(compacted, "aether-internal inbox") {
+	if strings.Contains(compacted, "role: interactive") || !strings.Contains(compacted, "aether-internal inbox") {
 		t.Fatalf("SessionStart(compact) must re-announce only the notices compaction dropped: %s", compacted)
 	}
 }
@@ -502,7 +446,7 @@ func TestHookWarnsOfOverlapsTheRunMayNotMessage(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, socket, run := hookRun(t, nil, []string{"shared.go"}, false)
+			_, db, socket, run := hookRun(t, []string{"shared.go"}, false)
 			tc.block(t, db, run)
 			var status protocol.CoordStatusResult
 			if err := coordtransport.Call(t.Context(), socket, protocol.MethodCoordHookStatus, nil, &status); err != nil {

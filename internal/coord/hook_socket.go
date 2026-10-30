@@ -16,7 +16,7 @@ import (
 const hookWriteTimeout = 3 * time.Second
 
 // hookWakeAdmissionTimeout keeps admission, including a wait for a busy
-// mission lock, inside the client's margin past the observer wait.
+// lock, inside the client's margin past the observer wait.
 const hookWakeAdmissionTimeout = 2 * time.Second
 
 func hookWaitRequest(req protocol.Request) bool {

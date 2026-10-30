@@ -202,8 +202,8 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		EnhancedDefault: profile.Capabilities.EnhancedDefault,
 		EffortLevels:    profile.EffortLevels,
 	}
-	if err := s.cfg.Runs.SwarmRefusal(profile.Name, domain.LaunchTUI); err != nil {
-		info.SwarmStandardRefusal = err.Error()
+	if err := s.cfg.Runs.WakeRefusal(profile.Name, domain.LaunchTUI); err != nil {
+		info.WakeStandardRefusal = err.Error()
 	}
 	if source == "member" {
 		info.Glyph = "custom"

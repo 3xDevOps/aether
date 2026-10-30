@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -68,7 +67,7 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 	if !self.Status.Terminal() && s.cfg.Development != nil {
 		available, err := s.cfg.Development.Capabilities(ctx, run)
 		if err != nil {
-			return protocol.CoordStatusResult{}, missionRPCError(method, err)
+			return protocol.CoordStatusResult{}, rpcError(method, err)
 		}
 		for _, capability := range available {
 			if isDevelopmentMethod(capability) {
@@ -89,28 +88,6 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		}, nil
 	}
 
-	var assignment *protocol.CoordMissionAssignment
-	var missionPeers []protocol.CoordPeer
-	if s.cfg.Mission != nil {
-		a, err := s.cfg.Mission.Assignment(ctx, run)
-		if err != nil {
-			return protocol.CoordStatusResult{}, missionRPCError(method, err)
-		}
-		if a.MissionID != "" {
-			advertised := a.Capabilities
-			a.Capabilities = nil
-			for _, capability := range advertised {
-				if isCoordinationCapability(capability) || isMissionMethod(capability) {
-					a.Capabilities = appendCapability(a.Capabilities, capability)
-				}
-			}
-			assignment = &a
-			missionPeers, err = s.cfg.Mission.Peers(ctx, run)
-			if err != nil {
-				return protocol.CoordStatusResult{}, missionRPCError(method, err)
-			}
-		}
-	}
 	var lineage []domain.RunID
 	parent := ""
 	if s.cfg.Children != nil {
@@ -118,20 +95,18 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		if lineage, err = s.cfg.Children.Lineage(ctx, run); err != nil {
 			return protocol.CoordStatusResult{}, internalError(method, err)
 		}
-		if self.MissionRole == "" {
-			parent = string(self.ParentRunID)
-		}
+		parent = string(self.ParentRunID)
 		if !self.Status.Terminal() {
 			available, err := s.cfg.Children.Capabilities(ctx, run)
 			if err != nil {
-				return protocol.CoordStatusResult{}, missionRPCError(method, err)
+				return protocol.CoordStatusResult{}, rpcError(method, err)
 			}
 			for _, capability := range available {
 				capabilities = appendCapability(capabilities, capability)
 			}
 		}
 	}
-	peers, total, err := s.statusPeers(ctx, self, missionPeers, lineage)
+	peers, total, err := s.statusPeers(ctx, self, lineage)
 	if err != nil {
 		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
@@ -143,16 +118,11 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 	for _, capability := range coordinationCapabilities {
 		capabilities = appendCapability(capabilities, capability)
 	}
-	if assignment != nil {
-		for _, capability := range assignment.Capabilities {
-			capabilities = appendCapability(capabilities, capability)
-		}
-	}
 	return protocol.CoordStatusResult{
 		WireVersion: protocol.CoordWireVersion, RunID: string(self.ID),
 		WorkspaceID: string(self.WorkspaceID), MemberID: string(self.MemberID),
 		Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
-		Assignment: assignment, ParentRunID: parent, Peers: peers, PeerTotal: total,
+		ParentRunID: parent, Peers: peers, PeerTotal: total,
 		PeersTruncated: total > len(peers), Unread: unread,
 		Capabilities: capabilities, Protected: self.Protected,
 	}, nil
@@ -165,10 +135,6 @@ func appendCapability(capabilities []string, capability string) []string {
 		}
 	}
 	return append(capabilities, capability)
-}
-
-func isCoordinationCapability(method string) bool {
-	return slices.Contains(coordinationCapabilities, method)
 }
 
 // boundStatusFiles caps one peer's overlapping files for coord.status and
@@ -185,7 +151,7 @@ func boundStatusFiles(all []string) ([]string, int, bool) {
 	return files, len(all), len(all) > len(files)
 }
 
-func missionRPCError(method string, err error) *protocol.Error {
+func rpcError(method string, err error) *protocol.Error {
 	if err == nil {
 		return nil
 	}
@@ -193,19 +159,16 @@ func missionRPCError(method string, err error) *protocol.Error {
 	if errors.As(err, &rpcErr) && rpcErr != nil {
 		copyErr := *rpcErr
 		if copyErr.Message == "" {
-			copyErr.Message = method + ": mission request failed"
+			copyErr.Message = method + ": request failed"
 		}
 		return &copyErr
 	}
 	code := protocol.CodeInternal
 	switch {
-	case errors.Is(err, store.ErrMissionStale), errors.Is(err, store.ErrMissionTakeover), errors.Is(err, permissions.ErrDenied):
+	case errors.Is(err, permissions.ErrDenied):
 		code = protocol.CodeDenied
-	case errors.Is(err, store.ErrMissionLimit), errors.Is(err, store.ErrMissionNotReady),
-		errors.Is(err, store.ErrMissionIdempotencyConflict), errors.Is(err, store.ErrIdempotencyConflict), errors.Is(err, store.ErrConflict):
+	case errors.Is(err, store.ErrIdempotencyConflict), errors.Is(err, store.ErrConflict):
 		code = protocol.CodeConflict
-	case errors.Is(err, store.ErrMissionPhase):
-		code = protocol.CodeInvalidState
 	case errors.Is(err, store.ErrNotFound):
 		code = protocol.CodeNotFound
 	}
@@ -469,9 +432,9 @@ func (s *Service) resolveRun(ctx context.Context, method string, run domain.RunI
 	return r, nil
 }
 
-// CoordReport reserves an outcome before evidence capture. Live non-worker
-// interactive runs may supersede earlier terminal reports; background runs and
-// workers keep one terminal slot. Failed capture leaves the reservation retryable.
+// CoordReport reserves an outcome before evidence capture. Live interactive
+// runs may supersede earlier terminal reports; background runs keep one
+// terminal slot. Failed capture leaves the reservation retryable.
 func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.CoordReportParams) (protocol.CoordReportResult, *protocol.Error) {
 	const method = protocol.MethodCoordReport
 	if s.cfg.Disabled {
@@ -539,25 +502,6 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
-	missionActive := false
-	missionLookupFailed := false
-	if s.cfg.Mission != nil {
-		assignment, err := s.cfg.Mission.Assignment(ctx, run)
-		if err != nil {
-			if !existingFinalized {
-				return protocol.CoordReportResult{}, missionRPCError(method, err)
-			}
-			missionLookupFailed = true
-		} else {
-			missionActive = assignment.MissionID != ""
-		}
-		if !existingFinalized {
-			if err := s.cfg.Mission.ValidateReport(ctx, run, store.CoordOutcome(p.Outcome)); err != nil {
-				return protocol.CoordReportResult{}, missionRPCError(method, err)
-			}
-		}
-	}
-	missionReconcile := s.cfg.Mission != nil && (missionActive || missionLookupFailed)
 	if s.cfg.Evidence == nil {
 		return protocol.CoordReportResult{}, internalError(method, ErrNoEvidenceCapture)
 	}
@@ -573,7 +517,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	// check and the report's finalization.
 	if s.cfg.Children != nil && !existingFinalized {
 		if err := s.cfg.Children.ValidateReport(ctx, run, store.CoordOutcome(p.Outcome)); err != nil {
-			return protocol.CoordReportResult{}, missionRPCError(method, err)
+			return protocol.CoordReportResult{}, rpcError(method, err)
 		}
 	}
 	nextAction := "review retained evidence"
@@ -609,7 +553,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
-	if report.State == store.CoordReportFinalized && report.PublishedAt != nil && !missionReconcile {
+	if report.State == store.CoordReportFinalized && report.PublishedAt != nil {
 		return coordReportResult(report), nil
 	}
 
@@ -657,19 +601,8 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if report.State != store.CoordReportFinalized {
 		return protocol.CoordReportResult{}, internalError(method, errors.New("coord report did not finalize"))
 	}
-	if missionReconcile {
-		// Admission may wait behind cancellation's synchronous Release. Only
-		// durable state is needed now; Release leaves this accepted socket open.
-		lock.Unlock()
-		lockHeld = false
-		s.leaveRun(run)
-		runHeld = false
-		if err := s.cfg.Mission.ReconcileReport(ctx, run, report, packet); err != nil {
-			return protocol.CoordReportResult{}, missionRPCError(method, err)
-		}
-	}
 	if report.PublishedAt != nil {
-		if err := s.enqueueWorkerReport(ctx, report); err != nil {
+		if err := s.enqueueChildReport(ctx, report); err != nil {
 			return protocol.CoordReportResult{}, internalError(method, err)
 		}
 	}
@@ -755,34 +688,28 @@ func (s *Service) rememberReportPacket(id string, packet protocol.EvidencePacket
 	s.reportPackets[id] = packet
 }
 
-// enqueueWorkerReport preserves a worker's report summary in the current
-// integrator's ordinary inbox, so the integrator learns of every outcome
-// through the mail it already watches. It retains the actual author and
+// enqueueChildReport preserves a child run's report summary in its parent's
+// ordinary inbox, so the parent learns of every outcome through the mail it
+// already watches. It retains the actual author and
 // requires explicit acknowledgement. The report outbox retries
 // inbox-cap/storage failures without spending a peer or rate slot.
-func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordReport) error {
-	var recipient domain.RunID
-	if s.cfg.Mission != nil {
-		var err error
-		if recipient, err = s.cfg.Mission.ReportRecipient(ctx, report.RunID); err != nil {
-			return fmt.Errorf("worker report recipient: %w", err)
-		}
+func (s *Service) enqueueChildReport(ctx context.Context, report *store.CoordReport) error {
+	if s.cfg.Children == nil {
+		return nil
 	}
-	if recipient == "" && s.cfg.Children != nil {
-		var err error
-		if recipient, err = s.cfg.Children.ReportRecipient(ctx, report.RunID); err != nil {
-			return fmt.Errorf("child report recipient: %w", err)
-		}
+	recipient, err := s.cfg.Children.ReportRecipient(ctx, report.RunID)
+	if err != nil {
+		return fmt.Errorf("child report recipient: %w", err)
 	}
 	if recipient == "" {
 		return nil
 	}
 	target, err := s.cfg.Store.GetRun(ctx, recipient)
 	if err != nil {
-		return fmt.Errorf("worker report integrator: %w", err)
+		return fmt.Errorf("child report parent: %w", err)
 	}
 	if target == nil || target.WorkspaceID != report.WorkspaceID || target.ID == report.RunID {
-		return errors.New("worker report integrator is outside the reporting worker's workspace")
+		return errors.New("child report parent is outside the reporting child's workspace")
 	}
 	msg := &store.RunMessage{
 		WorkspaceID: report.WorkspaceID, FromRun: report.RunID, ToRun: target.ID,
@@ -790,11 +717,11 @@ func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordRe
 		IdempotencyKey: "coord-report-" + string(report.Outcome) + ":" + report.ID + ":" + string(target.ID),
 	}
 	if err = s.cfg.Mail.RetireProvisionalReports(ctx, report.RunID, target.ID, report.CreatedAt); err != nil {
-		return fmt.Errorf("enqueue worker report: %w", err)
+		return fmt.Errorf("enqueue child report: %w", err)
 	}
 	created, err := appendRunMessage(ctx, s.cfg.Mail, msg)
 	if err != nil {
-		return fmt.Errorf("enqueue worker report: %w", err)
+		return fmt.Errorf("enqueue child report: %w", err)
 	}
 	if created {
 		s.wakeInbox(target.ID)
@@ -802,11 +729,11 @@ func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordRe
 	return nil
 }
 
-// publishReportEvidence persists any worker-report inbox message, then
+// publishReportEvidence persists any child-report inbox message, then
 // appends deterministic projection events before marking the existing outbox
 // row published. A failed step is retried without duplicating prior commits.
 func (s *Service) publishReportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) error {
-	if err := s.enqueueWorkerReport(ctx, report); err != nil {
+	if err := s.enqueueChildReport(ctx, report); err != nil {
 		return err
 	}
 	workspaceID := domain.WorkspaceID(packet.WorkspaceID)
@@ -964,13 +891,6 @@ func (s *Service) drainOutboxPage(ctx context.Context) (pending, progressed bool
 			pending = true
 			continue
 		}
-		if s.cfg.Mission != nil {
-			if rerr := s.cfg.Mission.ReconcileReport(ctx, report.RunID, report, packet); rerr != nil {
-				s.recordReportFailure(ctx, pub, rerr, false)
-				pending = true
-				continue
-			}
-		}
 		if perr := s.publishReportEvidence(ctx, report, packet); perr != nil {
 			permanent := errors.Is(perr, store.ErrCoordReportPublicationConflict) ||
 				errors.Is(perr, events.ErrEventIDConflict)
@@ -1096,7 +1016,7 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 	case pub.EventType == store.CoordAuditMessage && pub.EventID == store.CoordAuditEventID(pub.MessageID):
 		ev.RunID = pub.FromRun
 		ev.Payload = events.CoordMessagePayload{
-			MessageID: pub.MessageID, WorkspaceID: pub.WorkspaceID, MissionID: pub.MissionID,
+			MessageID: pub.MessageID, WorkspaceID: pub.WorkspaceID,
 			FromRunID: pub.FromRun, ToRunID: pub.ToRun, Kind: pub.Kind, CorrelationID: pub.CorrelationID,
 		}
 	case pub.EventType == store.CoordAuditAcked && pub.EventID == store.CoordAuditAckedEventID(pub.MessageID) &&
@@ -1114,32 +1034,21 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 	return outbox.MarkCoordAuditPublished(ctx, pub.EventID)
 }
 
-type takeoverStore interface {
-	GetMissionWorkerAssignment(context.Context, domain.RunID) (*domain.MissionWorkerAssignment, error)
-}
-
-// heldWorker reports whether a person holds run, a swarm worker, so mail to
-// it waits for them to let go.
-func (s *Service) heldWorker(ctx context.Context, run domain.RunID) (bool, error) {
-	takeovers, ok := s.cfg.Mail.(takeoverStore)
-	if !ok {
+// heldChild reports whether run is an attached child run a member controls,
+// so mail to it waits for them to let go.
+func (s *Service) heldChild(ctx context.Context, run domain.RunID) (bool, error) {
+	if s.cfg.Controlled == nil || s.cfg.Children == nil || !s.cfg.Controlled(run) {
 		return false, nil
 	}
-	a, err := takeovers.GetMissionWorkerAssignment(ctx, run)
-	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return a.Active, nil
+	parent, err := s.cfg.Children.ReportRecipient(ctx, run)
+	return parent != "", err
 }
 
 func (s *Service) receiptStatus(ctx context.Context, method string, to domain.RunID, recipient domain.RunStatus) (string, *protocol.Error) {
 	if recipient.Terminal() {
 		return string(recipient), nil
 	}
-	held, err := s.heldWorker(ctx, to)
+	held, err := s.heldChild(ctx, to)
 	if err != nil {
 		return "", internalError(method, err)
 	}

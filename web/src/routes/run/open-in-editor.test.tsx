@@ -93,19 +93,6 @@ describe('Open in editor', () => {
     }
   })
 
-  it('says that connecting takes control of a swarm worker, and only there', async () => {
-    const { unmount } = open()
-    await userEvent.click((await more()).getByRole('menuitem', { name: 'Open in editor…' }))
-    expect(within(await screen.findByRole('dialog', { name: 'Open in editor' })).queryByText(/takes control/)).toBeNull()
-    unmount()
-
-    open({ mission_id: 'mission_1', mission_role: 'worker' })
-    await userEvent.click((await more()).getByRole('menuitem', { name: 'Open in editor…' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Open in editor' }))
-    expect(dialog.getByText('Connecting takes control of this swarm worker')).toBeDefined()
-    expect(dialog.getByText(/stops the integrator from steering it until you disconnect or control is released on the swarm page/)).toBeDefined()
-  })
-
   it('returns focus to More when the dialog closes', async () => {
     open()
     await userEvent.click((await more()).getByRole('menuitem', { name: 'Open in editor…' }))

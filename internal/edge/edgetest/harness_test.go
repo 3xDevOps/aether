@@ -669,7 +669,7 @@ type (
 func (noRuns) StopTerminal(context.Context, domain.MemberID) error { return nil }
 
 // agent.list asks about agents no run here uses.
-func (noRuns) SwarmRefusal(string, domain.LaunchMode) error { return nil }
+func (noRuns) WakeRefusal(string, domain.LaunchMode) error { return nil }
 
 func (noRuns) AgentSwitchable(context.Context, domain.MemberID, domain.MemberID, string) (bool, error) {
 	return false, nil
@@ -738,7 +738,7 @@ func (s *serverNode) start() {
 		if log, err = events.OpenSQLiteLog(filepath.Join(s.dir, "aether.db")); err != nil {
 			t.Fatal(err)
 		}
-		services.Timeline = timeline.NewReader(log, db)
+		services.Timeline = timeline.NewReader(log)
 	}
 	var eventLog events.EventLog
 	if log != nil {

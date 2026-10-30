@@ -1,6 +1,6 @@
 # Watches
 
-A watch is a subscription you keep on one run, one swarm or one pull
+A watch is a subscription you keep on one run or one pull
 request. The server evaluates it, not your browser or an agent, so it keeps
 working after you close the dashboard and across server restarts. When the
 target needs you or reaches the state you asked about, the server records a
@@ -20,24 +20,21 @@ takes the target's defaults, marked *.
 
 | Target | Condition | Notified when |
 | --- | --- | --- |
-| `run` | `needs_you`* | The run waits on a person: a permission request, a question, a blocked report, a usage limit, a disconnected agent, a turn cut short, or a live failure nobody has seen. This is the rule the **Needs you** list uses (`domain.Run.NeedsAttention`). A run waiting on workers, on CI, on tools or on nothing, an answered run, and a turn that ended without a report never notify. One notice per distinct need, and each open permission request or question is a need of its own; an unchanged question is never repeated. |
-| `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the run ended completed without a success report, because the agent exited with its results committed or a member or the swarm's integrator closed it as completed. A retained run that is relaunched and completes again is announced again. A member accepting or closing a reported success is not announced again, but a success reported after the run went back to work is. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
+| `run` | `needs_you`* | The run waits on a person: a permission request, a question, a blocked report, a usage limit, a disconnected agent, a turn cut short, or a live failure nobody has seen. This is the rule the **Needs you** list uses (`domain.Run.NeedsAttention`). A run waiting on child runs, on CI, on tools or on nothing, an answered run, and a turn that ended without a report never notify. One notice per distinct need, and each open permission request or question is a need of its own; an unchanged question is never repeated. |
+| `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the run ended completed without a success report, because the agent exited with its results committed or a member or its parent run closed it as completed. A retained run that is relaunched and completes again is announced again. A member accepting or closing a reported success is not announced again, but a success reported after the run went back to work is. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
 | `run` | `pr_merged`, `ci` | Every pull request the run recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
-| `mission` | `needs_you`* | The swarm needs its accountable human: the integrator asks a question, or the integrator stopped or failed to launch, with the launch error. Each open question is its own notice, in any order they are answered. A completed or cancelled swarm needs nothing: a question it left open is moot, and its delivered push is withdrawn. Workers never notify on their own; the integrator handles them. |
-| `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. A completed swarm can be reopened, so its watch stays `active`, and a swarm that completes again is announced again. |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | See [Pull requests and CI](#pull-requests-and-ci). |
 
 Aether has no deploy signal. `deployed` is refused with that reason; watch
 `finished` or `pr_merged` instead.
 
-A notice's title is the run's title or the swarm's objective. Its body is the
+A notice's title is the run's title. Its body is the
 line above, or the question's own text, and it links to the target:
-`/?run=<id>` for a run, `/?page=missions&id=<id>` for a swarm.
+`/?run=<id>` for a run.
 
-A run that has ended (failed, stopped, merged or abandoned) or a cancelled
-swarm cannot be watched: `watch.create` says how it ended. A finish the
+A run that has ended (failed, stopped, merged or abandoned) cannot be watched: `watch.create` says how it ended. A finish the
 target reached before the watch began, such as a run whose agent already
-reported done or a completed swarm, is not announced; the next one is.
+reported done is not announced; the next one is.
 
 ## Pull requests and CI
 
@@ -99,12 +96,12 @@ the run, so every surface that shows the run's pull request sees it.
 | `active` | Evaluated on every event about the target. |
 | `paused` | You paused it. Nothing is evaluated or sent until you resume it. |
 | `error` | Evaluation failed, including the check every live watch gets when the server starts; `error` holds the real error. It retries with backoff from 30 seconds, doubling to at most 15 minutes, and returns to `active` once an evaluation succeeds. A startup check whose retry cannot be saved either is retried every tick until one is. A watch created, changed or resumed while the server is still recovering its runs is first checked once recovery ends, so a request not yet restored never reads as a need. `access revoked: ...` means you no longer exist, await approval, or cannot see the workspace; it is not retried on a timer, only on the target's next event. |
-| `done` | The target reached its final state (a run merged, abandoned, failed or stopped; a swarm cancelled) and its last notice is recorded. |
+| `done` | The target reached its final state (a run merged, abandoned, failed or or stopped) and its last notice is recorded. |
 | `expired` | It passed `expires_at`. Give it a new `expires_at` to watch again. |
 
 A watch expires 14 days after creation unless you set `expires_at`, at most
 90 days ahead. Done and expired watches and their notices are deleted 30 days
-after they ended. Deleting the run, the swarm, the workspace or your member
+after they ended. Deleting the run, the workspace or your member
 account deletes its watches.
 
 ## Delivery
@@ -147,7 +144,7 @@ tell when they end.
 
 Your own run already pushes you when it needs you
 ([push notifications](networking.md#notifications)). A watch on a run you own
-that is not part of a swarm therefore records push `skipped` instead of
+therefore records push `skipped` instead of
 pushing, when you have a device to push to (with none it is
 `no_destination`):
 
@@ -160,7 +157,7 @@ pushing, when you have a device to push to (with none it is
 
 Every other notice is pushed: the run closed as merged or abandoned, stopped,
 completed, its pull request merged or its checks finished. A watch on someone
-else's run, or on a swarm run, pushes every notice.
+else's run pushes every notice.
 
 ## Assistant watches
 
@@ -212,8 +209,8 @@ or `assistant`; neither offers the preferences methods.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `watch.create` | `target` (`kind` and `run_id`, `mission_id`, or `repo` and `number`), `conditions`, `expires_at` (RFC 3339), `label`, `source` (`dashboard`, `assistant`, `mcp`), `idempotency_key` | `{watch, receipt}` |
-| `watch.list` | `state`, `target_kind`, `run_id`, `mission_id` | `{watches}` |
+| `watch.create` | `target` (`kind` and `run_id`, or `repo` and `number`), `conditions`, `expires_at` (RFC 3339), `label`, `source` (`dashboard`, `assistant`, `mcp`), `idempotency_key` | `{watch, receipt}` |
+| `watch.list` | `state`, `target_kind`, `run_id` | `{watches}` |
 | `watch.get` | `watch_id` | `{watch, notifications}`, newest first, at most 50 |
 | `watch.update` | `watch_id`, `paused`, `conditions`, `expires_at`, `label` | `{watch, receipt}` |
 | `watch.delete` | `watch_id` | `{}` |

@@ -5,7 +5,6 @@ package tools
 
 import (
 	"bufio"
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -41,66 +40,58 @@ const (
 // tiers are the methods the assistant may call: every method of every op
 // internal/ops offers it, which a test checks.
 var tiers = map[string]string{
-	protocol.MethodServerInfo:            tierRead,
-	protocol.MethodRunList:               tierRead,
-	protocol.MethodRunGet:                tierRead,
-	protocol.MethodRunACPHistory:         tierRead,
-	protocol.MethodTerminalHistory:       tierRead,
-	protocol.MethodWorkspaceList:         tierRead,
-	protocol.MethodWorkspaceGet:          tierRead,
-	protocol.MethodWorkspaceTimeline:     tierRead,
-	protocol.MethodAgentList:             tierRead,
-	protocol.MethodAgentModels:           tierRead,
-	protocol.MethodAccountList:           tierRead,
-	protocol.MethodTemplateList:          tierRead,
-	protocol.MethodChangesList:           tierRead,
-	protocol.MethodRunChildren:           tierRead,
-	protocol.MethodAccountUsage:          tierRead,
-	protocol.MethodTerminalStatus:        tierRead,
-	protocol.MethodAssistantDocs:         tierRead,
-	protocol.MethodAssistantViewContext:  tierRead,
-	protocol.MethodMemorySearch:          tierRead,
-	protocol.MethodAttentionList:         tierRead,
-	protocol.MethodInsightsGet:           tierRead,
-	protocol.MethodMissionList:           tierRead,
-	protocol.MethodMissionShow:           tierRead,
-	protocol.MethodCoordMessagesList:     tierRead,
-	protocol.MethodRunRoomList:           tierRead,
-	protocol.MethodRunGitLog:             tierRead,
-	protocol.MethodRunGitDiff:            tierRead,
-	protocol.MethodRunEvidenceList:       tierRead,
-	protocol.MethodRunPRStatus:           tierRead,
-	protocol.MethodRunPRFeedback:         tierRead,
-	protocol.MethodRunOverlaps:           tierRead,
-	protocol.MethodRunLaunch:             tierConfirmed,
-	protocol.MethodTemplateLaunch:        tierConfirmed,
-	protocol.MethodMissionCreate:         tierConfirmed,
-	protocol.MethodRunInject:             tierConfirmed,
-	protocol.MethodRunPause:              tierReversible,
-	protocol.MethodRunResume:             tierReversible,
-	protocol.MethodRunKill:               tierConfirmed,
-	protocol.MethodRunClose:              tierConfirmed,
-	protocol.MethodEnvSave:               tierConfirmed,
-	protocol.MethodRunInputRespond:       tierConfirmed,
-	protocol.MethodMissionQuestionAnswer: tierConfirmed,
-	protocol.MethodRunRoomPost:           tierConfirmed,
+	protocol.MethodServerInfo:           tierRead,
+	protocol.MethodRunList:              tierRead,
+	protocol.MethodRunGet:               tierRead,
+	protocol.MethodRunACPHistory:        tierRead,
+	protocol.MethodTerminalHistory:      tierRead,
+	protocol.MethodWorkspaceList:        tierRead,
+	protocol.MethodWorkspaceGet:         tierRead,
+	protocol.MethodWorkspaceTimeline:    tierRead,
+	protocol.MethodAgentList:            tierRead,
+	protocol.MethodAgentModels:          tierRead,
+	protocol.MethodAccountList:          tierRead,
+	protocol.MethodTemplateList:         tierRead,
+	protocol.MethodChangesList:          tierRead,
+	protocol.MethodRunChildren:          tierRead,
+	protocol.MethodAccountUsage:         tierRead,
+	protocol.MethodTerminalStatus:       tierRead,
+	protocol.MethodAssistantDocs:        tierRead,
+	protocol.MethodAssistantViewContext: tierRead,
+	protocol.MethodMemorySearch:         tierRead,
+	protocol.MethodAttentionList:        tierRead,
+	protocol.MethodInsightsGet:          tierRead,
+	protocol.MethodCoordMessagesList:    tierRead,
+	protocol.MethodRunRoomList:          tierRead,
+	protocol.MethodRunGitLog:            tierRead,
+	protocol.MethodRunGitDiff:           tierRead,
+	protocol.MethodRunEvidenceList:      tierRead,
+	protocol.MethodRunPRStatus:          tierRead,
+	protocol.MethodRunPRFeedback:        tierRead,
+	protocol.MethodRunOverlaps:          tierRead,
+	protocol.MethodRunLaunch:            tierConfirmed,
+	protocol.MethodTemplateLaunch:       tierConfirmed,
+	protocol.MethodRunInject:            tierConfirmed,
+	protocol.MethodRunPause:             tierReversible,
+	protocol.MethodRunResume:            tierReversible,
+	protocol.MethodRunKill:              tierConfirmed,
+	protocol.MethodRunClose:             tierConfirmed,
+	protocol.MethodEnvSave:              tierConfirmed,
+	protocol.MethodRunInputRespond:      tierConfirmed,
+	protocol.MethodRunRoomPost:          tierConfirmed,
 
-	protocol.MethodMemberList:               tierRead,
-	protocol.MethodMemoryShow:               tierRead,
-	protocol.MethodMemoryAdd:                tierConfirmed,
-	protocol.MethodRunRelaunch:              tierConfirmed,
-	protocol.MethodRunModeSwitch:            tierConfirmed,
-	protocol.MethodRunProtect:               tierConfirmed,
-	protocol.MethodRunArchive:               tierConfirmed,
-	protocol.MethodRunHandoff:               tierConfirmed,
-	protocol.MethodMissionWorkerRelease:     tierConfirmed,
-	protocol.MethodMissionArchive:           tierConfirmed,
-	protocol.MethodMissionUnarchive:         tierConfirmed,
-	protocol.MethodMissionReplaceIntegrator: tierConfirmed,
-	protocol.MethodRunPRCreate:              tierConfirmed,
-	protocol.MethodRunPRMerge:               tierConfirmed,
-	protocol.MethodMemoryPin:                tierConfirmed,
-	protocol.MethodMemoryUnpin:              tierConfirmed,
+	protocol.MethodMemberList:    tierRead,
+	protocol.MethodMemoryShow:    tierRead,
+	protocol.MethodMemoryAdd:     tierConfirmed,
+	protocol.MethodRunRelaunch:   tierConfirmed,
+	protocol.MethodRunModeSwitch: tierConfirmed,
+	protocol.MethodRunProtect:    tierConfirmed,
+	protocol.MethodRunArchive:    tierConfirmed,
+	protocol.MethodRunHandoff:    tierConfirmed,
+	protocol.MethodRunPRCreate:   tierConfirmed,
+	protocol.MethodRunPRMerge:    tierConfirmed,
+	protocol.MethodMemoryPin:     tierConfirmed,
+	protocol.MethodMemoryUnpin:   tierConfirmed,
 
 	protocol.MethodAssistantPreferences: tierRead,
 	protocol.MethodAssistantRemember:    tierReversible,
@@ -333,20 +324,6 @@ func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 			return ""
 		}
 		return launched.Run.ID
-	case protocol.MethodMissionCreate:
-		created, err := protocol.DecodeParams[protocol.MissionCreateResult](result)
-		if err != nil {
-			slog.Warn("assistant tools: read the created swarm", "error", err)
-			return ""
-		}
-		return created.Mission.CurrentIntegratorRunID
-	case protocol.MethodMissionReplaceIntegrator:
-		replaced, err := protocol.DecodeParams[protocol.MissionReplaceIntegratorResult](result)
-		if err != nil {
-			slog.Warn("assistant tools: read the replacement integrator", "error", err)
-			return ""
-		}
-		return replaced.RunID
 	case protocol.MethodRunInject:
 		p, err := protocol.DecodeParams[protocol.RunInjectParams](req.Params)
 		if err != nil {
@@ -364,8 +341,6 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		return nil
 	case protocol.MethodRunLaunch:
 		return s.summarizeLaunch(ctx, req, c)
-	case protocol.MethodMissionCreate:
-		return s.summarizeMission(ctx, req, c)
 	case protocol.MethodTemplateLaunch:
 		return s.summarizeTemplate(ctx, req, c)
 	case protocol.MethodRunInject:
@@ -383,8 +358,6 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		return nil
 	case protocol.MethodRunInputRespond:
 		return s.summarizeRespond(ctx, req, c)
-	case protocol.MethodMissionQuestionAnswer:
-		return s.summarizeSwarmAnswer(ctx, req, c)
 	case protocol.MethodRunRoomPost:
 		p, err := protocol.DecodeParams[protocol.RunRoomPostParams](req.Params)
 		if err != nil || p.RunID == "" {
@@ -452,34 +425,6 @@ func (s *Server) summarizeRespond(ctx context.Context, req protocol.Request, c *
 		return nil
 	}
 	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: run %s has no pending request %s", req.Method, p.RunID, p.RequestID)}
-}
-
-// summarizeSwarmAnswer names the swarm whose integrator asked, by its
-// objective, and its accountable human when that is another member.
-func (s *Server) summarizeSwarmAnswer(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-	p, err := protocol.DecodeParams[protocol.MissionQuestionAnswerParams](req.Params)
-	if err != nil || p.QuestionID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": question_id is required"}
-	}
-	var shown protocol.MissionShowResult
-	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{QuestionID: p.QuestionID}, &shown); rpcErr != nil {
-		return rpcErr
-	}
-	i := slices.IndexFunc(shown.Questions, func(q protocol.MissionQuestion) bool { return q.ID == p.QuestionID })
-	if i < 0 {
-		return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: swarm %s has no question %s", req.Method, shown.Mission.ID, p.QuestionID)}
-	}
-	if rpcErr := s.owner(ctx, shown.Mission.AccountableHumanID, c); rpcErr != nil {
-		return rpcErr
-	}
-	q := shown.Questions[i]
-	again, waits := "", ""
-	if q.AnsweredAt != nil {
-		again, waits = " again", " and no longer waits"
-	}
-	c.Summary = fmt.Sprintf("Answer swarm %s (%q)%s%s, which asked %q%s: %q", shown.Mission.ID, truncate(shown.Mission.Objective), ownedBy(c), again,
-		truncate(q.Body), waits, truncate(p.Answer))
-	return nil
 }
 
 func (s *Server) attention(ctx context.Context, workspaceID string) ([]protocol.AttentionItem, *protocol.Error) {
@@ -647,28 +592,6 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	return nil
 }
 
-func (s *Server) summarizeMission(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-	p, err := protocol.DecodeParams[protocol.MissionCreateParams](req.Params)
-	if err != nil || p.WorkspaceID == "" || p.Integrator.Harness == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and integrator are required"}
-	}
-	ws, rpcErr := s.workspaceName(ctx, p.WorkspaceID)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	n, rpcErr := s.launchNames(ctx, c.Defaults)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	agents := make([]string, len(p.ExecutionChoices))
-	for i, choice := range p.ExecutionChoices {
-		agents[i] = fmt.Sprintf("%s (%s) on %s", truncate(choice.Harness), choice.Mode, n.account(choice.AccountMemberID))
-	}
-	c.Summary = fmt.Sprintf("Start a swarm in %s with integrator %s (%s) on %s, agents %s%s: \"%s\"", ws, truncate(p.Integrator.Harness), p.Integrator.Mode,
-		n.account(p.Integrator.AccountMemberID), named(agents), n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c), firstLine(p.Objective))
-	return nil
-}
-
 // summarizeTemplate names the template's agent, mode, model and task as the
 // params fill it in, and pins the launch to that version of the template,
 // which any workspace admin may change while the card waits.
@@ -731,7 +654,7 @@ var (
 // assistant writes both, so saved_defaults may name only launch fields, and
 // its reasons are cut to fit a card.
 func statedReason(method string, params json.RawMessage) (json.RawMessage, string, *protocol.AssistantDefaultsUse, error) {
-	if !slices.Contains([]string{protocol.MethodRunLaunch, protocol.MethodMissionCreate, protocol.MethodTemplateLaunch}, method) || len(params) == 0 || string(params) == "null" {
+	if !slices.Contains([]string{protocol.MethodRunLaunch, protocol.MethodTemplateLaunch}, method) || len(params) == 0 || string(params) == "null" {
 		return params, "", nil, nil
 	}
 	var fields map[string]json.RawMessage
@@ -840,7 +763,7 @@ func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *p
 	return nil
 }
 
-// owner marks c as acting on another member's run or swarm when member is
+// owner marks c as acting on another member's run when member is
 // not the socket's member, and names that member: their display name, else
 // their id.
 func (s *Server) owner(ctx context.Context, member string, c *protocol.AssistantConfirmation) *protocol.Error {
@@ -947,9 +870,7 @@ func truncate(text string) string {
 // names one as the actor. It may name the agent accounts a call runs on or
 // reads, the accountFields, which the server checks member may use;
 // run.list takes member_id as a read filter, where "mine" selects member;
-// and run.handoff names the teammate it hands the run to. mission.create
-// makes member the swarm's accountable human and the account of every agent
-// that names none.
+// and run.handoff names the teammate it hands the run to.
 func Prepare(member, method string, params json.RawMessage) (json.RawMessage, error) {
 	if len(params) == 0 || string(params) == "null" {
 		return params, nil
@@ -964,11 +885,7 @@ func Prepare(member, method string, params json.RawMessage) (json.RawMessage, er
 			return nil, fmt.Errorf("%s is not accepted: calls act as the member this socket belongs to", name)
 		}
 	}
-	switch method {
-	case protocol.MethodMissionCreate:
-		return prepareMission(member, params)
-	case protocol.MethodRunList:
-	default:
+	if method != protocol.MethodRunList {
 		return params, nil
 	}
 	var mine bool
@@ -988,35 +905,10 @@ func Prepare(member, method string, params json.RawMessage) (json.RawMessage, er
 // accountFields are the params, by method, that name an agent account to
 // launch on or read; the server refuses one not shared with the caller.
 var accountFields = map[string][]string{
-	protocol.MethodRunLaunch:     {"account_member_id", "fallback_account_member_ids"},
-	protocol.MethodMissionCreate: {"fallback_account_member_ids"},
-	protocol.MethodAgentList:     {"account_member_id"},
-	protocol.MethodAgentModels:   {"account_member_id"},
-	protocol.MethodAccountUsage:  {"account_member_id"},
-}
-
-// prepareMission refuses fields mission.create does not know, as the server
-// does: re-encoding p would drop them, so a misspelled option, such as
-// no_fallback, would launch without it.
-func prepareMission(member string, params json.RawMessage) (json.RawMessage, error) {
-	var p protocol.MissionCreateParams
-	dec := json.NewDecoder(bytes.NewReader(params))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&p); err != nil {
-		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
-			return nil, fmt.Errorf("unknown param %s; this server does not support it", field)
-		}
-		return nil, err
-	}
-	if p.AccountableHumanID != "" {
-		return nil, errors.New("accountable_human_id is not accepted: calls act as the member this socket belongs to")
-	}
-	p.AccountableHumanID = member
-	p.Integrator.AccountMemberID = cmp.Or(p.Integrator.AccountMemberID, member)
-	for i := range p.ExecutionChoices {
-		p.ExecutionChoices[i].AccountMemberID = cmp.Or(p.ExecutionChoices[i].AccountMemberID, member)
-	}
-	return json.Marshal(p)
+	protocol.MethodRunLaunch:    {"account_member_id", "fallback_account_member_ids"},
+	protocol.MethodAgentList:    {"account_member_id"},
+	protocol.MethodAgentModels:  {"account_member_id"},
+	protocol.MethodAccountUsage: {"account_member_id"},
 }
 
 func serveDocs(raw json.RawMessage) (json.RawMessage, *protocol.Error) {

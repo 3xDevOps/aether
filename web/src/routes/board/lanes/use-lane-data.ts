@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { loadMission } from '@/components/messages/handles'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { AgentLoad } from '@/routes/board/lanes/model'
 import { sameIdentity, useStore } from '@/store'
-import { coalesce } from '@/store/coalesce'
 import { emptyLaneHistory, historyBudget, laneEventTypes, type LaneHistory } from '@/store/lanes'
 import { sessionStreamOpen } from '@/store/session-stream'
 import { itemsOf } from '@/store/sessions'
@@ -92,33 +90,6 @@ export function useLaneHistory(workspaceIDs: string[], floor: number) {
       retry,
     }
   }, [key, histories, retry])
-}
-
-/** Reads each visible swarm once, and again whenever the server says it changed or Retry is pressed after a failure. */
-export function useLaneMissions(missionIDs: string[]) {
-  const key = missionIDs.join('\n')
-  const seqs = useStore(useShallow((s) => missionIDs.map((id) => s.missionSeq[id] ?? 0)))
-  const seen = useRef(new Map<string, number>())
-  const [errors, setErrors] = useState<Readonly<Record<string, string>>>({})
-  const [attempt, setAttempt] = useState(0)
-  useEffect(() => {
-    const ids = key ? key.split('\n') : []
-    ids.forEach((id, i) => {
-      const loaded = useStore.getState().missionDetails[id]
-      if (loaded && seen.current.get(id) === seqs[i]) return
-      seen.current.set(id, seqs[i])
-      coalesce(seen.current, `mission:${id}`, () => loadMission(id).then(
-        () => setErrors(({ [id]: _, ...rest }) => rest),
-        (err: unknown) => {
-          seen.current.delete(id)
-          setErrors((current) => ({ ...current, [id]: message(err) }))
-        },
-      ))
-    })
-  }, [key, seqs, attempt])
-  const error = useMemo(() => (key ? key.split('\n') : []).map((id) => errors[id]).find(Boolean) ?? null, [key, errors])
-  const retry = useCallback(() => setAttempt((n) => n + 1), [])
-  return { error, retry }
 }
 
 /** `resident` reads the session's live index; a session's store entry outlives its stream, so only an open stream counts. */

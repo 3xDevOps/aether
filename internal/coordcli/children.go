@@ -20,7 +20,7 @@ const (
 const childUsage = `usage: aether-internal child <options|start|list|cancel|fetch> [options]
 
 Dispatch fresh-context child runs on other agents and models, within what this
-run's owner or swarm allows, and manage them. A child cannot start children.
+run's owner allows, and manage them. A child cannot start children.
   options [--harness <agent>]   whether you may start children, the limits,
                                 and each agent and account with its state
                                 (ready, exhausted, not-installed, not-signed-in);
@@ -155,7 +155,7 @@ func childSkill(status *protocol.CoordStatusResult) string {
 	switch {
 	case slices.Contains(status.Capabilities, protocol.MethodChildStart):
 		return "Child runs: `aether-internal child start` dispatches a session on any installed agent and model with a completely fresh context, which can orchestrate its own subagents (aether-internal child --help). " +
-			"Use one instead of your own subagents for a complex task that splits into parallel parts and benefits from fresh-context sessions: it is a dispatch-and-forget shortcut for firing off part of a very complex task, or for when the user asks for session or swarm orchestration. Your own subagents suit small lookups and edits. " +
+			"Use one instead of your own subagents for a complex task that splits into parallel parts and benefits from fresh-context sessions: it is a dispatch-and-forget shortcut for firing off part of a very complex task, or for when the user asks for session orchestration. Your own subagents suit small lookups and edits. " +
 			"Run `aether-internal child options` once, then `child start`; honor the number of children and agents the user asks for. " +
 			"A child sees only its task text and your last commit, and cannot start children. Its report reaches your inbox and wakes you; account for unfinished children before reporting success.\n"
 	case slices.Contains(status.Capabilities, protocol.MethodChildOptions):

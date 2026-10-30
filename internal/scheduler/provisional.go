@@ -8,16 +8,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// provisionalGrace is how long a swarm worker's or child run's turn end waits for the next
+// provisionalGrace is how long a child run's turn end waits for the next
 // turn, such as one its unread mail wakes, before its last message is
 // forwarded.
 var provisionalGrace = 15 * time.Second
 
-// TurnEnded hands a swarm worker's or child run's last message to
-// coordination, which forwards it to the integrator or parent as a provisional report unless the turn
+// TurnEnded hands a child run's last message to coordination, which
+// forwards it to the parent as a provisional report unless the turn
 // reported. A turn that started within provisionalGrace or a waiting outcome
-// keeps it back; an answered one does not, so the integrator hears from a
-// worker whose attempt stays open.
+// keeps it back; an answered one does not, so the parent hears from a child
+// that stays open.
 func (s *Scheduler) TurnEnded(run domain.RunID, message string) {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -25,9 +25,9 @@ func (s *Scheduler) TurnEnded(run domain.RunID, message string) {
 		s.mu.Unlock()
 		return
 	}
-	assigned, started := entry.missionAssigned, entry.turnStartedAt
+	started := entry.turnStartedAt
 	s.mu.Unlock()
-	if !assigned && !s.hasParent(run) {
+	if !s.hasParent(run) {
 		return
 	}
 	time.AfterFunc(provisionalGrace, func() {
@@ -41,13 +41,12 @@ func (s *Scheduler) TurnEnded(run domain.RunID, message string) {
 		ctx, cancel := context.WithTimeout(s.superCtx, 30*time.Second)
 		defer cancel()
 		if err := c.svc.ProvisionalReport(ctx, run, started, message); err != nil {
-			slog.Warn("scheduler: forward the worker's last message to its integrator", "run", run, "error", err)
+			slog.Warn("scheduler: forward the child's last message to its parent", "run", run, "error", err)
 		}
 	})
 }
 
-// hasParent reports whether run is a child run, whose parent hears from it as
-// an integrator hears from a worker.
+// hasParent reports whether run is a child run.
 func (s *Scheduler) hasParent(run domain.RunID) bool {
 	r, err := s.cfg.Store.GetRun(s.superCtx, run)
 	return err == nil && r.ParentRunID != ""

@@ -13,7 +13,6 @@ export const childRunsLabel = 'Let my runs start child runs'
 
 const scope: [string, string][] = [
   ['Allows', 'An agent in one of your runs starts another agent as a child run, on your account, then messages it and receives its result. You own every child run.'],
-  ['Swarms', "Use the swarm's own agents and accounts. This setting never overrides them."],
   ['Limits', "The workspace budget and the workspace's child-run limits apply to every child run."],
   ['One run', "Options → Child runs in the launch dialog, or More → Allow child runs on a run, overrides this for that run."],
 ]

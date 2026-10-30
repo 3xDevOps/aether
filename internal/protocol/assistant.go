@@ -168,15 +168,12 @@ type AssistantViewContext struct {
 }
 
 // AssistantViewAttachment names one thing a prompt is about. Kind is
-// workspace, run, mission, pr, check, failure or task; the other fields say
+// workspace, run, pr, check or failure; the other fields say
 // which.
 type AssistantViewAttachment struct {
 	Kind        string `json:"kind"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	RunID       string `json:"run_id,omitempty"`
-	MissionID   string `json:"mission_id,omitempty"`
-	TaskID      string `json:"task_id,omitempty"`
-	AttemptID   string `json:"attempt_id,omitempty"`
 	PR          int    `json:"pr,omitempty"`
 	Repository  string `json:"repository,omitempty"`
 	Check       string `json:"check,omitempty"`
@@ -188,7 +185,6 @@ type AssistantViewEntry struct {
 	Name        string    `json:"name"`
 	WorkspaceID string    `json:"workspace_id,omitempty"`
 	RunID       string    `json:"run_id,omitempty"`
-	MissionID   string    `json:"mission_id,omitempty"`
 	Subagent    string    `json:"subagent,omitempty"`
 	View        string    `json:"view,omitempty"`
 	At          time.Time `json:"at,omitzero"`

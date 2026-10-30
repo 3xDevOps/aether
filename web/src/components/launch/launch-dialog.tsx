@@ -2,30 +2,22 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
-import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
+import { RefusalNotes } from '@/components/launch/agent-picker'
 import { AccountOptions, automaticFallback, ChildRunsSwitch, type ChildRunsChoice, fallbackParams, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
-import { ModeControl } from '@/components/launch/mode-control'
 import { PermissionControl, permissionFeature } from '@/components/launch/permission-control'
-import { integratorModes } from '@/components/launch/modes'
 import { ExtraRepos } from '@/components/launch/extra-repos'
-import { EffortField, ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
+import { needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launch/run-limits'
 import { fallbackFromSaved, fallbackToSaved, SaveAccountDefault, SavedIssues } from '@/components/launch/saved-defaults'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
-import { sameWorker, WorkerAgents, type WorkerChoice, workerMode, workerRefusals } from '@/components/launch/worker-agents'
 import { LoaderCircle, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import { FormField } from '@/components/ui/form-field'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SlideOut } from '@/components/ui/slide-out'
-import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { allowed } from '@/lib/permissions'
-import { randomID } from '@/lib/random'
-import { multiRepoFeature, multiRepoMethod, swarmReposFeature } from '@/lib/repos'
-import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice, Permission } from '@/lib/types'
+import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
+import type { Member, Permission } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
 import { cn, surface } from '@/lib/utils'
 import { sameIdentity, useStore } from '@/store'
@@ -33,12 +25,6 @@ import { useChildSettings, useChildSettingsRead } from '@/store/children'
 import { rememberChoice, saveLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
-
-type Kind = 'run' | 'swarm'
-
-// Outlives the dialog: a failed create may already have stored the mission,
-// and resending the same contents under the same key replays it.
-const swarmKeys = new Map<string, string>()
 
 /** `open` turns false when the panel starts to leave; the host unmounts it after the slide. */
 export function LaunchDialog({ open = true }: { open?: boolean }) {
@@ -50,7 +36,6 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const upsertRun = useStore((s) => s.upsertRun)
   const self = useStore((s) => s.info?.member)
   const features = useStore((s) => s.info?.features)
-  const capabilities = useStore((s) => s.capabilities)
   const cap = useCapability()
   const workspaces = useStore((s) => s.workspaces)
   const extraOptions = useMemo(
@@ -59,14 +44,9 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   )
   const [extras, setExtras] = useState<string[]>([])
   const identity = useSelf()
-  const swarmAvailable = cap.hasMethod('mission.create') && allowed('launch', identity)
   const ownAccountID = identity?.id ?? self?.id ?? ''
-  const [kind, setKind] = useState<Kind>(() => {
-    const { paletteDialog, route } = useStore.getState()
-    return swarmAvailable && (paletteDialog === 'swarm' || route.name === 'missions') ? 'swarm' : 'run'
-  })
   const reposOffered = extraOptions.length > 0 && cap.hasMethod(multiRepoMethod) &&
-    (features?.includes(kind === 'swarm' ? swarmReposFeature : multiRepoFeature) ?? false)
+    (features?.includes(multiRepoFeature) ?? false)
   // The panel stays open while the sidebar switches workspace, so the new primary may be among the picked extras.
   const pickedExtras = extras.filter((id) => extraOptions.some((item) => item.id === id))
   const extraRepos = reposOffered && pickedExtras.length ? { extra_workspace_ids: pickedExtras } : {}
@@ -94,16 +74,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   // A saved choice read after the member picked a tier must not replace it.
   const permissionPicked = useRef(false)
   const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick })
-  const { agents, agentError, agent, harness, mode, model, effort, effortLevels, noAgents } = choice
+  const { agents, agentError, harness, mode, model, effort, noAgents } = choice
   const [task, setTask] = useState('')
-  const [objective, setObjective] = useState('')
-  const [agentsByAccount, setAgentsByAccount] = useState<Record<string, AgentInfo[]> | null>(null)
-  const [workerError, setWorkerError] = useState<string | null>(null)
-  const [workers, setWorkers] = useState<WorkerChoice[]>([])
-  const [chosenWorkerMode, setWorkerMode] = useState<LaunchMode>('acp')
-  const { refused: integratorRefused, mode: integratorMode } = integratorModes(agent, harness, mode)
-  const workerRefused = workerRefusals(workers, agentsByAccount)
-  const shownWorkerMode = ([chosenWorkerMode, 'acp', 'tui'] as const).find((next) => !workerRefused[next]) ?? 'headless'
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
@@ -113,18 +85,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const shown = useRef(true)
   const sharedAccount = account !== '' && account !== ownAccountID
   const accountName = accounts.find((member) => member.id === account)?.display_name ?? account
-  const accountField = kind === 'swarm' ? 'Integrator account' : 'Account'
-  const taskMissing = kind === 'run' && needsTask(mode, task)
-  // Availability can drop while open; stay on Swarm and say why rather than
-  // switching under the reader.
-  const swarmUnavailable = kind !== 'swarm' || swarmAvailable
-    ? null
-    : capabilities === null
-      ? 'Swarm launch is unavailable: the server did not report its capabilities. Switch to Run to launch a run.'
-      : !allowed('launch', identity)
-        ? 'Swarm launch is unavailable: your role cannot launch.'
-        : 'Swarm launch is unavailable: the gateway does not offer mission.create. Switch to Run to launch a run.'
-
+  const taskMissing = needsTask(mode, task)
   useEffect(() => {
     if (error) errorCallout.current?.scrollIntoView({ block: 'nearest' })
   }, [error])
@@ -160,32 +121,10 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     setFallback(fallbackFromSaved(savedFallback, accounts))
   }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead, ownAccountID])
 
-  useEffect(() => {
-    if (kind !== 'swarm' || !accounts.length) return
-    let live = true
-    setWorkerError(null)
-    Promise.all(accounts.map(async (member) => {
-      const list = await api.agentList(member.id === ownAccountID ? undefined : member.id)
-      return [member.id, list.filter((item) => item.installed === true)] as const
-    })).then((entries) => {
-      if (!live) return
-      const byAccount: Record<string, AgentInfo[]> = Object.fromEntries(entries)
-      setAgentsByAccount(byAccount)
-      setWorkers((current) => {
-        if (current.length) return current.filter((choice) => (byAccount[choice.account_member_id] ?? []).some((item) => item.name === choice.harness && launchable(item)))
-        const fallback = (byAccount[account] ?? []).find(launchable)
-        return fallback ? [{ account_member_id: account, harness: fallback.name }] : []
-      })
-    }).catch((err) => {
-      if (live) setWorkerError(message(err))
-    })
-    return () => { live = false }
-  }, [accounts, account, kind, ownAccountID])
-
   const saveAccountDefault = () => saveLaunchDefaults((current) => ({
     ...current,
     account_member_id: account === ownAccountID ? '' : account,
-    fallback: fallbackToSaved(fallback, accounts, kind === 'swarm' ? '' : account),
+    fallback: fallbackToSaved(fallback, accounts, account),
   }))
 
   const setUp = () => {
@@ -197,20 +136,6 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     permissionPicked.current = true
     setPermission(next)
     if (savesDefaults) saveLaunchDefaults((current) => ({ ...current, permission: next })).catch((err) => toast.error(`Permission not saved for your next launch: ${message(err)}`))
-  }
-
-  const toggleWorker = (choice: WorkerChoice, on: boolean) => {
-    setWorkers((current) => on
-      ? current.some((item) => sameWorker(item, choice)) ? current : [...current, choice]
-      : current.filter((item) => !sameWorker(item, choice)))
-  }
-
-  const setWorkerModel = (choice: WorkerChoice, next: string) => {
-    setWorkers((current) => current.map((item) => sameWorker(item, choice) ? { ...item, model: next } : item))
-  }
-
-  const setWorkerEffort = (choice: WorkerChoice, next: string) => {
-    setWorkers((current) => current.map((item) => sameWorker(item, choice) ? { ...item, effort: next } : item))
   }
 
   const launchRun = async () => {
@@ -244,82 +169,21 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     toast.success('Run launched')
   }
 
-  const createSwarm = async () => {
-    const trimmed = objective.trim()
-    const accountableHumanID = self?.id ?? ''
-    if (!workspaceID || !accountableHumanID || !trimmed || !account || !harness || !integratorMode) {
-      throw new Error('Enter an objective and choose an integrator agent.')
-    }
-    const integratorModel = model.trim()
-    const integrator: MissionExecutionChoice = {
-      account_member_id: account,
-      harness,
-      mode: integratorMode,
-      ...(integratorModel ? { model: integratorModel } : {}),
-      ...(effort ? { effort } : {}),
-    }
-    const workerChoices = workers.map((choice): MissionExecutionChoice => {
-      const info = agentsByAccount?.[choice.account_member_id]?.find((item) => item.name === choice.harness)
-      const workerModel = choice.model?.trim()
-      return {
-        account_member_id: choice.account_member_id,
-        harness: choice.harness,
-        mode: workerMode(info, choice.harness, shownWorkerMode),
-        ...(workerModel ? { model: workerModel } : {}),
-        ...(choice.effort ? { effort: choice.effort } : {}),
-      }
-    })
-    const contents = {
-      workspace_id: workspaceID,
-      objective: trimmed,
-      accountable_human_id: accountableHumanID,
-      integrator,
-      // Sorted: the idempotency key and the server's receipt check both
-      // follow the serialized list.
-      execution_choices: [integrator, ...workerChoices.filter((choice) => !sameWorker(choice, integrator) || choice.mode !== integrator.mode)]
-        .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode) || (a.model ?? '').localeCompare(b.model ?? '') || (a.effort ?? '').localeCompare(b.effort ?? '')),
-      ...fallbackParams(fallback, accounts, ''),
-      ...extraRepos,
-    }
-    const serialized = JSON.stringify(contents)
-    const key = swarmKeys.get(serialized) ?? randomID('mission')
-    swarmKeys.set(serialized, key)
-    const signedIn = sameIdentity()
-    const result = await api.missionCreate({ ...contents, idempotency_key: key })
-    swarmKeys.delete(serialized)
-    if (signedIn()) rememberChoice(harness, integratorMode, integratorModel)
-    close()
-    navigate('missions', { missionId: result.mission.id })
-    toast.success('Swarm created')
-  }
-
   const submit = async () => {
     setLaunching(true)
     setError(null)
     setSetup(null)
     try {
-      await (kind === 'run' ? launchRun() : createSwarm())
+      await launchRun()
     } catch (err) {
       // Closed while the request ran, the dialog can no longer show the refusal.
-      if (!shown.current) toast.error(`${kind === 'swarm' ? 'Swarm not created' : 'Launch failed'}: ${message(err)}`)
+      if (!shown.current) toast.error(`Launch failed: ${message(err)}`)
       setLaunching(false)
       setError(message(err))
       setSetup(setupOutput(err))
     }
   }
 
-  const integratorPicker = agents === null
-    ? <p className="text-ui-sm text-muted">Loading agents…</p>
-    : (
-        <AgentPicker
-          label="Integrator agent"
-          agents={agents}
-          value={harness}
-          onChange={(name) => { setError(null); choice.choose(name) }}
-          onSetUp={noAgents ? undefined : setUp}
-          disabled={launching}
-        />
-      )
   const notes = (
     <>
       {agentError && <Callout tone="failed" role="alert">{agentError}</Callout>}
@@ -334,7 +198,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
             : 'Set up an agent opens Agents, where Add agent installs it.'}
         </Callout>
       )}
-      {agents && agentError === null && <RefusalNotes agents={agents} accountName={accountName} accountField={accountField} />}
+      {agents && agentError === null && <RefusalNotes agents={agents} accountName={accountName} />}
       {savedRead.error && (
         <Callout
           tone="failed"
@@ -349,7 +213,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     </>
   )
   const options = accounts.length > 1 && (
-    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} swarm={kind === 'swarm'} save={savesDefaults && <SaveAccountDefault choice={JSON.stringify([account, fallback])} onSave={saveAccountDefault} />} />
+    <AccountOptions label="Account" accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} save={savesDefaults && <SaveAccountDefault choice={JSON.stringify([account, fallback])} onSave={saveAccountDefault} />} />
   )
 
   return (
@@ -362,65 +226,24 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         onInteractOutside={(event) => event.preventDefault()}
         className={cn(surface, 'relative grid h-full w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-none border-y-0 border-l-0 p-4 pt-[calc(1rem+var(--safe-top))] shadow-dialog outline-none')}
       >
-        <Tabs value={kind} onValueChange={(value) => { setKind(value as Kind); setError(null) }} className="contents">
-          <DialogHeader>
-            <DialogTitle>{kind === 'swarm' ? 'New swarm' : 'New run'}</DialogTitle>
-            <DialogDescription>
-              {kind === 'swarm'
-                ? 'The integrator plans the work, starts a worker run per task, and combines the results.'
-                : 'Starts an agent in its own container on the workspace\'s base branch.'}
-            </DialogDescription>
-            {(swarmAvailable || kind === 'swarm') && (
-              <TabsList aria-label="Launch">
-                <TabsTrigger value="run">Run</TabsTrigger>
-                <TabsTrigger value="swarm">Swarm</TabsTrigger>
-              </TabsList>
-            )}
-          </DialogHeader>
-          <form
-            id="launch-form"
-            className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1 py-1 [&>*]:shrink-0"
-            onSubmit={(event) => { event.preventDefault(); void submit() }}
-          >
-            <TabsContent value="run" className="flex flex-col gap-4">
-              {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
-              <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
-              {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-              {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background runs cannot start child runs.' : undefined} disabled={launching} />}
-            </TabsContent>
-            <TabsContent value="swarm" className="flex flex-col gap-4">
-              {swarmUnavailable && <Callout tone="needs-you" role="status" id="launch-swarm-unavailable">{swarmUnavailable}</Callout>}
-              <FormField label="Objective" help="Required. The integrator asks you clarifying questions only if it needs answers, then runs the swarm to completion.">
-                <Textarea autoFocus required rows={3} placeholder="What outcome should the integrator coordinate?" value={objective} onChange={(event) => setObjective(event.target.value)} />
-              </FormField>
-              {integratorPicker}
-              {harness && (
-                <ModeControl
-                  label="Integrator mode"
-                  value={integratorMode}
-                  onChange={(next) => { setError(null); choice.setMode(next) }}
-                  refused={integratorRefused}
-                  onSetUp={setUp}
-                />
-              )}
-              {harness && <ModelField label="Integrator model" harness={harness} accountMemberID={choice.accountMemberID} value={model} onChange={(next) => { setError(null); choice.setModel(next) }} disabled={launching} />}
-              {effortLevels.length > 0 && <EffortField label="Integrator effort" levels={effortLevels} value={effort} onChange={(next) => { setError(null); choice.setEffort(next) }} disabled={launching} />}
-              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={shownWorkerMode} ownAccountID={ownAccountID} onToggle={toggleWorker} onModel={setWorkerModel} onEffort={setWorkerEffort} />
-              <ModeControl
-                label="Worker mode"
-                value={shownWorkerMode}
-                onChange={setWorkerMode}
-                refused={workerRefused}
-                onSetUp={setUp}
-                help="A worker whose agent cannot use this mode runs in the mode its row names."
-              />
-            </TabsContent>
-            {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} swarm={kind === 'swarm'} />}
-            {notes}
-            {options}
-            {error && <Callout ref={errorCallout} tone="failed" role="alert" title={kind === 'swarm' ? 'Swarm not created' : 'Launch failed'}>{error}{setup && <SetupOutput output={setup} />}</Callout>}
-          </form>
-        </Tabs>
+        <DialogHeader>
+          <DialogTitle>New run</DialogTitle>
+          <DialogDescription>Starts an agent in its own container on the workspace's base branch.</DialogDescription>
+        </DialogHeader>
+        <form
+          id="launch-form"
+          className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1 py-1 [&>*]:shrink-0"
+          onSubmit={(event) => { event.preventDefault(); void submit() }}
+        >
+          {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
+          <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
+          {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
+          {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background runs cannot start child runs.' : undefined} disabled={launching} />}
+          {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
+          {notes}
+          {options}
+          {error && <Callout ref={errorCallout} tone="failed" role="alert" title="Launch failed">{error}{setup && <SetupOutput output={setup} />}</Callout>}
+        </form>
         <DialogFooter className="sm:items-center">
           <div className="min-w-0 max-sm:order-last sm:mr-auto">
             <WorkspaceLine workspace={workspace} />
@@ -429,11 +252,10 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           <Button
             type="submit"
             form="launch-form"
-            aria-describedby={swarmUnavailable ? 'launch-swarm-unavailable' : undefined}
-            disabled={launching || !workspaceID || !account || !harness || taskMissing || swarmUnavailable !== null || (kind === 'swarm' && (objective.trim() === '' || !integratorMode))}
+            disabled={launching || !workspaceID || !account || !harness || taskMissing}
           >
             {launching && <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />}
-            {late ? stillWaiting : launching ? (kind === 'swarm' ? 'Creating swarm…' : 'Launching…') : kind === 'swarm' ? 'Create swarm' : 'Launch'}
+            {late ? stillWaiting : launching ? 'Launching…' : 'Launch'}
           </Button>
         </DialogFooter>
         <DialogPrimitive.Close asChild>

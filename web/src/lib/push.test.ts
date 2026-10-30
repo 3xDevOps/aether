@@ -209,7 +209,7 @@ describe('watchPush', () => {
     port1.close()
     expect(store.getState().route).toEqual({ name: 'settings', params: { section: 'watches', watch: 'wat-3m8q2k7v4c' } })
     expect(window.location.search).toBe('?page=settings&id=watches&watch=wat-3m8q2k7v4c')
-    env.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'aether:open-url', url: 'https://elsewhere.example/?page=missions' } }))
+    env.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'aether:open-url', url: 'https://elsewhere.example/?page=memory' } }))
     expect(store.getState().route.name).toBe('settings')
     stop()
   })

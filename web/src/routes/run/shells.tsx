@@ -17,7 +17,6 @@ import { getShellSocket, initialRunShellDock, shellEnded } from '@/store/termina
 /** Mirrors maxRunShells in internal/scheduler/run_shell.go. */
 const maxOwnShells = 4
 const limitReason = `People can run ${maxOwnShells} shells in a run; the agent’s are counted apart. Stop one to open another.`
-const workerReason = 'Take control first. This run is a swarm worker, so control is never taken for you.'
 
 export const shellPollMs = (visible: boolean) => (visible ? 2_000 : 10_000)
 
@@ -56,9 +55,6 @@ export function useRunShells(runID: string, visible: boolean) {
   // once it has drawn, because the control that asked is gone by then.
   const focusShell = useRef(false)
   const canOpen = paused === false && (run?.status === 'running' || run?.status === 'needs-attention')
-  // Shell control on a swarm worker also sets its durable orchestration hold
-  // (docs/terminal.md), so there it stays a deliberate click.
-  const implicitControl = run?.mission_role !== 'worker'
 
   const refresh = useCallback(async () => {
     const current = ++revision.current
@@ -104,7 +100,7 @@ export function useRunShells(runID: string, visible: boolean) {
     try {
       const result = await api.devTerminalStart({ run_id: runID })
       revision.current++
-      if (implicitControl) writeIntent.current[shellControlKey(runID, result.terminal)] = true
+      writeIntent.current[shellControlKey(runID, result.terminal)] = true
       const s = useStore.getState()
       const current = s.shellDocks[runID]?.terminals ?? []
       s.syncShellTerminals(runID, [...current.filter((item) => item.terminal_id !== result.terminal.terminal_id), result.terminal])
@@ -117,7 +113,7 @@ export function useRunShells(runID: string, visible: boolean) {
     } finally {
       setBusy(false)
     }
-  }, [runID, implicitControl])
+  }, [runID])
 
   /** `from` is the controller the person agreed to take the shell from. */
   const stop = useCallback(async (terminal: DevTerminal, from?: DevController) => {
@@ -169,7 +165,6 @@ export function useRunShells(runID: string, visible: boolean) {
     atLimit,
     canAdd: canOpen && !busy && !atLimit,
     busy,
-    implicitControl,
     writeIntent,
     controlSessions,
     focusShell,
@@ -202,15 +197,12 @@ export function ShellCloseItems({ shells, terminal, onClose }: { shells: RunShel
     useStore.getState().closeShellTab(shells.runID, terminal.terminal_id)
   }
   if (shellEnded(terminal)) return <MenuItem onSelect={hide}>Close</MenuItem>
-  const needsControl = !shells.implicitControl &&
-    getShellSocket(shells.runID, terminal.terminal_id)?.controlMetadata?.().has_control !== true
   return (
     <>
       <MenuItem onSelect={hide}>Hide, keep running</MenuItem>
       <MenuItem
         tone="danger"
-        disabled={shells.busy || needsControl}
-        description={needsControl ? workerReason : undefined}
+        disabled={shells.busy}
         onSelect={() => {
           onClose?.()
           void shells.stop(terminal)

@@ -116,7 +116,7 @@ func TestAssistantSurface(t *testing.T) {
 			t.Errorf("%s: tier %d, description %q, annotations %+v", tool.Name, o.Tier, tool.Description, tool.Annotations)
 		}
 	}
-	for _, name := range []string{"search", "fetch", "aether_cancel_swarm", "aether_mark_reviewed"} {
+	for _, name := range []string{"search", "fetch", "aether_mark_reviewed"} {
 		if slices.Contains(names, name) {
 			t.Errorf("the assistant offers %s", name)
 		}
@@ -180,35 +180,20 @@ func TestMessageKeyKeepsInFlight(t *testing.T) {
 
 // A keyed answer retried after its question stopped waiting repeats the
 // key on the one call that answers that question, so the server returns
-// the saved answer; an id that is neither a swarm question nor a teammate
-// question on the run, nor one the key replied to, writes nothing.
+// the saved answer; an id that is not a teammate question on the run, nor
+// one the key replied to, writes nothing.
 func TestKeyedAnswerRetry(t *testing.T) {
 	f := newFake(t)
-	f.answers[protocol.MethodMissionShow] = func(raw json.RawMessage) (any, error) {
-		var p protocol.MissionShowParams
-		if err := json.Unmarshal(raw, &p); err != nil || p.QuestionID != "q-1" {
-			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "mission question not found"}
-		}
-		return protocol.MissionShowResult{Mission: protocol.Mission{ID: "mis-1"}}, nil
-	}
 	f.answers[protocol.MethodRunRoomList] = returns(protocol.RoomMessageListResult{Messages: []protocol.RoomMessage{
 		{ID: "room-1", RunID: "run-1", Kind: protocol.RoomMessageQuestion, Body: "which db?"},
 		{ID: "room-9", RunID: "run-1", Kind: protocol.RoomMessageReply, Body: "main", CorrelationID: "room-old", IdempotencyKey: "a2"},
 	}})
-	f.answers[protocol.MethodMissionQuestionAnswer] = returns(protocol.MissionQuestionResult{})
 	f.answers[protocol.MethodRunRoomPost] = returns(protocol.RunRoomPostResult{})
 	cs := connectorSession(t, f, ScopeWrite)
 	answer := func(id, key string) (string, bool) {
 		f.calls = nil
 		text, _, failed := try(t, cs, "aether_answer", map[string]any{"run_id": "run-1", "answer_id": id, "answer": "main", "idempotency_key": key})
 		return text, failed
-	}
-
-	if _, failed := answer("q-1", "a1"); failed {
-		t.Fatal("a keyed swarm answer retry failed")
-	}
-	if got := f.acted(); got.method != protocol.MethodMissionQuestionAnswer || got.params != `{"question_id":"q-1","answer":"main","idempotency_key":"a1"}` {
-		t.Fatalf("a keyed swarm answer retry called %+v", got)
 	}
 
 	for id, key := range map[string]string{"room-1": "a1", "room-old": "a2"} {

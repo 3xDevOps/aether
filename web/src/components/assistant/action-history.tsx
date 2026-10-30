@@ -15,7 +15,6 @@ import type { AcpSession } from '@/store/sessions'
 
 const opensWord: Record<ActionTarget['kind'], string> = {
   run: 'opens the run',
-  swarm: 'opens the swarm',
   pr: 'opens the pull request',
   workspace: 'opens the workspace',
   environment: 'opens the environment',
@@ -37,7 +36,7 @@ function Entry({ action, onOpen }: { action: AssistantAction; onOpen: () => void
   const names = useActionNames()
   const open = useOpenTarget()
   const gone = useTargetGone(action)
-  const { background } = useBackground(action)
+  const background = useBackground(action)
   const target = action.target && !gone && (action.target.route || action.target.url) ? action.target : undefined
   return (
     <li>

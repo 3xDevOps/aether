@@ -99,7 +99,6 @@ export function AccountOptions({
   onChange,
   fallback,
   onFallback,
-  swarm = false,
   save,
 }: {
   label: string
@@ -109,11 +108,8 @@ export function AccountOptions({
   onChange: (account: string) => void
   fallback: Fallback
   onFallback: (fallback: Fallback) => void
-  swarm?: boolean
   save?: ReactNode
 }) {
-  // A swarm's list is every worker's policy too; the server skips each run's current account.
-  const skip = swarm ? '' : account
   const accountName = (member: Member) => `${member.display_name}${member.id === ownAccountID ? ' (you)' : ' (shared)'}`
   const chosen = accounts.find((member) => member.id === account)
   const shared = account !== '' && account !== ownAccountID
@@ -121,7 +117,7 @@ export function AccountOptions({
     <Collapsible defaultOpen={shared}>
       <CollapsibleTrigger>
         <span className="font-medium">Options</span>
-        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallbackParams(fallback, accounts, skip).no_fallback && ' · Fallback off'}</span>}
+        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallbackParams(fallback, accounts, account).no_fallback && ' · Fallback off'}</span>}
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-1 pt-2 pl-5">
         <Label htmlFor="launch-account">{label}</Label>
@@ -142,7 +138,7 @@ export function AccountOptions({
             ? `Uses ${chosen?.display_name ?? account}'s agent login and vendor quota in your own environment, with your GitHub login. You remain its owner and actor.`
             : 'A teammate who shares their agent account appears here.'}
         </p>
-        <FallbackList accounts={accounts} account={account} skip={skip} accountName={accountName} fallback={fallback} onChange={onFallback} />
+        <FallbackList accounts={accounts} account={account} skip={account} accountName={accountName} fallback={fallback} onChange={onFallback} />
         {save}
       </CollapsibleContent>
     </Collapsible>

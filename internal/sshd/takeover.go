@@ -291,7 +291,7 @@ func (s *Server) handleTakeover(a *takeoverAttach, ctl protocol.DashAttachContro
 
 // grantTakeover holds the coordinator lock through admission and acknowledgement.
 // The grant closure rechecks requester authority and the captured holder fence
-// in the same control admission boundary as readiness and mission takeover.
+// in the same control admission boundary as readiness.
 func (s *Server) grantTakeover(p *pendingTakeover, recipient *takeoverAttach, requestID uint64) {
 	if err := s.validateTakeover(p); err != nil {
 		s.takeovers.finish(p, "cancelled", err, recipient, requestID)

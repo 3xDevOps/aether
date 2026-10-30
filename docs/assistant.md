@@ -128,12 +128,11 @@ run.
 | Stop or close a run | Stop a run, or close it as merged or abandoned | Yes |
 | Save your environment | Save it as the image new runs and terminals start from | Yes |
 | Run lifecycle | Relaunch a stopped run, switch its mode, protect or archive it, hand it to a teammate | Yes |
-| Swarms | Replace a stopped integrator, release your control of a worker, archive or unarchive a swarm | Yes |
 | Open and merge | Open or merge a run's pull request | Yes |
 | Team memory | Add a note, pin or unpin one; it cannot remove notes | Yes |
 
 Asked "what is left", "continue this" or "did we ship?", the assistant reads
-the run or swarm with its [progress evidence](connectors.md#progress-evidence)
+the run with its [progress evidence](connectors.md#progress-evidence)
 and answers requested, implemented, reviewed, merged, released and deployed
 on separate lines, each with its source and time, or "unknown" when Aether has
 no source, as for releases and deployments. An agent's success report alone
@@ -192,9 +191,9 @@ both pages, and sends nothing until you pick one.
 
 To point a message at something specific, use **Fix this** on a failed session,
 the button beside a failing check or beside the pull request number in a run's
-header, **Ask the assistant** beside a swarm task's error, or the run menu's
+header, or the run menu's
 **Ask the assistant to fix this run** and **Ask the assistant why this is
-stuck**. Each opens the panel with that run, check, pull request, error or task
+stuck**. Each opens the panel with that run, check or pull request
 attached and a short draft to edit; nothing is sent until you press Send. The
 attachment holds only ids and names, such as `acme/api#42 · check lint`; the
 assistant reads the details with its tools.
@@ -285,13 +284,12 @@ shows its state: running, done, failed, declined by you, expired after 10
 minutes unanswered, withdrawn when the turn ended first, or did not finish. A
 call waiting for your approval is one line above the approval card. It also
 says whether you approved it or auto-approval passed it, and links to the run,
-swarm, pull request or environment. A failure shows the server's error as is.
+pull request or environment. A failure shows the server's error as is.
 **Retry** adds `Retry: <what it tried>` to the message box for you to edit and
 send. A launch card adds what started, such as `run · api · Claude Code opus ·
-your account`. A run or swarm the assistant launched that is still going reads
+your account`. A run the assistant launched that is still going reads
 **Working in the background** with how you hear back; it keeps running after
-you close the panel. A launched swarm's state is read again on each change to
-it, so the card and the **Actions** list agree. Reads fold
+you close the panel. Reads fold
 into one line, such as **Read 3 runs**, that expands. The **Actions** button in
 the panel header lists the conversation's actions, newest first.
 
@@ -354,7 +352,7 @@ agent asks you still appears as a card.
 ## Notifications
 
 Aether watches every run the assistant launches, relaunches or messages for
-you, and the integrator of every swarm it starts or gives a new integrator: it
+you: it
 creates a [watch](watches.md#assistant-watches) with source `assistant`,
 listed in **Settings > Watches**, where you pause it to stop the notices. If
 the watch cannot be created, the conversation says so with the error. You do

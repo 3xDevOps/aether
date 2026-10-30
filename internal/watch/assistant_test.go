@@ -274,7 +274,6 @@ func TestOwnersRunNotificationCoversOnlyWhatItPushes(t *testing.T) {
 	}{
 		{"a need of the owner's run", own(nil), need, true},
 		{"a need of someone else's run", own(func(r *domain.Run) { r.MemberID = "bob" }), need, false},
-		{"a need of a swarm run", own(func(r *domain.Run) { r.MissionID = "m1" }), need, false},
 		{"a success parked for review", own(nil), reported, true},
 		{"a success never put up for review", own(func(r *domain.Run) { r.Review = "" }), reported, false},
 		{"a success put off for later", own(func(r *domain.Run) { r.Review = domain.ReviewLater }), reported, false},

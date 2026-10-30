@@ -103,11 +103,6 @@ func TestScenarioStateIsReadable(t *testing.T) {
 					read("aether_pr_status", map[string]any{"run_id": r.ID})
 				}
 			}
-			var missions protocol.MissionListResult
-			_ = json.Unmarshal(s.Answers["mission.list"], &missions)
-			for _, m := range missions.Missions {
-				read("aether_get_swarm", map[string]any{"swarm_id": m.ID})
-			}
 		})
 	}
 }

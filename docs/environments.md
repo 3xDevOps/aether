@@ -230,7 +230,7 @@ containers created afterwards, one field at a time; clear a field to fall
 back to the flag or the default. A single run overrides both under
 **Resource limits** in the launch dialog's **Run** tab (`limits` on
 `run.launch`; CPUs, memory in GiB, processes). An empty field follows the
-server limit. A swarm uses the server limits.
+server limit.
 
 A new limit applies to containers created afterwards. Docker must report
 support for CPU quotas, memory and swap limits, and PID limits, or new

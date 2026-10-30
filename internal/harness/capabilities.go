@@ -51,16 +51,16 @@ const (
 	HooksManaged
 )
 
-// SwarmRefusal is why a swarm integrator or worker of agent in mode would
-// sit idle with unread mail, or nil. Only shipped agents declare
+// WakeRefusal is why a run of agent in mode that waits for mail would sit
+// idle with unread mail, or nil. Only shipped agents declare
 // capabilities; a custom agent's own command decides when it reads mail.
-func SwarmRefusal(agent string, mode domain.LaunchMode) error {
+func WakeRefusal(agent string, mode domain.LaunchMode) error {
 	p, shipped := profiles[agent]
 	if !shipped || agent == "custom" || mode != domain.LaunchTUI || p.Capabilities.IdleWake {
 		return nil
 	}
 	if p.EnhancedSupport() == EnhancedNone {
-		return fmt.Errorf("%s in Standard mode has no idle wake, and it has no Enhanced mode; start it as a Background worker", agent)
+		return fmt.Errorf("%s in Standard mode has no idle wake, and it has no Enhanced mode; start it as a Background run", agent)
 	}
 	return fmt.Errorf("%s in Standard mode has no idle wake; start it in Enhanced", agent)
 }

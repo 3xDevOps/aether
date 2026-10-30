@@ -100,7 +100,7 @@ func (s *Server) templateSave(ctx context.Context, member domain.MemberID, param
 		if mode == "" {
 			mode = domain.LaunchHeadless
 		}
-		if err := validator.ValidateMissionLaunch(ctx, member, member, t.Harness, mode, t.Model, t.Effort); err != nil {
+		if err := validator.ValidateLaunch(ctx, member, member, t.Harness, mode, t.Model, t.Effort); err != nil {
 			return nil, invalidParams(err.Error())
 		}
 	}

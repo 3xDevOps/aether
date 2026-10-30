@@ -70,7 +70,7 @@ func sendHookMail(t *testing.T, service *coord.Service, to domain.RunID, key str
 }
 
 func TestClaudeWakeStartsATurnForNewMail(t *testing.T) {
-	service, db, socket, run := hookRun(t, nil, nil, false)
+	service, db, socket, run := hookRun(t, nil, false)
 	done := startClaudeWaiter(t.Context(), socket, `{"hook_event_name":"Stop","stop_hook_active":true}`)
 	waitClaimed(t, run)
 	sendHookMail(t, service, run, "wake-mail")
@@ -190,7 +190,7 @@ func TestClaudeWakeEndsWhenSuperseded(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, socket, run := hookRun(t, nil, nil, false)
+			_, _, socket, run := hookRun(t, nil, false)
 			done := startClaudeWaiter(t.Context(), socket, `{"hook_event_name":"Stop","stop_hook_active":true}`)
 			waitClaimed(t, run)
 			tc.supersede(t, socket, run)
@@ -203,7 +203,7 @@ func TestClaudeWakeEndsWhenSuperseded(t *testing.T) {
 }
 
 func TestClaudeWakeEndsWhenClaudeCodeIsGone(t *testing.T) {
-	_, _, socket, run := hookRun(t, nil, nil, false)
+	_, _, socket, run := hookRun(t, nil, false)
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)

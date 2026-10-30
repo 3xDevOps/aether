@@ -63,14 +63,12 @@ function runView(s: RootState, runId: string): string | undefined {
 }
 
 function currentEntry(s: RootState): ViewEntry {
-  const { runId, workspaceId, missionId, agent, view } = s.route.params
+  const { runId, workspaceId, agent, view } = s.route.params
   const run = runId ? s.runs[runId] : undefined
   const entry: ViewEntry = { name: s.route.name }
   const workspace = workspaceId ?? run?.workspace_id ?? s.activeWorkspace
   if (workspace) entry.workspace_id = workspace
   if (runId) entry.run_id = runId
-  const mission = missionId ?? run?.mission_id
-  if (mission) entry.mission_id = mission
   if (agent) entry.subagent = agent
   const shown = runId ? runView(s, runId) : view
   if (shown) entry.view = shown
@@ -78,7 +76,7 @@ function currentEntry(s: RootState): ViewEntry {
 }
 
 function sameEntity(a: ViewEntry, b: ViewEntry): boolean {
-  return a.name === b.name && a.run_id === b.run_id && a.mission_id === b.mission_id && a.subagent === b.subagent &&
+  return a.name === b.name && a.run_id === b.run_id && a.subagent === b.subagent &&
     (a.run_id !== undefined || a.workspace_id === b.workspace_id)
 }
 
@@ -149,7 +147,7 @@ export function pinPage(s: RootState, now = new Date()): DraftPin {
 }
 
 export function entityKey(entry: ViewEntry): string {
-  return JSON.stringify([entry.name, entry.run_id, entry.mission_id, entry.subagent, entry.run_id ? undefined : entry.workspace_id])
+  return JSON.stringify([entry.name, entry.run_id, entry.subagent, entry.run_id ? undefined : entry.workspace_id])
 }
 
 /**
@@ -201,7 +199,7 @@ export function nextViewContext(s: RootState): ViewContext | undefined {
   return assistantShareView(s) ? retained.viewContext : unsharedPart(retained.viewContext)
 }
 
-const attachmentFields = ['kind', 'workspace_id', 'run_id', 'mission_id', 'task_id', 'attempt_id', 'pr', 'repository', 'check', 'failure', 'seq'] as const
+const attachmentFields = ['kind', 'workspace_id', 'run_id', 'pr', 'repository', 'check', 'failure', 'seq'] as const
 
 export function sameAttachment(a: ViewAttachment, b: ViewAttachment): boolean {
   return attachmentFields.every((field) => a[field] === b[field])

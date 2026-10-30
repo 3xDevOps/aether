@@ -30,10 +30,6 @@ var conditionsOf = map[string]struct{ all, defaults []string }{
 		all:      []string{protocol.WatchNeedsYou, protocol.WatchFinished, protocol.WatchPRMerged, protocol.WatchCI},
 		defaults: []string{protocol.WatchNeedsYou, protocol.WatchFinished},
 	},
-	protocol.WatchTargetMission: {
-		all:      []string{protocol.WatchNeedsYou, protocol.WatchFinished},
-		defaults: []string{protocol.WatchNeedsYou, protocol.WatchFinished},
-	},
 	protocol.WatchTargetPR: {
 		all:      []string{protocol.WatchCI, protocol.WatchReview, protocol.WatchMerged, protocol.WatchClosed},
 		defaults: []string{protocol.WatchCI, protocol.WatchReview, protocol.WatchMerged},
@@ -50,34 +46,13 @@ func WatchesLink() string        { return "/?page=settings&id=watches" }
 func RunLink(id domain.RunID) string {
 	return "/?run=" + url.QueryEscape(string(id))
 }
-func MissionLink(id domain.MissionID) string {
-	return "/?page=missions&id=" + url.QueryEscape(string(id))
-}
-
-// MissionTitle names a swarm by the first line of its objective.
-func MissionTitle(m *domain.Mission) string {
-	for line := range strings.Lines(m.Objective) {
-		if line = strings.TrimSpace(line); line != "" {
-			return clip(line, 120)
-		}
-	}
-	return "Untitled swarm"
-}
-
-func clip(s string, limit int) string {
-	runes := []rune(s)
-	if len(runes) <= limit {
-		return s
-	}
-	return strings.TrimRight(string(runes[:limit]), " ") + "…"
-}
 
 // normalize checks conditions against kind and returns them in display
 // order, the defaults when empty.
 func (s *Service) normalize(kind string, conditions []string) ([]string, error) {
 	set, ok := conditionsOf[kind]
 	if !ok {
-		return nil, invalid("target kind %q is not one of run, mission, pr", kind)
+		return nil, invalid("target kind %q is not one of run, pr", kind)
 	}
 	if len(conditions) == 0 {
 		conditions = set.defaults
@@ -153,23 +128,6 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		if key, _, ok := runFinish(run, ""); ok && !run.Status.Final() {
 			fired[protocol.WatchFinished] = key
 		}
-	case protocol.WatchTargetMission:
-		if t.MissionID == "" {
-			return "", "", nil, invalid("target.mission_id is required")
-		}
-		m, err := s.store.GetMission(ctx, domain.MissionID(t.MissionID))
-		if err != nil {
-			return "", "", nil, fmt.Errorf("swarm %s: %w", t.MissionID, err)
-		}
-		if m.Phase == domain.MissionPhaseCancelled {
-			return "", "", nil, invalid("swarm %s is cancelled; there is nothing left to watch", t.MissionID)
-		}
-		ws, title = m.WorkspaceID, MissionTitle(m)
-		if m.Phase == domain.MissionPhaseCompleted {
-			if fired[protocol.WatchFinished], err = s.missionFinish(ctx, m); err != nil {
-				return "", "", nil, err
-			}
-		}
 	case protocol.WatchTargetPR:
 		if t.Repo == "" || t.Number <= 0 {
 			return "", "", nil, invalid("target.repo and target.number are required")
@@ -183,7 +141,7 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		}
 		title = fmt.Sprintf("%s#%d", t.Repo, t.Number)
 	default:
-		return "", "", nil, invalid("target kind %q is not one of run, mission, pr", t.Kind)
+		return "", "", nil, invalid("target kind %q is not one of run, pr", t.Kind)
 	}
 	if ws != "" {
 		actor := permissions.Actor{ID: member.ID, Role: member.Role}
@@ -249,7 +207,7 @@ func (s *Service) create(ctx context.Context, memberID domain.MemberID, p protoc
 	}
 	w := &store.Watch{
 		MemberID: memberID, WorkspaceID: ws, TargetKind: p.Target.Kind, RunID: domain.RunID(p.Target.RunID),
-		MissionID: domain.MissionID(p.Target.MissionID), Repo: p.Target.Repo, Number: p.Target.Number,
+		Repo: p.Target.Repo, Number: p.Target.Number,
 		TargetTitle: title, Conditions: conditions, Label: lbl, Source: source, State: protocol.WatchActive,
 		Fired: fired, IdempotencyKey: p.IdempotencyKey, CreatedAt: now, UpdatedAt: now, ExpiresAt: expires,
 		NextCheckAt: &now,
@@ -321,7 +279,7 @@ func (s *Service) insert(ctx context.Context, w *store.Watch) (bool, error) {
 // conversation; push delivery is unchanged.
 func (s *Service) existing(ctx context.Context, member domain.MemberID, t protocol.WatchTarget, conditions []string, source string) (*store.Watch, error) {
 	for range 4 {
-		watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: t.Kind, RunID: domain.RunID(t.RunID), MissionID: domain.MissionID(t.MissionID)})
+		watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: t.Kind, RunID: domain.RunID(t.RunID)})
 		if err != nil {
 			return nil, err
 		}
@@ -353,7 +311,7 @@ func (s *Service) existing(ctx context.Context, member domain.MemberID, t protoc
 		}
 		return s.settledWatch(context.WithoutCancel(ctx), w.ID)
 	}
-	return nil, fmt.Errorf("watch on %s %s: changed by every concurrent update", kindWords[t.Kind], cmp.Or(t.RunID, t.MissionID, t.Repo))
+	return nil, fmt.Errorf("watch on %s %s: changed by every concurrent update", kindWords[t.Kind], cmp.Or(t.RunID, t.Repo))
 }
 
 // settled evaluates watch id once, so its result shows the target as it
@@ -401,7 +359,7 @@ var conditionWords = map[string]string{
 }
 
 var kindWords = map[string]string{
-	protocol.WatchTargetRun: "run", protocol.WatchTargetMission: "swarm", protocol.WatchTargetPR: "pull request",
+	protocol.WatchTargetRun: "run", protocol.WatchTargetPR: "pull request",
 }
 
 // receipt says in one line what w watches and where its notices go.
@@ -454,7 +412,7 @@ func (s *Service) receipt(ctx context.Context, w *store.Watch) (string, error) {
 }
 
 func targetOf(w *store.Watch) protocol.WatchTarget {
-	return protocol.WatchTarget{Kind: w.TargetKind, RunID: string(w.RunID), MissionID: string(w.MissionID), Repo: w.Repo, Number: w.Number}
+	return protocol.WatchTarget{Kind: w.TargetKind, RunID: string(w.RunID), Repo: w.Repo, Number: w.Number}
 }
 
 func stamp(t *time.Time) string {
@@ -515,7 +473,7 @@ func (s *Service) owned(ctx context.Context, member domain.MemberID, id string) 
 func (s *Service) List(ctx context.Context, member domain.MemberID, p protocol.WatchListParams) (protocol.WatchListResult, error) {
 	watches, err := s.store.ListWatches(ctx, store.WatchFilter{
 		MemberID: member, State: p.State, TargetKind: p.TargetKind,
-		RunID: domain.RunID(p.RunID), MissionID: domain.MissionID(p.MissionID),
+		RunID: domain.RunID(p.RunID),
 	})
 	if err != nil {
 		return protocol.WatchListResult{}, err

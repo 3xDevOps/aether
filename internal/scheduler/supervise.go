@@ -108,24 +108,6 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 		return
 	}
 	if retained {
-		s.mu.Lock()
-		keep := entry.missionAssigned && !entry.destroyPending && s.cfg.RunContainerTTL >= 0 &&
-			entry.retainedUntil != nil && time.Now().UTC().Before(*entry.retainedUntil) && err == nil
-		if keep {
-			entry.exitObserved = true
-			entry.exitCode = st.Code
-			entry.paused = false
-			if persistErr := s.persistRetainedSidecar(entry.sidecar()); persistErr != nil {
-				entry.evidencePending = true
-				s.recordCleanupErrorLocked(entry, cleanupStateError)
-				slog.Warn("scheduler: persist retained worker exit", "run", entry.runID, "error", persistErr)
-			}
-		}
-		s.mu.Unlock()
-		if keep {
-			entry.lifecycleMu.Unlock()
-			return
-		}
 		if err := s.expireRetainedLocked(context.Background(), entry, ""); err != nil {
 			slog.Warn("scheduler: expire retained container after exit", "run", entry.runID, "error", err)
 		}
@@ -238,27 +220,6 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	case reported == "" && entry.reported != "" && !entry.status.Terminal():
 		to, reason, cause = entry.reported, reportedClose(entry.reported).reason, causeReported
 	}
-	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0 && !entry.noRetain
-	if retain {
-		deadline := time.Now().UTC().Add(s.cfg.RunContainerTTL)
-		entry.evidenceIdentity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
-		sc := entry.sidecar()
-		sc.Retained = true
-		sc.RetainedUntil = &deadline
-		sc.EvidencePending = true
-		if persistErr := s.persistRetainedSidecar(sc); persistErr != nil {
-			entry.finalizing = false
-			s.recordCleanupErrorLocked(entry, cleanupStateError)
-			s.mu.Unlock()
-			slog.Warn("scheduler: persist completed worker retention", "run", entry.runID, "error", persistErr)
-			entry.lifecycleMu.Unlock()
-			return
-		}
-		entry.retained = true
-		entry.retainedUntil = &deadline
-		entry.evidencePending = true
-		reason = retainedCompletionReason
-	}
 	err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor, cause)
 	s.mu.Unlock()
 	if err != nil && !errors.Is(err, ErrInvalidTransition) {
@@ -279,7 +240,6 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if s.runs[entry.runID] == entry {
 		identity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
 		entry.evidenceIdentity = identity
-		entry.evidencePending = retain
 		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
 			slog.Warn("scheduler: persist evidence identity", "run", entry.runID, "error", sidecarErr)
 		}
@@ -287,15 +247,6 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	s.mu.Unlock()
 	if identity == "" {
 		identity = finishCaptureIdentity("", published, committed, code)
-	}
-	if retain {
-		defer entry.lifecycleMu.Unlock()
-		if settleErr := s.settleRetainedCompletion(ctx, entry); settleErr != nil {
-			slog.Warn("scheduler: settle completed worker retention", "run", entry.runID, "error", settleErr)
-		}
-		_ = s.entryDriver(entry).Stop(ctx, entry.runID)
-		s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
-		return
 	}
 	entry.lifecycleMu.Unlock()
 	if captureErr := s.captureFinishEvidence(ctx, entry.runID, to, identity); captureErr != nil {

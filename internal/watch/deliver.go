@@ -270,15 +270,6 @@ func (s *Service) currentNeeds(ctx context.Context, w *store.Watch) ([]need, err
 			return nil, err
 		}
 		return s.runNeeds(run), nil
-	case protocol.WatchTargetMission:
-		m, err := s.store.GetMission(ctx, w.MissionID)
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		return s.missionNeeds(ctx, m)
 	}
 	return nil, nil
 }

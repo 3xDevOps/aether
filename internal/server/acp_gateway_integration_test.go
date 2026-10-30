@@ -168,7 +168,7 @@ func TestIntegrationEnhancedRunGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := waitMissionSocket(t, filepath.Join(env.data, "coord", runID))
+	socket := waitCoordSocket(t, filepath.Join(env.data, "coord", runID))
 	reportOutcome := func(outcome, key, reason string) {
 		t.Helper()
 		if err := pacedCall(ctx, socket, protocol.MethodCoordReport, protocol.CoordReportParams{

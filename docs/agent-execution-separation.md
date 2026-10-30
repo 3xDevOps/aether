@@ -62,7 +62,7 @@ execute again.
 
 Interactive runs already remain replyable after a success/failure report;
 explicit Close ends that live use and starts the configured compute grace.
-Background runs and swarm workers still complete automatically. That
+Background runs still complete automatically. That
 [lifecycle policy](environments.md#resource-limits-and-launch-admission)
 provides conversation continuity without a second runtime. A split would
 need to justify its additional complexity through execution isolation or
@@ -109,7 +109,7 @@ isolation result.
 | Execution can be replaced after failure while completed file writes survive. | Persistent mounts, image/user identity, working directory and process ownership must remain consistent. A filesystem snapshot is not an exact-process resume. |
 | Tool attribution and resource ownership become clearer. | Every operation needs authorization, identity and an unambiguous result or unknown-outcome state across transport failure. |
 | Agent credentials can be kept away from arbitrary build commands. | Only credentials needed by execution should cross the boundary. Sharing the whole home with both sides weakens this benefit. |
-| Small agent processes may support more concurrent sessions on a host. | A second runtime and transport add baseline memory, startup latency and operational work. Measure a moderate swarm on a 32 GiB host; do not assume a savings figure. |
+| Small agent processes may support more concurrent sessions on a host. | A second runtime and transport add baseline memory, startup latency and operational work. Measure many child runs on a 32 GiB host; do not assume a savings figure. |
 
 A split is not a logging policy, a substitute for capacity admission, or a
 promise of exactly-once commands. Disk space and durable history still need

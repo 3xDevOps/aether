@@ -68,7 +68,7 @@ const (
 	CoordReportFinalized CoordReportState = "finalized"
 )
 
-// CoordOutcome classifies a durable worker result.
+// CoordOutcome classifies a durable result.
 type CoordOutcome string
 
 const (
@@ -85,14 +85,12 @@ func (o CoordOutcome) Valid() bool {
 // one read returns shares a single token, and acknowledging that token
 // acknowledges exactly that batch - which is what makes delivery
 // at-least-once: a batch whose response never reached the agent is still
-// unacknowledged, so the next read returns it again. MissionID is the swarm
-// the sender belonged to when it sent. RetiredAt marks mail left unread when
+// unacknowledged, so the next read returns it again. RetiredAt marks mail left unread when
 // its recipient's container was released: it is history, never delivered,
 // and does not count toward the inbox cap.
 type RunMessage struct {
 	ID             string
 	WorkspaceID    domain.WorkspaceID
-	MissionID      domain.MissionID
 	FromRun        domain.RunID
 	ToRun          domain.RunID
 	Body           string
@@ -234,16 +232,10 @@ type CoordTerminalReportStore interface {
 
 var _ CoordTerminalReportStore = (*DB)(nil)
 
-const runMessageCols = `id, workspace_id, mission_id, from_run, to_run, body, kind, correlation_id, idempotency_key, delivery_token, created_at, delivered_at, acked_at, retired_at`
+const runMessageCols = `id, workspace_id, from_run, to_run, body, kind, correlation_id, idempotency_key, delivery_token, created_at, delivered_at, acked_at, retired_at`
 
 const unreadMessage = `acked_at IS NULL AND retired_at IS NULL`
 
-// senderMission resolves a run's swarm the way the run snapshot does: the
-// mission it integrates, else the one mission its attempts belong to.
-const senderMission = `COALESCE(
-	(SELECT MIN(id) FROM missions WHERE current_integrator_run_id = ?1),
-	(SELECT MIN(mission_id) FROM mission_attempts WHERE run_id = ?1 HAVING COUNT(DISTINCT mission_id) = 1),
-	'')`
 const coordReportCols = `id, workspace_id, run_id, outcome, summary, next_action, evidence_refs, input_evidence_refs, idempotency_key, state, created_at, finalized_at, published_at, superseded_at`
 
 func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int) error {
@@ -311,17 +303,12 @@ func (d *DB) AppendRunMessageCreated(ctx context.Context, m *RunMessage, maxUnac
 		}
 	}
 
-	var mission string
-	if merr := tx.QueryRowContext(ctx, `SELECT `+senderMission, m.FromRun).Scan(&mission); merr != nil {
-		return false, fmt.Errorf("store: append run message: sender mission: %w", merr)
-	}
-
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO run_messages (`+runMessageCols+`)
-		 SELECT ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, '', ?, NULL, NULL, NULL
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, '', ?, NULL, NULL, NULL
 		 WHERE (SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND `+unreadMessage+`) < ?
 		 ON CONFLICT (from_run, idempotency_key) WHERE idempotency_key <> '' DO NOTHING`,
-		id, m.WorkspaceID, mission, m.FromRun, m.ToRun, m.Body, m.Kind, correlation,
+		id, m.WorkspaceID, m.FromRun, m.ToRun, m.Body, m.Kind, correlation,
 		m.IdempotencyKey, createdAt, m.ToRun, maxUnacked,
 	)
 	if err != nil {
@@ -360,7 +347,6 @@ func (d *DB) AppendRunMessageCreated(ctx context.Context, m *RunMessage, maxUnac
 		return false, fmt.Errorf("store: append run message: commit: %w", err)
 	}
 	m.ID, m.CreatedAt = id, ts
-	m.MissionID = domain.MissionID(mission)
 	m.CorrelationID = correlation
 	m.DeliveryToken, m.DeliveredAt, m.AckedAt, m.RetiredAt = "", nil, nil, nil
 	return true, nil
@@ -575,18 +561,16 @@ func placeholders(n int) string {
 func scanRunMessage(row interface{ Scan(...any) error }) (*RunMessage, error) {
 	var (
 		m           RunMessage
-		mission     sql.NullString
 		createdAt   int64
 		deliveredAt *int64
 		ackedAt     *int64
 		retiredAt   *int64
 	)
-	if err := row.Scan(&m.ID, &m.WorkspaceID, &mission, &m.FromRun, &m.ToRun, &m.Body,
+	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.FromRun, &m.ToRun, &m.Body,
 		&m.Kind, &m.CorrelationID, &m.IdempotencyKey, &m.DeliveryToken,
 		&createdAt, &deliveredAt, &ackedAt, &retiredAt); err != nil {
 		return nil, err
 	}
-	m.MissionID = domain.MissionID(mission.String)
 	m.CreatedAt = decodeTime(createdAt)
 	m.DeliveredAt = decodeTimePtr(deliveredAt)
 	m.AckedAt = decodeTimePtr(ackedAt)
@@ -657,7 +641,7 @@ func validateCoordReportRefs(refs []string) error {
 // ReserveCoordReport durably records a report before any evidence capture.
 // A retry with the same key returns the persisted pending or finalized row,
 // or ErrCoordReportSuperseded once it was superseded. A fresh key on a live,
-// non-worker interactive run supersedes its terminal reservation atomically.
+// interactive run supersedes its terminal reservation atomically.
 // Other runs keep their terminal slot until a relaunch supersedes it.
 func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool, error) {
 	if err := validateCoordReport(report); err != nil {
@@ -697,9 +681,8 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 		       SELECT 1 FROM coord_reports WHERE run_id = ? AND idempotency_key = ?)
 		   AND EXISTS (
 		       SELECT 1 FROM runs WHERE id = ? AND mode IN ('tui', 'acp')
-		         AND status IN ('queued', 'provisioning', 'running', 'needs-attention'))
-		   AND NOT EXISTS (SELECT 1 FROM mission_attempts WHERE run_id = ?)`,
-		createdAt, report.RunID, report.RunID, report.IdempotencyKey, report.RunID, report.RunID); err != nil {
+		         AND status IN ('queued', 'provisioning', 'running', 'needs-attention'))`,
+		createdAt, report.RunID, report.RunID, report.IdempotencyKey, report.RunID); err != nil {
 		return false, fmt.Errorf("store: reserve coord report: supersede previous: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO coord_reports (`+coordReportCols+`)

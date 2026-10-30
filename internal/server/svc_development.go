@@ -15,12 +15,6 @@ import (
 
 func init() {
 	registerService("development", func(d Deps) (Service, error) {
-		d.Runs.UseDevelopmentTakeover(func(ctx context.Context, id domain.RunID, member domain.MemberID) error {
-			if mission := d.SSH.Services.MissionControl; mission != nil {
-				return mission.Takeover(ctx, id, member)
-			}
-			return nil
-		})
 		d.SSH.Services.Development = developmentService{runs: d.Runs}
 		d.SSH.Services.RunSSH = d.Runs
 		return nil, nil

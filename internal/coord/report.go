@@ -59,15 +59,6 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 	if len(p.EvidenceRefs) > 0 {
 		return protocol.CoordReportResult{}, invalidParams(method, p.Outcome+" takes no evidence_refs")
 	}
-	if p.Outcome == protocol.CoordOutcomeNeedsInput && s.cfg.Mission != nil {
-		assignment, err := s.cfg.Mission.Assignment(ctx, run)
-		if err != nil {
-			return protocol.CoordReportResult{}, missionRPCError(method, err)
-		}
-		if assignment.Role == "worker" {
-			return protocol.CoordReportResult{}, invalidParams(method, "a mission worker cannot report needs-input; ask your integrator with `aether-internal ask`")
-		}
-	}
 	if s.cfg.Outcomes == nil {
 		return protocol.CoordReportResult{}, internalError(method, ErrNoOutcomeSink)
 	}
@@ -143,8 +134,7 @@ func reusedKey(key string) *protocol.Error {
 
 // applyRunOutcome hands a run's report to the scheduler before the
 // publication is marked done, so the outbox retries a failed hand-off.
-// Mission integrators use the ordinary outcome path; workers keep their mission
-// lifecycle. A superseded report remains evidence but no longer speaks for the run.
+// A superseded report remains evidence but no longer speaks for the run.
 func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport) error {
 	if s.cfg.Outcomes == nil || report.SupersededAt != nil {
 		return nil
@@ -158,18 +148,6 @@ func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport
 	}
 	if current.SupersededAt != nil {
 		return nil
-	}
-	if s.cfg.Mission != nil {
-		assignment, assignmentErr := s.cfg.Mission.Assignment(ctx, report.RunID)
-		if errors.Is(assignmentErr, store.ErrNotFound) || errors.Is(assignmentErr, store.ErrMissionStale) {
-			return nil
-		}
-		if assignmentErr != nil {
-			return fmt.Errorf("report outcome assignment: %w", assignmentErr)
-		}
-		if assignment.Role == "worker" {
-			return nil
-		}
 	}
 	reportedAt := *report.FinalizedAt
 	switch report.Outcome {

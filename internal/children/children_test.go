@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,8 +60,8 @@ func (f *fakeRuns) StopForParent(ctx context.Context, run, parent domain.RunID) 
 	return err
 }
 
-func (f *fakeRuns) SwarmRefusal(agent string, mode domain.LaunchMode) error {
-	return agentharness.SwarmRefusal(agent, mode)
+func (f *fakeRuns) WakeRefusal(agent string, mode domain.LaunchMode) error {
+	return agentharness.WakeRefusal(agent, mode)
 }
 
 func (f *fakeRuns) CloseRun(ctx context.Context, run domain.RunID, _ domain.MemberID, outcome domain.RunStatus) error {
@@ -389,36 +390,6 @@ func TestBackgroundParentsCannotDelegate(t *testing.T) {
 	}
 }
 
-func TestSwarmChildrenUseOnlyTheSwarmsChoices(t *testing.T) {
-	h := newHarness(t)
-	m := &domain.Mission{
-		WorkspaceID: h.ws.ID, Objective: "objective", AccountableHumanID: h.ada.ID, IdempotencyKey: "swarm-1",
-		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP},
-		ExecutionChoices: []domain.MissionExecutionChoice{
-			{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP},
-			{AccountMemberID: h.ada.ID, Harness: "codex", Mode: domain.LaunchACP, Model: "gpt-5-codex"},
-		},
-	}
-	if err := h.db.CreateMission(h.ctx, m); err != nil {
-		t.Fatalf("mission fixture: %v", err)
-	}
-	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "objective", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
-	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
-		t.Fatal(err)
-	}
-	got := h.mustStart(integrator.ID, protocol.ChildStartParams{Harness: "codex"})
-	if got.Model != "gpt-5-codex" {
-		t.Fatalf("child model = %q, want the swarm's choice", got.Model)
-	}
-	if _, err := h.start(integrator.ID, protocol.ChildStartParams{Harness: "codex", Model: "o3"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("a model outside the swarm's choices = %v, want denied", err)
-	}
-	c, _ := h.db.GetChild(h.ctx, domain.RunID(got.RunID))
-	if c.TreeKey != "mission:"+string(m.ID) || c.MissionID != m.ID {
-		t.Fatalf("swarm child tree = %q mission %q", c.TreeKey, c.MissionID)
-	}
-}
-
 func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	h := newHarness(t)
 	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
@@ -527,28 +498,6 @@ func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 	}
 	if err := h.svc.ValidateReport(h.ctx, parent.ID, store.CoordOutcomeSuccess); err != nil {
 		t.Fatalf("a handed-off child still holds its old parent's success: %v", err)
-	}
-}
-
-func TestSwarmChildrenNeedTheSwarmOwnersRun(t *testing.T) {
-	h := newHarness(t)
-	m := &domain.Mission{
-		WorkspaceID: h.ws.ID, Objective: "objective", AccountableHumanID: h.ada.ID, IdempotencyKey: "swarm-owner",
-		Integrator:       domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP},
-		ExecutionChoices: []domain.MissionExecutionChoice{{AccountMemberID: h.ada.ID, Harness: "codex", Mode: domain.LaunchACP}},
-	}
-	if err := h.db.CreateMission(h.ctx, m); err != nil {
-		t.Fatal(err)
-	}
-	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "objective", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
-	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.db.TransferRun(h.ctx, integrator.ID, h.bob.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.start(integrator.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("a swarm run handed to another member starting a child on the swarm's accounts = %v, want denied", err)
 	}
 }
 
@@ -703,5 +652,32 @@ func TestClosedParentSettlesAChildStoppedWhileProvisioning(t *testing.T) {
 	h.settle()
 	if left, err := h.db.ChildrenToSettle(h.ctx); err != nil || len(left) != 0 {
 		t.Fatalf("children left to settle = %d, %v; want none", len(left), err)
+	}
+}
+
+func TestChildChecksOutItsParentsExtraRepositories(t *testing.T) {
+	h := newHarness(t)
+	parent := h.run(h.ada.ID, domain.LaunchACP, "fix login")
+	var extra []domain.WorkspaceID
+	for _, name := range []string{"lib", "docs"} {
+		w := &domain.Workspace{Name: name, BaseBranch: "main"}
+		if err := h.db.CreateWorkspace(h.ctx, w); err != nil {
+			t.Fatal(err)
+		}
+		extra = append(extra, w.ID)
+	}
+	repos := []domain.RunRepo{
+		{WorkspaceID: extra[0], Name: "lib", Path: "/repos/lib", BaseBranch: "main", BaseCommit: "abc"},
+		{WorkspaceID: extra[1], Name: "docs", Path: "/repos/docs", BaseBranch: "main", BaseCommit: "abc"},
+	}
+	if err := h.db.SetRunRepos(h.ctx, parent.ID, repos); err != nil {
+		t.Fatal(err)
+	}
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
+	h.settle()
+	h.runs.mu.Lock()
+	defer h.runs.mu.Unlock()
+	if len(h.runs.launched) != 1 || !slices.Equal(h.runs.launched[0].ExtraWorkspaces, extra) {
+		t.Fatalf("child launch = %+v, want the parent's extra repositories %v", h.runs.launched, extra)
 	}
 }

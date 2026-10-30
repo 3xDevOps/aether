@@ -135,67 +135,26 @@ func TestCLIJSONEnvelopeAndStableExit(t *testing.T) {
 	}
 }
 
-func TestCLISkillRoleBoundaries(t *testing.T) {
-	for _, role := range []string{"ordinary", "worker", "integrator"} {
-		t.Run(role, func(t *testing.T) {
-			status := protocol.CoordStatusResult{
-				RunID:        "run-current",
-				Capabilities: []string{protocol.MethodWorkerStart, protocol.MethodMissionStart},
-			}
-			if role != "ordinary" {
-				status.Assignment = &protocol.CoordMissionAssignment{
-					Role: role, MissionID: "mission-current", TaskID: "task-current", TaskRevision: 7,
-					AttemptID: "attempt-current", Phase: "active", IntegratorGeneration: 3,
-					Capabilities: status.Capabilities,
-				}
-			}
-			var out bytes.Buffer
-			code, err := writeSkill(&out, &status)
-			if err != nil || code != ExitOK {
-				t.Fatalf("skill = %d, %v", code, err)
-			}
-			raw := out.String()
-			if !strings.Contains(raw, "Role: "+role+"\n") || !strings.Contains(raw, "Run: run-current\n") {
-				t.Fatalf("skill lost live identity: %s", raw)
-			}
-			if role == "worker" {
-				if !strings.Contains(raw, "aether-internal task show --task-id task-current\n") ||
-					!strings.Contains(raw, "Task revision: 7\n") || !strings.Contains(raw, "Attempt ID: attempt-current\n") {
-					t.Fatalf("worker cannot discover its full assignment: %s", raw)
-				}
-			}
-			if role == "integrator" {
-				if at := strings.Index(raw, integratorRole); at < 0 || at > strings.Index(raw, "Phase: ") {
-					t.Fatalf("integrator skill lacks its role line before the phase guidance: %s", raw)
-				}
-				for _, command := range []string{"task list --mission-id mission-current", "worker list --mission-id mission-current"} {
-					if !strings.Contains(raw, "aether-internal "+command+"\n") {
-						t.Fatalf("integrator missing current mission command %q: %s", command, raw)
-					}
-				}
-			} else {
-				if strings.Contains(raw, integratorRole) {
-					t.Fatalf("%s skill claimed the integrator role: %s", role, raw)
-				}
-				for _, command := range []string{"mission ", "integration ", "worker ", "task accept"} {
-					if strings.Contains(raw, "aether-internal "+command) {
-						t.Fatalf("%s advertised unauthorized command %q: %s", role, command, raw)
-					}
-				}
-			}
-		})
+func TestCLISkillNamesTheLiveRun(t *testing.T) {
+	status := protocol.CoordStatusResult{RunID: "run-current"}
+	var out bytes.Buffer
+	code, err := writeSkill(&out, &status)
+	if err != nil || code != ExitOK {
+		t.Fatalf("skill = %d, %v", code, err)
+	}
+	if raw := out.String(); !strings.Contains(raw, "Role: ordinary\n") || !strings.Contains(raw, "Run: run-current\n") {
+		t.Fatalf("skill lost live identity: %s", raw)
 	}
 }
 
-// Outcome guidance is selected by the live assignment, launch mode and
-// capabilities, not merely by whether the socket belongs to a mission.
-func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
+// Outcome guidance is selected by the launch mode and capabilities.
+func TestCLISkillOutcomesFollowTheLaunchMode(t *testing.T) {
 	reports := []string{protocol.MethodCoordInbox, protocol.MethodCoordReport}
 	backgroundRule := "never report needs-input, waiting or answered"
 	for _, tc := range []struct {
-		name, role, background, enhanced string
-		capabilities                     []string
-		want, refuse                     []string
+		name, background, enhanced string
+		capabilities               []string
+		want, refuse               []string
 	}{
 		{name: "ordinary", capabilities: reports,
 			want: []string{ordinaryOutcomes, "- answered: ", "- needs-input: only", "never report waiting", coordhooks.ReviewRule}, refuse: []string{"- waiting:"}},
@@ -204,14 +163,6 @@ func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 			refuse: []string{"never report waiting", "): missing"}},
 		{name: "background", background: "1", capabilities: reports,
 			want: []string{backgroundOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting", "- answered"}},
-		{name: "worker", role: "worker", enhanced: "1", capabilities: reports,
-			want: []string{workerOutcomes, "- answered: ", "- needs-input: not for workers", "- waiting: "}, refuse: []string{coordhooks.ReviewRule}},
-		{name: "background worker", role: "worker", background: "1", enhanced: "1", capabilities: reports,
-			want: []string{workerOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
-		{name: "integrator", role: "integrator", capabilities: reports,
-			want: []string{integratorOutcomes, "mission plan show --wait 30`; never report waiting"}, refuse: []string{"- waiting:"}},
-		{name: "background integrator", role: "integrator", background: "1", capabilities: reports,
-			want: []string{integratorOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
 		{name: "no reports", capabilities: []string{protocol.MethodCoordInbox},
 			want: []string{"aether-internal inbox --wait 30"}, refuse: []string{"- waiting", "END EVERY TURN"}},
 	} {
@@ -220,9 +171,6 @@ func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 			t.Setenv(coordtransport.EnhancedEnv, tc.enhanced)
 			t.Setenv(coordtransport.WakeEnv, "")
 			status := protocol.CoordStatusResult{RunID: "run-current", Capabilities: tc.capabilities}
-			if tc.role != "" {
-				status.Assignment = &protocol.CoordMissionAssignment{Role: tc.role, MissionID: "mission-current"}
-			}
 			var out bytes.Buffer
 			if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
 				t.Fatalf("skill = %d, %v", code, err)
@@ -258,7 +206,7 @@ func TestCLIGeneralSkillWithoutSocket(t *testing.T) {
 		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
 	}
 	raw := out.String()
-	if strings.Contains(raw, "Run:") || strings.Contains(raw, "Mission:") || strings.Contains(raw, "Task ID:") {
+	if strings.Contains(raw, "Run:") || strings.Contains(raw, "Mission:") {
 		t.Fatalf("general skill claimed live assignment: %q", raw)
 	}
 	for _, command := range []string{"mission ", "integration ", "worker ", "task "} {
@@ -283,44 +231,6 @@ func TestCLIHelpIsSocketIndependent(t *testing.T) {
 				t.Fatalf("help output = %q", out.String())
 			}
 		})
-	}
-}
-
-func TestCLIMissionTaskAndWorkerAdapters(t *testing.T) {
-	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
-		switch req.Method {
-		case protocol.MethodTaskShow:
-			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","status":"ready"}}`)}
-		case protocol.MethodTaskAcceptSubmission:
-			var p protocol.TaskAcceptSubmissionParams
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				t.Fatalf("decode accept submission: %v", err)
-			}
-			if p.SubmissionID != "submission-1" || p.ExpectedIntegratorGeneration != 4 || p.ExpectedAcceptedSetVersion != 8 || p.IdempotencyKey != "accept-1" || p.ScopeDisposition != "approved with documented deviation" {
-				t.Fatalf("accept submission params = %+v", p)
-			}
-			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","status":"accepted"},"acceptance":{"accepted_set_version":9}}`)}
-		case protocol.MethodWorkerStart:
-			var p protocol.WorkerStartParams
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				t.Fatalf("decode worker start: %v", err)
-			}
-			if p.DispatchKey != "dispatch-1" || p.ExpectedIntegratorGeneration != 4 {
-				t.Fatalf("worker start params = %+v", p)
-			}
-			return protocol.Response{Result: json.RawMessage(`{"attempt":{"id":"attempt-1","state":"reserved"}}`)}
-		default:
-			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
-		}
-	})
-	if code, raw := runCLI(t, s.path, []string{"task", "show", "--task-id", "task-1"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
-		t.Fatalf("task show = code %d, envelope %s", code, raw)
-	}
-	if code, raw := runCLI(t, s.path, []string{"task", "accept-submission", "--submission-id", "submission-1", "--expected-integrator-generation", "4", "--expected-accepted-set-version", "8", "--idempotency-key", "accept-1", "--scope-disposition", "approved with documented deviation"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
-		t.Fatalf("task accept-submission = code %d, envelope %s", code, raw)
-	}
-	if code, raw := runCLI(t, s.path, []string{"worker", "start", "--mission-id", "mission-1", "--task-id", "task-1", "--task-revision", "2", "--dispatch-key", "dispatch-1", "--harness", "claude", "--mode", "headless", "--account-owner-id", "member-1", "--run-owner-id", "member-1", "--expected-integrator-generation", "4"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
-		t.Fatalf("worker start = code %d, envelope %s", code, raw)
 	}
 }
 
@@ -580,79 +490,6 @@ func TestCLIOutputFailuresReturnContext(t *testing.T) {
 	}
 }
 
-func TestCLIWorkerStartDefaultsFromAssignment(t *testing.T) {
-	var sent protocol.WorkerStartParams
-	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
-		switch req.Method {
-		case protocol.MethodCoordStatus:
-			return protocol.Response{Result: json.RawMessage(`{"run_id":"run-1","assignment":{"mission_id":"mission-1","role":"integrator","integrator_generation":4,"execution_choices":[{"account_member_id":"member-1","harness":"omp","mode":"tui"},{"account_member_id":"member-2","harness":"claude","mode":"tui"},{"account_member_id":"member-2","harness":"claude","mode":"tui","model":"opus"},{"account_member_id":"member-1","harness":"omp","mode":"acp"},{"account_member_id":"member-2","harness":"codex","mode":"tui"},{"account_member_id":"member-1","harness":"codex","mode":"acp"}]}}`)}
-		case protocol.MethodTaskShow:
-			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","current_revision":3}}`)}
-		case protocol.MethodWorkerStart:
-			if err := json.Unmarshal(req.Params, &sent); err != nil {
-				t.Fatalf("decode worker start: %v", err)
-			}
-			return protocol.Response{Result: json.RawMessage(`{"attempt":{"id":"attempt-1","state":"reserved"}}`)}
-		default:
-			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
-		}
-	})
-	for _, model := range []string{"opus", ""} {
-		sent = protocol.WorkerStartParams{}
-		if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--harness", "claude", "--model", model}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
-			t.Fatalf("worker start --model %q = code %d, envelope %s", model, code, raw)
-		}
-		want := protocol.WorkerStartParams{MissionID: "mission-1", TaskID: "task-1", TaskRevision: 3, DispatchKey: "task-1-r3", Harness: "claude", Mode: "tui", Model: model, AccountOwnerID: "member-2", ExpectedIntegratorGeneration: 4}
-		if sent != want {
-			t.Fatalf("worker start --model %q params = %+v, want %+v", model, sent, want)
-		}
-	}
-	sent = protocol.WorkerStartParams{}
-	if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--harness", "omp"}, ""); code != ExitOK || sent.Mode != "acp" {
-		t.Fatalf("worker start --harness omp = code %d, mode %q, envelope %s; want the enhanced choice", code, sent.Mode, raw)
-	}
-	if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--harness", "codex"}, ""); code != ExitUsage {
-		t.Fatalf("worker start --harness codex across accounts = code %d, envelope %s; want it refused as ambiguous", code, raw)
-	}
-	code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--mode", "tui"}, "")
-	if envelope := decodeEnvelope(t, raw); code != ExitUsage || envelope.OK || !strings.Contains(envelope.Error.Message, `--harness omp --mode tui --account-owner-id member-1 --model ""; --harness claude --mode tui --account-owner-id member-2 --model ""; --harness claude --mode tui --account-owner-id member-2 --model opus`) {
-		t.Fatalf("ambiguous worker start = code %d, envelope %s", code, raw)
-	}
-}
-
-func TestCLIWorkerStartSelectsTheChoiceByEffort(t *testing.T) {
-	var sent protocol.WorkerStartParams
-	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
-		switch req.Method {
-		case protocol.MethodCoordStatus:
-			return protocol.Response{Result: json.RawMessage(`{"run_id":"run-1","assignment":{"mission_id":"mission-1","role":"integrator","integrator_generation":4,"execution_choices":[{"account_member_id":"member-1","harness":"claude","mode":"tui"},{"account_member_id":"member-1","harness":"claude","mode":"tui","effort":"high"}]}}`)}
-		case protocol.MethodTaskShow:
-			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","current_revision":3}}`)}
-		case protocol.MethodWorkerStart:
-			if err := json.Unmarshal(req.Params, &sent); err != nil {
-				t.Fatalf("decode worker start: %v", err)
-			}
-			return protocol.Response{Result: json.RawMessage(`{"attempt":{"id":"attempt-1","state":"reserved"}}`)}
-		default:
-			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
-		}
-	})
-	for _, effort := range []string{"high", ""} {
-		sent = protocol.WorkerStartParams{}
-		if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--effort", effort}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
-			t.Fatalf("worker start --effort %q = code %d, envelope %s", effort, code, raw)
-		}
-		want := protocol.WorkerStartParams{MissionID: "mission-1", TaskID: "task-1", TaskRevision: 3, DispatchKey: "task-1-r3", Harness: "claude", Mode: "tui", Effort: effort, AccountOwnerID: "member-1", ExpectedIntegratorGeneration: 4}
-		if sent != want {
-			t.Fatalf("worker start --effort %q params = %+v, want %+v", effort, sent, want)
-		}
-	}
-	code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1"}, "")
-	if envelope := decodeEnvelope(t, raw); code != ExitUsage || envelope.OK || !strings.Contains(envelope.Error.Message, `--harness claude --mode tui --account-owner-id member-1 --effort ""; --harness claude --mode tui --account-owner-id member-1 --effort high`) {
-		t.Fatalf("worker start without --effort = code %d, envelope %s; want both choices listed", code, raw)
-	}
-}
-
 func TestCLIAckSpendsOneInboxRead(t *testing.T) {
 	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
 		if req.Method != protocol.MethodCoordInbox {
@@ -677,15 +514,14 @@ func TestCLISkillForAnAgentNamedApartFromItsCommand(t *testing.T) {
 	status := protocol.CoordStatusResult{
 		RunID:        "run-current",
 		Capabilities: []string{protocol.MethodCoordInbox, protocol.MethodCoordReport},
-		Assignment:   &protocol.CoordMissionAssignment{Role: "worker", MissionID: "mission-current"},
 	}
 	var out bytes.Buffer
 	if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
 		t.Fatalf("skill = %d, %v", code, err)
 	}
 	raw := out.String()
-	if !strings.Contains(raw, workerOutcomes) {
-		t.Fatalf("skill lacks the worker's outcome guidance: %s", raw)
+	if !strings.Contains(raw, ordinaryOutcomes) {
+		t.Fatalf("skill lacks the outcome guidance: %s", raw)
 	}
 	if !strings.Contains(raw, "Inbox hooks: no packaged integration for harness mycursor; see aether-internal skill --hooks.") {
 		t.Fatalf("skill hook summary = %s", raw)
@@ -702,7 +538,6 @@ func TestCLISkillForCursorReportsCursorHooks(t *testing.T) {
 	status := protocol.CoordStatusResult{
 		RunID:        "run-current",
 		Capabilities: []string{protocol.MethodCoordInbox},
-		Assignment:   &protocol.CoordMissionAssignment{Role: "worker", MissionID: "mission-current"},
 	}
 	var out bytes.Buffer
 	if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
@@ -719,7 +554,6 @@ func TestCLISkillForAntigravityReportsNoPackagedHooks(t *testing.T) {
 	status := protocol.CoordStatusResult{
 		RunID:        "run-current",
 		Capabilities: []string{protocol.MethodCoordInbox},
-		Assignment:   &protocol.CoordMissionAssignment{Role: "worker", MissionID: "mission-current"},
 	}
 	var out bytes.Buffer
 	if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {

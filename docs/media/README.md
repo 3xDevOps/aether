@@ -76,7 +76,7 @@ These screenshots are browser verification evidence, not the live-agent demo
 described above:
 
 - `run-map-restored.png`: the actual Board, run cards and store with
-  deterministic fixture runs, including swarm workers, a paused run and a
+  deterministic fixture runs, including child runs, a paused run and a
   failed run. No live gateway was connected.
 - `launch-splash-restored.png`: the restored animation paused at 700ms by a
   temporary browser harness. Production animation timings were unchanged.

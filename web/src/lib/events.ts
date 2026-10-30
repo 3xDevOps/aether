@@ -37,7 +37,6 @@ export const eventLabel = {
   'workspace.evidence_packet': 'Saved evidence',
   'coord.message': 'Agent message sent',
   'coord.message.acked': 'Agent message read',
-  'mission.changed': 'Swarm changes',
   'member.changed': 'Member renames',
   'member.device': 'Devices',
   'member.merged': 'Member merges',

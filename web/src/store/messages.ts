@@ -8,7 +8,6 @@ import type { SliceCreator } from '@/store/slice'
 
 export type MessageScope =
   | { kind: 'workspace'; workspaceID: string }
-  | { kind: 'mission'; workspaceID: string; missionID: string }
   | { kind: 'run'; workspaceID: string; runID: string }
   | { kind: 'thread'; workspaceID: string; correlationID: string }
 
@@ -16,8 +15,6 @@ export function messageScopeKey(scope: MessageScope): string {
   switch (scope.kind) {
     case 'workspace':
       return `workspace:${scope.workspaceID}`
-    case 'mission':
-      return `mission:${scope.missionID}`
     case 'run':
       return `run:${scope.runID}`
     case 'thread':
@@ -25,7 +22,7 @@ export function messageScopeKey(scope: MessageScope): string {
   }
 }
 
-type Participants = Pick<RunMessage, 'workspace_id' | 'mission_id' | 'from_run_id' | 'to_run_id' | 'correlation_id'>
+type Participants = Pick<RunMessage, 'workspace_id' | 'from_run_id' | 'to_run_id' | 'correlation_id'>
 
 /** A run scope covers mail on either side of the run. */
 export function inMessageScope(scope: MessageScope, m: Participants): boolean {
@@ -33,8 +30,6 @@ export function inMessageScope(scope: MessageScope, m: Participants): boolean {
   switch (scope.kind) {
     case 'workspace':
       return true
-    case 'mission':
-      return m.mission_id === scope.missionID
     case 'run':
       return m.from_run_id === scope.runID || m.to_run_id === scope.runID
     case 'thread':
@@ -127,7 +122,6 @@ export async function loadMessagePage(store: RootStore, client: Api, scope: Mess
   try {
     const page = await client.coordMessagesList({
       workspace_id: scope.workspaceID,
-      mission_id: scope.kind === 'mission' ? scope.missionID : undefined,
       run_id: scope.kind === 'run' ? scope.runID : undefined,
       correlation_id: scope.kind === 'thread' ? scope.correlationID : undefined,
       before: older ? (before ?? undefined) : undefined,

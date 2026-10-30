@@ -27,7 +27,6 @@ const generalPrompts = [
   asked("What's the status of my runs?"),
   { label: 'Launch a run to …', text: 'Launch a run to ' },
   asked('Install Rust in my environment'),
-  asked('How do swarms work?'),
 ]
 
 /** The page's own prompts, each attached to what it is about: a run's follow its state, and nothing offers to merge a pull request the run does not have. */
@@ -44,9 +43,7 @@ function usePagePrompts(): Example[] {
       ...(pr ? [asked('Review and merge when checks pass', [{ kind: 'pr', workspace_id: run.workspace_id, run_id: run.id, pr: pr.number, repository: pr.repository, label: `PR #${pr.number}` }])] : []),
     ]
   }
-  if (route.name === 'board') return [asked('What needs me?')]
-  const missionID = route.name === 'missions' ? route.params.missionId : undefined
-  return missionID ? [asked('Summarize progress', [{ kind: 'mission', mission_id: missionID, label: missionID }])] : []
+  return route.name === 'board' ? [asked('What needs me?')] : []
 }
 
 export function AssistantSetup({ status }: { status: AssistantStatus }) {

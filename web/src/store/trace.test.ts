@@ -177,8 +177,8 @@ describe('flattenTrace', () => {
     expect(flattenTrace(root, open)[2]).toBe(rows[2])
   })
 
-  it('opens an integrator’s last turn ahead of its Workers group', () => {
-    const root = trace(items(), { live: false, end: t0 + 60_000, runStatus: 'completed', workers: [{ runID: 'w1', label: 'Worker 1', start: t0, end: t0 + 1000, status: 'done' }] })
+  it('opens a run’s last turn ahead of its Workers group', () => {
+    const root = trace(items(), { live: false, end: t0 + 60_000, runStatus: 'completed', workers: [{ runID: 'w1', label: 'Child run 1', start: t0, end: t0 + 1000, status: 'done' }] })
     expect(flattenTrace(root, {}).map((row) => [row.key, row.expanded])).toEqual([
       ['run', true], ['turn:1', false], ['turn:1>1/call:c1', undefined], ['turn:2', true], ['2/call:c3', undefined], ['workers', true], ['worker:w1', undefined],
     ])

@@ -82,9 +82,6 @@ type acpRun struct {
 	err      error
 	stopping bool
 	ended    bool
-	// untried marks a first task sent but not yet accepted, so a refusal
-	// fails a worker whichever of startOneShot or the turn end reports it.
-	untried bool
 	// instructions are the run instructions the first message or mail prompt
 	// a taskless session accepts carries, for an agent with no system prompt
 	// route.
@@ -164,7 +161,7 @@ func (d *acpDriver) sendContinuation(entry *supervised) {
 	switch {
 	case err == nil || usageLimited(err):
 	case d.oneShot(entry):
-		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the continuation to the agent: " + err.Error()})
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the continuation to the agent: " + err.Error()})
 	default:
 		slog.Warn("scheduler: send the continuation to the agent", "run", entry.runID, "error", err)
 	}
@@ -435,7 +432,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			mode = recorded
 		}
 	}
-	instructions, err := d.s.briefedInstructions(ctx, d.s.runGuide(ctx, entry.runID, entry.missionAssigned, oneShot, true), run.Extras, run.WorkspaceID, run.MemberID)
+	instructions, err := d.s.briefedInstructions(ctx, d.s.runGuide(ctx, entry.runID, oneShot, true), run.Extras, run.WorkspaceID, run.MemberID)
 	if err != nil {
 		return err
 	}
@@ -565,7 +562,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	go d.watch(entry, r)
 	c := d.s.coordinationSeam()
 	if c != nil && c.enabled && !oneShot {
-		c.svc.EnhancedSessionOpened(ctx, runID)
+		c.svc.EnhancedSessionOpened(runID)
 	}
 	if c != nil && c.enabled && coordDir != "" && fresh {
 		channel := "first message"
@@ -580,9 +577,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		// how the failed turn ends.
 	case oneShot && modelErr != nil:
 		// Unattended, the task would otherwise run on the agent's default model.
-		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
 	case oneShot && effortErr != nil:
-		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "effort not set: " + effortErr.Error()})
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "effort not set: " + effortErr.Error()})
 	case how == openContinue:
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, prompt)
@@ -667,7 +664,7 @@ func (d *acpDriver) fail(entry *supervised, err error) {
 	d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
 	if d.oneShot(entry) {
-		d.endOneShot(entry, false, false, idle)
+		d.endOneShot(entry, false, idle)
 		return
 	}
 	go d.report(entry.runID, idle)
@@ -742,7 +739,7 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 		d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
 	}
 	if d.oneShot(entry) {
-		d.endOneShot(entry, false, false, idle)
+		d.endOneShot(entry, false, idle)
 		return
 	}
 	d.report(entry.runID, idle)

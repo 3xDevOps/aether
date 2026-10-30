@@ -184,7 +184,7 @@ func TestManagerEndToEnd(t *testing.T) {
 	assertPayloads(t, payloads, want)
 }
 
-// A swarm worker's supervisor keeps the PTY open after the agent exits.
+// A supervisor keeps the PTY open after the agent exits.
 func TestManagerHandsOverTheResultWhileThePTYStaysOpen(t *testing.T) {
 	data, err := os.ReadFile("testdata/claude_clean.jsonl")
 	if err != nil {

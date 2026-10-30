@@ -138,8 +138,8 @@ schedules, devices and accounts, and the lower of the two roles. The absorbed
 member's home moves to `<data-dir>/merged/<merge id>/home` and their private
 signing key to `signing-key` beside it. Both hold credentials, so remove the
 directory with `sudo rm -r` once nothing in it is needed. A merge is
-refused, with the reason, when either member is pending or has an unfinished run,
-terminal or swarm role. Nothing undoes a merge.
+refused, with the reason, when either member is pending or has an unfinished run
+or terminal. Nothing undoes a merge.
 
 ### Remove access
 
@@ -301,7 +301,7 @@ A scheduled run refreshes the mirror first and creates no run if that fails. See
 ### Delete a workspace
 
 `aether workspace delete myproject --yes` removes the workspace with its runs,
-checkouts, transcripts, swarms, templates, budget and costs. Member accounts,
+checkouts, transcripts, templates, budget and costs. Member accounts,
 local clones and the upstream repository stay. It never stops work: stop active
 runs and remove schedules first. The error names what blocks it.
 
@@ -320,13 +320,13 @@ more than one workspace exists`. `aether runs` lists runs from every workspace.
 | `aether pause`, `resume`, `kill <run>` | Suspend, thaw or stop a run. The checkout and transcript survive a kill |
 | `aether runs --needs-you` | Runs waiting on you. `aether runs <run-id>` shows what one needs and the command that answers it |
 | `aether timeline` | The workspace history. `aether timeline <run-id>` shows one run's. Filter with `--member`, `--type`, `--limit`. `--jsonl` exports |
-| `aether changes` | Run and swarm changes since a cursor: status, reports, mail, pull requests, swarm and lifecycle. `--follow` keeps polling ([coordination.md](coordination.md#follow-changes-from-a-cursor)) |
+| `aether changes` | Run changes since a cursor: status, reports, mail, pull requests and lifecycle. `--follow` keeps polling ([coordination.md](coordination.md#follow-changes-from-a-cursor)) |
 | `aether cost --runs` | Token spend per member and run |
 
 The dashboard shows each run as **Needs you**, **Working**, **Paused**, **Done**
 or **Failed**. **Needs you** means something blocks the run that you can
-resolve, such as a permission or question, a stalled run of yours, an unreviewed
-finish or a swarm question. Everyone else sees that run as **Working** with
+resolve, such as a permission or question, a stalled run of yours, or an unreviewed
+finish. Everyone else sees that run as **Working** with
 "Waiting for Alice" ([failure-handling.md](failure-handling.md#needs-you)).
 
 Answer an agent's plan or permission prompt in the run's Session view
@@ -441,7 +441,7 @@ behind it. One member can let a collaborator launch runs on theirs.
 
 The owner shares under **Profile → Agent account sharing → Share account**. The
 recipient selects **New run → Options → Account** and picks `<name> (shared)`
-(**Integrator account** on the **Swarm** tab). From the CLI:
+From the CLI:
 
 ```sh
 aether account share <member-id>      # owner
@@ -513,7 +513,7 @@ aether run "triage the failures" --agent claude --no-fallback
 ```
 
 Passing both flags fails with `--fallback and --no-fallback cannot be used
-together`. `aether swarm create` takes the same flags. With no qualifying account
+together`. With no qualifying account
 the run launches on the requested one. A run that fell back stays owned by its
 launcher. Its header reads **On `<name>`'s account (fallback)**, and `aether
 runs` appends ` (fallback)` to the `ACCOUNT` column.
@@ -589,99 +589,13 @@ A [member merge](#link-or-merge-sign-ins) keeps the survivor's saved choices.
 Any account or fallback member that names the absorbed member, in anyone's
 choices, is moved to the survivor, and those choices get a new `revision`.
 
-## Swarms
-
-A **swarm** is one objective handed to an **integrator** run. The integrator asks
-you clarifying questions only if it needs answers, splits the objective into
-tasks, starts **worker** runs for them, combines and verifies their results, and
-reports success. No human approves the plan or the delivery.
-
-```mermaid
-flowchart LR
-    Y["You: objective"] --> I[Integrator run]
-    I -->|asks if unclear| Y
-    I -->|tasks| W1[Worker run]
-    I -->|tasks| W2[Worker run]
-    W1 -->|report| I
-    W2 -->|report| I
-    I -->|verified result| D[Delivered branch]
-```
-
-### Launch a swarm
-
-In the dashboard, open **New run** and use the **Swarm** tab. Set the objective,
-the **Integrator agent**, **Integrator mode** (Standard or Enhanced, since
-Background exits after one turn), the **Integrator model** and **Integrator
-effort**, **Agents for workers** with a model and an effort on each, **Worker mode** (Enhanced by default) and,
-optionally, **Add repos**. A
-worker whose agent cannot use that mode runs in the mode its row names. Swarm
-agents run only in a mode Aether can wake when mail arrives, so an agent with no
-idle wake ([Agents](harnesses.md#supported-agents)) is refused Standard, with
-for example `copilot in Standard mode has no idle wake; start it in Enhanced`. The
-CLI does the same:
-
-```sh
-aether swarm create "add a health check endpoint and document it" \
-  --agent claude --model opus --effort high --worker claude:background \
-  --worker codex:background+xhigh:gpt-5-codex
-```
-
-`--idempotency-key <key>` makes a retried create return the same swarm.
-`--worker agent[:mode[+effort][:model]]` allows workers on an agent and
-repeats. The effort rides on the mode (`codex:+high` keeps the default mode),
-because a model may itself contain `:`, as in pi's `sonnet:high`.
-`--repo <workspace>` (repeatable) checks out another workspace at
-`/repos/<name>` in the integrator and every worker, as `aether run --repo`
-does for one run ([quickstart.md](quickstart.md#working-across-repos)). A
-worker's commits in an extra repo stay on that worker's run branch there, which
-its run page shows under **Changes**, and the integrator names those runs in its
-final report. An empty
-model or effort keeps the agent's default. `-` as the objective reads it from stdin. The
-integrator runs on your account, or the one named by `--account`, in `--mode
-standard` or `enhanced` ([enhanced-runs.md](enhanced-runs.md)). A mode left out of
-`--mode` or a `--worker` is `enhanced` where the agent's Enhanced mode is
-installed on that account, and `standard` otherwise. If the server stored the
-swarm but could not start the integrator, the command prints the error
-([failure-handling.md](failure-handling.md#integrator-launch-failures)).
-
-### Follow a swarm
-
-**Swarms** in the dashboard lists each swarm with its phase and run counts, swarms
-that need you first. A swarm's page shows **Questions for you**, **Tasks**,
-**Agent messages** and **Integration**. `aether swarm list` and `aether swarm show
-<swarm-id>` print the objective, integrator, open questions, tasks with their
-blockers and each worker attempt.
-
-A swarm is `planning` while the integrator asks questions and proposes tasks,
-`active` while it runs workers and delivers, `completed` after it reports success
-(prompting it again moves the swarm back to `active`), or `cancelled`. A task is
-**Done** only when its accepted submission has the required evidence. A worker's
-report or a clean exit is not enough.
-
-### Answer, cancel or replace the integrator
-
-The integrator's questions are the only thing that waits for you. Only the
-swarm's accountable human (the member who created it) or an admin can act on a
-swarm, and they need the collaborator role at that moment.
-
-```sh
-aether swarm answer <swarm-id> --question <question-id> "net/http, no framework"
-aether swarm cancel <swarm-id>
-aether swarm replace-integrator <swarm-id> --agent codex
-```
-
-`answer` takes `-` to read from stdin. `cancel` stops every run of a swarm in
-`planning` or `active`. `replace-integrator` starts a new integrator when the old
-run exited or reported failure, and takes `--mode` as `create` does. In the dashboard these are under **More swarm
-actions**. The server rechecks your role and account grants on every action.
-
 ## Child runs
 
 An agent can start a **child run**: a session with a completely fresh context
 on any agent and model you have installed, such as Codex reviewing what Claude
 wrote. A child can orchestrate its own subagents. Agents dispatch one for a
 complex task that splits into parallel parts, as a dispatch-and-forget
-shortcut, or when you ask for session or swarm orchestration; small lookups
+shortcut, or when you ask for session orchestration; small lookups
 stay with the agent's own subagents. The child appears under its parent in the
 dashboard, with its purpose, agent, model, account and state, and you open,
 message, take over or stop it like any run. Its result reaches the parent's
@@ -717,9 +631,6 @@ setting. Only the run's owner allows it, and a handoff to another member voids
 it. An admin can turn it off. Handing a run to another member detaches it from
 its parent and from its children, so no lineage spans two owners.
 
-A swarm needs no setting: its runs and their children use only the swarm's
-own agent, mode, model and account choices and its fallback policy.
-
 When a parent is closed (merged, abandoned, or completed and accepted), its
 children are closed with it: finished ones are relabeled the same way and
 working ones are stopped first. A child its parent cancels ends `completed`
@@ -749,8 +660,9 @@ counted as unmetered, so totals read "at least".
 - A parked parent woken by other mail can work beside its busy children, so
   it can briefly exceed `--child-max-live`.
 - A child gets the workspace's environment and secrets like any run of yours,
-  but not its parent's transcript. It works in the parent's primary
-  repository only, from the parent's last commit.
+  but not its parent's transcript. It works in the parent's repositories,
+  extra `--repo` ones included, from the parent's last commit, and inherits
+  the parent's permission tier.
 - Deleting a child takes its spend out of the parent's total; the
   workspace totals and `aether cost` keep it.
 - Turning child runs off stops queued children from starting; running ones

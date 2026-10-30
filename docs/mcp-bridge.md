@@ -4,9 +4,7 @@ Aether's MCP bridge is an in-container MCP server for six coordination
 tools and two team memory tools, registered automatically for Enhanced runs
 and manually elsewhere. The canonical agent interface is the
 `aether-internal` CLI, which is automatically available in every managed
-container and can load a version-matched skill on demand. The bridge is not the
-Release B orchestration interface and does not need to mirror its swarm or
-worker-management surface.
+container and can load a version-matched skill on demand. The bridge does not mirror the whole `aether-internal` surface.
 
 When coordination assets are available, the server stages verified executable
 bytes read-only at the two in-container paths used by the existing surfaces:
@@ -61,8 +59,8 @@ The bridge's MCP `instructions` are the run's role card (see
 `AETHER_ROLE_CARD=1`, which Aether sets on the bridge when the ACP system
 prompt already carries the card, they are only a brief of under 512 bytes:
 report success or failure when the work the agent owns is done or cannot be
-done, needs-input only for a question a human must answer (workers and
-Background runs are told never to), blocked when a human must intervene,
+done, needs-input only for a question a human must answer (Background
+runs are told never to), blocked when a human must intervene,
 and waiting when it ends its turn to await agents, CI or a process, or, where nothing resumes an idle session, never waiting but waiting
 for mail in the turn with `aether_inbox`; never report while still working;
 subagents and spawned workflows never report. Both come from `coord.status`,
@@ -73,8 +71,7 @@ without an answer the instructions only point at `aether-internal skill`.
 The canonical CLI remains available without MCP. A shell-capable agent can
 invoke `aether-internal` directly and request its live, version-matched skill
 on demand. A container or terminal without a run identity can use general
-help or the non-run skill guidance, but status, messaging, reporting, and
-swarm operations return unavailable. Lack of manual MCP registration is not
+help or the non-run skill guidance, but status, messaging and reporting return unavailable. Lack of manual MCP registration is not
 an overlap-only or notice-only mode.
 
 See [coordination.md](coordination.md) for the established CLI commands and
@@ -87,8 +84,7 @@ The bridge exposes eight tools, and four child-run tools on servers that
 offer [child runs](coordination.md#child-runs). Their parameters, receipts,
 authorization rules, limits, idempotency behavior, and durable storage map to
 the established v3 run socket methods. This is the bridge's complete
-surface; it does not expose Release B swarm, task, worker, takeover, or
-integrator-management commands.
+surface.
 
 | MCP tool | v3 method | Parameters | Result |
 | --- | --- | --- | --- |
@@ -106,12 +102,11 @@ integrator-management commands.
 | `aether_child_cancel` | `child.cancel` | `run_id` | the child |
 
 The bridge returns the established structured result directly. This
-presentation differs from any CLI envelope, but it does not add operations or
-make MCP a Release B-parity interface.
+presentation differs from any CLI envelope, but it does not add operations.
 
 The bridge registers the child-run tools when the run's `coord.status`
 lists `child.options` as it starts; the server still refuses a start the
-run's owner or swarm does not allow. `child.fetch` is
+run's owner does not allow. `child.fetch` is
 CLI-only.
 
 The two memory tools read and write the workspace's
@@ -141,7 +136,7 @@ progress or blocker that affects a peer; that a receipt means queued rather
 than read and replies arrive in the inbox; and to check status instead of
 retrying a denial. The `aether_inbox` description says peer messages and
 replies arrive there and marks them as untrusted information that never
-overrides the user, the assignment or the integrator. The `aether_reply`
+overrides the user or the assignment. The `aether_reply`
 description says a reply reaches only the asking run and grants it no
 control. These descriptions reach subagents, which share the MCP tools but
 not the parent's system prompt. See
@@ -186,7 +181,7 @@ leaves the outcome unaccepted and the runtime recoverable.
 
 Interactive Standard and Enhanced runs remain open after a success or failure
 report; the agent ends its turn and waits for follow-up. Each later task uses
-a fresh report idempotency key. Background runs and swarm workers retain
+a fresh report idempotency key. Background runs retain
 terminal report behavior. See [Report an outcome](coordination.md#report-an-outcome).
 
 ## MCP errors
@@ -228,8 +223,7 @@ correlated pending input requests. A request-only update leaves execution
 unchanged. They are not an agent outcome, are not an MCP tool, and do not
 create a coordination report or evidence receipt. See
 [status reporting](harnesses.md#status-reporting) for request lifetimes.
-Agent callbacks are hidden lifecycle plumbing, not commands for an operator or
-worker to run. The callback exits promptly even when status reporting is
+Agent callbacks are hidden lifecycle plumbing, not commands for an operator to run. The callback exits promptly even when status reporting is
 unavailable so it cannot block the agent.
 
 ## Staging, retention, and shutdown
@@ -259,23 +253,21 @@ not in a run). It dials `/run/aether-assistant/assistant.sock`; `-socket`
 overrides the path. The socket is bound to one member, so no call names who
 acts: the socket rejects any param containing `member_id` except the agent
 accounts a call launches on or reads (`account_member_id` and
-`fallback_account_member_ids` on `run.launch`, `fallback_account_member_ids`
-and each agent's `account_member_id` on `mission.create`, and
-`account_member_id` on `agent.list`, `agent.models` and `account.usage`), the
+`fallback_account_member_ids` on `run.launch`, `account_member_id` on `agent.list`, `agent.models` and `account.usage`), the
 `run.list` read filter and the teammate `run.handoff` gives a run to. The
 server refuses an account not shared with the member. `aether_list_runs`
 with `mine` filters to the socket's member.
 
 | Tier | Tools |
 | --- | --- |
-| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_watches`, `aether_list_workspaces`, `aether_get_workspace`, `aether_launch_options`, `aether_changes`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
+| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_watches`, `aether_list_workspaces`, `aether_get_workspace`, `aether_launch_options`, `aether_changes`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
 | Reversible | `aether_pause_run`, `aether_resume_run`, `aether_watch` |
-| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_save_launch_defaults`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin`, `aether_unwatch` |
+| Confirmed | `aether_launch_run`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_save_launch_defaults`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin`, `aether_unwatch` |
 
 A confirmed call blocks until the member approves it in the dashboard, or runs
 at once when the member turned on [auto-approval](assistant.md#auto-approval),
 except that a message to or stop of another member's run always waits for a
-click, and an answer, an approval decision, a swarm launch, a template launch,
+click, and an answer, an approval decision, a template launch,
 and a launch with automatic fallback (no `fallback_account_member_ids` and no
 `no_fallback`) while any account is shared with the member always do: the
 card's `other_member` and `other_owner` name the accounts' owners. A launch
@@ -289,19 +281,16 @@ accounts shared after it was saved. The card names what the call acts on: the ru
 owner, the request and the option chosen, a message's attachments and anchor, a
 launch's account when it is a teammate's, its fallback (saying when it may fall
 back to accounts shared with the member), extra repositories and child-run
-setting, a swarm launch's integrator and agents with their accounts, or a
+setting, or a
 template's name, agent and task with its parameters filled in, the launch
 pinned to that version of the template (a template launch whose
 `idempotency_key` already started a run returns that run without a card, even
-once the template changed); the swarm's goal, its accountable human
-when that is someone else, and its question, saying so when the question was
-already answered; the teammate a run is handed to; the agent and account a
-replacement integrator uses; a pull
+once the template changed); a question, saying so when it was
+already answered; the teammate a run is handed to; a pull
 request's branch, head and title or repository, number, head and base; a memory
-note's workspace, text, who it is for and the note it replaces; that archiving a
-swarm closes its completed runs; a deleted watch's target, conditions and notice
-count. `aether_launch_run` and `aether_launch_swarm`
-take an optional `reason`, one line from the assistant on why, which the card
+note's workspace, text, who it is for and the note it replaces; a deleted watch's target, conditions and notice
+count. `aether_launch_run`
+takes an optional `reason`, one line from the assistant on why, which the card
 shows as `The assistant's reason: "..."` (cut to 200 characters); the socket
 takes it off before the call reaches the server, and a connector does not offer
 it. A decline, timeout or closed session fails the call with the reason.
@@ -328,7 +317,7 @@ the member's runs by default on a connector and every run they can see on the
 assistant. A connector call is cut off after 40 seconds and a launch keeps
 starting past it; an assistant call waits, since its member may still be
 deciding a card. The assistant does not offer `search`, `fetch`,
-`aether_mark_reviewed` or `aether_cancel_swarm`; the connector does not offer
+or `aether_mark_reviewed`; the connector does not offer
 the environment, usage, docs, view context and workspace tools. Messages and
 launches dedupe the same way on both: an `idempotency_key` repeats a call
 safely, and a keyless message reuses the key of the same message to the same run

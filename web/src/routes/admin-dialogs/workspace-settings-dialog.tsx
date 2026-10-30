@@ -141,7 +141,7 @@ export function WorkspaceSettingsDialog({
           {limitsOffered && (
             <fieldset className="min-w-0 space-y-2 border-t pt-3 text-ui">
               <legend className="float-left mb-1 font-medium">Child runs</legend>
-              <p className="clear-left text-ui-sm text-muted">Limits for each tree of runs that agents start from one another. Swarm workers are not counted; their child runs are.</p>
+              <p className="clear-left text-ui-sm text-muted">Limits for each tree of runs that agents start from one another.</p>
               {limitsError && <p role="alert" className="text-ui-sm text-state-failed">{limitsError}</p>}
               {limits && limitFields.map(({ key, label, help }) => (
                 <div key={key} className="grid grid-cols-[minmax(0,1fr)_6rem] items-center gap-x-3">

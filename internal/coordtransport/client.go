@@ -33,11 +33,10 @@ const (
 // them, so a call outlasts the card; internal/assistant/tools checks every
 // method it confirms is here.
 var ConfirmedMethods = []string{protocol.MethodRunKill, protocol.MethodRunClose, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
-	protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost,
+	protocol.MethodRunInputRespond, protocol.MethodRunRoomPost,
 	protocol.MethodRunRelaunch, protocol.MethodRunModeSwitch, protocol.MethodRunProtect, protocol.MethodRunArchive, protocol.MethodRunHandoff,
-	protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive, protocol.MethodMissionReplaceIntegrator,
 	protocol.MethodRunPRCreate, protocol.MethodRunPRMerge,
-	protocol.MethodMemoryAdd, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin, protocol.MethodMissionCreate, protocol.MethodTemplateLaunch, protocol.MethodLaunchDefaultsSet,
+	protocol.MethodMemoryAdd, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin, protocol.MethodTemplateLaunch, protocol.MethodLaunchDefaultsSet,
 	protocol.MethodWatchDelete, protocol.MethodAssistantForget}
 
 func callTimeout(method string, params any) time.Duration {
@@ -49,7 +48,7 @@ func callTimeout(method string, params any) time.Duration {
 		if params != nil {
 			timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
 		}
-	case protocol.MethodCoordInbox, protocol.MethodMissionPlanShow:
+	case protocol.MethodCoordInbox:
 		timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
 	case protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop, protocol.MethodDevBrowserReset:
 		timeout = 30*time.Second + callMargin
@@ -73,7 +72,7 @@ func callTimeout(method string, params any) time.Duration {
 // longPoll reports whether the server may hold the request open for the
 // caller's wait_seconds, which is what exempts it from the deadline ceiling.
 func longPoll(method string) bool {
-	return method == protocol.MethodCoordInbox || method == protocol.MethodCoordHookStatus || method == protocol.MethodMissionPlanShow
+	return method == protocol.MethodCoordInbox || method == protocol.MethodCoordHookStatus
 }
 
 // pollWaitSeconds clamps the caller's wait to the same bound the server
@@ -90,12 +89,6 @@ func pollWaitSeconds(params any) int {
 	case protocol.CoordHookStatusParams:
 		wait = p.WaitSeconds
 	case *protocol.CoordHookStatusParams:
-		if p != nil {
-			wait = p.WaitSeconds
-		}
-	case protocol.MissionPlanShowParams:
-		wait = p.WaitSeconds
-	case *protocol.MissionPlanShowParams:
 		if p != nil {
 			wait = p.WaitSeconds
 		}

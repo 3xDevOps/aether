@@ -69,7 +69,7 @@ func TestConnectorProtocolThroughTheEdge(t *testing.T) {
 
 	resp, out := rpc(t, base, token.AccessToken, "tools/list", map[string]any{})
 	tools, _ := out["result"].(map[string]any)["tools"].([]any)
-	if resp.StatusCode != http.StatusOK || len(tools) != 37 || resp.Header.Get("Mcp-Session-Id") != "" {
+	if resp.StatusCode != http.StatusOK || len(tools) != 32 || resp.Header.Get("Mcp-Session-Id") != "" {
 		t.Fatalf("tools/list without initialize: %s %v", resp.Status, out)
 	}
 	// The budget of docs/chatgpt-plugin.md#tool-list-budget, as a client
@@ -103,7 +103,7 @@ func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 	h := newHarness(t)
 	client := newConnectorClient(t)
 	rooms := &fakeRooms{}
-	s := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{Rooms: rooms, Missions: &fakeMissions{}})
+	s := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{Rooms: rooms})
 	other := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{})
 	clients := h.login(alice, bob)
 	al, bo := clients[0], clients[1]
@@ -159,8 +159,7 @@ func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 	}
 	// Alice has not shared her agent account with bob.
 	for name, args := range map[string]map[string]any{
-		"aether_launch_run":   {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "account_member_id": string(s.memberOf(t, alice).ID)},
-		"aether_launch_swarm": {"workspace_id": string(ws.ID), "objective": "o", "harness": "claude", "workers": []any{map[string]any{"harness": "codex", "account_member_id": string(s.memberOf(t, alice).ID)}}},
+		"aether_launch_run": {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "account_member_id": string(s.memberOf(t, alice).ID)},
 	} {
 		if failed, text := toolText(t, session, name, args); !failed || !strings.Contains(text, "not shared") {
 			t.Errorf("%s on an account not shared with bob = %v %s, want refused", name, failed, text)

@@ -89,11 +89,8 @@ type Run struct {
 	UnansweredQuestions int     `json:"unanswered_questions"`
 	UnackedMessages     int     `json:"unacked_messages"`
 	OldestUnackedAt     *string `json:"oldest_unacked_at,omitempty"`
-	MissionID           string  `json:"mission_id,omitempty"`
-	MissionRole         string  `json:"mission_role,omitempty"`
-	IntegratorRunID     string  `json:"integrator_run_id,omitempty"`
-	// ParentRunID is the run that started this one, or a worker's current
-	// integrator; RootRunID is the top of its tree.
+	// ParentRunID is the run that started this one; RootRunID is the top
+	// of its tree.
 	ParentRunID  string `json:"parent_run_id,omitempty"`
 	RootRunID    string `json:"root_run_id,omitempty"`
 	ChildPurpose string `json:"child_purpose,omitempty"`
@@ -258,9 +255,6 @@ func RunFromDomain(r *domain.Run) Run {
 		UnansweredQuestions: r.UnansweredQuestions,
 		UnackedMessages:     r.UnackedMessages,
 		OldestUnackedAt:     rfc3339Ptr(r.OldestUnackedAt),
-		MissionID:           string(r.MissionID),
-		MissionRole:         r.MissionRole,
-		IntegratorRunID:     string(r.IntegratorRunID),
 		ParentRunID:         string(r.ParentRunID),
 		RootRunID:           string(r.RootRunID),
 		ChildPurpose:        r.ChildPurpose,
@@ -332,9 +326,6 @@ type ServerInfoResult struct {
 }
 
 const FeatureMultiRepo = "multi-repo"
-
-// FeatureSwarmRepos marks a server whose mission.create takes extra_workspace_ids; an older one drops them.
-const FeatureSwarmRepos = "swarm-repos"
 
 // FeaturePermission marks a server whose run.launch takes permission; an
 // older one drops it and runs the agent as root.
@@ -921,9 +912,9 @@ type AgentInfo struct {
 	// EffortLevels are the effort or thinking levels a launch may pass;
 	// empty when the agent has no effort setting.
 	EffortLevels []string `json:"effort_levels,omitempty"`
-	// SwarmStandardRefusal is why a swarm integrator or worker cannot run the
-	// agent in Standard mode; empty when it can.
-	SwarmStandardRefusal string `json:"swarm_standard_refusal,omitempty"`
+	// WakeStandardRefusal is why a run that waits for mail from its child
+	// runs cannot use the agent in Standard mode; empty when it can.
+	WakeStandardRefusal string `json:"wake_standard_refusal,omitempty"`
 	// Empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
 	// InstallScript followed by the pinned adapter's install.
@@ -938,23 +929,6 @@ type AgentInfo struct {
 	LoginMissing   bool   `json:"login_missing,omitempty"`
 	OwnAccountOnly bool   `json:"own_account_only,omitempty"`
 	Unavailable    string `json:"unavailable,omitempty"`
-}
-
-// SwarmMode is the mode a swarm starts agent in when none is given, read from
-// agents, an agent.list result: Enhanced where it is installed, since Aether
-// can wake any Enhanced run when mail arrives, and Standard otherwise.
-// Standard that Aether could not wake is refused with the install command.
-func SwarmMode(agents []AgentInfo, agent string) (string, error) {
-	for _, a := range agents {
-		switch {
-		case a.Name != agent:
-		case a.EnhancedInstalled:
-			return string(domain.LaunchACP), nil
-		case a.SwarmStandardRefusal != "" && a.Enhanced != "none":
-			return "", fmt.Errorf("%s, which is not installed: aether agent add %s --enhanced", a.SwarmStandardRefusal, agent)
-		}
-	}
-	return string(domain.LaunchTUI), nil
 }
 
 type AgentInstallParams struct {

@@ -233,7 +233,7 @@ func (h *coordHarness) ownBy(i int, owner domain.MemberID, protected bool) {
 	}
 }
 
-// isolate gives each run its own protected owner, so only the swarm and
+// isolate gives each run its own protected owner, so only the lineage and
 // radar routes reach it.
 func (h *coordHarness) isolate(runs ...int) {
 	h.t.Helper()

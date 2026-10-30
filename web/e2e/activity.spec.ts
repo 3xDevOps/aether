@@ -2,11 +2,10 @@
 // and its one Filter popover is a Radix popover holding Radix selects, which
 // only a real browser stacks and dismisses the way a person meets them.
 
-import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from './fixtures'
-import { runContainer } from './harness/docker'
+import { runCoordCLI, waitForCoordCLI } from './harness/coord'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
@@ -57,47 +56,30 @@ test('Activity narrows the log from one filter and switches to agent messages', 
   await expect(page.getByText(/coord\.messages\.list/)).toHaveCount(0)
 })
 
-function coord<T>(runID: string, args: string[]): T {
-  const output = execFileSync('docker', ['exec', runContainer(runID), 'aether-internal', ...args], { encoding: 'utf8', timeout: 60_000 })
-  const envelope = JSON.parse(output) as { ok?: boolean; result?: T; error?: { message?: string } }
-  if (!envelope.ok || envelope.result === undefined) throw new Error(envelope.error?.message || `aether-internal ${args.join(' ')} failed`)
-  return envelope.result
-}
-
 test('Activity shows real agent messages and narrows them to one thread', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
   const aliceID = await memberID(alice)
   aether.installAgent(aliceID, 'claude', 'sleep 600')
+  aether.installAgent(aliceID, 'codex', 'sleep 600')
+  const claudeHome = path.join(aether.server.memberHome(aliceID), '.claude')
+  mkdirSync(claudeHome, { recursive: true })
+  writeFileSync(path.join(claudeHome, '.credentials.json'), '{}\n')
+  aether.giveCodexLogin(aliceID)
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
-  const choice = (mode: string) => ({ account_member_id: aliceID, harness: 'claude', mode })
-  const { mission } = await alice.api.rpc<{ mission: { id: string; current_integrator_run_id: string; integrator_generation: number } }>('mission.create', {
-    idempotency_key: 'activity-messages',
-    workspace_id: workspaces[0].id,
-    objective: 'activity message fixture',
-    accountable_human_id: aliceID,
-    integrator: choice('tui'),
-    execution_choices: [choice('tui'), choice('headless')],
+  const { run: parent } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
+    workspace_id: workspaces[0].id, task: 'activity message fixture', harness: 'claude', mode: 'tui',
   })
-  const lead = mission.current_integrator_run_id
-  const socket = (runID: string) => expect.poll(() => existsSync(path.join(aether.server.dataDir, 'coord', runID, 'coord3.sock')), { timeout: 120_000 }).toBeTruthy()
-  await socket(lead)
-  const { task } = coord<{ task: { id: string; current_revision: number } }>(lead, [
-    'task', 'propose', '--mission-id', mission.id, '--idempotency-key', 'activity-task',
-    '--revision', JSON.stringify({ title: 'messages', objective: 'Answer one question.', status: 'proposed', scope: {}, evidence_requirements: [] }),
-  ])
-  coord(lead, ['mission', 'start', '--mission-id', mission.id, '--idempotency-key', 'activity-start'])
-  const worker = coord<{ attempt: { run_id: string } }>(lead, [
-    'worker', 'start', '--mission-id', mission.id, '--task-id', task.id, '--task-revision', String(task.current_revision),
-    '--dispatch-key', 'activity-worker', '--harness', 'claude', '--mode', 'headless',
-    '--account-owner-id', aliceID, '--run-owner-id', aliceID,
-    '--expected-integrator-generation', String(mission.integrator_generation),
-  ]).attempt.run_id
-  await socket(worker)
-  coord(lead, ['send', '--to', worker, '--idempotency-key', 'activity-send', '--body', 'Start with the parser.'])
-  const { question_id: question } = coord<{ question_id: string }>(worker, ['ask', '--to', lead, '--idempotency-key', 'activity-ask', '--body', 'Which parser?'])
-  coord(lead, ['reply', '--question-id', question, '--idempotency-key', 'activity-reply', '--body', 'The JSON one.'])
+  await waitForCoordCLI(parent.id, aether.server.dataDir)
+  const child = runCoordCLI<{ run_id: string }>(parent.id, [
+    'child', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Answer one question',
+    '--task', 'Answer one question.', '--idempotency-key', 'activity-child',
+  ]).run_id
+  await waitForCoordCLI(child, aether.server.dataDir)
+  runCoordCLI(parent.id, ['send', '--to', child, '--idempotency-key', 'activity-send', '--body', 'Start with the parser.'])
+  const { question_id: question } = runCoordCLI<{ question_id: string }>(child, ['ask', '--to', parent.id, '--idempotency-key', 'activity-ask', '--body', 'Which parser?'])
+  runCoordCLI(parent.id, ['reply', '--question-id', question, '--idempotency-key', 'activity-reply', '--body', 'The JSON one.'])
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(alice.url)

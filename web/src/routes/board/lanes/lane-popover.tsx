@@ -4,14 +4,12 @@ import { MessageRow, Participants } from '@/components/messages/message-row'
 import { Button } from '@/components/ui/button'
 import { PopoverContent } from '@/components/ui/popover'
 import { api } from '@/lib/api'
-import { clockTime } from '@/lib/format'
-import { unreadMail, unreadReason } from '@/lib/needs-you'
+import { clockTime, elapsed } from '@/lib/format'
 import { stateName, stateWords } from '@/lib/status'
 import { CardActionButton, cardAction } from '@/routes/board/card-action'
 import type { LaneEdge } from '@/routes/board/lanes/edges'
-import type { RunLane, SwarmLane } from '@/routes/board/lanes/model'
+import type { FamilyLane, RunLane } from '@/routes/board/lanes/model'
 import { segmentLabel } from '@/routes/board/lanes/segments'
-import { elapsed } from '@/routes/missions/tree'
 import { useStore } from '@/store'
 import { diffTotals } from '@/store/diff'
 import { messageScopeKey, scopeMessages, useMessageList, type MessageScope } from '@/store/messages'
@@ -55,12 +53,11 @@ export function RunPopover({ lane, at, agentName, now, onReply, onAgents }: {
   const totals = diffTotals(snapshot?.files)
   const action = cardAction(card)
   const segment = at === undefined ? undefined : lane.segments.find((s) => at >= s.start && at <= s.end)
-  const unread = unreadMail(run, now)
   const pending = run.pending_inputs?.length ?? 0
   const words = stateWords(card, undefined, now)
   return (
     <>
-      <Header>{[lane.handle ?? agentName ?? run.harness, stateName(card), elapsed(run.created_at, lane.end)].join(' · ')}</Header>
+      <Header>{[agentName ?? run.harness, stateName(card), elapsed(run.created_at, lane.end)].join(' · ')}</Header>
       <p className="mt-0.5 text-ui font-medium break-words">{lane.title}</p>
       <Facts
         items={[
@@ -68,7 +65,6 @@ export function RunPopover({ lane, at, agentName, now, onReply, onAgents }: {
           words.detail,
           card.next,
           run.branch && `${run.branch}${totals ? ` +${totals.additions} −${totals.deletions}` : ''}`,
-          unread > 0 && unreadReason(unread, run.oldest_unacked_at!, now),
           pending > 0 && `${pending} ${pending === 1 ? 'input' : 'inputs'} waiting`,
           overlaps !== undefined && overlaps.length > 0 && `Overlaps ${overlaps.length} ${overlaps.length === 1 ? 'run' : 'runs'} on ${new Set(overlaps.flatMap((o) => o.files)).size} files`,
           segment && (segment.state === 'unloaded'
@@ -79,23 +75,20 @@ export function RunPopover({ lane, at, agentName, now, onReply, onAgents }: {
       <Actions>
         {action && <CardActionButton card={card} action={action} onReply={onReply} />}
         <Button variant="secondary" size="sm" onClick={() => navigate('run', { runId: run.id })}>Open run</Button>
-        {run.mission_id && <Button variant="ghost" size="sm" onClick={() => navigate('missions', { missionId: run.mission_id! })}>Open swarm</Button>}
         {onAgents && <Button variant="ghost" size="sm" onClick={() => onAgents(!lane.agentsOpen)}>{lane.agentsOpen ? 'Hide agents' : 'Show agents'}</Button>}
       </Actions>
     </>
   )
 }
 
-export function SwarmPopover({ lane }: { lane: SwarmLane }) {
+export function FamilyPopover({ lane }: { lane: FamilyLane }) {
   const navigate = useStore((s) => s.navigate)
-  const { integratorID } = lane
   return (
     <>
-      <Header>{lane.missionID ? 'Swarm' : 'Run'} · {lane.detail}</Header>
+      <Header>Run · {lane.detail}</Header>
       <p className="mt-0.5 text-ui font-medium break-words">{lane.title}</p>
       <Actions>
-        {lane.missionID && <Button variant="secondary" size="sm" onClick={() => navigate('missions', { missionId: lane.missionID! })}>Open swarm</Button>}
-        {integratorID && <Button variant={lane.missionID ? 'ghost' : 'secondary'} size="sm" onClick={() => navigate('run', { runId: integratorID })}>{lane.missionID ? 'Open integrator' : 'Open run'}</Button>}
+        <Button variant="secondary" size="sm" onClick={() => navigate('run', { runId: lane.parentID })}>Open run</Button>
       </Actions>
     </>
   )
@@ -126,9 +119,6 @@ function MessageThread({ messages }: { messages: NonNullable<LaneEdge['messages'
 }
 
 const kindWord: Record<LaneEdge['kind'], string> = {
-  orchestration: 'Launched by its integrator',
-  dependency: 'Task dependency',
-  submission: 'Submission',
   message: 'Agent message',
   overlap: 'File overlap',
 }
@@ -137,7 +127,6 @@ function edgeHead(edge: LaneEdge, now: number): string {
   const count = edge.messages?.ids.length ?? 1
   return [
     edge.kind === 'message' && count > 1 ? `${count} agent messages` : kindWord[edge.kind],
-    edge.submission?.state,
     clockTime(iso(edge.from.t), now),
   ].filter(Boolean).join(' · ')
 }
@@ -168,15 +157,6 @@ export function EdgePopover({ edge, now }: { edge: LaneEdge; now: number }) {
         <Participants from={edge.from.run} to={edge.to.run} />
       </div>
       {edge.messages && <MessageThread messages={edge.messages} />}
-      {edge.kind === 'submission' && edge.submission && (
-        <Facts
-          items={[
-            edge.submission.decided_at ? `Decided ${clockTime(edge.submission.decided_at, now)}` : 'Waiting for the integrator',
-            (edge.submission.scope_violations?.length ?? 0) > 0 && `${edge.submission.scope_violations!.length} scope violations`,
-          ]}
-        />
-      )}
-      {edge.kind === 'dependency' && <Facts items={['The second task started after the first finished.']} />}
       {edge.kind === 'overlap' && <Facts items={edge.files ?? []} />}
     </>
   )

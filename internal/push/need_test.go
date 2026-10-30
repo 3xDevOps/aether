@@ -19,8 +19,6 @@ func TestNeedOf(t *testing.T) {
 	}
 	enhanced := func(r *domain.Run) { r.Mode, r.ACP = domain.LaunchACP, true }
 	background := func(r *domain.Run) { r.Mode = domain.LaunchHeadless }
-	worker := func(r *domain.Run) { r.MissionRole = "worker" }
-	integrator := func(r *domain.Run) { r.MissionRole = "integrator" }
 	unseen := func(r *domain.Run) { r.OutcomeUnseen = true }
 	review := func(state domain.RunReview) func(*domain.Run) { return func(r *domain.Run) { r.Review = state } }
 	question := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}}
@@ -41,7 +39,6 @@ func TestNeedOf(t *testing.T) {
 		{name: "terminal question", run: parked(needsYou, "turn ended without a report"), inputs: question, want: "Question: answer in the terminal"},
 		{name: "background question", run: parked(waiting, "turn ended without a report", background), inputs: question},
 		{name: "background turn failed", run: parked(domain.ActivityFailed, "enhanced turn failed: overloaded", background, unseen), want: "Turn failed: overloaded"},
-		{name: "worker request", run: parked(needsYou, "turn ended without a report", worker), inputs: permission},
 		{name: "waiting", run: parked(waiting, "turn ended without a report")},
 		{name: "legacy idle", run: parked(domain.ActivityIdle, "agent idle")},
 		{name: "enhanced turn ended", run: parked(waiting, "turn ended without a report", enhanced)},
@@ -55,27 +52,20 @@ func TestNeedOf(t *testing.T) {
 		{name: "failure seen", run: parked(domain.ActivityFailed, "agent failed")},
 		{name: "usage limit", run: parked(needsYou, "Usage limit reached on Ada's account; no fallback has usage left"), want: "Usage limit reached on Ada's account; no fallback has usage left"},
 		{name: "paused", run: parked(needsYou, "blocked: need the staging API key"), paused: true},
-		{name: "integrator waiting on workers", run: parked(domain.ActivityWaitingAgents, "turn ended without a report", integrator)},
 		{name: "reported waiting", run: parked(domain.ActivityWaitingAgents, "waiting on 3 workers", enhanced)},
 		{name: "waiting for CI", run: parked(domain.ActivityWaitingCI, "CI on PR 12", enhanced)},
 		{name: "wait broken", run: parked(needsYou, "wait broken: pr:o/r#12:checks resolved, but the agent was not woken", enhanced), want: "Wait broken, send a message to continue: pr:o/r#12:checks resolved, but the agent was not woken"},
-		{name: "worker wait broken", run: parked(needsYou, "wait broken: pr:o/r#12:checks resolved, but the agent was not woken", worker)},
 		{name: "waiting for a process", run: parked(domain.ActivityWaitingTools, "release build", enhanced)},
 		{name: "answered", run: parked(domain.ActivityAnswered, "explained the retry policy", enhanced)},
-		{name: "worker answered", run: parked(domain.ActivityAnswered, "replied to the integrator", worker)},
 		{name: "waiting on a tool", run: &domain.Run{Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning, Activity: domain.ActivityWaitingTools}},
 		{name: "blocked", run: parked(needsYou, "blocked: need the staging API key", background), want: "Blocked: need the staging API key"},
-		{name: "worker blocked", run: parked(needsYou, "blocked: merge conflict", worker), want: "Worker blocked: merge conflict"},
 		{name: "needs input", run: parked(needsYou, "needs input: which region?", enhanced), want: "which region?"},
-		{name: "worker needs input", run: parked(needsYou, "needs input: which region?", worker)},
 		{name: "enhanced failure", run: parked(domain.ActivityDisconnected, "enhanced session failed: not logged in", background), want: "Enhanced could not start: not logged in"},
 		{name: "adapter exited", run: parked(domain.ActivityDisconnected, "enhanced session ended: exit code 1", enhanced), want: "Agent disconnected: exit code 1"},
-		{name: "worker disconnected", run: parked(domain.ActivityDisconnected, "enhanced session ended: exit code 1", worker)},
 		{name: "reported success", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewReady)), want: "Agent reported success, review the result"},
 		{name: "reported success seen, still to review", run: parked(domain.ActivityFinished, "agent reported success", review(domain.ReviewReady)), want: "Agent reported success, review the result"},
 		{name: "reported success for later", run: parked(domain.ActivityFinished, "agent reported success", unseen, review(domain.ReviewLater))},
 		{name: "reported success disconnected", run: parked(domain.ActivityDisconnected, "enhanced session ended: exit code 1", review(domain.ReviewReady)), want: "Agent disconnected: exit code 1"},
-		{name: "worker reported success", run: parked(domain.ActivityFinished, "agent reported success", worker, unseen, review(domain.ReviewReady))},
 		{name: "reported failure", run: parked(domain.ActivityFailed, "agent reported failure", enhanced, unseen), want: "Agent reported failure, review the result"},
 		{name: "finished before reviews", run: parked(domain.ActivityFinished, "agent reported success", unseen)},
 		{name: "background success", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true, Review: domain.ReviewReady}, want: "Agent reported success, review the result"},
@@ -84,7 +74,6 @@ func TestNeedOf(t *testing.T) {
 		{name: "failed", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunFailed, OutcomeUnseen: true}, want: "Failed, review the result"},
 		{name: "finished and seen", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunCompleted}},
 		{name: "closed by a member", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunAbandoned}},
-		{name: "worker finished", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true, MissionRole: "worker"}},
 	} {
 		got := needOf(tc.run, tc.inputs, tc.paused)
 		switch {

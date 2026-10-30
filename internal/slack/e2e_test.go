@@ -127,7 +127,7 @@ func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cost.New: %v", err)
 	}
-	notices, err := push.New(push.Config{Store: h.db, Bus: bus, Runs: runs, Swarm: srv.SwarmAttention, Budgets: costs,
+	notices, err := push.New(push.Config{Store: h.db, Bus: bus, Runs: runs, Budgets: costs,
 		KeyPath: filepath.Join(t.TempDir(), "vapid_key.pem"), Quiet: time.Millisecond})
 	if err != nil {
 		t.Fatalf("push.New: %v", err)

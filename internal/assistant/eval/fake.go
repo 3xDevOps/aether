@@ -52,7 +52,7 @@ func (r *Recorder) Calls() []ToolCall {
 var confirmed = map[string]bool{
 	protocol.MethodRunLaunch: true, protocol.MethodRunInject: true, protocol.MethodRunKill: true,
 	protocol.MethodRunClose: true, protocol.MethodRunRelaunch: true, protocol.MethodRunPRMerge: true,
-	protocol.MethodRunPRCreate: true, protocol.MethodMissionCreate: true, protocol.MethodMemoryAdd: true,
+	protocol.MethodRunPRCreate: true, protocol.MethodMemoryAdd: true,
 	protocol.MethodEnvSave: true, protocol.MethodRunInputRespond: true,
 }
 
@@ -170,11 +170,10 @@ func launchedRun(p protocol.RunLaunchParams, n int) protocol.Run {
 func idOf(params any) string {
 	b, _ := json.Marshal(params)
 	var p struct {
-		RunID     string `json:"run_id"`
-		MissionID string `json:"mission_id"`
+		RunID string `json:"run_id"`
 	}
 	_ = json.Unmarshal(b, &p)
-	return p.RunID + p.MissionID
+	return p.RunID
 }
 
 // docsAnswer serves Aether's own guides, as the assistant's tool socket does.

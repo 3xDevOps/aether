@@ -33,7 +33,7 @@ Contact for this policy: [team@onaether.dev]. Issues:
 
 ## What the connector receives from ChatGPT or Claude
 
-- Tool arguments the assistant chooses to send: workspace, run and swarm
+- Tool arguments the assistant chooses to send: workspace and run
   ids, task and message text, answers to agent questions, search words,
   filters such as a time range, and optional idempotency keys.
 - During sign-in: the app's client id URL (only `https://chatgpt.com/...`
@@ -51,7 +51,7 @@ files, location, or any OpenAI or Anthropic user id.
 - Text written by you, your teammates, agents and GitHub users: run titles,
   tasks, reports, agent conversations and terminal output, diffs, commit
   subjects and git author names, pull request reviews and comments with the
-  GitHub usernames that wrote them, swarm tasks, questions and messages, and
+  GitHub usernames that wrote them, questions and messages, and
   team memory notes with their author's name.
 
 No tool returns member email addresses or logins. Every member of an Aether

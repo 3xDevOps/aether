@@ -114,22 +114,18 @@ export interface ViewEntry {
   name: string
   workspace_id?: string
   run_id?: string
-  mission_id?: string
   subagent?: string
   view?: string
   at?: string
 }
 
-export type ViewAttachmentKind = 'workspace' | 'run' | 'mission' | 'pr' | 'check' | 'failure' | 'task'
+export type ViewAttachmentKind = 'workspace' | 'run' | 'pr' | 'check' | 'failure'
 
 /** One thing a prompt is about, by id: never a title, log or file contents. */
 export interface ViewAttachment {
   kind: ViewAttachmentKind
   workspace_id?: string
   run_id?: string
-  mission_id?: string
-  task_id?: string
-  attempt_id?: string
   pr?: number
   /** `owner/name` of the pull request. */
   repository?: string

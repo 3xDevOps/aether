@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -19,7 +18,6 @@ type watchesInput struct {
 type watchInput struct {
 	WatchID    string   `json:"watch_id,omitempty"`
 	RunID      string   `json:"run_id,omitempty"`
-	SwarmID    string   `json:"swarm_id,omitempty"`
 	PR         string   `json:"pr,omitempty"`
 	Conditions []string `json:"conditions,omitempty"`
 	ExpiresAt  string   `json:"expires_at,omitempty" jsonschema:"RFC 3339"`
@@ -44,7 +42,7 @@ var watchOps = []Op{
 		"Use this when the user asks about their watches, or one watch_id's notices."+untrustedRule, listWatches).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWatchList, protocol.MethodWatchGet),
 	opOf("aether_watch", "Watch", ScopeWrite, false, nextWatches,
-		"Use this when the user wants notices on a run, swarm or pr (owner/name#7); with watch_id, change or pause it.", watch).
+		"Use this when the user wants notices on a run or pr (owner/name#7); with watch_id, change or pause it.", watch).
 		hints(false, false).offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodWatchCreate, protocol.MethodWatchUpdate),
 	opOf("aether_unwatch", "Delete watch", ScopeWrite, true, nextWatches,
 		"Use this when the user deletes a watch.", unwatch).
@@ -52,11 +50,10 @@ var watchOps = []Op{
 }
 
 type watchTarget struct {
-	Kind    string `json:"kind"`
-	RunID   string `json:"run_id,omitempty"`
-	SwarmID string `json:"swarm_id,omitempty"`
-	Repo    string `json:"repo,omitempty"`
-	Number  int    `json:"number,omitempty"`
+	Kind   string `json:"kind"`
+	RunID  string `json:"run_id,omitempty"`
+	Repo   string `json:"repo,omitempty"`
+	Number int    `json:"number,omitempty"`
 }
 
 type watchRow struct {
@@ -105,10 +102,7 @@ func (l links) at(path string) string {
 }
 
 func watchRowOf(w protocol.Watch, l links) watchRow {
-	t := watchTarget{Kind: w.Target.Kind, RunID: w.Target.RunID, SwarmID: w.Target.MissionID, Repo: w.Target.Repo, Number: w.Target.Number}
-	if t.Kind == protocol.WatchTargetMission {
-		t.Kind = "swarm"
-	}
+	t := watchTarget{Kind: w.Target.Kind, RunID: w.Target.RunID, Repo: w.Target.Repo, Number: w.Target.Number}
 	row := watchRow{ID: w.ID, State: w.State, Error: w.Error, Target: t, Conditions: w.Conditions, Label: w.Label, Source: w.Source,
 		ExpiresAt: w.ExpiresAt, LastCheckAt: w.LastCheckAt, URL: l.at(w.Link),
 		Untrusted: watchText{TargetTitle: clip(w.TargetTitle, maxReport), Observed: clip(w.Observed.Summary, maxReport)}}
@@ -171,23 +165,12 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 	}
 	var res protocol.WatchResult
 	if in.WatchID != "" {
-		if in.RunID != "" || in.SwarmID != "" || in.PR != "" {
+		if in.RunID != "" || in.PR != "" {
 			return "", nil, invalid("a watch's target cannot change; leave out watch_id to create a new watch")
 		}
 		err = c.act(ctx, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: in.WatchID, Paused: in.Paused, Conditions: in.Conditions,
 			ExpiresAt: in.ExpiresAt}, &res)
 	} else {
-		var given []string
-		for field, v := range map[string]string{"run_id": in.RunID, "swarm_id": in.SwarmID, "pr": in.PR} {
-			if v != "" {
-				given = append(given, field)
-			}
-		}
-		slices.Sort(given)
-		// run_id may name the run that opened pr.
-		if in.SwarmID != "" && len(given) > 1 {
-			return "", nil, invalid("pass one target, not %s; run_id goes with pr only as the run that opened it", strings.Join(given, " and "))
-		}
 		var t protocol.WatchTarget
 		switch {
 		case in.Paused != nil:
@@ -211,12 +194,10 @@ func watch(ctx context.Context, c calls, in watchInput) (string, any, error) {
 				return "", nil, invalid("pr %q is not owner/name#number or a GitHub pull request URL", in.PR)
 			}
 			t = protocol.WatchTarget{Kind: protocol.WatchTargetPR, Repo: repo, Number: number, RunID: in.RunID}
-		case in.SwarmID != "":
-			t = protocol.WatchTarget{Kind: protocol.WatchTargetMission, MissionID: in.SwarmID}
 		case in.RunID != "":
 			t = protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: in.RunID}
 		default:
-			return "", nil, invalid("pass run_id, swarm_id or pr to create a watch, or watch_id to change one")
+			return "", nil, invalid("pass run_id or pr to create a watch, or watch_id to change one")
 		}
 		source := protocol.WatchSourceMCP
 		if c.surface == Assistant {

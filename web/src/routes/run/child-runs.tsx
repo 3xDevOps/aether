@@ -142,7 +142,7 @@ function RunLink({ runID }: { runID: string }) {
 
 /** Where a child run sits: the run that started it and the top of its tree. */
 export function RunLineage({ run }: { run: RunRecord }) {
-  if (!run.parent_run_id || run.mission_role === 'worker') return null
+  if (!run.parent_run_id) return null
   const root = run.root_run_id && run.root_run_id !== run.parent_run_id ? run.root_run_id : undefined
   return (
     <nav aria-label="Run lineage" className="flex min-w-0 items-center gap-1.5 border-b border-seam px-4 py-1 text-ui-sm text-muted">
@@ -164,7 +164,7 @@ export function RunLineage({ run }: { run: RunRecord }) {
 export function useChildRunsItems(run: RunRecord, client: Api = api): ExtraItem[] {
   const cap = useCapability()
   const self = useSelf()
-  if (!cap.hasMethod('run.children.allow') || run.mission_id || isTerminal(run.status)) return []
+  if (!cap.hasMethod('run.children.allow') || isTerminal(run.status)) return []
   const owner = self.id === run.member_id
   const item = (next: 'on' | 'off'): ExtraItem => ({
     id: `child-runs-${next}`,

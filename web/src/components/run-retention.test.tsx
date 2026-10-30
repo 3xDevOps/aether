@@ -14,7 +14,7 @@ describe('run retention', () => {
     closed.unmount()
 
     render(
-      <RunRetention run={run({ status: 'completed', reason: 'worker finished; retained container', container_retained_until: until })} />,
+      <RunRetention run={run({ status: 'completed', mode: 'headless', reason: 'agent reported success; retained container', container_retained_until: until })} />,
     )
     expect(screen.getByText(/Runtime grace ends/)).toBeDefined()
     expect(screen.queryByText(reopen)).toBeNull()

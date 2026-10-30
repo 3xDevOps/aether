@@ -274,23 +274,6 @@ it('takes back a lease that a closed page of the same member left behind', async
   view.unmount()
 })
 
-it('never takes control by typing in a swarm worker, where control is also a durable hold', async () => {
-  useStore.getState().upsertRun(run({ mission_id: 'mission_1', mission_role: 'worker' }))
-  const view = render(<Shells />)
-  await attach()
-  expect(await screen.findByText(/This run is a swarm worker/)).toBeTruthy()
-  await type(view, 'ls')
-  expect(StubSocket.opened).toHaveLength(1)
-  const stop = (await menu('Shell actions')).getByRole('menuitem', { name: /Stop shell/ })
-  expect(stop.getAttribute('aria-disabled')).toBe('true')
-  expect(stop.textContent).toContain('Take control first')
-  fireEvent.keyDown(stop, { key: 'Escape' })
-  fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
-  await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
-  expect((await attach(true)).frames()[0]).toMatchObject({ write: true })
-  view.unmount()
-})
-
 it('releases control when the Terminal view is left', async () => {
   const view = render(<Shells />)
   await attach()

@@ -208,17 +208,6 @@ func (noOpenRoomRequests) ListOpenRoomRequests(context.Context, domain.RunID) ([
 	return nil, nil
 }
 
-func TestAttentionListNamesTheWorkerTheCallerHolds(t *testing.T) {
-	e, db, _ := missionWorkerTestEnv(t)
-	if _, err := db.SetMissionWorkerTakeover(t.Context(), e.run.ID, e.member.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	item := attentionItems(t, e, e.member.ID, protocol.AttentionListParams{})[e.run.ID]
-	if item.Kind != protocol.AttentionKindControlHold || item.Reason != "You hold control of worker 1" {
-		t.Errorf("held worker = %+v", item)
-	}
-}
-
 func TestCompareSinceOrdersByTimeUnknownLast(t *testing.T) {
 	got := []string{"", "2026-10-22T10:00:00Z", "2026-10-22T10:00:00.5Z", "2026-10-22T09:00:00-02:00"}
 	slices.SortStableFunc(got, compareSince)

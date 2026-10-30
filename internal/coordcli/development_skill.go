@@ -75,9 +75,9 @@ exactly that limitation and the text/DOM checks you did; do not claim visual
 verification from text alone. Preserve capture identity/revision, note any
 truncation and unsupported content, and do not automatically upload screenshots
 publicly. Verify and collect required evidence before reporting an outcome,
-terminal stop, or artifact deletion. Background and worker success/failure
-reports may clean up development resources; interactive non-worker sessions
-stay open for follow-up. Read the inbox before reporting, then end your turn.
+terminal stop, or artifact deletion. Background success/failure reports
+may clean up development resources; interactive sessions stay open for
+follow-up. Read the inbox before reporting, then end your turn.
 `
 
 const retainCaptureSkill = `Retain only deliberately selected, reviewed captures:

@@ -14,7 +14,7 @@ import (
 )
 
 // authorize lets sender open a conversation with target: its owner may
-// message, and unless the runs are parent and child, swarm peers or overlap
+// message, and unless the runs are parent and child or overlap
 // on a file, the target's protection and its workspace's steer-others
 // setting allow it. Any
 // live run on the server qualifies, in any workspace and tree. Callers have
@@ -35,13 +35,6 @@ func (s *Service) authorize(ctx context.Context, method string, sender, target *
 		if related {
 			return nil
 		}
-	}
-	member, err := s.missionMember(ctx, sender.ID, target.ID)
-	if err != nil {
-		return missionRPCError(method, err)
-	}
-	if member {
-		return nil
 	}
 	peer, err := s.radar.authorized(ctx, sender.ID, target.ID)
 	if err != nil {
@@ -77,33 +70,12 @@ func (s *Service) messagingOwner(ctx context.Context, run *domain.Run) (*domain.
 	return owner, "", nil
 }
 
-func (s *Service) missionMember(ctx context.Context, run, peer domain.RunID) (bool, error) {
-	if s.cfg.Mission == nil {
-		return false, nil
-	}
-	assignment, err := s.cfg.Mission.Assignment(ctx, run)
-	if err != nil || assignment.MissionID == "" {
-		return false, err
-	}
-	peers, err := s.cfg.Mission.Peers(ctx, run)
-	if err != nil {
-		return false, err
-	}
-	for _, p := range peers {
-		if domain.RunID(p.RunID) == peer {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // statusPeers lists the most relevant live runs self may message, bounded to
-// CoordMaxStatusPeers, with the unbounded total: parent and children, swarm
-// peers, the radar's active/grace peers, then the other live runs in the
+// CoordMaxStatusPeers, with the unbounded total: parent and children, the radar's active/grace peers, then the other live runs in the
 // workspace that self's owner may message, most recently active first. Any
 // other live run on the server can be messaged by ID without being listed. A
 // run whose owner may not message lists none.
-func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeers []protocol.CoordPeer, lineage []domain.RunID) ([]protocol.CoordPeer, int, error) {
+func (s *Service) statusPeers(ctx context.Context, self *domain.Run, lineage []domain.RunID) ([]protocol.CoordPeer, int, error) {
 	peers := make([]protocol.CoordPeer, 0, protocol.CoordMaxStatusPeers)
 	owner, _, err := s.messagingOwner(ctx, self)
 	if err != nil || owner == nil {
@@ -164,7 +136,7 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 			last := &protocol.CoordSentMessage{
 				MessageID: m.ID, State: protocol.CoordSentStateSent, CreatedAt: m.CreatedAt.UTC().Format(time.RFC3339),
 			}
-			if held, heldErr := s.heldWorker(ctx, r.ID); heldErr != nil {
+			if held, heldErr := s.heldChild(ctx, r.ID); heldErr != nil {
 				addErr = heldErr
 			} else if held {
 				last.State = protocol.CoordSentStateHeld
@@ -184,10 +156,6 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 	}
 	for _, id := range lineage {
 		add(byID[id], protocol.CoordPeerLineage, overlaps[id])
-	}
-	for _, p := range missionPeers {
-		id := domain.RunID(p.RunID)
-		add(byID[id], protocol.CoordPeerMission, overlaps[id])
 	}
 	for _, p := range radarPeers {
 		add(byID[p.run], p.state, p)

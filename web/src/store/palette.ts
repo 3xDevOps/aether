@@ -2,7 +2,7 @@ import type { WatchTarget } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /** Every form the shell hosts; sweep this list rather than keep a copy. */
-export const paletteDialogs = ['launch', 'swarm', 'inject', 'forward', 'close', 'clear-done', 'release-finished', 'watch'] as const
+export const paletteDialogs = ['launch', 'inject', 'forward', 'close', 'clear-done', 'release-finished', 'watch'] as const
 
 export type PaletteDialog = (typeof paletteDialogs)[number]
 
@@ -12,7 +12,7 @@ export interface PaletteSlice {
   /** Only run-specific forms carry a run id. */
   paletteRunID: string | null
   paletteForwardTarget: string | null
-  /** The swarm or pull request the Watch form is for; a run's comes from paletteRunID. */
+  /** The pull request the Watch form is for; a run's comes from paletteRunID. */
   paletteWatchTarget: WatchTarget | null
   togglePalette: (open?: boolean) => void
   openPaletteDialog: (dialog: PaletteDialog, runID?: string) => void

@@ -1,17 +1,14 @@
 package server
 
 import (
-	"context"
 	"errors"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/push"
 	"github.com/3xDevOps/Aether/internal/watch"
 )
 
 // Watches: a bus consumer that evaluates each member's watches on runs and
-// swarms and delivers their notices in-app, through Web Push and, for the
+// pull requests and delivers their notices in-app, through Web Push and, for the
 // watches the assistant keeps on the runs it launches, to the assistant. It reads
 // the push service svc_push.go builds, which Go initializes first.
 func init() {
@@ -28,9 +25,6 @@ func init() {
 			Bus:       d.Bus,
 			Runs:      d.Runs,
 			Recovered: d.Runs.RecoveryReady(),
-			Swarm: func(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-				return d.SSHServer().SwarmAttention(ctx, run)
-			},
 		}
 		if p, ok := d.SSH.Services.Push.(*push.Service); ok {
 			cfg.Push = p

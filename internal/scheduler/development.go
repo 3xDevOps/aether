@@ -393,13 +393,7 @@ func (s *Scheduler) developmentControl(ctx context.Context, id domain.RunID, p c
 			if _, err := s.validateDevelopmentSurface(ctx, id, req.Surface); err != nil {
 				return err
 			}
-			if err := auth(); err != nil {
-				return err
-			}
-			if p.Kind == control.PrincipalMember && surface.Kind == control.SurfaceTerminal && s.cfg.DevelopmentTerminalTakeover != nil {
-				return s.cfg.DevelopmentTerminalTakeover(ctx, id, p.MemberID)
-			}
-			return nil
+			return auth()
 		})
 		if acquireErr != nil {
 			return nil, acquireErr
@@ -417,9 +411,6 @@ func (s *Scheduler) developmentControl(ctx context.Context, id domain.RunID, p c
 	return nil, errors.New("unknown development control operation")
 }
 
-func (s *Scheduler) UseDevelopmentTakeover(takeover func(context.Context, domain.RunID, domain.MemberID) error) {
-	s.cfg.DevelopmentTerminalTakeover = takeover
-}
 func (s *Scheduler) AuthorizeDevelopment(ctx context.Context, id domain.RunID, p control.Principal, authorize func() error) error {
 	return s.developmentAuthorization(ctx, id, p, authorize)
 }

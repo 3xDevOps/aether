@@ -182,8 +182,8 @@ func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 // own events and the agent messages other runs addressed to it, because
 // SQLite answers their OR by scanning the workspace's events. The message
 // type is a literal so the partial idx_events_coord_to_run can serve the
-// second lookup. Several runs, or a Mission, keep the OR: SQLite would read
-// both lookups off the workspace index and scan it twice.
+// second lookup. Several runs keep the OR: SQLite would read both lookups off the
+// workspace index and scan it twice.
 func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (string, []any) {
 	where := "seq > ?"
 	args := []any{afterSeq}
@@ -199,25 +199,17 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 		where += " AND run_id = ?"
 		args = append(args, string(f.Run))
 	}
-	union := len(f.Runs) == 1 && f.Mission == ""
-	if !union && (len(f.Runs) > 0 || f.Mission != "") {
-		var either []string
-		if len(f.Runs) > 0 {
-			set := "(?" + strings.Repeat(", ?", len(f.Runs)-1) + ")"
-			either = append(either, "run_id IN "+set, "(type = ? AND json_extract(payload, '$.to_run_id') IN "+set+")")
-			for _, r := range f.Runs {
-				args = append(args, string(r))
-			}
-			args = append(args, string(TypeCoordMessage))
-			for _, r := range f.Runs {
-				args = append(args, string(r))
-			}
+	union := len(f.Runs) == 1
+	if !union && len(f.Runs) > 0 {
+		set := "(?" + strings.Repeat(", ?", len(f.Runs)-1) + ")"
+		where += " AND (run_id IN " + set + " OR (type = ? AND json_extract(payload, '$.to_run_id') IN " + set + "))"
+		for _, r := range f.Runs {
+			args = append(args, string(r))
 		}
-		if f.Mission != "" {
-			either = append(either, "(type = ? AND json_extract(payload, '$.mission_id') = ?)")
-			args = append(args, string(TypeMissionChanged), string(f.Mission))
+		args = append(args, string(TypeCoordMessage))
+		for _, r := range f.Runs {
+			args = append(args, string(r))
 		}
-		where += " AND (" + strings.Join(either, " OR ") + ")"
 	}
 	if len(f.Types) > 0 {
 		where += " AND type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")"

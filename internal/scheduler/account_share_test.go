@@ -272,7 +272,7 @@ func (e *shareEnv) assertFailedRun(t *testing.T, task string) {
 }
 
 // A member's own harness definition runs only on their own account: on a
-// shared account it is refused before any container exists, and a mission
+// A server-wide definition of the same shape shares
 // cannot record it. A server-wide definition of the same shape shares
 // exactly its declared login path.
 func TestSharedLaunchCustomHarness(t *testing.T) {
@@ -293,11 +293,11 @@ func TestSharedLaunchCustomHarness(t *testing.T) {
 	if e.containerCount() != 0 {
 		t.Fatal("a container was created for the refused launch")
 	}
-	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.owner.ID, "aider", domain.LaunchHeadless, "", ""); err == nil || !strings.Contains(err.Error(), "runs only on your own account") {
-		t.Fatalf("ValidateMissionLaunch = %v, want refusal", err)
+	if err = e.sched.ValidateLaunch(t.Context(), e.member.ID, e.owner.ID, "aider", domain.LaunchHeadless, "", ""); err == nil || !strings.Contains(err.Error(), "runs only on your own account") {
+		t.Fatalf("ValidateLaunch = %v, want refusal", err)
 	}
-	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "", ""); err != nil {
-		t.Fatalf("ValidateMissionLaunch on the member's own account: %v", err)
+	if err = e.sched.ValidateLaunch(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "", ""); err != nil {
+		t.Fatalf("ValidateLaunch on the member's own account: %v", err)
 	}
 
 	admin := newShareEnv(t, func(cfg *Config) {

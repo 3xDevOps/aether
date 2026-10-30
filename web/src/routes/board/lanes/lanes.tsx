@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
-import { clockTime } from '@/lib/format'
+import { clockTime, elapsed } from '@/lib/format'
 import { useKeybindings } from '@/lib/keybindings'
 import { playEntrance, play } from '@/lib/motion'
 import { prefersReducedMotion } from '@/lib/hooks'
@@ -11,10 +11,9 @@ import { ReplyComposer, cardAction } from '@/routes/board/card-action'
 import { ticks, xOf } from '@/routes/board/lanes/axis'
 import { EdgeHits, EdgeStrokes, drawEdges, edgeShape, type EdgeAnchor } from '@/routes/board/lanes/connectors'
 import { laneEdges, type EdgesInput, type LaneEdge } from '@/routes/board/lanes/edges'
-import { EdgePopover, LaneLinks, LanePopoverContent, RunPopover, SwarmPopover } from '@/routes/board/lanes/lane-popover'
+import { EdgePopover, FamilyPopover, LaneLinks, LanePopoverContent, RunPopover } from '@/routes/board/lanes/lane-popover'
 import { LaneRow, trackGutter, type LaneGeometry } from '@/routes/board/lanes/lane-row'
 import { laneHeight, layoutLanes, type Lane, type LanesModel, type RunLane } from '@/routes/board/lanes/model'
-import { elapsed } from '@/routes/missions/tree'
 import { agentStateWord, openAgent } from '@/routes/run/subagent-cards'
 import { useStore } from '@/store'
 
@@ -24,7 +23,7 @@ const axisHeight = 28
 const overscan = 400
 /** Half the "now" chip and a little air: tick labels this close to it would sit under it. */
 const nowClear = 48
-const onlyOverlaps = new Set(['orchestration', 'dependency', 'submission', 'message'] as const)
+const onlyOverlaps = new Set(['message'] as const)
 
 type Pop =
   | { kind: 'lane'; key: string; run?: string; x: number; y: number; h: number; at?: number; reply?: boolean }
@@ -36,12 +35,12 @@ function treeLabel(lane: Lane, now: number): string {
       return [`${lane.label}, ${lane.count} ${lane.count === 1 ? 'run' : 'runs'}`, lane.before > 0 && `${lane.before} ended before this window`].filter(Boolean).join(', ')
     case 'summary':
       return lane.label
-    case 'swarm':
-      return `${lane.missionID ? 'Swarm' : 'Run'} ${lane.title}, ${lane.detail}`
+    case 'family':
+      return `Run ${lane.title}, ${lane.detail}`
     case 'run': {
       const { card } = lane
       const words = stateWords(card, undefined, now)
-      return [lane.title, lane.handle, words.label, words.detail, `started ${clockTime(card.run.created_at, now)}`, elapsed(card.run.created_at, lane.end), card.owner?.display_name]
+      return [lane.title, words.label, words.detail, `started ${clockTime(card.run.created_at, now)}`, elapsed(card.run.created_at, lane.end), card.owner?.display_name]
         .filter(Boolean).join(', ')
     }
     case 'agent':
@@ -52,7 +51,7 @@ function treeLabel(lane: Lane, now: number): string {
 }
 
 function expandedOf(lane: Lane): boolean | undefined {
-  if (lane.kind === 'section' || lane.kind === 'swarm') return lane.open
+  if (lane.kind === 'section' || lane.kind === 'family') return lane.open
   if (lane.kind === 'summary') return false
   if (lane.kind === 'run') return lane.agentsOpen
   return undefined
@@ -289,7 +288,7 @@ export function LanesView(props: LanesViewProps) {
   }
 
   const toggle = (lane: Lane, open: boolean) => {
-    if (lane.kind === 'section' || lane.kind === 'swarm') props.onToggle(lane.key, open)
+    if (lane.kind === 'section' || lane.kind === 'family') props.onToggle(lane.key, open)
     else if (lane.kind === 'summary') props.onToggle(lane.parentKey!, true)
     else if (lane.kind === 'run' && (lane.agentsOpen !== undefined || props.canShowAgents(lane))) props.onAgents(lane.card.run.id, open)
   }
@@ -301,7 +300,7 @@ export function LanesView(props: LanesViewProps) {
       case 'summary':
         toggle(lane, lane.kind === 'summary' || !lane.open)
         break
-      case 'swarm':
+      case 'family':
         if (chevron || x === undefined) toggle(lane, !lane.open)
         else openLane(lane, x)
         break
@@ -506,7 +505,7 @@ export function LanesView(props: LanesViewProps) {
                   onAgents={popLane.agentsOpen !== undefined || props.canShowAgents(popLane) ? (open) => { props.onAgents(popLane.card.run.id, open); setPop(null) } : undefined}
                 />
               )}
-              {popLane.kind === 'swarm' && <SwarmPopover lane={popLane} />}
+              {popLane.kind === 'family' && <FamilyPopover lane={popLane} />}
               <LaneLinks edges={edges.filter((edge) => edge.from.lane === popLane.key || edge.to.lane === popLane.key)} now={now} onPick={openEdge} />
             </LanePopoverContent>
           ) : pop?.kind === 'edge' ? (

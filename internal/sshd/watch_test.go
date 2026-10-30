@@ -1,7 +1,6 @@
 package sshd
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -17,13 +16,9 @@ import (
 // watched is refused with why.
 func TestWatchesBelongToTheirCreator(t *testing.T) {
 	t.Parallel()
-	var e *testEnv
-	e = newTestEnv(t, func(c *Config) {
+	e := newTestEnv(t, func(c *Config) {
 		svc, err := watch.New(watch.Config{
 			Store: c.Store.(*store.DB), Bus: c.Bus, Runs: c.Runs,
-			Swarm: func(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-				return e.srv.SwarmAttention(ctx, run)
-			},
 		})
 		if err != nil {
 			t.Fatalf("watch.New: %v", err)

@@ -84,8 +84,7 @@ func policyOf(order []string, off bool) fallbackPolicy {
 	return fallbackPolicy{Policy: "automatic"}
 }
 
-// choice is an agent a run or swarm role runs: its harness, mode and model
-// on an account. No model is the agent's default.
+// choice is an agent a run runs: its harness, mode and model on an account. No model is the agent's default.
 type choice struct {
 	Harness  string      `json:"harness"`
 	Mode     string      `json:"mode"`
@@ -105,8 +104,7 @@ type repoRef struct {
 }
 
 // launchReceipt is what a launch started and on what, the result field
-// launch of aether_launch_run, aether_launch_swarm,
-// aether_get_run and aether_get_swarm. RequestedAccount is set when usage
+// launch of aether_launch_run and aether_get_run. RequestedAccount is set when usage
 // fallback moved a run off the account asked for.
 type launchReceipt struct {
 	Kind        string `json:"kind"`
@@ -114,8 +112,6 @@ type launchReceipt struct {
 	WorkspaceID string `json:"workspace_id"`
 	*choice
 	RequestedAccount *accountRef               `json:"requested_account,omitempty"`
-	Integrator       *choice                   `json:"integrator,omitempty"`
-	Workers          []choice                  `json:"workers,omitempty"`
 	Fallback         fallbackPolicy            `json:"fallback"`
 	Skipped          []protocol.SkippedAccount `json:"skipped_fallback_accounts,omitempty"`
 	Repos            []repoRef                 `json:"repos,omitempty"`
@@ -144,20 +140,6 @@ func runReceipt(r protocol.Run, l links, book accountBook) *launchReceipt {
 	return out
 }
 
-func swarmReceipt(m protocol.Mission, l links, book accountBook) *launchReceipt {
-	in := m.Integrator
-	integrator := choiceOf(in.Harness, in.Mode, in.Model, in.AccountMemberID, book)
-	out := &launchReceipt{Kind: "swarm", ID: m.ID, WorkspaceID: m.WorkspaceID, Integrator: &integrator,
-		Fallback: policyOf(m.FallbackAccountMemberIDs, m.NoFallback), URL: l.swarm(m.ID)}
-	for _, c := range m.ExecutionChoices {
-		out.Workers = append(out.Workers, choiceOf(c.Harness, c.Mode, c.Model, c.AccountMemberID, book))
-	}
-	for _, id := range m.ExtraWorkspaceIDs {
-		out.Repos = append(out.Repos, repoRef{WorkspaceID: id})
-	}
-	return out
-}
-
 type launchOptionsInput struct {
 	WorkspaceID     string `json:"workspace_id,omitempty" jsonschema:"add its templates"`
 	Models          string `json:"models,omitempty" jsonschema:"an agent: add its models"`
@@ -166,30 +148,26 @@ type launchOptionsInput struct {
 
 var launchOps = []Op{
 	opOf("aether_launch_options", "Launch options", ScopeRead, true, nextWorkspaces,
-		"Use this when choosing what to launch: workspaces, accounts with usage, agents and modes, swarm eligibility, fallback, saved defaults.", launchOptions).
+		"Use this when choosing what to launch: workspaces, accounts with usage, agents and modes, fallback, saved defaults.", launchOptions).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodAccountList, protocol.MethodAgentList, protocol.MethodLaunchDefaultsGet,
 		protocol.MethodAccountUsage, protocol.MethodTemplateList, protocol.MethodAgentModels),
 }
 
 // agentRow is an agent on one account. Refused is why a launch on the
-// account would be refused; Modes are the modes a run may start in, and
-// Swarm the modes an integrator or a worker may.
+// account would be refused; Modes are the modes a run may start in.
 type agentRow struct {
 	Name        string   `json:"name"`
 	Installed   bool     `json:"installed"`
 	SignedIn    *bool    `json:"signed_in,omitempty"`
 	DefaultMode string   `json:"default_mode"`
 	Modes       []string `json:"modes"`
-	Integrator  []string `json:"integrator_modes"`
-	Worker      string   `json:"worker_mode,omitempty"`
 	Refused     string   `json:"refused,omitempty"`
 }
 
 // rowOfAgent follows the dashboard's launch dialog: Enhanced needs it
-// installed, a swarm agent needs a mode Aether can wake, and Background
-// never runs an integrator.
+// installed.
 func rowOfAgent(a protocol.AgentInfo) agentRow {
-	row := agentRow{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound, DefaultMode: a.DefaultMode, Modes: []string{"tui", "headless"}, Integrator: []string{}}
+	row := agentRow{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound, DefaultMode: a.DefaultMode, Modes: []string{"tui", "headless"}}
 	switch {
 	case !a.Installed:
 		row.Refused = "not installed"
@@ -203,13 +181,6 @@ func rowOfAgent(a protocol.AgentInfo) agentRow {
 	enhanced := a.Enhanced != "none" && a.EnhancedInstalled
 	if enhanced {
 		row.Modes = append([]string{"acp"}, row.Modes...)
-		row.Integrator = append(row.Integrator, "acp")
-	}
-	if a.SwarmStandardRefusal == "" {
-		row.Integrator = append(row.Integrator, "tui")
-	}
-	if row.Refused == "" {
-		row.Worker = slices.Concat(row.Integrator, []string{"headless"})[0]
 	}
 	return row
 }

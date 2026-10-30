@@ -538,17 +538,6 @@ first, as the server last recorded it (`repo`, `repository`, `number`, `url`,
 `state`, `merged_at`, `checked_at`), without asking GitHub. `run.pr.status`
 refreshes that record.
 
-`run.list` and `run.get` include optional `mission_id`, `mission_role`, and
-`integrator_run_id` fields on each run snapshot. The current swarm integrator
-has role `integrator` and points to its own run ID; workers have role `worker`
-and point to that swarm's current integrator, including finished and older
-attempts. Replacing the integrator changes that parent ID on worker snapshots
-and removes the swarm fields from the replaced integrator. Ordinary runs
-omit all three fields. A worker linked to conflicting swarms also omits
-them rather than choosing an arbitrary parent; repeated attempts within one
-swarm retain that swarm. These fields come from durable relationships,
-not task text, and confer no authorization.
-
 `account_member_id` on a run snapshot is the account the run uses.
 `requested_account_member_id` appears only when [usage
 fallback](teams.md#usage-fallback) launched the run on another account than
@@ -557,23 +546,21 @@ account the run first used, and is absent again if the run moves back to
 it. Each move publishes a `run.account` event `{account_member_id,
 previous_account_member_id, requested_account_member_id}` carrying the same
 fields. A headless Claude run whose output reports the usage limit
-publishes `run.usage_limit` `{message}` with the agent's message. `run.launch` and `mission.create`
-take the fallback policy as `fallback_account_member_ids` (member IDs, tried
+publishes `run.usage_limit` `{message}` with the agent's message. `run.launch`
+takes the fallback policy as `fallback_account_member_ids` (member IDs, tried
 in order) or `no_fallback: true`; omitting both orders the launcher's
 accounts by usage left, and sending both is refused with `-32602`
 `fallback_account_member_ids and no_fallback cannot both be set`. When no
 account qualifies, the run launches on the requested account. Run snapshots
-and swarms carry the policy back in the same two fields. A fallback account
+carry the policy back in the same two fields. A fallback account
 whose check failed, rather than one that is exhausted or not shared, is left
-out, and `run.launch` and `mission.create` list it in
+out, and `run.launch` lists it in
 `skipped_fallback_accounts` `[{account_member_id, error}]` (an entry with no
 account means listing the candidates failed); `error` is a fixed reason, such
 as `the account's agent could not be checked`, and the server log has the
 detail. A replay does not repeat them.
-Swarm attempts carry `launch_account_id`, the account the worker's run
-launched on.
 
-`run.launch`, `mission.create` and `template.launch` refuse a param they do
+`run.launch` and `template.launch` refuse a param they do
 not know with `-32602` `unknown param "<name>"; this server does not support
 it`, so a client never launches without an option it asked for. Other
 methods ignore unknown params.
@@ -603,9 +590,8 @@ Every `run.status` payload carries the run's `state`, `status_seq`,
 greater than the one you hold. A `run.status` event stored before the server
 had `status_seq` carries `0` and no `state`: label it by its status alone.
 
-`run.launch`, `template.save` and `worker.start` take an optional `model`,
-and `mission.create` takes one on the integrator and on each of
-`execution_choices`; it is passed to the agent as is, and empty keeps the
+`run.launch` and `template.save` take an optional `model`;
+it is passed to the agent as is, and empty keeps the
 agent's default ([harnesses.md](harnesses.md#choose-a-model)). A model with
 whitespace or control characters, a leading `-`, or more than 128 bytes is
 `-32602` with
@@ -631,16 +617,11 @@ lists the `permission` feature when `run.launch` takes it; an older server
 drops it and runs the agent as root. Run snapshots carry `permission`, and
 `launch.defaults` keeps the `permission` the launch form preselects.
 
-`run.launch` and `mission.create` take an optional `extra_workspace_ids`:
-other workspaces checked out at `/repos/<name>` in the run, or in a swarm's
-integrator and every worker. An empty id, the primary workspace or a repeated
+`run.launch` takes an optional `extra_workspace_ids`:
+other workspaces checked out at `/repos/<name>` in the run. An empty id, the primary workspace or a repeated
 id is `-32602`. `server.info` lists the `multi-repo` feature when `run.launch`
-takes them and `swarm-repos` when `mission.create` does; an older server drops
-the field. `mission.show` and `mission.list` return a swarm's
-`extra_workspace_ids`.
-
-`mission.show` takes `mission_id`, or `question_id` alone to show the swarm
-that asked that question.
+takes them; an older server drops
+the field.
 
 Run snapshots, including mutation results, also expose
 `container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`
@@ -759,7 +740,7 @@ audit history.
 returning `{"ok":true}`. It permanently removes an inactive workspace and its
 server-side data, repository and mirror keys. It preserves member accounts,
 homes, local clones and upstream repositories. Revoke remote deploy keys
-separately. Active runs, pending runtime or swarm work, configured schedules block deletion; the
+separately. Active runs, pending runtime work, configured schedules block deletion; the
 error names the blocker. In-flight control or Git operations return `-32003`
 instead of waiting behind them. Cleanup errors leave the workspace available
 for retry but do not restore already removed data. Success publishes
@@ -778,14 +759,6 @@ Archiving does not schedule deletion; the obsolete `deletes_at` field is no
 longer emitted. Both calls publish `run.archived` with `archived_at` (null on
 restore) and a matching timeline note. Explicit Delete remains separate.
 
-`mission.archive`, `mission.unarchive` and `mission.delete` accept
-`{"mission_id":"..."}`. Archive and unarchive return `{"mission":Mission}`
-with `archived_at` set while archived; delete returns `{}`. They need
-`run.launch` and the swarm's accountable human or an admin, archive and
-delete cascade to the swarm's runs, and a swarm with a live run is refused
-with `-32002`; see
-[coordination.md](coordination.md#archiving-and-deleting-a-swarm).
-
 `member.rename` accepts `{"display_name":"..."}` (and `member_id`, admin
 only, to rename someone else) and returns `{"member":Member}`. The name is
 trimmed and must be 1 to 64 characters with no control characters; a bad
@@ -802,9 +775,8 @@ that the caller opened the run, which clears up to two flags on it:
 - `run.finish_unopened` is set by that same outcome, and by any change into a
   terminal status (`completed`, `failed`, `interrupted`, `merged` or
   `abandoned`) that no member asked for: an exit, a failure, a server
-  restart, or a swarm completing or stopping its workers. A member's own
-  `run.close` or `run.kill`, and the closes `mission.archive` makes for them,
-  leave it clear whatever it was before: that member has dealt with the run.
+  restart, or a parent run closing its children. A member's own
+  `run.close` or `run.kill` leave it clear whatever it was before: that member has dealt with the run.
   That includes a close or kill of a run that had already finished. When the
   call relabels the run, its `run.status` event carries the cleared flag;
   when it changes nothing else, the server publishes `run.finish_opened`.
@@ -830,8 +802,7 @@ resumes.
 as `run.close` does. `complete` closes a live run as `run.close` does but
 records `completed`, or only records the acceptance on a `completed` run,
 and sets `review` to `accepted`; it is idempotent once accepted, and refused
-with `-32002` for other terminal statuses and for a live swarm worker, which
-completes through its integrator. `later` without a `ready` or `later`
+with `-32002` for other terminal statuses. `later` without a `ready` or `later`
 review is `-32002` too. `later` sets
 `review` to `later` and leaves the run where it is.
 Each change publishes `run.review` with
@@ -998,12 +969,11 @@ These serve a client with no dashboard and no stream, such as the
 | `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first: each run that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it |
 | `run.input.respond` | `{"run_id":"...","request_id":"...","option_id":"...","values":{...}}`; Steer | `{"status":"answered"}`, or `{"status":"already_answered"}` when an earlier answer won |
 
-An `AttentionItem` is `{kind, run_id, mission_id, workspace_id, title,
+An `AttentionItem` is `{kind, run_id, workspace_id, title,
 harness, reason, since}` plus what answering it needs. `kind` is one of
 `permission`, `question`, `queued-message`, `room-question`,
-`swarm-question`, `integrator-down`, `control-hold`, `disconnected`,
-`blocked`, `needs-input`, `ready` or `failed`; `control-hold` is a swarm
-worker whose control the caller holds. `permission` and
+`disconnected`,
+`blocked`, `needs-input`, `ready` or `failed`. `permission` and
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
 run's `options` are `{id, label, kind}`, `kind` being `allow_once`,
 `allow_always`, `reject_once` or `reject_always` for a permission, and a
@@ -1012,8 +982,8 @@ request, in either mode, offers `allow-once` (`allow_once`) and `deny-once`
 (`reject_once`), and is listed only to the run's owner and admins. A link
 request is a `question` whose `request` also carries `url`: open that page,
 then accept or decline.
-`swarm-question`, `room-question` and `queued-message` carry
-`message: {id, body, from}`: a `mission.question.answer` question, a room
+`room-question` and `queued-message` carry
+`message: {id, body, from}`: a room
 question to answer with a `run.room.post` reply, and a steer request to
 decide with `run.room.decide`. A `room-question` whose text cannot be read
 says `A teammate asked a question` and has no `message`. An item with no
@@ -1082,8 +1052,7 @@ none.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the
-dashboard's query state: `<dashboard_url>/?run=<run_id>` opens a run and
-`<dashboard_url>/?page=missions&id=<mission_id>` a swarm. The edge serves no
+dashboard's query state: `<dashboard_url>/?run=<run_id>` opens a run. The edge serves no
 dashboard, so there is no link without `web-port`.
 
 The dashboard also calls these methods through the same route:
@@ -1091,14 +1060,14 @@ The dashboard also calls these methods through the same route:
 | Method | Params | Result |
 | --- | --- | --- |
 | `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"...","repo":"..."}`; `from` and `to` optional, `to` only with `from`; `repo` is a workspace ID from the run's `repos`, empty for the primary repo) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
-| `coord.messages.list` | `{"workspace_id":"...","mission_id":"...","run_id":"...","correlation_id":"...","before":"...","limit":50}` (only `workspace_id` required; `run_id` matches either side) | `{"messages":[{"id":"...","workspace_id":"...","mission_id":"...","from_run_id":"...","to_run_id":"...","kind":"message"\|"question"\|"reply"\|"report","correlation_id":"...","body":"...","created_at":"...","delivered_at":"...","acked_at":"...","outcome":"...","summary":"...","next_action":"..."}],"next_before":"..."}` newest first; report fields only on `report` rows. See [coordination.md](coordination.md#seeing-agent-messages) |
+| `coord.messages.list` | `{"workspace_id":"...","run_id":"...","correlation_id":"...","before":"...","limit":50}` (only `workspace_id` required; `run_id` matches either side) | `{"messages":[{"id":"...","workspace_id":"...","from_run_id":"...","to_run_id":"...","kind":"message"\|"question"\|"reply"\|"report","correlation_id":"...","body":"...","created_at":"...","delivered_at":"...","acked_at":"...","outcome":"...","summary":"...","next_action":"..."}],"next_before":"..."}` newest first; report fields only on `report` rows. See [coordination.md](coordination.md#seeing-agent-messages) |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `system.stats` | `{"since_ms":1761100000000}` (optional; Unix milliseconds, 0 or absent returns the whole window) | `SystemStatsResult` - `{"interval_ms":5000,"retention_ms":3600000,"host":{"cpu_cores","memory_total_bytes","swap_total_bytes","uptime_seconds"},"host_error":"","samples":[{"t_ms","cpu_user","cpu_system","cpu_iowait","cpu_steal","memory_used_bytes","memory_available_bytes","memory_free_bytes","swap_used_bytes","load1","load5","load15","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps","pressure_cpu","pressure_memory","pressure_io"}],"containers_at_ms":0,"containers_error":"","containers":[{"owner_kind":"run"\|"browser"\|"member","owner_id","member_id","workspace_id","title","status","cpu_cores","cpu_limit_cores","cpu_throttled_percent","memory_bytes","memory_limit_bytes","pids","pids_limit","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps"}],"others":{"containers","cpu_cores","memory_bytes"}}`. The host is sampled every 5 s from server start and kept for an hour; CPU fields are percent of all cores over the interval, and the `pressure_*` fields (PSI `some avg10`) are absent without `/proc/pressure`. Host sampling reads `/proc` and `/sys`, so on a non-Linux server `host_error` says so. Containers are sampled only while a `system.stats` call arrived in the last 60 s; a call while idle starts sampling without waiting for it and the next sample follows 1 s later. `containers` is empty and `containers_at_ms` 0 when the latest snapshot is older than two intervals, and `containers_error` carries the Docker error when sampling failed. A run's browser sidecar is its own entry with `owner_kind` `browser`, the run's id and its own limits. `cpu_cores` and the rate fields are absent until a container has two samples; `cpu_limit_cores` is absent when unlimited. A member sees only their own containers; `others` sums the rest and any container with no run or member owner, and is absent when empty |
 | `server.run_limits` | optional `cpus`, `memory_bytes`, `pids` (`0` clears one); setting any is admin only | `{"limits":{...},"default":{...},"effective":{...}}` - what an admin set, what an unset field gets (the flag or automatic value), and what a run with no override of its own gets. New containers only. `run.launch` takes `limits` `{cpus,memory_bytes,pids}` to override them for one run |
 | `server.sysbox.status` | none; admin only | `{"state":"on"\|"off"\|"unsupported"\|"installing"\|"failed","reason":"...","log":"..."}` - whether Docker lists `sysbox-runc`. `reason` explains `off`, `unsupported` and `failed`; `off` with a reason naming `sudo aether-server sysbox install` means the server is not root. `log` is the last 8 KiB of installer output |
 | `server.sysbox.install` | none; admin only | the same status. Starts the installer in the background, one at a time; a call while one runs returns `installing`. Poll `server.sysbox.status` until `on`, `unsupported` or `failed`. The server then uses Sysbox for new containers at once. Never retried after a transport failure. While it runs, `server.update` answers `-32003` |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
-| `insights.get` | `{"workspace_id":"","scope":"mine"\|"everyone","from":"<RFC3339>","to":"<RFC3339>","time_zone":"America/Los_Angeles"}` | `{"generated_at":"...","from":"...","to":"...","time_zone":"...","bucket":"day"\|"week","totals":Totals,"previous":Totals,"series":[{"start":"2026-10-09","launched":3,"completed":2,"merged":1,"failed":0,"interrupted":0,"abandoned":0}],"heatmap":[{"date":"2026-04-20","runs":2}],"by_workspace":[{"workspace_id":"...","name":"...","launched":4,"finished":3,"failed":1}],"by_agent":[{"harness":"claude","model":"","launched":4,"finished":3,"failed":1}],"swarms":{"launched":1,"completed":1,"cancelled":0,"agents":5,"tasks_accepted":4},"durations":{"runs_measured":9,"median_run_seconds":1260,"p90_run_seconds":4100,"state_runs_measured":6,"median_working_seconds":900,"median_waiting_seconds":240,"median_response_seconds":75},"cost":{"metered_runs":3,"unmetered_runs":6,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000,"by_agent":[{"harness":"claude","metered_runs":3,"unmetered_runs":0,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000}]},"pull_requests":{"opened":2,"merged":1},"success":{"runs":{"succeeded":4,"finished":9},"swarms":{"succeeded":1,"finished":2}},"outcomes":{"runs":Outcome,"swarms":Outcome,"series":[{"start":"2026-10-09","runs":Outcome,"swarms":Outcome}],"members":[{"member_id":"...","display_name":"...","color":"#e6194b","runs":Outcome,"swarms":Outcome,"series":[{"start":"2026-10-09","runs":Outcome,"swarms":Outcome}]}]},"recent":[{"run_id":"...","title":"...","workspace_id":"...","status":"completed","reason":"","harness":"claude","model":"","created_at":"...","finished_at":"...","duration_seconds":1200,"mission_id":"","pr_url":"","pr_state":""}],"needs_you":2,"coverage":{"state_times_since":"...","pull_requests_since":""}}`; `Outcome` is `{"done","failed","abandoned"}`; `outcomes.members` is filled only for `scope` `everyone`. `Totals` is `{"launched","completed","merged","failed","interrupted","abandoned","killed","active","finished"}`. What each number counts is in [insights.md](insights.md) |
+| `insights.get` | `{"workspace_id":"","scope":"mine"\|"everyone","from":"<RFC3339>","to":"<RFC3339>","time_zone":"America/Los_Angeles"}` | `{"generated_at":"...","from":"...","to":"...","time_zone":"...","bucket":"day"\|"week","totals":Totals,"previous":Totals,"series":[{"start":"2026-10-09","launched":3,"completed":2,"merged":1,"failed":0,"interrupted":0,"abandoned":0}],"heatmap":[{"date":"2026-04-20","runs":2}],"by_workspace":[{"workspace_id":"...","name":"...","launched":4,"finished":3,"failed":1}],"by_agent":[{"harness":"claude","model":"","launched":4,"finished":3,"failed":1}],"durations":{"runs_measured":9,"median_run_seconds":1260,"p90_run_seconds":4100,"state_runs_measured":6,"median_working_seconds":900,"median_waiting_seconds":240,"median_response_seconds":75},"cost":{"metered_runs":3,"unmetered_runs":6,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000,"by_agent":[{"harness":"claude","metered_runs":3,"unmetered_runs":0,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000}]},"pull_requests":{"opened":2,"merged":1},"success":{"runs":{"succeeded":4,"finished":9}},"outcomes":{"runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}],"members":[{"member_id":"...","display_name":"...","color":"#e6194b","runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}]}]},"recent":[{"run_id":"...","title":"...","workspace_id":"...","status":"completed","reason":"","harness":"claude","model":"","created_at":"...","finished_at":"...","duration_seconds":1200,"pr_url":"","pr_state":""}],"needs_you":2,"coverage":{"state_times_since":"...","pull_requests_since":""}}`; `Outcome` is `{"done","failed","abandoned"}`; `outcomes.members` is filled only for `scope` `everyone`. `Totals` is `{"launched","completed","merged","failed","interrupted","abandoned","killed","active","finished"}`. What each number counts is in [insights.md](insights.md) |
 | `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","login_command":"claude auth login","login_kind":"interactive","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-adapters); `default_mode` is `acp` when `enhanced_installed` is true, else `tui`, the mode a `run.launch` without `mode` starts in; `executable` is the command the agent runs, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `login_command` is the vendor's sign-in command `aether agent login` types, `login_kind` is `device` when it prints a URL and code and needs nothing typed back, else `interactive`; both are absent for a member-defined agent. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
 | `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"fallback"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds an older or fallback list. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#choose-a-model) |
 | `agent.install` | `{"name":"claude","enhanced":true}` (`enhanced` optional) | `{"log_tail":"...","installed":true,"enhanced_installed":true,"error":"the install command exited 1"}` - runs a shipped agent's install command, and its adapter's with `enhanced`, in the caller's environment terminal, starting it if needed; `error` is set when the command failed. Needs the launch capability. Answers within 10 minutes; one install per member at a time, a second answers `-32003` |
@@ -1131,7 +1100,7 @@ The dashboard also calls these methods through the same route:
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 | `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `idle`, `installing`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the run belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `installing` means a start is installing the agent in the assistant's container |
 | `assistant.start` | `{"agent":"claude"}` (optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their agent in the caller's assistant container, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation |
-| `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `mission`, `pr`, `check`, `failure`, `task`) and any of `workspace_id`, `run_id`, `mission_id`, `task_id`, `attempt_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
+| `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `pr`, `check`, `failure`) and any of `workspace_id`, `run_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
 | `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's held view context, which the assistant reads with `aether_view_context` along with its `source` (`prompt` or `navigation`) and `age_seconds`, unless `share_view` is off. An update whose `captured_at` is before the held view's is dropped while that view is under 10 seconds old, so a late update never replaces the view a prompt just carried; after that the last one received wins, whatever the device's clock. One without `route` forgets the held view: the member removed the page from their draft. Kept in memory only |
 | `assistant.cancel` | none | empty result; cancels the turn in flight |
 | `assistant.answer` | `{"request_id":"...","option_id":"...","values":{}}` | empty result; answers one of the harness's permission prompts or questions |
@@ -2524,7 +2493,7 @@ workspace receives it; a client shows it only to the member in `member_id`.
 `kind` is `finished`, `needs_input` or `needs_attention`.
 The event is published once per announced state.
 
-### Branch, pull request and swarm events
+### Branch and pull request events
 
 These tell a client what to re-read; none carries the full state.
 
@@ -2551,10 +2520,6 @@ These tell a client what to re-read; none carries the full state.
    "url":"https://github.com/owner/name/pull/128","state":"merged",
    "merged_at":"2026-10-20T01:02:03Z"}}
   ```
-
-- `mission.changed`: see [coordination.md](coordination.md). `change`
-  names the kind of change when there is one, with `task_id` and
-  `attempt_id` when it concerns one task or attempt.
 
 ### `GET /ws/attach/<run_id>`
 
@@ -2715,8 +2680,7 @@ resize, control, geometry, and acknowledgements.
    `control_generation`. Only that authenticated attachment can decide;
    knowing another session's ID is insufficient. Acceptance or expiry grants
    only after the server atomically rechecks the captured holder generation
-   and live connection, current requester authority, terminal readiness, and
-   swarm admission. A raw CLI holder cannot answer the dashboard dialog;
+   and live connection, current requester authority, and terminal readiness. A raw CLI holder cannot answer the dashboard dialog;
    the same deadline still applies. Either participant disconnecting, holder
    replacement/release, or lost run/member authority cancels the request.
    Reconnecting the same generation does not revive an old request.

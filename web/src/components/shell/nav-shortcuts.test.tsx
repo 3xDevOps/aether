@@ -51,7 +51,7 @@ describe('navigation shortcuts', () => {
   it('reaches every sidebar destination the gateway serves on its g sequence', () => {
     render(<AppShell />)
 
-    for (const [key, route] of [['a', 'timeline'], ['g', 'agents'], ['e', 'environment'], [',', 'settings'], ['s', 'missions']]) {
+    for (const [key, route] of [['a', 'timeline'], ['g', 'agents'], ['e', 'environment'], [',', 'settings']]) {
       press('g')
       press(key!)
       expect(useStore.getState().route.name).toBe(route)

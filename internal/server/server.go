@@ -162,9 +162,8 @@ type Config struct {
 	// StallThreshold for an Enhanced turn with no first update yet, or quiet
 	// with no tool running. CheckoutTTL is how long a finished run's
 	// checkout is kept before the GC reclaims it (negative disables GC).
-	// RunContainerTTL retains exact containers after TUI Close, an agent-finished
-	// TUI run, or mission-run completion (negative disables retention).
-	// Completed mission workers never reopen.
+	// RunContainerTTL retains exact containers after TUI Close, or an agent-finished
+	// TUI run (negative disables retention).
 	// MinFreeDiskBytes overrides the automatic data/runtime filesystem
 	// reserve. Negative disables disk admission, not host memory checks.
 	StallThreshold   time.Duration

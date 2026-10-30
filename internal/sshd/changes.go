@@ -36,13 +36,12 @@ var changeKinds = map[string]struct {
 	protocol.ChangeKindReports:   {types: []events.Type{events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineReport}},
 	protocol.ChangeKindMessages:  {types: []events.Type{events.TypeCoordMessage}},
 	protocol.ChangeKindPR:        {types: []events.Type{events.TypeRunPR}},
-	protocol.ChangeKindSwarm:     {types: []events.Type{events.TypeMissionChanged}},
-	protocol.ChangeKindLifecycle: {types: []events.Type{events.TypeRunArchived, events.TypeRunDeleted, events.TypeWorkspaceDeleted, events.TypeMissionChanged, events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineHandoff}},
+	protocol.ChangeKindLifecycle: {types: []events.Type{events.TypeRunArchived, events.TypeRunDeleted, events.TypeWorkspaceDeleted, events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineHandoff}},
 }
 
 var changeKindOrder = []string{
 	protocol.ChangeKindStatus, protocol.ChangeKindReports, protocol.ChangeKindMessages,
-	protocol.ChangeKindPR, protocol.ChangeKindSwarm, protocol.ChangeKindLifecycle,
+	protocol.ChangeKindPR, protocol.ChangeKindLifecycle,
 }
 
 func init() {
@@ -64,9 +63,8 @@ func changesTarget(s *Server, ctx context.Context, raw json.RawMessage) (permiss
 	return permissions.Target{Workspace: ws}, nil
 }
 
-// changesScope resolves the one workspace the named workspace, run and swarm
-// share, and whether it still exists. A workspace, run or swarm deleted
-// since the caller's cursor was issued is no error, so the feed still
+// changesScope resolves the one workspace the named workspace and run
+// share, and whether it still exists. A workspace or run deleted since the caller's cursor was issued is no error, so the feed still
 // delivers its deletion.
 func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams) (domain.WorkspaceID, bool, *protocol.Error) {
 	gone := func(err error) bool { return p.Cursor != "" && errors.Is(err, store.ErrNotFound) }
@@ -81,32 +79,10 @@ func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams)
 			ws = run.WorkspaceID
 		}
 	}
-	if p.MissionID != "" {
-		ms, ok := s.cfg.Store.(store.MissionStore)
-		if !ok {
-			return "", false, &protocol.Error{Code: protocol.CodeUnavailable, Message: "changes.list: swarms are not available"}
-		}
-		m, err := ms.GetMission(ctx, domain.MissionID(p.MissionID))
-		switch {
-		case gone(err):
-		case err != nil:
-			return "", false, rpcError(err)
-		case ws != "":
-			served, lerr := ms.ListMissionRunIDs(ctx, m.ID)
-			if lerr != nil {
-				return "", false, rpcError(lerr)
-			}
-			if !slices.Contains(served, domain.RunID(p.RunID)) {
-				return "", false, invalidParams("run_id has not served mission_id")
-			}
-		default:
-			ws = m.WorkspaceID
-		}
-	}
 	if p.WorkspaceID != "" {
 		id := domain.WorkspaceID(p.WorkspaceID)
 		if ws != "" && ws != id {
-			return "", false, invalidParams("workspace_id does not contain the named run or swarm")
+			return "", false, invalidParams("workspace_id does not contain the named run")
 		}
 		if _, err := s.cfg.Store.GetWorkspace(ctx, id); gone(err) {
 			deleted, derr := s.workspaceDeleted(ctx, id)
@@ -155,13 +131,12 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 	filter := timeline.Filter{
 		Workspace: ws,
 		Run:       domain.RunID(p.RunID),
-		MissionID: domain.MissionID(p.MissionID),
 		NoRereads: true,
 	}
 	if ws != "" && !live {
 		// A deleted workspace's log holds only its workspace.deleted, which
-		// carries no run: the run and swarm filters would hide it.
-		filter.Run, filter.MissionID = "", ""
+		// carries no run: the run filter would hide it.
+		filter.Run = ""
 	}
 	kinds := p.Kinds
 	if len(kinds) == 0 {
@@ -216,10 +191,6 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 		}
 	}
 
-	missions, err := s.changeMissions(ctx, filter.MissionID, page.Events)
-	if err != nil {
-		return nil, rpcError(err)
-	}
 	out := protocol.ChangesListResult{
 		Changes:    make([]protocol.Change, 0, len(page.Events)),
 		NextCursor: strconv.FormatUint(page.NextSeq, 10),
@@ -227,36 +198,8 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 		Head:       strconv.FormatUint(page.Head, 10),
 	}
 	for _, ev := range page.Events {
-		if c, ok := changeOf(ev, missions[ev.RunID]); ok && requested[c.Kind] {
+		if c, ok := changeOf(ev); ok && requested[c.Kind] {
 			out.Changes = append(out.Changes, c)
-		}
-	}
-	return out, nil
-}
-
-// changeMissions maps each run on the page to the swarm it serves. A
-// mission filter already names it; a deleted run maps to none.
-func (s *Server) changeMissions(ctx context.Context, filtered domain.MissionID, evs []events.Event) (map[domain.RunID]domain.MissionID, error) {
-	out := make(map[domain.RunID]domain.MissionID)
-	for _, ev := range evs {
-		if ev.RunID == "" {
-			continue
-		}
-		if _, seen := out[ev.RunID]; seen {
-			continue
-		}
-		if filtered != "" {
-			out[ev.RunID] = filtered
-			continue
-		}
-		run, err := s.cfg.Store.GetRun(ctx, ev.RunID)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-			out[ev.RunID] = ""
-		case err != nil:
-			return nil, fmt.Errorf("changes.list: read run %s: %w", ev.RunID, err)
-		default:
-			out[ev.RunID] = run.MissionID
 		}
 	}
 	return out, nil
@@ -264,14 +207,13 @@ func (s *Server) changeMissions(ctx context.Context, filtered domain.MissionID, 
 
 // changeOf projects one event onto its compact change; ok is false for an
 // event no kind keeps.
-func changeOf(ev events.Event, mission domain.MissionID) (protocol.Change, bool) {
+func changeOf(ev events.Event) (protocol.Change, bool) {
 	c := protocol.Change{
 		Seq:         ev.Seq,
 		Time:        ev.Time.UTC().Format(time.RFC3339Nano),
 		Type:        string(ev.Type),
 		WorkspaceID: string(ev.WorkspaceID),
 		RunID:       string(ev.RunID),
-		MissionID:   string(mission),
 		ActorID:     string(ev.ActorID),
 	}
 	switch v := ev.Payload.(type) {
@@ -303,20 +245,10 @@ func changeOf(ev events.Event, mission domain.MissionID) (protocol.Change, bool)
 		}
 	case events.CoordMessagePayload:
 		c.Kind = protocol.ChangeKindMessages
-		c.MissionID = string(v.MissionID)
 		c.Message = &protocol.ChangeMessage{MessageID: v.MessageID, FromRunID: string(v.FromRunID), ToRunID: string(v.ToRunID), Kind: v.Kind, CorrelationID: v.CorrelationID}
 	case events.RunPRPayload:
 		c.Kind = protocol.ChangeKindPR
 		c.PR = &protocol.ChangePR{Number: v.Number, State: v.State, URL: v.URL, Merged: v.MergedAt != nil}
-	case events.MissionChangedPayload:
-		c.MissionID = string(v.MissionID)
-		if v.Deleted {
-			c.Kind = protocol.ChangeKindLifecycle
-			c.Lifecycle = &protocol.ChangeLifecycle{Action: "swarm-deleted"}
-			break
-		}
-		c.Kind = protocol.ChangeKindSwarm
-		c.Swarm = &protocol.ChangeSwarm{Change: string(v.Change), TaskID: string(v.TaskID), AttemptID: string(v.AttemptID)}
 	case events.RunArchivedPayload:
 		c.Kind = protocol.ChangeKindLifecycle
 		c.Lifecycle = &protocol.ChangeLifecycle{Action: "archived"}

@@ -395,7 +395,7 @@ after the key and value of `config set`.
 | `checkout-ttl` | `72h` | How long a finished run's checkout is kept after the run ends. It also stays while the run's container is kept. Negative keeps it forever. |
 | `run-container-ttl` | `168h` | How long a closed run's container is kept so the run can be relaunched. A relaunched run's clock restarts at its next close. |
 | `browser-image` | `ghcr.io/3xdevops/aether-browser:<release>` | The image a run's **Browser** tab starts from. Set it and updates stop moving it. |
-| `conflict-coordination` | on | Let overlapping runs message each other ([coordination.md](coordination.md)). Swarms need it. |
+| `conflict-coordination` | on | Let overlapping runs message each other ([coordination.md](coordination.md)). |
 
 API keys for key-based agents go in `/etc/aether/aether-server.env`, which the
 unit loads; subscription logins live in each member's home

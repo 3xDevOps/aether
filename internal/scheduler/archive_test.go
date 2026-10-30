@@ -12,10 +12,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// createRun creates a run owned by e.member directly in status, bypassing
+// createStatusRun creates a run owned by e.member directly in status, bypassing
 // launch so archive tests can exercise every Final status without a real
 // container.
-func createRun(t *testing.T, e *testEnv, status domain.RunStatus) *domain.Run {
+func createStatusRun(t *testing.T, e *testEnv, status domain.RunStatus) *domain.Run {
 	t.Helper()
 	r := &domain.Run{
 		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "archive me",
@@ -37,7 +37,7 @@ func TestSetArchivedRefusedOnNonFinal(t *testing.T) {
 	ctx := t.Context()
 
 	for _, status := range []domain.RunStatus{domain.RunRunning, domain.RunCompleted} {
-		r := createRun(t, e, status)
+		r := createStatusRun(t, e, status)
 		_, err := e.sched.SetArchived(ctx, r.ID, e.member.ID, true)
 		if !errors.Is(err, ErrInvalidTransition) {
 			t.Fatalf("SetArchived on %s run: err = %v, want ErrInvalidTransition", status, err)
@@ -82,7 +82,7 @@ func TestSetArchivedIdempotent(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	sub := e.subscribe(t)
-	r := createRun(t, e, domain.RunMerged)
+	r := createStatusRun(t, e, domain.RunMerged)
 
 	first, err := e.sched.SetArchived(ctx, r.ID, e.member.ID, true)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestSetArchivedRestore(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	sub := e.subscribe(t)
-	r := createRun(t, e, domain.RunFailed)
+	r := createStatusRun(t, e, domain.RunFailed)
 
 	if _, err := e.sched.SetArchived(ctx, r.ID, e.member.ID, true); err != nil {
 		t.Fatalf("SetArchived: %v", err)
@@ -156,35 +156,6 @@ func TestSetArchivedRestore(t *testing.T) {
 	}
 	if unarchived.ArchivedAt != nil {
 		t.Fatal("restoring an unarchived run set ArchivedAt")
-	}
-}
-
-func TestSetMissionArchivedPublishesEachRunItMoves(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, nil)
-	ctx := t.Context()
-	sub := e.subscribe(t)
-	m := &domain.Mission{
-		WorkspaceID: e.ws.ID, Objective: "archive swarm", AccountableHumanID: e.member.ID,
-		Integrator:     domain.MissionIntegrator{AccountMemberID: e.member.ID, Harness: "fake", Mode: domain.LaunchTUI},
-		IdempotencyKey: "archive-swarm",
-	}
-	if err := e.db.CreateMission(ctx, m); err != nil {
-		t.Fatalf("create mission: %v", err)
-	}
-	if _, err := e.db.CancelMission(ctx, m.ID, e.member.ID, "archive-swarm-cancel"); err != nil {
-		t.Fatalf("cancel mission: %v", err)
-	}
-	r := createRun(t, e, domain.RunAbandoned)
-	now := time.Now().UTC()
-	for _, at := range []*time.Time{&now, nil} {
-		changed, err := e.sched.SetMissionArchived(ctx, m.ID, []domain.RunID{r.ID}, e.member.ID, at)
-		if err != nil || !changed {
-			t.Fatalf("SetMissionArchived(%v) = %v, %v; want the swarm changed", at, changed, err)
-		}
-		if payload := waitArchivedEvent(t, sub, r.ID); (payload.ArchivedAt != nil) != (at != nil) {
-			t.Fatalf("run.archived payload after SetMissionArchived(%v) = %+v", at, payload)
-		}
 	}
 }
 
@@ -314,7 +285,7 @@ func TestDeleteRemovesAnOldArchivedRun(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	sub := e.subscribe(t)
-	r := createRun(t, e, domain.RunMerged)
+	r := createStatusRun(t, e, domain.RunMerged)
 	backdateArchived(t, e, r, 365*24*time.Hour)
 
 	if err := e.sched.DeleteRun(ctx, r.ID, e.member.ID); err != nil {
@@ -422,7 +393,7 @@ func TestDeleteArchivedRunKeepsRecordOnDeleteFailure(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	sub := e.subscribe(t)
-	r := createRun(t, e, domain.RunMerged)
+	r := createStatusRun(t, e, domain.RunMerged)
 	backdateArchived(t, e, r, 365*24*time.Hour)
 	e.sched.cfg.Store = &failingDeleteRunStore{Store: e.db}
 

@@ -156,7 +156,7 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 }
 
 // StopDevelopmentRun is called only after the terminal report/evidence commit.
-// It never clears a mission takeover hold or destroys the run's checkout.
+// It never destroys the run's checkout.
 func (s *Scheduler) StopDevelopmentRun(ctx context.Context, id domain.RunID) error {
 	cid := s.developmentContainer(id)
 	if cid == "" {

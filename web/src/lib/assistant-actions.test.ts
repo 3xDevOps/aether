@@ -93,7 +93,7 @@ describe('assistantView', () => {
       return { records, rows }
     }
 
-    it.each(['mission.question.answer', 'run.room.post', 'run.input.respond'])('folds an answer recorded as %s into its aether_answer card', (method) => {
+    it.each(['run.room.post', 'run.input.respond'])('folds an answer recorded as %s into its aether_answer card', (method) => {
       const answer = { id: '1:t0', name: 'aether_answer', status: 'running' as const, input: { run_id: 'r1', answer_id: 'q1', answer: 'use main' } }
       const waiting = [{ id: 'c', method, summary: '', params: {}, created_at: at, expires_at: at }]
       expect(assistantView([block(answer)], waiting).actions.map((a) => a.state)).toEqual(['approval'])
@@ -204,7 +204,7 @@ describe('assistantView', () => {
   })
 })
 
-describe('the lifecycle, swarm, pull request and memory tools', () => {
+describe('the lifecycle, pull request and memory tools', () => {
   const names = { run: () => undefined, workspace: () => undefined, agent: () => undefined, sharer: () => undefined }
   const confirm = (method: string) => ({ id: method, method, summary: '', params: {}, created_at: at, expires_at: at })
 
@@ -214,15 +214,12 @@ describe('the lifecycle, swarm, pull request and memory tools', () => {
     ['aether_run_lifecycle', { run_id: 'r1', action: 'restore' }, 'run.archive', 'Restore run r1', 'Restored run r1'],
     ['aether_switch_run_mode', { run_id: 'r1', mode: 'enhanced' }, 'run.mode.switch', 'Switch run r1 to enhanced mode', 'Switched run r1 to enhanced mode'],
     ['aether_handoff_run', { run_id: 'r1', to_member_id: 'Dana' }, 'run.handoff', 'Hand off run r1 to Dana', 'Handed off run r1 to Dana'],
-    ['aether_swarm_manage', { swarm_id: 'swarm:mis-1', action: 'release_worker', run_id: 'r7' }, 'mission.worker.release', 'Release worker run r7', 'Released worker run r7'],
-    ['aether_swarm_manage', { swarm_id: 'swarm:mis-1', action: 'archive' }, 'mission.archive', 'Archive swarm mis-1', 'Archived swarm mis-1'],
-    ['aether_replace_integrator', { swarm_id: 'mis-1' }, 'mission.replace-integrator', 'Replace the integrator of swarm mis-1', 'Replaced the integrator of swarm mis-1'],
     ['aether_pr_create', { run_id: 'r1' }, 'run.pr.create', 'Open a pull request for run r1', 'Opened a pull request for run r1'],
     ['aether_memory_add', { kind: 'gotcha', text: 'x' }, 'memory.add', 'Add a gotcha note', 'Added a gotcha note'],
     ['aether_memory_pin', { id: 'mem-9', pin: false }, 'memory.unpin', 'Unpin note mem-9', 'Unpinned note mem-9'],
     ['aether_stop_run', { run_id: 'r1', outcome: 'merged' }, 'run.close', 'Close run r1 as merged', 'Closed run r1 as merged'],
     ['aether_decide_approval', { run_id: 'r1' }, 'run.input.respond', 'Decide an approval for run r1', 'Decided an approval for run r1'],
-    ['aether_watch', { swarm_id: 'swarm:mis-1' }, 'watch.create', 'Watch swarm mis-1', 'Started watching swarm mis-1'],
+    ['aether_watch', { run_id: 'r1' }, 'watch.create', 'Watch run r1', 'Started watching run r1'],
     ['aether_watch', { watch_id: 'w-1', paused: true }, 'watch.update', 'Pause watch w-1', 'Paused watch w-1'],
     ['aether_unwatch', { watch_id: 'w-1' }, 'watch.delete', 'Delete watch w-1', 'Deleted watch w-1'],
   ])('%s %j waits on %s and reads "%s", then "%s"', (tool, input, method, pending, done) => {
@@ -253,24 +250,18 @@ describe('the lifecycle, swarm, pull request and memory tools', () => {
     expect([created!.state, actionSummary(created!, names)]).toEqual(['unconfirmed', 'Open a pull request for run r1'])
   })
 
-  it('links a released worker to its run, not its swarm', () => {
-    const [released] = assistantView([block({ id: '1:t0', name: 'aether_swarm_manage', input: { swarm_id: 'swarm:mis-1', action: 'release_worker', run_id: 'r7' }, result: { swarm_id: 'mis-1', run_id: 'r7' } })], []).actions
-    expect([released!.target?.kind, released!.target?.id]).toEqual(['run', 'r7'])
-  })
-
-  it('links a swarm tool to its swarm and a created pull request to GitHub', () => {
+  it('links a created pull request to GitHub', () => {
     const view = assistantView([block(
-      { id: '1:t0', name: 'aether_swarm_manage', input: { swarm_id: 'swarm:mis-1', action: 'archive' }, result: {} },
-      { id: '1:t1', name: 'aether_pr_create', input: { run_id: 'r1' }, result: { pull_request: { number: 7, url: 'https://github.com/acme/api/pull/7' }, url: '?run=r1' } },
+      { id: '1:t0', name: 'aether_pr_create', input: { run_id: 'r1' }, result: { pull_request: { number: 7, url: 'https://github.com/acme/api/pull/7' }, url: '?run=r1' } },
     )], [])
-    expect(view.actions.map((a) => [a.target?.kind, a.target?.id])).toEqual([['swarm', 'mis-1'], ['pr', 'https://github.com/acme/api/pull/7']])
+    expect(view.actions.map((a) => [a.target?.kind, a.target?.id])).toEqual([['pr', 'https://github.com/acme/api/pull/7']])
   })
 })
 
 describe('launchLine', () => {
-  it('names a swarm launch\'s agent and model from the tool\'s own inputs', () => {
+  it('names a launch\'s agent and model from the tool\'s own inputs', () => {
     const names = { run: () => undefined, workspace: () => 'api', agent: () => 'Claude Code', sharer: () => undefined }
-    const [swarm] = assistantView([block({ id: '1:t0', name: 'aether_launch_swarm', input: { workspace_id: 'ws1', harness: 'claude', model: 'opus', objective: 'x' }, result: { ids: { mission_id: 'mis-1' } } })], []).actions
-    expect(launchLine(swarm!, names)).toBe('swarm · api · Claude Code opus')
+    const [launched] = assistantView([block({ id: '1:t0', name: 'aether_launch_run', input: { workspace_id: 'ws1', harness: 'claude', model: 'opus', task: 'x' }, result: { run_id: 'r1' } })], []).actions
+    expect(launchLine(launched!, names)).toBe('run · api · Claude Code opus')
   })
 })

@@ -35,7 +35,7 @@ test('Insights counts a finished run and keeps it across period and scope', asyn
   const mine = page.getByRole('region', { name: 'My statistics' })
   const team = page.getByRole('region', { name: 'Team statistics' })
   for (const section of [mine, team]) {
-    await expect(section.getByRole('article', { name: 'Runs / swarms completed' })).toContainText('1 run / 0 swarms', { timeout: 30_000 })
+    await expect(section.getByRole('article', { name: 'Runs completed' })).toContainText('1 run', { timeout: 30_000 })
     await expect(section.getByRole('article', { name: 'Success rate' })).toContainText('0%')
     await expect(section.getByRole('article', { name: 'Total tokens used' })).toBeVisible()
     await expect(section.getByRole('img')).toHaveCount(7)
@@ -63,7 +63,7 @@ function week(scope: string) {
   })
   const mineRuns = [{ done: 2, failed: 0, abandoned: 0 }, empty, { done: 3, failed: 1, abandoned: 0 }, { done: 1, failed: 0, abandoned: 1 }, empty, { done: 4, failed: 2, abandoned: 0 }, { done: 1, failed: 0, abandoned: 0 }]
   const bobRuns = [empty, { done: 2, failed: 0, abandoned: 0 }, { done: 1, failed: 1, abandoned: 1 }, empty, { done: 3, failed: 0, abandoned: 0 }, { done: 2, failed: 1, abandoned: 0 }, { done: 5, failed: 0, abandoned: 2 }]
-  const bucket = (runs: typeof mineRuns, start: string, i: number) => ({ start, runs: runs[i], swarms: i === 6 ? { done: 1, failed: 0, abandoned: 0 } : empty })
+  const bucket = (runs: typeof mineRuns, start: string, i: number) => ({ start, runs: runs[i] })
   const sum = (runs: typeof mineRuns) => runs.reduce((a, r) => ({ done: a.done + r.done, failed: a.failed + r.failed, abandoned: a.abandoned + r.abandoned }), empty)
   const add = (a: typeof empty, b: typeof empty) => ({ done: a.done + b.done, failed: a.failed + b.failed, abandoned: a.abandoned + b.abandoned })
   const alice = days.map((d, i) => bucket(mineRuns, d, i))
@@ -82,7 +82,6 @@ function week(scope: string) {
     heatmap: [],
     by_workspace: [],
     by_agent: [],
-    swarms: { launched: 2, completed: 1, cancelled: 0, agents: 6, tasks_accepted: 5 },
     durations: { runs_measured: 0, median_run_seconds: 0, p90_run_seconds: 0, state_runs_measured: 0, median_working_seconds: 0, median_waiting_seconds: 0, median_response_seconds: 0 },
     cost: {
       metered_runs: 4, unmetered_runs: 1, cost_usd: 3, input_tokens: 90_000, output_tokens: 10_000, total_tokens: 100_000,
@@ -92,15 +91,14 @@ function week(scope: string) {
       ],
     },
     pull_requests: { opened: 0, merged: 0 },
-    success: { runs: { succeeded: everyone ? 9 : 5, finished: runs.done + runs.failed + runs.abandoned }, swarms: { succeeded: 1, finished: 1 } },
+    success: { runs: { succeeded: everyone ? 9 : 5, finished: runs.done + runs.failed + runs.abandoned } },
     outcomes: {
       runs,
-      swarms: { done: 1, failed: 0, abandoned: 0 },
-      series: days.map((start, i) => ({ start, runs: everyone ? add(mineRuns[i], bobRuns[i]) : mineRuns[i], swarms: bucket(mineRuns, start, i).swarms })),
+      series: days.map((start, i) => ({ start, runs: everyone ? add(mineRuns[i], bobRuns[i]) : mineRuns[i] })),
       members: everyone
         ? [
-            { member_id: 'mem_alice', display_name: 'alice', color: '#e6194b', runs: sum(mineRuns), swarms: { done: 1, failed: 0, abandoned: 0 }, series: alice },
-            { member_id: 'mem_bob', display_name: 'bob', color: '#3cb44b', runs: sum(bobRuns), swarms: empty, series: bob.map((b) => ({ ...b, swarms: empty })) },
+            { member_id: 'mem_alice', display_name: 'alice', color: '#e6194b', runs: sum(mineRuns), series: alice },
+            { member_id: 'mem_bob', display_name: 'bob', color: '#3cb44b', runs: sum(bobRuns), series: bob },
           ]
         : [],
     },
@@ -120,9 +118,9 @@ test('Insights dims the other days while one is hovered, for me and for the team
 
   const mine = page.getByRole('region', { name: 'My statistics' })
   const team = page.getByRole('region', { name: 'Team statistics' })
-  await expect(mine.getByRole('article', { name: 'Runs / swarms completed' })).toContainText('11 runs / 1 swarm', { timeout: 30_000 })
+  await expect(mine.getByRole('article', { name: 'Runs completed' })).toContainText('11 runs', { timeout: 30_000 })
   await expect(mine.getByRole('article', { name: 'Total tokens used' })).toContainText(/used 56% of the 100K tokens/)
-  await expect(team.getByRole('article', { name: 'Runs / swarms completed' })).toContainText('24 runs / 1 swarm')
+  await expect(team.getByRole('article', { name: 'Runs completed' })).toContainText('24 runs')
 
   for (const section of [mine, team]) {
     const days = section.getByRole('img')
@@ -134,9 +132,6 @@ test('Insights dims the other days while one is hovered, for me and for the team
     const opacity = (index: number) => days.nth(index).evaluate((node) => getComputedStyle(node).opacity)
     await expect.poll(() => opacity(0)).toBe('0.4')
     expect(await opacity(2)).toBe('1')
-    await section.getByRole('button', { name: 'Swarms' }).click()
-    await expect(section.getByText('1 swarm ended in the last 7 days')).toBeVisible()
-    await section.getByRole('button', { name: 'Runs' }).click()
   }
   await expect(team.getByRole('list', { name: 'Members' })).toContainText('BObob')
   await expect(team.getByRole('list', { name: 'Legend' })).toContainText('F Failed')

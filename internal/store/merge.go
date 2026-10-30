@@ -393,7 +393,7 @@ func planInTx(ctx context.Context, tx *sql.Tx, hash string, minted, proposer dom
 }
 
 // refuseLiveWork refuses a merge while either member has a run that is not
-// finished, an Environment terminal, a role in an open swarm, a handoff
+// finished, an Environment terminal, a handoff
 // still publishing, a queued steer request or an approved delivery not yet
 // made: those still act as the member, beyond what a merge moves.
 func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error {
@@ -410,17 +410,6 @@ func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error
 		return err
 	}
 	terminals, err := queryStrings(ctx, tx, `SELECT member_id FROM member_terminals WHERE member_id IN (?1, ?2) ORDER BY member_id`, a, b)
-	if err != nil {
-		return err
-	}
-	missions, err := queryStrings(ctx, tx, `SELECT id FROM missions m WHERE phase IN ('planning', 'active') AND (
-		accountable_human_id IN (?1, ?2) OR integrator_account_member_id IN (?1, ?2)
-		OR integrator_authorizing_human_id IN (?1, ?2) OR integrator_run_owner_id IN (?1, ?2)
-		OR instr(execution_choices, '"' || ?1 || '"') > 0 OR instr(execution_choices, '"' || ?2 || '"') > 0
-		OR EXISTS (SELECT 1 FROM mission_attempts t WHERE t.mission_id = m.id AND (t.authorizing_human_id IN (?1, ?2)
-		     OR t.run_owner_id IN (?1, ?2) OR t.account_owner_id IN (?1, ?2) OR t.launch_account_id IN (?1, ?2)))
-		OR EXISTS (SELECT 1 FROM mission_worker_takeovers w WHERE w.mission_id = m.id AND w.active = 1 AND w.member_id IN (?1, ?2))
-	) ORDER BY id`, a, b)
 	if err != nil {
 		return err
 	}
@@ -447,9 +436,6 @@ func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error
 	}
 	for _, m := range terminals {
 		stop = append(stop, "the Environment terminal of member "+m+" (aether terminal stop on that sign-in)")
-	}
-	if len(missions) > 0 {
-		stop = append(stop, "swarms "+strings.Join(missions, ", ")+" (aether swarm cancel <swarm-id>, or let them finish)")
 	}
 	if len(stop) > 0 {
 		return refuseMerge("stop these first, then merge: %s", strings.Join(stop, "; "))

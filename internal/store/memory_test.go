@@ -159,7 +159,6 @@ func TestMemorySearchSourceAndReplaced(t *testing.T) {
 		{MemoryQuery{Workspace: w.ID, Replaced: true, Limit: 1}, []string{old.ID}},
 		{MemoryQuery{Workspace: w.ID, Replaced: true, All: true, Words: "lease"}, []string{old.ID}},
 		{MemoryQuery{Workspace: w.ID, Source: MemoryFromAgent, All: true}, []string{old.ID, agent.ID}},
-		{MemoryQuery{Workspace: w.ID, Source: MemoryFromAnswer}, []string{}},
 	} {
 		if got := noteIDs(t, db, c.q); !slices.Equal(got, c.want) {
 			t.Errorf("search %+v = %v, want %v", c.q, got, c.want)
@@ -729,28 +728,6 @@ func TestMemoryWithholdsSecretInChangedFile(t *testing.T) {
 	}
 	if got := noteIDs(t, db, MemoryQuery{Workspace: w.ID, Words: "token"}); len(got) != 0 {
 		t.Fatalf("search the filename = %v, want none", got)
-	}
-}
-
-func TestMemoryCapturesQuestionAnswer(t *testing.T) {
-	db, mission, member := planningFixture(t)
-	ctx := context.Background()
-	q, err := db.InsertMissionQuestion(ctx, mission.ID, mission.CurrentIntegratorRunID, "which checkout flow?", "ask-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		if _, _, answerErr := db.AnswerMissionQuestion(ctx, q.ID, member, "the guest flow", "answer-1"); answerErr != nil {
-			t.Fatalf("AnswerMissionQuestion: %v", answerErr)
-		}
-	}
-	notes, err := db.SearchMemory(ctx, MemoryQuery{Workspace: mission.WorkspaceID, Words: "checkout", Limit: 10})
-	if err != nil || len(notes) != 1 {
-		t.Fatalf("answer notes = %v, %v; want 1", notes, err)
-	}
-	if n := notes[0]; n.Source != MemoryFromAnswer || n.Kind != MemoryDecision || n.Body != "Q: which checkout flow? A: the guest flow" ||
-		n.SourceRef != string(q.ID) || n.AuthorID != member || n.RunID != mission.CurrentIntegratorRunID {
-		t.Fatalf("answer note = %+v", n)
 	}
 }
 

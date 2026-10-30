@@ -29,7 +29,7 @@ type savedFill struct {
 	// modelCheckedOn is the account get checked the saved model on, when the
 	// launch used it and no note says it went unchecked.
 	modelCheckedOn string
-	// Account is the saved account, for a swarm worker that names none, or
+	// Account is the saved account, for a launch that names none, or
 	// AccountErr why it cannot be used.
 	Account    string
 	AccountErr error
@@ -114,8 +114,6 @@ func agentLister(ctx context.Context, read Call, book accountBook) func(account 
 type launchSlots struct {
 	harness, mode, model *string
 	account              *accountChoice
-	// integrator is a swarm's: its modes are an integrator's.
-	integrator bool
 }
 
 // fillSaved fills each field in slots the caller left empty from saved,
@@ -184,7 +182,7 @@ func fillSaved(saved protocol.LaunchDefaultsResult, slots launchSlots, agentsOn 
 		return fill, nil
 	}
 	if *slots.mode == "" && choice.Mode != "" {
-		reason, err := modeRefused(*slots.harness, choice.Mode, slots.integrator, a.AccountMemberID, agentsOn, book)
+		reason, err := modeRefused(*slots.harness, choice.Mode, a.AccountMemberID, agentsOn, book)
 		if reason != "" {
 			fill.skip("mode", reason)
 		} else {
@@ -237,19 +235,13 @@ func agentRefused(harness, account string, agentsOn func(string) ([]protocol.Age
 
 // modeRefused is why harness cannot start in mode on account, as
 // aether_launch_options lists its modes, or "".
-func modeRefused(harness, mode string, integrator bool, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (string, error) {
+func modeRefused(harness, mode string, account string, agentsOn func(string) ([]protocol.AgentInfo, error), book accountBook) (string, error) {
 	info, reason, err := agentOn(harness, account, agentsOn, book)
 	if reason != "" || err != nil {
 		return reason, err
 	}
 	row := rowOfAgent(info)
 	allowed := row.Modes
-	if integrator {
-		allowed = row.Integrator
-		if mode == "tui" && info.SwarmStandardRefusal != "" {
-			return info.SwarmStandardRefusal, nil
-		}
-	}
 	if slices.Contains(allowed, mode) {
 		return "", nil
 	}

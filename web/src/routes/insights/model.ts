@@ -64,8 +64,8 @@ export function percent(part: number, whole: number): number | null {
 
 /** Servers that predate outcomes, success or per-agent tokens answer insights.get without them. */
 export function hasOutcomes(result: InsightsResult): boolean {
-  return Array.isArray(result.outcomes?.series) && Array.isArray(result.outcomes.members) && result.outcomes.runs != null && result.outcomes.swarms != null &&
-    result.success?.runs != null && result.success.swarms != null && Array.isArray(result.cost?.by_agent)
+  return Array.isArray(result.outcomes?.series) && Array.isArray(result.outcomes.members) && result.outcomes.runs != null &&
+    result.success?.runs != null && Array.isArray(result.cost?.by_agent)
 }
 
 /** Two letters per member for the legend and tooltip, numbered when two members share them. */
@@ -78,8 +78,6 @@ export function memberTags(members: { member_id: string; display_name: string }[
     return [m.member_id, seen[base] > 1 ? `${base}${seen[base]}` : base]
   }))
 }
-
-export type Unit = 'runs' | 'swarms'
 
 export const outcomeKeys = ['done', 'failed', 'abandoned'] as const
 export type OutcomeKey = (typeof outcomeKeys)[number]
@@ -98,16 +96,16 @@ export interface Day {
   members: Record<OutcomeKey, Slice[]>
 }
 
-/** One entry per day of the series: the unit's outcomes, and who they belong to when the result names members. */
-export function chartDays(result: InsightsResult, unit: Unit): Day[] {
+/** One entry per day of the series: the run outcomes, and who they belong to when the result names members. */
+export function chartDays(result: InsightsResult): Day[] {
   const { series, members } = result.outcomes
   return series.map((bucket, i) => {
     const slices = (key: OutcomeKey): Slice[] =>
       members.flatMap((m) => {
-        const count = m.series[i]?.[unit][key] ?? 0
+        const count = m.series[i]?.runs[key] ?? 0
         return count > 0 ? [{ id: m.member_id, name: m.display_name, color: m.color, count }] : []
       })
-    return { start: bucket.start, counts: bucket[unit], members: { done: slices('done'), failed: slices('failed'), abandoned: slices('abandoned') } }
+    return { start: bucket.start, counts: bucket.runs, members: { done: slices('done'), failed: slices('failed'), abandoned: slices('abandoned') } }
   })
 }
 
@@ -115,12 +113,12 @@ export function chartMax(days: Day[]): number {
   return Math.max(1, ...days.flatMap((d) => outcomeKeys.map((key) => d.counts[key])))
 }
 
-export function dayWords(day: Day, unit: Unit): string {
+export function dayWords(day: Day): string {
   const counts = outcomeKeys.map((key) => {
     const who = day.members[key].map((m) => `${m.name} ${m.count}`).join(', ')
     return `${day.counts[key]} ${key}${who && ` (${who})`}`
   })
-  return `${dayLabel(day.start, { weekday: 'short', month: 'short', day: 'numeric' })}: ${unit} ${counts.join(', ')}`
+  return `${dayLabel(day.start, { weekday: 'short', month: 'short', day: 'numeric' })}: runs ${counts.join(', ')}`
 }
 
 export type SectionLoad =

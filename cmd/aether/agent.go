@@ -288,7 +288,7 @@ func agentAdd(args []string) error {
 const codexHookNote = `Trust Aether's hooks once. Standard Codex runs load Aether's inbox hooks. Codex runs a hook
 only after you trust it, so your first Standard run opens "Hooks need review": choose
 "Trust all and continue". Codex remembers this in ~/.codex/config.toml for every workspace and
-asks again only if Aether's hooks change. If a swarm worker is your first Standard Codex run,
+asks again only if Aether's hooks change. If a child run is your first Standard Codex run,
 open its terminal to answer. If the list shows hooks you don't recognize, choose "Review hooks"
 instead.`
 

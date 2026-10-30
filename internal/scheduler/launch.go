@@ -205,7 +205,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return nil, err
 	}
-	argv, profile, acp, err := s.command(ctx, workspace, member, account, harness, mode, opts.AssignedRunID != "", task, opts.Model, opts.Effort, extraRepos...)
+	argv, profile, acp, err := s.command(ctx, workspace, member, account, harness, mode, task, opts.Model, opts.Effort, extraRepos...)
 	if err != nil {
 		return nil, err
 	}
@@ -222,10 +222,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	}
 	// A reserved identity that already has a run is a replay: its base was
 	// captured on the original handoff, and a new fetch could fail or differ.
-	reservedID := opts.AssignedRunID
-	if reservedID == "" {
-		reservedID = opts.ReservedRunID
-	}
+	reservedID := opts.ReservedRunID
 	if reservedID != "" {
 		existing, getErr := s.cfg.Store.GetRun(ctx, reservedID)
 		if getErr == nil {
@@ -322,7 +319,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if opts.RequestedAccount != account {
 		run.RequestedAccountMemberID = opts.RequestedAccount
 	}
-	if err := createAssignedRun(ctx, s.cfg.Store, run, reservedID); err != nil {
+	if err := createRun(ctx, s.cfg.Store, run, reservedID); err != nil {
 		if reservedID != "" {
 			existing, getErr := s.cfg.Store.GetRun(ctx, reservedID)
 			if getErr == nil && sameReservedRun(existing, run) && (opts.CachedBase == "" || opts.CachedBase == existing.BaseCommit) {
@@ -342,8 +339,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if opts.Admitted != nil {
 		opts.Admitted()
 	}
-	persistSupervisor := opts.AssignedRunID != ""
-	if err := s.provision(ctx, run, ws, actor, argv, profile, persistSupervisor); err != nil {
+	if err := s.provision(ctx, run, ws, actor, argv, profile); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, run), nil
@@ -352,18 +348,17 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // provision registers the run in s.runs before any provisioning I/O so a
 // concurrent Kill takes the supervised path instead of transitioning the row
 // underneath the in-flight launch.
-func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
+func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile) error {
 	entry := &supervised{
-		runID:           run.ID,
-		workspaceID:     run.WorkspaceID,
-		task:            run.Task,
-		memberID:        run.HomeMember(),
-		launchMode:      run.Mode,
-		acp:             run.ACP,
-		missionAssigned: persistSupervisor,
-		status:          domain.RunProvisioning,
-		startedAt:       time.Now().UTC(),
-		done:            make(chan struct{}),
+		runID:       run.ID,
+		workspaceID: run.WorkspaceID,
+		task:        run.Task,
+		memberID:    run.HomeMember(),
+		launchMode:  run.Mode,
+		acp:         run.ACP,
+		status:      domain.RunProvisioning,
+		startedAt:   time.Now().UTC(),
+		done:        make(chan struct{}),
 	}
 	s.mu.Lock()
 	if pending := s.pending[run.ID]; pending != nil && pending.killRequested {
@@ -380,7 +375,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		return err
 	}
 	run.Status = domain.RunProvisioning
-	if err := s.provisionSteps(ctx, entry, run, ws, actor, argv, profile, persistSupervisor); err != nil {
+	if err := s.provisionSteps(ctx, entry, run, ws, actor, argv, profile); err != nil {
 		s.failProvisioning(run, actor.ID, err)
 		reason := publicRunStatusReason("provisioning: " + err.Error())
 		var setup *runtime.SetupError
@@ -401,7 +396,7 @@ type SetupFailure struct {
 
 func (e *SetupFailure) Error() string { return fmt.Sprintf("run %s failed: %s", e.run, e.reason) }
 
-func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
+func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile) error {
 	checkout, branch, err := s.createCheckouts(ctx, run, ws)
 	if err != nil {
 		return fmt.Errorf("create checkout: %w", err)
@@ -433,7 +428,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	entry.gitAuthorEmail = actor.GitIdentity().Email
 	entry.egress = plan.Egress
 	s.mu.Unlock()
-	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, persistSupervisor, unlockCaches)
+	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, unlockCaches)
 	if err != nil {
 		return err
 	}
@@ -485,7 +480,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 // startRunContainer is the part of a launch a move to another account
 // repeats. On failure no container of it is left running. It calls
 // unlockCaches once the sidecar publishes the container's cache ownership.
-func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, run *domain.Run, actor *domain.Member, argv []string, profile harness.Profile, plan *EnvironmentPlan, persistSupervisor bool, unlockCaches func()) (AgentDriver, error) {
+func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, run *domain.Run, actor *domain.Member, argv []string, profile harness.Profile, plan *EnvironmentPlan, unlockCaches func()) (AgentDriver, error) {
 	var native harness.NativeLaunch
 	coordination := s.coordinationSeam()
 	if coordination != nil && coordination.enabled && run.Mode == domain.LaunchTUI && run.Task != "" {
@@ -545,7 +540,7 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	if err != nil {
 		return nil, err
 	}
-	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, limits, persistSupervisor))
+	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, limits))
 	if err != nil {
 		return nil, fmt.Errorf("create container: %w", err)
 	}
@@ -690,7 +685,7 @@ func (s *Scheduler) freshen(ctx context.Context, run *domain.Run) *domain.Run {
 // command resolves argv and profile for one launch by member in workspace on
 // account's shared account, with the profile from launchProfile. An acp
 // launch has no argv: the task travels over the protocol.
-func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model, effort string, extras ...domain.RunRepo) (argv []string, profile harness.Profile, acp bool, err error) {
+func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task, model, effort string, extras ...domain.RunRepo) (argv []string, profile harness.Profile, acp bool, err error) {
 	if err = domain.ValidModel(model); err != nil {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
 	}
@@ -726,11 +721,59 @@ func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, m
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
 	}
 	if task != "" && !profile.CarriesInstructions() {
-		instructions, ierr := s.briefedInstructions(ctx, s.runGuide(ctx, "", assigned, mode == domain.LaunchHeadless, false), extras, workspace, member)
+		instructions, ierr := s.briefedInstructions(ctx, s.runGuide(ctx, "", mode == domain.LaunchHeadless, false), extras, workspace, member)
 		if ierr != nil {
 			return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", ierr)
 		}
 		task = withInstructions(task, instructions)
 	}
 	return harness.Argv(argv, task, profile.LaunchArgs(model, effort)), profile, false, nil
+}
+
+// createRun stores run under reserved when a caller minted its ID beforehand,
+// so a retry after a lost response cannot mint a second run.
+func createRun(ctx context.Context, st store.Store, run *domain.Run, reserved domain.RunID) error {
+	if reserved == "" {
+		return st.CreateRun(ctx, run)
+	}
+	run.ID = reserved
+	byID, ok := st.(store.ReservedRunStore)
+	if !ok {
+		return errors.New("scheduler: reserved run IDs are unavailable")
+	}
+	if err := byID.CreateRunWithID(ctx, run); err != nil {
+		return fmt.Errorf("create reserved run %s: %w", reserved, err)
+	}
+	return nil
+}
+
+func sameReservedRun(existing, requested *domain.Run) bool {
+	return existing != nil && requested != nil &&
+		existing.ID == requested.ID &&
+		existing.WorkspaceID == requested.WorkspaceID &&
+		existing.MemberID == requested.MemberID &&
+		existing.AccountMember() == requested.AccountMember() &&
+		existing.Task == requested.Task &&
+		existing.Harness == requested.Harness &&
+		existing.Mode == requested.Mode &&
+		existing.Model == requested.Model &&
+		existing.Effort == requested.Effort
+}
+
+// WakeRefusal is harness.WakeRefusal for the command a launch of agent runs.
+// A server-wide definition replaces the shipped command and its
+// capabilities, so like a custom agent it is not judged.
+func (s *Scheduler) WakeRefusal(agent string, mode domain.LaunchMode) error {
+	if _, defined := s.harnesses[agent]; defined {
+		return nil
+	}
+	return harness.WakeRefusal(agent, mode)
+}
+
+// ValidateLaunch reports whether member's launch of harnessName on account
+// has a command for mode, resolving it exactly as a launch would. The task
+// shapes only the prompt, so validation passes none and reads no brief.
+func (s *Scheduler) ValidateLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model, effort string) error {
+	_, _, _, err := s.command(ctx, "", member, account, harnessName, mode, "", model, effort)
+	return err
 }

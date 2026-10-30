@@ -57,7 +57,6 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   const now = useClock()
   const condition = useStore((s) => needsYou(run, stateContextOf(s, now)))
   const room = useStore((s) => s.roomMessages[run.id])
-  const navigate = useStore((s) => s.navigate)
   const selfID = useStore((s) => s.info?.member.id)
   if (!condition) return null
 
@@ -71,8 +70,6 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   switch (condition.target) {
     case 'changes':
       return view === 'changes' ? null : { label: action.label, act: () => nav.go('changes') }
-    case 'swarm':
-      return run.mission_id ? { label: action.label, act: () => navigate('missions', { missionId: run.mission_id! }) } : null
     case 'notes': {
       const question = unansweredQuestions(room ?? []).find((m) => m.actor_id !== run.member_id)
       return { label: action.label, act: () => nav.reveal(question ? requestCardID.question(question.id) : 'details-needs-you') }

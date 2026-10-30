@@ -22,7 +22,7 @@ type AuditListParams struct {
 // AuditEntry is one audited call. Via is dashboard, cli, connector or
 // assistant; ConnectorID and Client name the connector, such as ChatGPT,
 // or the Slack link.
-// Target is the run, swarm, connector or member acted on. Outcome is ok,
+// Target is the run, connector or member acted on. Outcome is ok,
 // or error with the protocol error code in Code.
 type AuditEntry struct {
 	Seq         int64  `json:"seq"`

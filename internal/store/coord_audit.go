@@ -24,7 +24,6 @@ type CoordAuditPublication struct {
 	EventType       string
 	MessageID       string
 	WorkspaceID     domain.WorkspaceID
-	MissionID       domain.MissionID
 	FromRun         domain.RunID
 	ToRun           domain.RunID
 	Kind            string
@@ -63,13 +62,13 @@ func CoordAuditAckedEventID(messageID string) string {
 }
 
 // messageKindSQL reads a run_messages row aliased m as its listed kind: a
-// worker report forwarded to the integrator is a message correlated with
+// child's report forwarded to its parent is a message correlated with
 // the sender's coord_reports row.
 const messageKindSQL = `CASE WHEN m.kind = 'message' AND EXISTS (
 	SELECT 1 FROM coord_reports report WHERE report.id = m.correlation_id AND report.run_id = m.from_run
 ) THEN 'report' ELSE m.kind END`
 
-const coordAuditCols = `event_id, event_type, message_id, workspace_id, mission_id, from_run, to_run,
+const coordAuditCols = `event_id, event_type, message_id, workspace_id, from_run, to_run,
 	kind, correlation_id, acked_at, created_at,
 	attempts, next_attempt_at, last_error, quarantined_at, quarantine_error`
 
@@ -79,9 +78,9 @@ func enqueueCoordAudit(ctx context.Context, tx *sql.Tx, eventType, where string,
 		prefix, createdAt = coordAckedEventPrefix, `m.acked_at`
 	}
 	query := `INSERT INTO coord_audit_publications
-		(event_id, event_type, message_id, workspace_id, mission_id, from_run, to_run,
+		(event_id, event_type, message_id, workspace_id, from_run, to_run,
 		 kind, correlation_id, acked_at, created_at)
-		SELECT ? || m.id, ?, m.id, m.workspace_id, COALESCE(m.mission_id, ''), m.from_run, m.to_run,
+		SELECT ? || m.id, ?, m.id, m.workspace_id, m.from_run, m.to_run,
 		       ` + messageKindSQL + `, m.correlation_id, m.acked_at, ` + createdAt + `
 		FROM run_messages m WHERE ` + where + `
 		ON CONFLICT (event_id) DO NOTHING`
@@ -211,7 +210,7 @@ func scanCoordAuditPublication(row interface{ Scan(...any) error }) (*CoordAudit
 		nextAttemptAt int64
 		quarantinedAt *int64
 	)
-	if err := row.Scan(&pub.EventID, &pub.EventType, &pub.MessageID, &pub.WorkspaceID, &pub.MissionID,
+	if err := row.Scan(&pub.EventID, &pub.EventType, &pub.MessageID, &pub.WorkspaceID,
 		&pub.FromRun, &pub.ToRun, &pub.Kind, &pub.CorrelationID, &ackedAt,
 		&createdAt, &pub.Attempts, &nextAttemptAt, &pub.LastError,
 		&quarantinedAt, &pub.QuarantineError); err != nil {

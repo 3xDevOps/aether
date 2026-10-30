@@ -9,7 +9,6 @@ import { virtualizeAbove } from '@/routes/board/card-list'
 import { EdgePopover } from '@/routes/board/lanes/lane-popover'
 import { useBoard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
-import '@/routes/missions'
 import { useStore } from '@/store'
 import { historyBudget } from '@/store/lanes'
 import { optimisticDeadlineMs } from '@/store/optimistic'
@@ -19,7 +18,6 @@ import {
   alice,
   bob,
   fakeApi,
-  mission,
   otherWorkspace,
   pendingDevice,
   roomMessage,
@@ -69,8 +67,6 @@ function seed(runs: Run[], { active = workspace.id, self = alice } = {}) {
     pausedRuns: {},
     roomMessages: {},
     roomStatus: {},
-    missions: {},
-    missionDetails: {},
     diffs: {},
     overlaps: {},
     mineOnly: false,
@@ -249,84 +245,12 @@ describe('board columns', () => {
     expect(cardOf('still going').queryByText('Paused')).toBeNull()
   })
 
-  it('shows a swarm as one card with its objective, phase and counts, opening the swarm page', () => {
-    const integrator = run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })
-    const worker = (id: string, status: Run['status']) => run({
-      id, task: `worker ${id}`, status, mode: 'headless',
-      mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: integrator.id,
-    })
-    seed([integrator, worker('w1', 'running'), worker('w2', 'running'), worker('w3', 'completed'), worker('w4', 'failed')])
-    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
-    renderBoard()
-
-    expect(screen.getAllByRole('article')).toHaveLength(1)
-    const swarm = cardOf('coordinate checkout work')
-    expect(swarm.getByText('Swarm active')).toBeDefined()
-    expect(swarm.getByRole('img', { name: '2 working' })).toBeDefined()
-    expect(swarm.getByRole('img', { name: '1 done' })).toBeDefined()
-    expect(swarm.getByRole('img', { name: '1 failed' })).toBeDefined()
-    expect(swarm.queryByRole('img', { name: /needs you/ })).toBeNull()
-    expect(screen.queryByText('worker w1')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'coordinate checkout work' }))
-    expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mission_1' } })
-  })
-
-  it("labels a swarm waiting on its workers with the integrator's reason", () => {
-    const integrator = run({
-      id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
-      status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers',
-    })
-    seed([integrator])
-    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
-    renderBoard()
-    const swarm = cardOf('coordinate checkout work')
-    expect(swarm.getByRole('img', { name: 'Waiting for 2 workers' })).toBeDefined()
-    expect(swarm.getByText('Swarm active')).toBeDefined()
-  })
-
-  it('acts on a swarm card for the integrator itself when the integrator needs you', () => {
-    const integrator = run({
-      id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
-      pending_inputs: [{ id: 'p', session_id: 's', kind: 'permission' }],
-    })
-    seed([integrator])
-    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
-    renderBoard()
-
-    fireEvent.click(cardOf('coordinate checkout work').getByRole('button', { name: 'Open terminal' }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_integrator' } })
-  })
-
-  it('renders card meta contributions: an overlap count and a swarm conflict count', () => {
-    const integrator = run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })
-    seed([integrator, working])
-    useStore.setState({
-      missions: { mission_1: mission() },
-      missionDetails: {
-        mission_1: {
-          mission: mission(), tasks: [], attempts: [], submissions: [], questions: [],
-          diagnostics: [{ task_id: 't1', task_revision: 1, run_id: 'run_w1', kind: 'observed_overlap', paths: ['src/a.ts'] }],
-        },
-      },
-      overlaps: { [working.id]: [{ run_id: 'run_peer', member_id: bob.id, files: ['src/a.ts'] }] },
-    })
+  it('renders an overlap count on a card', () => {
+    seed([working])
+    useStore.setState({ overlaps: { [working.id]: [{ run_id: 'run_peer', member_id: bob.id, files: ['src/a.ts'] }] } })
     renderBoard()
 
     expect(cardOf('still going').getByRole('button', { name: '1 overlap' })).toBeDefined()
-    expect(cardOf('coordinate checkout work').getByRole('button', { name: '1 conflict' })).toBeDefined()
-  })
-
-  it('folds archived swarm workers into one card and honours Mine there', () => {
-    const archived = (id: string, member = alice.id) =>
-      run({ ...archivedMerged, id, task: `archived ${id}`, member_id: member, mission_id: 'mission_1', mission_role: 'worker' })
-    seed([archived('a1'), archived('a2'), run({ ...archivedMerged, member_id: bob.id, task: 'bob archived' }), working])
-    useStore.setState({ missions: { mission_1: mission({ phase: 'completed' }) }, mineOnly: true })
-    renderBoard()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Archived (1)' }))
-    expect(column('Finished').getAllByRole('article')).toHaveLength(1)
-    expect(cardOf('coordinate checkout work').getByText('Swarm completed')).toBeDefined()
-    expect(screen.queryByText('bob archived')).toBeNull()
   })
 
   it('keeps unchanged cards as the same objects across unrelated updates', () => {
@@ -757,21 +681,20 @@ describe('empty board', () => {
 })
 
 describe('map view', () => {
-  it('switches from an aggregated swarm to individual runs and opens the selected worker', async () => {
+  it('switches from an aggregated family to individual runs and opens the selected child run', async () => {
     seed([
-      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' }),
-      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator' }),
+      run({ id: 'run_parent', task: 'coordinate' }),
+      run({ id: 'child', task: 'implement checkout', parent_run_id: 'run_parent' }),
     ])
-    useStore.setState({ missions: { mission_1: mission() } })
     renderBoard()
     expect(screen.getAllByRole('article')).toHaveLength(1)
     await userEvent.click(screen.getByRole('tab', { name: 'Map' }))
-    expect(screen.getAllByRole('article').map((card) => card.dataset.runId).sort()).toEqual(['run_integrator', 'worker'])
+    expect(screen.getAllByRole('article').map((card) => card.dataset.runId).sort()).toEqual(['child', 'run_parent'])
     await userEvent.click(screen.getByRole('button', { name: 'implement checkout' }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'worker' } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'child' } })
   })
 
-  it('reveals archived workers without hiding live runs, and keeps the all-workspaces choice out of Board', async () => {
+  it('reveals archived runs without hiding live runs, and keeps the all-workspaces choice out of Board', async () => {
     seed([working, merged, archivedMerged, run({ id: 'other', task: 'other workspace', workspace_id: otherWorkspace.id })])
     renderBoard()
     await userEvent.click(screen.getByRole('tab', { name: 'Map' }))
@@ -849,32 +772,15 @@ describe('lanes view', () => {
     expect(document.activeElement).toBe(within(composer).getByRole('textbox', { name: 'Message to the agent' }))
   })
 
-  it('groups a swarm under one lane with its integrator and workers', async () => {
+  it('groups a run with its child runs under one lane', async () => {
     seed([
-      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' }),
-      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator' }),
+      run({ id: 'run_parent', task: 'coordinate' }),
+      run({ id: 'child', task: 'implement checkout', parent_run_id: 'run_parent' }),
     ])
-    useStore.setState({ missions: { mission_1: mission() } })
     const tree = await openLanes()
-    expect(within(tree).getByRole('treeitem', { name: /^Swarm coordinate checkout work/ }).getAttribute('aria-expanded')).toBe('true')
-    const worker = within(tree).getByRole('treeitem', { name: /^implement checkout, Worker/ })
-    expect([worker.getAttribute('aria-level'), worker.getAttribute('aria-posinset'), worker.getAttribute('aria-setsize')]).toEqual(['3', '2', '2'])
-  })
-
-  it("lists a lane's links in its popover, so the keyboard opens what a click on a link does", async () => {
-    const recent = new Date(Date.now() - 10 * 60_000).toISOString()
-    seed([
-      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator', created_at: recent }),
-      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator', created_at: recent }),
-    ])
-    useStore.setState({ missions: { mission_1: mission() } })
-    const tree = await openLanes()
-    act(() => within(tree).getByRole('treeitem', { name: /^implement checkout, Worker/ }).focus())
-    await userEvent.keyboard('{Enter}')
-    const dialog = await screen.findByRole('dialog', { name: /^implement checkout/ })
-    await userEvent.click(within(within(dialog).getByRole('region', { name: 'Links' })).getByRole('button', { name: /^Launched by its integrator/ }))
-    const link = await screen.findByRole('dialog', { name: 'Link' })
-    expect(within(link).getByText(/^Launched by its integrator/)).toBeDefined()
+    expect(within(tree).getByRole('treeitem', { name: /^Run coordinate, 1 child run/ }).getAttribute('aria-expanded')).toBe('true')
+    const child = within(tree).getByRole('treeitem', { name: /^implement checkout, / })
+    expect([child.getAttribute('aria-level'), child.getAttribute('aria-posinset'), child.getAttribute('aria-setsize')]).toEqual(['3', '2', '2'])
   })
 
   it('closes a popover whose lane folds away and focuses the lane that draws its run', async () => {
@@ -894,20 +800,9 @@ describe('lanes view', () => {
       id: `m_${run_id}`, workspace_id: workspace.id, from_run_id: run_id!, to_run_id: 'c', kind: 'message' as const, body: `from ${run_id}`, created_at: '2026-08-14T10:30:00Z',
     }] })
     vi.mocked(api.coordMessagesList).mockImplementationOnce(sent).mockImplementationOnce(sent)
-    render(<EdgePopover edge={{ key: 'mail', kind: 'message', from: { lane: 'swarm', run: 'a', t: 0 }, to: { lane: 'c', run: 'c', t: 0 }, messages: { ids: ['m_a', 'm_b'], senders: ['a', 'b'], acked: false } }} now={Date.now()} />)
+    render(<EdgePopover edge={{ key: 'mail', kind: 'message', from: { lane: 'a', run: 'a', t: 0 }, to: { lane: 'c', run: 'c', t: 0 }, messages: { ids: ['m_a', 'm_b'], senders: ['a', 'b'], acked: false } }} now={Date.now()} />)
     expect(await screen.findByText('from a')).toBeDefined()
     expect(await screen.findByText('from b')).toBeDefined()
-  })
-
-  it('shows a failed swarm read with its error and retries it', async () => {
-    seed([run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })])
-    vi.mocked(api.missionShow).mockRejectedValueOnce(new ApiError(500, 'mission store unavailable'))
-    await openLanes()
-    const alert = await screen.findByRole('alert')
-    expect(within(alert).getByText('Swarm details')).toBeDefined()
-    expect(alert.textContent).toContain('mission store unavailable')
-    await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   })
 
   it('keeps the timeline when nothing ran in the window, so it can still pan and zoom', async () => {

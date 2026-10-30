@@ -106,8 +106,7 @@ func (b brief) String() string {
 }
 
 // runLine says who ran what and how it ended, from server-owned fields
-// and the first line of the task a member typed (or the swarm's
-// objective).
+// and the first line of the task a member typed.
 func runLine(r *store.MemoryBriefRun, now time.Time) string {
 	outcome := string(r.Outcome)
 	if outcome == "" {

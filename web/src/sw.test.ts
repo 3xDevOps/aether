@@ -82,11 +82,11 @@ describe('service worker', () => {
     })
   })
 
-  it("quietly replaces a swarm's need, tagged by the page it opens, when it ends", async () => {
-    const url = '/?page=missions&id=mis-4c8v2n6k1p'
-    const { self, dispatch } = worker([], [{ tag: url, title: 'Swarm: login rework', data: { url } }])
-    await dispatch('push', { data: { json: () => ({ title: 'Swarm: login rework', body: 'No longer needs you', url, clear: true }) } })
-    expect(self.registration.showNotification).toHaveBeenCalledWith('Swarm: login rework', {
+  it("quietly replaces a run's need, tagged by the page it opens, when it ends", async () => {
+    const url = '/?run=run-4c8v2n6k1p'
+    const { self, dispatch } = worker([], [{ tag: url, title: 'Run: login rework', data: { url } }])
+    await dispatch('push', { data: { json: () => ({ title: 'Run: login rework', body: 'No longer needs you', url, clear: true }) } })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Run: login rework', {
       body: 'No longer needs you',
       tag: url,
       silent: true,
@@ -189,8 +189,8 @@ describe('service worker', () => {
 
   it('keeps one notification per page and opens the page it names', async () => {
     const { self, dispatch } = worker()
-    const url = '/?page=missions&id=mis-rtgje8zxp6'
-    await dispatch('push', { data: { json: () => ({ title: 'Ship watches', body: 'Swarm completed', url }) } })
+    const url = '/?run=run-rtgje8zxp6'
+    await dispatch('push', { data: { json: () => ({ title: 'Ship watches', body: 'Run completed', url }) } })
     expect(self.registration.showNotification).toHaveBeenCalledWith('Ship watches', expect.objectContaining({ tag: url, data: { url } }))
     await dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
     expect(self.clients.openWindow).toHaveBeenCalledWith(url)
@@ -205,7 +205,7 @@ describe('service worker', () => {
   })
 
   it('sends a dashboard from an older build that ignores the page to open there itself', async () => {
-    const url = '/?page=missions&id=mis-rtgje8zxp6'
+    const url = '/?run=run-rtgje8zxp6'
     const old = window(true, false)
     const open = worker([old])
     await open.dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })

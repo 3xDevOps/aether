@@ -356,7 +356,7 @@ mode is installed, and Standard otherwise. `--model` picks the model,
 agent may change outside its checkout: `root`, `default` (the default) or
 `isolated` ([permission tiers](security.md#permission-tiers)).
 The first run on a server pulls the environment image, so it starts slower. To
-give one objective to a group of agents, see swarms in [teams.md](teams.md).
+let an agent hand parts of a task to other agents, see [child runs](teams.md#child-runs).
 
 Every launch carries an idempotency key. If the call fails or you press
 Ctrl-C, the CLI prints the exact retry with `--idempotency-key`; running it
@@ -400,8 +400,7 @@ linked clone. Evidence packets cover the primary repo only, and the dashboard's
 Compare menu is the primary repo's.
 Extra branches are published to their own workspaces; closing the run commits
 and publishes every repo. Each pull request is per repo; there is no cross-repo
-merge. A swarm takes extra repos the same way, for its integrator and every
-worker ([teams.md](teams.md#launch-a-swarm)); templates use one workspace.
+merge. A child run inherits its parent's extra repos ([teams.md](teams.md#child-runs)); templates use one workspace.
 
 ## 7. Watch it
 
@@ -485,8 +484,7 @@ an `answered` report or no report or it went silent, and a message continues it 
 and the wake never reached the agent, or its source went unread for an hour; see [Waits Aether can
 check](failure-handling.md#waits-aether-can-check)), and 124 on timeout. Before exiting it prints `run
 <run-id> <state>: <reason>`, with the state as `aether runs` labels it. It keeps waiting
-while the run waits on agents, CI or a process, and on a swarm worker's
-question, which its integrator answers. When Aether cannot vouch for that wait
+while the run waits on agents, CI or a process. When Aether cannot vouch for that wait
 it says so once on stderr: `run <run-id> still waits, but <condition>: status
 unknown (last read 12m ago): <error>`. It also exits 1 on its
 own error, such as an unknown run id, with the error on stderr and nothing on

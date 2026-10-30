@@ -12,7 +12,6 @@ const (
 type CoordMessagePayload struct {
 	MessageID     string             `json:"message_id"`
 	WorkspaceID   domain.WorkspaceID `json:"workspace_id"`
-	MissionID     domain.MissionID   `json:"mission_id,omitempty"`
 	FromRunID     domain.RunID       `json:"from_run_id"`
 	ToRunID       domain.RunID       `json:"to_run_id"`
 	Kind          string             `json:"kind"`

@@ -41,15 +41,11 @@ func heldByTasks(report agentstatus.Report) bool {
 }
 
 func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
-	// A swarm worker's or child run's ended turn hands its last message to
-	// its integrator or parent.
+	// A child run's ended turn hands its last message to its parent.
 	forward, message := false, ""
 	switch acp.StopReason(st.Reason) {
 	case acp.StopReasonEndTurn, acp.StopReasonMaxTokens, acp.StopReasonMaxTurnRequests, acp.StopReasonRefusal, "error":
-		d.s.mu.Lock()
-		assigned := entry.missionAssigned
-		d.s.mu.Unlock()
-		if sess := d.session(entry.runID); sess != nil && (assigned || d.s.hasParent(entry.runID)) {
+		if sess := d.session(entry.runID); sess != nil && d.s.hasParent(entry.runID) {
 			forward, message = true, acphost.LastMessage(sess.Log())
 		}
 	}
@@ -69,7 +65,7 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 		// An interrupted session is ended by its connection's end or
 		// resumed by startOneShot.
 		if st.Reason != "" && st.Reason != "interrupted" {
-			d.endOneShot(entry, st.Reason == "end_turn", false, turnEndReport(st.Reason))
+			d.endOneShot(entry, st.Reason == "end_turn", turnEndReport(st.Reason))
 		}
 		return
 	}
@@ -121,7 +117,7 @@ func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, st acphost.TurnS
 		d.s.mu.Lock()
 		entry.failReason = stopped
 		d.s.mu.Unlock()
-		d.endOneShot(entry, false, false, report)
+		d.endOneShot(entry, false, report)
 	}
 }
 
@@ -135,26 +131,12 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 			prompt = oneShotResume
 		case last.StopReason == "", last.StopReason == "interrupted" && reset:
 		default:
-			d.endOneShot(entry, last.StopReason == "end_turn", false, turnEndReport(last.StopReason))
+			d.endOneShot(entry, last.StopReason == "end_turn", turnEndReport(last.StopReason))
 			return
 		}
 	}
-	d.mu.Lock()
-	r := d.runs[entry.runID]
-	if r != nil && prompt != oneShotResume {
-		r.untried = true
-	}
-	d.mu.Unlock()
-	// The session reports acceptance before the turn's end.
-	accepted := func(_ bool, err error) {
-		if err == nil && r != nil {
-			d.mu.Lock()
-			r.untried = false
-			d.mu.Unlock()
-		}
-	}
-	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, accepted); err != nil && !usageLimited(err) {
-		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
+	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil && !usageLimited(err) {
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
 }
 
@@ -180,17 +162,14 @@ func turnEndReport(stop string) agentstatus.Report {
 }
 
 // Only the first call for a session ends it, and its session takes no input
-// from then on. A swarm worker's run is left to CompleteMission unless
-// untried: its agent never got the task, so there is nothing to judge.
-func (d *acpDriver) endOneShot(entry *supervised, ok, untried bool, idle agentstatus.Report) {
+// from then on.
+func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Report) {
 	d.mu.Lock()
 	r := d.runs[entry.runID]
 	skip := d.closed || r == nil || r.stopping || r.ended
 	live := r != nil && r.session != nil
 	if !skip {
 		r.ended = true
-		untried = untried || (!ok && r.untried)
-		r.untried = false
 	}
 	d.mu.Unlock()
 	if skip {
@@ -208,15 +187,11 @@ func (d *acpDriver) endOneShot(entry *supervised, ok, untried bool, idle agentst
 		}
 		unlock()
 		d.s.mu.Lock()
-		assigned, cid := entry.missionAssigned && !untried, entry.containerID
-		if !ok && !assigned {
+		cid := entry.containerID
+		if !ok {
 			entry.exitDetail = idle.Reason
 		}
 		d.s.mu.Unlock()
-		if assigned {
-			d.report(entry.runID, idle)
-			return
-		}
 		signal := "USR2"
 		if ok {
 			signal = "USR1"

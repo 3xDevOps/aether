@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 import { isTerminal } from '@/store/runs'
-import { missionSeqOf } from '@/store/workflow-signals'
 import { loadWholeItem } from '@/store/session-stream'
 
 export const actionTone: Record<ActionState, Tone> = {
@@ -45,7 +44,6 @@ export const actionStateWord: Record<ActionState, string> = {
 
 const targetWord: Record<ActionTarget['kind'], string> = {
   run: 'Open run',
-  swarm: 'Open swarm',
   pr: 'Open pull request',
   workspace: 'Open workspace',
   environment: 'Open environment',
@@ -59,9 +57,9 @@ const goneWord: Partial<Record<ActionTarget['kind'], string>> = {
   workspace: 'This workspace no longer exists',
 }
 
-const launchTools = new Set(['aether_launch_run', 'aether_launch_swarm', 'aether_relaunch_run'])
+const launchTools = new Set(['aether_launch_run', 'aether_relaunch_run'])
 
-/** Whether the call starts a run or swarm, whose target can reach the transcript before the store. */
+/** Whether the call starts a run, whose target can reach the transcript before the store. */
 function startsWork(action: AssistantAction): boolean {
   return launchTools.has(action.tool) || (action.tool === 'aether_run_lifecycle' && action.input.action === 'relaunch')
 }
@@ -92,9 +90,8 @@ export function useActionNames(): ActionNames {
 }
 
 /**
- * Whether the store, once loaded, no longer holds the target. Swarms load on
- * demand, so only runs and workspaces can tell; a launch's own run can reach
- * the transcript before the store hears of it, so it never reads as gone.
+ * Whether the store, once loaded, no longer holds the target. Only runs and
+ * workspaces can tell; a launch's own run can reach the transcript before the store hears of it, so it never reads as gone.
  */
 export function useTargetGone(action: AssistantAction): boolean {
   const target = action.target
@@ -119,43 +116,13 @@ export function useOpenTarget(): (target: ActionTarget) => void {
   }
 }
 
-/**
- * Whether a launched run or swarm still works in the background after the
- * panel closes, and why a launched swarm could not be read. The store keeps
- * runs current but refreshes swarms only for the active workspace, so a
- * launched swarm is read here, then again on each of its changes; until read
- * it counts as working. The phase read is kept, since another workspace's
- * list can replace the store's swarms.
- */
-export function useBackground(action: AssistantAction): { background: boolean; swarmError?: string } {
-  const swarm = action.state === 'done' && startsWork(action) && action.target?.kind === 'swarm' ? action.target.id : undefined
-  const seq = useStore((s) => (swarm ? missionSeqOf(swarm)(s) : 0))
-  const [error, setError] = useState<string>()
-  const [phase, setPhase] = useState<string>()
-  useEffect(() => {
-    if (!swarm) return
-    let live = true
-    api.missionShow(swarm).then((result) => {
-      if (!live) return
-      setError(undefined)
-      setPhase(result.mission.phase)
-      useStore.getState().upsertMission(result.mission)
-    }, (err) => live && setError(`Could not read swarm ${swarm}: ${message(err)}`))
-    return () => {
-      live = false
-    }
-  }, [swarm, seq])
-  const background = useStore((s) => {
-    if (action.state !== 'done' || !startsWork(action) || !action.target) return false
-    if (action.target.kind === 'run') {
-      const run = s.runs[action.target.id]
-      return run !== undefined && !isTerminal(run.status)
-    }
-    if (action.target.kind !== 'swarm') return false
-    const shown = s.missions[action.target.id]?.phase ?? phase
-    return shown !== 'completed' && shown !== 'cancelled'
+/** Whether a launched run still works in the background after the panel closes. */
+export function useBackground(action: AssistantAction): boolean {
+  return useStore((s) => {
+    if (action.state !== 'done' || !startsWork(action) || action.target?.kind !== 'run') return false
+    const run = s.runs[action.target.id]
+    return run !== undefined && !isTerminal(run.status)
   })
-  return { background: background && !error, swarmError: error }
 }
 
 export function retryDraft(action: AssistantAction, names: ActionNames): void {
@@ -169,7 +136,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
   const names = useActionNames()
   const open = useOpenTarget()
   const gone = useTargetGone(action)
-  const { background, swarmError } = useBackground(action)
+  const background = useBackground(action)
   const details = useStore((s) => s.expandedRows[assistantSessionID]?.[action.id] ?? false)
   const setRow = useStore((s) => s.setSessionRow)
   const summary = actionSummary(action, names)
@@ -206,14 +173,13 @@ export function ActionCard({ action }: { action: AssistantAction }) {
       {facts && <p className="pl-5 text-ui-sm break-words text-muted">{facts}</p>}
       {preference && <PreferenceDetail facts={preference} />}
       {preference?.kind === 'used' && <UsedPreferences action={action} items={preference.items} />}
-      {background && <p className="pl-5 text-ui-sm break-words text-muted">{action.target?.kind === 'swarm' ? hearBack.swarm : hearBack.run}</p>}
+      {background && <p className="pl-5 text-ui-sm break-words text-muted">{hearBack.run}</p>}
       {!known && <InputRows input={action.input} />}
       {shownError && (
         <p role="alert" className="ml-5 rounded-control bg-state-failed-soft px-2 py-1 font-code text-ui-sm break-words whitespace-pre-wrap text-text">
           {shownError}
         </p>
       )}
-      {swarmError && <p className="pl-5 text-ui-sm break-words text-muted">{swarmError}</p>}
       {gone && goneWord[action.target!.kind] && <p className="pl-5 text-ui-sm text-muted">{goneWord[action.target!.kind]}</p>}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-5">
         {link && (
