@@ -125,7 +125,6 @@ type soakWatcher struct {
 	// arrivals is when the server's stream first showed each numbered line.
 	arrivals map[int]time.Time
 	lastTick int
-	items    []string
 	statuses []string
 	ticks    []tickObs
 }

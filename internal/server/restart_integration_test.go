@@ -103,7 +103,7 @@ type soakEnv struct {
 	exited chan struct{}
 }
 
-func buildSoakBinary(t *testing.T, pkg, out string, ldflags string) string {
+func buildSoakBinary(t *testing.T, pkg, out string, ldflags string) {
 	t.Helper()
 	args := []string{"build", "-o", out}
 	if ldflags != "" {
@@ -115,7 +115,6 @@ func buildSoakBinary(t *testing.T, pkg, out string, ldflags string) string {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build %s: %v\n%s", pkg, err, output)
 	}
-	return out
 }
 
 func copyExecutable(t *testing.T, from, to string) {

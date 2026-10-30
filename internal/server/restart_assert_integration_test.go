@@ -171,6 +171,9 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 				}
 				applied := strings.Count(termLog, ev.ID)
 				fmt.Fprintf(&report, "terminal input %s: ok=%v applied=%d %s\n", ev.ID, ev.OK, applied, firstLine(ev.Err))
+				if ev.OK && applied != 1 {
+					t.Errorf("terminal input %s was accepted but applied %d times, want once", ev.ID, applied)
+				}
 				if applied > 1 {
 					t.Errorf("unkeyed terminal input %s was applied %d times", ev.ID, applied)
 				}
