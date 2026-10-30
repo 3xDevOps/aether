@@ -1,6 +1,7 @@
-import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
+import { useStore } from '@/store'
 
 const slideMs = 220
 
@@ -34,15 +35,21 @@ export function SlideOut({ open, width, top, className, children }: {
   className?: string
   children: ReactNode
 }) {
-  const sidebar = document.getElementById('sidebar')
-  const style: CSSProperties = { width: `min(${width}, ${sidebar ? 'calc(100vw - 100%)' : '100vw'})`, ...(top === undefined ? {} : { top }) }
+  const collapsed = useStore((s) => s.sidebarCollapsed)
+  const [sidebar, setSidebar] = useState(() => document.getElementById('sidebar'))
+  // Hiding the sidebar removes the element the panel sits in, so look again once it has gone.
+  useLayoutEffect(() => setSidebar(document.getElementById('sidebar')), [collapsed])
+  const style: CSSProperties = {
+    width: `min(${width}, ${sidebar ? 'calc(100vw - 100%)' : '100vw'})`,
+    ...(top === undefined ? { bottom: sidebar ? 0 : 'var(--keyboard-inset, 0px)' } : { top }),
+  }
   return createPortal(
     <div
       style={style}
       className={cn(
         'pointer-events-none z-40 [clip-path:inset(-2rem_-2rem_-2rem_0)]',
         sidebar ? 'absolute left-full' : 'fixed left-0',
-        top === undefined && 'inset-y-0',
+        top === undefined && 'top-0',
       )}
     >
       <div

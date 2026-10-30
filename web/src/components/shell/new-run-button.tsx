@@ -87,7 +87,7 @@ export function SplitNewRun({ blocked, shortcut, onOpen }: {
 
   const needsTask = last?.mode === 'headless'
   const launchQuick = async () => {
-    if (blocked || busy || !last) return
+    if (blocked || busy || !last || !saved.fresh) return
     if (needsTask || savedRefused(last, saved.result)) {
       onOpen()
       return

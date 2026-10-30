@@ -122,9 +122,9 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   }, [error])
 
   useEffect(() => {
-    shown.current = true
+    shown.current = open
     return () => { shown.current = false }
-  }, [])
+  }, [open])
 
   useEffect(() => {
     let live = true

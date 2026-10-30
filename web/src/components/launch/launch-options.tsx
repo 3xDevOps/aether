@@ -170,12 +170,12 @@ export function ChildRunsSwitch({ value, onChange, enabled, unavailable, disable
           id="launch-child-runs"
           aria-describedby="launch-child-runs-help"
           checked={on}
-          disabled={disabled || !!unavailable}
+          disabled={disabled || !!unavailable || enabled === undefined}
           onCheckedChange={(next) => onChange(next === (enabled === true) ? '' : next ? 'on' : 'off')}
         />
       </div>
       <p id="launch-child-runs-help" className="text-ui-sm text-muted">
-        {unavailable ?? ['Lets the agent start other agents as child runs, and the runs it starts too.', value ? 'Set for this run only.' : enabled === undefined ? '' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim()}
+        {unavailable ?? (enabled === undefined ? 'Reading your child runs setting…' : ['Lets the agent start other agents as child runs, and the runs it starts too.', value ? 'Set for this run only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
       </p>
     </div>
   )
