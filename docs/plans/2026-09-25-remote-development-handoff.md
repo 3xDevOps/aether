@@ -1,7 +1,7 @@
 # Remote development implementation
 
 The product contract is
-[the remote-development plan](docs/plans/2026-09-25-remote-development.md).
+[the remote-development plan](2026-09-25-remote-development.md).
 The implementation is in [PR #247](https://github.com/3xDevOps/aether/pull/247).
 Hosted and native-harness acceptance is recorded below. Operational commands
 belong in the public guides; current CI, review and publication evidence belongs
@@ -188,9 +188,9 @@ build, HTTP 200, or a transcript tail.
 
 ## Operational guides
 
-See [coordination](docs/coordination.md), [harnesses](docs/harnesses.md),
-[terminal](docs/terminal.md), [gateway](docs/local-gateway.md),
-[dashboard](docs/dashboard-frontend.md), [quickstart](docs/quickstart.md),
-[security](docs/security.md), [privacy](docs/privacy.md),
-[testing](docs/testing.md), [install](docs/install.md), and
-[notices](docs/notices.md).
+See [coordination](../coordination.md), [harnesses](../harnesses.md),
+[terminal](../terminal.md), [gateway](../local-gateway.md),
+[dashboard](../dashboard-frontend.md), [quickstart](../quickstart.md),
+[security](../security.md), [privacy](../privacy.md),
+[testing](../testing.md), [install](../install.md), and
+[notices](../notices.md).

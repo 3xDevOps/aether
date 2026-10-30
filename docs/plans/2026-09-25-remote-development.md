@@ -2,8 +2,9 @@
 
 **Status:** Implemented in [PR #247](https://github.com/3xDevOps/aether/pull/247).
 Operational guides describe the implemented surfaces and prerequisites.
-[handoff.md](../../handoff.md) records observed acceptance, vendor limitations
-and the CI/review/publication gates; the PR and release carry current results.
+[The handoff](2026-09-25-remote-development-handoff.md) records observed
+acceptance, vendor limitations and the CI/review/publication gates; the PR and
+release carry current results.
 
 **Goal:** A developer can implement, run, inspect, correct, and publish a change
 entirely through Aether. An agent can observe and operate the application it
