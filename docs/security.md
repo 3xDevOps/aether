@@ -866,7 +866,7 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 - Containers share the host kernel. A kernel or Docker escape reaches the
   host.
 - Outbound traffic is limited only for runs of a workspace with egress
-  control on. Other runs, environment terminals and verification containers
+  control on. Other runs and environment terminals
   reach the internet, your network and ports the server host listens on.
 - An egress-limited run still reaches services on the server host, and every
   allowed host can receive data. A client that ignores the proxy variables

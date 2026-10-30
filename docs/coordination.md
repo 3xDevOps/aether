@@ -59,7 +59,7 @@ its own binary once per process, and re-hashes the staged copy only when that
 file's device, inode, size, mtime, ctime, or mode changed since it was last
 verified.
 Every run receives its own authenticated socket, independently of conflict
-policy. Member terminals and verification containers receive the CLI without
+policy. Member terminals receive the CLI without
 borrowing a run's identity.
 
 ## Wire v3

@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestDroppingDeliveredWatchConditionsMigrationFromV96(t *testing.T) {
+func TestDroppingDeliveredWatchConditionsMigrationFromV97(t *testing.T) {
 	t.Parallel()
-	const previous = 96
+	const previous = 97
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, previous)
 	if _, execErr := raw.Exec(`
