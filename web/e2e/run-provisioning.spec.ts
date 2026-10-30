@@ -76,7 +76,7 @@ test('a run opened while its container starts says so', async ({ page, aether })
   })
   launched.catch(() => {})
 
-  await sidebar.getByRole('button', { name: /the provisioning run/ }).click()
+  await sidebar.getByRole('button', { name: /the provisioning session/ }).click()
   await expect(
     page.getByRole('heading', { name: 'the provisioning session', exact: true }),
   ).toBeVisible()

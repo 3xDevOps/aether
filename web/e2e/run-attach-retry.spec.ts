@@ -50,7 +50,7 @@ test('a run whose session is missing never reads as offline while it waits', asy
       return
     }
     if (opened <= drops + 1) {
-      ws.send(JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }))
+      ws.send(JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no terminal for session' }))
       ws.close({ code: 1008, reason: 'attach refused' })
     }
   })
@@ -92,6 +92,6 @@ test('a run whose session is missing never reads as offline while it waits', asy
 
   // The wait is the whole of what is on screen: no refusal to read, and
   // nothing to press that could not help.
-  await expect(page.getByText('ptyhost: no session for run')).toHaveCount(0)
+  await expect(page.getByText('ptyhost: no terminal for session')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0)
 })

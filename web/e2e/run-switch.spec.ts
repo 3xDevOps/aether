@@ -217,7 +217,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   unanswered = run.id
 
   const sidebar = page.getByRole('navigation', { name: 'Aether' })
-  await sidebar.getByRole('button', { name: /the second run/ }).click()
+  await sidebar.getByRole('button', { name: /the second session/ }).click()
   await expect(
     page.getByRole('heading', { name: 'the second session', exact: true }),
   ).toBeVisible()
