@@ -82,7 +82,6 @@ func TestWatchesBelongToTheirCreator(t *testing.T) {
 		{protocol.WatchCreateParams{Target: create.Target, Conditions: []string{"deployed"}}, "no deploy signal"},
 		{protocol.WatchCreateParams{Target: create.Target, Conditions: []string{"ci"}}, "not supported yet"},
 		{protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetPR, Repo: "o/r", Number: 1}}, "not supported yet"},
-		{protocol.WatchCreateParams{Target: create.Target, Conditions: []string{"delivered"}}, "does not apply to a run"},
 		{protocol.WatchCreateParams{Target: create.Target, ExpiresAt: "2099-01-01T00:00:00Z"}, "more than 90 days"},
 	} {
 		var pe *protocol.Error

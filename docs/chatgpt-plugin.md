@@ -132,7 +132,6 @@ can push branches and open pull requests.
 | `aether_swarm_manage` | no | yes | yes | Archiving closes the swarm's completed runs; a released worker goes on working under its integrator |
 | `aether_handoff_run` | no | yes | no | Only the teammate can hand the run back |
 | `aether_replace_integrator` | no | yes | yes | The old integrator loses its authority; the new one can push and open PRs |
-| `aether_integration_decide` | no | yes | yes | A delivered candidate moves a branch or publishes a proposal ref |
 | `aether_pr_create` | no | no | yes | Opens a pull request on GitHub; it can be closed |
 | `aether_pr_merge` | no | yes | yes | A merge on GitHub cannot be taken back |
 | `aether_memory_add`, `aether_memory_pin` | no | no | no | Notes stay on the user's server; unpin and remove undo them |
@@ -160,10 +159,10 @@ search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-searc
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
 tools, and each tool's name, description and compact input schema at most 3500
-bytes, 15000 for all of them together. Today that is 39 tools, 14970 bytes and
-3585 o200k tokens, the largest tool `aether_launch_run` at 1410 bytes; the
-whole `tools/list` JSON is 21732 bytes and 5173 tokens. Measure tokens offline with the
-`o200k_base` tokenizer and update these numbers when tools change. Give each
+bytes, 15000 for all of them together. Today that is 37 tools and 14208 bytes, the largest tool
+`aether_launch_run` at 1410 bytes; the whole `tools/list` JSON is 20616 bytes.
+Measure tokens offline with the `o200k_base` tokenizer and update these numbers
+when tools change. Give each
 tool one "Use this when" sentence, describe a property only when its name does
 not say enough, and fold a read into a tool that already answers it, as
 `aether_launch_options` carries templates and models. Merge only tools of the
@@ -296,8 +295,8 @@ use, the categories of recipients, data retention timelines"
 [legal/privacy-connectors.md](legal/privacy-connectors.md) drafts the policy
 from them.
 
-**Collected from ChatGPT or Claude.** Tool arguments: workspace, run, swarm,
-candidate and note ids, task and message text, answers, template parameters,
+**Collected from ChatGPT or Claude.** Tool arguments: workspace, run, swarm
+and note ids, task and message text, answers, template parameters,
 pull request titles and bodies, team memory note text and cited paths, the
 member ids of agent accounts to launch on or read, a teammate's member id or
 display name for a handoff, watch targets, conditions and expiry times, and

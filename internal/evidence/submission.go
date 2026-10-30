@@ -2,8 +2,10 @@ package evidence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -17,7 +19,7 @@ import (
 // Missing packets occupy empty entries; unavailable sources stay unavailable.
 // It holds every involved run's capture/expiry/purge lock through consume, allowing
 // acceptance to commit its refreshed observations before cleanup can remove them.
-// This is a presence check, not candidate required_sources completeness validation.
+// This is a presence check, not required_sources completeness validation.
 func (s *Service) WithSubmissionSources(ctx context.Context, workspace domain.WorkspaceID, ids []string, consume func([]protocol.EvidencePacket) error) error {
 	if workspace == "" || len(ids) == 0 || consume == nil {
 		return fmt.Errorf("%w: workspace, packet ids and submission callback are required", ErrInvalidRequest)
@@ -86,7 +88,7 @@ func (s *Service) WithSubmissionSources(ctx context.Context, workspace domain.Wo
 }
 
 func (s *Service) checkSubmissionTranscript(ctx context.Context, packet *store.EvidencePacket, truncated bool) error {
-	reader, err := s.openCandidateTranscript(packet)
+	reader, err := s.openTranscript(packet)
 	if err != nil {
 		return err
 	}
@@ -125,4 +127,19 @@ func (s *Service) checkSubmissionTranscript(ctx context.Context, packet *store.E
 		}
 	}
 	return nil
+}
+
+func (s *Service) openTranscript(packet *store.EvidencePacket) (io.ReadCloser, error) {
+	path, err := s.artifactPath(StorageKey(packet))
+	if err != nil {
+		return nil, err
+	}
+	reader, err := s.fs.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrTranscriptUnavailable
+		}
+		return nil, err
+	}
+	return reader, nil
 }

@@ -101,7 +101,6 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		RunID       string `json:"run_id"`
 		MissionID   string `json:"mission_id"`
 		QuestionID  string `json:"question_id"`
-		CandidateID string `json:"candidate_id"`
 		ID          string `json:"id"`
 		ConnectorID string `json:"connector_id"`
 		MemberID    string `json:"member_id"`
@@ -115,14 +114,10 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		WorkspaceID string `json:"workspace_id"`
 	}
 	var res struct {
-		Run       made `json:"run"`
-		Mission   made `json:"mission"`
-		Item      made `json:"item"`
-		Candidate struct {
-			ID          string `json:"candidate_id"`
-			WorkspaceID string `json:"workspace_id"`
-		} `json:"candidate"`
-		Merge struct {
+		Run     made `json:"run"`
+		Mission made `json:"mission"`
+		Item    made `json:"item"`
+		Merge   struct {
 			AbsorbedID string `json:"absorbed_id"`
 		} `json:"merge"`
 		Link struct {
@@ -130,8 +125,8 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		} `json:"link"`
 	}
 	_ = json.Unmarshal(result, &res)
-	target := cmp.Or(res.Run.ID, res.Mission.ID, res.Item.ID, res.Candidate.ID, ids.RunID, ids.MissionID, ids.QuestionID, ids.CandidateID, ids.ID)
-	workspace := cmp.Or(res.Run.WorkspaceID, res.Mission.WorkspaceID, res.Item.WorkspaceID, res.Candidate.WorkspaceID, ids.WorkspaceID)
+	target := cmp.Or(res.Run.ID, res.Mission.ID, res.Item.ID, ids.RunID, ids.MissionID, ids.QuestionID, ids.ID)
+	workspace := cmp.Or(res.Run.WorkspaceID, res.Mission.WorkspaceID, res.Item.WorkspaceID, ids.WorkspaceID)
 	switch method {
 	case protocol.MethodConnectorRevoke:
 		target = ids.ConnectorID

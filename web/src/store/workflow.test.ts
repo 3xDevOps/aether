@@ -12,7 +12,6 @@ import {
   needsYouBelow,
   runFacts,
   shareTree,
-  type CandidateFacts,
   type ChildRunFacts,
   type RunFacts,
   type WorkflowNode,
@@ -115,7 +114,7 @@ const tasks = [
   missionTask({ id: 'task_2', revision: missionTaskRevision({ task_id: 'task_2', title: 'Second' }), status: 'ready', dependencies: [{ task_id: 'task_2', revision: 1, depends_on_task_id: 'task_1', depends_on_revision: 1 }] }),
 ]
 
-function swarm(over: Partial<MissionDetail> = {}, runs: Record<string, RunFacts> = {}, candidates: CandidateFacts[] = []) {
+function swarm(over: Partial<MissionDetail> = {}, runs: Record<string, RunFacts> = {}) {
   const detail: MissionDetail = {
     mission: mission({ current_integrator_run_id: 'run_int' }),
     tasks,
@@ -125,22 +124,17 @@ function swarm(over: Partial<MissionDetail> = {}, runs: Record<string, RunFacts>
     questions: [],
     ...over,
   }
-  return deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel: 'Integrator' })
+  return deriveSwarmWorkflow({ detail, runs, integratorLabel: 'Integrator' })
 }
 
 describe('swarm workflow', () => {
-  it('links task to attempt to submission, and lists candidates after the tasks', () => {
-    const candidate: CandidateFacts = {
-      candidate_id: 'cand_1', state: 'frozen', candidate_revision: 'rev', target_ref: 'refs/heads/main', created_at: '2026-08-14T10:20:00Z',
-      verifications: [{ candidate_revision: 'rev', status: 'failed', exit_code: 2, created_at: '2026-08-14T10:21:00Z' }],
-    }
-    const tree = swarm({ submissions: [submission({ state: 'accepted', decided_at: '2026-08-14T10:12:00Z' })] }, {}, [candidate])
-    expect(tree.children.map((child) => child.id)).toEqual(['task:task_1', 'task:task_2', 'candidate:cand_1'])
+  it('links task to attempt to submission', () => {
+    const tree = swarm({ submissions: [submission({ state: 'accepted', decided_at: '2026-08-14T10:12:00Z' })] })
+    expect(tree.children.map((child) => child.id)).toEqual(['task:task_1', 'task:task_2'])
     const task = byID(tree, 'task:task_1')!
     expect(task.state).toBe('completed')
     expect(task.children[0]).toMatchObject({ id: 'attempt:att_1', parentId: 'task:task_1', runId: 'run_w1' })
     expect(task.children[0]!.children[0]).toMatchObject({ id: 'submission:sub_1', parentId: 'attempt:att_1', state: 'completed', label: 'Accepted' })
-    expect(byID(tree, 'candidate:cand_1')).toMatchObject({ state: 'failed', detail: 'Verification failed: exit 2' })
     expect(countsText(tree.counts!)).toBe('1 of 2 tasks done')
     expect(byID(tree, 'task:task_2')).toMatchObject({ state: 'pending', detail: 'No worker yet · Depends on rewrite the guest checkout flow' })
     expect(byID(swarm(), 'task:task_2')).toMatchObject({ state: 'waiting', detail: 'Waiting on rewrite the guest checkout flow' })
@@ -159,19 +153,6 @@ describe('swarm workflow', () => {
     })
     expect(byID(revised, 'task:task_1')).toMatchObject({ state: 'pending', detail: 'No worker yet' })
     expect(byID(revised, 'task:task_2')).toMatchObject({ state: 'waiting', detail: 'Waiting on rewrite the guest checkout flow' })
-  })
-
-  it('shows a conflicted candidate, a candidate never verified and a delivered one', () => {
-    const tree = swarm({}, {}, [
-      { candidate_id: 'c1', state: 'conflicted', target_ref: 'main', conflicts: ['a.go', 'b.go'], created_at: '2026-08-14T10:00:00Z' },
-      { candidate_id: 'c2', state: 'frozen', candidate_revision: 'r', target_ref: 'main', created_at: '2026-08-14T10:00:00Z' },
-      { candidate_id: 'c3', state: 'frozen', target_ref: 'main', delivery_receipt: { result: 'landed', created_at: '2026-08-14T10:05:00Z' }, created_at: '2026-08-14T10:00:00Z' },
-    ])
-    expect(byID(tree, 'candidate:c1')!.detail).toBe('2 conflicts: a.go, b.go')
-    expect(byID(tree, 'candidate:c2')).toMatchObject({ state: 'unknown', detail: 'Verification not checked yet' })
-    expect(byID(tree, 'candidate:c3')).toMatchObject({ state: 'completed', detail: 'Delivered' })
-    const unread = swarm({}, {}, [{ candidate_id: 'c4', state: 'conflicted', target_ref: 'main', created_at: '2026-08-14T10:00:00Z', readError: 'integration.show: permission denied' }])
-    expect(byID(unread, 'candidate:c4')).toMatchObject({ state: 'unknown', detail: 'integration.show: permission denied' })
   })
 
   it('surfaces a worker that needs you through its folded task', () => {
@@ -209,7 +190,7 @@ describe('child runs', () => {
   it('nests a worker\'s child runs under its attempt and the integrator\'s under the root', () => {
     const detail: MissionDetail = { mission: mission({ current_integrator_run_id: 'run_int' }), tasks, attempts: [attempt({})], submissions: [], diagnostics: [], questions: [] }
     const tree = deriveSwarmWorkflow({
-      detail, runs: {}, candidates: [], integratorLabel: 'Integrator',
+      detail, runs: {}, integratorLabel: 'Integrator',
       childRuns: [childFacts('wc', 'run_w1'), childFacts('ic', 'run_int')],
     })
     expect(byID(tree, 'run:wc')?.parentId).toBe('attempt:att_1')

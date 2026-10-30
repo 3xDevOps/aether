@@ -118,8 +118,6 @@ Reference:
   requirements, the listing package, testing and review.
 - [legal/](legal/): drafts of the connector privacy policy and terms, not yet
   approved or published.
-- [Candidate integration](integration.md): how swarm results are verified
-  and delivered.
 - [MCP bridge](mcp-bridge.md): the coordination and memory tools inside a run's
   container.
 - [Agent execution separation](agent-execution-separation.md): a design record

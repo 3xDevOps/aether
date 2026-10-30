@@ -759,8 +759,7 @@ audit history.
 returning `{"ok":true}`. It permanently removes an inactive workspace and its
 server-side data, repository and mirror keys. It preserves member accounts,
 homes, local clones and upstream repositories. Revoke remote deploy keys
-separately. Active runs, pending runtime or swarm work, configured schedules,
-active candidate verification and unfinished delivery block deletion; the
+separately. Active runs, pending runtime or swarm work, configured schedules block deletion; the
 error names the blocker. In-flight control or Git operations return `-32003`
 instead of waiting behind them. Cleanup errors leave the workspace available
 for retry but do not restore already removed data. Success publishes
@@ -1087,45 +1086,7 @@ dashboard's query state: `<dashboard_url>/?run=<run_id>` opens a run and
 `<dashboard_url>/?page=missions&id=<mission_id>` a swarm. The edge serves no
 dashboard, so there is no link without `web-port`.
 
-### Candidate integration methods
-
-The authenticated gateway exposes the candidate integration service through
-the same generic control-channel route. `aether gui` sends these calls over
-its authenticated SSH backend; `aether-server --web-port` dispatches them
-in-process for the member identified by Tailscale WhoIs. The method names,
-parameter fields, aggregate states, and result objects are documented in
-[integration.md](integration.md).
-
-| Method | Request body | Success result |
-| --- | --- | --- |
-| `integration.prepare` | `IntegrationPrepareParams` | `{ "candidate": Candidate }` |
-| `integration.show` | `IntegrationShowParams` | `{ "candidate": Candidate }` |
-| `integration.patch` | `IntegrationShowParams` | `{ "patch": string, "truncated": boolean }` |
-| `integration.list` | `IntegrationListParams` | `{ "candidates": CandidateSummary[] }` |
-| `integration.resolve` | `IntegrationResolveParams` | `{ "candidate": Candidate }` |
-| `integration.verify` | `IntegrationVerifyParams` | `{ "candidate": Candidate }` |
-| `integration.request_delivery` | `IntegrationRequestDeliveryParams` | `{ "candidate": Candidate }` |
-| `integration.decide` | `IntegrationDecideParams` | `{ "candidate": Candidate }` |
-| `integration.deliver` | `IntegrationDeliverParams` | `{ "candidate": Candidate }` |
-| `integration.delete` | `IntegrationDeleteParams` | `{}` |
-
-For example, the dashboard sends the params object directly (not a JSON-RPC
-envelope):
-
-```http
-POST /api/v1/integration.show
-Content-Type: application/json
-Authorization: Bearer <local-gateway-token>
-
-{"workspace_id":"ws_123","candidate_id":"cand_456"}
-```
-
-The response is `200` with the result object as the whole body. Every
-integration mutation is authenticated and re-authorized at the service
-boundary; a client cannot supply an actor, run identity, swarm authority,
-or push grant. A transport failure is handled by the existing local-gateway
-redial/retry policy, while a service denial, conflict, stale revision, or
-unavailable owned source remains the server's protocol error.
+The dashboard also calls these methods through the same route:
 
 | Method | Params | Result |
 | --- | --- | --- |
@@ -2589,17 +2550,6 @@ These tell a client what to re-read; none carries the full state.
   {"type":"run.pr","run_id":"run_...","payload":{"run_id":"run_...","number":128,
    "url":"https://github.com/owner/name/pull/128","state":"merged",
    "merged_at":"2026-10-20T01:02:03Z"}}
-  ```
-
-- `integration.changed`: an integration candidate, its verification or
-  its delivery was written. `state` and `version` are the candidate's after
-  the write, so verification and delivery progress raise `version` while
-  `state` can stay `frozen`; `mission_id` is empty for a candidate outside a
-  swarm. Re-read `integration.show`.
-
-  ```json
-  {"type":"integration.changed","payload":{"mission_id":"mis_...",
-   "candidate_id":"cand_...","state":"frozen","version":4}}
   ```
 
 - `mission.changed`: see [coordination.md](coordination.md). `change`

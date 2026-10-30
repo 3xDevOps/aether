@@ -845,11 +845,10 @@ describe('swarm', () => {
       useStore.setState({ workspaces: { [workspace.id]: workspace, [docs.id]: docs } })
     })
 
-    it('creates the swarm with them and says candidates combine /workspace only', async () => {
+    it('creates the swarm with them', async () => {
       useStore.setState({ info: { ...serverInfo, features: ['multi-repo', 'swarm-repos'] } })
       await openSwarm()
       await addDocs()
-      expect(screen.getByText(/Candidates combine \/workspace only/)).toBeTruthy()
       await create('coordinate checkout work')
       await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
       expect(vi.mocked(api.missionCreate).mock.calls[0][0].extra_workspace_ids).toEqual([docs.id])

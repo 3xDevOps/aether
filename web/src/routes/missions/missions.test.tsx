@@ -178,25 +178,15 @@ describe('swarm list', () => {
 })
 
 describe('swarm detail', () => {
-  it('orders its sections and keeps internals behind Technical details', async () => {
+  it('orders its sections', async () => {
     seed({ runs: { run_integrator: toRecord(integrator()) } })
     await mount(showing({}, { questions: [missionQuestion({ answer: 'guest', answered_at: '2026-08-14T10:02:00Z', answered_by_member_id: bob.id })], tasks: [missionTask()], attempts: [attempt()] }))
-    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(['Questions from the integrator', 'Tasks', 'Agent messages', 'Integration'])
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(['Questions from the integrator', 'Tasks', 'Agent messages'])
     const regions = screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'))
-    expect(regions.filter((name) => name !== 'Candidate review')).toEqual(['Swarm', 'Questions from the integrator', 'Tasks', 'Agent messages', 'Integration'])
+    expect(regions).toEqual(['Swarm', 'Questions from the integrator', 'Tasks', 'Agent messages'])
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('coordinate checkout work')
     expect(screen.getByText('Workers run. The integrator accepts their work, verifies and delivers the result, then reports success.')).toBeDefined()
     expect(screen.getByText('Answered by Bob')).toBeDefined()
-    expect(within(screen.getByRole('region', { name: 'Integration' })).getByRole('button', { name: 'Open integrator' })).toBeDefined()
-    expect(screen.getAllByRole('button', { name: 'Open integrator' })).toHaveLength(1)
-    expect(screen.queryByText('mission_1')).toBeNull()
-
-    await userEvent.click(screen.getByRole('button', { name: 'Integration' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Technical details' }))
-    expect(screen.getByText('mission_1')).toBeDefined()
-    expect(screen.getByText('task_1 · revision 1')).toBeDefined()
-    expect(screen.getByText("Claude Code · Background · Alice Claude Code · Standard · Alice")).toBeDefined()
-    expect(screen.getByText('rewrite the guest checkout flow · attempt 1')).toBeDefined()
   })
 
   it('names the extra repos every run checks out', async () => {
@@ -204,17 +194,6 @@ describe('swarm detail', () => {
     seed({ runs: { run_integrator: toRecord(integrator()) }, workspaces: { [workspace.id]: workspace, [api.id]: api } })
     await mount(showing({ extra_workspace_ids: [api.id, 'wsp_deleted'] }))
     expect(screen.getByText('Extra repos: api, wsp_deleted, at /repos/<name> in every run.')).toBeDefined()
-  })
-
-  it('links run IDs in Technical details to their runs', async () => {
-    seed({ runs: { run_integrator: toRecord(integrator()) } })
-    await mount(showing({}, { tasks: [missionTask()], attempts: [attempt()] }))
-    await userEvent.click(screen.getByRole('button', { name: 'Integration' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Technical details' }))
-    await userEvent.click(screen.getAllByRole('button', { name: 'run_worker' })[0])
-    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_worker' } })
-    await userEvent.click(screen.getAllByRole('button', { name: 'run_integrator' }).at(-1)!)
-    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_integrator' } })
   })
 
   it('answers an open question from the primary action', async () => {
@@ -339,15 +318,6 @@ describe('swarm detail', () => {
     await userEvent.keyboard('{ArrowLeft}')
     expect(root.getAttribute('aria-expanded')).toBe('false')
     expect(tasks.queryByText('add empty cart tests')).toBeNull()
-  })
-
-  it('reads the candidates again on integration.changed', async () => {
-    seed({ runs: { run_integrator: toRecord(integrator()) } })
-    const client = showing({}, { tasks: [missionTask()] })
-    await mount(client)
-    const reads = vi.mocked(client.integrationList).mock.calls.length
-    await act(async () => useStore.getState().bumpWorkflowSignal('integrationSeq', 'mission_1'))
-    expect(vi.mocked(client.integrationList).mock.calls.length).toBeGreaterThan(reads)
   })
 
   it('keeps control holds and workers that need you visible when the integrator is folded', async () => {

@@ -20,7 +20,6 @@ import type { AgentInfo, Mission } from '@/lib/types'
 import { AgentMessages } from '@/routes/missions/agent-messages'
 import { ClampedText } from '@/routes/missions/clamped-text'
 import { CancelSwarm, ReplaceIntegrator } from '@/routes/missions/dialogs'
-import { SwarmIntegration } from '@/routes/missions/integration'
 import { answerFormID, SwarmQuestions } from '@/routes/missions/questions'
 import {
   integratorLabel,
@@ -272,16 +271,6 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
           />
           <SwarmTasks detail={detail} agents={agents} canRelease={canRelease} client={client} onChanged={onChanged} />
           <AgentMessages detail={detail} client={client} />
-          <SwarmIntegration
-            detail={detail}
-            agents={agents}
-            client={client}
-            action={!openQuestion && integratorRunID && !missing && (
-              <Button size="sm" variant={final ? 'secondary' : 'primary'} onClick={() => navigate('run', { runId: integratorRunID })}>
-                Open integrator
-              </Button>
-            )}
-          />
         </div>
       </div>
       {dialog === 'replace' && (

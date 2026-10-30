@@ -306,7 +306,6 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   ),
   'coord.message.acked': () => 'An agent read its message',
   'mission.changed': (p) => (p.deleted ? 'A swarm was deleted' : <>Swarm <MissionName id={p.mission_id} /> updated</>),
-  'integration.changed': (p) => <>Swarm <MissionName id={p.mission_id} /> integration {text(p.state) || 'changed'}</>,
   'member.changed': (p, e) => <MemberRenamed member={p.member_id} actor={e.actor_id} name={p.display_name} />,
   'member.merged': (p) => <>Merged a member into <Who id={p.survivor_id} object /></>,
   'member.device': (p) => deviceWords[text(p.status)] ?? 'A device changed',

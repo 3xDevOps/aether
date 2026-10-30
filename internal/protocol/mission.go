@@ -503,3 +503,13 @@ func MissionFromDomain(m *domain.Mission) Mission {
 func MissionQuestionFromDomain(q *domain.MissionQuestion) MissionQuestion {
 	return MissionQuestion{ID: string(q.ID), MissionID: string(q.MissionID), Seq: q.Seq, Body: q.Body, AskedByRunID: string(q.AskedByRunID), AskedAt: rfc3339(q.AskedAt), Answer: q.Answer, AnsweredByMemberID: string(q.AnsweredByMemberID), AnsweredAt: rfc3339Ptr(q.AnsweredAt)}
 }
+
+// SubmissionRef identifies one immutable source submission. EvidenceRef is
+// the durable evidence packet ID; RetainedRevision names the source revision
+// retained for it.
+type SubmissionRef struct {
+	WorkspaceID      string `json:"workspace_id"`
+	RunID            string `json:"run_id"`
+	EvidenceRef      string `json:"evidence_ref"`
+	RetainedRevision string `json:"retained_revision"`
+}

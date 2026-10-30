@@ -182,8 +182,7 @@ func TestCLISkillPhaseActionBoundaries(t *testing.T) {
 			if !strings.Contains(raw, "Phase: "+phase+"\n") {
 				t.Fatalf("skill lost current phase: %s", raw)
 			}
-			hasIntegration := strings.Contains(raw, "aether-internal integration ")
-			if hasIntegration != (phase == "active") {
+			if strings.Contains(raw, "aether-internal integration") {
 				t.Fatalf("integration guidance in phase %s: %s", phase, raw)
 			}
 			if phase != "active" && phase != "completed" && strings.Contains(raw, "aether-internal worker start ") {

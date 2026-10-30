@@ -74,8 +74,6 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 				"attempts":[{"run_id":"run-1","takeover_active":true,"takeover_member_id":"m2","takeover_generation":2}]}`), nil
 		}
 		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "mission question not found"}
-	case protocol.MethodIntegrationShow:
-		return json.RawMessage(`{"candidate":{"candidate_id":"cand-1","mission_id":"mis-1","target_ref":"refs/heads/main"}}`), nil
 	case protocol.MethodMemoryShow:
 		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","scope":"member","title":"CI needs Docker","pinned_by":"m2","pinned_by_name":"Grace","pinned_at":"2026-10-26T10:00:00Z"}}`), nil
 	case protocol.MethodAssistantPreferenceShow:
@@ -120,8 +118,6 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMissionUnarchive:     protocol.MissionIDParams{MissionID: "mis-1"},
 		protocol.MethodMissionReplaceIntegrator: protocol.MissionReplaceIntegratorParams{MissionID: "mis-1", ExpectedGeneration: 1, IdempotencyKey: "k",
 			Integrator: protocol.MissionIntegrator{AccountMemberID: "m2", Harness: "codex", Mode: "acp"}},
-		protocol.MethodIntegrationDecide:  protocol.IntegrationDecideParams{WorkspaceID: "ws-1", CandidateID: "cand-1", RequestID: "req-1", RequestVersion: 1, Approve: true},
-		protocol.MethodIntegrationDeliver: protocol.IntegrationDeliverParams{WorkspaceID: "ws-1", CandidateID: "cand-1", RequestID: "req-1", RequestVersion: 2},
 		protocol.MethodRunPRCreate: protocol.RunPRCreateParams{RunID: "run-1", Expected: protocol.RunGitExpected{Branch: "fix-login", Head: "0123456789abcdef"},
 			Title: "Fix login", Draft: true},
 		protocol.MethodRunPRMerge: protocol.RunPRMergeParams{RunID: "run-1", Method: "squash", ExpectedHead: "fedcba9876543210", Repository: "acme/shop", Number: 7,
@@ -156,8 +152,6 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMissionArchive:           `Archive, closing its completed runs, swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodMissionUnarchive:         `Unarchive swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodMissionReplaceIntegrator: `Replace integrator run run-9 of swarm mis-1 ("Ship the billing page"), owned by Grace, with codex (acp) on Grace's (m2) account`,
-		protocol.MethodIntegrationDecide:        `Approve delivering candidate cand-1, moving refs/heads/main, for swarm mis-1 ("Ship the billing page"), owned by Grace`,
-		protocol.MethodIntegrationDeliver:       `Deliver candidate cand-1, moving refs/heads/main, for swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodRunPRCreate:              `Open a draft pull request from run run-1 ("Fix login"), owned by Grace, branch fix-login at 0123456, into the workspace's base branch: "Fix login"`,
 		protocol.MethodRunPRMerge:               `Merge (squash) acme/shop#7 of run run-1 ("Fix login"), owned by Grace, at fedcba9 into main; GitHub reports 1 failing checks, 1 pending checks and 1 reviewers requesting changes`,
 		protocol.MethodMemoryAdd:                `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0 ("CI needs Docker") and moving its pin`,

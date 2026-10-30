@@ -455,17 +455,6 @@ func TestPlanMergeRefusals(t *testing.T) {
 		t.Fatalf("queued steer request = %v", err)
 	}
 	mustExec(t, db, `UPDATE room_messages SET state = 'sent'`)
-	mustExec(t, db, `INSERT INTO integration_candidates (id, workspace_id, actor_key, idempotency_key, digest, state, version, payload, created_at, expires_at)
-		VALUES ('cand-1', ?, 'member:x', 'k', 'd', 'frozen', 1, json_object('delivery_request', json_object('state', 'approved', 'decided_by', ?)), 1, 9999999999999)`,
-		w.ID, b.ID)
-	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); !isRefusal(err, "approved deliveries of candidates cand-1") {
-		t.Fatalf("approved delivery = %v", err)
-	}
-	mustExec(t, db, `UPDATE integration_candidates SET state = 'expired'`)
-	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); err != nil {
-		t.Fatalf("approved delivery of a deleted candidate = %v, want no refusal", err)
-	}
-	mustExec(t, db, `DELETE FROM integration_candidates`)
 	plan, err := db.PlanMerge(ctx, "code", b.ID, "", now)
 	if err != nil {
 		t.Fatal(err)

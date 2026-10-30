@@ -358,7 +358,7 @@ someone who can run code in the workspace.
 - Plain variables and the setup script are readable by every member, so keep
   credentials out of them. A variable marked secret later stays in old
   database backups: change its value too.
-- Every new run and candidate verification container gets the secrets as
+- Every new run container gets the secrets as
   environment variables, readable by every process in it and by anyone with
   Docker access on the host (`docker inspect`). Anyone who can launch or
   message a run in the workspace can make it print a secret into the
@@ -472,28 +472,6 @@ run branches and pull requests go. A source URL must not contain credentials.
   adopting a new revision by its full commit SHA, moves it.
 - A failed refresh blocks the launch instead of starting from stale code
   ([Launch and mirror failures](failure-handling.md#launch-and-mirror-failures)).
-
-## Candidate verification and delivery
-
-A candidate is a branch the server assembles from one or more runs' work, for
-a human or a swarm integrator to verify and deliver
-([teams.md](teams.md#combine-several-runs-into-one-result)).
-
-- Any member can read a candidate. Preparing, verifying, deciding and
-  delivering need permission to push, checked again at delivery. A swarm
-  integrator delivers on behalf of the swarm's accountable human, who must be
-  allowed to push.
-- Verification runs with the home of whoever asked (the run's launcher when an
-  agent asked), so that home's gh login and signing key are available to it.
-  It runs as uid `1000` with sudo that needs no password, as a Root access run
-  does.
-- A proposal delivery creates `refs/heads/aether/proposal-<request-id>` and
-  never pushes upstream. A mirrored target accepts only proposals and refuses
-  a direct update with `gitengine: mirrored workspace target is not directly
-  deliverable`.
-- Nothing stops an agent from running its own `git push` or `gh pr create`
-  with the member's credentials. The push permission only governs delivery
-  through Aether.
 
 ## The dashboard gateways
 

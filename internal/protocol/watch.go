@@ -21,14 +21,13 @@ const (
 
 // A target kind accepts only its own subset of the watch conditions.
 const (
-	WatchNeedsYou  = "needs_you"
-	WatchFinished  = "finished"
-	WatchPRMerged  = "pr_merged"
-	WatchCI        = "ci"
-	WatchDelivered = "delivered"
-	WatchReview    = "review"
-	WatchMerged    = "merged"
-	WatchClosed    = "closed"
+	WatchNeedsYou = "needs_you"
+	WatchFinished = "finished"
+	WatchPRMerged = "pr_merged"
+	WatchCI       = "ci"
+	WatchReview   = "review"
+	WatchMerged   = "merged"
+	WatchClosed   = "closed"
 )
 
 const (

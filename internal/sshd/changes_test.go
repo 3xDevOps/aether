@@ -127,7 +127,6 @@ func TestChangesListPagesMeaningfulChanges(t *testing.T) {
 	seq["swarm-report"] = e.publish(t, ws, swarm, events.TimelinePayload{Kind: events.TimelineReport, ReportID: "rep-1", Outcome: "waiting", WaitingFor: "ci", Summary: long})
 	seq["mail"] = e.publish(t, ws, swarm, events.CoordMessagePayload{MessageID: "msg-1", WorkspaceID: ws, MissionID: mission.ID, FromRunID: swarm, ToRunID: solo, Kind: "question"})
 	seq["mission"] = e.publish(t, ws, "", events.MissionChangedPayload{MissionID: mission.ID, Change: "task", TaskID: "task-1"})
-	seq["candidate"] = e.publish(t, ws, "", events.IntegrationChangedPayload{MissionID: mission.ID, CandidateID: "cand-1", State: "verifying"})
 	seq["other-mission"] = e.publish(t, ws, "", events.MissionChangedPayload{MissionID: "mis-other", Change: "task"})
 	seq["solo-pr"] = e.publish(t, ws, solo, events.RunPRPayload{RunID: solo, Number: 42, State: "OPEN"})
 	e.publish(t, ws, solo, events.RunCostPayload{InputTokens: 10})
@@ -146,7 +145,7 @@ func TestChangesListPagesMeaningfulChanges(t *testing.T) {
 		}
 		return out
 	}
-	all := want("swarm-up", "solo-input", "swarm-report", "mail", "mission", "candidate", "other-mission", "solo-pr", "solo-archived", "solo-handoff", "other-up")
+	all := want("swarm-up", "solo-input", "swarm-report", "mail", "mission", "other-mission", "solo-pr", "solo-archived", "solo-handoff", "other-up")
 
 	// No cursor: the newest changes, oldest first, and the head as cursor.
 	newest := listChanges(t, c, protocol.ChangesListParams{Limit: 3})
@@ -204,9 +203,9 @@ func TestChangesListPagesMeaningfulChanges(t *testing.T) {
 	}{
 		"workspace": {protocol.ChangesListParams{WorkspaceID: string(other.ID)}, want("other-up")},
 		"run":       {protocol.ChangesListParams{RunID: string(solo)}, want("solo-input", "mail", "solo-pr", "solo-archived", "solo-handoff")},
-		"mission":   {protocol.ChangesListParams{MissionID: string(mission.ID)}, want("swarm-up", "swarm-report", "mail", "mission", "candidate")},
+		"mission":   {protocol.ChangesListParams{MissionID: string(mission.ID)}, want("swarm-up", "swarm-report", "mail", "mission")},
 		"kinds":     {protocol.ChangesListParams{Kinds: []string{"pr", "lifecycle"}}, want("solo-pr", "solo-archived", "solo-handoff")},
-		"combined":  {protocol.ChangesListParams{MissionID: string(mission.ID), Kinds: []string{"swarm", "reports"}}, want("swarm-report", "mission", "candidate")},
+		"combined":  {protocol.ChangesListParams{MissionID: string(mission.ID), Kinds: []string{"swarm", "reports"}}, want("swarm-report", "mission")},
 	} {
 		tc.params.Cursor, tc.params.Limit = "0", 1
 		got, _ := pageAll(t, c, tc.params)

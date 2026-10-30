@@ -71,13 +71,6 @@ func (d *DB) DeleteWorkspace(ctx context.Context, id domain.WorkspaceID) error {
 			return fmt.Errorf("store: delete workspace data: %w", mapConstraint(err, ErrInUse))
 		}
 	}
-	var candidates bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM integration_candidates WHERE workspace_id = ?)`, id).Scan(&candidates); err != nil {
-		return err
-	}
-	if candidates {
-		return fmt.Errorf("%w: workspace integration candidates have not been cleaned up", ErrInUse)
-	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("store: delete workspace: %w", mapConstraint(err, ErrInUse))

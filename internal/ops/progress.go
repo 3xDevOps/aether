@@ -584,36 +584,10 @@ func swarmProgress(ctx context.Context, read Call, res protocol.MissionShowResul
 	}
 	untrusted["progress_reports"] = reportTexts
 
-	type receipt struct {
-		CandidateID string `json:"candidate_id"`
-		ReceiptID   string `json:"receipt_id"`
-		Result      string `json:"result"`
-		DeliveredAt string `json:"delivered_at"`
-	}
-	delivery := map[string]any{"source": sourceAether, "note": "a delivery lands in Aether's own git, not on GitHub"}
-	var cands protocol.IntegrationListResult
-	if err := read(ctx, protocol.MethodIntegrationList, protocol.IntegrationListParams{WorkspaceID: m.WorkspaceID, MissionID: m.ID, Limit: maxRows}, &cands); err != nil {
-		delivery["error"] = err.Error()
-	} else {
-		receipts := []receipt{}
-		for _, cd := range cands.Candidates {
-			if rc := cd.DeliveryReceipt; rc != nil {
-				receipts = append(receipts, receipt{CandidateID: cd.CandidateID, ReceiptID: rc.ReceiptID, Result: string(rc.Result), DeliveredAt: rc.CreatedAt.UTC().Format(time.RFC3339)})
-			}
-		}
-		delivery["receipts"], delivery["checked_at"] = receipts[:min(len(receipts), defaultRows)], asOf
-		if len(cands.Candidates) >= maxRows {
-			delivery["note"] = fmt.Sprintf("a delivery lands in Aether's own git, not on GitHub; only the newest %d candidates were read, so earlier deliveries may be missing", maxRows)
-		}
-		if len(receipts) > defaultRows {
-			delivery["receipts_total"] = len(receipts)
-		}
-	}
-
 	progress := map[string]any{"as_of": asOf,
 		"requested":   map[string]any{"tasks": tasks, "tasks_total": len(res.Tasks)},
 		"implemented": map[string]any{"attempts": attempts, "attempts_total": len(res.Attempts)},
-		"reviewed":    reviewed, "merged": mergedRows, "aether_delivery": delivery,
+		"reviewed":    reviewed, "merged": mergedRows,
 		"reports": reportRows, "children": childRows,
 		"flags": map[string]any{"open_tasks_in_completed_swarm": open, "report_conflicts": conflictRows}}
 	if runsTotal > len(runs) {

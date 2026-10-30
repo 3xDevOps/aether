@@ -31,7 +31,7 @@ var conditionsOf = map[string]struct{ all, defaults []string }{
 		defaults: []string{protocol.WatchNeedsYou, protocol.WatchFinished},
 	},
 	protocol.WatchTargetMission: {
-		all:      []string{protocol.WatchNeedsYou, protocol.WatchFinished, protocol.WatchDelivered},
+		all:      []string{protocol.WatchNeedsYou, protocol.WatchFinished},
 		defaults: []string{protocol.WatchNeedsYou, protocol.WatchFinished},
 	},
 	protocol.WatchTargetPR: {
@@ -396,7 +396,7 @@ func (s *Service) result(ctx context.Context, w *store.Watch) (protocol.WatchRes
 
 var conditionWords = map[string]string{
 	protocol.WatchNeedsYou: "needs you", protocol.WatchFinished: "finished", protocol.WatchPRMerged: "PR merged",
-	protocol.WatchCI: "CI", protocol.WatchDelivered: "delivered", protocol.WatchReview: "review",
+	protocol.WatchCI: "CI", protocol.WatchReview: "review",
 	protocol.WatchMerged: "merged", protocol.WatchClosed: "closed",
 }
 

@@ -1099,10 +1099,10 @@ Removal also repairs the selection and open route before any refresh awaits.
   possible: Tailscale may identify the new connection as a different member.
   Only a local gateway's fixed identity can reuse replay without that refresh.
 - **Branch, pull request and swarm hints are counters.** `git.branch` and
-  `run.pr` bump a per-run `gitSeq` and `prSeq`, and `integration.changed`
-  and `mission.changed` a per-swarm `integrationSeq` and `missionSeq`
+  `run.pr` bump a per-run `gitSeq` and `prSeq`, and `mission.changed`
+  a per-swarm `missionSeq`
   (`src/store/workflow-signals.ts`). A view that shows that state keys its
-  `run.git.log`, `run.pr.feedback` or `integration.show` re-read on the
+  `run.git.log` or `run.pr.feedback` re-read on the
   counter (`useStore(gitSeqOf(runID))`) instead of polling.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
@@ -3772,11 +3772,10 @@ both what it renders and the overlap set the conflict chips read.
   names itself in the status line. Every error, from the log, the feedback,
   a send or a merge, is shown as the server or GitHub wrote it.
 - **The card reads on events, not timers.** The log is read when the first
-  card for a run mounts and again on each `git.branch` event for the run or
-  `integration.changed` for its swarm (`gitSeq` and `integrationSeq` in
+  card for a run mounts and again on each `git.branch` event for the run (`gitSeq` in
   `store/workflow-signals.ts`), and with each 60s pull request poll, since
   a fetch moves the base without a `git.branch` event. The pull request is
-  read again on `run.pr`, `git.branch` and `integration.changed`. One read
+  read again on `run.pr` and `git.branch`. One read
   of each is in flight per run (`store/coalesce.ts`). A refetch keeps every
   row whose commit did not change as the same object, so its memoised row
   does not re-render. A polite screen-reader region repeats the status line
@@ -4049,7 +4048,7 @@ gateway lists the `run.repos` method.
   repos** (`launch/extra-repos.tsx`) below either tab, a checklist of the
   member's other workspaces. Each pick becomes a chip and goes out as
   `extra_workspace_ids` on `run.launch`, or on `mission.create` from the Swarm
-  tab, whose help line adds that candidates combine `/workspace` only; the repo
+  tab; the repo
   is checked out at `/repos/<name>`. The picks are kept across tabs. The Swarm
   tab offers it only when `server.info` also lists the `swarm-repos` feature,
   since an older server drops the field; a pick made on Run is then not sent.
@@ -4354,7 +4353,7 @@ dev.browser.inspect: this run's browser companion predates dev.browser.inspect; 
 a canvas copy or the last received frame, and needs no lease. It creates a
 private transient capture and a note for it, with its card open: words for
 the agent are optional, **Keep as evidence…** opens **Captures** (see
-[Captures and candidate review](#captures-and-candidate-review)), where a
+[Captures](#captures)), where a
 member inspects and retains it, and **Remove** takes it out of the message
 while the capture stays in the run. Taking a screenshot does not publish or
 retain anything.
@@ -4571,7 +4570,7 @@ you and Failed first. Only Working dots pulse, and rows added after the first
 render enter with `animate-entrance` (a fade and a 4px rise over 360ms); with
 reduced motion requested, neither animates.
 
-### Captures and candidate review
+### Captures
 
 **Captures…** in More (and in the terminal's **Tools** menu) opens
 `routes/run/captures.tsx`, a dialog titled **Captures** (a bottom sheet on
@@ -4579,7 +4578,6 @@ phones, positioned against the viewport so the run view's scroll containers
 cannot clip it). Captures record what was seen, not that it was verified. The
 dialog holds, top to bottom:
 
-- **Candidate review**, collapsed (`routes/terminal/candidate-review.tsx`).
 - **Select transient captures to retain** and **Retain selected captures**:
   a screenshot from the Browser or a shell is private and transient until
   retained here. Nothing is retained or attached to a pull request on its own.
@@ -4591,40 +4589,6 @@ dialog holds, top to bottom:
 
 **Raw events…** opens the run's slice of the activity feed
 (`routes/run/raw-events.tsx`) and restores the feed filters on close.
-
-Candidate review is the human path to combine retained packets into one
-change. **Select retained packets** takes at least two, in an order the
-member arranges; **Target ref** and **Expected target revision** (read from
-the run's captured base commit) fix where it lands, and **Prepare candidate**
-starts assembly. **Existing candidates** lists the workspace's candidates,
-each with **Show full**. A candidate shows its ordered inputs, state and
-revision; a conflicted one offers a complete-contents field per path with
-**Apply this resolution** and **Delete file**, then **Apply resolutions**.
-Once frozen, **Verification** takes a **Verification argv** (a JSON array)
-and **Timeout seconds** and runs **Run verification** on the server; each
-result shows its status, exit code, argv, observed environment and bounded
-output. **Delivery** picks a **Delivery action** (**Update target ref** or
-**Create proposal**) and sends **Request delivery** with the selected
-passing verifications; a pending request offers **Approve delivery** and
-**Deny delivery** (a swarm integrator's request arrives already approved),
-and an approved one **Deliver candidate**.
-
-Mutations are disabled while the connection is not **Live** or the
-workspace's authority is still loading ("Offline or reconnecting.", "Loading
-fresh workspace authority."). A return to **Live** refetches candidates and
-the selected review before enabling controls, so stale revisions and requests
-are not reused. A refreshed candidate with a new identity or version
-invalidates resolution drafts; an own partial **Apply resolutions** response
-keeps only untouched drafts that still conflict. The panel shows the
-gateway's error with **Reload candidate** rather than a client-side result.
-
-The swarm page's Integration section mounts the same panel with `readOnly`:
-an integrator prepares, verifies and delivers on its own, so the page lists
-the workspace's candidates ("No candidate has been prepared yet."), **Show
-full** loads one, and the panel re-reads every five seconds while open.
-Packet selection, target fields, conflict editors and every mutation button
-are not rendered. The wire methods and bounded records are in
-[integration.md](integration.md).
 
 ### Missing run
 
@@ -4785,7 +4749,7 @@ The body is one column, in this order:
    accountable human or an admin.
 3. **Tasks**, the [workflow tree](#workflow-panel) of the swarm, derived by
    `deriveSwarmWorkflow` in `src/store/workflow.ts` from `mission.show`,
-   the store's runs and `integration.list`. The root is the current
+   the store's runs. The root is the current
    integrator run, labelled `Integrator · <agent> · <mode>`, with
    `<n> of <m> tasks done`, where a task is done only when the server
    accepted a submission for its current revision. Under it each task shows
@@ -4802,14 +4766,7 @@ The body is one column, in this order:
    store does not hold shows the attempt state alone. Under each worker are
    its submissions: Accepted, Rejected, `Submitted, waiting for the
    integrator`, Superseded or Abandoned, with `for revision <n>` when it was
-   for an earlier revision and any scope violations. After the tasks come
-   the integration candidates, newest first, each `Candidate for <ref>`:
-   Preparing, `<n> conflicts: <paths>`, `Verification running`,
-   `Verification passed`, `Verification failed: <error or exit code>`,
-   `Delivery pending`, `Delivered`, or `Not verified yet`; the newest three
-   are read with `integration.show` for their checks, a failed read shows
-   its error verbatim, and the list is read again on each
-   `integration.changed` and `mission.changed` for the swarm. Selecting a worker, submission or the
+   for an earlier revision and any scope violations. Selecting a worker, submission or the
    integrator opens that run. An open task, or one with no worker yet,
    offers **Task details**, closed by default, with the task's objective, scope, blockers other than
    `proposal` in planning, scope diagnostics with a link to the other run,
@@ -4819,16 +4776,8 @@ The body is one column, in this order:
    `expected_takeover_generation`; it stays visible however the tree is
    folded.
 4. **Agent messages**, described below.
-5. **Integration**, closed by default: the read-only candidate panel (see
-   [Captures and candidate review](#captures-and-candidate-review)),
-   listing this swarm's candidates, and a **Technical details** disclosure
-   with the swarm ID, integrator run ID, generation, accepted set version,
-   execution choices, task IDs and revisions, attempts, and each accepted
-   submission's run, retained revision, evidence reference, evidence
-   exceptions and scope disposition. Every run ID there opens its run.
 
-Each `mission.changed` for the open swarm re-reads `mission.show`, and
-with it the candidates, and one
+Each `mission.changed` for the open swarm re-reads `mission.show`, and one
 for any other swarm re-reads `mission.list`, without holding up the events
 behind it. A burst coalesces to one read in flight and one queued per swarm
 (or workspace list), so the page settles on the last state.

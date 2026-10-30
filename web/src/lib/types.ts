@@ -1090,13 +1090,6 @@ export interface RunPRPayload {
   merged_at?: string
 }
 
-export interface IntegrationChangedPayload {
-  mission_id: string
-  candidate_id: string
-  state: string
-  version: number
-}
-
 export type MissionChange =
   | 'task_proposed'
   | 'task_accepted'

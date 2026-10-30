@@ -422,18 +422,7 @@ func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, err
 			r.notices = append(r.notices, Notice{Condition: protocol.WatchFinished, Key: key, Title: r.title, Body: finished, Link: link})
 		}
 	}
-	var delivered string
-	if slices.Contains(w.Conditions, protocol.WatchDelivered) {
-		receipts, err := s.deliveries(ctx, m, w.CreatedAt)
-		if err != nil {
-			return reading{}, err
-		}
-		for _, d := range receipts {
-			delivered = d.Body
-			r.notices = append(r.notices, Notice{Condition: protocol.WatchDelivered, Key: d.Key, Title: r.title, Body: d.Body, Link: link})
-		}
-	}
-	r.observed.Summary = cmp.Or(r.observed.Need, finished, delivered, "Swarm "+string(m.Phase))
+	r.observed.Summary = cmp.Or(r.observed.Need, finished, "Swarm "+string(m.Phase))
 	return r, nil
 }
 
@@ -497,37 +486,6 @@ func (s *Service) missionNeeds(ctx context.Context, m *domain.Mission) ([]need, 
 		return out, nil
 	}
 	return append(out, need{key: item.Kind + ":" + item.Since, body: item.Reason}), nil
-}
-
-type delivery struct {
-	Key, Body string
-	at        time.Time
-}
-
-// deliveries are the swarm's integration delivery receipts since the watch
-// began, oldest first: a ref landed, or a proposal opened.
-func (s *Service) deliveries(ctx context.Context, m *domain.Mission, since time.Time) ([]delivery, error) {
-	receipts, err := s.store.MissionDeliveryReceipts(ctx, m.WorkspaceID, m.ID)
-	if err != nil {
-		return nil, fmt.Errorf("read swarm %s deliveries: %w", m.ID, err)
-	}
-	var out []delivery
-	for candidate, raw := range receipts {
-		var receipt protocol.DeliveryReceipt
-		if err := json.Unmarshal(raw, &receipt); err != nil {
-			return nil, fmt.Errorf("read candidate %s delivery receipt: %w", candidate, err)
-		}
-		if receipt.CreatedAt.Before(since) {
-			continue
-		}
-		body := "Delivered to " + receipt.TargetRef
-		if receipt.Result == protocol.DeliveryResultProposed {
-			body = "Proposed " + cmp.Or(receipt.ProposalRef, receipt.TargetRef)
-		}
-		out = append(out, delivery{Key: receipt.ReceiptID, Body: body, at: receipt.CreatedAt})
-	}
-	slices.SortFunc(out, func(a, b delivery) int { return cmp.Or(a.at.Compare(b.at), strings.Compare(a.Key, b.Key)) })
-	return out, nil
 }
 
 func prConditionsOf(conditions []string) []string {

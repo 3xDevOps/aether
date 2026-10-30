@@ -60,7 +60,7 @@ export function ExtraRepos({
       {chosen.length > 0 && (
         <p className="text-ui-sm text-muted">
           {swarm
-            ? 'The integrator and each worker check out every extra repo beside /workspace, at /repos/<name>, on their own run branches. Candidates combine /workspace only.'
+            ? 'The integrator and each worker check out every extra repo beside /workspace, at /repos/<name>, on their own run branches.'
             : 'Each extra repo is checked out beside /workspace, at /repos/<name>, on its own run branch.'}
         </p>
       )}

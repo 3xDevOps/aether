@@ -87,18 +87,12 @@ func TestWorkspaceDeletePopulatedInactiveWorkspace(t *testing.T) {
 	if _, err := os.Stat(secretFile); err != nil {
 		t.Fatalf("workspace secret file: %v", err)
 	}
-	candidateID := "finished-candidate"
-	candidate, _ := json.Marshal(protocol.Candidate{CandidateID: candidateID, WorkspaceID: string(ws.ID), State: protocol.CandidateUnavailable})
-	if err := s.db.CreateIntegrationCandidate(ctx, &store.IntegrationCandidate{ID: candidateID, WorkspaceID: ws.ID, ActorKey: "member:" + string(member.ID), IdempotencyKey: "prepare", Digest: "digest", State: "unavailable", Payload: candidate, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
-		t.Fatal(err)
-	}
 	stagedID := "evidence-" + strings.Repeat("a", 64)
 	if err := s.db.CreateEvidenceStaging(ctx, &store.EvidenceStaging{ID: stagedID, WorkspaceID: ws.ID, RunID: run.ID, Origin: store.EvidenceOrigin{Kind: store.EvidenceOriginServer}, IdempotencyKey: "interrupted-capture", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	removed := []string{
 		filepath.Join(root, "checkouts", string(run.ID), "result.txt"),
-		filepath.Join(root, "candidates", candidateID, "transcript.txt"),
 		filepath.Join(root, "evidence", stagedID+".transcript"),
 	}
 	for _, path := range removed {
@@ -129,9 +123,6 @@ func TestWorkspaceDeletePopulatedInactiveWorkspace(t *testing.T) {
 	}
 	if _, err := s.db.GetRun(ctx, run.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted run: %v", err)
-	}
-	if _, err := s.db.GetIntegrationCandidate(ctx, candidateID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("deleted candidate: %v", err)
 	}
 	if _, err := s.db.GetWorkspaceBudget(ctx, ws.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted budget: %v", err)
@@ -262,31 +253,5 @@ func TestWorkspaceDeleteThatLeavesTheRowKeepsItsSecrets(t *testing.T) {
 	}
 	if _, err = os.Stat(secretFile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("secret file after the deletion: %v", err)
-	}
-}
-
-func TestWorkspaceDeleteRefusesActiveCandidateVerification(t *testing.T) {
-	t.Parallel()
-	s, _, member, ws := newWorkspaceDeletionServer(t)
-	candidateID := "active-verification"
-	candidate, _ := json.Marshal(protocol.Candidate{
-		CandidateID: candidateID, WorkspaceID: string(ws.ID), State: protocol.CandidateFrozen,
-		Verifications: []protocol.Verification{{VerificationID: "check", Status: protocol.VerificationRunning}},
-	})
-	if err := s.db.CreateIntegrationCandidate(t.Context(), &store.IntegrationCandidate{
-		ID: candidateID, WorkspaceID: ws.ID, ActorKey: "member:" + string(member.ID),
-		IdempotencyKey: "prepare", Digest: "digest", State: "frozen", Payload: candidate,
-		ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := callWorkspaceDeletion(t, s, member.ID, ws.ID); err == nil || err.Code != protocol.CodeConflict || !strings.Contains(err.Message, "verification") {
-		t.Fatalf("active verification deletion = %v", err)
-	}
-	if _, err := s.db.GetWorkspace(t.Context(), ws.ID); err != nil {
-		t.Fatalf("active workspace removed: %v", err)
-	}
-	if _, err := s.db.GetIntegrationCandidate(t.Context(), candidateID); err != nil {
-		t.Fatalf("active candidate removed: %v", err)
 	}
 }

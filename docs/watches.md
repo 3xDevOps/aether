@@ -24,12 +24,11 @@ takes the target's defaults, marked *.
 | `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the run ended completed without a success report, because the agent exited with its results committed or a member or the swarm's integrator closed it as completed. A retained run that is relaunched and completes again is announced again. A member accepting or closing a reported success is not announced again, but a success reported after the run went back to work is. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
 | `run` | `pr_merged`, `ci` | Every pull request the run recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
 | `mission` | `needs_you`* | The swarm needs its accountable human: the integrator asks a question, or the integrator stopped or failed to launch, with the launch error. Each open question is its own notice, in any order they are answered. A completed or cancelled swarm needs nothing: a question it left open is moot, and its delivered push is withdrawn. Workers never notify on their own; the integrator handles them. |
-| `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. A completed swarm can be reopened or still deliver, so its watch stays `active`, and a swarm that completes again is announced again. |
-| `mission` | `delivered` | An integration delivery receipt landed after the watch began: `Delivered to <ref>` when the ref moved, `Proposed <ref>` when a proposal was opened. |
+| `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. A completed swarm can be reopened, so its watch stays `active`, and a swarm that completes again is announced again. |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | See [Pull requests and CI](#pull-requests-and-ci). |
 
 Aether has no deploy signal. `deployed` is refused with that reason; watch
-`finished`, `pr_merged` or `delivered` instead.
+`finished` or `pr_merged` instead.
 
 A notice's title is the run's title or the swarm's objective. Its body is the
 line above, or the question's own text, and it links to the target:

@@ -2290,6 +2290,11 @@ DROP TABLE coord_peers;
 ALTER TABLE runs ADD COLUMN permission TEXT NOT NULL DEFAULT 'root';
 ALTER TABLE launch_defaults ADD COLUMN permission TEXT NOT NULL DEFAULT '';
 `,
+	// v98: candidate integration is gone; its aggregates go with it.
+	`
+DROP TABLE integration_candidates;
+DELETE FROM events WHERE type = 'integration.changed';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

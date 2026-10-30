@@ -64,8 +64,6 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodMemorySearch:             scopeRead,
 	protocol.MethodMemoryShow:               scopeRead,
 	protocol.MethodMemberList:               scopeRead,
-	protocol.MethodIntegrationList:          scopeRead,
-	protocol.MethodIntegrationShow:          scopeRead,
 	protocol.MethodWatchList:                scopeRead,
 	protocol.MethodWatchGet:                 scopeRead,
 	protocol.MethodTemplateList:             scopeRead,
@@ -102,8 +100,6 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodMissionArchive:           scopeControl,
 	protocol.MethodMissionUnarchive:         scopeControl,
 	protocol.MethodMissionReplaceIntegrator: scopeControl,
-	protocol.MethodIntegrationDecide:        scopeControl,
-	protocol.MethodIntegrationDeliver:       scopeControl,
 }
 
 // ConnectorMethodScopes are the scopes a connector needs one of to call

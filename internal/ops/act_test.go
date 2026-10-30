@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -253,67 +252,6 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 	f.errs[protocol.MethodMissionReplaceIntegrator] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "server restarting"}
 	if text, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "idempotency_key": "k-1"}); !failed || !strings.Contains(text, "retry with idempotency_key k-1") {
 		t.Fatalf("uncertain failure = %q", text)
-	}
-}
-
-func TestConnectorIntegrationDecide(t *testing.T) {
-	request := &protocol.DeliveryRequest{RequestID: "req-1", RequestVersion: 7, Action: "land", State: protocol.DeliveryPending}
-	candidate := protocol.Candidate{CandidateID: "cand-1", WorkspaceID: "ws-1", TargetRef: "refs/heads/main", State: protocol.CandidateFrozen,
-		DeliveryRequest: request, Verifications: []protocol.Verification{{VerificationID: "v-1", Status: protocol.VerificationPassed, Output: injection,
-			Argv: []string{"sh", "-c", strings.Repeat("x", 20000)}}},
-		ExpiresAt: time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)}
-	f := newFake(t)
-	f.answers[protocol.MethodIntegrationShow] = returns(protocol.IntegrationShowResult{Candidate: candidate})
-	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{Candidates: []protocol.CandidateSummary{
-		{CandidateID: "cand-1", State: protocol.CandidateFrozen, TargetRef: "refs/heads/main", DeliveryRequest: request}}})
-	decided, approved := candidate, *request
-	approved.State = protocol.DeliveryApproved
-	decided.DeliveryRequest = &approved
-	f.answers[protocol.MethodIntegrationDecide] = returns(protocol.IntegrationDecideResult{Candidate: decided})
-	cs := connectorSession(t, f, ScopeControl)
-
-	// The integrator agent chose the target ref, so it stays under untrusted.
-	text, out := run(t, cs, "aether_integration", map[string]any{"workspace_id": "ws-1"})
-	if text != "1 candidates, 1 delivery requests awaiting a decision." || strings.Contains(trusted(t, out), "refs/heads/main") {
-		t.Fatalf("list = %q %v", text, out)
-	}
-	text, out = run(t, cs, "aether_integration", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1"})
-	if strings.Contains(trusted(t, out), injection) || strings.Contains(trusted(t, out), "refs/heads/main") || strings.Contains(text, "refs/heads/main") {
-		t.Fatalf("agent text outside untrusted: %q %v", text, out)
-	}
-	command := out["untrusted"].(map[string]any)["verifications"].([]any)[0].(map[string]any)["command"].(string)
-	if !strings.HasPrefix(command, "sh -c xxx") || !strings.HasSuffix(command, "…") || len([]rune(command)) > maxText+1 {
-		t.Fatalf("verification command = %d runes, starts %q", len([]rune(command)), command[:min(len(command), 20)])
-	}
-
-	text, out = run(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-1", "action": "approve"})
-	if text != "Candidate cand-1's delivery request is approved." || out["request_state"] != "approved" {
-		t.Fatalf("approve = %q %v", text, out)
-	}
-	if got := f.acted(); got.method != protocol.MethodIntegrationDecide || got.params != `{"workspace_id":"ws-1","candidate_id":"cand-1","request_id":"req-1","request_version":7,"approve":true}` {
-		t.Fatalf("approve sent %+v", got)
-	}
-	f.calls = nil
-	if msg, _, failed := try(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-0", "action": "deliver"}); !failed ||
-		!strings.Contains(msg, "no longer req-0") || len(called(f, protocol.MethodIntegrationDeliver)) != 0 {
-		t.Fatalf("deciding a request that changed = %q", msg)
-	}
-	// A request already in the state asked for is done, so a retry is safe.
-	request.State = protocol.DeliveryApproved
-	if text, _ = run(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-1", "action": "approve"}); text != "Candidate cand-1's delivery request is already approved." ||
-		len(called(f, protocol.MethodIntegrationDecide)) != 0 {
-		t.Fatalf("approving twice = %q", text)
-	}
-	request.State = protocol.DeliveryDelivered
-	if text, _ = run(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-1", "action": "approve"}); text != "Candidate cand-1's delivery request is already delivered." ||
-		len(called(f, protocol.MethodIntegrationDecide)) != 0 {
-		t.Fatalf("approving a delivered request = %q", text)
-	}
-	request.State = protocol.DeliveryApproved
-	f.errs[protocol.MethodIntegrationDeliver] = &protocol.Error{Code: protocol.CodeDenied, Message: "integration.deliver: denied: push permission"}
-	if text, _, failed := try(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-1", "action": "deliver"}); !failed ||
-		text != "integration.deliver: denied: push permission" {
-		t.Fatalf("denied delivery = %q", text)
 	}
 }
 

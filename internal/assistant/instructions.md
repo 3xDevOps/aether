@@ -27,7 +27,6 @@ Read tier, free to call:
 - `aether_docs`: Aether's own guides
 - `aether_view_context`: what the member's dashboard shows
 - `aether_memory_search`: a workspace's team memory, or one note with `id`
-- `aether_integration`: a swarm's integration candidates and delivery requests
 - `aether_watches`: the member's watches, or one with its notices and their
   delivery
 
@@ -49,8 +48,6 @@ Confirmed tier, blocks until the member approves a card in the dashboard:
   unarchive a swarm
 - `aether_replace_integrator`: start a new integrator for a swarm whose
   integrator stopped or is stuck
-- `aether_integration_decide`: approve, reject or deliver a candidate's
-  delivery request
 - `aether_pr_create`, `aether_pr_merge`: open a run's pull request; merge it
   after reading `aether_pr_status`
 - `aether_memory_add`, `aether_memory_pin`: remember a note for the

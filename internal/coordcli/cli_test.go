@@ -140,7 +140,7 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 		t.Run(role, func(t *testing.T) {
 			status := protocol.CoordStatusResult{
 				RunID:        "run-current",
-				Capabilities: []string{protocol.MethodIntegrationDeliver, protocol.MethodWorkerStart, protocol.MethodMissionStart},
+				Capabilities: []string{protocol.MethodWorkerStart, protocol.MethodMissionStart},
 			}
 			if role != "ordinary" {
 				status.Assignment = &protocol.CoordMissionAssignment{
@@ -321,71 +321,6 @@ func TestCLIMissionTaskAndWorkerAdapters(t *testing.T) {
 	}
 	if code, raw := runCLI(t, s.path, []string{"worker", "start", "--mission-id", "mission-1", "--task-id", "task-1", "--task-revision", "2", "--dispatch-key", "dispatch-1", "--harness", "claude", "--mode", "headless", "--account-owner-id", "member-1", "--run-owner-id", "member-1", "--expected-integrator-generation", "4"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
 		t.Fatalf("worker start = code %d, envelope %s", code, raw)
-	}
-}
-func TestCLIIntegrationFiveCommandSurface(t *testing.T) {
-	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
-		switch req.Method {
-		case protocol.MethodIntegrationPrepare, protocol.MethodIntegrationShow,
-			protocol.MethodIntegrationVerify, protocol.MethodIntegrationRequestDelivery,
-			protocol.MethodIntegrationDeliver:
-			var raw map[string]any
-			if err := json.Unmarshal(req.Params, &raw); err != nil {
-				t.Fatalf("decode integration params: %v", err)
-			}
-			if raw["actor"] != nil || raw["run_id"] != nil {
-				t.Fatalf("integration params carried transport identity: %+v", raw)
-			}
-			return protocol.Response{Result: json.RawMessage(`{"candidate":{"candidate_id":"candidate-1"}}`)}
-		default:
-			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
-		}
-	})
-	file := filepath.Join(t.TempDir(), "params.json")
-	if err := os.WriteFile(file, []byte(`{"workspace_id":"ws-1","candidate_id":"candidate-1","idempotency_key":"fixed-1"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, command := range []string{"prepare", "show", "verify", "request-delivery", "deliver"} {
-		args := []string{"integration", command, "--params-file", file, "--json"}
-		if command == "verify" {
-			args = []string{"integration", command, "--params-file", "-", "--json"}
-		}
-		input := ""
-		if command == "verify" {
-			input = `{"workspace_id":"ws-1","candidate_id":"candidate-1","candidate_revision":"rev-1","idempotency_key":"verify-1"}`
-		}
-		code, raw := runCLI(t, s.path, args, input)
-		if code != ExitOK || !decodeEnvelope(t, raw).OK {
-			t.Fatalf("integration %s = code %d, envelope %s", command, code, raw)
-		}
-	}
-}
-func TestCLIIntegrationErrorCodesMapToExitStatuses(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		code int
-		exit int
-	}{
-		{name: "denied", code: protocol.CodeDenied, exit: ExitDenied},
-		{name: "conflict", code: protocol.CodeConflict, exit: ExitDenied},
-		{name: "invalid params", code: protocol.CodeInvalidParams, exit: ExitUsage},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			s := newCLISocket(t, func(req protocol.Request) protocol.Response {
-				if req.Method != protocol.MethodIntegrationShow {
-					return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
-				}
-				return protocol.Response{Error: &protocol.Error{Code: test.code, Message: "integration.show: " + test.name}}
-			})
-			code, raw := runCLI(t, s.path, []string{"integration", "show", "--params-file", "-", "--json"}, `{}`)
-			if code != test.exit {
-				t.Fatalf("integration %s exit = %d, want %d; output=%s", test.name, code, test.exit, raw)
-			}
-			env := decodeEnvelope(t, raw)
-			if env.OK || env.Error == nil || env.Error.Code != test.code {
-				t.Fatalf("integration %s envelope = %+v", test.name, env)
-			}
-		})
 	}
 }
 

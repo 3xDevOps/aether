@@ -46,8 +46,6 @@ var actSummaries = map[string]summarizer{
 	protocol.MethodMissionArchive:           swarmSummary("Archive, closing its completed runs,"),
 	protocol.MethodMissionUnarchive:         swarmSummary("Unarchive"),
 	protocol.MethodMissionReplaceIntegrator: (*Server).summarizeReplaceIntegrator,
-	protocol.MethodIntegrationDecide:        (*Server).summarizeDelivery,
-	protocol.MethodIntegrationDeliver:       (*Server).summarizeDelivery,
 	protocol.MethodRunPRCreate:              (*Server).summarizePRCreate,
 	protocol.MethodRunPRMerge:               (*Server).summarizePRMerge,
 	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
@@ -190,39 +188,6 @@ func (s *Server) summarizeReplaceIntegrator(ctx context.Context, req protocol.Re
 	}
 	c.Summary = fmt.Sprintf("Replace integrator run %s of swarm %s (%q)%s with %s (%s) on %s's (%s) account", cmp.Or(m.CurrentIntegratorRunID, "(none)"),
 		m.ID, truncate(m.Objective), commaAfter(ownedBy(c)), truncate(agent), p.Integrator.Mode, account, truncate(p.Integrator.AccountMemberID))
-	return nil
-}
-
-func (s *Server) summarizeDelivery(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-	p, err := protocol.DecodeParams[protocol.IntegrationDecideParams](req.Params)
-	if err != nil || p.WorkspaceID == "" || p.CandidateID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and candidate_id are required"}
-	}
-	var shown protocol.IntegrationShowResult
-	if rpcErr := s.call(ctx, protocol.MethodIntegrationShow, protocol.IntegrationShowParams{WorkspaceID: p.WorkspaceID, CandidateID: p.CandidateID}, &shown); rpcErr != nil {
-		return rpcErr
-	}
-	verb := "Deliver"
-	if req.Method == protocol.MethodIntegrationDecide {
-		verb = "Approve delivering"
-		if !p.Approve {
-			verb = "Reject delivering"
-		}
-	}
-	cd := shown.Candidate
-	effect := "moving " + truncate(cd.TargetRef)
-	if r := cd.DeliveryRequest; r != nil && r.Action == protocol.DeliveryActionProposal {
-		effect = "publishing a proposal ref for " + truncate(cd.TargetRef)
-	}
-	c.Summary = fmt.Sprintf("%s candidate %s, %s", verb, cd.CandidateID, effect)
-	if cd.MissionID == "" {
-		return nil
-	}
-	m, rpcErr := s.swarm(ctx, cd.MissionID, c)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	c.Summary += fmt.Sprintf(", for swarm %s (%q)%s", m.ID, truncate(m.Objective), ownedBy(c))
 	return nil
 }
 

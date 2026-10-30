@@ -268,9 +268,9 @@ with `mine` filters to the socket's member.
 
 | Tier | Tools |
 | --- | --- |
-| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_integration`, `aether_watches`, `aether_list_workspaces`, `aether_get_workspace`, `aether_launch_options`, `aether_changes`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
+| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_watches`, `aether_list_workspaces`, `aether_get_workspace`, `aether_launch_options`, `aether_changes`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
 | Reversible | `aether_pause_run`, `aether_resume_run`, `aether_watch` |
-| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_save_launch_defaults`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin`, `aether_unwatch` |
+| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_save_launch_defaults`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin`, `aether_unwatch` |
 
 A confirmed call blocks until the member approves it in the dashboard, or runs
 at once when the member turned on [auto-approval](assistant.md#auto-approval),
@@ -296,7 +296,7 @@ pinned to that version of the template (a template launch whose
 once the template changed); the swarm's goal, its accountable human
 when that is someone else, and its question, saying so when the question was
 already answered; the teammate a run is handed to; the agent and account a
-replacement integrator uses; a delivery's candidate and target branch; a pull
+replacement integrator uses; a pull
 request's branch, head and title or repository, number, head and base; a memory
 note's workspace, text, who it is for and the note it replaces; that archiving a
 swarm closes its completed runs; a deleted watch's target, conditions and notice

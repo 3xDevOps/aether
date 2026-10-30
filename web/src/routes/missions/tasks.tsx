@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AskAssistantButton } from '@/components/assistant/ask'
 import { agentLabel, modeLabel } from '@/components/launch/modes'
@@ -16,11 +16,10 @@ import { presentRun } from '@/lib/status'
 import type { AgentInfo, MissionAttempt, MissionTask, MissionTaskScope } from '@/lib/types'
 import { missionTree } from '@/routes/missions/tree'
 import { useStore } from '@/store'
-import { useCapability, useChildRunFacts } from '@/store/hooks'
+import { useChildRunFacts } from '@/store/hooks'
 import type { MissionDetail } from '@/store/missions'
 import { stateContextOf } from '@/store/selectors'
-import { integrationSeqOf } from '@/store/workflow-signals'
-import { deriveSwarmWorkflow, runFacts, shareTree, type CandidateFacts, type RunFacts, type WorkflowNode } from '@/store/workflow'
+import { deriveSwarmWorkflow, runFacts, shareTree, type RunFacts, type WorkflowNode } from '@/store/workflow'
 
 function scopeFacts(scope: MissionTaskScope): string[] {
   return [
@@ -144,45 +143,6 @@ function useSwarmRuns(runIDs: string[]): Record<string, RunFacts> {
   return useMemo(() => Object.fromEntries(JSON.parse(key) as [string, RunFacts][]), [key])
 }
 
-const candidateDetails = 3
-
-const noCandidates: CandidateFacts[] = []
-
-function useCandidates(detail: MissionDetail, client: Api): { candidates: CandidateFacts[]; error?: string } {
-  const cap = useCapability()
-  const [state, setState] = useState<{ missionID: string; candidates: CandidateFacts[]; error?: string }>({ missionID: '', candidates: noCandidates })
-  const changed = useStore(integrationSeqOf(detail.mission.id))
-  const { mission } = detail
-  const readable = cap.hasMethod('integration.list') && cap.hasMethod('integration.show')
-  useEffect(() => {
-    if (!readable) return
-    let live = true
-    const load = async () => {
-      const listed = await client.integrationList({ workspace_id: mission.workspace_id, mission_id: mission.id, limit: 50 })
-      const newest = [...listed.candidates].sort((a, b) => b.created_at.localeCompare(a.created_at))
-      const shown = await Promise.all(newest.map(async (summary, index): Promise<CandidateFacts> => {
-        if (index >= candidateDetails) return summary
-        try {
-          const { candidate } = await client.integrationShow({ workspace_id: mission.workspace_id, candidate_id: summary.candidate_id })
-          return candidate
-        } catch (err) {
-          return { ...summary, readError: message(err) }
-        }
-      }))
-      if (live) setState({ missionID: mission.id, candidates: shown })
-    }
-    load().catch((err) => live && setState((current) => ({
-      missionID: mission.id,
-      candidates: current.missionID === mission.id ? current.candidates : noCandidates,
-      error: message(err),
-    })))
-    return () => {
-      live = false
-    }
-  }, [client, detail, mission.id, mission.workspace_id, readable, changed])
-  return state.missionID === mission.id ? state : { candidates: noCandidates }
-}
-
 export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
   detail: MissionDetail
   agents: AgentInfo[] | null
@@ -198,20 +158,18 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
   )
   const runs = useSwarmRuns(runIDs)
   const childRuns = useChildRunFacts(runIDs)
-  const { candidates, error } = useCandidates(detail, client)
   const previous = useRef<WorkflowNode | undefined>(undefined)
   const tree = useMemo(() => {
     const next = shareTree(previous.current, deriveSwarmWorkflow({
       detail,
       runs,
-      candidates,
       childRuns,
       integratorLabel: runLabel('Integrator', mission.integrator.harness, mission.integrator.mode, agents),
       workerLabel: (attempt, name) => runLabel(name, attempt.harness, attempt.mode, agents),
     }))
     previous.current = next
     return next
-  }, [detail, runs, candidates, childRuns, agents, mission.integrator.harness, mission.integrator.mode])
+  }, [detail, runs, childRuns, agents, mission.integrator.harness, mission.integrator.mode])
   const tasks = useMemo(() => new Map(detail.tasks.map((task) => [`task:${task.id}`, task])), [detail.tasks])
   const held = useMemo(() => missionTree(detail).flatMap((node) => {
     const latest = node.attempts[0]
@@ -220,7 +178,7 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
       : []
   }), [detail])
   const select = (node: WorkflowNode) => {
-    if (!node.runId || node.kind === 'task' || node.kind === 'candidate') return false
+    if (!node.runId || node.kind === 'task') return false
     navigate('run', { runId: node.runId })
     return true
   }
@@ -248,7 +206,6 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
           {mission.phase === 'planning' ? 'The integrator has not proposed tasks yet.' : 'This swarm has no tasks.'}
         </p>
       )}
-      {error && <p className="pl-5 text-ui-sm text-state-failed">Integration candidates: {error}</p>}
     </section>
   )
 }

@@ -1,6 +1,5 @@
 import type { Tone } from '@/components/ui/status-dot'
 import { stateLabel, stateTone, type PresentationState, type RunPresentation } from '@/lib/status'
-import type { CandidateState, DeliveryReceipt, DeliveryRequest, VerificationStatus } from '@/lib/integration-types'
 import type { MissionAttempt, MissionAttemptState, MissionSubmission, MissionTask } from '@/lib/types'
 import { missionTree, taskTitle } from '@/routes/missions/tree'
 import type { MissionDetail } from '@/store/missions'
@@ -11,7 +10,7 @@ import { agentLabel, agentState, type AgentIndex, type AgentState, type Subagent
 /** A run's states, plus Not started for work nobody picked up and Not checked yet for a fact nobody read. */
 export type WorkflowState = PresentationState | 'pending' | 'unknown'
 
-export type WorkflowKind = 'run' | 'request' | 'agent' | 'workflow' | 'integrator' | 'task' | 'attempt' | 'submission' | 'candidate'
+export type WorkflowKind = 'run' | 'request' | 'agent' | 'workflow' | 'integrator' | 'task' | 'attempt' | 'submission'
 
 export interface WorkflowCounts {
   noun: 'task' | 'agent'
@@ -216,21 +215,6 @@ export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentInd
   }
 }
 
-export interface CandidateFacts {
-  candidate_id: string
-  state: CandidateState
-  candidate_revision?: string
-  target_ref: string
-  conflicts?: string[]
-  verifications?: { candidate_revision: string; status: VerificationStatus; exit_code?: number; error?: string; created_at: string; finished_at?: string }[]
-  delivery_request?: Pick<DeliveryRequest, 'state'>
-  delivery_receipt?: Pick<DeliveryReceipt, 'result' | 'created_at'>
-  created_at: string
-  error?: string
-  /** Why integration.show could not be read, verbatim. */
-  readError?: string
-}
-
 const attemptStates: Record<MissionAttemptState, WorkflowState> = {
   reserved: 'working',
   launching: 'working',
@@ -326,63 +310,16 @@ function taskState(task: MissionTask, latest: WorkflowNode | undefined, waitingO
   return { state: 'pending', detail: 'No worker yet' }
 }
 
-function verificationState(candidate: CandidateFacts): { state: WorkflowState; detail: string } {
-  const checks = (candidate.verifications ?? []).filter((item) => item.candidate_revision === candidate.candidate_revision)
-  const latest = checks.at(-1)
-  if (!latest) return { state: 'unknown', detail: candidate.verifications ? 'Not verified yet' : 'Verification not checked yet' }
-  switch (latest.status) {
-    case 'running':
-      return { state: 'waiting-ci', detail: 'Verification running' }
-    case 'passed':
-      return { state: 'ready', detail: 'Verification passed' }
-    default: {
-      const why = latest.error || (latest.exit_code !== undefined ? `exit ${latest.exit_code}` : latest.status.replace('_', ' '))
-      return { state: 'failed', detail: `Verification failed: ${why}` }
-    }
-  }
-}
-
-function candidateNode(candidate: CandidateFacts, parentId: string): WorkflowNode {
-  const base = {
-    id: `candidate:${candidate.candidate_id}`,
-    parentId,
-    kind: 'candidate' as const,
-    label: `Candidate for ${candidate.target_ref}`,
-    startedAt: candidate.created_at,
-    children: [],
-  }
-  const receipt = candidate.delivery_receipt
-  if (receipt) return { ...base, state: 'completed', detail: receipt.result === 'proposed' ? 'Delivered as a proposal' : 'Delivered', endedAt: receipt.created_at }
-  if (candidate.readError) return { ...base, state: 'unknown', detail: candidate.readError }
-  switch (candidate.state) {
-    case 'preparing':
-      return candidate.error ? { ...base, state: 'failed', detail: candidate.error } : { ...base, state: 'working', detail: 'Preparing' }
-    case 'conflicted': {
-      const n = candidate.conflicts?.length ?? 0
-      return { ...base, state: 'waiting-agents', detail: n > 0 ? `${n} ${n === 1 ? 'conflict' : 'conflicts'}: ${candidate.conflicts!.join(', ')}` : 'Conflicted' }
-    }
-    case 'frozen': {
-      const request = candidate.delivery_request?.state
-      if (request === 'pending' || request === 'approved' || request === 'delivering') return { ...base, state: 'waiting-agents', detail: `Delivery ${request}` }
-      if (request === 'denied') return { ...base, state: 'failed', detail: 'Delivery denied' }
-      return { ...base, ...verificationState(candidate) }
-    }
-    default:
-      return { ...base, state: 'closed', detail: candidate.error || candidate.state.charAt(0).toUpperCase() + candidate.state.slice(1) }
-  }
-}
-
 export interface SwarmInput {
   detail: MissionDetail
   runs: Record<string, RunFacts>
-  candidates: CandidateFacts[]
   /** Child runs the integrator and workers started, at any depth. */
   childRuns?: ChildRunFacts[]
   integratorLabel: string
   workerLabel?: (attempt: MissionAttempt, name: string) => string
 }
 
-export function deriveSwarmWorkflow({ detail, runs, candidates, childRuns = [], integratorLabel, workerLabel = (_, name) => name }: SwarmInput): WorkflowNode {
+export function deriveSwarmWorkflow({ detail, runs, childRuns = [], integratorLabel, workerLabel = (_, name) => name }: SwarmInput): WorkflowNode {
   const { mission } = detail
   const rootID = `integrator:${mission.id}`
   const runID = mission.current_integrator_run_id
@@ -420,7 +357,6 @@ export function deriveSwarmWorkflow({ detail, runs, candidates, childRuns = [], 
   })
   const children = [
     ...tasks,
-    ...candidates.map((candidate) => candidateNode(candidate, rootID)),
     ...(runID ? childRunNodes(runID, rootID, childRuns) : []),
   ]
   const state: WorkflowState = integrator?.state ?? (mission.phase === 'completed' ? 'completed' : mission.phase === 'cancelled' ? 'closed' : 'unknown')
