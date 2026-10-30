@@ -408,6 +408,13 @@ type supervised struct {
 	agentCost      float64
 	sessionMu      sync.Mutex
 	agentExec      *runtime.ExecIdentity
+	// agentKeeper is how to reattach to the keeper agentExec runs, nil for
+	// an adapter an older server ran without one.
+	agentKeeper *keeperRecord
+	// keeperDelivered are the tags of requests a server process before this
+	// one left with the agent, once this one reattached to its keeper.
+	keeperDelivered []string
+	keeperAdopted   bool
 	// spendMu orders charge calls; uncharged holds the tokens of a spend
 	// whose publish failed.
 	spendMu   sync.Mutex

@@ -316,6 +316,19 @@ func (s *Session) interruptTasksLocked(last Item) {
 	s.emitLocked(marker)
 }
 
+// adoptTasksLocked takes the live task set an adopted session last
+// recorded: the tasks run on under the same agent.
+func (s *Session) adoptTasksLocked(last Item) {
+	for _, t := range last.Tasks {
+		held, _ := agentstatus.HeldTask(t.Type)
+		s.tasks[t.ID] = &liveTask{typ: t.Type, description: t.Description, dismissed: held && !t.Holds}
+	}
+	s.loggedTasks, s.loggedOwed = last.Tasks, last.FollowUp
+	if last.FollowUp {
+		s.oweLocked(followUpGrace)
+	}
+}
+
 // backgroundLocked reports whether the agent works with no prompt open: an
 // autonomous turn runs, tasks it reports back on are live, or one ended and
 // the turn reporting back on it is still owed.
@@ -424,7 +437,7 @@ func (s *Session) endAutonomousLocked(stop string) {
 	if len(s.queue) > 0 && !s.closingLocked() {
 		next := s.queue[0]
 		s.queue = s.queue[1:]
-		s.startTurnLocked(next.blocks, next.delivered)
+		s.startTurnLocked(next.blocks, next.delivered, next.tag)
 		return
 	}
 	s.followUpLocked()

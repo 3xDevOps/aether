@@ -1,0 +1,169 @@
+// Package acpkeeper keeps an enhanced run's ACP adapter attached across a
+// server restart. A keeper process inside the run container owns the
+// adapter's stdio and serves it on a container-local unix socket; each server
+// process attaches to it through a short-lived bridge exec, and a newer
+// server takes the adapter over without a new session, prompt or turn.
+//
+// The socket carries one JSON frame per line. The first frame an attacher
+// sends is a hello; the keeper answers welcome, with the state the attacher
+// adopts, or refused. Every agent-to-client ACP message is a numbered rpc
+// frame that the keeper retains until the attacher acks it; client-to-agent
+// messages are unnumbered rpc frames.
+package acpkeeper
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+)
+
+const (
+	// Command is the staged binary's keeper subcommand.
+	Command = "acp-keeper"
+	// Version is the frame protocol this build speaks. A keeper refuses a
+	// hello for any other version, which sends the server back to
+	// stopping the adapter and restoring its session.
+	Version = 1
+	// AdoptMethod is the request an attacher sends in place of the
+	// session/prompt an earlier attacher left unanswered. The keeper answers
+	// it with that prompt's answer and forwards nothing to the agent.
+	AdoptMethod = "_aether/keeper/adopt_prompt"
+
+	// maxLine bounds one frame. The SDK reads agent messages of up to 10
+	// MiB; a prompt with several images can be larger.
+	maxLine = 64 << 20
+	// stderrTail is how much of the adapter's stderr the keeper keeps.
+	stderrTail = 4 << 10
+)
+
+// Frame types.
+const (
+	frameHello     = "hello"
+	frameWelcome   = "welcome"
+	frameRefused   = "refused"
+	frameRPC       = "rpc"
+	frameAck       = "ack"
+	frameDetach    = "detach"
+	frameBye       = "bye"
+	frameClose     = "close"
+	frameExit      = "exit"
+	framePreempted = "preempted"
+)
+
+// Refusal codes.
+const (
+	// RefusedToken: the hello did not carry the keeper's token.
+	RefusedToken = "token"
+	// RefusedVersion: the keeper speaks another protocol version.
+	RefusedVersion = "version"
+	// RefusedStale: a server generation at least as new already attached.
+	RefusedStale = "stale"
+	// RefusedOverflow: the keeper dropped agent output it could not retain
+	// while no server read it, so attaching would lose some.
+	RefusedOverflow = "overflow"
+	// RefusedExited: the adapter exited.
+	RefusedExited = "exited"
+)
+
+type frame struct {
+	T   string          `json:"t"`
+	Seq uint64          `json:"seq,omitempty"`
+	M   json.RawMessage `json:"m,omitempty"`
+	// Tag names what a client-to-agent request delivers, such as a room
+	// message id; the keeper reports the tags of requests it forwarded for
+	// an attacher that is gone.
+	Tag string `json:"tag,omitempty"`
+
+	V     int    `json:"v,omitempty"`
+	Gen   uint64 `json:"gen,omitempty"`
+	Token string `json:"token,omitempty"`
+	Ack   uint64 `json:"ack,omitempty"`
+
+	State *State `json:"state,omitempty"`
+	Code  string `json:"code,omitempty"`
+	Error string `json:"error,omitempty"`
+	Exit  *Exit  `json:"exit,omitempty"`
+}
+
+// State is what a welcome hands the attacher: what the adapter answered the
+// first attacher's initialize and the latest session/new, session/load or
+// session/resume, and the work earlier attachers left in flight.
+type State struct {
+	Initialize json.RawMessage `json:"initialize,omitempty"`
+	Session    json.RawMessage `json:"session,omitempty"`
+	SessionID  string          `json:"session_id,omitempty"`
+	// Prompt is the session/prompt an earlier attacher sent whose answer no
+	// attacher acked; AdoptMethod takes it over.
+	Prompt *Prompt `json:"prompt,omitempty"`
+	// Delivered are the tags of requests earlier attachers sent that reached
+	// the agent and whose answer no attacher acked.
+	Delivered []string `json:"delivered,omitempty"`
+	Stderr    string   `json:"stderr,omitempty"`
+}
+
+// Prompt is a session/prompt in flight when its attacher went away.
+type Prompt struct {
+	Tag string `json:"tag,omitempty"`
+	// Answered says the agent already answered it.
+	Answered bool `json:"answered,omitempty"`
+}
+
+// Exit is how the adapter ended.
+type Exit struct {
+	Code   int    `json:"code"`
+	Stderr string `json:"stderr,omitempty"`
+}
+
+// RefusedError is a keeper's refusal of a hello.
+type RefusedError struct {
+	Code    string
+	Message string
+	Exit    *Exit
+}
+
+func (e *RefusedError) Error() string {
+	if e.Message == "" {
+		return "acpkeeper: attach refused: " + e.Code
+	}
+	return fmt.Sprintf("acpkeeper: attach refused: %s: %s", e.Code, e.Message)
+}
+
+// ErrNothingToAdopt answers AdoptMethod when no earlier prompt is in flight.
+var ErrNothingToAdopt = errors.New("acpkeeper: no prompt in flight to adopt")
+
+// rpcHead is the part of an ACP message the keeper routes on.
+type rpcHead struct {
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+	Params struct {
+		SessionID string `json:"sessionId"`
+	} `json:"params"`
+	Result json.RawMessage `json:"result"`
+	Error  json.RawMessage `json:"error"`
+}
+
+func (h rpcHead) request() bool  { return h.Method != "" && present(h.ID) }
+func (h rpcHead) response() bool { return h.Method == "" && present(h.ID) }
+
+func present(raw json.RawMessage) bool { return len(raw) > 0 && string(raw) != "null" }
+
+// withID returns line with its JSON-RPC id replaced.
+func withID(line []byte, id json.RawMessage) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(line, &m); err != nil {
+		return nil, err
+	}
+	m["id"] = id
+	return json.Marshal(m)
+}
+
+// ServeArgv is the command that runs bin, the staged binary, as the keeper
+// of adapter listening on socket.
+func ServeArgv(bin, socket string, adapter []string) []string {
+	return append([]string{bin, Command, "serve", socket, "--"}, adapter...)
+}
+
+// AttachArgv is the command that bridges its stdio to the keeper at socket.
+func AttachArgv(bin, socket string) []string {
+	return []string{bin, Command, "attach", socket}
+}

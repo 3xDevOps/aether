@@ -867,7 +867,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	}
 	s.mu.Lock()
 	entry.containerID = ""
-	entry.agentExec = nil
+	entry.agentExec, entry.agentKeeper = nil, nil
 	if entry.userReservation != nil {
 		delete(s.credentialUsers, entry.userReservation)
 		entry.userReservation = nil

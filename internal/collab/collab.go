@@ -120,7 +120,13 @@ type Config struct {
 	// Ready, when supplied, closes only after scheduler recovery has restored
 	// persisted runs and their PTY sessions. The overdue worker waits for it
 	// before claiming any steer, leaving messages durably queued during boot.
-	Ready            <-chan struct{}
+	Ready <-chan struct{}
+	// Reattached reports the tags of what reached the agent of a run whose
+	// session this server process adopted from the agent's keeper, and
+	// false for a run whose session it restored or started anew. With it,
+	// steers an earlier server process left queued behind an agent turn are
+	// settled once Ready closes: delivered, sent again, or not sent.
+	Reattached       func(domain.RunID) (delivered []string, ok bool)
 	BodyLimit        int
 	AttachmentLimit  int
 	AttachmentBytes  int
@@ -175,6 +181,9 @@ type Service struct {
 	workerDone chan struct{}
 	overdueErr error
 	dropQueued sync.Once
+	// bootAt is when Start ran; steers queued before it are an earlier
+	// server process's.
+	bootAt time.Time
 }
 
 // OverdueDeliveryError reports the latest overdue worker failure, kept after
@@ -221,16 +230,22 @@ func New(cfg Config) (*Service, error) {
 	return &Service{cfg: cfg, now: cfg.Now}, nil
 }
 
-// Start records the steers an earlier server process left queued behind an
-// agent turn as not sent, performs an immediate overdue sweep and then keeps
-// sweeping until ctx is cancelled. Call it before the scheduler opens agent
-// sessions. Calling Start more than once is harmless.
+// Start settles the steers an earlier server process left queued behind an
+// agent turn, performs an immediate overdue sweep and then keeps sweeping
+// until ctx is cancelled. Call it before the scheduler opens agent sessions.
+// Calling Start more than once is harmless.
 func (s *Service) Start(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("%w: nil context", ErrInvalidRequest)
 	}
 	var dropErr error
-	s.dropQueued.Do(func() { dropErr = s.dropAgentQueued(ctx) })
+	s.dropQueued.Do(func() {
+		if s.cfg.Reattached == nil {
+			dropErr = s.dropAgentQueued(ctx)
+			return
+		}
+		s.bootAt = s.now()
+	})
 	if dropErr != nil {
 		return dropErr
 	}
@@ -266,6 +281,11 @@ func (s *Service) Start(ctx context.Context) error {
 			case <-ready:
 			case <-workerCtx.Done():
 				return
+			}
+		}
+		if s.cfg.Reattached != nil {
+			if err := s.settleAgentQueued(workerCtx); err != nil {
+				s.recordOverdueError(err)
 			}
 		}
 		if _, err := s.DeliverDue(workerCtx, store.MaxCollaborationPageSize); err != nil {

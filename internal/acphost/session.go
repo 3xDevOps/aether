@@ -83,6 +83,19 @@ type Config struct {
 	// Code titles a session at its first prompt, but its adapter sends
 	// session_info_update only when the turn ends.
 	TitleLookup time.Duration
+	// Adopt takes over the session an earlier server process opened through
+	// the agent's keeper instead of initializing the agent and opening one.
+	Adopt *Adoption
+}
+
+// Adoption is what the keeper reported about the session a server takes
+// over: the agent's initialize and session results, and whether a
+// session/prompt is in flight for the turn the item log leaves open.
+type Adoption struct {
+	Initialize json.RawMessage
+	Session    json.RawMessage
+	SessionID  string
+	Prompt     bool
 }
 
 // TurnState is the session's execution state: working with reason "prompt"
@@ -195,12 +208,27 @@ func (s *Session) resolveLocked(a *turnAck, err error) {
 }
 
 func (s *Session) closingLocked() bool {
-	return s.closed || s.hostClosed || s.conn.closed() || s.conn.inputBroken()
+	return s.closed || s.hostClosed || s.detached || s.conn.closed() || s.conn.inputBroken()
 }
 
 type queuedPrompt struct {
 	blocks    []acp.ContentBlock
 	delivered func(error)
+	tag       string
+}
+
+type tagKey struct{}
+
+// WithTag marks the prompt sent with ctx as delivering what tag names, such
+// as a room message id. A keeper reports the tags of prompts that reached
+// the agent while their server went away.
+func WithTag(ctx context.Context, tag string) context.Context {
+	return context.WithValue(ctx, tagKey{}, tag)
+}
+
+func tagOf(ctx context.Context) string {
+	tag, _ := ctx.Value(tagKey{}).(string)
+	return tag
 }
 
 // Session ties an agent connection to its item log and viewers.
@@ -227,10 +255,15 @@ type Session struct {
 	subs       map[chan Item]struct{}
 	closed     bool
 	hostClosed bool
-	state      State
-	actAt      time.Time
-	actNext    *[2]string
-	actTimer   *time.Timer
+	// detached ends the session without recording its end: the agent keeps
+	// the turn, and the next server process adopts it. silent is set once
+	// a detached connection ended and what it delivered is recorded, and
+	// stops every item and callback after.
+	detached, silent bool
+	state            State
+	actAt            time.Time
+	actNext          *[2]string
+	actTimer         *time.Timer
 	// prompted is the latest prompt's text with whitespace collapsed;
 	// message is that prompt as the member wrote it.
 	prompted string
@@ -307,7 +340,8 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 
 	last, _, openTurn := log.state()
 	s.turn = last.Turn
-	if openTurn {
+	adopt := cfg.Adopt
+	if openTurn && adopt == nil {
 		s.mu.Lock()
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "The agent connection ended before the turn finished."}})
 		s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "interrupted"})
@@ -324,9 +358,15 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.mu.Lock()
 		for _, it := range running {
 			s.taskCalls[it.ToolCall.Task.ID] = *it.ToolCall
-			s.taskEndedLocked(it.ToolCall.Task.ID, "stopped")
+			if adopt == nil {
+				s.taskEndedLocked(it.ToolCall.Task.ID, "stopped")
+			}
 		}
-		s.interruptTasksLocked(LastItem(log, KindBackground))
+		if adopt != nil {
+			s.adoptTasksLocked(LastItem(log, KindBackground))
+		} else {
+			s.interruptTasksLocked(LastItem(log, KindBackground))
+		}
 		s.mu.Unlock()
 	}
 
@@ -346,13 +386,17 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		// asked; they arrive stamped with the subagent's parent link.
 		s.conn.sessionMeta["claudeCode"] = map[string]any{"emitRawSDKMessages": claudeTaskFrames, "options": map[string]any{"forwardSubagentText": true}}
 	}
-	if err := s.open(ctx); err != nil {
+	open := s.open
+	if adopt != nil {
+		open = func(context.Context) error { return s.adopt(openTurn) }
+	}
+	if err := open(ctx); err != nil {
 		_ = w.Close()
 		s.stop()
 		s.notify.close(nil)
 		return nil, errors.Join(err, log.Close())
 	}
-	if cfg.SessionID != "" {
+	if cfg.SessionID != "" && adopt == nil {
 		// The connection that held the restored session's turn and
 		// requests may have ended without reporting their end.
 		s.mu.Lock()
@@ -407,6 +451,73 @@ func (s *Session) open(ctx context.Context) error {
 			Description: fmt.Sprintf("Session %s could not be restored: %v", s.cfg.SessionID, restoreErr),
 		}})
 	}
+	s.sessionOptionsLocked(res)
+	return nil
+}
+
+// adopt takes over the session the keeper reported. A turn the log leaves
+// open goes on: its prompt's answer still reaches this session, or the
+// agent's own turn still streams; neither is sent again.
+func (s *Session) adopt(openTurn bool) error {
+	a := s.cfg.Adopt
+	var init initializeResult
+	if err := json.Unmarshal(a.Initialize, &init); err != nil {
+		return fmt.Errorf("acphost: adopt the agent's initialize result: %w", err)
+	}
+	if err := s.conn.setInfo(init); err != nil {
+		return err
+	}
+	var res sessionResult
+	if err := json.Unmarshal(a.Session, &res); err != nil || a.SessionID == "" {
+		return fmt.Errorf("acphost: adopt session %q: %w", a.SessionID, errors.Join(err, errors.New("the keeper reported no session")))
+	}
+	s.conn.sessionID.Store(a.SessionID)
+	s.conn.reuseRequests(PendingRequests(s.log))
+	started := LastItem(s.log, KindTurnStart)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionOptionsLocked(res)
+	s.restoreStateLocked()
+	s.inputsLocked()
+	switch {
+	case openTurn && started.Autonomous:
+		s.autonomous, s.turnAt, s.lastUpdate = true, time.Now(), time.Now()
+		s.settleLocked()
+	case openTurn && a.Prompt:
+		s.turnActive, s.turnAt = true, time.Now()
+		s.stateLocked(TurnState{Working: true, Reason: "prompt"})
+		go s.runTurn(nil, &turnAck{done: make(chan struct{})}, func() {})
+	case openTurn:
+		// The prompt never reached the keeper, or the server that sent it
+		// was handed its answer and went away before recording it.
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Aether's server restarted and the agent's keeper had no prompt of this turn in flight."}})
+		s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "interrupted"})
+		s.stateLocked(TurnState{Reason: "interrupted"})
+	default:
+		s.stateLocked(TurnState{})
+	}
+	return nil
+}
+
+// restoreStateLocked takes the mode, options, commands, auth status and
+// usage an adopted session last recorded, so they are not recorded again.
+func (s *Session) restoreStateLocked() {
+	if it := LastItem(s.log, KindModeChange); it.Mode != "" {
+		s.state.Mode = it.Mode
+		s.options.setCurrent("mode", it.Mode)
+	}
+	if it := LastItem(s.log, KindConfigOptions); present(it.ConfigOptions) {
+		s.options.adopt(it.ConfigOptions)
+		s.state.ConfigOptions = it.ConfigOptions
+	}
+	s.state.Commands = LastItem(s.log, KindCommands).Commands
+	s.state.Auth = LastItem(s.log, KindAuthStatus).Auth
+	s.state.Usage = LastItem(s.log, KindUsage).Usage
+}
+
+// sessionOptionsLocked takes the agent's models, modes and options from its
+// session/new, session/resume or session/load result.
+func (s *Session) sessionOptionsLocked(res sessionResult) {
 	s.options.model = legacyOptions(res.Models, "availableModels", "modelId", "currentModelId")
 	s.options.mode = legacyOptions(res.Modes, "availableModes", "id", "currentModeId")
 	// Resume/load may have already delivered config updates. If the response
@@ -420,7 +531,6 @@ func (s *Session) open(ctx context.Context) error {
 		s.options.mode.current = s.state.Mode
 	}
 	s.replaceOptionsLocked(options)
-	return nil
 }
 
 // SessionID is the agent session id to store for a later restore.
@@ -443,6 +553,16 @@ func (s *Session) Close() error {
 	return s.conn.Close()
 }
 
+// Detach makes the end of the connection silent: no item, state, input or
+// delivery callback records it, because the agent keeps running under its
+// keeper and the next server process adopts the session. No turn starts after
+// it. Call it before the connection ends.
+func (s *Session) Detach() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.detached = true
+}
+
 // Prompt sends input to the agent. With no turn running it starts one and
 // returns once the agent accepted it; a refusal is an error. While a turn
 // runs, steer asks the agent to add the input to that turn if it advertises
@@ -462,20 +582,21 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		s.mu.Unlock()
 		return Receipt{}, ErrClosed
 	}
+	tag := tagOf(ctx)
 	if !s.turnActive && !s.autonomous {
-		ack := s.startTurnLocked(blocks, report(delivered, false))
+		ack := s.startTurnLocked(blocks, report(delivered, false), tag)
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
 	}
 	if !steer || !s.conn.Info().Steering {
-		s.queue = append(s.queue, queuedPrompt{blocks, report(delivered, true)})
+		s.queue = append(s.queue, queuedPrompt{blocks, report(delivered, true), tag})
 		s.mu.Unlock()
 		return Receipt{Outcome: OutcomeQueued}, nil
 	}
 	starting := s.starting
 	s.mu.Unlock()
 
-	outcome, err := s.conn.steer(ctx, blocks)
+	outcome, err := s.conn.steer(ctx, blocks, tag)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -522,11 +643,11 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive && !s.autonomous {
-		ack := s.startTurnLocked(blocks, report(delivered, false))
+		ack := s.startTurnLocked(blocks, report(delivered, false), tag)
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
 	}
-	s.queue = append(s.queue, queuedPrompt{blocks, report(delivered, true)})
+	s.queue = append(s.queue, queuedPrompt{blocks, report(delivered, true), tag})
 	s.mu.Unlock()
 	return Receipt{Outcome: OutcomeQueued}, nil
 }
@@ -575,7 +696,7 @@ func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock, del
 		s.mu.Unlock()
 		return false, nil
 	}
-	ack := s.startTurnLocked(blocks, delivered)
+	ack := s.startTurnLocked(blocks, delivered, tagOf(ctx))
 	s.mu.Unlock()
 	if _, err := awaitAccept(ctx, ack); err != nil {
 		return false, err
@@ -594,10 +715,10 @@ func (s *Session) validatePromptImages(blocks []acp.ContentBlock) error {
 	return nil
 }
 
-func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(error)) *turnAck {
+func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(error), tag string) *turnAck {
 	// Before the turn is recorded: Cancel does not take mu, and a cancel
 	// sent after the turn shows in the log must wait for its prompt.
-	sent := s.conn.w.sendingPrompt()
+	sent := s.conn.w.sendingPrompt(tag)
 	ack := &turnAck{done: make(chan struct{}), delivered: delivered}
 	s.starting = ack
 	s.turn++
@@ -719,9 +840,12 @@ func forAgentOnly(b acp.ContentBlock) bool {
 	return a != nil && len(a.Audience) > 0 && !slices.Contains(a.Audience, acp.RoleUser)
 }
 
+// runTurn runs the turn blocks start, or with no blocks the adopted turn
+// whose prompt an earlier server process sent.
 func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) {
 	stop, spent, err := s.conn.prompt(s.ctx, blocks)
 	sent()
+	lost := blocks == nil && errors.Is(err, errNothingToAdopt)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ended++
@@ -732,6 +856,9 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 		s.mu.Unlock()
 		s.conn.delivered()
 		s.mu.Lock()
+	}
+	if err != nil && s.detached && s.conn.closed() {
+		s.silent = true
 	}
 	s.resolveLocked(ack, err)
 	if s.starting == ack {
@@ -745,6 +872,9 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 	reason := stop
 	var failed error
 	switch {
+	case lost:
+		reason = "interrupted"
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Aether's server restarted and the agent's keeper no longer had the turn's prompt in flight."}})
 	case err != nil && (s.conn.closed() || s.conn.inputBroken()):
 		reason = "interrupted"
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: err.Error()}})
@@ -774,7 +904,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 	if len(s.queue) > 0 && !s.closingLocked() {
 		next := s.queue[0]
 		s.queue = s.queue[1:]
-		s.startTurnLocked(next.blocks, next.delivered)
+		s.startTurnLocked(next.blocks, next.delivered, next.tag)
 		return
 	}
 	s.followUpLocked()
@@ -836,7 +966,7 @@ func (s *Session) Notice(severity, title, description string) error {
 func (s *Session) Record(n Notice) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
+	if s.closed || s.silent {
 		return ErrClosed
 	}
 	it := Item{Kind: KindNotice, Notice: &n, Turn: s.turn}
@@ -914,7 +1044,7 @@ func (s *Session) Subscribe(afterSeq int64) (SubscriptionReplay, <-chan Item, fu
 }
 
 func (s *Session) emitLocked(it Item) {
-	if s.closed {
+	if s.closed || s.silent {
 		return
 	}
 	switch it.Kind {
@@ -1012,7 +1142,11 @@ func (s *Session) flushActivity() {
 }
 
 // callback runs f after every earlier callback, outside the session lock.
-func (s *Session) callback(f func()) { s.notify.push(f) }
+func (s *Session) callback(f func()) {
+	if !s.silent {
+		s.notify.push(f)
+	}
+}
 
 func (s *Session) inputsLocked() {
 	if s.closed || s.cfg.OnInputs == nil {
@@ -1080,6 +1214,11 @@ func (s *Session) requestOpened(r Request) {
 func (s *Session) requestClosed(r Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.detached && r.Status == RequestCancelled {
+		// The connection ended under it; the agent still waits for the
+		// answer, which the next server process asks for.
+		return
+	}
 	s.emitLocked(Item{Kind: KindRequest, Request: &r})
 	s.inputsLocked()
 	// The agent resumes only after this returns; its quiet wait starts now.
@@ -1092,6 +1231,9 @@ func (s *Session) requestClosed(r Request) {
 func (s *Session) watch() {
 	<-s.conn.Done()
 	s.conn.delivered()
+	s.mu.Lock()
+	s.silent = s.detached
+	s.mu.Unlock()
 	s.stop()
 	s.conn.drain()
 	s.mu.Lock()

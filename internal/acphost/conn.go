@@ -20,6 +20,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -169,6 +170,9 @@ type Conn struct {
 	// cancelled is closed and replaced each time pending requests are
 	// cancelled.
 	cancelled chan struct{}
+	// reuse holds the ids an adopted session's log gives requests still
+	// pending, for the agent's requests the keeper sends again.
+	reuse []Request
 }
 
 // childLink is a subagent session's launch id and the launch id of the
@@ -187,6 +191,15 @@ type agentInput struct {
 	unsent chan struct{}
 	// promptID is the JSON-RPC id of the session/prompt awaiting its answer.
 	promptID string
+	// promptTag and steerTag name what the next session/prompt and the next
+	// steer deliver, for a writer that records it.
+	promptTag, steerTag string
+}
+
+// taggedWriter is a keeper attachment, which records what a request
+// delivers.
+type taggedWriter interface {
+	WriteTagged(p []byte, tag string) (int, error)
 }
 
 type rpcHead struct {
@@ -196,15 +209,32 @@ type rpcHead struct {
 
 func (in *agentInput) Write(p []byte) (int, error) {
 	var m rpcHead
-	prompt := bytes.Contains(p, []byte(`"`+acp.AgentMethodSessionPrompt+`"`)) && json.Unmarshal(p, &m) == nil &&
-		m.Method == acp.AgentMethodSessionPrompt
-	if prompt {
-		// Before the write: the agent can answer before Write returns.
-		in.mu.Lock()
-		in.promptID = string(m.ID)
-		in.mu.Unlock()
+	method := ""
+	for _, name := range []string{acp.AgentMethodSessionPrompt, acpkeeper.AdoptMethod, methodSteering} {
+		if bytes.Contains(p, []byte(`"`+name+`"`)) && json.Unmarshal(p, &m) == nil && m.Method == name {
+			method = name
+			break
+		}
 	}
-	n, err := in.WriteCloser.Write(p)
+	prompt := method == acp.AgentMethodSessionPrompt || method == acpkeeper.AdoptMethod
+	tag := ""
+	in.mu.Lock()
+	switch {
+	case prompt:
+		// Before the write: the agent can answer before Write returns.
+		in.promptID = string(m.ID)
+		tag, in.promptTag = in.promptTag, ""
+	case method == methodSteering:
+		tag, in.steerTag = in.steerTag, ""
+	}
+	in.mu.Unlock()
+	var n int
+	var err error
+	if tagged, ok := in.WriteCloser.(taggedWriter); ok && tag != "" {
+		n, err = tagged.WriteTagged(p, tag)
+	} else {
+		n, err = in.WriteCloser.Write(p)
+	}
 	if err != nil {
 		in.broken.Store(true)
 		_ = in.output.Close()
@@ -234,12 +264,14 @@ func (in *agentInput) answersPrompt(line []byte) bool {
 	return true
 }
 
-// sendingPrompt holds a cancel back until the next session/prompt is
-// written, or until the returned release is called.
-func (in *agentInput) sendingPrompt() func() {
+// sendingPrompt holds a cancel back until the next session/prompt, which
+// delivers what tag names, is written, or until the returned release is
+// called.
+func (in *agentInput) sendingPrompt(tag string) func() {
 	unsent := make(chan struct{})
 	in.mu.Lock()
 	in.unsent = unsent
+	in.promptTag = tag
 	in.mu.Unlock()
 	return func() {
 		in.mu.Lock()
@@ -393,6 +425,11 @@ func (c *Conn) initialize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return c.setInfo(res)
+}
+
+// setInfo takes what the agent advertised in its initialize result.
+func (c *Conn) setInfo(res initializeResult) error {
 	if res.ProtocolVersion != acp.ProtocolVersionNumber {
 		return fmt.Errorf("acphost: agent speaks ACP protocol version %d, the host speaks %d", res.ProtocolVersion, acp.ProtocolVersionNumber)
 	}
@@ -461,15 +498,28 @@ func nonNil(mcp []acp.McpServer) []acp.McpServer {
 	return mcp
 }
 
+// errNothingToAdopt is the keeper's answer to an adopted turn whose prompt
+// never reached it.
+var errNothingToAdopt = errors.New("acphost: the keeper has no prompt in flight")
+
 // prompt runs one turn and returns its stop reason and the tokens the agent
 // reports for it, cache reads and writes as input and thought tokens as
 // output. A malformed usage counts no tokens rather than failing the turn. It
-// returns only when the turn ends.
+// returns only when the turn ends. With no blocks it takes over the turn
+// whose prompt an earlier server process sent through the agent's keeper.
 func (c *Conn) prompt(ctx context.Context, blocks []acp.ContentBlock) (string, Spend, error) {
+	method, params := acp.AgentMethodSessionPrompt, any(acp.PromptRequest{SessionId: acp.SessionId(c.SessionID()), Prompt: blocks})
+	if blocks == nil {
+		method, params = acpkeeper.AdoptMethod, map[string]any{}
+	}
 	res, err := call[struct {
 		StopReason string          `json:"stopReason"`
 		Usage      json.RawMessage `json:"usage"`
-	}](c, ctx, acp.AgentMethodSessionPrompt, acp.PromptRequest{SessionId: acp.SessionId(c.SessionID()), Prompt: blocks})
+	}](c, ctx, method, params)
+	var re *acp.RequestError
+	if blocks == nil && errors.As(err, &re) && re.Message == acpkeeper.ErrNothingToAdopt.Error() {
+		err = errNothingToAdopt
+	}
 	var u acp.Usage
 	if len(res.Usage) == 0 || json.Unmarshal(res.Usage, &u) != nil {
 		return res.StopReason, Spend{}, err
@@ -501,7 +551,10 @@ func SessionLost(err error) bool {
 
 // steer adds input to the running turn. idleBehavior promptRequired makes
 // the agent refuse rather than start a turn the host did not open.
-func (c *Conn) steer(ctx context.Context, blocks []acp.ContentBlock) (string, error) {
+func (c *Conn) steer(ctx context.Context, blocks []acp.ContentBlock, tag string) (string, error) {
+	c.w.mu.Lock()
+	c.w.steerTag = tag
+	c.w.mu.Unlock()
 	res, err := call[struct {
 		Outcome string `json:"outcome"`
 	}](c, ctx, methodSteering, map[string]any{
@@ -870,8 +923,14 @@ func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *a
 func (c *Conn) wait(ctx context.Context, req Request, cancelled <-chan struct{}) (answer, bool) {
 	req.ID = rand.Text()
 	req.Status = RequestPending
-	p := &pendingRequest{req: req, answer: make(chan answer, 1)}
 	c.mu.Lock()
+	if i := slices.IndexFunc(c.reuse, func(r Request) bool {
+		return r.Kind == req.Kind && r.ToolCallID == req.ToolCallID && r.Title == req.Title
+	}); i >= 0 {
+		req.ID = c.reuse[i].ID
+		c.reuse = slices.Delete(c.reuse, i, i+1)
+	}
+	p := &pendingRequest{req: req, answer: make(chan answer, 1)}
 	select {
 	case <-cancelled:
 		c.mu.Unlock()
@@ -937,6 +996,14 @@ func (c *Conn) answer(requestID, optionID string, content map[string]any) error 
 	c.resolved[requestID] = true
 	p.answer <- answer{optionID: optionID, content: content}
 	return nil
+}
+
+// reuseRequests gives the agent's requests the keeper sends again the ids
+// the item log shows them pending under.
+func (c *Conn) reuseRequests(pending []Request) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reuse = pending
 }
 
 func (c *Conn) cancelPending() {

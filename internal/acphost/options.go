@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // optionCatalog keeps native options separate from the legacy selectors. Native
@@ -109,6 +110,36 @@ func (o *optionCatalog) replace(raw json.RawMessage) {
 				seenModel = seenModel || category == "model"
 				seenMode = seenMode || category == "mode"
 			}
+		}
+	}
+}
+
+// adopt takes the options an adopted session last rendered: the native
+// options as they were, and the current values of the selectors render
+// synthesized for legacy models and modes.
+func (o *optionCatalog) adopt(rendered json.RawMessage) {
+	var entries []json.RawMessage
+	if json.Unmarshal(rendered, &entries) != nil {
+		return
+	}
+	native := make([]json.RawMessage, 0, len(entries))
+	var synthetic []nativeOption
+	for _, entry := range entries {
+		var option nativeOption
+		_ = json.Unmarshal(entry, &option)
+		if category := option.category(); strings.HasPrefix(option.ID, "_aether_") && (category == "model" || category == "mode") {
+			synthetic = append(synthetic, option)
+			continue
+		}
+		native = append(native, entry)
+	}
+	if len(native) > 0 {
+		raw, _ := json.Marshal(native)
+		o.replace(raw)
+	}
+	for _, option := range synthetic {
+		if current, ok := option.selectValue(); ok {
+			o.legacy(option.category()).current = current
 		}
 	}
 }

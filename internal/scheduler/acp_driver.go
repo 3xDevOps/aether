@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -51,9 +51,10 @@ var acpTitleLookupDelay = 3 * time.Second
 var ErrACPNotRunning = errors.New("scheduler: the enhanced session is not running")
 
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
-// shell, and the agent's ACP server runs beside it as a managed exec whose
-// stdio the acphost session owns. The adapter never outlives that pipe, so
-// every reattach stops any earlier exec before starting a fresh one.
+// shell, and the agent's ACP server runs beside it under a keeper, a managed
+// exec that owns the adapter's stdio and outlives this server process. The
+// acphost session speaks ACP through a bridge exec attached to the keeper; a
+// later server process attaches anew and adopts the session.
 type acpDriver struct {
 	s *Scheduler
 
@@ -76,8 +77,11 @@ type waiter struct {
 }
 
 type acpRun struct {
-	session  *acphost.Session
+	session *acphost.Session
+	// exec is the keeper's, bridge the exec keeper attaches through.
 	exec     runtime.ManagedExec
+	keeper   *acpkeeper.Client
+	bridge   runtime.ManagedExec
 	stderr   *tailBuffer
 	err      error
 	stopping bool
@@ -246,7 +250,7 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 	if instructions != "" {
 		blocks = append(blocks, acp.TextBlock("\n\n"+instructions))
 	}
-	receipt, err := sess.Prompt(ctx, blocks, steer, func(queued bool, taken error) {
+	receipt, err := sess.Prompt(acphost.WithTag(ctx, prompt.MessageID), blocks, steer, func(queued bool, taken error) {
 		settle(taken)
 		if taken == nil {
 			if answerErr := d.s.answerReached(run.ID, sent); answerErr != nil {
@@ -387,17 +391,20 @@ func (d *acpDriver) openRestored(ctx context.Context, entry *supervised, how acp
 	return d.open(ctx, entry, how)
 }
 
-// open runs under the run's op lock.
+// open runs under the run's op lock. openRestore with no live session first
+// reattaches to the keeper an earlier server process left running and adopts
+// its session; every other open, or a failed reattach, stops that keeper and
+// starts the adapter under a new one.
 func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) error {
 	if err := d.stopAdapterLocked(ctx, entry.runID); err != nil {
 		slog.Warn("scheduler: stop the previous ACP server", "run", entry.runID, "error", err)
 	}
-	d.stopStaleExec(ctx, entry)
 
 	d.s.mu.Lock()
 	paused, cid, coordDir, cachedSession, cost, task := entry.paused, entry.containerID, entry.coordDir, entry.agentSessionID, entry.agentCost, entry.task
 	oneShot := entry.launchMode == domain.LaunchHeadless
 	marked := entry.usageLimit != ""
+	kept := entry.agentKeeper != nil
 	d.s.mu.Unlock()
 	if paused {
 		// Docker cannot exec into a frozen container; Resume connects.
@@ -439,19 +446,43 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	if err != nil {
 		return err
 	}
-	exec, err := managed.StartExecPipe(ctx, cid, runtime.ExecSpec{
-		Argv: adapter, WorkingDir: d.s.cfg.WorktreeMount, CreationKey: "acp-" + rand.Text(),
-		// A container started for a Standard run lacks both.
-		Env: []string{coordtransport.EnhancedEnv + "=1", "NO_BROWSER=1"},
-	})
-	if err != nil {
-		return fmt.Errorf("start %s: %w", adapter[0], err)
+	var exec, bridge runtime.ManagedExec
+	var keeper *acpkeeper.Client
+	var adopt *acphost.Adoption
+	if how == openRestore && kept {
+		exec, keeper, bridge, err = d.reattach(ctx, entry, managed, cid)
+		if err == nil {
+			state := keeper.State()
+			adopt = &acphost.Adoption{Initialize: state.Initialize, Session: state.Session, SessionID: state.SessionID, Prompt: state.Prompt != nil}
+			d.record(entry, func() { entry.keeperDelivered, entry.keeperAdopted = state.Delivered, true })
+		} else {
+			slog.Warn("scheduler: reattach to the agent's keeper", "run", entry.runID, "error", err)
+			d.notice(entry.runID, "warning", "Agent restarted", "Aether could not reattach to the agent after the server restarted, so it restarted the agent and restored its session: "+err.Error())
+		}
 	}
-	identity := exec.Identity()
-	d.record(entry, func() { entry.agentExec = &identity })
-	att := exec.Attachment()
 	stderr := &tailBuffer{max: acpStderrTail}
-	go func() { _, _ = io.Copy(stderr, att.Stderr()) }()
+	var stdout io.Reader
+	var stdin io.WriteCloser
+	switch {
+	case keeper != nil:
+		_, _ = stderr.Write([]byte(keeper.State().Stderr))
+	default:
+		d.stopStaleExec(ctx, entry)
+		exec, keeper, bridge, err = d.startKept(ctx, entry, managed, cid, adapter)
+		if err == nil {
+			break
+		}
+		// A container staged before keepers existed has a binary without
+		// one: its adapter runs as before and ends with this process.
+		slog.Warn("scheduler: run the agent's ACP server under a keeper", "run", entry.runID, "error", err)
+		if exec, err = d.startDirect(ctx, entry, managed, cid, adapter, stderr); err != nil {
+			return err
+		}
+		stdout, stdin = exec.Attachment().Stdout(), exec.Attachment().Stdin()
+	}
+	if keeper != nil {
+		stdout, stdin = keeper.Reader(), keeper.Writer()
+	}
 
 	var titleLookup time.Duration
 	if profile.ACPTitleLookup {
@@ -473,8 +504,8 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			Name: "aether", Command: coordtransport.BinaryPath, Args: []string{"mcp"}, Env: []acp.EnvVariable{card},
 		}}}
 	}
-	r := &acpRun{exec: exec, stderr: stderr}
-	sess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
+	r := &acpRun{exec: exec, keeper: keeper, bridge: bridge, stderr: stderr}
+	sess, err := acphost.Start(ctx, stdout, stdin, acphost.Config{
 		LogPath:        d.s.cfg.PTY.ItemLogPath(runID),
 		Cwd:            d.s.cfg.WorktreeMount,
 		MCPServers:     mcp,
@@ -515,10 +546,14 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		OnTitle:    func(title string) { d.s.setRunTitle(runID, title) },
 		Cost:       cost,
 		OnSpend:    func(sp acphost.Spend) { d.charge(entry, sp) },
+		Adopt:      adopt,
 	})
 	if err != nil {
+		r.release()
 		if stopErr := d.stopExec(exec); stopErr != nil {
 			slog.Warn("scheduler: stop the failed ACP server", "run", runID, "error", stopErr)
+		} else {
+			d.forget(entry, exec)
 		}
 		return adapterError(fmt.Errorf("open the agent session: %w", err), stderr)
 	}
@@ -528,13 +563,17 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		}
 	}
 	d.record(entry, func() { entry.agentSessionID = sess.SessionID() })
+	// An adopted session keeps the mode, model and effort it had.
+	if adopt != nil {
+		mode = ""
+	}
 	if mode != "" && sess.State().Mode != mode {
 		if err := sess.SetMode(ctx, mode); err != nil {
 			slog.Warn("scheduler: set the agent's mode", "run", runID, "mode", mode, "error", err)
 		}
 	}
 	var modelErr error
-	if run.Model != "" {
+	if run.Model != "" && adopt == nil {
 		if modelErr = sess.SetModel(ctx, run.Model); modelErr != nil {
 			if err := sess.Notice("error", "Model not set", modelErr.Error()); err != nil {
 				slog.Warn("scheduler: record the model notice", "run", runID, "error", err)
@@ -543,7 +582,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	// After the model: the levels an agent offers can depend on it.
 	var effortErr error
-	if run.Effort != "" && !profile.ACPEffortArgs {
+	if run.Effort != "" && !profile.ACPEffortArgs && adopt == nil {
 		if effortErr = sess.SetEffort(ctx, run.Effort); effortErr != nil {
 			if err := sess.Notice("error", "Effort not set", effortErr.Error()); err != nil {
 				slog.Warn("scheduler: record the effort notice", "run", runID, "error", err)
@@ -584,6 +623,8 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	case oneShot && effortErr != nil:
 		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "effort not set: " + effortErr.Error()})
 	case how == openContinue:
+	case oneShot && adopt != nil && sess.State().TurnInFlight:
+		// The adopted turn runs on; its end ends the run.
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, prompt)
 	case fresh && task != "":
@@ -713,13 +754,32 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace+10*time.Second)
 	defer cancel()
-	status, err := r.exec.Wait(ctx)
-	cause := fmt.Errorf("the agent's ACP server exited with code %d", status.Code)
-	if err != nil {
-		cause = fmt.Errorf("the agent's ACP server closed its output: %w", err)
-		_, _ = r.exec.Stop(ctx, acpStopGrace)
+	if r.keeper != nil && errors.Is(r.keeper.Err(), acpkeeper.ErrPreempted) {
+		// Another server process took the agent over.
+		slog.Warn("scheduler: a newer server attached to the agent's keeper", "run", entry.runID)
+		r.release()
+		return
 	}
+	var cause error
+	switch exit := r.exit(); {
+	case exit != nil:
+		cause = fmt.Errorf("the agent's ACP server exited with code %d", exit.Code)
+		_, _ = r.stderr.Write([]byte(exit.Stderr))
+		_, _ = r.exec.Wait(ctx)
+	case r.keeper != nil:
+		cause = fmt.Errorf("the agent's ACP server closed its output: %w", errors.Join(r.keeper.Err(), errors.New("the keeper did not report the agent's exit")))
+		_, _ = r.exec.Stop(ctx, acpStopGrace)
+	default:
+		status, err := r.exec.Wait(ctx)
+		cause = fmt.Errorf("the agent's ACP server exited with code %d", status.Code)
+		if err != nil {
+			cause = fmt.Errorf("the agent's ACP server closed its output: %w", err)
+			_, _ = r.exec.Stop(ctx, acpStopGrace)
+		}
+	}
+	r.release()
 	_ = r.exec.Detach()
+	d.forget(entry, r.exec)
 	cause = adapterError(cause, r.stderr)
 	defer d.lockOp(entry.runID)()
 	d.mu.Lock()
@@ -755,9 +815,18 @@ func adapterError(err error, stderr *tailBuffer) error {
 	return err
 }
 
+// stopAdapter also stops a keeper the run records but no live session
+// holds, as after an open that failed before it reattached.
 func (d *acpDriver) stopAdapter(ctx context.Context, run domain.RunID) error {
 	defer d.lockOp(run)()
-	return d.stopAdapterLocked(ctx, run)
+	err := d.stopAdapterLocked(ctx, run)
+	d.s.mu.Lock()
+	entry := d.s.runs[run]
+	d.s.mu.Unlock()
+	if err == nil && entry != nil {
+		d.stopStaleExec(ctx, entry)
+	}
+	return err
 }
 
 // stopAdapterLocked keeps the adapter's exec identity in the sidecar when the
@@ -774,20 +843,24 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) err
 		return nil
 	}
 	if r.session != nil {
-		_ = r.session.Close()
+		// Closing writes to the agent's stdin, which an agent that stopped
+		// reading never takes; stopping the exec ends that write.
+		go func() { _ = r.session.Close() }()
 		select {
 		case <-r.session.Done():
 		case <-time.After(acpStopGrace):
 		case <-ctx.Done():
 		}
 	}
-	if err := d.stopExec(r.exec); err != nil {
+	err := d.stopExec(r.exec)
+	r.release()
+	if err != nil {
 		return err
 	}
 	d.s.mu.Lock()
 	defer d.s.mu.Unlock()
 	if entry := d.s.runs[run]; entry != nil && entry.agentExec != nil && entry.agentExec.ExecID == r.exec.Identity().ExecID {
-		entry.agentExec = nil
+		entry.agentExec, entry.agentKeeper = nil, nil
 		if err := d.s.writeSidecar(entry.sidecar()); err != nil {
 			slog.Warn("scheduler: persist stopped ACP server", "run", run, "error", err)
 		}
@@ -795,66 +868,44 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) err
 	return nil
 }
 
-// shutdown closes every session without stopping its adapter or reporting
-// its end, as the end of the server process would; the next server replaces
-// the adapters and reports the restored sessions' state. It waits for each
-// session's callbacks, so a dropped queued prompt is recorded before the
-// store closes.
+// shutdown detaches every session from its keeper without recording or
+// reporting its end: the adapter, its turn and its requests run on, and the
+// next server process reattaches and adopts them.
 func (d *acpDriver) shutdown() {
 	d.mu.Lock()
 	d.closed = true
-	var sessions []*acphost.Session
+	var detaching []*acpRun
 	for _, r := range d.runs {
 		r.stopping = true
 		if r.session != nil {
-			_ = r.session.Close()
-			sessions = append(sessions, r.session)
+			detaching = append(detaching, r)
 		}
 	}
 	d.mu.Unlock()
-	deadline := time.After(acpStopGrace)
-	for _, session := range sessions {
-		select {
-		case <-session.Done():
-		case <-deadline:
-			return
-		}
-	}
-}
-
-func (d *acpDriver) stopExec(exec runtime.ManagedExec) error {
-	ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace+10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace)
 	defer cancel()
-	defer func() { _ = exec.Detach() }()
-	_, err := exec.Stop(ctx, acpStopGrace)
-	if err == nil {
-		return nil
-	}
-	if state, statusErr := exec.Status(ctx); statusErr == nil && !state.Running {
-		return nil
-	}
-	return fmt.Errorf("stop the agent's ACP server (exec %s): %w", exec.Identity().ExecID, err)
-}
-
-// stopStaleExec stops an adapter a previous server process started: Docker
-// cannot reattach its stdio, so it can only be replaced.
-func (d *acpDriver) stopStaleExec(ctx context.Context, entry *supervised) {
-	d.s.mu.Lock()
-	stale := entry.agentExec
-	d.s.mu.Unlock()
-	if stale == nil {
-		return
-	}
-	if managed, ok := d.s.cfg.Runtime.(runtime.ManagedExecRuntime); ok {
-		if exec, err := managed.RecoverExec(ctx, *stale); err == nil {
-			if stopErr := d.stopExec(exec); stopErr != nil {
-				slog.Warn("scheduler: stop the earlier ACP server", "run", entry.runID, "error", stopErr)
+	var wg sync.WaitGroup
+	for _, r := range detaching {
+		wg.Go(func() {
+			if r.keeper == nil {
+				// An adapter run without a keeper ends with this process.
+				_ = r.session.Close()
+			} else {
+				if err := r.keeper.Detach(ctx); err != nil {
+					slog.Warn("scheduler: detach from the agent's keeper", "error", err)
+				}
+				// Everything the keeper sent before it confirmed is
+				// recorded; what follows is the end of the attachment.
+				r.session.Detach()
+				r.release()
 			}
-		} else {
-			slog.Info("scheduler: earlier ACP server is gone", "run", entry.runID, "error", err)
-		}
+			select {
+			case <-r.session.Done():
+			case <-ctx.Done():
+			}
+		})
 	}
-	d.record(entry, func() { entry.agentExec = nil })
+	wg.Wait()
 }
 
 func (d *acpDriver) record(entry *supervised, change func()) {

@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/codexapp"
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
@@ -39,6 +40,9 @@ func main() {
 	// every run receives that read-only, version-matched staged binary.
 	if len(os.Args) > 1 && os.Args[1] == "dev-exec" {
 		os.Exit(devExec(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == acpkeeper.Command {
+		os.Exit(acpKeeper(os.Args[2:]))
 	}
 	if filepath.Base(os.Args[0]) == "aether-internal" {
 		os.Exit(coordcli.Main(os.Args[1:]))
