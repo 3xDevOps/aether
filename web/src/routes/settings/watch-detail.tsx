@@ -120,7 +120,8 @@ interface EditFields {
 }
 
 function editFields(watch: Watch): EditFields {
-  return { conditions: watch.conditions, label: watch.label ?? '', expires: dateValue(watch.expires_at) }
+  const offered = conditionChoices[watch.target.kind].map((choice) => choice.value)
+  return { conditions: watch.conditions.filter((c) => offered.includes(c)), label: watch.label ?? '', expires: dateValue(watch.expires_at) }
 }
 
 function sameConditions(a: WatchCondition[], b: WatchCondition[]): boolean {
