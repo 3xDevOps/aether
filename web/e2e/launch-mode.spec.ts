@@ -34,6 +34,8 @@ test('a run starts in Enhanced unless Standard is picked', async ({ page, aether
     if (pick) await dialog.getByRole('radiogroup', { name: 'Mode' }).getByRole('radio', { name: pick }).click()
     await dialog.getByLabel('Task').fill(task)
     await dialog.getByRole('button', { name: 'Launch', exact: true }).click()
+    // The panel does not block the view, so a run that appears first must not start the next launch inside it.
+    await expect(dialog).toBeHidden()
     await expect(page.getByRole('heading', { name: task, exact: true }).first()).toBeVisible()
   }
 
