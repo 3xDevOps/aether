@@ -1096,7 +1096,13 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 			}
 			missing, dup := 0, 0
 			var gaps []string
-			for n := 1; n <= top; n++ {
+			// The item log keeps only the newest items, so lines before the
+			// oldest retained one are not a loss.
+			first := top
+			for n := range seen {
+				first = min(first, n)
+			}
+			for n := first; n <= top; n++ {
 				switch seen[n] {
 				case 0:
 					missing++
