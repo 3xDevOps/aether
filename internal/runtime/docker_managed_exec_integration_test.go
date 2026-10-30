@@ -5,16 +5,20 @@ package runtime
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/moby/moby/client"
 )
 
 // buildStagedHelper builds the server binary the container runs as
@@ -208,4 +212,83 @@ func readStream(r io.Reader) <-chan string {
 		}
 	}()
 	return lines
+}
+
+// TestDockerManagedExecForgottenByDocker: dockerd restarted with
+// live-restore forgets every exec, while the processes keep running. A
+// forgotten exec is recovered, stopped and read from its helper; only a
+// stopped container or a helper with no supervisor proves it gone.
+func TestDockerManagedExecForgottenByDocker(t *testing.T) {
+	d := newTestDocker(t)
+	binary := buildStagedHelper(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	id := createContainer(t, d, Spec{
+		Name:  fmt.Sprintf("it-forgotten-exec-%d", time.Now().UnixNano()),
+		Image: testImage, TTY: true,
+		Command: []string{"/bin/sh", "-c", "exec sleep 300"},
+		Mounts:  []Mount{{HostPath: binary, ContainerPath: coordtransport.CLIPath, ReadOnly: true}},
+	})
+	if err := d.Start(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	var forgottenIDs sync.Map
+	cli, err := client.New(client.FromEnv, client.WithResponseHook(func(resp *http.Response) {
+		path := resp.Request.URL.Path
+		if _, forget := forgottenIDs.Load(filepath.Base(filepath.Dir(path))); forget && resp.Request.Method == http.MethodGet && strings.HasSuffix(path, "/json") {
+			_ = resp.Body.Close()
+			resp.StatusCode, resp.Status = http.StatusNotFound, "404 Not Found"
+			resp.Header.Set("Content-Type", "application/json")
+			resp.Body = io.NopCloser(strings.NewReader(`{"message":"No such exec instance"}`))
+		}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	forgetful := &Docker{cli: cli, waitClient: cli, namePrefix: d.namePrefix, labels: d.labels, networkMode: d.networkMode}
+	start := func(key string) ExecIdentity {
+		t.Helper()
+		execution, err := d.StartExecPipe(ctx, id, ExecSpec{CreationKey: key, Argv: []string{"sleep", "300"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := execution.Detach(); err != nil {
+			t.Fatal(err)
+		}
+		forgottenIDs.Store(execution.Identity().ExecID, true)
+		return execution.Identity()
+	}
+
+	recovered, err := forgetful.RecoverExec(ctx, start("live"))
+	if err != nil {
+		t.Fatalf("recover a forgotten exec whose command runs: %v", err)
+	}
+	state, err := recovered.Status(ctx)
+	if err != nil || !state.Running || state.Exited {
+		t.Fatalf("forgotten running exec = %+v, %v", state, err)
+	}
+	status, err := recovered.Stop(ctx, time.Second)
+	if err != nil || status.Code != 143 {
+		t.Fatalf("stop a forgotten exec = %+v, %v; want SIGTERM exit 143", status, err)
+	}
+	if state, err = recovered.Status(ctx); err != nil || !state.Exited || state.ExitCode == nil || *state.ExitCode != 143 {
+		t.Fatalf("forgotten exec after stop = %+v, %v", state, err)
+	}
+
+	orphan := start("orphan")
+	if code, _, stderr, err := d.Exec(ctx, id, []string{"pkill", "-KILL", "-f", "run-pipe orphan"}, ""); err != nil || code != 0 {
+		t.Fatalf("kill the supervisor: code=%d stderr=%q err=%v", code, stderr, err)
+	}
+	if _, err := forgetful.RecoverExec(ctx, orphan); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("recover a forgotten exec without a supervisor = %v; want ErrNotFound", err)
+	}
+
+	stopped := start("stopped")
+	if err := d.Stop(ctx, id, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := forgetful.RecoverExec(ctx, stopped); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("recover a forgotten exec in a stopped container = %v; want ErrNotFound", err)
+	}
 }

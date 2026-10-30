@@ -404,15 +404,22 @@ run, it reattaches and replays the kept output: the same process keeps
 running, typing, resize and Ctrl-C work, `terminal output` continues from a
 cursor taken before the restart, and `terminal wait` reports the real exit.
 Output older than the kept 2 MiB is lost, and reading from a cursor before it
-reports `truncated`.
+reports `truncated`. When the shell exits while no server is attached, the
+keeper holds its exit status for the next server for up to 31 seconds, and
+background jobs the shell left behind run until the keeper exits.
 
 A shell started by a server without terminal keepers, or in a container whose
 staged binary predates them, keeps running through a restart, but its screen,
 output and input are gone. It reads `PTY unavailable after recovery;
-execution was not reattached or restarted`; stop it and start another. A
-terminal whose process Docker no longer knows reads **exited** with the
-reason; stopping it removes it without taking control first, and closing the
-run is not blocked by it.
+execution was not reattached or restarted`; stop it and start another.
+
+Docker restarted with `live-restore` forgets every exec but not its
+processes: Aether then reads a terminal's state from its exec helper in the
+container, so a running terminal is never reported exited and `terminal
+stop` still stops it. A terminal whose process is provably gone, because its
+container stopped or its exec helper died without recording an exit, reads
+**exited** with the reason; stopping it removes it without taking control
+first, and closing the run is not blocked by it.
 
 ## Limits
 

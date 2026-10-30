@@ -59,7 +59,7 @@ func (k *testTermKeeper) eventually(t *testing.T, what string, ok func() bool) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the terminal never saw %s", what)
+			t.Fatalf("the terminal never saw %s: %q", what, k.input.String())
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -181,7 +181,10 @@ func TestDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
 		keeper = k
 	}
 	principal := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
-	keeper.output(t, "$ make\r\n")
+	// Each server answers the cursor position queries it was sent once.
+	replies := func() int { return strings.Count(keeper.input.String(), "R") }
+	keeper.output(t, "\x1b[6n$ make\r\n")
+	keeper.eventually(t, "the first reply", func() bool { return replies() == 1 })
 	result, err := terminalTestCall(t, e.sched, run.ID, principal, protocol.MethodDevTerminalWait, protocol.DevTerminalWaitParams{
 		DevTerminalTarget: target, Contains: "$ make", TimeoutMS: 2000})
 	if err != nil || !result.(protocol.DevTerminalWaitResult).Matched {
@@ -190,10 +193,11 @@ func TestDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
 	cursor := result.(protocol.DevTerminalWaitResult).Position
 
 	recovered := restartScheduler(t, e)
-	keeper.output(t, "built while the server was down\r\n")
+	keeper.output(t, "built while the server was down\x1b[6n\r\n")
 	if err = recovered.RecoverDevelopmentTerminals(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
 	}
+	keeper.eventually(t, "the reply to the query while no server was attached", func() bool { return replies() == 2 })
 	listed, err := terminalTestCall(t, recovered, run.ID, principal, protocol.MethodDevTerminalList, protocol.DevTerminalListParams{})
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +213,7 @@ func TestDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := output.(protocol.DevTerminalOutputResult); got.MissingCursor || got.Truncated || got.Text != "built while the server was down\r\n" {
+	if got := output.(protocol.DevTerminalOutputResult); got.MissingCursor || got.Truncated || got.Text != "built while the server was down\x1b[6n\r\n" {
 		t.Fatalf("output after the pre-restart cursor = %+v", got)
 	}
 
@@ -218,13 +222,16 @@ func TestDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
 		DevTerminalTarget: target, DevControlFence: fence, Kind: "text", Text: "ls\r"}); err != nil {
 		t.Fatalf("input after restart: %v", err)
 	}
-	keeper.eventually(t, "the input", func() bool { return keeper.input.String() == "ls\r" })
+	keeper.eventually(t, "the input", func() bool { return strings.HasSuffix(keeper.input.String(), "ls\r") })
 	if _, err = terminalTestCall(t, recovered, run.ID, principal, protocol.MethodDevTerminalResize, protocol.DevTerminalResizeParams{
 		DevTerminalTarget: target, DevControlFence: fence, Cols: 40, Rows: 10}); err != nil {
 		t.Fatalf("resize after restart: %v", err)
 	}
 	keeper.eventually(t, "the resize", func() bool { return len(keeper.sizes) > 0 && keeper.sizes[len(keeper.sizes)-1] == [2]uint16{40, 10} })
 	keeper.output(t, "a.txt\r\n")
+	if replies() != 2 {
+		t.Fatalf("terminal replies %q; want one per query", keeper.input.String())
+	}
 	if result, err = terminalTestCall(t, recovered, run.ID, principal, protocol.MethodDevTerminalWait, protocol.DevTerminalWaitParams{
 		DevTerminalTarget: target, Contains: "a.txt", TimeoutMS: 2000}); err != nil || !result.(protocol.DevTerminalWaitResult).Matched {
 		t.Fatalf("wait after restart = %+v, %v", result, err)

@@ -24,6 +24,10 @@ const Attached = "run-attached"
 
 const StartupTimeout = 15 * time.Second
 
+// ErrNoSupervisor is an execution without a running supervisor or a final
+// record: its command no longer runs and its exit status is lost.
+var ErrNoSupervisor = errors.New("execution control unavailable")
+
 // ReapTimeout bounds cleanup after SIGKILL. An unkillable descendant makes the
 // execution unavailable; it must never be reported as successfully stopped.
 const ReapTimeout = 5 * time.Second
@@ -125,7 +129,7 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 			return state, nil
 		}
 		if request.Action != "start" && request.Action != "stop" {
-			return State{}, fmt.Errorf("execution control unavailable: %w", err)
+			return State{}, fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 		}
 		select {
 		case <-ctx.Done():

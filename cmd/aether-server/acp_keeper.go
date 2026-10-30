@@ -21,11 +21,11 @@ func acpKeeper(args []string) int {
 		return acpkeeper.Serve(args[1], args[3], args[5:])
 	case len(args) >= 5 && args[0] == "term" && args[3] == "--":
 		if cols, rows, ok := termSize(args[2]); ok {
-			return acpkeeper.ServeTerm(args[1], "", cols, rows, args[4:])
+			return acpkeeper.ServeTerm(args[1], "", "", cols, rows, args[4:])
 		}
-	case len(args) >= 7 && args[0] == "term" && args[3] == "--user" && args[5] == "--":
+	case len(args) >= 9 && args[0] == "term" && args[3] == "--user" && args[5] == "--home" && args[7] == "--":
 		if cols, rows, ok := termSize(args[2]); ok {
-			return acpkeeper.ServeTerm(args[1], args[4], cols, rows, args[6:])
+			return acpkeeper.ServeTerm(args[1], args[4], args[6], cols, rows, args[8:])
 		}
 	case len(args) == 2 && args[0] == "attach":
 		if err := acpkeeper.Bridge(args[1], os.Stdin, os.Stdout); err != nil {
@@ -34,7 +34,7 @@ func acpKeeper(args []string) int {
 		}
 		return 0
 	}
-	_, _ = fmt.Fprintln(os.Stderr, "acp-keeper: expected serve <socket> [--user <uid:gid>] -- <argv...>, term <socket> <cols>x<rows> [--user <uid:gid>] -- <argv...> or attach <socket>")
+	_, _ = fmt.Fprintln(os.Stderr, "acp-keeper: expected serve <socket> [--user <uid:gid>] -- <argv...>, term <socket> <cols>x<rows> [--user <uid:gid> --home <dir>] -- <argv...> or attach <socket>")
 	return 125
 }
 

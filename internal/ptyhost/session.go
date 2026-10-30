@@ -251,6 +251,15 @@ func (s *session) commitOutputLocked(p []byte) {
 	if len(p) == 0 {
 		return
 	}
+	// A query is answered by the position before the output it is in, so
+	// the output on either side of quiet is applied apart.
+	if s.ring != nil {
+		if at := s.ring.position().Sequence; at < s.quiet && s.quiet-at < TerminalSequence(len(p)) {
+			n := int(s.quiet - at)
+			s.commitOutputLocked(p[:n])
+			p = p[n:]
+		}
+	}
 	if s.screen != nil {
 		s.screen.write(p)
 	}

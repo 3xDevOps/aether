@@ -100,6 +100,11 @@ func TestTermReattachReplaysFromOffset(t *testing.T) {
 	if got := readN(t, first.Stdout(), 18); got != "$ make\r\nbuilding\r\n" {
 		t.Fatalf("first attacher read %q", got)
 	}
+	p.eventually(t, func() bool {
+		k.mu.Lock()
+		defer k.mu.Unlock()
+		return k.sent == 18
+	})
 	// The server goes away; the program keeps writing.
 	_ = first.Close()
 	_, _ = k.Write([]byte("done\r\n"))
@@ -108,7 +113,7 @@ func TestTermReattachReplaysFromOffset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st := second.State(); st.Start != 0 || st.End != 24 || second.From() != 8 {
+	if st := second.State(); st.Start != 0 || st.End != 24 || st.Sent != 18 || second.From() != 8 {
 		t.Fatalf("welcome state %+v from %d", st, second.From())
 	}
 	// Reads stop at the welcome's End, so a caller can tell replay from new
@@ -188,6 +193,51 @@ func TestTermNewerGenerationPreempts(t *testing.T) {
 	if p.in.Len() != 0 {
 		t.Fatalf("a preempted attacher's input reached the terminal: %q", p.in.String())
 	}
+}
+
+// fullPTY is a PTY master whose input stays full until opened.
+type fullPTY struct {
+	pty
+	open  chan struct{}
+	tried chan struct{}
+	once  sync.Once
+}
+
+func (p *fullPTY) Write(b []byte) (int, error) {
+	select {
+	case <-p.open:
+		return p.pty.Write(b)
+	default:
+		p.once.Do(func() { close(p.tried) })
+		return 0, ErrInputFull
+	}
+}
+
+func TestTermDropsAPreemptedAttachersPendingInput(t *testing.T) {
+	t.Parallel()
+	p := &fullPTY{open: make(chan struct{}), tried: make(chan struct{})}
+	k := NewTerm(TermConfig{Token: token, Input: p, Resize: p.resize, Cols: 80, Rows: 24})
+	old, err := attachTerm(t, k, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = old.Stdin().Write([]byte("stale")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.tried:
+	case <-time.After(timeout):
+		t.Fatal("the keeper never wrote the input")
+	}
+	current, err := attachTerm(t, k, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(p.open)
+	if _, err = current.Stdin().Write([]byte("fresh")); err != nil {
+		t.Fatal(err)
+	}
+	p.eventually(t, func() bool { return p.in.String() == "fresh" })
 }
 
 func TestTermRefusesAWrongTokenAndAnACPKeeper(t *testing.T) {

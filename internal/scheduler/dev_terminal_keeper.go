@@ -36,7 +36,7 @@ func (s *Scheduler) startKeptTerminal(ctx context.Context, managed runtime.Manag
 	}
 	socket := path.Join(acpkeeper.SocketRoot, strings.ToLower(rand.Text()), "keeper.sock")
 	exec, err := managed.StartExecPipe(ctx, live.ContainerID, runtime.ExecSpec{
-		Argv:        acpkeeper.TermArgv(coordtransport.CLIPath, socket, normalizeRecoveryRunUser(info.User), spec.Cols, spec.Rows, spec.Argv),
+		Argv:        acpkeeper.TermArgv(coordtransport.CLIPath, socket, normalizeRecoveryRunUser(info.User), envHome(live.Env), spec.Cols, spec.Rows, spec.Argv),
 		User:        keeperUser,
 		WorkingDir:  spec.WorkingDir,
 		CreationKey: spec.CreationKey,
@@ -44,7 +44,7 @@ func (s *Scheduler) startKeptTerminal(ctx context.Context, managed runtime.Manag
 		Env: append(append([]string(nil), live.Env...), "TERM=xterm"),
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", errNoTerminalKeeper, err)
+		return nil, nil, fmt.Errorf("start the terminal keeper: %w", err)
 	}
 	keeper := &terminalKeeper{keeperRecord: keeperRecord{Socket: socket, Token: rand.Text()}, Epoch: ptyhost.TerminalEpoch(rand.Text())}
 	stderr, copied, err := keeperReady(ctx, exec, keeper.Token)
@@ -56,10 +56,25 @@ func (s *Scheduler) startKeptTerminal(ctx context.Context, managed runtime.Manag
 	exit, stopErr := exec.Stop(stopCtx, 0)
 	_ = exec.Detach()
 	<-copied
-	if stopErr == nil && (exit.Code == 126 || exit.Code == 127) {
+	switch {
+	case stopErr != nil:
+		// The command may still run: starting it again could run it twice.
+		return nil, nil, fmt.Errorf("start the terminal keeper: %w", errors.Join(adapterError(err, stderr), stopErr))
+	case exit.Code == 126 || exit.Code == 127:
 		return nil, nil, &runtime.ExecExitError{Code: exit.Code}
 	}
 	return nil, nil, fmt.Errorf("%w: %w", errNoTerminalKeeper, adapterError(err, stderr))
+}
+
+// envHome is the HOME env sets, if any.
+func envHome(env []string) string {
+	home := ""
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
+			home = v
+		}
+	}
+	return home
 }
 
 var errNoTerminalKeeper = errors.New("the run's staged binary cannot keep a terminal")
@@ -93,14 +108,10 @@ func (s *Scheduler) attachTerminalLocked(ctx context.Context, run domain.RunID, 
 	if err == nil {
 		state := client.State()
 		key := ptyhost.RunShellSession(run, terminal.ID)
-		// An earlier server process answered the terminal queries in the
-		// output it was sent; the first attacher answers them all.
-		var quiet ptyhost.TerminalSequence
-		if next.Gen > 1 {
-			quiet = ptyhost.TerminalSequence(state.End)
-		}
+		// Earlier server processes answered the terminal queries in the
+		// output they were sent.
 		err = host.ResumeDevelopmentSession(ctx, key, client, uint(state.Cols), uint(state.Rows),
-			ptyhost.TerminalPosition{Epoch: next.Epoch, Sequence: ptyhost.TerminalSequence(client.From())}, quiet)
+			ptyhost.TerminalPosition{Epoch: next.Epoch, Sequence: ptyhost.TerminalSequence(client.From())}, ptyhost.TerminalSequence(state.Sent))
 		if err == nil {
 			terminal.Generation = s.cfg.PTY.SessionGeneration(key)
 			terminal.Cols, terminal.Rows = uint(state.Cols), uint(state.Rows)
