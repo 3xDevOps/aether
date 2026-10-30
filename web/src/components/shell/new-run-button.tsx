@@ -111,7 +111,7 @@ export function SplitNewRun({ blocked, shortcut, onOpen }: {
             first={false}
             buttonRef={quick}
             label={`Launch again: ${last.harness}, ${modeLabel(last.mode)}`}
-            aria-disabled={blocked || busy ? true : undefined}
+            aria-disabled={blocked || busy || !saved.fresh ? true : undefined}
             aria-describedby={lingering ? previewID : undefined}
             aria-busy={busy || undefined}
             onClick={() => void launchQuick()}

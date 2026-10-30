@@ -152,11 +152,13 @@ export function AccountOptions({
 export type ChildRunsChoice = '' | 'on' | 'off'
 
 /** Whether this run may start child runs; it follows the member setting until flipped, and only a flip is sent. */
-export function ChildRunsSwitch({ value, onChange, enabled, unavailable, disabled }: {
+export function ChildRunsSwitch({ value, onChange, enabled, readError, unavailable, disabled }: {
   value: ChildRunsChoice
   onChange: (value: ChildRunsChoice) => void
   /** The member setting, unknown until read. */
   enabled: boolean | undefined
+  /** Why the setting could not be read; the switch then sets this run alone. */
+  readError?: string | null
   /** Why this run cannot start child runs whatever the setting says. */
   unavailable?: string
   disabled?: boolean
@@ -170,12 +172,12 @@ export function ChildRunsSwitch({ value, onChange, enabled, unavailable, disable
           id="launch-child-runs"
           aria-describedby="launch-child-runs-help"
           checked={on}
-          disabled={disabled || !!unavailable || enabled === undefined}
-          onCheckedChange={(next) => onChange(next === (enabled === true) ? '' : next ? 'on' : 'off')}
+          disabled={disabled || !!unavailable || (enabled === undefined && !readError)}
+          onCheckedChange={(next) => onChange(enabled !== undefined && next === enabled ? '' : next ? 'on' : 'off')}
         />
       </div>
       <p id="launch-child-runs-help" className="text-ui-sm text-muted">
-        {unavailable ?? (enabled === undefined ? 'Reading your child runs setting…' : ['Lets the agent start other agents as child runs, and the runs it starts too.', value ? 'Set for this run only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
+        {unavailable ?? (enabled === undefined ? (readError ? `Could not read your setting: ${readError}` : 'Reading your child runs setting…') : ['Lets the agent start other agents as child runs.', value ? 'Set for this run only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
       </p>
     </div>
   )

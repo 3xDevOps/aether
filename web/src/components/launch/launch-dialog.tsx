@@ -28,7 +28,7 @@ import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/li
 import { useReturnFocus } from '@/lib/hooks'
 import { cn, surface } from '@/lib/utils'
 import { sameIdentity, useStore } from '@/store'
-import { useChildSettingsRead } from '@/store/children'
+import { useChildSettings, useChildSettingsRead } from '@/store/children'
 import { rememberChoice, saveLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
@@ -81,6 +81,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const [pick, setPick] = useState(0)
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
+  const childReadError = useChildSettings((s) => s.error)
   const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
   const limitsOffered = cap.hasMethod('server.run_limits')
   const serverLimits = useServerRunLimits(api, limitsOffered)
@@ -369,7 +370,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
               {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-              {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} unavailable={mode === 'headless' ? 'Background runs cannot start child runs.' : undefined} disabled={launching} />}
+              {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background runs cannot start child runs.' : undefined} disabled={launching} />}
             </TabsContent>
             <TabsContent value="swarm" className="flex flex-col gap-4">
               {swarmUnavailable && <Callout tone="needs-you" role="status" id="launch-swarm-unavailable">{swarmUnavailable}</Callout>}
