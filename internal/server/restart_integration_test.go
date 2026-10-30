@@ -1073,8 +1073,8 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(s, "\n")
-	if len(line) > 200 {
-		line = line[:200]
+	if len(line) > 700 {
+		line = line[:700]
 	}
 	return line
 }
