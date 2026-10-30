@@ -111,7 +111,7 @@ func TestWatchCreate(t *testing.T) {
 // model word for word, with the conditions to use instead.
 func TestWatchUnsupportedCondition(t *testing.T) {
 	f := newFake(t)
-	refusal := `Aether has no deploy signal, so it cannot watch for "deployed"; watch finished, pr_merged or delivered instead`
+	refusal := `Aether has no deploy signal, so it cannot watch for "deployed"; watch finished or pr_merged instead`
 	f.errs[protocol.MethodWatchCreate] = &protocol.Error{Code: protocol.CodeInvalidParams, Message: refusal}
 	text, _, failed := try(t, connectorSession(t, f, ScopeWrite), "aether_watch", map[string]any{"run_id": "run-1", "conditions": []string{"deployed"}})
 	if !failed || !strings.HasPrefix(text, refusal) {

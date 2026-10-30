@@ -2636,8 +2636,7 @@ base branch, the same target the Publish dialog fills in, or one a member
 typed into that dialog and found or opened a pull request at. It asks once
 when the run page opens, every 60
 seconds while the page is visible, after each push or creation in the
-dialog, and at once on a `run.pr` or `git.branch` event for the run or an
-`integration.changed` event for its swarm. The header and the [git card](#changes-view-and-publish)
+dialog, and at once on a `run.pr` or `git.branch` event for the run. The header and the [git card](#changes-view-and-publish)
 share one poll per run however many of them are mounted. It re-reads `run.git.status` only when the answer says the branch or
 HEAD moved. Both calls execute `git` and `gh` in the run's container, so the
 check state exists only while the run is `running` or `needs-attention`: a
@@ -4926,7 +4925,7 @@ in **Needs you**.
   is mounted (`useLiveFeed`), `applyEvent` appends each event the filters
   select by the server reader's own rule (workspace, run or mail to it, actor,
   type; `run.diff`, `run.title`, `run.agent`, `coord.message.acked`,
-  `mission.changed`, `integration.changed`, `run.pr` and `workspace.presence`
+  `mission.changed`, `run.pr` and `workspace.presence`
   only when asked for by type),
   skipping a sequence already held. The cursor follows only while the window
   is whole - no read in flight, failed or cut short - and a view reads from
