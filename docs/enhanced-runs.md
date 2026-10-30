@@ -297,8 +297,11 @@ open under the same id, background tasks and commands the agent's shell tool
 started keep running, and nothing is sent to the agent twice. A message queued
 behind the turn is sent again once the server is back, unless it already
 reached the agent; one queued for a paused run waits until the run resumes.
-The log records no notice for an adoption. A stopped server detaches cleanly;
-a killed one can show up to 100 ms of the agent's output twice. A server killed
+An answer, cancel or message sent while the new server is still recovering
+runs waits for recovery, up to 30 seconds, instead of failing with `the
+enhanced session is not running`. The log records no notice for an adoption.
+A stopped server detaches cleanly. A killed one can, rarely, record twice the
+agent output it logged in the instant before it died. A server killed
 after it recorded a new turn but before the turn's prompt reached the keeper
 ends that turn with **Turn interrupted**: `Aether's server restarted before
 this turn's prompt reached the agent. Send it again.`

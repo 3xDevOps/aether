@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -196,6 +197,8 @@ type Scheduler struct {
 	// for it so overdue steers cannot claim before recovered PTYs are injectable.
 	recoveryReady     chan struct{}
 	recoveryReadyOnce sync.Once
+	// recovering is set while Start recovers runs.
+	recovering atomic.Bool
 	// superCtx bounds every supervision goroutine; cancelling it never stops a
 	// container.
 	superCtx    context.Context
@@ -682,6 +685,8 @@ func (s *Scheduler) RecoveryReady() <-chan struct{} {
 }
 
 func (s *Scheduler) Start(ctx context.Context) error {
+	s.recovering.Store(true)
+	defer s.recovering.Store(false)
 	// Subscribed before recovery, so a usage limit published meanwhile
 	// waits for the run recovery brings back.
 	var (
@@ -714,6 +719,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return recoveryError(err)
 	}
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
+	s.recovering.Store(false)
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	watched := make(chan struct{})
 	go func() {

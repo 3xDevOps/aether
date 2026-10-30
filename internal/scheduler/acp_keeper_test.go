@@ -442,3 +442,43 @@ func TestEnhancedRunKeepsAPendingPermissionOfALaterTurnThroughRestarts(t *testin
 		t.Fatalf("%d agents, want the first one adopted", len(rt.all()))
 	}
 }
+
+func TestEnhancedAnswerRightAfterARestartWaitsForRecovery(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptAskPermission}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	var pending []domain.RunInputRequest
+	waitFor(t, "permission request", func() bool {
+		pending = e.sched.PendingInputs(run.ID)
+		return len(pending) == 1
+	})
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	// Recovery's exit probe holds it open long enough to answer during it.
+	cfg.ExitProbeTimeout = 500 * time.Millisecond
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	answered := make(chan error, 1)
+	go func() {
+		for !s.recovering.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		answered <- s.ACPAnswer(run.ID, pending[0].ID, "allow", nil)
+	}()
+	startScheduler(t, s)
+	if err := <-answered; err != nil {
+		t.Fatalf("answer during recovery: %v", err)
+	}
+	waitItems(t, s, run.ID, "the answered turn", assistantSaid("permission: allow"))
+}

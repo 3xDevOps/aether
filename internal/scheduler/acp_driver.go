@@ -30,8 +30,10 @@ const (
 	// acpConnectTimeout bounds starting the adapter and opening its session:
 	// a cold npm adapter takes seconds, a hung one must not hold a launch.
 	acpConnectTimeout = time.Minute
-	acpStopGrace      = 3 * time.Second
-	acpStderrTail     = 4 << 10
+	// acpRecoveryWait bounds how long a call waits for recovery.
+	acpRecoveryWait = 30 * time.Second
+	acpStopGrace    = 3 * time.Second
+	acpStderrTail   = 4 << 10
 	// acpSteerTimeout bounds a delivery, which runs under the run's
 	// admission lock and may wait on the agent's answer to a steer.
 	acpSteerTimeout = 15 * time.Second
@@ -309,7 +311,15 @@ func (d *acpDriver) session(run domain.RunID) *acphost.Session {
 	return nil
 }
 
+// live waits for recovery, which reopens the sessions an earlier server
+// process left, so a call right after a restart is not refused.
 func (d *acpDriver) live(run domain.RunID) (*acphost.Session, error) {
+	if d.s.recovering.Load() {
+		select {
+		case <-d.s.RecoveryReady():
+		case <-time.After(acpRecoveryWait):
+		}
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r := d.runs[run]
