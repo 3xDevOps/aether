@@ -728,7 +728,7 @@ func TestCleanupExpiredIsBoundedIdempotentAndPathSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(packet.Objective, "/host") || strings.Contains(Summary(packet), "/host") {
+	if strings.Contains(packet.Objective, "/host") {
 		t.Fatalf("host path escaped packet: %+v", packet)
 	}
 	st.mu.Lock()

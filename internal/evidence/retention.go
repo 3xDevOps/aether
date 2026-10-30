@@ -586,25 +586,3 @@ func safePacket(p protocol.EvidencePacket) protocol.EvidencePacket {
 	p.RelatedRoomMessageIDs = boundedIDs(p.RelatedRoomMessageIDs)
 	return p
 }
-
-// Summary deterministically renders the packet's structured factual fields for
-// handoff or review UI. It intentionally performs no model call and omits
-// storage paths and source bodies.
-func Summary(p protocol.EvidencePacket) string {
-	transcript := "unavailable"
-	for _, source := range p.Sources {
-		if source.Name != "transcript" {
-			continue
-		}
-		if source.Available {
-			transcript = "available"
-			if source.Truncated {
-				transcript = "truncated"
-			}
-		}
-		break
-	}
-	return fmt.Sprintf("objective=%s; revision=%s; changed_files=%d; transcript=%s; unresolved=%d; next_action=%s; provenance=%s",
-		cleanText(p.Objective, MaxObjectiveBytes), p.RetainedRevision, len(p.ChangedFiles), transcript,
-		len(p.UnresolvedFacts), cleanText(p.NextAction, MaxNextActionBytes), cleanText(p.Provenance, MaxProvenanceBytes))
-}

@@ -74,11 +74,6 @@ func Main(args []string) int {
 	return code
 }
 
-// Execute is a convenience for embedders and focused command tests.
-func Execute(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, error) {
-	return Run(ctx, args, Config{In: in, Out: out, ErrOut: errOut})
-}
-
 // Run executes one command without changing the calling process's cwd,
 // environment, or repository. State commands write one JSON envelope; skill,
 // help, and hook use their documented output formats.
