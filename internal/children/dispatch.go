@@ -192,6 +192,13 @@ func (s *Service) settle(ctx context.Context) error {
 				}
 				continue
 			}
+			// A child already in a final state has nothing to close.
+			if child.Status.Final() {
+				if _, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID); err != nil {
+					return err
+				}
+				continue
+			}
 			// The child's result was delivered to the parent and is part of
 			// its work: close it as the parent was.
 			var closeErr error
