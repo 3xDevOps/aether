@@ -1,0 +1,277 @@
+// Command soakagent is the restart acceptance test's in-container agent. It
+// runs as one ACP turn of the scripted agent (acpmock.PromptRunPrefix), starts
+// a long shell command, and keeps calling the server through the staged CLI
+// and the staged MCP bridge for the whole duration, as a busy agent does.
+// Every call, every message and every streamed line is recorded with a
+// millisecond timestamp in <dir>/<name>.jsonl for the test to read.
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/protocol"
+)
+
+type event struct {
+	T    int64  `json:"t"`
+	Kind string `json:"kind"`
+	OK   bool   `json:"ok"`
+	Dur  int64  `json:"dur_ms,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Err  string `json:"err,omitempty"`
+}
+
+type recorder struct {
+	mu sync.Mutex
+	f  *os.File
+}
+
+func (r *recorder) add(kind string, start time.Time, id string, err error) {
+	e := event{T: start.UnixMilli(), Kind: kind, OK: err == nil, Dur: time.Since(start).Milliseconds(), ID: id}
+	if err != nil {
+		e.Err = err.Error()
+	}
+	line, _ := json.Marshal(e)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, _ = r.f.Write(append(line, '\n'))
+}
+
+func main() {
+	name := flag.String("name", "a", "this agent's name, a or b")
+	dir := flag.String("dir", "/workspace/soak", "directory for logs and markers")
+	duration := flag.Duration("duration", 100*time.Second, "how long the agent keeps working")
+	long := flag.Int("long", 120, "seconds the long shell command runs")
+	flag.Parse()
+
+	if err := os.MkdirAll(*dir, 0o755); err != nil {
+		fmt.Println("soak-error:", err)
+		os.Exit(1)
+	}
+	f, err := os.OpenFile(filepath.Join(*dir, *name+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Println("soak-error:", err)
+		os.Exit(1)
+	}
+	rec := &recorder{f: f}
+	ctx, cancel := context.WithTimeout(context.Background(), *duration+5*time.Minute)
+	defer cancel()
+
+	startLong(*dir, *name, *long, rec)
+	bridge := &mcpConn{}
+	defer bridge.close()
+	peer := waitPeer(ctx, bridge, rec, *dir)
+	fmt.Println("peer:" + peer)
+
+	end := time.Now().Add(*duration)
+	var wg sync.WaitGroup
+	loop := func(every time.Duration, fn func(n int)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := 0; time.Now().Before(end); n++ {
+				fn(n)
+				time.Sleep(every)
+			}
+		}()
+	}
+	loop(3*time.Second, func(int) { cliStatus(ctx, rec) })
+	loop(3*time.Second, func(int) { bridge.status(ctx, rec) })
+	if *name == "a" {
+		loop(5*time.Second, func(n int) { cliSend(ctx, rec, peer, fmt.Sprintf("a-msg-%04d", n), n%2 == 0) })
+		loop(0, func(int) { bridge.recv(ctx, rec) })
+	} else {
+		loop(5*time.Second, func(n int) { bridge.send(ctx, rec, peer, fmt.Sprintf("b-msg-%04d", n)) })
+		loop(0, func(int) { cliRecv(ctx, rec) })
+	}
+	var ticks atomic.Int64
+	loop(100*time.Millisecond, func(int) { fmt.Printf("tick %d\n", ticks.Add(1)) })
+	wg.Wait()
+	rec.add("end", time.Now(), fmt.Sprint(ticks.Load()), nil)
+	fmt.Println("soak-done", ticks.Load())
+}
+
+// startLong runs the long command as a plain child, the way an agent's shell
+// tool does, appending a line a second to a marker file.
+func startLong(dir, name string, seconds int, rec *recorder) {
+	marker := filepath.Join(dir, "marker."+name)
+	script := fmt.Sprintf(`i=0; while [ $i -lt %d ]; do i=$((i+1)); echo $i >> %s; sleep 1; done; echo ok > %s`,
+		seconds, marker, filepath.Join(dir, "long.done."+name))
+	cmd := exec.Command("sh", "-c", script)
+	start := time.Now()
+	err := cmd.Start()
+	rec.add("long", start, fmt.Sprint(cmd.Process.Pid), err)
+}
+
+func waitPeer(ctx context.Context, b *mcpConn, rec *recorder, dir string) string {
+	var touched time.Time
+	for {
+		if time.Since(touched) > 10*time.Second {
+			_ = os.WriteFile(filepath.Join(filepath.Dir(dir), "shared.txt"), []byte(time.Now().String()), 0o644)
+			touched = time.Now()
+		}
+		var st protocol.CoordStatusResult
+		if err := b.call(ctx, "aether_status", nil, &st); err == nil && len(st.Peers) > 0 {
+			return st.Peers[0].RunID
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func cli(ctx context.Context, args ...string) ([]byte, error) {
+	cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, coordtransport.CLIPath, args...)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return out.Bytes(), fmt.Errorf("%w: %s%s", err, out.String(), errb.String())
+	}
+	return out.Bytes(), nil
+}
+
+func cliStatus(ctx context.Context, rec *recorder) {
+	start := time.Now()
+	_, err := cli(ctx, "status", "--json")
+	rec.add("cli", start, "", err)
+}
+
+func cliSend(ctx context.Context, rec *recorder, peer, body string, keyed bool) {
+	start := time.Now()
+	args := []string{"send", "--to", peer, "--body", body}
+	if keyed {
+		args = append(args, "--idempotency-key", "soak-"+body)
+	}
+	_, err := cli(ctx, args...)
+	rec.add("send", start, body, err)
+}
+
+func cliRecv(ctx context.Context, rec *recorder) {
+	start := time.Now()
+	out, err := cli(ctx, "inbox", "--wait", "10")
+	var env struct {
+		Result protocol.CoordInboxResult `json:"result"`
+	}
+	if err == nil {
+		err = json.Unmarshal(out, &env)
+	}
+	if err != nil {
+		rec.add("recv-call", start, "", err)
+		time.Sleep(100 * time.Millisecond)
+		return
+	}
+	rec.add("recv-call", start, "", nil)
+	for _, m := range env.Result.Messages {
+		rec.add("recv", time.Now(), m.Body, nil)
+	}
+}
+
+// mcpConn is a client of the staged MCP bridge that reconnects, as an agent
+// harness restarts a dead MCP server.
+type mcpConn struct {
+	mu    sync.Mutex
+	cs    *mcp.ClientSession
+	ack   string
+	rcvMu sync.Mutex
+}
+
+func (m *mcpConn) session(ctx context.Context) (*mcp.ClientSession, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cs != nil {
+		return m.cs, nil
+	}
+	cmd := exec.Command(coordtransport.BinaryPath, "mcp")
+	client := mcp.NewClient(&mcp.Implementation{Name: "soakagent", Version: "v0"}, nil)
+	cs, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("connect to the bridge: %w", err)
+	}
+	m.cs = cs
+	return cs, nil
+}
+
+func (m *mcpConn) close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cs != nil {
+		_ = m.cs.Close()
+		m.cs = nil
+	}
+}
+
+func (m *mcpConn) call(ctx context.Context, tool string, args, out any) error {
+	cs, err := m.session(ctx)
+	if err != nil {
+		return err
+	}
+	cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	res, err := cs.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: args})
+	if err != nil {
+		m.close()
+		return fmt.Errorf("%s: %w", tool, err)
+	}
+	if res.IsError {
+		var text []string
+		for _, c := range res.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				text = append(text, tc.Text)
+			}
+		}
+		return fmt.Errorf("%s: tool error: %s", tool, strings.Join(text, " "))
+	}
+	if out == nil {
+		return nil
+	}
+	raw, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, out)
+}
+
+func (m *mcpConn) status(ctx context.Context, rec *recorder) {
+	start := time.Now()
+	err := m.call(ctx, "aether_status", nil, nil)
+	rec.add("mcp", start, "", err)
+}
+
+func (m *mcpConn) send(ctx context.Context, rec *recorder, peer, body string) {
+	start := time.Now()
+	args := protocol.CoordSendParams{ToRunID: peer, Body: body, IdempotencyKey: "soak-" + body}
+	err := m.call(ctx, "aether_send", args, nil)
+	rec.add("send", start, body, err)
+}
+
+func (m *mcpConn) recv(ctx context.Context, rec *recorder) {
+	m.rcvMu.Lock()
+	defer m.rcvMu.Unlock()
+	start := time.Now()
+	var inbox protocol.CoordInboxResult
+	err := m.call(ctx, "aether_inbox", protocol.CoordInboxParams{AckToken: m.ack, WaitSeconds: 10}, &inbox)
+	if err != nil {
+		rec.add("recv-call", start, "", err)
+		time.Sleep(100 * time.Millisecond)
+		return
+	}
+	rec.add("recv-call", start, "", nil)
+	m.ack = inbox.AckToken
+	for _, msg := range inbox.Messages {
+		rec.add("recv", time.Now(), msg.Body, nil)
+	}
+}

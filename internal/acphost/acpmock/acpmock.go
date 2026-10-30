@@ -48,6 +48,10 @@ const (
 	PromptLongTool = "run a long tool"
 	// ChatterInterval paces PromptChatter and PromptThink.
 	ChatterInterval = 20 * time.Millisecond
+	// PromptRunPrefix makes the agent run the command line after it with
+	// sh -c and stream each line it prints as an assistant message chunk.
+	// The turn ends when the command exits, or at session/cancel.
+	PromptRunPrefix = "run "
 	// PromptAskForm makes the agent ask a form question and reply with the
 	// answer: "form: <action> <content as JSON>".
 	PromptAskForm = "ask form"
@@ -499,6 +503,9 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		}
 		return map[string]any{"stopReason": "cancelled"}, nil
 	}
+	if command, ok := strings.CutPrefix(text, PromptRunPrefix); ok {
+		return a.run(ctx, cancelled, command), nil
+	}
 	if strings.HasPrefix(text, coordhooks.ReportReminderLead) {
 		// The mock cannot run aether-internal.
 		a.text(ctx, ReminderReply)
@@ -508,6 +515,37 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		a.update(ctx, u)
 	}
 	return a.fix.Prompt.Result, nil
+}
+
+func (a *Agent) run(ctx context.Context, cancelled <-chan struct{}, command string) any {
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	go func() {
+		select {
+		case <-cancelled:
+			stop()
+		case <-runCtx.Done():
+		}
+	}()
+	cmd := exec.CommandContext(runCtx, "sh", "-c", command)
+	cmd.Stderr = os.Stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		a.text(ctx, "run: "+err.Error())
+		return map[string]any{"stopReason": "end_turn"}
+	}
+	if err = cmd.Start(); err != nil {
+		a.text(ctx, "run: "+err.Error())
+		return map[string]any{"stopReason": "end_turn"}
+	}
+	sc := bufio.NewScanner(out)
+	for sc.Scan() {
+		a.text(ctx, sc.Text()+"\n")
+	}
+	if err = cmd.Wait(); err != nil && runCtx.Err() != nil {
+		return map[string]any{"stopReason": "cancelled"}
+	}
+	return map[string]any{"stopReason": "end_turn"}
 }
 
 const demoAnswer = "The totals now round to cents before they are returned.\n\n" +
