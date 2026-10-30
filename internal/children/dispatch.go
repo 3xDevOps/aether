@@ -295,17 +295,19 @@ func (s *Service) noticeIdle(ctx context.Context) error {
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
-		msg := fmt.Sprintf("Child run %s (%s) has been %s for %s", c.Child.RunID, c.Child.Purpose, c.Run.Activity, now.Sub(c.Since).Round(time.Minute))
+		// The commands come before the reason and report, which a long
+		// question can push past the mailbox's body limit.
+		msg := fmt.Sprintf("Child run %s (%s) has been %s for %s.", c.Child.RunID, c.Child.Purpose, c.Run.Activity, now.Sub(c.Since).Round(time.Minute)) +
+			"\nCheck what it is doing, then wake it with an instruction: aether-internal send --to " + string(c.Child.RunID) +
+			" --body <text>, or stop it: aether-internal child cancel --run-id " + string(c.Child.RunID)
 		if c.Run.Reason != "" {
-			msg += ": " + c.Run.Reason
+			msg += "\nIts status reason: " + truncateSummary(c.Run.Reason)
 		}
 		if latest, err := s.cfg.Store.LatestReportOfAnyOutcome(ctx, c.Child.RunID); err == nil {
 			msg += fmt.Sprintf("\nIts latest report, %s at %s: %s", latest.Outcome, latest.CreatedAt.UTC().Format(time.RFC3339), truncateSummary(latest.Summary))
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
-		msg += "\nCheck what it is doing, then wake it with an instruction: aether-internal send --to " + string(c.Child.RunID) +
-			" --body <text>, or stop it: aether-internal child cancel --run-id " + string(c.Child.RunID)
 		_ = s.notify(ctx, c.Child.RunID, c.Child.ParentRunID, msg, key)
 	}
 	return nil
