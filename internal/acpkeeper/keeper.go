@@ -411,15 +411,10 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 	refuse := func(code, message string) *frame {
 		return &frame{T: frameRefused, V: Version, Code: code, Error: message, Exit: k.exit}
 	}
+	if code, message := checkHello(h, k.cfg.Token, k.gen); code != "" {
+		return nil, refuse(code, message)
+	}
 	switch {
-	case subtle.ConstantTimeCompare([]byte(h.Token), []byte(k.cfg.Token)) != 1 || k.cfg.Token == "":
-		return nil, refuse(RefusedToken, "")
-	case h.V != Version:
-		return nil, refuse(RefusedVersion, "the keeper speaks protocol version "+strconv.Itoa(Version))
-	case h.Gen <= k.gen:
-		return nil, refuse(RefusedStale, "generation "+strconv.FormatUint(k.gen, 10)+" already attached")
-	case h.Gen-k.gen > maxGenStep:
-		return nil, refuse(RefusedStale, "generation "+strconv.FormatUint(h.Gen, 10)+" is too far ahead of "+strconv.FormatUint(k.gen, 10))
 	case k.overflow:
 		return nil, refuse(RefusedOverflow, "")
 	case k.exit != nil:
@@ -474,6 +469,22 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 	k.att = a
 	k.cond.Broadcast()
 	return a, nil
+}
+
+// checkHello returns why a keeper whose token is token and whose newest
+// attacher is generation gen refuses h, or no code.
+func checkHello(h frame, token string, gen uint64) (code, message string) {
+	switch {
+	case subtle.ConstantTimeCompare([]byte(h.Token), []byte(token)) != 1 || token == "":
+		return RefusedToken, ""
+	case h.V != Version:
+		return RefusedVersion, "the keeper speaks protocol version " + strconv.Itoa(Version)
+	case h.Gen <= gen:
+		return RefusedStale, "generation " + strconv.FormatUint(gen, 10) + " already attached"
+	case h.Gen-gen > maxGenStep:
+		return RefusedStale, "generation " + strconv.FormatUint(h.Gen, 10) + " is too far ahead of " + strconv.FormatUint(gen, 10)
+	}
+	return "", ""
 }
 
 func (k *Keeper) fromAttacher(a *attacher, f frame) {

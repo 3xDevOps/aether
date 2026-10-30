@@ -857,7 +857,12 @@ when finished. Re-observe stale ownership instead of blindly replaying input
 or stealing a human's control. Input is fenced by incarnation and controller,
 not redraw revisions. A viewer attach does not impose geometry; resize is an
 explicit controlled action. Releasing control or detaching does not stop the
-app; `terminal stop` stops the owned process group.
+app; `terminal stop` stops the owned process group. A server restart does not
+either: the terminal keeps its process, and output cursors, input and `wait`
+continue once the server is back
+([terminal.md](terminal.md#reconnects-and-server-updates)). `terminal stop` on a
+terminal whose process Docker no longer knows removes it without a control
+lease.
 
 Browser startup is lazy and works on a standard **headless Ubuntu server**.
 There is no X11, Wayland, Xvfb, desktop session, host browser or disabled

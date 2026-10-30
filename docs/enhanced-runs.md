@@ -286,7 +286,9 @@ runs as the run's user, as before ([security](security.md#permission-tiers)).
 
 A server restart or update (`systemctl restart aether-server`,
 `aether server update`, a boot trial or a rollback) leaves the keeper and the
-agent running. The next server process reattaches and adopts the session: the
+agent running. Terminals started with `aether-internal terminal` run under a
+keeper of their own and keep their output, input and exit status through it
+([terminal.md](terminal.md#reconnects-and-server-updates)). The next server process reattaches and adopts the session: the
 turn in flight keeps streaming, an open permission request or question stays
 open under the same id, background tasks and commands the agent's shell tool
 started keep running, and nothing is sent to the agent twice. A message queued
@@ -312,7 +314,8 @@ dropped, and the run parks with `turn interrupted`.
 Queued messages read **Not sent**: send them again. Background tasks end with
 the old adapter, including commands the agent's own shell tool left running,
 and the log notes **Background work interrupted**. Commands in a terminal
-started with `aether-internal terminal` keep running. A session that cannot be
+started with `aether-internal terminal` keep running, and the terminal stays
+usable ([terminal.md](terminal.md#reconnects-and-server-updates)). A session that cannot be
 restored starts a new one and says `Started a new agent session`. When another
 process attaches to the keeper, which only a second server on the same data
 directory or root in the container can do, the server logs **Agent connection

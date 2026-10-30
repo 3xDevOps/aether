@@ -128,7 +128,7 @@ func (h *unsupportedGraphicsString) Put(data []uint32, start, end int) {
 func (*unsupportedGraphicsString) End(bool) bool { return true }
 
 func (s *session) queueProtocolReplyLocked(data string) {
-	if s.ended || s.stopped || s.protocolErr != nil {
+	if s.ended || s.stopped || s.protocolErr != nil || (s.ring != nil && s.ring.position().Sequence < s.quiet) {
 		return
 	}
 	if len(data) > maxProtocolReplyBytes-len(s.protocolPending) {

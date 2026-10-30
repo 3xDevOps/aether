@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -26,13 +27,20 @@ type terminalTestRuntime struct {
 	mu         sync.Mutex
 	executions map[string]*terminalTestExec
 	failBash   bool
+	// keepers runs terminal keepers in process; without it the staged
+	// binary predates them.
+	keepers     bool
+	keeperTerms map[string]*testTermKeeper
+	gone        map[string]bool
 }
 
 type terminalTestExec struct {
 	identity   runtime.ExecIdentity
 	process    *fakeContainer
 	attachment *fakeAttachment
-	stopGate   func(context.Context) error
+	// start is the attachment of a keeper or bridge exec.
+	start    runtime.Attachment
+	stopGate func(context.Context) error
 }
 
 func newTerminalTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
@@ -53,6 +61,9 @@ func newTerminalTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 }
 
 func (r *terminalTestRuntime) StartExecTTY(_ context.Context, container runtime.ID, spec runtime.ExecSpec) (runtime.ManagedExec, error) {
+	if len(spec.Argv) > 3 && spec.Argv[1] == acpkeeper.Command {
+		return r.startKeeperExec(container, spec)
+	}
 	r.fakeRuntime.mu.Lock()
 	r.execCalls = append(r.execCalls, fakeExecTTYCall{id: container, argv: append([]string(nil), spec.Argv...), workDir: spec.WorkingDir, cols: spec.Cols, rows: spec.Rows})
 	r.fakeRuntime.mu.Unlock()
@@ -78,6 +89,9 @@ func (r *terminalTestRuntime) StartExecPipe(ctx context.Context, container runti
 func (r *terminalTestRuntime) RecoverExec(_ context.Context, identity runtime.ExecIdentity) (runtime.ManagedExec, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.gone[identity.ExecID] {
+		return nil, fmt.Errorf("%w: inspect execution: %w: No such exec instance: %s", runtime.ErrExecUnavailable, runtime.ErrNotFound, identity.ExecID)
+	}
 	execution := r.executions[identity.ExecID]
 	if execution == nil || execution.identity != identity {
 		return nil, runtime.ErrExecUnavailable
@@ -87,6 +101,9 @@ func (r *terminalTestRuntime) RecoverExec(_ context.Context, identity runtime.Ex
 
 func (e *terminalTestExec) Identity() runtime.ExecIdentity { return e.identity }
 func (e *terminalTestExec) Attachment() runtime.Attachment {
+	if e.start != nil {
+		return e.start
+	}
 	if e.attachment == nil {
 		return nil
 	}
@@ -142,6 +159,11 @@ func (e *terminalTestExec) Resize(ctx context.Context, cols, rows uint) error {
 	return e.attachment.Resize(ctx, cols, rows)
 }
 func (e *terminalTestExec) Detach() error {
+	if e.start != nil {
+		start := e.start
+		e.start = nil
+		return start.Close()
+	}
 	if e.attachment == nil {
 		return nil
 	}

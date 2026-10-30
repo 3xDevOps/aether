@@ -9,12 +9,17 @@
 // adopts, or refused. Every agent-to-client ACP message is a numbered rpc
 // frame that the keeper retains until the attacher acks it; client-to-agent
 // messages are unnumbered rpc frames.
+//
+// A terminal keeper speaks the same hello on the same kind of socket for a
+// command it runs on a PTY it owns. Its output frames carry the PTY's bytes
+// numbered by offset; a hello names the offset to replay from.
 package acpkeeper
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 )
 
 const (
@@ -59,6 +64,9 @@ const (
 	frameClose     = "close"
 	frameExit      = "exit"
 	framePreempted = "preempted"
+	frameOutput    = "out"
+	frameInput     = "in"
+	frameResize    = "resize"
 )
 
 // Refusal codes.
@@ -97,6 +105,10 @@ type frame struct {
 	Code  string `json:"code,omitempty"`
 	Error string `json:"error,omitempty"`
 	Exit  *Exit  `json:"exit,omitempty"`
+
+	Data []byte `json:"data,omitempty"`
+	Cols uint16 `json:"cols,omitempty"`
+	Rows uint16 `json:"rows,omitempty"`
 }
 
 // State is what a welcome hands the attacher: what the adapter answered the
@@ -113,6 +125,19 @@ type State struct {
 	// the agent and whose answer no attacher acked.
 	Delivered []string `json:"delivered,omitempty"`
 	Stderr    string   `json:"stderr,omitempty"`
+	// Term is a terminal keeper's state.
+	Term *TermState `json:"term,omitempty"`
+}
+
+// TermState is the output a terminal keeper retains, by byte offset since
+// the terminal started, and its geometry.
+type TermState struct {
+	// Start is the offset of the oldest retained byte, End the offset after
+	// the newest.
+	Start uint64 `json:"start"`
+	End   uint64 `json:"end"`
+	Cols  uint16 `json:"cols"`
+	Rows  uint16 `json:"rows"`
 }
 
 // Prompt is a session/prompt in flight when its attacher went away. Turn is
@@ -180,6 +205,17 @@ func ServeArgv(bin, socket, user string, adapter []string) []string {
 		argv = append(argv, "--user", user)
 	}
 	return append(append(argv, "--"), adapter...)
+}
+
+// TermArgv is the command that runs bin as the keeper of a terminal of cols
+// by rows that runs argv, listening on socket. With user, a "uid:gid", the
+// keeper starts argv as that user.
+func TermArgv(bin, socket, user string, cols, rows uint, argv []string) []string {
+	out := []string{bin, Command, "term", socket, strconv.FormatUint(uint64(cols), 10) + "x" + strconv.FormatUint(uint64(rows), 10)}
+	if user != "" {
+		out = append(out, "--user", user)
+	}
+	return append(append(out, "--"), argv...)
 }
 
 // AttachArgv is the command that bridges its stdio to the keeper at socket.

@@ -77,31 +77,40 @@ func Attach(ctx context.Context, conn io.ReadWriteCloser, hello Hello) (*Client,
 }
 
 func attach(conn io.ReadWriteCloser, hello Hello) (*Client, error) {
-	if err := encodeFrame(conn, frame{T: frameHello, V: Version, Gen: hello.Gen, Token: hello.Token}); err != nil {
-		return nil, fmt.Errorf("acpkeeper: send hello: %w", err)
+	br, state, err := handshake(conn, frame{T: frameHello, V: Version, Gen: hello.Gen, Token: hello.Token})
+	if err != nil {
+		return nil, err
+	}
+	out, in := io.Pipe()
+	return &Client{
+		conn: conn, br: br, state: state, out: out, in: in,
+		kick: make(chan struct{}, 1), done: make(chan struct{}),
+	}, nil
+}
+
+// handshake sends hello and returns the state the keeper welcomed it with.
+func handshake(conn io.ReadWriter, hello frame) (*bufio.Reader, State, error) {
+	if err := encodeFrame(conn, hello); err != nil {
+		return nil, State{}, fmt.Errorf("acpkeeper: send hello: %w", err)
 	}
 	br := bufio.NewReaderSize(conn, 64<<10)
 	line, err := readLine(br)
 	if err != nil {
-		return nil, fmt.Errorf("acpkeeper: read the keeper's answer: %w", err)
+		return nil, State{}, fmt.Errorf("acpkeeper: read the keeper's answer: %w", err)
 	}
 	var f frame
 	if err := json.Unmarshal(line, &f); err != nil {
-		return nil, fmt.Errorf("acpkeeper: decode the keeper's answer: %w", err)
+		return nil, State{}, fmt.Errorf("acpkeeper: decode the keeper's answer: %w", err)
 	}
 	switch {
 	case f.T == frameRefused:
-		return nil, &RefusedError{Code: f.Code, Message: f.Error, Exit: f.Exit}
+		return nil, State{}, &RefusedError{Code: f.Code, Message: f.Error, Exit: f.Exit}
 	case f.T != frameWelcome || f.State == nil:
-		return nil, fmt.Errorf("acpkeeper: unexpected %q frame instead of welcome", f.T)
+		return nil, State{}, fmt.Errorf("acpkeeper: unexpected %q frame instead of welcome", f.T)
 	case f.V != Version:
-		return nil, &RefusedError{Code: RefusedVersion, Message: fmt.Sprintf("the keeper welcomed protocol version %d", f.V)}
+		return nil, State{}, &RefusedError{Code: RefusedVersion, Message: fmt.Sprintf("the keeper welcomed protocol version %d", f.V)}
 	}
-	out, in := io.Pipe()
-	return &Client{
-		conn: conn, br: br, state: *f.State, out: out, in: in,
-		kick: make(chan struct{}, 1), done: make(chan struct{}),
-	}, nil
+	return br, *f.State, nil
 }
 
 // State is what the keeper's welcome reported.

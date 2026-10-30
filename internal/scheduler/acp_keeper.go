@@ -61,16 +61,32 @@ func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed 
 		}
 		return nil, fmt.Errorf("record the keeper: %w", err)
 	}
+	stderr, copied, err := keeperReady(ctx, exec, record.Token)
+	if err != nil {
+		if stopErr := d.stopExec(exec); stopErr != nil {
+			slog.Warn("scheduler: stop the failed ACP keeper", "run", entry.runID, "error", stopErr)
+		}
+		<-copied
+		return nil, adapterError(fmt.Errorf("start %s under its keeper: %w", adapter[0], err), stderr)
+	}
+	return exec, nil
+}
+
+// keeperReady hands a keeper exec its token and waits until it listens, then
+// detaches from the exec, whose stdio the keeper no longer uses and which
+// ends with this server process. stderr holds the tail of the keeper's
+// stderr once copied is closed, which the end of the exec does.
+func keeperReady(ctx context.Context, exec runtime.ManagedExec, token string) (stderr *tailBuffer, copied <-chan struct{}, err error) {
 	att := exec.Attachment()
-	stderr := &tailBuffer{max: acpStderrTail}
-	copied := make(chan struct{})
+	stderr = &tailBuffer{max: acpStderrTail}
+	done := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(stderr, att.Stderr())
-		close(copied)
+		close(done)
 	}()
 	ready := make(chan error, 1)
 	go func() {
-		if _, werr := io.WriteString(att.Stdin(), record.Token+"\n"); werr != nil {
+		if _, werr := io.WriteString(att.Stdin(), token+"\n"); werr != nil {
 			ready <- fmt.Errorf("hand the keeper its token: %w", werr)
 			return
 		}
@@ -85,17 +101,10 @@ func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed 
 	case <-ctx.Done():
 		err = ctx.Err()
 	}
-	if err != nil {
-		if stopErr := d.stopExec(exec); stopErr != nil {
-			slog.Warn("scheduler: stop the failed ACP keeper", "run", entry.runID, "error", stopErr)
-		}
-		<-copied
-		return nil, adapterError(fmt.Errorf("start %s under its keeper: %w", adapter[0], err), stderr)
+	if err == nil {
+		_ = exec.Detach()
 	}
-	// The keeper no longer uses the exec's stdio, which ends with this
-	// server process.
-	_ = exec.Detach()
-	return exec, nil
+	return stderr, done, err
 }
 
 // startKept starts adapter under a new keeper and attaches to it.
