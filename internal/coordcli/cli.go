@@ -17,6 +17,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -708,13 +709,13 @@ func send(ctx context.Context, socket string, args []string, in io.Reader, errOu
 	if err := parseFlags(fs, args); err != nil {
 		return protocol.CoordSendResult{}, err
 	}
-	if *to == "" && fs.NArg() > 0 {
-		*to, _ = positionalBody(fs.Args())
-	}
-	if *body == "" && fs.NArg() > 1 {
-		_, *body = positionalBody(fs.Args())
+	if err := positionalBody(fs.Args(), to, body); err != nil {
+		return protocol.CoordSendResult{}, err
 	}
 	text, err := resolveBody(*body, *bodyFile, in)
+	if err == nil && text == "" {
+		err = usageError("a message body is required")
+	}
 	if err != nil {
 		return protocol.CoordSendResult{}, err
 	}
@@ -739,13 +740,13 @@ func ask(ctx context.Context, socket string, args []string, in io.Reader, errOut
 	if err := parseFlags(fs, args); err != nil {
 		return protocol.CoordAskResult{}, err
 	}
-	if *to == "" && fs.NArg() > 0 {
-		*to, _ = positionalBody(fs.Args())
-	}
-	if *body == "" && fs.NArg() > 1 {
-		_, *body = positionalBody(fs.Args())
+	if err := positionalBody(fs.Args(), to, body); err != nil {
+		return protocol.CoordAskResult{}, err
 	}
 	text, err := resolveBody(*body, *bodyFile, in)
+	if err == nil && text == "" {
+		err = usageError("a message body is required")
+	}
 	if err != nil {
 		return protocol.CoordAskResult{}, err
 	}
@@ -770,13 +771,13 @@ func reply(ctx context.Context, socket string, args []string, in io.Reader, errO
 	if err := parseFlags(fs, args); err != nil {
 		return protocol.CoordReplyResult{}, err
 	}
-	if *question == "" && fs.NArg() > 0 {
-		*question, _ = positionalBody(fs.Args())
-	}
-	if *body == "" && fs.NArg() > 1 {
-		_, *body = positionalBody(fs.Args())
+	if err := positionalBody(fs.Args(), question, body); err != nil {
+		return protocol.CoordReplyResult{}, err
 	}
 	text, err := resolveBody(*body, *bodyFile, in)
+	if err == nil && text == "" {
+		err = usageError("a message body is required")
+	}
 	if err != nil {
 		return protocol.CoordReplyResult{}, err
 	}
@@ -860,11 +861,23 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 	return nil
 }
 
-func positionalBody(args []string) (string, string) {
-	if len(args) == 0 {
-		return "", ""
+// positionalBody fills target (when no flag set it) and body (when no flag
+// set it) from the positional arguments: the first is the target, every other
+// one is the body. A flag after the body is refused, since flag
+// parsing stops at the body and would otherwise send the flag as text.
+func positionalBody(args []string, target, body *string) error {
+	if *target == "" && len(args) > 0 {
+		*target, args = args[0], args[1:]
 	}
-	return args[0], strings.Join(args[1:], " ")
+	for _, a := range args[min(1, len(args)):] {
+		if len(a) > 1 && a[0] == '-' && (a[1] == '-' || unicode.IsLetter(rune(a[1]))) {
+			return usageError(fmt.Sprintf("flag %s after the message body; put flags before the body", a))
+		}
+	}
+	if *body == "" && len(args) > 0 {
+		*body = strings.Join(args, " ")
+	}
+	return nil
 }
 
 func resolveBody(body, file string, in io.Reader) (result string, retErr error) {
