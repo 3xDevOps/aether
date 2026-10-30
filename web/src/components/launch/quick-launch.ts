@@ -22,12 +22,12 @@ export function useLastLaunch(): { last: LastLaunch | null; saved: LaunchDefault
     : Object.entries(local).sort(([, a], [, b]) => b.at - a.at)[0]?.[0]
   if (!harness) return { last: null, saved }
   const { mode, model } = rememberedChoice(harness, saved.result)
-  return { last: { harness, mode: mode ?? 'tui', ...(model ? { model } : {}) }, saved }
+  return { last: { harness, mode: mode ?? 'acp', ...(model ? { model } : {}) }, saved }
 }
 
 /** Whether the saved choices name `last` in a way a launch would refuse; the panel shows why. */
 export function savedRefused(last: LastLaunch, saved: LaunchDefaultsResult | null): boolean {
-  return (saved?.invalid ?? []).some((issue) => issue.field === 'agent' || issue.field === `agents.${last.harness}` || issue.field.startsWith(`agents.${last.harness}.`))
+  return (saved?.invalid ?? []).some((issue) => issue.field === 'agent' || issue.field === 'account_member_id' || issue.field === `agents.${last.harness}` || issue.field.startsWith(`agents.${last.harness}.`))
 }
 
 /** Starts a run on `last` with no task, on the saved account and fallback, as the launch panel would. */
@@ -37,13 +37,13 @@ export async function quickLaunch(last: LastLaunch, saved: LaunchDefaultsResult 
   try {
     const wanted = saved?.defaults.account_member_id ?? ''
     const policy = saved?.defaults.fallback
-    const refused = saved?.invalid?.some((issue) => issue.field === 'account_member_id')
     let account = ''
     let fallback = automaticFallback
     let accounts = [] as Awaited<ReturnType<typeof api.accountList>>['accounts']
     if (wanted || (policy && policy.policy !== 'automatic')) {
       accounts = (await api.accountList()).accounts
-      account = wanted && !refused && wanted !== own && accounts.some((member) => member.id === wanted) ? wanted : ''
+      if (wanted && wanted !== own && !accounts.some((member) => member.id === wanted)) throw new Error('your saved account is no longer shared with you; choose another in New run')
+      account = wanted === own ? '' : wanted
       fallback = fallbackFromSaved(policy, accounts)
     }
     const run = await api.runLaunch({

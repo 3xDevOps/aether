@@ -67,6 +67,8 @@ export function SplitNewRun({ blocked, shortcut, onOpen }: {
   const { last, saved } = useLastLaunch()
   const [busy, setBusy] = useState(false)
   const [previewTop, setPreviewTop] = useState<number | null>(null)
+  const shownTop = useRef(0)
+  if (previewTop !== null) shownTop.current = previewTop
   const quick = useRef<HTMLButtonElement>(null)
   const previewID = useId()
   const lingering = useLingering(previewTop !== null)
@@ -130,7 +132,7 @@ export function SplitNewRun({ blocked, shortcut, onOpen }: {
                   </>
                 )}
           </Half>
-          {lingering && <LaunchPreview id={previewID} open={previewTop !== null} top={previewTop ?? 0} last={last} needsTask={needsTask} />}
+          {lingering && <LaunchPreview id={previewID} open={previewTop !== null} top={shownTop.current} last={last} needsTask={needsTask} />}
         </>
       )}
     </div>
