@@ -205,20 +205,15 @@ func FetchManifest(ctx context.Context, tag string) (Manifest, error) {
 	return FetchManifestFrom(ctx, defaultBaseURL, tag)
 }
 
-// LatestManifest resolves the newest release and fetches its manifest. A
-// newest release without one yet is ErrNoRelease.
-func LatestManifest(ctx context.Context) (Manifest, error) {
-	return LatestManifestFrom(ctx, defaultBaseURL)
-}
-
 // FetchManifestFrom is FetchManifest against a repository base URL such
 // as Checker.BaseURL.
 func FetchManifestFrom(ctx context.Context, baseURL, tag string) (Manifest, error) {
 	return fetchManifest(ctx, baseURL, tag)
 }
 
-// LatestManifestFrom is LatestManifest against a repository base URL such
-// as Checker.BaseURL.
+// LatestManifestFrom resolves the newest release at a repository base URL
+// such as Checker.BaseURL and fetches its manifest. A newest release
+// without one yet is ErrNoRelease.
 func LatestManifestFrom(ctx context.Context, baseURL string) (Manifest, error) {
 	tag, err := LatestTag(ctx, baseURL+"/releases/latest")
 	if err != nil {
