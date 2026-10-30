@@ -20,6 +20,7 @@ import (
 // Runs is the scheduler side of a child run.
 type Runs interface {
 	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
+	SwarmRefusal(agent string, mode domain.LaunchMode) error
 	StopForParent(ctx context.Context, run, parent domain.RunID) error
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string, reportedOnly bool) (*domain.Run, error)

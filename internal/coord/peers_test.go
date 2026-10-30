@@ -103,8 +103,13 @@ func TestAnyRunMessagesARunInAnotherWorkspace(t *testing.T) {
 			t.Fatalf("send %s -> %s: %v", dir[0], dir[1], err)
 		}
 		h.advance(sendRefill)
-		if _, err := h.svc.Ask(ctx, dir[0], protocol.CoordAskParams{ToRunID: string(dir[1]), Body: "across?", IdempotencyKey: "ask-" + string(dir[0])}); err != nil {
+		asked, err := h.svc.Ask(ctx, dir[0], protocol.CoordAskParams{ToRunID: string(dir[1]), Body: "across?", IdempotencyKey: "ask-" + string(dir[0])})
+		if err != nil {
 			t.Fatalf("ask %s -> %s: %v", dir[0], dir[1], err)
+		}
+		h.advance(sendRefill)
+		if _, err := h.svc.Reply(ctx, dir[1], protocol.CoordReplyParams{QuestionID: asked.QuestionID, Body: "yes", IdempotencyKey: "reply-" + string(dir[0])}); err != nil {
+			t.Fatalf("reply %s -> %s: %v", dir[1], dir[0], err)
 		}
 	}
 	st, err := h.svc.Status(ctx, local)

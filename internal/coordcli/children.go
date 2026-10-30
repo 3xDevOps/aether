@@ -17,10 +17,10 @@ const (
 	maxChildRequestBytes = 60 << 10
 )
 
-const childUsage = `usage: aether-internal child <options|start|list|cancel|detach|fetch> [options]
+const childUsage = `usage: aether-internal child <options|start|list|cancel|fetch> [options]
 
-Start child runs on other agents and models, within what this run's owner or
-swarm allows, and manage them.
+Dispatch fresh-context child runs on other agents and models, within what this
+run's owner or swarm allows, and manage them. A child cannot start children.
   options [--harness <agent>]   whether you may start children, the limits,
                                 and each agent and account with its state
                                 (ready, exhausted, not-installed, not-signed-in);
@@ -31,9 +31,8 @@ swarm allows, and manage them.
                                 start a child from your last published commit;
                                 commit first, uncommitted changes are not included
   list [--run-id <child>]       your children with state, latest report, branch,
-                                account and whether their base is stale
+                                and account
   cancel --run-id <child>       stop a child, or drop it from the queue
-  detach --run-id <child>       let a child run on without you
   fetch --run-id <child>        copy its branch to refs/remotes/children/<child>
 
 A child's report arrives in your inbox and wakes you; do not poll. Message a

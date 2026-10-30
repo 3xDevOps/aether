@@ -17,6 +17,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	agentharness "github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -56,6 +57,10 @@ func (f *fakeRuns) StopForParent(ctx context.Context, run, parent domain.RunID) 
 	now := time.Now()
 	_, err := f.db.UpdateRunStatus(ctx, run, domain.RunCompleted, "stopped by parent run "+string(parent), "", nil, &now)
 	return err
+}
+
+func (f *fakeRuns) SwarmRefusal(agent string, mode domain.LaunchMode) error {
+	return agentharness.SwarmRefusal(agent, mode)
 }
 
 func (f *fakeRuns) CloseRun(ctx context.Context, run domain.RunID, _ domain.MemberID, outcome domain.RunStatus) error {

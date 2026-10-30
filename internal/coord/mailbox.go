@@ -346,17 +346,13 @@ func (s *Service) Reply(ctx context.Context, from domain.RunID, p protocol.Coord
 	if err != nil {
 		return protocol.CoordReplyResult{}, internalError(method, err)
 	}
-	if sender, serr := s.cfg.Store.GetRun(ctx, from); serr != nil {
+	if _, serr := s.cfg.Store.GetRun(ctx, from); serr != nil {
 		if errors.Is(serr, store.ErrNotFound) {
 			return protocol.CoordReplyResult{}, &protocol.Error{
 				Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown run %s", method, from),
 			}
 		}
 		return protocol.CoordReplyResult{}, internalError(method, serr)
-	} else if sender.WorkspaceID != question.WorkspaceID {
-		return protocol.CoordReplyResult{}, &protocol.Error{
-			Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: question %s is outside this workspace", method, p.QuestionID),
-		}
 	}
 	if question.ToRun != from {
 		return protocol.CoordReplyResult{}, &protocol.Error{
@@ -1217,7 +1213,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 		}
 	}
 	msg := &store.RunMessage{
-		WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to, Body: body,
+		WorkspaceID: sender.WorkspaceID, FromRun: from, ToRun: to, Body: body,
 		Kind: kind, CorrelationID: correlation, IdempotencyKey: idempotency,
 	}
 	created, err := appendRunMessage(ctx, s.cfg.Mail, msg)

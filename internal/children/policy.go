@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	agentharness "github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -77,8 +76,8 @@ func (s *Service) resolve(ctx context.Context, parentID domain.RunID) (*policy, 
 		p.refusal = fmt.Sprintf("swarm %s is cancelled", p.mission.ID)
 	case p.parentOf != "":
 		p.refusal = fmt.Sprintf("run %s is itself a child run of %s, and child runs go one level deep; do the work yourself or message %s", parent.ID, p.parentOf, p.parentOf)
-	case agentharness.SwarmRefusal(parent.Harness, parent.Mode) != nil:
-		p.refusal = agentharness.SwarmRefusal(parent.Harness, parent.Mode).Error()
+	case s.cfg.Runs.SwarmRefusal(parent.Harness, parent.Mode) != nil:
+		p.refusal = s.cfg.Runs.SwarmRefusal(parent.Harness, parent.Mode).Error()
 	case p.scope == scopeMember:
 		if !memberAllows(parent, p.settings) {
 			p.refusal = "child runs are off for this run's owner; they can turn them on in Settings → Child runs (aether children on) or allow them for this run only from the run's More menu (Allow child runs)"
