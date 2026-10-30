@@ -388,7 +388,7 @@ attached to it, the viewer included: the `watching` lists of
 right edge and the age, the glyph and a swarm's button move left to make
 room; a run nobody is on reserves none. A root with child runs shows a
 `Network` glyph and their count before the agent glyph, and its name adds
-"2 child runs · 1 working"; only its children that need you list under it. The first avatar sits whole at the
+"2 child runs · 1 working"; every child lists under it, as swarm workers do. The first avatar sits whole at the
 edge and each one after shows from behind it, to its left. First is the
 run's controller. While nobody holds control it is the last controller, if
 they are still on the run. The rest follow by name. A row draws three
@@ -1379,8 +1379,7 @@ shows (`card-list.tsx`, virtua).
 
 In a flat run list (`run-list.tsx`) a root lists its workers and child runs
 at any depth under it with a toggle naming the count (**Show 2 child
-runs**). A swarm's workers start shown; child runs start folded, and a
-folded child that needs you still shows. Nested rows add the model to the
+runs**). Workers and child runs both start shown, and a folded one that needs you still shows. Nested rows add the model to the
 agent.
 
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
@@ -1632,7 +1631,10 @@ the window, a line above the lanes says so; the axis stays, so panning and
 zooming still reach older runs. A swarm lists as one header lane (objective,
 phase, worker counts) in the section of its most urgent member, followed by
 its integrator, then its workers in task order ("Worker 2"), retries after the
-first attempt. It starts open while live with eight tasks or fewer, or when a
+first attempt. A run with child runs lists the same way: a header lane
+(the run's title, "N child runs" and their counts, with the Network glyph)
+followed by the run and its child runs at any depth, oldest first, in the
+section of its most urgent member. Either group starts open while live with eight tasks or fewer, or when a
 worker needs you; folded, it draws its integrator's bar and a strip of its
 workers' most urgent state over time, and still lists any worker that needs
 you. Disclosure choices last until the view unmounts.
@@ -3197,7 +3199,10 @@ A subagent whose launch is not held starts at its first held item and sits
 in that item's turn, or under the run when that turn is not held either. An
 integrator's workers are read with `mission.show` when Trace opens and again
 on each `mission.changed`; an answer to an earlier read never replaces a
-later one, and a failed read shows its error with **Retry**.
+later one, and a failed read shows its error with **Retry**. A run's child
+runs at any depth join the same Workers group as spans from their creation
+(or start) to their end, drawn failed or stopped by their status; they come
+from the runs the dashboard already holds, so a new child appears at once.
 
 A call still open when its turn or subagent ended is **Stopped** at that end,
 unless it is a background task of a live run. Item times are log times, so a

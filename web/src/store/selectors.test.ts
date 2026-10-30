@@ -193,6 +193,16 @@ describe('sidebarGroups', () => {
     ])
   })
 
+  it('lists every child run beneath its parent, not only those that need the viewer', () => {
+    const groups = sidebarGroups(input([
+      record({ id: 'parent' }),
+      record({ id: 'c1', parent_run_id: 'parent', created_at: '2026-08-14T10:00:00Z' }),
+      record({ id: 'c2', parent_run_id: 'parent', status: 'completed', created_at: '2026-08-14T11:00:00Z' }),
+    ]))
+    expect(ids(groups[0].runs)).toEqual(['parent'])
+    expect(ids(groups[0].runs[0].children)).toEqual(['c1', 'c2'])
+  })
+
   it('keeps every visible swarm run beneath its current integrator without inflating Needs you', () => {
     const swarmRun = (id: string, over: Parameters<typeof run>[0] = {}) => record({
       id, mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'old', ...over,

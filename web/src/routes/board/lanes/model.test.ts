@@ -141,6 +141,33 @@ describe('buildLanes', () => {
     expect(drawn.get('done')).toBe('section:finished:summary')
   })
 
+  it('groups a run with its child runs like a swarm, open while live and folded on request', () => {
+    const ctx = ctxOf([
+      run({ id: 'parent', task: 'parent work', created_at: at(5), started_at: at(5) }),
+      run({ id: 'c1', parent_run_id: 'parent', task: 'first', created_at: at(10), started_at: at(10) }),
+      run({ id: 'c2', parent_run_id: 'parent', task: 'second', status: 'completed', state: undefined, created_at: at(12), finished_at: at(20) }),
+      run({ id: 'g1', parent_run_id: 'c1', task: 'nested', status: 'needs-attention', state: 'needs-you', created_at: at(15), started_at: at(15) }),
+    ])
+    const { lanes } = buildLanes(input(ctx))
+    expect(lanes.map((l) => l.kind === 'section' ? l.label : l.kind === 'run' ? [l.card.run.id, l.level] : l.kind)).toEqual([
+      'Needs you', 'swarm', ['parent', 3], ['c1', 3], ['c2', 3], ['g1', 3],
+    ])
+    const header = lanes.find((l): l is SwarmLane => l.kind === 'swarm')!
+    expect(header).toMatchObject({ open: true, integratorID: 'parent', detail: '3 child runs · 1 needs you · 1 working · 1 done' })
+    const folded = buildLanes(input(ctx, { open: new Map([[header.key, false]]) })).lanes
+    expect(folded.filter((l) => l.kind === 'run').map((l) => (l as RunLane).card.run.id)).toEqual(['g1'])
+  })
+
+  it('keeps a folded family\'s parent visible while it awaits review', () => {
+    const ctx = ctxOf([
+      run({ id: 'parent', status: 'completed', state: undefined, review: 'ready', created_at: at(5), started_at: at(5), finished_at: at(40) }),
+      run({ id: 'c1', parent_run_id: 'parent', status: 'completed', state: undefined, created_at: at(10), finished_at: at(20) }),
+    ])
+    const { lanes } = buildLanes(input(ctx))
+    expect(lanes.find((l): l is SwarmLane => l.kind === 'swarm')).toMatchObject({ open: false })
+    expect(lanes.filter((l): l is RunLane => l.kind === 'run').map((l) => l.card.run.id)).toEqual(['parent'])
+  })
+
   it('keeps a failure that ended as it started visible on the Finished strip', () => {
     const ctx = ctxOf([
       run({ id: 'done', status: 'merged', state: undefined, created_at: at(10), finished_at: at(40) }),

@@ -22,8 +22,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => nestWorkers(runs), [runs])
-  // A swarm lists its workers; child runs stay folded until asked for.
-  const open = (row: RunRow) => expanded[row.run.id] ?? row.run.mission_role === 'integrator'
+  const open = (row: RunRow) => expanded[row.run.id] ?? true
   const shown = (row: RunRow, workers: RunRow[]) => open(row) ? workers : workers.filter((worker) => worker.needsYou)
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && runs.length === 0)

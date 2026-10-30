@@ -3,6 +3,7 @@ import { loadMission, swarmHandle } from '@/components/messages/handles'
 import { api } from '@/lib/api'
 import { useSecondClock } from '@/lib/clock'
 import { message } from '@/lib/format'
+import { runLabel } from '@/lib/status'
 import type { MissionAttemptState } from '@/lib/types'
 import { taskTitle } from '@/routes/missions/tree'
 import { useStore } from '@/store'
@@ -14,6 +15,7 @@ import { costTotals, deriveTrace, traceStats, type SpanStatus, type WorkerSource
 import { axisAt, buildAxis, gapLabel, idleGaps, type Axis, type Gap } from '@/store/trace-axis'
 import { readTraceLog } from '@/store/trace-log'
 import { missionSeqOf } from '@/store/workflow-signals'
+import { descendantRuns } from '@/store/selectors'
 
 const liveStatuses = new Set(['queued', 'provisioning', 'running', 'needs-attention'])
 
@@ -33,6 +35,11 @@ const attemptStatus: Record<MissionAttemptState, SpanStatus> = {
   abandoned: 'stopped',
 }
 
+function childStatus(status: RunRecord['status']): SpanStatus {
+  if (liveStatuses.has(status)) return 'running'
+  return status === 'failed' || status === 'interrupted' ? 'failed' : status === 'abandoned' ? 'stopped' : 'done'
+}
+
 function useWorkers(run: RunRecord): { workers: WorkerSource[] | undefined; error: string | null; retry: () => void } {
   const missionID = run.mission_role === 'integrator' ? run.mission_id : undefined
   const detail = useStore((s) => (missionID ? s.missionDetails[missionID] : undefined))
@@ -47,7 +54,17 @@ function useWorkers(run: RunRecord): { workers: WorkerSource[] | undefined; erro
       live = false
     }
   }, [missionID, changed, tries])
-  const workers = useMemo(() => detail?.attempts.flatMap((attempt) => {
+  const childKey = useStore((s) => JSON.stringify(descendantRuns(s.runs, [run.id]).filter((child) => !child.detached).map((child) => [
+    child.id, runLabel(child), child.started_at ?? child.created_at, child.finished_at, child.status,
+  ])))
+  const children = useMemo(() => (JSON.parse(childKey) as [string, string, string, string | null, RunRecord['status']][]).map(([runID, label, start, finished, status]): WorkerSource => ({
+    runID,
+    label,
+    start: Date.parse(start),
+    end: finished ? Date.parse(finished) : null,
+    status: childStatus(status),
+  })), [childKey])
+  const attempts = useMemo(() => detail?.attempts.flatMap((attempt) => {
     if (attempt.run_id === run.id) return []
     const handle = swarmHandle(detail, attempt.run_id)
     const task = detail.tasks.find((item) => item.id === attempt.task_id)
@@ -60,6 +77,7 @@ function useWorkers(run: RunRecord): { workers: WorkerSource[] | undefined; erro
       status: attemptStatus[attempt.state],
     }]
   }), [detail, run.id])
+  const workers = useMemo(() => (attempts || children.length > 0 ? [...(attempts ?? []), ...children] : undefined), [attempts, children])
   return { workers, error, retry: () => setTries((n) => n + 1) }
 }
 

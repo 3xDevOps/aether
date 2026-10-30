@@ -91,11 +91,11 @@ export function SwarmPopover({ lane }: { lane: SwarmLane }) {
   const { integratorID } = lane
   return (
     <>
-      <Header>Swarm · {lane.detail}</Header>
+      <Header>{lane.missionID ? 'Swarm' : 'Run'} · {lane.detail}</Header>
       <p className="mt-0.5 text-ui font-medium break-words">{lane.title}</p>
       <Actions>
-        <Button variant="secondary" size="sm" onClick={() => navigate('missions', { missionId: lane.missionID })}>Open swarm</Button>
-        {integratorID && <Button variant="ghost" size="sm" onClick={() => navigate('run', { runId: integratorID })}>Open integrator</Button>}
+        {lane.missionID && <Button variant="secondary" size="sm" onClick={() => navigate('missions', { missionId: lane.missionID! })}>Open swarm</Button>}
+        {integratorID && <Button variant={lane.missionID ? 'ghost' : 'secondary'} size="sm" onClick={() => navigate('run', { runId: integratorID })}>{lane.missionID ? 'Open integrator' : 'Open run'}</Button>}
       </Actions>
     </>
   )
