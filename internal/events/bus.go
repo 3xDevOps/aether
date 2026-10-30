@@ -78,8 +78,6 @@ func (f Filter) matchesRuns(e Event) bool {
 		return slices.Contains(f.Runs, p.ToRunID)
 	case MissionChangedPayload:
 		return f.Mission != "" && p.MissionID == f.Mission
-	case IntegrationChangedPayload:
-		return f.Mission != "" && p.MissionID == f.Mission
 	}
 	return false
 }

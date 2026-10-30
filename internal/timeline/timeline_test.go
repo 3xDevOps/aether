@@ -88,7 +88,7 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	}
 	swarm := events.Filter{Runs: []domain.RunID{"run-integrator"}, Mission: "mission-1"}
 	if !swarm.Matches(events.Event{Payload: events.MissionChangedPayload{MissionID: "mission-1"}}) ||
-		swarm.Matches(events.Event{Payload: events.IntegrationChangedPayload{MissionID: "mission-2"}}) {
+		swarm.Matches(events.Event{Payload: events.MissionChangedPayload{MissionID: "mission-2"}}) {
 		t.Error("a live subscription filtered by mission must see that mission's swarm events only")
 	}
 }
@@ -140,7 +140,7 @@ func TestBeforeReadsTheNewestHistoryFirst(t *testing.T) {
 }
 
 func TestDetailEventsAreExcludedFromDefaultFeed(t *testing.T) {
-	for _, typ := range []events.Type{events.TypeRunTitle, events.TypeMissionChanged, events.TypeIntegrationChanged, events.TypeRunPR, events.TypePresence} {
+	for _, typ := range []events.Type{events.TypeRunTitle, events.TypeMissionChanged, events.TypeRunPR, events.TypePresence} {
 		if !detailTypes[typ] {
 			t.Fatalf("%s should be a detail event in the default feed", typ)
 		}

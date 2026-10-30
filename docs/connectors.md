@@ -211,7 +211,7 @@ than `offline_access`, the only one the OAuth metadata lists in
 | --- | --- | --- |
 | `read` | Always granted | Every read-only tool |
 | `write` | **Launch and message**, checked by default | Launching runs and swarms; messaging, pausing, resuming, relaunching, protecting and archiving runs; answering agents' and teammates' questions; marking runs reviewed; adding and pinning team memory |
-| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, switching a run's mode, cancelling, archiving and unarchiving swarms, releasing a swarm worker, handing runs to teammates, replacing a swarm's integrator, deciding and delivering integration candidates, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
+| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, switching a run's mode, cancelling, archiving and unarchiving swarms, releasing a swarm worker, handing runs to teammates, replacing a swarm's integrator, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
 
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
@@ -219,15 +219,14 @@ each connector's scopes.
 
 The server also checks the scope of every call a connector makes, whatever the
 member's role. Reads such as `run.get`, `workspace.timeline`, `member.list`,
-`memory.show`, `integration.show`, `template.list`, `changes.list` and
+`memory.show`, `template.list`, `changes.list` and
 `launch.defaults.get` need `read`; `run.launch`, `template.launch`,
 `mission.create`, `run.inject`, `run.room.post`, `run.pause`, `run.resume`,
 `run.review`, `run.relaunch`, `run.protect`, `run.archive`, `memory.add`,
 `memory.pin` and `memory.unpin` need `write`; `run.kill`, `run.close`,
 `run.mode.switch` (it discards a turn in progress), `run.handoff`,
 `mission.cancel`, `mission.worker.release`, `mission.archive`,
-`mission.unarchive`, `mission.replace-integrator`, `integration.decide`,
-`integration.deliver`, `run.pr.create` and `run.pr.merge` need `control`.
+`mission.unarchive`, `mission.replace-integrator`, `run.pr.create` and `run.pr.merge` need `control`.
 `run.input.respond` needs `control` to decide a permission request and `write`
 to answer a question. `run.review` with `complete` needs `control` for a live
 run unless its agent reported success and the run awaits review, since
@@ -262,7 +261,6 @@ others:
 | `aether_get_swarm` | Your swarms; with `swarm_id`, one swarm's tasks, workers with their agent, mode, model and account, who holds their control and why one failed, questions, recent messages and integrator generation; `evidence: true` adds [progress evidence](#progress-evidence) | `read` |
 | `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
 | `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md), or with `id` one note with the notes that replaced it or that it replaced | `read` |
-| `aether_integration` | A workspace's or swarm's [integration candidates](teams.md#combine-several-runs-into-one-result), or one with its verifications and delivery request | `read` |
 | `aether_changes` | What changed since a cursor: run status, reports, agent mail, pull requests, swarms and lifecycle, oldest first, paged with `next_cursor` | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
 | `aether_watches` | Your [watches](watches.md), each with its state, conditions and last notice; with `watch_id`, one watch with its 10 newest notices and where each was delivered | `read` |
@@ -278,7 +276,6 @@ others:
 | `aether_handoff_run` | Give a run to a teammate, who then owns and controls it | `control` |
 | `aether_replace_integrator` | Start a new integrator for a swarm from its agents | `control` |
 | `aether_swarm_manage` | Release a member's control of a swarm worker; archive a finished swarm, which closes its completed runs as merged or abandoned; unarchive one | `control` |
-| `aether_integration_decide` | Approve or reject a candidate's delivery request, or deliver an approved one to its target branch | `control` |
 | `aether_pr_create`, `aether_pr_merge` | Open a pull request from a run's pushed branch; merge it on GitHub | `control` |
 
 Things to ask:
@@ -304,8 +301,7 @@ Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
 one-line summary followed by the result as JSON. Text that agents, teammates or
 GitHub users wrote, run titles, swarm goals, failing check names, the reasons
-runs wait, an integration candidate's target ref, delivery request and
-receipt, and a watch's receipt, observed state and notices included, comes back
+runs wait, and a watch's receipt, observed state and notices included, comes back
 under an `untrusted` field; outside it are only
 fixed labels such as `The agent asks a question`, ids, states, counts, times,
 links, workspace and agent names, branch names, file paths and the server's own
@@ -321,8 +317,7 @@ it returns a run's title, task and reason and a swarm's goal whole. A permission
 request longer than 600 characters is decided only in the dashboard, never by
 `aether_decide_approval`. Lists return 20 rows by default, at most 100, and say
 how many matched when they cut rows; `aether_needs_attention` returns at most 30
-items. `aether_integration` lists the newest 100 candidates and says when older
-ones are not shown. `aether_run_changes` lists 20 commits and up to 10 diff
+items. `aether_run_changes` lists 20 commits and up to 10 diff
 files of 6000 bytes, 12000 in all, per page, and returns `next_commits_offset`
 and `next_diff_file` for the next page, `diff_clipped_files` with the numbers of
 files cut at 6000 bytes, and `diff_truncated: true` when the server cut the diff
@@ -537,10 +532,6 @@ that the run's pull request changed.
   `untrusted.progress_reports`. With `integrator_generation` above 1,
   `integrator_note` counts earlier integrators no submission names, which
   are not listed.
-- `aether_delivery`: the swarm's first 20 delivery receipts
-  (`receipts_total` when there are more), which land in Aether's own git,
-  not on GitHub. They come from the newest 100 candidates; `note` says
-  when earlier deliveries may be missing.
 - `flags`: `open_tasks_in_completed_swarm`, tasks neither done nor abandoned
   in a completed swarm, and `report_conflicts`, which adds
   `success_without_accepted_submission` for a worker with no submission
@@ -581,9 +572,7 @@ The other writes repeat safely without a key. Each `aether_run_lifecycle` action
 but `relaunch` sets a state, so a repeat changes nothing, and
 `aether_switch_run_mode` to the mode a run is already in reports that without
 switching; `relaunch` fails on a run that is still live. `aether_handoff_run` to
-the run's owner, `aether_swarm_manage` on a worker nobody holds, and
-`aether_integration_decide` on a request already in the state asked for or
-already delivered report that and write nothing. `aether_pr_create` returns the
+the run's owner, and `aether_swarm_manage` on a worker nobody holds report that and write nothing. `aether_pr_create` returns the
 run's open pull request instead of opening another, and `aether_pr_merge`
 reports a merged one as merged. `aether_replace_integrator` requires
 `expected_generation`, the `integrator_generation` `aether_get_swarm` returns;
@@ -710,7 +699,7 @@ A connector whose refresh token lapsed after 30 days unused is deleted without
 an entry.
 
 An entry names the member, how the call arrived, the method, the workspace,
-the run, swarm, note, integration candidate, question, connector, member,
+the run, swarm, note, question, connector, member,
 device or Slack user it acted on (for an accepted merge, the absorbed member;
 for a refused one, the proposal), and `ok` or `error` with the error code. It never holds tokens, messages or other parameters. How a call arrived
 is `connector` with the client and connector id, `assistant`, `dashboard` for

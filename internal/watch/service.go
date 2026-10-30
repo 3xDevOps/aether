@@ -323,7 +323,6 @@ func (s *Service) retryLater(ctx context.Context, id string, failure error) erro
 var watchedTypes = []events.Type{
 	events.TypeRunStatus, events.TypeRunInput, events.TypeRunOutcomeSeen, events.TypeRunReview,
 	events.TypeRunArchived, events.TypeRunPR, events.TypeTimeline, events.TypeMissionChanged,
-	events.TypeIntegrationChanged,
 }
 
 // consume follows the bus from the cursor, and from it again whenever the
@@ -431,11 +430,6 @@ func (s *Service) advance(ctx context.Context, seq uint64) error {
 func (s *Service) affected(ctx context.Context, e events.Event) ([]string, error) {
 	switch p := e.Payload.(type) {
 	case events.MissionChangedPayload:
-		return s.store.EvaluableWatchIDs(ctx, "", p.MissionID)
-	case events.IntegrationChangedPayload:
-		if p.MissionID == "" {
-			return nil, nil
-		}
 		return s.store.EvaluableWatchIDs(ctx, "", p.MissionID)
 	}
 	if e.RunID == "" {

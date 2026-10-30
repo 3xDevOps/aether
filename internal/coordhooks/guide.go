@@ -147,7 +147,7 @@ func Outcomes(g Guide) []Outcome {
 		success = "your task is done and verified with its required evidence (success submits the attempt and stops you), or cannot be done."
 		needsInput = "not for workers; ask your integrator with `aether-internal ask`."
 	case RoleIntegrator:
-		success = "success once the verified candidate is delivered (it completes the mission); failure if the mission cannot finish."
+		success = "success once every task is accepted and the work is delivered through your normal PR flow (it completes the mission); failure if the mission cannot finish."
 	case RoleMission:
 		success = "as `aether-internal skill` describes for your role; a worker's success submits its attempt and stops it."
 		needsInput = "integrators only; a worker asks its integrator with `aether-internal ask`."
@@ -235,9 +235,6 @@ func RoleCard(g Guide) string {
 	if g.Repos != "" {
 		b.WriteString("This run also has extra repositories beside the one in the working directory: " + g.Repos +
 			". Each is its own git repository with its own run branch; commit in every repository you change.\n")
-		if g.Role == RoleIntegrator {
-			b.WriteString("Integration candidates combine only the working-directory repository: a worker's commits in an extra repository stay on that worker's run branch there, so name those worker runs in your final report.\n")
-		}
 	}
 	if g.Parent != "" {
 		fmt.Fprintf(&b, "Run %s started you as its child run: do the task yourself; child runs go one level deep, so you cannot start child runs. "+

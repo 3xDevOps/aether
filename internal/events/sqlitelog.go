@@ -214,8 +214,8 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 			}
 		}
 		if f.Mission != "" {
-			either = append(either, "(type IN (?, ?) AND json_extract(payload, '$.mission_id') = ?)")
-			args = append(args, string(TypeMissionChanged), string(TypeIntegrationChanged), string(f.Mission))
+			either = append(either, "(type = ? AND json_extract(payload, '$.mission_id') = ?)")
+			args = append(args, string(TypeMissionChanged), string(f.Mission))
 		}
 		where += " AND (" + strings.Join(either, " OR ") + ")"
 	}

@@ -121,7 +121,7 @@ var readOps = []Op{
 	opOf("aether_get_swarm", "Get swarms", ScopeRead, true, nextSwarms,
 		"Use this when the user asks about their swarms, or one by swarm_id."+untrustedRule, getSwarm).
 		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList,
-		protocol.MethodRunGet, protocol.MethodRunChildren, protocol.MethodRunPRStatus, protocol.MethodRunPRFeedback, protocol.MethodWorkspaceTimeline, protocol.MethodIntegrationList),
+		protocol.MethodRunGet, protocol.MethodRunChildren, protocol.MethodRunPRStatus, protocol.MethodRunPRFeedback, protocol.MethodWorkspaceTimeline),
 	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, its diff."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),

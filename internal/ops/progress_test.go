@@ -139,8 +139,6 @@ func TestSwarmProgress(t *testing.T) {
 		return fb
 	})
 	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-a", "success", "done"), reportEvent("run-b", "success", injection))
-	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{Candidates: []protocol.CandidateSummary{
-		{CandidateID: "cand-1", TargetRef: injection, DeliveryReceipt: &protocol.DeliveryReceipt{ReceiptID: "rcpt-1", Result: protocol.DeliveryResultLanded, CreatedAt: checkedLongAgo}}}})
 	cs := connectorSession(t, f)
 
 	_, out := run(t, cs, "aether_get_swarm", map[string]any{"swarm_id": "mis-1"})
@@ -189,9 +187,6 @@ func TestSwarmProgress(t *testing.T) {
 	if byRun(t, p["reports"], "run-int")["missing"] != notInReports || byRun(t, p["reports"], "run-a")["outcome"] != "success" {
 		t.Errorf("reports = %v", p["reports"])
 	}
-	if dig(t, p, "aether_delivery", "source") != sourceAether || dig(t, p, "aether_delivery", "receipts", 0, "receipt_id") != "rcpt-1" {
-		t.Errorf("delivery = %v", p["aether_delivery"])
-	}
 	if jsonOf(t, out["released"]) != `{"reason":"`+notTracked+`","state":"unknown"}` || jsonOf(t, out["deployed"]) != jsonOf(t, out["released"]) {
 		t.Errorf("released %v, deployed %v", out["released"], out["deployed"])
 	}
@@ -222,12 +217,6 @@ func TestSwarmProgressBoundsLiveLookups(t *testing.T) {
 	}
 	f.answers[protocol.MethodMissionShow] = returns(show)
 	f.answers[protocol.MethodRunGet] = runsAt(runs)
-	var cands protocol.IntegrationListResult
-	for i := range defaultRows + 2 {
-		cands.Candidates = append(cands.Candidates, protocol.CandidateSummary{CandidateID: fmt.Sprintf("cand-%d", i),
-			DeliveryReceipt: &protocol.DeliveryReceipt{ReceiptID: fmt.Sprintf("rcpt-%d", i), Result: protocol.DeliveryResultLanded, CreatedAt: checkedLongAgo}})
-	}
-	f.answers[protocol.MethodIntegrationList] = returns(cands)
 	f.errs[protocol.MethodRunPRStatus] = errors.New("github.com: dial tcp: i/o timeout")
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Error: "gh: could not reach api.github.com"})
 	f.errs[protocol.MethodWorkspaceTimeline] = errors.New("timeline: database is locked")
@@ -238,9 +227,6 @@ func TestSwarmProgressBoundsLiveLookups(t *testing.T) {
 	}
 	if !strings.Contains(p["reports_error"].(string), "database is locked") {
 		t.Errorf("reports_error = %v", p["reports_error"])
-	}
-	if n := len(dig(t, p, "aether_delivery", "receipts").([]any)); n != defaultRows || dig(t, p, "aether_delivery", "receipts_total") != float64(defaultRows+2) {
-		t.Errorf("%d receipts, total %v", n, dig(t, p, "aether_delivery", "receipts_total"))
 	}
 	if n := len(called(f, protocol.MethodRunPRStatus)); n != evidenceLive {
 		t.Fatalf("%d live lookups, want %d", n, evidenceLive)
@@ -332,7 +318,6 @@ func TestSwarmProgressFindsUnrecordedPullRequests(t *testing.T) {
 	show.Mission.CurrentIntegratorRunID = ""
 	f.answers[protocol.MethodMissionShow] = returns(show)
 	f.answers[protocol.MethodRunGet] = runsAt(map[string]protocol.RunResult{"run-a": runWith("run-a", "running"), "run-b": runWith("run-b", "running")})
-	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{})
 	f.answers[protocol.MethodRunPRStatus] = answerTo(func(p protocol.RunPRStatusParams) any {
 		if p.RunID == "run-b" {
 			return protocol.RunPRStatusResult{Error: "no pull request for branch aether/run-b"}
@@ -384,7 +369,6 @@ func TestSwarmProgressAcceptanceFollowsRevision(t *testing.T) {
 	})
 	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "ana", Error: "no pull request for branch aether/run-int2"})
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Identity: "ana", Error: "no pull request for branch aether/run-int2"})
-	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{})
 	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-a", "success", "done"), reportEvent("run-b", "success", "done"),
 		reportEvent("run-c", "success", "done"))
 	_, out := run(t, connectorSession(t, f), "aether_get_swarm", map[string]any{"swarm_id": "mis-1", "evidence": true})
@@ -472,7 +456,6 @@ func TestEvidenceAbandonedPartialAndExtraRepo(t *testing.T) {
 	f.answers[protocol.MethodRunGet] = runsAt(map[string]protocol.RunResult{})
 	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "ana", Error: "no pull request"})
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Identity: "ana", Error: "no pull request"})
-	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{})
 	cs := connectorSession(t, f)
 	_, out := run(t, cs, "aether_get_swarm", map[string]any{"swarm_id": "mis-1", "evidence": true})
 	if sub := dig(t, out, "progress", "implemented", "attempts", 0, "submission").(map[string]any); sub["accepted"] != false {

@@ -121,7 +121,7 @@ run.
 
 | What | Examples | Asks first? |
 | --- | --- | --- |
-| Read | List runs, workspaces and agents. Read one run and its conversation. See your remaining agent quota and your environment's state. Search and show [team memory](memory.md) notes. List integration candidates. | No |
+| Read | List runs, workspaces and agents. Read one run and its conversation. See your remaining agent quota and your environment's state. Search and show [team memory](memory.md) notes. | No |
 | Pause and resume | Pause or resume a run | No |
 | Launch a run | Start a run with a workspace, agent and task | Yes |
 | Message a run | Send a message to a run's agent | Yes |
@@ -129,7 +129,7 @@ run.
 | Save your environment | Save it as the image new runs and terminals start from | Yes |
 | Run lifecycle | Relaunch a stopped run, switch its mode, protect or archive it, hand it to a teammate | Yes |
 | Swarms | Replace a stopped integrator, release your control of a worker, archive or unarchive a swarm | Yes |
-| Deliver and merge | Approve, reject or deliver an integration candidate; open or merge a run's pull request | Yes |
+| Open and merge | Open or merge a run's pull request | Yes |
 | Team memory | Add a note, pin or unpin one; it cannot remove notes | Yes |
 
 Asked "what is left", "continue this" or "did we ship?", the assistant reads

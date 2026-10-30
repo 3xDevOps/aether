@@ -36,7 +36,7 @@ var ConfirmedMethods = []string{protocol.MethodRunKill, protocol.MethodRunClose,
 	protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost,
 	protocol.MethodRunRelaunch, protocol.MethodRunModeSwitch, protocol.MethodRunProtect, protocol.MethodRunArchive, protocol.MethodRunHandoff,
 	protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive, protocol.MethodMissionReplaceIntegrator,
-	protocol.MethodIntegrationDecide, protocol.MethodIntegrationDeliver, protocol.MethodRunPRCreate, protocol.MethodRunPRMerge,
+	protocol.MethodRunPRCreate, protocol.MethodRunPRMerge,
 	protocol.MethodMemoryAdd, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin, protocol.MethodMissionCreate, protocol.MethodTemplateLaunch, protocol.MethodLaunchDefaultsSet,
 	protocol.MethodWatchDelete, protocol.MethodAssistantForget}
 

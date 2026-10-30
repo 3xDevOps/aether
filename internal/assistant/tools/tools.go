@@ -86,8 +86,6 @@ var tiers = map[string]string{
 	protocol.MethodRunRoomPost:           tierConfirmed,
 
 	protocol.MethodMemberList:               tierRead,
-	protocol.MethodIntegrationList:          tierRead,
-	protocol.MethodIntegrationShow:          tierRead,
 	protocol.MethodMemoryShow:               tierRead,
 	protocol.MethodMemoryAdd:                tierConfirmed,
 	protocol.MethodRunRelaunch:              tierConfirmed,
@@ -99,8 +97,6 @@ var tiers = map[string]string{
 	protocol.MethodMissionArchive:           tierConfirmed,
 	protocol.MethodMissionUnarchive:         tierConfirmed,
 	protocol.MethodMissionReplaceIntegrator: tierConfirmed,
-	protocol.MethodIntegrationDecide:        tierConfirmed,
-	protocol.MethodIntegrationDeliver:       tierConfirmed,
 	protocol.MethodRunPRCreate:              tierConfirmed,
 	protocol.MethodRunPRMerge:               tierConfirmed,
 	protocol.MethodMemoryPin:                tierConfirmed,

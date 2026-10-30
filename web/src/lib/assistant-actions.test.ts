@@ -217,7 +217,6 @@ describe('the lifecycle, swarm, pull request and memory tools', () => {
     ['aether_swarm_manage', { swarm_id: 'swarm:mis-1', action: 'release_worker', run_id: 'r7' }, 'mission.worker.release', 'Release worker run r7', 'Released worker run r7'],
     ['aether_swarm_manage', { swarm_id: 'swarm:mis-1', action: 'archive' }, 'mission.archive', 'Archive swarm mis-1', 'Archived swarm mis-1'],
     ['aether_replace_integrator', { swarm_id: 'mis-1' }, 'mission.replace-integrator', 'Replace the integrator of swarm mis-1', 'Replaced the integrator of swarm mis-1'],
-    ['aether_integration_decide', { candidate_id: 'cand-1', action: 'deliver' }, 'integration.deliver', 'Deliver candidate cand-1', 'Delivered candidate cand-1'],
     ['aether_pr_create', { run_id: 'r1' }, 'run.pr.create', 'Open a pull request for run r1', 'Opened a pull request for run r1'],
     ['aether_memory_add', { kind: 'gotcha', text: 'x' }, 'memory.add', 'Add a gotcha note', 'Added a gotcha note'],
     ['aether_memory_pin', { id: 'mem-9', pin: false }, 'memory.unpin', 'Unpin note mem-9', 'Unpinned note mem-9'],

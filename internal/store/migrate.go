@@ -2290,6 +2290,17 @@ DROP TABLE coord_peers;
 ALTER TABLE runs ADD COLUMN permission TEXT NOT NULL DEFAULT 'root';
 ALTER TABLE launch_defaults ADD COLUMN permission TEXT NOT NULL DEFAULT '';
 `,
+	// v98: candidate integration is gone: its aggregates and events go with it, and
+	// watches stop waiting on the delivered condition.
+	`
+DROP TABLE integration_candidates;
+DELETE FROM events WHERE type = 'integration.changed';
+UPDATE watches SET state = 'expired', ended_at = updated_at, next_check_at = NULL, version = version + 1
+WHERE conditions LIKE '%"delivered"%' AND state IN ('active', 'paused', 'error')
+	AND NOT EXISTS (SELECT 1 FROM json_each(conditions) WHERE value <> 'delivered');
+UPDATE watches SET conditions = (SELECT json_group_array(value) FROM json_each(conditions) WHERE value <> 'delivered')
+WHERE conditions LIKE '%"delivered"%' AND EXISTS (SELECT 1 FROM json_each(conditions) WHERE value <> 'delivered');
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

@@ -9,13 +9,8 @@ runs to do them. A current swarm assignment may add server-authorized peers
 before any file overlap exists. The channel is advisory:
 it does not lock files, pause work, or decide which change wins.
 
-Candidate verification and delivery is a separate authenticated service
-described in [integration.md](integration.md). Coordination records remain
-observations/evidence; they do not constitute an accepted submission, a
-frozen candidate revision, or a landed upstream change. The swarm-policy
-adapter exposes a narrow agent integration CLI only to the current integrator:
-`prepare`, `show`, `verify`, `request-delivery`, and `deliver`. Ordinary and
-worker runs do not receive these commands.
+Coordination records remain observations/evidence; they do not constitute an
+accepted submission or a landed upstream change.
 
 ## Run-mounted surfaces
 
@@ -64,7 +59,7 @@ its own binary once per process, and re-hashes the staged copy only when that
 file's device, inode, size, mtime, ctime, or mode changed since it was last
 verified.
 Every run receives its own authenticated socket, independently of conflict
-policy. Member terminals and verification containers receive the CLI without
+policy. Member terminals receive the CLI without
 borrowing a run's identity.
 
 ## Wire v3
@@ -108,8 +103,6 @@ command.
 
 Swarm runs additionally receive assignment-scoped `task.*` and `worker.*` methods
 published by `coord.status`; the current integrator also receives exactly
-`integration.prepare`, `integration.show`, `integration.verify`,
-`integration.request_delivery`, `integration.deliver`,
 `mission.question.ask`, `mission.plan.show`, and `mission.start`. These
 methods use the same run-authenticated socket but are not part of the base
 `coord.*` set.
@@ -368,8 +361,7 @@ wake-frame dispatch as well; checking authority once before writing is not
 enough. Inbox-consumer registration is also ordered against that final write:
 an earlier registered consumer keeps priority, but a consumer registered
 after an admitted frame cannot revoke the already-accepted wake.
-A wake waits for a busy swarm authorization lock, for example while
-integration prepare assembles a candidate: up to 2 seconds for a native wake
+A wake waits for a busy swarm authorization lock: up to 2 seconds for a native wake
 and 20 for an Enhanced one, and no longer once the run starts closing. Busy
 run control refuses it at once. A refused wake stays owed; the receiver
 updates observed IDs without adding notified IDs, so a later bounded
@@ -517,7 +509,7 @@ backward from `before_seq` (zero: the log head; pass the previous page's
 `older_seq`), always returning events oldest first. It accepts
 `mission_id`, which matches events of every run
 that has served the swarm and, without `run_id`, the swarm's own
-`mission.changed` and `integration.changed` events when `types` asks for
+`mission.changed` events when `types` asks for
 them, and its `run_id` filter also matches mail
 addressed to the run. The two swarm filters differ: the timeline also
 shows mail a swarm run received from a run outside the swarm, which
@@ -557,7 +549,7 @@ members are refused like every other call.
 | `reports` | `workspace.timeline` reports | `report` {`outcome`, `waiting_for`} |
 | `messages` | `coord.message` | `message` {`message_id`, `from_run_id`, `to_run_id`, `kind`, `correlation_id`}, no body |
 | `pr` | `run.pr` | `pr` {`number`, `state`, `url`, `merged`} |
-| `swarm` | `mission.changed`, `integration.changed` | `swarm` {`change`, `task_id`, `attempt_id`} or {`candidate_id`, `state`} |
+| `swarm` | `mission.changed` | `swarm` {`change`, `task_id`, `attempt_id`} |
 | `lifecycle` | `run.archived`, `run.deleted`, `workspace.deleted`, a deleted swarm's `mission.changed`, handoffs | `lifecycle` {`action`: `archived`, `restored`, `deleted`, `swarm-deleted`, `workspace-deleted` or `handoff`, `to_member_id`} |
 
 `kinds` empty means all six. Diffs, agent activity, presence and cost are
@@ -789,7 +781,7 @@ its own task ID:
 Use the actual command from skill, not the example ID above. Read the returned
 task revision, objective, scope, exclusions, and evidence requirements before
 acting. Workers may read and propose; they must not spawn workers, accept tasks,
-or perform swarm or integration operations. A worker's skill also tells it to
+or perform swarm operations. A worker's skill also tells it to
 check the inbox after reading the task, before each commit, and before
 reporting, and that `status` lists its sibling workers. Ordinary runs have no
 swarm authority. Help documents syntax, not permission.
@@ -1117,8 +1109,8 @@ The workspace mirror's **import source**, the run checkout's **origin**, and a
 fork PR's **base repository/branch** and **head owner/branch** are distinct.
 Inspect them explicitly; do not push to a guessed mirror URL or rewrite origin
 implicitly. Inspect existing PR metadata before native `gh pr create`/update
-to avoid duplicate or wrong-base PRs. Follow the assignment's approval and
-swarm integration boundaries; discovery does not authorize PR merging,
+to avoid duplicate or wrong-base PRs. Follow the assignment's approval
+boundaries; discovery does not authorize PR merging,
 automatic screenshot publication, or disabling commit signing.
 
 Every pull request description ends with `Opened from Aether run <run id>`;
@@ -1625,11 +1617,8 @@ integrator reports success, which also stops any leftover workers. When a
 swarm ends, a worker that already submitted is retained and its attempt
 recorded `completed`; every other live worker is killed and its attempt
 recorded `cancelled`. A success report before `mission start` is refused with
-code `-32002`, and so is one while a swarm candidate holds an approved
-delivery request that has not run, has not expired, and no later delivery to
-the same ref replaced; the error names the `integration deliver` parameters. A read-only
-investigation with nothing to deliver reports success once its findings are
-gathered; do not submit a fake integration candidate just to change the phase.
+code `-32002`. A read-only investigation with nothing to deliver reports
+success once its findings are gathered.
 
 ### Ask a question and reply
 
@@ -1733,68 +1722,6 @@ Refusals name the cause: child runs off for the owner, a Background parent
 (it exits before a result can reach it), a parent that is itself a child, a
 parent that cannot wake on mail, a cancelled swarm, an account outside the
 allowed set, or the workspace budget.
-
-### Integrator candidate integration
-
-A candidate freezes selected accepted revisions for combined verification and
-delivery. Only the current swarm integrator may use these
-agent commands:
-
-```text
-integration prepare
-integration show
-integration verify
-integration request-delivery
-integration deliver
-```
-
-Each accepts `--params-file FILE|-` and optional `--json`. JSON input is
-limited to 32 KiB; `-` reads standard input. The run socket supplies caller
-identity. Parameter JSON cannot grant a role or approval. Results use the
-normal `schema_version`, `ok`, `result`, and structured `error` envelope.
-There is no agent `decide`, `approve`, generic RPC, list, resolve, patch, or
-delete command.
-
-Use each command's `--help` for its required JSON fields. Prepare requires
-`target_ref`, `expected_target_revision`, and `idempotency_key`; the server
-resolves omitted workspace, swarm, and accepted inputs. Explicit
-`submissions` select an ordered subset of current accepted revisions.
-
-Create parameter files in a writable location, not the read-only
-`/run/aether` mount:
-
-```sh
-aether-internal integration prepare --params-file /tmp/aether-prepare.json --json
-aether-internal integration show --params-file /tmp/aether-show.json --json
-aether-internal integration verify --params-file /tmp/aether-verify.json --json
-aether-internal integration request-delivery --params-file /tmp/aether-request.json --json
-```
-
-Verification is asynchronous; poll `show` for its durable result. A swarm
-candidate needs no human delivery decision: once verification passes,
-`request-delivery` returns a request already approved on behalf of the
-accountable human, who must still hold Push on the workspace. Deliver it:
-
-```sh
-aether-internal integration deliver --params-file /tmp/aether-deliver.json --json
-```
-
-After delivery, report success; that completes the swarm. If `prepare`
-reports a conflicted candidate, prepare and deliver an ordered subset of the
-accepted submissions that applies cleanly, then revise the conflicting task so
-a new worker redoes it from the advanced target, accept its submission, and
-prepare that submission.
-
-Other swarm work may continue, but changing the accepted submission set
-invalidates an older candidate's swarm binding. A replacement integrator
-may continue a candidate when the accepted set is unchanged.
-
-After an uncertain outcome, retry the same parameters and mutation identity.
-Do not replace an `idempotency_key` merely because the connection failed;
-delivery retries use the same `request_id` and `request_version`. A denial,
-conflict, or invalid state remains a structured server error. See
-[Candidate integration](integration.md) for parameter records, retained
-verification evidence and exact delivery.
 
 ### Report an outcome
 
@@ -1958,8 +1885,8 @@ What a report does depends on the run:
   An integrator, always a Standard or Enhanced run, remains open for
   follow-up, and [reopens the swarm](#mission-phases) by proposing a task or
   starting a worker. Report success only after the
-  verified candidate is delivered, or, with nothing to deliver, once the
-  findings are gathered.
+  accepted work is delivered through your normal PR flow, or, with nothing to
+  deliver, once the findings are gathered.
 
 Reported outcomes carry `outcome_unseen: true` until the owner opens the run
 (`run.seen`) or work resumes, Close or another status change clears it. They
@@ -2015,10 +1942,6 @@ facts atomically with acceptance. It does not infer availability from the
 detail text or repair an expired or missing packet. Retrying an accepted
 operation preserves its receipt even after later evidence expiry, while
 still enforcing current authorization.
-
-Candidate integration has a separate completeness policy: a truncated source
-listed in `required_sources` remains refused. See
-[candidate source validation](integration.md#candidate-identity-and-assembly).
 
 Finalization and event publication are crash-safe. Finalization writes a
 durable pending publication row and a deterministic evidence-event ID. The

@@ -30,7 +30,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/profile"
@@ -104,10 +103,6 @@ type Config struct {
 	// nil leaves every reported wait unverified. Primarily for tests until
 	// the condition store is wired.
 	WaitConditions scheduler.WaitConditions
-	// IntegrationAdmission is the server-controlled policy seam for
-	// consequential candidate mutations. It is never populated from a
-	// request field.
-	IntegrationAdmission integration.AdmissionFunc
 	// StandardImage is the server-owned image used for all runs until member
 	// image selection is available. Empty uses DefaultStandardImage.
 	StandardImage string

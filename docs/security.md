@@ -32,7 +32,6 @@ credentials out of the report.
 | [Assistant](#the-assistant) | Its own container, home and sign-in, which your runs and account share recipients cannot see or change. Launching, messaging and stopping runs and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
-| [Candidate delivery](#candidate-verification-and-delivery) | Permission to push is checked again at delivery. A mirrored target gets a proposal branch, never an upstream push. | Verification runs with the member's home credentials. An agent can still push on its own outside Aether. |
 | [Dashboard gateways](#the-dashboard-gateways) | `aether gui` listens on loopback with a per-process token. The server's dashboard is tailnet-only HTTPS with per-request identity. | Any process on the server host that connects to the host's own tailnet address is served as the node's owner. |
 | [Push notifications](#push-notifications) | The server posts only to public HTTPS endpoints, and the payload is encrypted to your browser. | A notice shows run text (title and reason) on your device. |
 | [Agent configuration and Files](#agent-configuration-and-files) | `aether config push` skips credential files and leaves out files with secrets. Files will not show a known credential file. | Files acts on your whole home. A credential under an unrecognized name is not locked. |
@@ -360,7 +359,7 @@ someone who can run code in the workspace.
 - Plain variables and the setup script are readable by every member, so keep
   credentials out of them. A variable marked secret later stays in old
   database backups: change its value too.
-- Every new run and candidate verification container gets the secrets as
+- Every new run container gets the secrets as
   environment variables, readable by every process in it and by anyone with
   Docker access on the host (`docker inspect`). Anyone who can launch or
   message a run in the workspace can make it print a secret into the
@@ -474,28 +473,6 @@ run branches and pull requests go. A source URL must not contain credentials.
   adopting a new revision by its full commit SHA, moves it.
 - A failed refresh blocks the launch instead of starting from stale code
   ([Launch and mirror failures](failure-handling.md#launch-and-mirror-failures)).
-
-## Candidate verification and delivery
-
-A candidate is a branch the server assembles from one or more runs' work, for
-a human or a swarm integrator to verify and deliver
-([teams.md](teams.md#combine-several-runs-into-one-result)).
-
-- Any member can read a candidate. Preparing, verifying, deciding and
-  delivering need permission to push, checked again at delivery. A swarm
-  integrator delivers on behalf of the swarm's accountable human, who must be
-  allowed to push.
-- Verification runs with the home of whoever asked (the run's launcher when an
-  agent asked), so that home's gh login and signing key are available to it.
-  It runs as uid `1000` with sudo that needs no password, as a Root access run
-  does.
-- A proposal delivery creates `refs/heads/aether/proposal-<request-id>` and
-  never pushes upstream. A mirrored target accepts only proposals and refuses
-  a direct update with `gitengine: mirrored workspace target is not directly
-  deliverable`.
-- Nothing stops an agent from running its own `git push` or `gh pr create`
-  with the member's credentials. The push permission only governs delivery
-  through Aether.
 
 ## The dashboard gateways
 
@@ -891,7 +868,7 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 - Containers share the host kernel. A kernel or Docker escape reaches the
   host.
 - Outbound traffic is limited only for runs of a workspace with egress
-  control on. Other runs, environment terminals and verification containers
+  control on. Other runs and environment terminals
   reach the internet, your network and ports the server host listens on.
 - An egress-limited run still reaches services on the server host, and every
   allowed host can receive data. A client that ignores the proxy variables

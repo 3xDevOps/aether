@@ -90,8 +90,6 @@ func TestConnectorScopesGateEachMethod(t *testing.T) {
 		{"write scope cannot archive a swarm", connector(write), protocol.MethodMissionArchive, json.RawMessage(`{}`), "mission.archive needs the control scope"},
 		{"write scope cannot unarchive a swarm", connector(write), protocol.MethodMissionUnarchive, json.RawMessage(`{}`), "mission.unarchive needs the control scope"},
 		{"write scope cannot replace an integrator", connector(write), protocol.MethodMissionReplaceIntegrator, json.RawMessage(`{}`), "mission.replace-integrator needs the control scope"},
-		{"write scope cannot decide an integration", connector(write), protocol.MethodIntegrationDecide, json.RawMessage(`{}`), "integration.decide needs the control scope"},
-		{"write scope cannot deliver an integration", connector(write), protocol.MethodIntegrationDeliver, json.RawMessage(`{}`), "integration.deliver needs the control scope"},
 		{"unlisted method", connector(all), protocol.MethodMemberRole, json.RawMessage(`{}`),
 			"member.role: ChatGPT connector con-test cannot call this method; no connector can, so use the Aether app or the aether CLI"},
 		{"dashboard is unscoped", e.srv.Local(e.member.ID), protocol.MethodMemberList, nil, ""},

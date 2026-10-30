@@ -38,7 +38,6 @@ export const eventLabel = {
   'coord.message': 'Agent message sent',
   'coord.message.acked': 'Agent message read',
   'mission.changed': 'Swarm changes',
-  'integration.changed': 'Swarm integration',
   'member.changed': 'Member renames',
   'member.device': 'Devices',
   'member.merged': 'Member merges',

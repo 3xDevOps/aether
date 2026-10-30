@@ -213,7 +213,7 @@ func (e *Engine) InitWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) (
 }
 
 // RemoveWorkspaceRepo removes all branches and private refs after the server
-// has fenced workspace admission and purged its run/candidate artifacts.
+// has fenced workspace admission and purged its run artifacts.
 func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) error {
 	repo, err := e.repoPath(ws)
 	if err != nil {

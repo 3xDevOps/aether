@@ -160,10 +160,6 @@ type WatchStore interface {
 	GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error)
 	PutNotifyPrefs(ctx context.Context, member domain.MemberID, p NotifyPrefs) error
 
-	// MissionDeliveryReceipts are the delivery receipts of every
-	// integration candidate of mission, keyed by candidate id.
-	MissionDeliveryReceipts(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID) (map[string]json.RawMessage, error)
-
 	// MissionFinishedAt is when mission last completed or was cancelled,
 	// nil while it never has.
 	MissionFinishedAt(ctx context.Context, mission domain.MissionID) (*time.Time, error)
@@ -538,29 +534,6 @@ func (d *DB) PurgeWatches(ctx context.Context, cutoff time.Time) (int64, error) 
 		return 0, fmt.Errorf("store: purge watches: %w", err)
 	}
 	return res.RowsAffected()
-}
-
-func (d *DB) MissionDeliveryReceipts(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID) (map[string]json.RawMessage, error) {
-	rows, err := d.db.QueryContext(ctx,
-		`SELECT id, json_extract(payload, '$.delivery_receipt') FROM integration_candidates
-		 WHERE workspace_id = ? AND json_extract(payload, '$.mission_id') = ?
-		   AND json_extract(payload, '$.delivery_receipt') IS NOT NULL`, workspace, mission)
-	if err != nil {
-		return nil, fmt.Errorf("store: list delivery receipts: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck // read-only iteration
-	out := map[string]json.RawMessage{}
-	for rows.Next() {
-		var id, receipt string
-		if err := rows.Scan(&id, &receipt); err != nil {
-			return nil, fmt.Errorf("store: list delivery receipts: %w", err)
-		}
-		out[id] = json.RawMessage(receipt)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list delivery receipts: %w", err)
-	}
-	return out, nil
 }
 
 func (d *DB) MissionFinishedAt(ctx context.Context, mission domain.MissionID) (*time.Time, error) {

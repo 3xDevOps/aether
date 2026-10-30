@@ -31,7 +31,7 @@ var conditionsOf = map[string]struct{ all, defaults []string }{
 		defaults: []string{protocol.WatchNeedsYou, protocol.WatchFinished},
 	},
 	protocol.WatchTargetMission: {
-		all:      []string{protocol.WatchNeedsYou, protocol.WatchFinished, protocol.WatchDelivered},
+		all:      []string{protocol.WatchNeedsYou, protocol.WatchFinished},
 		defaults: []string{protocol.WatchNeedsYou, protocol.WatchFinished},
 	},
 	protocol.WatchTargetPR: {
@@ -85,7 +85,7 @@ func (s *Service) normalize(kind string, conditions []string) ([]string, error) 
 	for _, c := range conditions {
 		switch {
 		case c == "deployed":
-			return nil, invalid("Aether has no deploy signal, so it cannot watch for %q; watch finished, pr_merged or delivered instead", c)
+			return nil, invalid("Aether has no deploy signal, so it cannot watch for %q; watch finished or pr_merged instead", c)
 		case !slices.Contains(set.all, c):
 			return nil, invalid("condition %q does not apply to a %s; use %s", c, kind, strings.Join(set.all, ", "))
 		case s.pr == nil && (kind == protocol.WatchTargetPR || c == protocol.WatchPRMerged || c == protocol.WatchCI):
@@ -396,7 +396,7 @@ func (s *Service) result(ctx context.Context, w *store.Watch) (protocol.WatchRes
 
 var conditionWords = map[string]string{
 	protocol.WatchNeedsYou: "needs you", protocol.WatchFinished: "finished", protocol.WatchPRMerged: "PR merged",
-	protocol.WatchCI: "CI", protocol.WatchDelivered: "delivered", protocol.WatchReview: "review",
+	protocol.WatchCI: "CI", protocol.WatchReview: "review",
 	protocol.WatchMerged: "merged", protocol.WatchClosed: "closed",
 }
 

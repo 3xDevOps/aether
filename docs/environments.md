@@ -268,8 +268,7 @@ member can read the script, the variable names and the non-secret values.
 A change applies to runs launched afterwards. An existing container keeps its
 variables and never reruns the script, so pausing, reopening or switching the
 mode of a run changes nothing. The egress host list is the exception: it
-applies at once. Candidate verification containers
-([integration.md](integration.md)) also get it. Your own environment terminal
+applies at once. Your own environment terminal
 does not.
 
 ### Setup script
@@ -382,7 +381,7 @@ exact name, or `*.` and a domain, which matches every subdomain but not the
 domain itself. On and off apply to runs launched afterwards; the host list
 applies at once to runs started with egress control on, and their open
 connections to a removed host close within 10 seconds. Agent runs are the only
-containers it limits: environment terminals, candidate verification and agent
+containers it limits: environment terminals and agent
 installs connect directly.
 
 An [Isolated run](security.md#permission-tiers) goes through the proxy whether

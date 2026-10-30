@@ -125,11 +125,6 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = missionCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In, cfg.ErrOut)
 	case "mission":
 		result, err = planCommand(ctx, cfg.Socket, args[1:], cfg.In)
-	case "integration":
-		if len(args) < 2 {
-			return fail(cfg.Out, protocol.CodeInvalidParams, "integration requires a subcommand")
-		}
-		result, err = integrationCommand(ctx, cfg.Socket, args[1], args[2:], cfg.In)
 	case "terminal", "browser", "control", "artifact":
 		result, err = developmentCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In)
 	case "memory":
@@ -162,7 +157,6 @@ Commands:
   mission   ask the accountable human and start the mission
   task      inspect and mutate mission task revisions
   worker    inspect and manage mission worker attempts
-  integration run the five integrator candidate operations
   report    record your state: an outcome, a question, or what you wait on
   memory    search and add team memory notes
   child     start and manage child runs on other agents
@@ -314,43 +308,6 @@ A summary file of "-" reads standard input.
 When live capabilities advertise artifact retain, deliberately retain reviewed
 captures before a terminal report can clean up the run; pass its packet_id as
 --evidence-ref. A transient capture handle is not a durable evidence reference.
-`,
-	"integration": `usage: aether-internal integration <prepare|show|verify|request-delivery|deliver> --params-file FILE|- [--json]
-
-Agent integration is limited to these five assignment-scoped operations.
-The mounted socket supplies caller identity. JSON input is limited to 32 KiB.
-`,
-	"integration prepare": `usage: aether-internal integration prepare --params-file FILE|- [--json]
-
-Required JSON: target_ref, expected_target_revision, idempotency_key.
-The server resolves omitted workspace_id, mission_id, and accepted submissions
-from the current integrator assignment. Explicit submissions select exact
-accepted inputs in the supplied order. Optional: required_sources.
-Retry uncertain outcomes with the same parameters and idempotency_key.
-`,
-	"integration show": `usage: aether-internal integration show --params-file FILE|- [--json]
-
-Required JSON: workspace_id, candidate_id.
-Returns the exact candidate revision, verification results, and delivery state.
-`,
-	"integration verify": `usage: aether-internal integration verify --params-file FILE|- [--json]
-
-Required JSON: workspace_id, candidate_id, candidate_revision, argv,
-idempotency_key. Optional: timeout_seconds.
-argv is a JSON string array. Poll show for the durable verification result.
-`,
-	"integration request-delivery": `usage: aether-internal integration request-delivery --params-file FILE|- [--json]
-
-Required JSON: workspace_id, candidate_id, candidate_revision, verification_ids,
-action ("update_ref" or "proposal"), idempotency_key.
-For a verified mission candidate the returned request is already approved on
-behalf of the accountable human; deliver it next.
-`,
-	"integration deliver": `usage: aether-internal integration deliver --params-file FILE|- [--json]
-
-Required JSON: workspace_id, candidate_id, request_id, request_version.
-Use the approved request returned by request-delivery or show. Replay the same
-request after an uncertain outcome; do not invent another delivery request.
 `,
 	"task show":              "usage: aether-internal task show --task-id <id>\n",
 	"task list":              "usage: aether-internal task list --mission-id <id>\n",
@@ -544,19 +501,6 @@ key. Save the generated key printed to stderr if you omitted --idempotency-key.
 Use a new key only for a new operation; receipt means durable storage, not read.
 `
 
-const integratorWorkflow = `When accepted submissions are ready for combined verification:
-  aether-internal integration --help
-  aether-internal integration prepare --help
-Prepare, show, verify, request-delivery, then deliver. A verified mission
-candidate needs no human decision: request-delivery returns an approved request.
-A conflicted candidate: prepare and deliver an ordered subset of the accepted
-submissions that applies cleanly, then revise the conflicting task so a new
-worker redoes it from the advanced target, accept its submission, and prepare
-that submission.
-Each subcommand's --help lists its JSON fields; use --params-file with a file
-outside /run/aether or "-" for stdin. A human uses Replace integrator if this run stops.
-`
-
 func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
 	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\nCLI build: %s\n", SchemaVersion, version.String()); err != nil {
 		return ExitFailure, fmt.Errorf("write skill header: %w", err)
@@ -589,7 +533,7 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 			}
 			switch role {
 			case "worker":
-				if _, err := fmt.Fprintf(out, "Task ID: %s\nTask revision: %d\nAttempt ID: %s\nPhase: %s\nRead your full assigned task before acting (use the assigned revision above):\n  aether-internal task show --task-id %s\nWorkers may read and propose only; do not spawn workers, accept tasks, or perform mission/integration operations.\nCheck the inbox after reading the task, before each commit, and before reporting; sibling workers are listed by status.\n",
+				if _, err := fmt.Fprintf(out, "Task ID: %s\nTask revision: %d\nAttempt ID: %s\nPhase: %s\nRead your full assigned task before acting (use the assigned revision above):\n  aether-internal task show --task-id %s\nWorkers may read and propose only; do not spawn workers or accept tasks.\nCheck the inbox after reading the task, before each commit, and before reporting; sibling workers are listed by status.\n",
 					boundedSkillField(assignment.TaskID), assignment.TaskRevision, boundedSkillField(assignment.AttemptID), boundedSkillField(assignment.Phase), shellquote.Quote(assignment.TaskID)); err != nil {
 					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
 				}
@@ -607,11 +551,6 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 				if len(assignment.ExecutionChoices) > 0 {
 					if _, err := fmt.Fprintf(out, "Approved execution choices: %s\n", boundedSkillExecutionChoices(assignment.ExecutionChoices)); err != nil {
 						return ExitFailure, fmt.Errorf("write skill execution choices: %w", err)
-					}
-				}
-				if assignment.Phase == "active" {
-					if _, err := io.WriteString(out, integratorWorkflow); err != nil {
-						return ExitFailure, fmt.Errorf("write skill integration workflow: %w", err)
 					}
 				}
 			}

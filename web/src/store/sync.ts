@@ -12,7 +12,6 @@ import type {
   Event,
   GatewayCapabilities,
   GitBranchPayload,
-  IntegrationChangedPayload,
   LinkStatus,
   MissionChangedPayload,
   OverlapPayload,
@@ -733,11 +732,6 @@ export async function applyEvent(
     case 'run.pr': {
       const p = ev.payload as RunPRPayload
       if (p.run_id) store.getState().bumpWorkflowSignal('prSeq', p.run_id)
-      break
-    }
-    case 'integration.changed': {
-      const p = ev.payload as IntegrationChangedPayload
-      if (p.mission_id) store.getState().bumpWorkflowSignal('integrationSeq', p.mission_id)
       break
     }
     case 'run.overlap': {

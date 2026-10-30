@@ -38,14 +38,13 @@ const (
 // snapshots, adapter activity, mail acknowledgements, swarm and pull request refresh
 // hints and presence are detail, not workspace history. Asking for one by type still returns it.
 var detailTypes = map[events.Type]bool{
-	events.TypeRunDiff:            true,
-	events.TypeRunTitle:           true,
-	events.TypeAgentEvent:         true,
-	events.TypeCoordMessageAcked:  true,
-	events.TypeMissionChanged:     true,
-	events.TypeIntegrationChanged: true,
-	events.TypeRunPR:              true,
-	events.TypePresence:           true,
+	events.TypeRunDiff:           true,
+	events.TypeRunTitle:          true,
+	events.TypeAgentEvent:        true,
+	events.TypeCoordMessageAcked: true,
+	events.TypeMissionChanged:    true,
+	events.TypeRunPR:             true,
+	events.TypePresence:          true,
 }
 
 // Filter narrows a timeline page. Member matches an event's actor - who
@@ -225,7 +224,7 @@ func (r *Reader) prepare(ctx context.Context, f Filter) (uint64, events.Filter, 
 		}
 		if f.Run != "" {
 			runs = slices.DeleteFunc(runs, func(run domain.RunID) bool { return run != f.Run })
-		} else if slices.Contains(f.Types, events.TypeMissionChanged) || slices.Contains(f.Types, events.TypeIntegrationChanged) {
+		} else if slices.Contains(f.Types, events.TypeMissionChanged) {
 			logFilter.Mission = f.MissionID
 		}
 		if len(runs) == 0 && logFilter.Mission == "" {

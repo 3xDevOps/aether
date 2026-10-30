@@ -566,7 +566,7 @@ again on the same port and data directory, for specs about what survives a
 crash.
 
 Specs that open a real run need Docker and skip without it.
-`onboarding-github`, `mission-candidate-review`,
+`onboarding-github`,
 `remote-development-git/native.spec.ts` and `swarm.mobile.spec.ts` fail
 without Docker instead. Some specs need more:
 

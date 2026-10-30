@@ -110,15 +110,12 @@ type ChangePR struct {
 	Merged bool   `json:"merged,omitempty"`
 }
 
-// ChangeSwarm is a swarm change: Change and TaskID for mission.changed,
-// CandidateID and State for integration.changed. A deleted swarm is a
-// lifecycle change.
+// ChangeSwarm is a swarm change: Change and TaskID for mission.changed. A
+// deleted swarm is a lifecycle change.
 type ChangeSwarm struct {
-	Change      string `json:"change,omitempty"`
-	TaskID      string `json:"task_id,omitempty"`
-	AttemptID   string `json:"attempt_id,omitempty"`
-	CandidateID string `json:"candidate_id,omitempty"`
-	State       string `json:"state,omitempty"`
+	Change    string `json:"change,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	AttemptID string `json:"attempt_id,omitempty"`
 }
 
 // ChangeLifecycle is a run being archived, restored, deleted, or handed

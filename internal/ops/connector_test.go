@@ -298,10 +298,10 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_decide_approval.decision": "allow,deny", "aether_stop_run.outcome": ",merged,abandoned",
 		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
 		"aether_memory_add.kind": "decision,convention,gotcha,preference", "aether_pr_merge.method": ",squash,merge,rebase",
-		"aether_replace_integrator.mode": ",tui,acp", "aether_integration_decide.action": "approve,reject,deliver",
-		"aether_run_lifecycle.action": "relaunch,protect,unprotect,archive,restore",
-		"aether_switch_run_mode.mode": "standard,enhanced",
-		"aether_swarm_manage.action":  "release_worker,archive,unarchive"}; !maps.Equal(enums, want) {
+		"aether_replace_integrator.mode": ",tui,acp",
+		"aether_run_lifecycle.action":    "relaunch,protect,unprotect,archive,restore",
+		"aether_switch_run_mode.mode":    "standard,enhanced",
+		"aether_swarm_manage.action":     "release_worker,archive,unarchive"}; !maps.Equal(enums, want) {
 		t.Errorf("enums = %v, want %v", enums, want)
 	}
 	connectorTools := slices.DeleteFunc(slices.Clone(Ops), func(o Op) bool { return o.Scope == "" })
@@ -319,8 +319,8 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_mark_reviewed": {false, true, false}, "aether_decide_approval": {false, true, true},
 		"aether_stop_run": {false, true, false}, "aether_cancel_swarm": {false, true, false},
 		"aether_run_lifecycle": {false, false, true}, "aether_switch_run_mode": {false, true, true}, "aether_swarm_manage": {false, true, true}, "aether_handoff_run": {false, true, false},
-		"aether_replace_integrator": {false, true, true}, "aether_integration_decide": {false, true, true},
-		"aether_pr_create": {false, false, true}, "aether_pr_merge": {false, true, true},
+		"aether_replace_integrator": {false, true, true},
+		"aether_pr_create":          {false, false, true}, "aether_pr_merge": {false, true, true},
 		"aether_memory_add": {false, false, false}, "aether_memory_pin": {false, false, false},
 		"aether_watch": {false, false, false}, "aether_unwatch": {false, true, false},
 	}
@@ -350,7 +350,7 @@ func TestConnectorToolList(t *testing.T) {
 			t.Errorf("%s, served before, is missing", name)
 		}
 	}
-	if want := []string{"aether_cancel_swarm", "aether_decide_approval", "aether_handoff_run", "aether_integration_decide",
+	if want := []string{"aether_cancel_swarm", "aether_decide_approval", "aether_handoff_run",
 		"aether_pr_create", "aether_pr_merge", "aether_replace_integrator", "aether_stop_run", "aether_swarm_manage", "aether_switch_run_mode"}; !slices.Equal(names[ScopeControl], want) {
 		t.Errorf("control tools = %v, want %v", names[ScopeControl], want)
 	}

@@ -59,7 +59,6 @@ var memberRefs = map[string]bool{
 	"harness_definitions.member_id":                        false,
 	"identity_invitations.member_id":                       false,
 	"identity_invitations.created_by":                      false,
-	"integration_candidates.actor_key":                     false,
 	"member_devices.approved_by":                           false,
 	"member_merge_codes.member_id":                         false,
 	"member_merge_codes.proposed_by":                       false,

@@ -633,9 +633,9 @@ because a model may itself contain `:`, as in pi's `sonnet:high`.
 `--repo <workspace>` (repeatable) checks out another workspace at
 `/repos/<name>` in the integrator and every worker, as `aether run --repo`
 does for one run ([quickstart.md](quickstart.md#working-across-repos)). A
-candidate combines `/workspace` only: a worker's commits in an extra repo stay
-on that worker's run branch there, which its run page shows under **Changes**,
-and the integrator names those runs in its final report. An empty
+worker's commits in an extra repo stay on that worker's run branch there, which
+its run page shows under **Changes**, and the integrator names those runs in its
+final report. An empty
 model or effort keeps the agent's default. `-` as the objective reads it from stdin. The
 integrator runs on your account, or the one named by `--account`, in `--mode
 standard` or `enhanced` ([enhanced-runs.md](enhanced-runs.md)). A mode left out of
@@ -674,25 +674,6 @@ aether swarm replace-integrator <swarm-id> --agent codex
 `planning` or `active`. `replace-integrator` starts a new integrator when the old
 run exited or reported failure, and takes `--mode` as `create` does. In the dashboard these are under **More swarm
 actions**. The server rechecks your role and account grants on every action.
-
-### Combine several runs into one result
-
-A **candidate** combines the retained results of several runs, applied in order in
-an isolated checkout on the server. Conflicts wait for explicit file resolutions,
-and a frozen candidate cannot be edited. The server then runs verification
-commands against it. A pass is evidence, not proof the code is correct. A swarm's
-**Integration** section shows its candidate read-only.
-
-Delivery is a human decision over the exact candidate and verification results.
-In a swarm, the integrator delivers its verified candidate on behalf of the
-accountable human. The delivering member must still be allowed to push. In a
-local-only workspace, delivery moves the branch, only if it has not moved since
-the candidate was prepared. In a mirrored workspace it creates
-`refs/heads/aether/proposal-<request-id>`, which you fetch and push through your
-normal upstream review. **Proposed** does not mean landed.
-
-A candidate lives 30 days, and a passing verification is valid for 24 hours. See
-[integration.md](integration.md) and [failure-handling.md](failure-handling.md).
 
 ## Child runs
 
@@ -782,7 +763,6 @@ counted as unmetered, so totals read "at least".
 - The permissive default lets any collaborator stop any run. Use `aether protect`
   or `--message-others admins-only` to narrow it.
 - A run's extra repos (`aether run --repo`) share its primary workspace's
-  environment, account and budget. A swarm's candidates combine its primary
-  workspace only. Templates take one workspace.
-- Evidence packets and candidates expire after 30 days.
+  environment, account and budget. Templates take one workspace.
+- Evidence packets expire after 30 days.
 - A merge of two members cannot be undone.

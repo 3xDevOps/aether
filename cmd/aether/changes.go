@@ -151,8 +151,6 @@ func changeDetail(ch protocol.Change) string {
 		detail = fmt.Sprintf("%s -> %s · %s", ch.Message.FromRunID, ch.Message.ToRunID, ch.Message.Kind)
 	case ch.PR != nil:
 		detail = fmt.Sprintf("#%d %s", ch.PR.Number, ch.PR.State)
-	case ch.Swarm != nil && ch.Swarm.CandidateID != "":
-		detail = fmt.Sprintf("%s candidate %s %s", ch.MissionID, ch.Swarm.CandidateID, ch.Swarm.State)
 	case ch.Swarm != nil:
 		detail = fmt.Sprintf("%s %s %s", ch.MissionID, ch.Swarm.Change, ch.Swarm.TaskID)
 	case ch.Lifecycle != nil:

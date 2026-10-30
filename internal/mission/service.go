@@ -120,16 +120,13 @@ type Config struct {
 	RequireCoordination func() error
 	Bus                 events.Bus
 	Now                 func() time.Time
-	Integration         func() (sshd.IntegrationService, error)
 	// Usage reads vendor quota for usage fallback; nil launches every run
 	// on its declared account.
 	Usage fallback.QuotaReader
 }
 type Service struct {
-	cfg             Config
-	mu              sync.Mutex
-	integrationMu   sync.RWMutex
-	integrationBase sshd.IntegrationService
+	cfg Config
+	mu  sync.Mutex
 	// dispatchMu orders each mission launch, up to its admission, against
 	// cancelling or completing a mission run and against the observation
 	// that settles a reservation as never launched.
@@ -1223,10 +1220,6 @@ func (s *Service) Show(ctx context.Context, p protocol.MissionShowParams) (proto
 // run identity; no method accepts a human/member selector or generic RPC.
 func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method string, raw json.RawMessage) (any, error) {
 	switch method {
-	case protocol.MethodIntegrationPrepare, protocol.MethodIntegrationShow,
-		protocol.MethodIntegrationVerify, protocol.MethodIntegrationRequestDelivery,
-		protocol.MethodIntegrationDeliver:
-		return s.handleIntegrationAgent(ctx, run, method, raw)
 	case protocol.MethodTaskShow, protocol.MethodTaskList:
 		return s.handleTaskRead(ctx, run, method, raw)
 	case protocol.MethodTaskPropose, protocol.MethodTaskRevise, protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission, protocol.MethodTaskAbandon:

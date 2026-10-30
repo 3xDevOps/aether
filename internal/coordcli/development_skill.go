@@ -113,7 +113,7 @@ Use native git/gh for authenticated push and PR operations under the run account
 not a second Git engine. Aether capabilities do not prove gh, credentials,
 push rights, image readers or a public upload destination exist. Do not silently
 change remotes, auto-upload screenshots or merge a PR; follow the assigned
-review/approval and mission integration boundaries.
+review/approval boundaries.
 `
 
 func hasSkillCapability(status *protocol.CoordStatusResult, method string) bool {

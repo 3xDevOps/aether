@@ -36,7 +36,7 @@ var changeKinds = map[string]struct {
 	protocol.ChangeKindReports:   {types: []events.Type{events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineReport}},
 	protocol.ChangeKindMessages:  {types: []events.Type{events.TypeCoordMessage}},
 	protocol.ChangeKindPR:        {types: []events.Type{events.TypeRunPR}},
-	protocol.ChangeKindSwarm:     {types: []events.Type{events.TypeMissionChanged, events.TypeIntegrationChanged}},
+	protocol.ChangeKindSwarm:     {types: []events.Type{events.TypeMissionChanged}},
 	protocol.ChangeKindLifecycle: {types: []events.Type{events.TypeRunArchived, events.TypeRunDeleted, events.TypeWorkspaceDeleted, events.TypeMissionChanged, events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineHandoff}},
 }
 
@@ -317,10 +317,6 @@ func changeOf(ev events.Event, mission domain.MissionID) (protocol.Change, bool)
 		}
 		c.Kind = protocol.ChangeKindSwarm
 		c.Swarm = &protocol.ChangeSwarm{Change: string(v.Change), TaskID: string(v.TaskID), AttemptID: string(v.AttemptID)}
-	case events.IntegrationChangedPayload:
-		c.Kind = protocol.ChangeKindSwarm
-		c.MissionID = string(v.MissionID)
-		c.Swarm = &protocol.ChangeSwarm{CandidateID: v.CandidateID, State: v.State}
 	case events.RunArchivedPayload:
 		c.Kind = protocol.ChangeKindLifecycle
 		c.Lifecycle = &protocol.ChangeLifecycle{Action: "archived"}

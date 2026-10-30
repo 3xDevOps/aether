@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import type { DevArtifact, EvidencePacket, EvidencePatchResult, EvidenceTranscriptResult } from '@/lib/types'
-import { useCandidateReview } from '@/routes/terminal/candidate-review'
 import { useStore } from '@/store'
 const emptyPackets: EvidencePacket[] = []
 
@@ -120,7 +119,6 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
     setOpen(true)
   }
 
-  const candidateReview = useCandidateReview({ workspaceID, currentRunID: runID, client }, open)
   const captureRetention = useCaptureRetention({
     runID,
     client,
@@ -196,9 +194,6 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
             <DialogDescription>Screenshots and retained captures for this run. They record what was seen, not that it was verified.</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="px-3">
-              {candidateReview}
-            </div>
             <div className="border-b border-seam px-3 py-2 text-ui-xs text-muted">
               Retain only reviewed captures. Images, URLs and notes may contain credentials or customer data; Aether does not reliably redact them.
               Retained copies use capture access and expiry, not private live-session permissions. Nothing is automatically retained or attached to a public PR.
