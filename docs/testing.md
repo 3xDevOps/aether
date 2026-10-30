@@ -695,6 +695,21 @@ every merge queue entry and every push to `main`.
 
 A pull request that changes only `docs/**` or root-level `*.md` files runs
 `audit` and nothing else. A Markdown file anywhere else counts as code.
+`scripts/ci-classify-areas.sh` narrows the rest by area:
+
+| Mode | Jobs | True for |
+| --- | --- | --- |
+| `go` | `lint`, `build-and-test`, `integration`, `integration-server-rest`, `integration-server-flows` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
+| `web` | `dashboard`, `dashboard-e2e` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
+
+A dashboard-only pull request therefore skips the Go jobs, and a change
+elsewhere in `internal/` skips the dashboard jobs, which rely on the Go
+integration suites for server behavior. The e2e suite runs the real
+server, so add the package to the `web` list in the script when a change
+there breaks the UI. A new top-level path counts as both. The pull request
+run is cancelled by a newer push (`cancel-in-progress` for `pull_request`
+only); `main` pushes and merge queue runs, whose concurrency groups are
+unique per commit, always run to completion.
 `edge-image` runs only when `scripts/ci-classify-edge.sh` says a changed path
 can affect the edge image, and `desktop-windows` only when
 `scripts/ci-classify-desktop.sh` finds a change under `desktop/`. On a pull
