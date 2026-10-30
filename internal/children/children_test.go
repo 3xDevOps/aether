@@ -68,6 +68,9 @@ func (f *fakeRuns) CloseRun(ctx context.Context, run domain.RunID, _ domain.Memb
 }
 
 func (f *fakeRuns) Review(ctx context.Context, run domain.RunID, _ domain.MemberID, _ string, _ bool) (*domain.Run, error) {
+	if r, err := f.db.GetRun(ctx, run); err == nil && r.Status.Terminal() && r.Status != domain.RunCompleted {
+		return nil, errors.New("a final run cannot be marked complete")
+	}
 	f.mu.Lock()
 	f.closed = append(f.closed, run)
 	f.mu.Unlock()
