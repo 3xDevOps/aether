@@ -166,6 +166,36 @@ func TestBuildEnvironmentPlanKeepsAnIsolatedLoginReal(t *testing.T) {
 	}
 }
 
+func TestBuildEnvironmentPlanRefusesAnIsolatedRunOnASharedLoginDirectory(t *testing.T) {
+	t.Parallel()
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "home-caches"), nil)
+	if err != nil {
+		t.Fatalf("memberhome.New: %v", err)
+	}
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes, Store: db, StateDir: t.TempDir()}}
+	ownerHome, err := homes.Path("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(ownerHome, ".omp", "agent"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	omp, ok := harness.Lookup("omp")
+	if !ok {
+		t.Fatal("no omp profile")
+	}
+	run := &domain.Run{ID: "run-iso", Permission: domain.PermissionIsolated, AccountMemberID: "owner"}
+	_, err = s.BuildEnvironmentPlan(context.Background(), run, &domain.Workspace{ID: "ws"}, &domain.Member{ID: "member"}, omp, EnvironmentPurposeRun)
+	if err == nil || !strings.Contains(err.Error(), "an isolated run cannot use another member's omp login") {
+		t.Fatalf("err = %v, want the refusal", err)
+	}
+}
+
 // Runs and the environment terminal both reach the member's signing agent,// Runs and the environment terminal both reach the member's signing agent,
 // over a workspace that sets SSH_AUTH_SOCK itself.
 func TestBuildEnvironmentPlanMountsTheSigningAgent(t *testing.T) {
