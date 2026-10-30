@@ -178,9 +178,9 @@ func TestCallStopsRetryingWithContext(t *testing.T) {
 
 func TestCallSentStaysSentAfterLaterDialFailure(t *testing.T) {
 	path := socketPath(t)
-	var stop func()
+	var stopFirst func()
 	var n atomic.Int32
-	stop = serveEach(t, path, func(c net.Conn, _ string) { n.Add(1); stop() })
+	stopFirst = serveEach(t, path, func(c net.Conn, _ string) { n.Add(1); stopFirst() })
 	// Unkeyed non-read: first attempt is sent then cut, never retried.
 	err := Call(context.Background(), path, protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{Kind: "text", Text: "x"}, nil)
 	if !strings.Contains(err.Error(), "may already have applied") || n.Load() != 1 {
@@ -188,7 +188,8 @@ func TestCallSentStaysSentAfterLaterDialFailure(t *testing.T) {
 	}
 	// Keyed: sent, cut, server stays down; the final message must not claim nothing applied.
 	path = socketPath(t)
-	stop = serveEach(t, path, func(c net.Conn, _ string) { stop() })
+	var stopSecond func()
+	stopSecond = serveEach(t, path, func(c net.Conn, _ string) { stopSecond() })
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
 	defer cancel()
 	err = Call(ctx, path, protocol.MethodCoordSend, protocol.CoordSendParams{Body: "x", IdempotencyKey: "k"}, nil)
