@@ -678,3 +678,35 @@ func (s *Scheduler) removeSidecar(run domain.RunID) {
 	s.releaseCoordination(run)
 	s.removeScratch(string(run))
 }
+
+const stoppedByParentReason = "stopped by parent run "
+
+// killedOutcome is the status a stopped run ends in: a child its parent
+// stopped completed its part, anything else was abandoned.
+func killedOutcome(by domain.RunID) domain.RunStatus {
+	if by != "" {
+		return domain.RunCompleted
+	}
+	return domain.RunAbandoned
+}
+
+func killedReason(by domain.RunID) string {
+	if by != "" {
+		return stoppedByParentReason + string(by)
+	}
+	return "killed"
+}
+
+// stopNoticeLocked names who stopped entry's run, or is empty while no stop was
+// requested.
+func (e *supervised) stopNoticeLocked() string {
+	switch {
+	case !e.killRequested:
+		return ""
+	case e.killBy != "":
+		return "Stopped by its parent run " + string(e.killBy) + "."
+	case e.killActor != "":
+		return "Stopped by a person."
+	}
+	return "Stopped by the server."
+}

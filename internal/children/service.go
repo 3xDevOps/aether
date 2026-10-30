@@ -20,7 +20,9 @@ import (
 // Runs is the scheduler side of a child run.
 type Runs interface {
 	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
-	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
+	StopForParent(ctx context.Context, run, parent domain.RunID) error
+	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
+	Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string, reportedOnly bool) (*domain.Run, error)
 	DefaultMode(ctx context.Context, member, account domain.MemberID, harnessName string) (domain.LaunchMode, error)
 	FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error)
 	AgentModels(ctx context.Context, member, account domain.MemberID, name string, refresh bool) (protocol.AgentModelsResult, error)

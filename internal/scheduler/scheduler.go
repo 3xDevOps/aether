@@ -337,6 +337,7 @@ type supervised struct {
 	paused            bool
 	killRequested     bool
 	killActor         domain.MemberID
+	killBy            domain.RunID // the parent that stopped this child run
 	// agentReport is the last native execution report, independent of outcome
 	// presentation. Input deltas are never retained or replayed.
 	agentReport agentstatus.Report
@@ -476,6 +477,7 @@ type pendingRun struct {
 	done          chan struct{}
 	killRequested bool
 	killActor     domain.MemberID
+	killBy        domain.RunID
 }
 
 func (s *Scheduler) beginPending(run domain.RunID) *pendingRun {

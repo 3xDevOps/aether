@@ -175,7 +175,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	s.cfg.Git.StopDiffWatch(entry.runID)
 
 	s.mu.Lock()
-	killed, killActor := entry.killRequested, entry.killActor
+	killed, killActor, killBy := entry.killRequested, entry.killActor, entry.killBy
 	// The agent's terminal report outranks its exit code. A run a human
 	// already closed keeps that close.
 	reported := entry.reported
@@ -215,7 +215,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	)
 	switch {
 	case killed:
-		to, reason, actor, cause = domain.RunAbandoned, "killed", killActor, memberCause(killActor)
+		to, reason, actor, cause = killedOutcome(killBy), killedReason(killBy), killActor, memberCause(killActor)
 	case reported != "":
 		to, reason, cause = reported, reportedClose(reported).reason, causeReported
 	case code == 0:
@@ -234,7 +234,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	// were committing still outranks the exit code.
 	switch {
 	case entry.killRequested:
-		to, reason, actor, cause = domain.RunAbandoned, "killed", entry.killActor, memberCause(entry.killActor)
+		to, reason, actor, cause = killedOutcome(entry.killBy), killedReason(entry.killBy), entry.killActor, memberCause(entry.killActor)
 	case reported == "" && entry.reported != "" && !entry.status.Terminal():
 		to, reason, cause = entry.reported, reportedClose(entry.reported).reason, causeReported
 	}

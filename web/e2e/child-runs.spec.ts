@@ -21,7 +21,7 @@ test.skip(!dockerReachable(), 'the runs need a reachable Docker daemon')
 const launchTimeout = 3 * 60 * 1000
 const shots = process.env.AETHER_E2E_SHOTS
 
-type Run = { id: string; status: string; parent_run_id?: string; child_purpose?: string }
+type Run = { id: string; status: string; reason?: string; parent_run_id?: string; child_purpose?: string }
 
 // A queued child has no run yet, so run.get answers not found until it starts.
 async function runStatus(member: { api: { rpc: <T>(m: string, p?: unknown) => Promise<T> } }, id: string): Promise<Run> {
@@ -118,7 +118,8 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   ])
   await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: launchTimeout }).toBe('running')
   await alice.api.rpc('run.kill', { run_id: parent.id })
-  await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: 60_000 }).toMatch(/^(abandoned|failed|interrupted)$/)
+  await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: 60_000 }).toBe('completed')
+  expect((await runStatus(alice, second.run_id)).reason).toContain(`stopped by parent run ${parent.id}`)
 })
 
 test('a refused child run nudges its owner without turning child runs on', async ({ page, aether }) => {

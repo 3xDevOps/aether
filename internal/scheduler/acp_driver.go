@@ -731,8 +731,16 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	if !current {
 		return
 	}
-	d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
+	d.s.mu.Lock()
+	stopped := entry.stopNoticeLocked()
+	d.s.mu.Unlock()
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
+	if stopped != "" {
+		d.notice(entry.runID, "info", "Enhanced session stopped", stopped)
+		idle.Reason = acpEndedReason + stopped
+	} else {
+		d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
+	}
 	if d.oneShot(entry) {
 		d.endOneShot(entry, false, false, idle)
 		return

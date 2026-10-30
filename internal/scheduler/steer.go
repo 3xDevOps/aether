@@ -15,17 +15,28 @@ import (
 )
 
 func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
+	return s.kill(ctx, run, actor, "")
+}
+
+// StopForParent stops a child run on its parent's say-so. The child ends
+// completed with a reason naming the parent, not as an abandoned failure.
+func (s *Scheduler) StopForParent(ctx context.Context, run, parent domain.RunID) error {
+	return s.kill(ctx, run, "", parent)
+}
+
+func (s *Scheduler) kill(ctx context.Context, run domain.RunID, actor domain.MemberID, by domain.RunID) error {
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry == nil {
 		if pending := s.pending[run]; pending != nil {
 			pending.killRequested = true
 			pending.killActor = actor
+			pending.killBy = by
 			s.mu.Unlock()
 			return nil
 		}
 		s.mu.Unlock()
-		return s.killUnsupervised(ctx, run, actor)
+		return s.killUnsupervised(ctx, run, actor, by)
 	}
 	s.mu.Unlock()
 
@@ -34,7 +45,7 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	s.mu.Lock()
 	if s.runs[run] != entry {
 		s.mu.Unlock()
-		return s.killUnsupervised(ctx, run, actor)
+		return s.killUnsupervised(ctx, run, actor, by)
 	}
 	if entry.destroyPending {
 		s.mu.Unlock()
@@ -52,6 +63,7 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	}
 	entry.killRequested = true
 	entry.killActor = actor
+	entry.killBy = by
 	workspace, cid := entry.workspaceID, entry.containerID
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: persist kill flag", "run", run, "error", err)
@@ -140,7 +152,7 @@ func (s *Scheduler) reconcileActiveDestroyPending(ctx context.Context, id domain
 
 // killUnsupervised writes status under s.mu: every scheduler status write
 // holds the lock, so a concurrent terminal transition cannot be overwritten.
-func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor domain.MemberID) error {
+func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor domain.MemberID, by domain.RunID) error {
 	r, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
 		return err
@@ -150,11 +162,12 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		// A launch registered the run meanwhile: route through the
 		// supervised path.
 		s.mu.Unlock()
-		return s.Kill(ctx, id, actor)
+		return s.kill(ctx, id, actor, by)
 	}
 	if pending := s.pending[id]; pending != nil {
 		pending.killRequested = true
 		pending.killActor = actor
+		pending.killBy = by
 		s.mu.Unlock()
 		return nil
 	}
@@ -179,7 +192,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 			// between expiry and a terminal no-op. A retry with no owner
 			// means a pending launch or a row that moved back to active;
 			// route it through Kill as well so that state is not discarded.
-			return s.Kill(ctx, id, actor)
+			return s.kill(ctx, id, actor, by)
 		}
 		return s.dismissFinished(ctx, id, actor)
 	}
@@ -190,7 +203,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	if handled, reconcileErr := s.reconcileActiveDestroyPending(ctx, id); reconcileErr != nil {
 		return reconcileErr
 	} else if handled {
-		return s.Kill(ctx, id, actor)
+		return s.kill(ctx, id, actor, by)
 	}
 
 	identity := "none"
@@ -211,11 +224,12 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		// A launch registered the run meanwhile: route through the
 		// supervised path.
 		s.mu.Unlock()
-		return s.Kill(ctx, id, actor)
+		return s.kill(ctx, id, actor, by)
 	}
 	if pending := s.pending[id]; pending != nil {
 		pending.killRequested = true
 		pending.killActor = actor
+		pending.killBy = by
 		s.mu.Unlock()
 		return nil
 	}
@@ -226,14 +240,14 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	}
 	if r.Status.Terminal() {
 		s.mu.Unlock()
-		return s.killUnsupervised(ctx, id, actor)
+		return s.killUnsupervised(ctx, id, actor, by)
 	}
 	// Sidecar writes are serialized by s.mu. Recheck immediately before the
 	// status write so a pending marker installed after the first probe still
 	// owns cleanup and cannot be bypassed by this transition.
 	if sc, serr := s.readSidecar(id); serr == nil && sc.DestroyPending {
 		s.mu.Unlock()
-		return s.killUnsupervised(ctx, id, actor)
+		return s.killUnsupervised(ctx, id, actor, by)
 	} else if serr != nil && !os.IsNotExist(serr) {
 		s.mu.Unlock()
 		return fmt.Errorf("scheduler: inspect destroy-pending sidecar: %w", serr)
@@ -242,7 +256,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		s.mu.Unlock()
 		return err
 	}
-	err = s.transitionOutcomeLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor, memberCause(actor))
+	err = s.transitionOutcomeLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, killedReason(by), actor, memberCause(actor))
 	s.mu.Unlock()
 	if err != nil {
 		return err

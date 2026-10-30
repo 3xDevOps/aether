@@ -94,8 +94,9 @@ swarm's runs and their descendants form one tree keyed by the swarm.
 7. **Results.** A child's success, failure or blocked report reaches its
    parent's inbox as a durable message (`correlation_id` = report ID), the
    same outbox path a worker report takes to its integrator, and wakes an
-   idle parent. A child that ends without a report sends one `child ended`
-   message. Mail survives restarts and compaction until acknowledged;
+   idle parent. A child that ends without a final report sends one `child ended`
+   message with its latest report and branch; a child whose turn ends without
+   a report sends its parent a provisional report, as a swarm worker does. Mail survives restarts and compaction until acknowledged;
    `child list` returns each child's latest report at any time.
 8. **Waiting and completion.** A child is **unfinished** while it is queued,
    provisioning, working, waiting or needs input. A parent parked with
@@ -103,10 +104,13 @@ swarm's runs and their descendants form one tree keyed by the swarm.
    an integrator with live workers is. A parent's success report is refused
    while it has unfinished attached children: cancel or detach them, or
    report `waiting`. A parent's turn ending does not stop its children.
-9. **Cancel and detach.** When a run ends (killed, failed, closed or
-   deleted), its attached unfinished children are stopped, finished ones
-   detached and kept for review, and queued ones cancelled; each child's own
-   children follow.
+9. **Cancel and detach.** A child its parent cancels ends `completed`
+   (`stopped by parent run <id>`): its work stands, it is no failure, and it
+   stays closable. When a person closes a run, its children are closed with
+   it: finished ones relabeled, working ones stopped and closed, queued ones
+   cancelled. When a run ends otherwise (killed, failed or deleted), its
+   attached unfinished children are stopped, finished ones detached and kept
+   for review, and queued ones cancelled; each child's own children follow.
    `child detach` (or **Detach** in the dashboard) keeps a child running on
    its own; it keeps its lineage and tree, and stops counting toward its
    parent's waiting and completion. Pausing a parent does not pause

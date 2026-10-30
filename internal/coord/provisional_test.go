@@ -129,3 +129,29 @@ func TestAnEarlierReportKeepsALaterTurnsProvisionalReport(t *testing.T) {
 		t.Fatalf("unread = %d, %v; want the blocked report and the later provisional report", unread, err)
 	}
 }
+
+type parentOf struct {
+	ChildService
+	child, parent domain.RunID
+}
+
+func (p parentOf) ReportRecipient(_ context.Context, run domain.RunID) (domain.RunID, error) {
+	if run == p.child {
+		return p.parent, nil
+	}
+	return "", nil
+}
+
+func TestProvisionalReportReachesTheParentOfAChildRun(t *testing.T) {
+	ctx := context.Background()
+	h, child, parent := newProvisionalHarness(t)
+	h.svc.cfg.Mission = nil
+	h.svc.cfg.Children = parentOf{child: child, parent: parent}
+	if err := h.svc.ProvisionalReport(ctx, child, time.Now().UTC(), "Pushed PR #7."); err != nil {
+		t.Fatalf("ProvisionalReport: %v", err)
+	}
+	inbox, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
+	if rpcErr != nil || len(inbox.Messages) != 1 || inbox.Messages[0].FromRunID != string(child) {
+		t.Fatalf("parent inbox = %+v, %v; want the child's provisional report", inbox, rpcErr)
+	}
+}

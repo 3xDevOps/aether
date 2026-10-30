@@ -12,17 +12,25 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-const provisionalHeader = "Provisional report: this worker ended its turn without `aether-internal report`. " +
+const provisionalHeader = "Provisional report: this run ended its turn without `aether-internal report`. " +
 	"A report from it supersedes this one. Its last message:\n\n"
 
-// ProvisionalReport forwards a swarm worker's last message to its integrator
+// ProvisionalReport forwards a swarm worker's or child run's last message to
+// its integrator or parent
 // when the turn that started at since ended without a coord.report. The turn
 // start keys the message, so each turn sends at most one.
 func (s *Service) ProvisionalReport(ctx context.Context, run domain.RunID, since time.Time, message string) error {
-	if s.cfg.Disabled || s.cfg.Mission == nil {
+	if s.cfg.Disabled {
 		return nil
 	}
-	recipient, err := s.cfg.Mission.ReportRecipient(ctx, run)
+	var recipient domain.RunID
+	var err error
+	if s.cfg.Mission != nil {
+		recipient, err = s.cfg.Mission.ReportRecipient(ctx, run)
+	}
+	if err == nil && recipient == "" && s.cfg.Children != nil {
+		recipient, err = s.cfg.Children.ReportRecipient(ctx, run)
+	}
 	if err != nil {
 		return fmt.Errorf("provisional report recipient: %w", err)
 	}
