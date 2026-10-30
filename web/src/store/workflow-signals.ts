@@ -23,6 +23,4 @@ export const createWorkflowSignalsSlice: SliceCreator<WorkflowSignalsSlice> = (s
     set((s) => ({ [signal]: { ...s[signal], [id]: (s[signal][id] ?? 0) + 1 } })),
 })
 
-export const gitSeqOf = (runID: string) => (s: RootState) => s.gitSeq[runID] ?? 0
-export const prSeqOf = (runID: string) => (s: RootState) => s.prSeq[runID] ?? 0
 export const missionSeqOf = (missionID: string) => (s: RootState) => s.missionSeq[missionID] ?? 0

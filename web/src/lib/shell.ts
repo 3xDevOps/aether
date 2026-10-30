@@ -15,16 +15,6 @@ export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`
 }
 
-/**
- * A relative path as one shell argument a flag parser reads as a value.
- * Quoting alone cannot do it: the shell strips the quotes and the parser
- * still sees a name starting with a dash, so such a path is written
- * relative to the current directory instead.
- */
-export function shellPath(path: string): string {
-  return shellQuote(path.startsWith('-') ? `./${path}` : path)
-}
-
 const approvalCode = /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/
 
 /**

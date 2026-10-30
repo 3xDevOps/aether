@@ -1,7 +1,7 @@
 import type { Event } from '@/lib/types'
 import { createRootStore } from '@/store'
 import { applyEvent, hydrate } from '@/store/sync'
-import { gitSeqOf, missionSeqOf, prSeqOf } from '@/store/workflow-signals'
+import { missionSeqOf } from '@/store/workflow-signals'
 import { fakeApi, workspace } from '@/test/fixtures'
 
 function event(seq: number, type: string, payload: unknown, run_id = ''): Event {
@@ -24,10 +24,10 @@ describe('workflow signals', () => {
     for (const ev of events) expect(await applyEvent(store, ev, client)).toBe(true)
 
     const s = store.getState()
-    expect(gitSeqOf('run_1')(s)).toBe(2)
+    expect(s.gitSeq.run_1).toBe(2)
     expect(s.runs.run_1?.last_commit).toBe('def5678')
-    expect(prSeqOf('run_1')(s)).toBe(1)
+    expect(s.prSeq.run_1).toBe(1)
     expect(missionSeqOf('mission_1')(s)).toBe(2)
-    expect(gitSeqOf('run_2')(s)).toBe(0)
+    expect(s.gitSeq.run_2).toBeUndefined()
   })
 })
