@@ -161,12 +161,22 @@ sudo env "PATH=$PATH" "HOME=$HOME" make test-integration \
 ## Restart acceptance
 
 `internal/server/restart_integration_test.go` checks that Enhanced runs keep
-working through a server restart or update, in two sizes. `TestIntegrationRestartSmoke`
-runs in CI: one probing run (below) that sends to a second, idle run holding a
-permission request, through `SIGTERM` twice and `SIGKILL` once, in about a
-minute and a half. `TestIntegrationRestartAcceptance` is the full matrix for
-a release or an owner check, described next; it skips unless `AETHER_RESTART_FULL=1`.
-The full matrix builds `aether-server` twice (the second reports `v0.0.0-soak-b`), runs one as a
+working through a server restart or update, in three sizes:
+
+- `TestIntegrationRestartSmoke` runs in CI, in about 90 seconds. Two Enhanced
+  runs, A streaming a numbered line every 100 ms and B holding a permission
+  request, each run a probe process started with `docker exec` (not part of
+  the agent). The probes call the server through the staged CLI and MCP bridge
+  and exchange mail, keeping an `inbox --wait 20` long poll open. Just before
+  each of two `SIGTERM`s and one `SIGKILL`, each probe fires keyed
+  `send`s through both the CLI and the bridge, and one unkeyed
+  `dev.terminal.input`.
+- `TestIntegrationRestartCoordination` measures the coordination socket alone
+  with one external probe.
+- `TestIntegrationRestartAcceptance` is the full matrix for a release or an
+  owner check; it skips unless `AETHER_RESTART_FULL=1`.
+
+The full matrix buildsThe full matrix builds `aether-server` twice (the second reports `v0.0.0-soak-b`), runs one as a
 child process against real Docker with a temporary data directory, and launches
 three Enhanced runs of a scripted agent (`internal/acphost/acpmock`):
 
@@ -190,6 +200,9 @@ It fails on any of:
 
 - a turn interrupted or a run parked with `turn interrupted`;
 - a failed CLI or bridge call the agent saw;
+- a send that failed but was delivered, unless its error says it "may already
+  have applied", or a message delivered twice;
+- an unkeyed terminal input applied more than once;
 - a sent message that was never received, or was received twice;
 - a streamed line missing or repeated;
 - the marker file not holding lines 1 to 120, or the container's ID or start
@@ -198,9 +211,9 @@ It fails on any of:
 
 It prints, per restart, the milliseconds between the last success before the
 signal and the first success after it for each channel (CLI and bridge calls
-on both runs, the inbox poll, and the `aether-acp` stream). Status calls run every
-2 seconds, because the coordination socket allows one request a second per
-run, so a gap under about 2000 ms is the probe interval and means no outage.
+on both runs and the `aether-acp` stream). Status calls run every
+2 seconds (4 in the smoke test), because the coordination socket allows one request a second per
+run, so a gap under about one interval is the probe interval and means no outage.
 
 ```sh
 sudo env "PATH=$PATH" "HOME=$HOME" AETHER_RESTART_FULL=1 make test-integration \

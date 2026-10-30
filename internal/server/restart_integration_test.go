@@ -59,6 +59,10 @@ type soakProfile struct {
 	// external runs the probe as a separate process in the container, not as
 	// the agent's turn, so it measures the coordination path alone.
 	external bool
+	// burst fires keyed sends and one terminal input around every restart.
+	burst bool
+	// every is the probes' status interval.
+	every    time.Duration
 	duration time.Duration
 	long     int
 	steps    func(e *soakEnv) []soakStep
@@ -92,6 +96,9 @@ type soakEnv struct {
 	ws        *domain.Workspace
 
 	outages []soakOutage
+	// burstHook, when set, starts a burst of in-flight calls just before a
+	// restart.
+	burstHook func()
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -534,7 +541,8 @@ func (w *soakWatcher) follow(ctx context.Context, e *soakEnv, runID string) {
 // keyed send in flight.
 func TestIntegrationRestartSmoke(t *testing.T) {
 	runRestartScenario(t, soakProfile{
-		probes: []string{"a"}, duration: 60 * time.Second, long: 70,
+		probes: []string{"a", "b"}, mail: true, external: true, burst: true, every: 4 * time.Second,
+		duration: 60 * time.Second, long: 70,
 		steps: func(e *soakEnv) []soakStep {
 			return []soakStep{
 				{"SIGTERM + restart", 8 * time.Second, e.restart("sigterm-1", e.term, nil)},
@@ -588,6 +596,9 @@ func (e *soakEnv) sigkill(t *testing.T) { e.signal(t, syscall.SIGKILL) }
 func (e *soakEnv) restart(name string, stop func(t *testing.T), prep func(t *testing.T)) func(*testing.T, *soakEnv) {
 	return func(t *testing.T, _ *soakEnv) {
 		t.Helper()
+		if e.burstHook != nil {
+			e.burstHook()
+		}
 		o := soakOutage{name: name, down: time.Now()}
 		stop(t)
 		if prep != nil {
@@ -597,6 +608,34 @@ func (e *soakEnv) restart(name string, stop func(t *testing.T), prep func(t *tes
 		o.up = time.Now()
 		e.outages = append(e.outages, o)
 	}
+}
+
+func soakEvery(prof soakProfile) time.Duration {
+	if prof.every == 0 {
+		return 2 * time.Second
+	}
+	return prof.every
+}
+
+// soakTickTask is an agent turn that streams a numbered line every 100 ms
+// for the profile's duration.
+func soakTickTask(prof soakProfile) string {
+	return fmt.Sprintf("%si=0; while [ $i -lt %d ]; do i=$((i+1)); echo tick $i; sleep 0.1; done",
+		acpmock.PromptRunPrefix, int((prof.duration+40*time.Second)/(100*time.Millisecond)))
+}
+
+func soakProbeCommand(prof soakProfile, name, runCID, peer string) string {
+	cmd := fmt.Sprintf("/workspace/soakagent -name %s -duration %s -long %d -every %s", name, prof.duration, prof.long, soakEvery(prof))
+	if prof.burst {
+		cmd += " -burst"
+	}
+	if peer == "" && !prof.mail {
+		peer = runCID
+	}
+	if peer != "" {
+		cmd += " -peer " + peer
+	}
+	return cmd
 }
 
 func runRestartScenario(t *testing.T, prof soakProfile) {
@@ -615,23 +654,49 @@ func runRestartScenario(t *testing.T, prof soakProfile) {
 			_, _ = dockerOut("rm", "-f", containerName(r.ID))
 		}
 	})
+	// An external mailing probe "b" lives in run C, which also holds the
+	// permission request.
+	sharedC := prof.external && prof.mail
 	for _, name := range prof.probes {
-		probe := fmt.Sprintf("/workspace/soakagent -name %s -duration %s -long %d", name, prof.duration, prof.long)
-		if !prof.mail {
-			probe += " -peer " + runC.ID
+		if sharedC && name == "b" {
+			ids[name] = runC.ID
+			continue
 		}
-		task := acpmock.PromptRunPrefix + probe
-		if prof.external {
-			task = "say pong"
+		task := "say pong"
+		switch {
+		case !prof.external:
+			task = acpmock.PromptRunPrefix + soakProbeCommand(prof, name, runC.ID, "")
+		case prof.mail:
+			task = soakTickTask(prof)
 		}
 		r := e.launch(t, task)
 		ids[name] = r.ID
 		runs = append(runs, r)
-		if prof.external {
-			waitFor(t, time.Minute, "the agent's first turn", func() bool { return soakTurnEnded(e, r.ID) })
-			args := append([]string{"exec", "-d", "-w", "/workspace", containerName(r.ID)}, strings.Fields(probe)...)
+	}
+	if prof.external {
+		if !prof.mail {
+			waitFor(t, time.Minute, "the agent's first turn", func() bool { return soakTurnEnded(e, ids["a"]) })
+		}
+		waitFor(t, time.Minute, "run C's first turn", func() bool { return soakTurnEnded(e, runC.ID) })
+		peer := func(name string) string {
+			if prof.mail {
+				return map[string]string{"a": ids["b"], "b": ids["a"]}[name]
+			}
+			return runC.ID
+		}
+		for _, name := range prof.probes {
+			args := append([]string{"exec", "-d", "-w", "/workspace", containerName(ids[name])},
+				strings.Fields(soakProbeCommand(prof, name, "", peer(name)))...)
 			if out, err := dockerOut(args...); err != nil {
 				t.Fatalf("start the external probe: %v (%s)", err, out)
+			}
+		}
+		if prof.burst {
+			e.burstHook = func() {
+				for _, name := range prof.probes {
+					_, _ = dockerOut("exec", containerName(ids[name]), "touch", "/workspace/soak/burst")
+				}
+				time.Sleep(250 * time.Millisecond)
 			}
 		}
 	}
@@ -644,7 +709,9 @@ func runRestartScenario(t *testing.T, prof soakProfile) {
 			return countKind(readEvents(ids["a"], "a"), "send") > 0
 		})
 	}
-	waitFor(t, time.Minute, "run C's first turn", func() bool { return soakTurnEnded(e, runC.ID) })
+	if !prof.external {
+		waitFor(t, time.Minute, "run C's first turn", func() bool { return soakTurnEnded(e, runC.ID) })
+	}
 	if err := e.call(protocol.MethodRunInject, protocol.RunInjectParams{
 		RunID: runC.ID, Message: acpmock.PromptAskPermission, IdempotencyKey: "soak-ask-permission",
 	}, nil); err != nil {
@@ -792,7 +859,7 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 
 	var report bytes.Buffer
 	fmt.Fprintf(&report, "\nrestart availability (ms between the last success before and the first success after the signal)\n")
-	fmt.Fprintf(&report, "%-10s %8s %8s %8s %8s %8s %8s %10s\n", "restart", "down_ms", "cli.a", "mcp.a", "cli.b", "mcp.b", "recv.b", "stream.a")
+	fmt.Fprintf(&report, "%-10s %8s %8s %8s %8s %8s %10s\n", "restart", "down_ms", "cli.a", "mcp.a", "cli.b", "mcp.b", "stream.a")
 	for _, o := range e.outages {
 		cell := func(name, kind string) string {
 			if g, ok := gapAround(logs[name], kind, o.down); ok {
@@ -815,8 +882,8 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 		if !before.IsZero() && !after.IsZero() {
 			stream = strconv.FormatInt(after.Sub(before).Milliseconds(), 10)
 		}
-		fmt.Fprintf(&report, "%-10s %8d %8s %8s %8s %8s %8s %10s\n", o.name, o.up.Sub(o.down).Milliseconds(),
-			cell("a", "cli"), cell("a", "mcp"), cell("b", "cli"), cell("b", "mcp"), cell("b", "recv-call"), stream)
+		fmt.Fprintf(&report, "%-10s %8d %8s %8s %8s %8s %10s\n", o.name, o.up.Sub(o.down).Milliseconds(),
+			cell("a", "cli"), cell("a", "mcp"), cell("b", "cli"), cell("b", "mcp"), stream)
 	}
 
 	failures := map[string]int{}
@@ -866,25 +933,50 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 				recv[ev.ID]++
 			}
 		}
-		lost, dup, sent := 0, 0, 0
+		lost, dup, sent, unsaid := 0, 0, 0, 0
 		for _, ev := range logs[name] {
-			if ev.Kind != "send" || !ev.OK {
+			if ev.Kind != "send" {
 				continue
 			}
-			sent++
-			switch n := recv[ev.ID]; {
-			case n == 0:
-				lost++
-			case n > 1:
+			n := recv[ev.ID]
+			switch {
+			case ev.OK:
+				sent++
+				if n == 0 {
+					lost++
+				}
+			case n > 0 && !strings.Contains(ev.Err, "may already have applied"):
+				unsaid++
+				t.Errorf("send %s failed with %q but was delivered: the error must say it may already have applied", ev.ID, firstLine(ev.Err))
+			}
+			if n > 1 {
 				dup++
 			}
 		}
-		fmt.Fprintf(&report, "mail %s->%s: acknowledged sends=%d lost=%d duplicated=%d\n", name, other, sent, lost, dup)
+		fmt.Fprintf(&report, "mail %s->%s: acknowledged sends=%d lost=%d duplicated=%d misreported-failures=%d\n", name, other, sent, lost, dup, unsaid)
 		if lost > 0 || dup > 0 {
 			t.Errorf("mail %s->%s: %d lost, %d duplicated of %d sends", name, other, lost, dup, sent)
 		}
 	}
 
+	if prof.burst {
+		for _, name := range prof.probes {
+			termLog, _ := containerFile(ids[name], "/workspace/soak/term.log")
+			for _, ev := range logs[name] {
+				if ev.Kind != "term-input" {
+					continue
+				}
+				applied := strings.Count(termLog, ev.ID)
+				fmt.Fprintf(&report, "terminal input %s: ok=%v applied=%d %s\n", ev.ID, ev.OK, applied, firstLine(ev.Err))
+				if applied > 1 {
+					t.Errorf("unkeyed terminal input %s was applied %d times", ev.ID, applied)
+				}
+				if !ev.OK && applied > 0 && !strings.Contains(ev.Err, "may already have applied") {
+					t.Errorf("terminal input %s failed with %q but was applied", ev.ID, firstLine(ev.Err))
+				}
+			}
+		}
+	}
 	for _, name := range prof.probes {
 		id := ids[name]
 		marker, err := containerFile(id, "/workspace/soak/marker."+name)
@@ -904,6 +996,9 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 	}
 
 	for _, name := range append(append([]string{}, prof.probes...), "c") {
+		if name == "b" && prof.external && prof.mail {
+			continue
+		}
 		id := ids[name]
 		items, err := e.history(id)
 		if err != nil {
@@ -956,7 +1051,7 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 				}
 			}
 			fmt.Fprintf(&report, "run %s: streamed ticks=%d missing=%d duplicated=%d\n", name, top, missing, dup)
-			if !prof.external && (missing > 0 || dup > 0 || top == 0) {
+			if (!prof.external || prof.mail) && (missing > 0 || dup > 0 || top == 0) {
 				t.Errorf("run %s: the stream lost %d and repeated %d of %d lines", name, missing, dup, top)
 			}
 			w := watchers[name]

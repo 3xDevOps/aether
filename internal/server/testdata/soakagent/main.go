@@ -56,6 +56,8 @@ func main() {
 	dir := flag.String("dir", "/workspace/soak", "directory for logs and markers")
 	duration := flag.Duration("duration", 100*time.Second, "how long the agent keeps working")
 	fixedPeer := flag.String("peer", "", "run to send to; without it the peer is discovered through the conflict radar")
+	every := flag.Duration("every", 2*time.Second, "interval of the CLI and bridge status probes")
+	burstMode := flag.Bool("burst", false, "send a burst of keyed sends and one terminal input when <dir>/burst appears")
 	long := flag.Int("long", 120, "seconds the long shell command runs")
 	flag.Parse()
 
@@ -93,27 +95,134 @@ func main() {
 			}
 		}()
 	}
-	loop(2*time.Second, func(int) { cliStatus(ctx, rec) })
-	loop(2*time.Second, func(n int) {
+	loop(*every, func(int) { cliStatus(ctx, rec) })
+	loop(*every, func(n int) {
 		if n == 0 {
 			time.Sleep(time.Second)
 		}
 		bridge.status(ctx, rec)
 	})
-	if *name == "a" {
-		loop(6*time.Second, func(n int) { cliSend(ctx, rec, peer, fmt.Sprintf("a-msg-%04d", n), n%2 == 0) })
-		if *fixedPeer == "" {
-			loop(0, func(int) { bridge.recv(ctx, rec) })
+	// The send limit is five and one every five seconds: bursts use it all.
+	sendEvery := 6 * time.Second
+	if *burstMode {
+		sendEvery = 0
+		if *name == "a" {
+			cliSend(ctx, rec, peer, "a-msg-0000", true)
+		} else {
+			bridge.send(ctx, rec, peer, "b-msg-0000")
 		}
+	}
+	regular := func(fn func(n int)) {
+		if sendEvery > 0 {
+			loop(sendEvery, fn)
+		}
+	}
+	if *name == "a" {
+		regular(func(n int) { cliSend(ctx, rec, peer, fmt.Sprintf("a-msg-%04d", n), n%2 == 0) })
+		loop(0, func(int) { bridge.recv(ctx, rec) })
 	} else {
-		loop(6*time.Second, func(n int) { bridge.send(ctx, rec, peer, fmt.Sprintf("b-msg-%04d", n)) })
+		regular(func(n int) { bridge.send(ctx, rec, peer, fmt.Sprintf("b-msg-%04d", n)) })
 		loop(0, func(int) { cliRecv(ctx, rec) })
+	}
+	if *burstMode {
+		term := startTerminal(ctx, *dir)
+		trigger := filepath.Join(*dir, "burst")
+		loop(50*time.Millisecond, func(int) {
+			if os.Remove(trigger) == nil {
+				burst(ctx, rec, bridge, term, *name, peer, int(bursts.Add(1)))
+			}
+		})
 	}
 	var ticks atomic.Int64
 	loop(100*time.Millisecond, func(int) { fmt.Printf("tick %d\n", ticks.Add(1)) })
 	wg.Wait()
 	rec.add("end", time.Now(), fmt.Sprint(ticks.Load()), nil)
 	fmt.Println("soak-done", ticks.Load())
+}
+
+var bursts atomic.Int64
+
+// burst fires two rounds of keyed sends (coord.send allows bursts of five) through the CLI and the bridge, and one
+// unkeyed terminal input, while the harness takes the server down.
+func burst(ctx context.Context, rec *recorder, b *mcpConn, term *terminal, name, peer string, n int) {
+	var wg sync.WaitGroup
+	if term != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); term.input(ctx, rec, fmt.Sprintf("term-%s-%d", name, n)) }()
+	}
+	for round := range 2 {
+		body := fmt.Sprintf("%s-burst-%d-%d", name, n, round)
+		wg.Add(2)
+		go func() { defer wg.Done(); cliSend(ctx, rec, peer, body+"-cli", true) }()
+		go func() { defer wg.Done(); b.send(ctx, rec, peer, body+"-mcp") }()
+		time.Sleep(150 * time.Millisecond)
+	}
+	wg.Wait()
+}
+
+// terminal is a development PTY whose process appends every line it reads to
+// <dir>/term.log, so the harness can count how often an input was applied.
+type terminal struct {
+	id, incarnation, session string
+	generation               uint64
+}
+
+func cliJSON(ctx context.Context, params any, args ...string) (json.RawMessage, error) {
+	raw, _ := json.Marshal(params)
+	cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, coordtransport.CLIPath, append(args, "--params-file", "-")...)
+	cmd.Stdin = bytes.NewReader(raw)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%w: %s%s", err, out.String(), errb.String())
+	}
+	var env struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		return nil, err
+	}
+	return env.Result, nil
+}
+
+func startTerminal(ctx context.Context, dir string) *terminal {
+	script := fmt.Sprintf(`while IFS= read -r l; do echo "$l" >> %s; done`, filepath.Join(dir, "term.log"))
+	res, err := cliJSON(ctx, protocol.DevTerminalStartParams{Name: "soak-term", Command: []string{"sh", "-c", script}}, "terminal", "start")
+	if err != nil {
+		fmt.Println("soak-error: terminal start:", err)
+		return nil
+	}
+	var started protocol.DevTerminalStartResult
+	if err = json.Unmarshal(res, &started); err != nil {
+		return nil
+	}
+	t := &terminal{id: started.Terminal.TerminalID, incarnation: started.Terminal.Incarnation, session: "soak-control"}
+	res, err = cliJSON(ctx, map[string]any{
+		"surface":            protocol.DevSurface{Kind: "terminal", ID: t.id, Incarnation: t.incarnation},
+		"control_session_id": t.session,
+	}, "control", "acquire")
+	if err != nil {
+		fmt.Println("soak-error: control acquire:", err)
+		return nil
+	}
+	var acquired protocol.DevControlAcquireResult
+	if err = json.Unmarshal(res, &acquired); err != nil || acquired.Controller == nil {
+		return nil
+	}
+	t.generation = acquired.Controller.ControlGeneration
+	return t
+}
+
+func (t *terminal) input(ctx context.Context, rec *recorder, token string) {
+	start := time.Now()
+	_, err := cliJSON(ctx, protocol.DevTerminalInputParams{
+		DevTerminalTarget: protocol.DevTerminalTarget{TerminalID: t.id, Incarnation: t.incarnation},
+		DevControlFence:   protocol.DevControlFence{ControlSessionID: t.session, ControlGeneration: t.generation},
+		Kind:              "text", Text: token + "\n",
+	}, "terminal", "input")
+	rec.add("term-input", start, token, err)
 }
 
 // startLong runs the long command as a plain child, the way an agent's shell
