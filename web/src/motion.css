@@ -70,6 +70,7 @@
   --animate-scrim-in: fade-in var(--duration-200) var(--ease-standard);
   --animate-sheet-up: sheet-up var(--duration-220) var(--ease-sheet);
   --animate-sheet-left: sheet-left var(--duration-220) var(--ease-sheet);
+  --animate-sheet-left-out: sheet-left-out var(--duration-220) var(--ease-sheet) forwards;
   --animate-sheet-right: sheet-right var(--duration-220) var(--ease-sheet);
   --animate-expand-right: expand-right var(--duration-220) var(--ease-enter);
   --animate-collapsible-down: collapsible-down var(--duration-expand) var(--ease-enter);
@@ -103,6 +104,11 @@
   }
   @keyframes sheet-left {
     from {
+      transform: translateX(-100%);
+    }
+  }
+  @keyframes sheet-left-out {
+    to {
       transform: translateX(-100%);
     }
   }

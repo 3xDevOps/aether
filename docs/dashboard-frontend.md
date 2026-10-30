@@ -330,8 +330,20 @@ top to bottom:
    workspace page) and **Environment** (the same page, scrolled to that
    section). With one workspace and no `workspace.list` method it is a
    plain label. The search button opens the command palette.
-2. **New run**, the only filled button in the shell (`n`), for a member who
-   may launch.
+2. **New run**, the only filled button in the shell, for a member who may
+   launch. A slanted cut splits it in two. The left half, **New run** (`n`),
+   slides the launch panel out of the sidebar's right edge over the view, with
+   no scrim; the panel stays open while you use the view behind it, and
+   Escape or its **Close** button closes it and returns focus to what opened
+   it. The right half appears once a launch has been saved: it shows the saved
+   agent's glyph and an Enhanced, Standard or Background mark, and launches
+   that agent, mode, model, account and fallback at once with no task
+   (`quick-launch.ts`). Hovering or focusing it slides out the saved choices.
+   A Background launch needs a task, so that half opens the panel instead, as
+   it does when the saved choices name an agent or model the account cannot
+   use. The panel's **Child runs** switch follows your Settings choice and
+   sends `children` only when flipped, for that run alone; it is off and
+   disabled for a Background run.
 3. **Runs** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Run state](#run-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a

@@ -7,15 +7,18 @@ import { ForwardDialog } from '@/components/palette/forward-dialog'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { InjectDialog } from '@/components/palette/inject-dialog'
 import { WatchDialog } from '@/components/palette/watch-dialog'
+import { useLingering } from '@/components/ui/slide-out'
 import { useStore } from '@/store'
 
 export function PaletteDialogs() {
   const dialog = useStore((s) => s.paletteDialog)
   const identity = useStore((s) => s.identityKey)
+  const launchOpen = dialog === 'launch' || dialog === 'swarm'
+  const launchShown = useLingering(launchOpen)
   return (
     <>
       {/* A different member's launch starts over from their own accounts and saved choices. */}
-      {(dialog === 'launch' || dialog === 'swarm') && <LaunchDialog key={identity ?? ''} />}
+      {launchShown && <LaunchDialog key={identity ?? ''} open={launchOpen} />}
       {dialog === 'inject' && <InjectDialog />}
       {dialog === 'forward' && <ForwardDialog />}
       {dialog === 'close' && <CloseDialog />}

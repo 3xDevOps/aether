@@ -550,7 +550,7 @@ them, and the launch is authorized as if nothing were saved. The built-in
 assistant's and the connectors' launch tools fill each field a launch leaves
 out from them ([Launch options](connectors.md#launch-options)).
 
-The dashboard's launch dialog opens on them and saves the agent, mode and
+The dashboard's launch panel opens on them, the right half of **New run** launches the last agent, mode and model at once, and the panel saves the agent, mode and
 model of each launch. It saves the account and fallback only when you select
 **Save as my default** under **Options**. **Settings → Launch** shows them,
 with each invalid choice and its reason, and changes or clears them.
@@ -727,8 +727,8 @@ shared with you, as [usage fallback](#usage-fallback) does for every launch,
 unless the parent was launched with `--no-fallback`. The agent and model never
 change.
 
-**Allow child runs** in a run's **More** menu, or **Options → Child runs** in
-the launch dialog, allows or stops them for that one run without changing your
+**Allow child runs** in a run's **More** menu, or the **Child runs**
+switch in the launch panel, allows or stops them for that one run without changing your
 setting. Only the run's owner allows it, and a handoff to another member voids
 it. An admin can turn it off. Handing a run to another member detaches it from
 its parent and from its children, so no lineage spans two owners.

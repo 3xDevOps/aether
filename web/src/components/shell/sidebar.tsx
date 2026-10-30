@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { AssistantButton } from '@/components/assistant/button'
-import { PanelLeft, Plus, Search } from '@/components/icons'
+import { PanelLeft, Search } from '@/components/icons'
 import { focusView } from '@/components/shell/center-view'
+import { SplitNewRun } from '@/components/shell/new-run-button'
 import { SidebarFooter, UpdateNotice } from '@/components/shell/sidebar-footer'
 import { needsYouRoute, runRowSelector, SidebarRuns } from '@/components/shell/sidebar-runs'
 import { WorkspaceSwitcher } from '@/components/shell/workspace-switcher'
@@ -241,19 +242,14 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
       </div>
       {canLaunch({ cap, role }) && (
         <div className="flex shrink-0 items-center gap-1 px-2 pb-1">
-          <Button
-            hint={blocked ?? `New run · ${shortcutLabel('launch')}`}
-            aria-disabled={blocked ? true : undefined}
-            onClick={() => {
-              if (blocked) return
+          <SplitNewRun
+            blocked={blocked ?? null}
+            shortcut={shortcutLabel('launch')}
+            onOpen={() => {
               setDrawerOpen(false)
               openDialog('launch')
             }}
-            className="min-w-0 flex-1"
-          >
-            <Plus />
-            New run
-          </Button>
+          />
           {!mobile && <AssistantButton variant="secondary" />}
         </div>
       )}
