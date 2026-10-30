@@ -48,6 +48,11 @@ const (
 	// report, while CoordMaxEvidenceRefBytes bounds each reference.
 	CoordMaxEvidenceRefs     = 32
 	CoordMaxEvidenceRefBytes = 512
+	// CoordRunClosingSuffix ends the CodeUnavailable message of a request the
+	// server refused, before acting on it, because it is shutting down; a
+	// client may send it again.
+	CoordRunClosingSuffix = ": run is closing"
+
 	// CoordMaxIdempotencyKeyBytes bounds every mutation identity.
 	CoordMaxIdempotencyKeyBytes = 256
 )
