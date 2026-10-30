@@ -393,6 +393,27 @@ The environment container survives a server restart or update, and unsaved
 changes stay. A run keeps the Aether helper it was created with, so SSH
 features added by a later server need a new run.
 
+Run shells, and terminals the agent starts with `aether-internal terminal
+start`, survive a server restart or update too. Each runs under a keeper: an
+`aether-internal acp-keeper term` process in the run container, started as
+root from the staged server binary, that owns the shell's PTY, starts the
+shell as the run's user and keeps the newest 2 MiB of its output. The server
+attaches to it through a short-lived `aether-internal acp-keeper attach` exec
+and a token only the server holds. When the next server process recovers the
+run, it reattaches and replays the kept output: the same process keeps
+running, typing, resize and Ctrl-C work, `terminal output` continues from a
+cursor taken before the restart, and `terminal wait` reports the real exit.
+Output older than the kept 2 MiB is lost, and reading from a cursor before it
+reports `truncated`.
+
+A shell started by a server without terminal keepers, or in a container whose
+staged binary predates them, keeps running through a restart, but its screen,
+output and input are gone. It reads `PTY unavailable after recovery;
+execution was not reattached or restarted`; stop it and start another. A
+terminal whose process Docker no longer knows reads **exited** with the
+reason; stopping it removes it without taking control first, and closing the
+run is not blocked by it.
+
 ## Limits
 
 - Six environment tabs, and four people's plus four agent shells per run.

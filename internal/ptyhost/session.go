@@ -104,9 +104,12 @@ type session struct {
 	geometryRevision   uint64
 	changed            chan struct{}
 	development        bool
-	protocolPending    []byte
-	protocolWake       chan struct{}
-	protocolErr        error
+	// quiet is the output position up to which terminal queries are not
+	// answered: a resumed terminal replays output whose queries were.
+	quiet           TerminalSequence
+	protocolPending []byte
+	protocolWake    chan struct{}
+	protocolErr     error
 
 	// pendingEcho is the echo the terminal still owes for input the server
 	// wrote to the agent - an injected line, or a member's keystrokes. The
