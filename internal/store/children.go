@@ -217,7 +217,8 @@ func (d *DB) ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, 
 		    OR (rc.detached = 0 AND (parent.id IS NULL OR parent.status IN (`+terminalStatuses+`))
 		        AND (rc.state = 'queued' OR (rc.state = 'started' AND child.status NOT IN (`+terminalStatuses+`))))
 		    OR (rc.detached = 0 AND rc.state = 'started' AND child.status = 'completed' AND child.review <> 'accepted'
-		        AND (parent.status IN ('merged', 'abandoned') OR (parent.status = 'completed' AND parent.review = 'accepted')))
+		        AND (parent.status = 'merged' OR (parent.status = 'abandoned' AND parent.reason <> 'killed')
+		         OR (parent.status = 'completed' AND parent.review = 'accepted')))
 		 ORDER BY rc.depth, rc.created_at`)
 }
 

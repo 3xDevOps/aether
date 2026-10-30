@@ -728,3 +728,26 @@ func TestClosedParentClosesItsChildren(t *testing.T) {
 		}
 	}
 }
+
+func TestKilledParentKeepsItsFinishedChildrenForReview(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	done := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "finished"})
+	h.settle()
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(done.RunID), domain.RunCompleted, "agent reported success", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunAbandoned, "killed", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	h.settle()
+	if r, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID)); r.Status != domain.RunCompleted {
+		t.Fatalf("child of a killed parent = %s, want it left completed for review", r.Status)
+	}
+	if left, err := h.db.ChildrenToSettle(h.ctx); err != nil || len(left) != 0 {
+		t.Fatalf("children left to settle = %d, %v", len(left), err)
+	}
+}

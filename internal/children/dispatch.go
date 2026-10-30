@@ -223,11 +223,14 @@ func (s *Service) settle(ctx context.Context) error {
 }
 
 // parentClosed reports whether a person closed the run: they chose its
-// final disposition or accepted its completion.
+// final disposition or accepted its completion. A kill also ends a run
+// abandoned, but leaves its finished children for review.
 func parentClosed(r *domain.Run) bool {
 	switch r.Status {
-	case domain.RunMerged, domain.RunAbandoned:
+	case domain.RunMerged:
 		return true
+	case domain.RunAbandoned:
+		return r.Reason != "killed"
 	case domain.RunCompleted:
 		return r.Review == domain.ReviewAccepted
 	}
