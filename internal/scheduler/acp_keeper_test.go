@@ -468,8 +468,8 @@ func TestEnhancedAnswerRightAfterARestartWaitsForRecovery(t *testing.T) {
 	cfg := e.cfg
 	cfg.PTY = newFakePTY()
 	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
-	// Recovery's exit probe holds it open long enough to answer during it.
-	cfg.ExitProbeTimeout = 500 * time.Millisecond
+	// A slow inspect holds recovery open long enough to answer during it.
+	e.rt.setInspectDelay(500 * time.Millisecond)
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)

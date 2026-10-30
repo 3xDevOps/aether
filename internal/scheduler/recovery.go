@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
@@ -25,9 +26,10 @@ const (
 	retainedReclaimedReason   = "retained container reclaimed for disk space"
 	recoveryPTYRetryInitial   = 10 * time.Millisecond
 	recoveryPTYRetryMax       = 250 * time.Millisecond
-	// defaultExitProbeTimeout is the startup Wait window that learns whether a
-	// container already exited before attach.
-	defaultExitProbeTimeout = 2 * time.Second
+	defaultExitProbeTimeout   = 2 * time.Second
+	// recoveryParallelism bounds how many live runs reattach at once, so one
+	// slow attach does not delay every run behind it.
+	recoveryParallelism = 4
 )
 
 func retainedTransitionError() error {
@@ -601,6 +603,8 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("scheduler: recovery: %w", err)
 	}
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, recoveryParallelism)
 	for _, r := range active {
 		s.mu.Lock()
 		_, alreadySupervised := s.runs[r.ID]
@@ -612,9 +616,15 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 		case domain.RunQueued, domain.RunProvisioning:
 			s.recoverUnstarted(ctx, r)
 		case domain.RunRunning, domain.RunNeedsAttention:
-			s.recoverSupervised(ctx, r)
+			slots <- struct{}{}
+			wg.Add(1)
+			go func() {
+				defer func() { <-slots; wg.Done() }()
+				s.recoverSupervised(ctx, r)
+			}()
 		}
 	}
+	wg.Wait()
 	s.refreshActivities(ctx)
 	s.cleanupTerminalSidecars(ctx)
 	s.cleanupTerminalCreationKeyContainers(ctx)
@@ -1284,22 +1294,22 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		s.finishRecoveredExit(ctx, r, sc)
 		return
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, s.cfg.ExitProbeTimeout)
-	st, waitErr := s.cfg.Runtime.Wait(probeCtx, cid)
-	cancel()
+	// The exit watcher started by supervision waits for the container to stop
+	// running, so an exit after this inspect is still seen.
+	info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
 	switch {
-	case waitErr == nil:
+	case inspectErr == nil && info.Exited:
 		sc.ExitObserved = true
-		sc.ExitCode = st.Code
+		sc.ExitCode = info.ExitCode
 		if werr := s.writeSidecar(sc); werr != nil {
 			slog.Warn("scheduler: persist exit_observed during recovery", "run", r.ID, "error", werr)
 		}
 		s.finishRecoveredExit(ctx, r, sc)
 		return
-	case errors.Is(waitErr, runtime.ErrNotFound):
+	case errors.Is(inspectErr, runtime.ErrNotFound):
 		s.didNotSurvive(ctx, r, cid)
 		return
-	case errors.Is(waitErr, context.DeadlineExceeded):
+	case inspectErr == nil:
 		s.attachAndSupervise(ctx, r, sc, cid)
 		return
 	case ctx.Err() != nil:

@@ -36,6 +36,7 @@ type fakeRuntime struct {
 	waitCalls   int
 	startErr    error
 	waitErr     error
+	inspectWait time.Duration
 	startHook   func(c *fakeContainer)
 	stopHook    func()
 	commitErr   error
@@ -82,6 +83,12 @@ type fakeExecCall struct {
 
 func newFakeRuntime() *fakeRuntime {
 	return &fakeRuntime{containers: make(map[runtime.ID]*fakeContainer), containerIP: "127.0.0.1"}
+}
+
+func (r *fakeRuntime) setInspectDelay(d time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.inspectWait = d
 }
 
 func (r *fakeRuntime) setWaitError(err error) {
@@ -395,6 +402,13 @@ func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStat
 }
 
 func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
+	r.mu.Lock()
+	waitErr, delay := r.waitErr, r.inspectWait
+	r.mu.Unlock()
+	if waitErr != nil {
+		return runtime.ContainerInfo{}, waitErr
+	}
+	time.Sleep(delay)
 	c, err := r.get(id)
 	if err != nil {
 		return runtime.ContainerInfo{}, err
@@ -403,13 +417,19 @@ func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.Contain
 	for key, value := range c.spec.Env {
 		env = append(env, key+"="+value)
 	}
-	return runtime.ContainerInfo{
+	info := runtime.ContainerInfo{
 		Image: c.spec.Image,
 		User:  c.spec.User,
 		Env:   env,
 
 		Fingerprint: c.spec.Fingerprint,
-	}, nil
+	}
+	c.mu.Lock()
+	if c.exit != nil {
+		info.Exited, info.ExitCode = true, c.exit.Code
+	}
+	c.mu.Unlock()
+	return info, nil
 }
 
 func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.ID, error) {

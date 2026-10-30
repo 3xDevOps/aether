@@ -118,8 +118,8 @@ type Config struct {
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
 	RunContainerTTL      time.Duration // default 1h; negative destroys on close/completion
-	// ExitProbeTimeout bounds recovery's startup probe of whether a container
-	// exited before attach.
+	// ExitProbeTimeout bounds the Wait probes that tell a running terminal or
+	// usage-moved container from an exited one.
 	ExitProbeTimeout time.Duration
 	// Now defaults to time.Now; tests set it to control the second-granularity
 	// saved-environment image tag.

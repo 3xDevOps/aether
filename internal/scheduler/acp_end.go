@@ -240,8 +240,8 @@ func (d *acpDriver) shutdown() {
 				_ = x.sess.Close()
 			} else {
 				// First, so no prompt starts and nothing records the end;
-				// a cancel or answer written from here until the keeper
-				// confirms still reaches the agent.
+				// a cancel or answer written from here on fails with
+				// acpkeeper.ErrDetached, and the next server delivers it.
 				x.sess.Detach()
 				if err := x.r.keeper.Detach(ctx); err != nil {
 					slog.Warn("scheduler: detach from the agent's keeper", "error", err)

@@ -158,7 +158,7 @@ func (d *acpDriver) sendContinuation(entry *supervised) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)
 	defer cancel()
-	sess, err := d.live(entry.runID)
+	sess, err := d.live(ctx, entry.runID)
 	if err == nil {
 		_, err = sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(swap.Continuation)}, false, nil)
 	}
@@ -205,7 +205,7 @@ func (d *acpDriver) LastActivity(run domain.RunID) time.Time {
 }
 
 func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Member, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error) {
-	sess, err := d.live(run.ID)
+	sess, err := d.live(ctx, run.ID)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ptyhost.ErrNoSession, err)
 	}
@@ -309,8 +309,9 @@ func (d *acpDriver) session(run domain.RunID) *acphost.Session {
 }
 
 // live waits, while Start recovers runs, for a run that has no session or
-// failure recorded yet, so a call right after a restart is not refused.
-func (d *acpDriver) live(run domain.RunID) (*acphost.Session, error) {
+// failure recorded yet, so a call right after a restart is not refused. A
+// cancelled ctx ends the wait.
+func (d *acpDriver) live(ctx context.Context, run domain.RunID) (*acphost.Session, error) {
 	sess, err, opened := d.liveNow(run)
 	if opened || !d.s.recovering.Load() {
 		return sess, err
@@ -321,6 +322,8 @@ func (d *acpDriver) live(run domain.RunID) (*acphost.Session, error) {
 	case <-started:
 	case <-d.s.RecoveryReady():
 	case <-time.After(acpRecoveryWait):
+	case <-ctx.Done():
+		return nil, fmt.Errorf("wait for the enhanced session: %w", ctx.Err())
 	}
 	sess, err, _ = d.liveNow(run)
 	return sess, err

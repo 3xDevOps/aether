@@ -514,7 +514,7 @@ func TestEnhancedRunMovesAgainOnASecondLimit(t *testing.T) {
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 	e.assertMovedToOwner(t, run.ID, notes)
 	waitFor(t, "the moved session", func() bool {
-		_, err := e.sched.acp.live(run.ID)
+		_, err := e.sched.acp.live(t.Context(), run.ID)
 		sc, scErr := e.sched.readSidecar(run.ID)
 		return err == nil && scErr == nil && sc.AccountSwap == nil
 	})
@@ -557,7 +557,7 @@ func TestUnconfirmedSharedLoginDoesNotUseUpTheAccount(t *testing.T) {
 		waitFor(t, "the move to "+string(account), func() bool {
 			row, rowErr := e.db.GetRun(t.Context(), run.ID)
 			sc, scErr := e.sched.readSidecar(run.ID)
-			_, liveErr := e.sched.acp.live(run.ID)
+			_, liveErr := e.sched.acp.live(t.Context(), run.ID)
 			return rowErr == nil && scErr == nil && liveErr == nil && row.AccountMemberID == account && sc.AccountSwap == nil
 		})
 	}
