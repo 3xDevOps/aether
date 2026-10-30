@@ -232,7 +232,7 @@ func TestIntegrationRunSSH(t *testing.T) {
 	if body := httpGet(t, forwardPort); body != "loopback-only\n" {
 		t.Fatalf("forwarded response = %q", body)
 	}
-	if _, stderr, code = ada.run("", "ssh", "-W", "example.com:80", host); code == 0 || !strings.Contains(stderr, "only the run's own loopback") {
+	if _, stderr, code = ada.run("", "ssh", "-W", "example.com:80", host); code == 0 || !strings.Contains(stderr, "only the session's own loopback") {
 		t.Fatalf("forward to another host = status %d stderr %q, want it prohibited", code, stderr)
 	}
 

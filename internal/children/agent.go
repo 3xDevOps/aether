@@ -347,7 +347,7 @@ func (s *Service) fetch(ctx context.Context, c *domain.ChildReservation) (protoc
 			return protocol.ChildFetchResult{}, rpcErr(method, fmt.Errorf("publish the subsession's branch: %w", err))
 		}
 	}
-	ref := "refs/remotes/subsessions/" + string(c.RunID)
+	ref := "refs/remotes/children/" + string(c.RunID)
 	commit, err := s.cfg.Git.FetchRunBranch(ctx, r.WorkspaceID, r.Branch, c.ParentRunID, ref)
 	if err != nil {
 		return protocol.ChildFetchResult{}, rpcErr(method, err)

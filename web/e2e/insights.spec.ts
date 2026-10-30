@@ -39,7 +39,7 @@ test('Insights counts a finished run and keeps it across period and scope', asyn
     await expect(section.getByRole('article', { name: 'Success rate' })).toContainText('0%')
     await expect(section.getByRole('article', { name: 'Total tokens used' })).toBeVisible()
     await expect(section.getByRole('img')).toHaveCount(7)
-    await expect(section.getByRole('img', { name: /runs 1 done/ })).toHaveCount(1)
+    await expect(section.getByRole('img', { name: /sessions 1 done/ })).toHaveCount(1)
   }
   await expect(team.getByRole('list', { name: 'Members' }).getByRole('listitem')).toHaveCount(1)
   await expect(mine.getByRole('list', { name: 'Members' })).toHaveCount(0)

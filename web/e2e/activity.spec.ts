@@ -73,7 +73,7 @@ test('Activity shows real agent messages and narrows them to one thread', async 
   })
   await waitForCoordCLI(parent.id, aether.server.dataDir)
   const child = runCoordCLI<{ run_id: string }>(parent.id, [
-    'child', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Answer one question',
+    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Answer one question',
     '--task', 'Answer one question.', '--idempotency-key', 'activity-child',
   ]).run_id
   await waitForCoordCLI(child, aether.server.dataDir)

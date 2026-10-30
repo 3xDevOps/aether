@@ -18,7 +18,7 @@ const scope: [string, string][] = [
 ]
 
 export function limitsText(limits: ChildLimits): string {
-  return `${limits.max_live} subsessions busy at once per parent session (more queue)`
+  return `${limits.max_live} subsessions busy at once per parent session (more queue).`
 }
 
 /** The workspace's child-run limits as a sentence: read, reading, or the refusal. */

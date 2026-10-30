@@ -384,7 +384,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     }).toBe('delivered')
 
     await takeControl.click()
-    await expect(bobControls.getByRole('alert')).toContainText('run control is held by another session')
+    await expect(bobControls.getByRole('alert')).toContainText('session control is held by another client')
     await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     const takeover = page.getByRole('alertdialog', { name: 'Session control requested' })
     await takeControl.focus()

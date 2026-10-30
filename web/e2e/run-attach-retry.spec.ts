@@ -72,7 +72,7 @@ test('a run whose session is missing never reads as offline while it waits', asy
   })
 
   await page.goto(alice.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /session is late/ }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /terminal is late/ }).click()
   // The wait only applies to a run that can still gain a session, so the test
   // is only about what it says while the run is one.
   await expect(

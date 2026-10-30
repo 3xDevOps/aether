@@ -206,7 +206,7 @@ test('two members share notes, moderated messages, and explicit control transfer
     // A short occupied click reports the conflict without displacing Alice.
     const takeControl = bobPresence.getByRole('button', { name: 'Take control', exact: true })
     await takeControl.click()
-    await expect(bobPage.getByText('run control is held by another session', { exact: true })).toBeVisible()
+    await expect(bobPage.getByText('session control is held by another client', { exact: true })).toBeVisible()
     await expect(bobPage.getByRole('alertdialog')).toBeHidden()
     await expect(bobPresence.getByRole('button', { name: 'Release', exact: true })).toBeHidden()
     await expect(alicePresence.getByRole('button', { name: 'Release', exact: true })).toBeVisible()

@@ -421,7 +421,7 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
   // tab reclaimed its own lease rather than acquiring an expired one.
   expect(Date.now() - left).toBeLessThan(15_000)
   await expect(page.getByRole('button', { name: 'Take control' })).toBeHidden()
-  await expect(page.getByText('run control is held by another session')).toBeHidden()
+  await expect(page.getByText('session control is held by another client')).toBeHidden()
 })
 
 test('reviewing a run leaves its control free until its terminal is shown', async ({ page, aether }) => {

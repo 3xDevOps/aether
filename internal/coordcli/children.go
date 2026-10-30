@@ -33,7 +33,7 @@ session's owner allows, and manage them. A subsession cannot start subsessions.
   list [--run-id <subsession>]  your subsessions with state, latest report, branch,
                                 and account
   cancel --run-id <subsession>  stop a subsession, or drop it from the queue
-  fetch --run-id <subsession>   copy its branch to refs/remotes/subsessions/<subsession>
+  fetch --run-id <subsession>   copy its branch to refs/remotes/children/<subsession>
 
 A subsession's report arrives in your inbox and wakes you; do not poll. So does a
 notice that a subsession sat idle or waiting over an hour. Message a

@@ -179,7 +179,7 @@ exit 3`)
 	if failed == nil || failed.Status != string(domain.RunFailed) || failed.Reason != reason {
 		t.Fatalf("failed run = %+v, want status failed and reason %q", failed, reason)
 	}
-	if want := "run " + failed.ID + " failed: " + reason; pe.Message != want {
+	if want := "session " + failed.ID + " failed: " + reason; pe.Message != want {
 		t.Errorf("launch error = %q, want %q", pe.Message, want)
 	}
 

@@ -60,11 +60,11 @@ test('an agent starts a child run that its owner sees, follows and stops', async
     workspace_id: workspaces[0].id, task: 'Fix the login redirect', harness: 'claude', mode: 'tui',
   })
   await waitForCoordCLI(parent.id, aether.server.dataDir)
-  const options = runCoordCLI<{ allowed: boolean; choices: { harness: string; status: string }[] }>(parent.id, ['child', 'options'])
+  const options = runCoordCLI<{ allowed: boolean; choices: { harness: string; status: string }[] }>(parent.id, ['subsession', 'options'])
   expect(options.allowed).toBe(true)
   expect(options.choices).toContainEqual(expect.objectContaining({ harness: 'codex', status: 'ready' }))
   const receipt = runCoordCLI<{ run_id: string; next: string }>(parent.id, [
-    'child', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Adversarial review of the redirect fix',
+    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Adversarial review of the redirect fix',
     '--task', 'Review the last commit for open redirects.', '--idempotency-key', 'review-1',
   ])
   expect(receipt.next).toContain('Do not poll')
@@ -104,7 +104,7 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   }
 
   const second = runCoordCLI<{ run_id: string }>(parent.id, [
-    'child', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Long-running audit',
+    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Long-running audit',
     '--task', 'Audit every redirect.', '--idempotency-key', 'audit-1',
   ])
   await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: launchTimeout }).toBe('running')

@@ -192,7 +192,7 @@ func TestIntegrationAssistantWatchesRun(t *testing.T) {
 		if strings.Contains(item, "needs your attention") && strings.Contains(item, "pick a database") && strings.Contains(item, "watch="+watchID) {
 			attentionNotices++
 		}
-		if strings.Contains(item, `Run \"`+task+`\"`) && (strings.Contains(item, "finished") || strings.Contains(item, "failed")) {
+		if strings.Contains(item, `Session \"`+task+`\"`) && (strings.Contains(item, "finished") || strings.Contains(item, "failed")) {
 			finishedNotices++
 		}
 	}
