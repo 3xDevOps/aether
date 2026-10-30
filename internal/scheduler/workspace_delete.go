@@ -40,21 +40,21 @@ func (s *Scheduler) WithInactiveWorkspace(ctx context.Context, id domain.Workspa
 	}
 	for _, run := range runs {
 		if !run.Status.Terminal() {
-			return fmt.Errorf("%w: run %s is %s; close or stop unfinished runs before deleting the workspace", ErrInvalidTransition, run.ID, run.Status)
+			return fmt.Errorf("%w: session %s is %s; close or stop unfinished sessions before deleting the workspace", ErrInvalidTransition, run.ID, run.Status)
 		}
 		s.mu.Lock()
 		entry := s.runs[run.ID]
 		busy := s.pending[run.ID] != nil || (entry != nil && (!entry.status.Terminal() || entry.finalizing || entry.destroyPending || !entry.retained))
 		s.mu.Unlock()
 		if busy {
-			return fmt.Errorf("%w: run %s is still active or cleaning up", ErrInvalidTransition, run.ID)
+			return fmt.Errorf("%w: session %s is still active or cleaning up", ErrInvalidTransition, run.ID)
 		}
 		sc, err := s.readSidecar(run.ID)
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		if err == nil && (sc.DestroyPending || sc.EvidencePending || (sc.ContainerID != "" && !sc.Retained && sc.RetainedUntil == nil)) {
-			return fmt.Errorf("%w: run %s has pending runtime cleanup", ErrInvalidTransition, run.ID)
+			return fmt.Errorf("%w: session %s has pending runtime cleanup", ErrInvalidTransition, run.ID)
 		}
 	}
 	mounting, mountErr := s.cfg.Store.RunsWithExtraRepo(ctx, id)
@@ -67,7 +67,7 @@ func (s *Scheduler) WithInactiveWorkspace(ctx context.Context, id domain.Workspa
 			return scErr
 		}
 		if scErr == nil && sc.ContainerID != "" {
-			return fmt.Errorf("%w: run %s still has a container mounting this workspace as an extra repository; delete that run first", ErrInvalidTransition, run)
+			return fmt.Errorf("%w: session %s still has a container mounting this workspace as an extra repository; delete that session first", ErrInvalidTransition, run)
 		}
 	}
 	return cleanup(runs)

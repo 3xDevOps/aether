@@ -209,7 +209,7 @@ func TestChangesListPagesMeaningfulChanges(t *testing.T) {
 		"bad cursor":        {protocol.ChangesListParams{Cursor: "seq-3"}, protocol.CodeInvalidParams},
 		"mixed scopes":      {protocol.ChangesListParams{WorkspaceID: string(other.ID), RunID: string(solo)}, protocol.CodeInvalidParams},
 		"unknown cursor ws": {protocol.ChangesListParams{Cursor: "0", WorkspaceID: "ws-never"}, protocol.CodeNotFound},
-		"missing run":       {protocol.ChangesListParams{RunID: "run-missing"}, protocol.CodeNotFound},
+		"missing session":   {protocol.ChangesListParams{RunID: "run-missing"}, protocol.CodeNotFound},
 		"negative limit":    {protocol.ChangesListParams{Limit: -1}, protocol.CodeInvalidParams},
 		"missing workspce":  {protocol.ChangesListParams{WorkspaceID: "ws-missing"}, protocol.CodeNotFound},
 	} {

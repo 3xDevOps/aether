@@ -54,7 +54,7 @@ export function useOpenInEditor(run: RunRecord): { item: ExtraItem | null; dialo
     id: 'open-in-editor',
     label: 'Open in editor…',
     Icon: ExternalLink,
-    ...(paused ? { disabled: true, description: 'Resume the run first' } : {}),
+    ...(paused ? { disabled: true, description: 'Resume the session first' } : {}),
     onSelect: (trigger) => {
       returnTo.current = trigger
       setOpen(true)
@@ -70,7 +70,7 @@ export function useOpenInEditor(run: RunRecord): { item: ExtraItem | null; dialo
       >
         <DialogHeader>
           <DialogTitle>Open in editor</DialogTitle>
-          <DialogDescription>Your editor connects to this run&apos;s container over SSH and opens its checkout.</DialogDescription>
+          <DialogDescription>Your editor connects to this session&apos;s container over SSH and opens its checkout.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap gap-2">
           {editors.map((editor) => (

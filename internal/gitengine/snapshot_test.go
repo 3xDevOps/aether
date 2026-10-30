@@ -324,7 +324,7 @@ func TestDiffWatchResumesItsIntervalChainAfterARestart(t *testing.T) {
 	}
 	ev, ok := nextEvent(t, diffs, 5*time.Second)
 	if !ok {
-		t.Fatal("no run.diff event after the first write")
+		t.Fatal("no session.diff event after the first write")
 	}
 	first := ev.Payload.(events.RunDiffPayload)
 	if first.Tree == "" {
@@ -363,7 +363,7 @@ func TestDiffWatchResumesItsIntervalChainAfterARestart(t *testing.T) {
 	}
 	ev, ok = nextEvent(t, diffs, 5*time.Second)
 	if !ok {
-		t.Fatal("no run.diff event after the post-restart edit")
+		t.Fatal("no session.diff event after the post-restart edit")
 	}
 	second := ev.Payload.(events.RunDiffPayload)
 	if second.ParentTree != first.Tree {

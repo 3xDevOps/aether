@@ -356,7 +356,7 @@ func mustDialRunSSH(t *testing.T, e *testEnv, signer ssh.Signer) *ssh.Client {
 	t.Helper()
 	nested, ack := dialRunSSH(t, e.dialWithTest(t, signer), string(e.run.ID))
 	if nested == nil {
-		t.Fatalf("ssh into the run refused: %d %s", ack.Code, ack.Error)
+		t.Fatalf("ssh into the session refused: %d %s", ack.Code, ack.Error)
 	}
 	return nested
 }
@@ -377,7 +377,7 @@ func runOverSSH(t *testing.T, client *ssh.Client, command, stdin string) (stdout
 	case errors.As(err, &exit):
 		status = exit.ExitStatus()
 	default:
-		t.Fatalf("run %q: %v", command, err)
+		t.Fatalf("session %q: %v", command, err)
 	}
 	return out.String(), errOut.String(), status
 }
@@ -395,7 +395,7 @@ func TestRunSSHExecCarriesStreamsAndExitStatus(t *testing.T) {
 	// bootstrap script all rely on, and one connection carries more than
 	// one session.
 	if stdout, _, status = runOverSSH(t, client, `cat; pwd`, "piped\n"); status != 0 || stdout != "piped\n"+svc.dir+"\n" {
-		t.Fatalf("stdin and working directory = %q status %d, want the run's checkout %s", stdout, status, svc.dir)
+		t.Fatalf("stdin and working directory = %q status %d, want the session's checkout %s", stdout, status, svc.dir)
 	}
 	if got := len(svc.starts()); got != 2 {
 		t.Fatalf("executions started = %d, want one per session", got)
@@ -511,27 +511,27 @@ func TestRunSSHRefusals(t *testing.T) {
 			code: protocol.CodeDenied, message: "membership pending admin approval",
 		},
 		{
-			name: "an unknown run",
+			name: "an unknown session",
 			arrange: func(_ *testing.T, e *testEnv, _ *runSSHTestService) (ssh.Signer, string) {
 				return e.signer, "run-nope"
 			},
-			code: protocol.CodeNotFound, message: "run not found",
+			code: protocol.CodeNotFound, message: "session not found",
 		},
 		{
-			name: "a paused run",
+			name: "a paused session",
 			arrange: func(_ *testing.T, e *testEnv, svc *runSSHTestService) (ssh.Signer, string) {
 				svc.refuse(scheduler.ErrRunPaused)
 				return e.signer, string(e.run.ID)
 			},
-			code: protocol.CodeInvalidState, message: "the run is paused",
+			code: protocol.CodeInvalidState, message: "the session is paused",
 		},
 		{
-			name: "a finished run",
+			name: "a finished session",
 			arrange: func(_ *testing.T, e *testEnv, svc *runSSHTestService) (ssh.Signer, string) {
-				svc.refuse(fmt.Errorf("%w: the run is completed and its container is gone", scheduler.ErrNoLiveEnvironment))
+				svc.refuse(fmt.Errorf("%w: the session is completed and its container is gone", scheduler.ErrNoLiveEnvironment))
 				return e.signer, string(e.run.ID)
 			},
-			code: protocol.CodeInvalidState, message: "the run is completed and its container is gone",
+			code: protocol.CodeInvalidState, message: "the session is completed and its container is gone",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -540,7 +540,7 @@ func TestRunSSHRefusals(t *testing.T) {
 			signer, run := tc.arrange(t, e, svc)
 			nested, ack := dialRunSSH(t, e.dialWithTest(t, signer), run)
 			if nested != nil {
-				t.Fatal("ssh into the run was admitted")
+				t.Fatal("ssh into the session was admitted")
 			}
 			if ack.Code != tc.code || !strings.Contains(ack.Error, tc.message) {
 				t.Fatalf("refusal = %d %q, want code %d naming %q", ack.Code, ack.Error, tc.code, tc.message)
@@ -584,7 +584,7 @@ func TestRunSSHEndsWhenAuthorizationOrTheRunGoes(t *testing.T) {
 			}
 		},
 		"run finished": func(_ *testing.T, _ *testEnv, svc *runSSHTestService, _ *domain.Member) {
-			svc.refuse(fmt.Errorf("%w: the run is completed and its container is gone", scheduler.ErrNoLiveEnvironment))
+			svc.refuse(fmt.Errorf("%w: the session is completed and its container is gone", scheduler.ErrNoLiveEnvironment))
 		},
 		"run closing": func(_ *testing.T, _ *testEnv, svc *runSSHTestService, _ *domain.Member) {
 			svc.refuse(scheduler.ErrDevelopmentClosed)
@@ -663,7 +663,7 @@ func TestRunSSHFailsClosedWhenItsCheckCannotComplete(t *testing.T) {
 
 	// A check that fails to complete fewer times in a row than the limit
 	// ends nothing: a store read racing a status change does that.
-	svc.refuseNext(errors.New("run lifecycle changed; retry"), runSSHUnconfirmedChecks-1)
+	svc.refuseNext(errors.New("session lifecycle changed; retry"), runSSHUnconfirmedChecks-1)
 	eventually(t, "the checks that could not complete", func() bool { return !svc.refusing() })
 	if stdout, _, status := runOverSSH(t, client, "echo still here", ""); status != 0 || stdout != "still here\n" {
 		t.Fatalf("after a transient check failure: %q status %d", stdout, status)
@@ -699,8 +699,8 @@ func TestRunSSHPauseKeepsTheConnectionAndStopsItsProcessesOnResume(t *testing.T)
 
 	svc.pause(e, true)
 	time.Sleep(100 * time.Millisecond)
-	if _, stderr, status := runOverSSH(t, client, "echo unreachable", ""); status != 255 || !strings.Contains(stderr, "the run is paused") {
-		t.Fatalf("new session on the paused run = status %d stderr %q, want it refused on the live connection", status, stderr)
+	if _, stderr, status := runOverSSH(t, client, "echo unreachable", ""); status != 255 || !strings.Contains(stderr, "the session is paused") {
+		t.Fatalf("new session on the paused session = status %d stderr %q, want it refused on the live connection", status, stderr)
 	}
 
 	// The member leaves while the container is frozen: the stop cannot
@@ -875,7 +875,7 @@ func TestRunSSHStartRefusalReachesTheClient(t *testing.T) {
 	client := mustDialRunSSH(t, e, e.signer)
 	svc.refuse(scheduler.ErrRunPaused)
 	_, stderr, status := runOverSSH(t, client, "echo unreachable", "")
-	if status != 255 || !strings.Contains(stderr, "aether: scheduler: the run has no live environment: the run is paused") {
+	if status != 255 || !strings.Contains(stderr, "aether: scheduler: the session has no live environment: the session is paused") {
 		t.Fatalf("start refusal = status %d stderr %q", status, stderr)
 	}
 }
@@ -941,7 +941,7 @@ func TestRunSSHForwardReachesOnlyTheRunsLoopback(t *testing.T) {
 	for _, host := range []string{"example.com", "10.0.0.1", "169.254.169.254", "0.0.0.0", "terminal", "run:" + string(e.run.ID)} {
 		_, err := client.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 		var refused *ssh.OpenChannelError
-		if !errors.As(err, &refused) || refused.Reason != ssh.Prohibited || !strings.Contains(refused.Message, "only the run's own loopback") {
+		if !errors.As(err, &refused) || refused.Reason != ssh.Prohibited || !strings.Contains(refused.Message, "only the session's own loopback") {
 			t.Fatalf("forward to %s = %v, want it prohibited", host, err)
 		}
 	}
@@ -1024,7 +1024,7 @@ func TestRunSSHBoundsSessionsForwardsAndConnections(t *testing.T) {
 		mustDialRunSSH(t, e, e.signer)
 	}
 	if nested, ack := dialRunSSH(t, e.dial(t), string(e.run.ID)); nested != nil || ack.Code != protocol.CodeConflict ||
-		!strings.Contains(ack.Error, "you already have 8 SSH connections open to run "+string(e.run.ID)) {
+		!strings.Contains(ack.Error, "you already have 8 SSH connections open to session "+string(e.run.ID)) {
 		t.Fatalf("connection past the member's cap = %d %q", ack.Code, ack.Error)
 	}
 	bo, boMember := addMember(t, e, "Bo", domain.RoleCollaborator, false)
@@ -1039,7 +1039,7 @@ func TestRunSSHBoundsSessionsForwardsAndConnections(t *testing.T) {
 	}
 	if nested, ack := dialRunSSH(t, e.dialWithTest(t, cy), string(e.run.ID)); nested != nil || ack.Code != protocol.CodeConflict ||
 		!strings.Contains(ack.Error, "already has 16 SSH connections open") {
-		t.Fatalf("connection past the run's cap = %d %q", ack.Code, ack.Error)
+		t.Fatalf("connection past the session's cap = %d %q", ack.Code, ack.Error)
 	}
 }
 

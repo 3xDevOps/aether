@@ -119,9 +119,9 @@ export function AgentSetup({
       {requireEnhanced ? (
         <p className="text-ui text-text">The assistant uses {name} in Enhanced mode, so its Enhanced adapter is installed too.</p>
       ) : (
-        <SetupStep number={1} title="Choose how runs show it">
+        <SetupStep number={1} title="Choose how sessions show it">
           <ModeComparison agent={agent} value={mode} onChange={setMode} />
-          {!enhancedSupported(agent) && <p className="text-ui-sm text-muted">Runs of {name} use Standard.</p>}
+          {!enhancedSupported(agent) && <p className="text-ui-sm text-muted">Sessions of {name} use Standard.</p>}
         </SetupStep>
       )}
 

@@ -137,7 +137,7 @@ export function RunFields({
       <FormField
         label="Task"
         help={mode === 'headless'
-          ? 'Required. A Background run starts with this task and takes no input.'
+          ? 'Required. A Background session starts with this task and takes no input.'
           : 'Optional. Leave it blank to open the agent with no prompt.'}
       >
         <Textarea autoFocus={autoFocus} required={mode === 'headless'} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />

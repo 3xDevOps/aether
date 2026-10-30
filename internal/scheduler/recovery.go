@@ -105,7 +105,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.startSupervision(entry)
 	}
 	if old.HomeMemberID == "" && old.MemberID != old.AccountMember() {
-		return nil, fmt.Errorf("%w: run %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new run",
+		return nil, fmt.Errorf("%w: session %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new session",
 			ErrInvalidTransition, run)
 	}
 	entry.lifecycleMu.Lock()
@@ -200,7 +200,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		if _, clearErr := s.cfg.Store.SetRunArchived(ctx, run, nil); clearErr != nil {
 			s.mu.Unlock()
 			s.archiveMu.Unlock()
-			return nil, fmt.Errorf("scheduler: clear archived run before relaunch: %w", clearErr)
+			return nil, fmt.Errorf("scheduler: clear archived session before relaunch: %w", clearErr)
 		}
 		runningRow.ArchivedAt = nil
 	}
@@ -209,7 +209,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			// No restore was published, so clients still show the run as
 			// archived; put the original timer back to match.
 			if _, rearchiveErr := s.cfg.Store.SetRunArchived(context.WithoutCancel(ctx), run, fresh.ArchivedAt); rearchiveErr != nil {
-				updateErr = errors.Join(updateErr, fmt.Errorf("scheduler: re-archive run after failed relaunch: %w", rearchiveErr))
+				updateErr = errors.Join(updateErr, fmt.Errorf("scheduler: re-archive session after failed relaunch: %w", rearchiveErr))
 			}
 		}
 		s.mu.Unlock()
@@ -1431,7 +1431,7 @@ func (s *Scheduler) cleanupLeftoverContainer(ctx context.Context, cid runtime.ID
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {
 		s.recordRunCleanupError(run, cleanupLookupError)
-		return fmt.Errorf("scheduler: load leftover run during recovery: %w", err)
+		return fmt.Errorf("scheduler: load leftover session during recovery: %w", err)
 	}
 	if cid != "" {
 		if derr := s.destroyDevelopmentContainer(ctx, run, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {

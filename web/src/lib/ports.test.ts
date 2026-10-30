@@ -60,7 +60,7 @@ describe('opening a run port on this computer', () => {
     vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
     const client = fakeApi()
 
-    await expect(openOnThisComputer(client, 'run-abc', 8000)).rejects.toThrow('Nothing in the run is listening on port 8000.')
+    await expect(openOnThisComputer(client, 'run-abc', 8000)).rejects.toThrow('Nothing in the session is listening on port 8000.')
 
     expect(client.localForwardStart).not.toHaveBeenCalled()
     expect(opened.close).toHaveBeenCalled()
@@ -70,7 +70,7 @@ describe('opening a run port on this computer', () => {
     vi.spyOn(window, 'open').mockReturnValue(null)
     const client = fakeApi({ devPortList: vi.fn(async () => ({ ports: [loopback] })) })
 
-    await expect(openOnThisComputer(client, 'run-abc', 5173)).rejects.toThrow('Port 5173 is bound to ::1 inside the run, so only the run can reach it. Start the server on 0.0.0.0 to open it on this computer.')
+    await expect(openOnThisComputer(client, 'run-abc', 5173)).rejects.toThrow('Port 5173 is bound to ::1 inside the session, so only the session can reach it. Start the server on 0.0.0.0 to open it on this computer.')
 
     expect(client.localForwardStart).not.toHaveBeenCalled()
   })

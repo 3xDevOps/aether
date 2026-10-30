@@ -17,7 +17,7 @@ import { memberID, seedWorkspace } from './harness/setup'
  */
 const drops = 4
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('a run whose session is missing never reads as offline while it waits', async ({
   page,
@@ -68,7 +68,7 @@ test('a run whose session is missing never reads as offline while it waits', asy
   await alice.api.rpc('run.launch', {
     workspace_id: workspaces[0].id,
     harness: 'claude',
-    task: 'a run whose session is late',
+    task: 'a session whose terminal is late',
   })
 
   await page.goto(alice.url)
@@ -76,7 +76,7 @@ test('a run whose session is missing never reads as offline while it waits', asy
   // The wait only applies to a run that can still gain a session, so the test
   // is only about what it says while the run is one.
   await expect(
-    page.locator('header').filter({ hasText: 'a run whose session is late' }),
+    page.locator('header').filter({ hasText: 'a session whose terminal is late' }),
   ).toContainText('Working')
 
   // Every dropped socket, the refusal, and the reconnect that refusal earns.

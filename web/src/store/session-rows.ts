@@ -100,7 +100,7 @@ function toolTarget(call: SessionToolCall): string {
   if (path && call.tool_kind !== 'execute') return path
   const [present, past] = toolTenses({ tool: call.tool_kind })
   const first = call.title.split(' ', 1)[0]!
-  const verbs = [present, past, call.tool_kind, 'Edit', 'Write', 'Run', 'Search', 'Fetch'].map((verb) => verb?.toLowerCase())
+  const verbs = [present, past, call.tool_kind, 'Edit', 'Write', 'Session', 'Search', 'Fetch'].map((verb) => verb?.toLowerCase())
   return verbs.includes(first.toLowerCase()) && call.title.length > first.length ? call.title.slice(first.length + 1) : call.title
 }
 
@@ -339,7 +339,7 @@ export function turnRows(turn: Turn): SessionRow[] {
       continue
     }
     if (slot.kind === 'reset') {
-      parts.push({ kind: 'boundary', row: { kind: 'event', id: slot.id, at: slot.at, text: 'New agent session' } })
+      parts.push({ kind: 'boundary', row: { kind: 'event', id: slot.id, at: slot.at, text: 'New agent conversation' } })
       continue
     }
     if (slot.kind === 'step') {

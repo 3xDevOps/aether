@@ -14,7 +14,7 @@ import { useStore } from '@/store'
 import { useCapability, useNeedsYouByWorkspace } from '@/store/hooks'
 
 function needsYouLabel(count: number): string {
-  return `${count} ${count === 1 ? 'run needs' : 'runs need'} you`
+  return `${count} ${count === 1 ? 'session needs' : 'sessions need'} you`
 }
 
 export function WorkspaceSwitcher() {

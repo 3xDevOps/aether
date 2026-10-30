@@ -151,7 +151,7 @@ describe('buildLanes', () => {
       'Needs you', 'family', ['parent', 3], ['c1', 3], ['c2', 3], ['g1', 3],
     ])
     const header = lanes.find((l): l is FamilyLane => l.kind === 'family')!
-    expect(header).toMatchObject({ open: true, parentID: 'parent', detail: '3 child runs · 1 needs you · 1 working · 1 done' })
+    expect(header).toMatchObject({ open: true, parentID: 'parent', detail: '3 subsessions · 1 needs you · 1 working · 1 done' })
     const folded = buildLanes(input(ctx, { open: new Map([[header.key, false]]) })).lanes
     expect(folded.filter((l) => l.kind === 'run').map((l) => (l as RunLane).card.run.id)).toEqual(['g1'])
   })

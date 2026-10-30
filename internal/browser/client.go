@@ -148,7 +148,7 @@ func (c *Client) Do(ctx context.Context, request Request) (Result, error) {
 // action. Callers must hold the surface admission/revocation gate throughout.
 func (c *Client) ReleaseInput(ctx context.Context, session string) error {
 	if session == "" {
-		return errors.New("browser input cleanup requires a session")
+		return errors.New("browser input cleanup requires a browser context")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

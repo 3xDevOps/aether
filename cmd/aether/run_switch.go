@@ -7,11 +7,11 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const runSwitchUsage = "usage: aether run switch <run-id> --mode standard|enhanced"
+const runSwitchUsage = "usage: aether session switch <session-id> --mode standard|enhanced"
 
 func runSwitch(args []string) error {
 	runID := args[0]
-	fs := newFlagSet("run switch")
+	fs := newFlagSet("session switch")
 	mode := fs.String("mode", "", "standard or enhanced")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -25,7 +25,7 @@ func runSwitch(args []string) error {
 		if err := c.Call(protocol.MethodRunModeSwitch, protocol.RunModeSwitchParams{RunID: runID, Mode: wire}, &res); err != nil {
 			return err
 		}
-		fmt.Printf("run %s switched to %s\n", res.Run.ID, *mode)
+		fmt.Printf("session %s switched to %s\n", res.Run.ID, *mode)
 		return nil
 	})
 }

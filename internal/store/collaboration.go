@@ -712,7 +712,7 @@ func (d *DB) ClaimRoomMessage(ctx context.Context, id string, now time.Time, for
 // between the candidate read and the cancellation update.
 func (d *DB) CancelQueuedSteerRequests(ctx context.Context, run domain.RunID, by domain.MemberID, decidedAt time.Time) ([]*RoomMessage, error) {
 	if run == "" || by == "" {
-		return nil, errors.New("store: cancel queued steer requests: run and decided_by are required")
+		return nil, errors.New("store: cancel queued steer requests: session and decided_by are required")
 	}
 	if decidedAt.IsZero() {
 		decidedAt = time.Now().UTC()
@@ -778,80 +778,80 @@ func (d *DB) CancelQueuedSteerRequests(ctx context.Context, run domain.RunID, by
 // can commit between the protection decision and cancellation.
 func (d *DB) SetRunProtectedAndCancelQueuedSteerRequests(ctx context.Context, run domain.RunID, protected bool, by domain.MemberID, decidedAt time.Time) ([]*RoomMessage, error) {
 	if run == "" {
-		return nil, errors.New("store: protect run: run is required")
+		return nil, errors.New("store: protect session: session is required")
 	}
 	if protected && by == "" {
-		return nil, errors.New("store: protect run: decided_by is required")
+		return nil, errors.New("store: protect session: decided_by is required")
 	}
 	if decidedAt.IsZero() {
 		decidedAt = time.Now().UTC()
 	}
 	decidedAtN, err := encodeTime(decidedAt)
 	if err != nil {
-		return nil, fmt.Errorf("store: protect run: %w", err)
+		return nil, fmt.Errorf("store: protect session: %w", err)
 	}
 	updatedAt, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return nil, fmt.Errorf("store: protect run: %w", err)
+		return nil, fmt.Errorf("store: protect session: %w", err)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store: protect run: begin: %w", err)
+		return nil, fmt.Errorf("store: protect session: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx, `UPDATE runs SET protected = ? WHERE id = ?`, protected, run)
 	if err != nil {
-		return nil, fmt.Errorf("store: protect run: update: %w", err)
+		return nil, fmt.Errorf("store: protect session: update: %w", err)
 	}
 	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
-		return nil, fmt.Errorf("store: protect run: rows: %w", rowsErr)
+		return nil, fmt.Errorf("store: protect session: rows: %w", rowsErr)
 	} else if n == 0 {
 		return nil, ErrNotFound
 	}
 	if !protected {
 		if commitErr := tx.Commit(); commitErr != nil {
-			return nil, fmt.Errorf("store: protect run: commit: %w", commitErr)
+			return nil, fmt.Errorf("store: protect session: commit: %w", commitErr)
 		}
 		return nil, nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM room_messages WHERE run_id = ? AND kind = ? AND state = ? ORDER BY created_at, rowid`, run, RoomMessageSteerRequest, RoomMessageQueued)
 	if err != nil {
-		return nil, fmt.Errorf("store: protect run: select: %w", err)
+		return nil, fmt.Errorf("store: protect session: select: %w", err)
 	}
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			_ = rows.Close()
-			return nil, fmt.Errorf("store: protect run: scan: %w", err)
+			return nil, fmt.Errorf("store: protect session: scan: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return nil, fmt.Errorf("store: protect run: rows: %w", err)
+		return nil, fmt.Errorf("store: protect session: rows: %w", err)
 	}
 	_ = rows.Close()
 	if len(ids) == 0 {
 		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("store: protect run: commit: %w", err)
+			return nil, fmt.Errorf("store: protect session: commit: %w", err)
 		}
 		return nil, nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE room_messages SET state = ?, decided_by = ?, decided_at = ?, updated_at = ?
 		WHERE run_id = ? AND kind = ? AND state = ?`, RoomMessageCancelled, by, decidedAtN, updatedAt, run, RoomMessageSteerRequest, RoomMessageQueued); err != nil {
-		return nil, fmt.Errorf("store: protect run: cancel: %w", err)
+		return nil, fmt.Errorf("store: protect session: cancel: %w", err)
 	}
 	messages := make([]*RoomMessage, 0, len(ids))
 	for _, id := range ids {
 		msg, err := scanRoomMessage(tx.QueryRowContext(ctx, `SELECT `+roomMessageCols+` FROM room_messages WHERE id = ?`, id))
 		if err != nil {
-			return nil, fmt.Errorf("store: protect run: read: %w", err)
+			return nil, fmt.Errorf("store: protect session: read: %w", err)
 		}
 		messages = append(messages, msg)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store: protect run: commit: %w", err)
+		return nil, fmt.Errorf("store: protect session: commit: %w", err)
 	}
 	return messages, nil
 }

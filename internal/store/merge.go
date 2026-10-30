@@ -426,13 +426,13 @@ func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error
 	}
 	var stop []string
 	if len(steers) > 0 {
-		stop = append(stop, "queued steer requests "+strings.Join(steers, ", ")+" (approve or deny them in the run's room)")
+		stop = append(stop, "queued steer requests "+strings.Join(steers, ", ")+" (approve or deny them in the session's room)")
 	}
 	if len(handoffs) > 0 {
 		stop = append(stop, "handoffs "+strings.Join(handoffs, ", ")+" (they finish publishing on their own; retry in a minute)")
 	}
 	if len(runs) > 0 {
-		stop = append(stop, "runs "+strings.Join(runs, ", ")+" (aether kill <run-id>, or aether close <run-id>)")
+		stop = append(stop, "sessions "+strings.Join(runs, ", ")+" (aether kill <session-id>, or aether close <session-id>)")
 	}
 	for _, m := range terminals {
 		stop = append(stop, "the Environment terminal of member "+m+" (aether terminal stop on that sign-in)")
@@ -879,7 +879,7 @@ func (d *DB) FinishedRunsOf(ctx context.Context, a, b domain.MemberID) ([]*domai
 			finished = append(finished, "'"+string(s)+"'")
 		}
 	}
-	return d.listRuns(ctx, fmt.Sprintf("finished runs of %s and %s", a, b), runSnapshotQuery(`runs.status IN (`+strings.Join(finished, ", ")+`)
+	return d.listRuns(ctx, fmt.Sprintf("finished sessions of %s and %s", a, b), runSnapshotQuery(`runs.status IN (`+strings.Join(finished, ", ")+`)
 		AND (runs.member_id IN (?, ?) OR runs.account_member_id IN (?, ?) OR runs.home_member_id IN (?, ?))`)+
 		` ORDER BY runs.created_at, runs.rowid`, a, b, a, b, a, b)
 }

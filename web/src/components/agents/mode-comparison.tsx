@@ -118,7 +118,7 @@ export function ModeComparison({
   return (
     <div className="@container flex min-w-0 flex-col gap-3">
       <RadioGroupPrimitive.Root
-        aria-label={`How runs show ${label(agent)}`}
+        aria-label={`How sessions show ${label(agent)}`}
         value={value}
         onValueChange={(next) => onChange(next as SetupMode)}
         className="grid gap-3 @min-[640px]:grid-cols-2"

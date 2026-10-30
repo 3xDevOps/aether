@@ -57,7 +57,7 @@ export function launchRows(s: RootState, method: string, params: unknown, defaul
   const owner = sharer(s, str(p.account_member_id))
   const extras = Array.isArray(p.extra_workspace_ids) ? p.extra_workspace_ids.filter((id): id is string => typeof id === 'string') : []
   const rows: [string, string][] = [
-    ['Kind', 'Run: one agent on one task'],
+    ['Kind', 'Session: one agent on one task'],
     ['Workspace', [workspace, ...extras].filter(Boolean).map((id) => s.workspaces[id!]?.name ?? id).join(', ')],
     ['Agent', agentLine(s, p)],
     ['Account', owner ? `${owner}'s account, shared with you` : 'Yours'],

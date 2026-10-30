@@ -43,7 +43,7 @@ export const actionStateWord: Record<ActionState, string> = {
 }
 
 const targetWord: Record<ActionTarget['kind'], string> = {
-  run: 'Open run',
+  run: 'Open session',
   pr: 'Open pull request',
   workspace: 'Open workspace',
   environment: 'Open environment',
@@ -53,15 +53,15 @@ const targetWord: Record<ActionTarget['kind'], string> = {
 }
 
 const goneWord: Partial<Record<ActionTarget['kind'], string>> = {
-  run: 'This run no longer exists',
+  run: 'This session no longer exists',
   workspace: 'This workspace no longer exists',
 }
 
-const launchTools = new Set(['aether_launch_run', 'aether_relaunch_run'])
+const launchTools = new Set(['aether_launch_session', 'aether_relaunch_session'])
 
 /** Whether the call starts a run, whose target can reach the transcript before the store. */
 function startsWork(action: AssistantAction): boolean {
-  return launchTools.has(action.tool) || (action.tool === 'aether_run_lifecycle' && action.input.action === 'relaunch')
+  return launchTools.has(action.tool) || (action.tool === 'aether_session_lifecycle' && action.input.action === 'relaunch')
 }
 
 /** States the member chose or let lapse: said quietly, with any error kept for the details. */

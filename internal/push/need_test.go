@@ -143,7 +143,7 @@ func TestRunTitle(t *testing.T) {
 	}{
 		"title":           {domain.Run{Title: " Fix the login redirect ", Task: "do it"}, "Fix the login redirect"},
 		"first line":      {domain.Run{Task: "\n  fix the auth bug\nand add a test"}, "fix the auth bug"},
-		"neither":         {domain.Run{}, "Untitled run"},
+		"neither":         {domain.Run{}, "Untitled session"},
 		"long is clipped": {domain.Run{Task: long}, strings.TrimRight(long[:fallbackTitleRunes], " ") + "…"},
 	} {
 		if got := RunTitle(&tc.run); got != tc.want {

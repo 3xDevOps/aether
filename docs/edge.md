@@ -429,7 +429,7 @@ reaches a dashboard over a tailnet
 ### MCP connectors
 
 A server's MCP connector lets ChatGPT or Claude list, launch, message and stop
-runs as a member ([connectors.md](connectors.md)). The edge forwards it at two
+sessions as a member ([connectors.md](connectors.md)). The edge forwards it at two
 URLs, and the server authenticates every request:
 
 - `https://<relay host>/mcp`, the universal URL every server on the edge
@@ -906,7 +906,7 @@ Check from another machine:
    ```
 
    Then `aether link --claim <code> --edge https://<relay-host>` and `aether
-   runs` on the laptop.
+   sessions` on the laptop.
 
 ### Monitoring
 
@@ -1001,7 +1001,7 @@ sudo systemctl restart aether-edge
 In a container, back up with `docker exec <container> aether-edge backup
 /var/lib/aether-edge/backups/` and start the new tag's container with the same
 volume. Fetch the new release's unit and environment example too, and compare them
-with yours. Relayed connections drop for a few seconds and runs are unaffected.
+with yours. Relayed connections drop for a few seconds and sessions are unaffected.
 Upgrade the edge before its servers: an older server or client is refused with
 `upgrade required: <minimum>`.
 
@@ -1057,7 +1057,7 @@ sudo systemctl enable --now aether-edge-update.timer aether-edge-update-recover.
 
 Without cosign or jq `--check` fails with `cosign not found` or `jq not found`.
 An edge whose image predates `version --json`, `release-check`, `backup` and
-`schema` makes every run exit 1 with `<image>@<digest> predates aether-edge ...`.
+`schema` makes every session exit 1 with `<image>@<digest> predates aether-edge ...`.
 Upgrade it by hand once ([First upgrade](#first-upgrade)). To be told about
 failures, add `OnFailure=` to the service.
 
@@ -1083,12 +1083,12 @@ updater does the rest.
   --manual-steps-done`. A hold because the running release is older than
   `min_upgrade_from` is refused with `--manual-steps-done passes only blocking
   manual steps`: upgrade by hand to a release at or above it first.
-- A `broken` state means the rollback failed, and every run exits 1 with
+- A `broken` state means the rollback failed, and every session exits 1 with
   `state is broken since <time>: <reason>`. Run the edge on a release you trust
   (put its digest in `.env`, restore a backup first if `schema --json` asks for
   it, then `docker compose up -d --wait aether-edge`) and delete
   `/var/lib/aether-edge-update/state`.
-- A digest in `/var/lib/aether-edge-update/failed` is skipped on every run. Delete
+- A digest in `/var/lib/aether-edge-update/failed` is skipped on every session. Delete
   its line to try it again.
 - A host that reboots mid-update is recovered at boot by
   `aether-edge-update-recover.service`, or by `sudo aether-edge-update --recover`.

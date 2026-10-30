@@ -363,7 +363,7 @@ func (s *Service) SetBudget(ctx context.Context, workspace domain.WorkspaceID, c
 			return Status{}, fmt.Errorf("cost: set budget %s: %w", workspace, err)
 		}
 		if c.Override {
-			reason += " (override on: the cap admits new runs)"
+			reason += " (override on: the cap admits new sessions)"
 		}
 	}
 	st, err := s.status(ctx, workspace)
@@ -385,17 +385,17 @@ func (s *Service) Admit(ctx context.Context, workspace domain.WorkspaceID, membe
 	}
 	st, err := s.status(ctx, workspace)
 	if err != nil {
-		return fmt.Errorf("cost: admit run in %s: %w", workspace, err)
+		return fmt.Errorf("cost: admit session in %s: %w", workspace, err)
 	}
 	if st.Admits() {
 		return nil
 	}
-	refusal := fmt.Sprintf("new run refused: $%.2f metered spend has reached the $%.2f cap",
+	refusal := fmt.Sprintf("new session refused: $%.2f metered spend has reached the $%.2f cap",
 		st.Spend.CostUSD, st.Budget.LimitUSD)
 	s.publish(ctx, st, refusal)
 	advisory := ""
 	if st.Spend.Advisory() {
-		advisory = fmt.Sprintf(" (%d of %d runs are unmetered, so the real spend is higher)",
+		advisory = fmt.Sprintf(" (%d of %d sessions are unmetered, so the real spend is higher)",
 			st.Spend.Unmetered, st.Spend.Runs)
 	}
 	return fmt.Errorf("%w: %w: workspace %s has spent $%.2f of its $%.2f cap%s; an admin can raise the cap or set an override with `aether budget set`",

@@ -24,7 +24,7 @@ func init() {
 	register(command{
 		name:    "timeline",
 		short:   "show a workspace's history, filterable and exportable as JSONL",
-		usage:   "aether timeline [<run-id>] [--workspace <name>] [--member <member>] [--type <types>] [--limit <n>] [--jsonl]",
+		usage:   "aether timeline [<session-id>] [--workspace <name>] [--member <member>] [--type <types>] [--limit <n>] [--jsonl]",
 		example: "aether timeline run-d6ay38tj8j --limit 50",
 		flags:   true,
 		run:     runTimeline,
@@ -33,8 +33,8 @@ func init() {
 
 func runTimeline(args []string) error {
 	fs := newFlagSet("timeline")
-	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace, or the run's with --run)")
-	run := fs.String("run", "", "only events for this run")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace, or the session's with --run)")
+	run := fs.String("run", "", "only events for this session")
 	member := fs.String("member", "", "only events by this member (ID or display name)")
 	types := fs.String("type", "", "comma-separated event types, e.g. run.status,workspace.timeline")
 	limit := fs.Int("limit", 200, "stop after this many entries (0 for the whole history)")
@@ -49,7 +49,7 @@ func runTimeline(args []string) error {
 	positional = append(positional, fs.Args()...)
 	switch {
 	case len(positional) > 1, len(positional) == 1 && *run != "":
-		return errors.New("usage: aether timeline [<run-id>] [flags]; name the run once, as an argument or with --run")
+		return errors.New("usage: aether timeline [<session-id>] [flags]; name the session once, as an argument or with --run")
 	case len(positional) == 1:
 		*run = positional[0]
 	}

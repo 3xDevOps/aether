@@ -444,8 +444,8 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		srv.Follow = func(ctx context.Context, run string) {
 			if _, followErr := s.watches.Follow(ctx, m.id, domain.RunID(run)); followErr != nil {
 				body := "Watching it failed: " + followErr.Error() + "\n\nYou will not be notified when it needs you or finishes."
-				if noteErr := s.note(ctx, m, acphost.Notice{Severity: "warning", Title: "Run " + run + " is not watched", Description: body}); noteErr != nil {
-					slog.Warn("assistant: watch the run", "run", run, "member", m.id, "error", errors.Join(followErr, noteErr))
+				if noteErr := s.note(ctx, m, acphost.Notice{Severity: "warning", Title: "Session " + run + " is not watched", Description: body}); noteErr != nil {
+					slog.Warn("assistant: watch the session", "run", run, "member", m.id, "error", errors.Join(followErr, noteErr))
 				}
 			}
 		}

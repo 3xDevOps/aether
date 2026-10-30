@@ -42,13 +42,13 @@ export function RemoveAgent({ agent, client, onRemoved, focusAfterRemoval, onClo
           <AlertDialogDescription className="break-words">
             {agent.source === 'member' ? (
               <>
-                Deletes your <Code>{agent.name}</Code> definition. New runs can't start it. <Code>~/.local/bin/{executable}</Code> and running runs are untouched.{' '}
+                Deletes your <Code>{agent.name}</Code> definition. New sessions can't start it. <Code>~/.local/bin/{executable}</Code> and running sessions are untouched.{' '}
                 <Name>Add agent…</Name> registers it again.
               </>
             ) : (
               <>
                 Deletes <Code>~/.local/bin/{executable}</Code>
-                {agent.enhanced_installed === true && agent.enhanced === 'adapter' && " and its Enhanced adapter's link"} from your environment. New runs can't start it; running runs keep going.
+                {agent.enhanced_installed === true && agent.enhanced === 'adapter' && " and its Enhanced adapter's link"} from your environment. New sessions can't start it; running sessions keep going.
                 Its login, settings and package files stay. <Name>Set up</Name> installs it again.
               </>
             )}

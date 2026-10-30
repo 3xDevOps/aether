@@ -35,7 +35,7 @@ func TestReadMemoryStatsAndMessage(t *testing.T) {
 	if err != nil || st.oomKills != 1 {
 		t.Fatalf("readMemoryStats = %+v, %v", st, err)
 	}
-	want := "Out of memory: the kernel killed a process in this run at its 8.0 GiB memory limit (peak 8.0 GiB)"
+	want := "Out of memory: the kernel killed a process in this session at its 8.0 GiB memory limit (peak 8.0 GiB)"
 	if got := oomMessage(st); got != want {
 		t.Fatalf("oomMessage = %q, want %q", got, want)
 	}
@@ -44,7 +44,7 @@ func TestReadMemoryStatsAndMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := oomMessage(st); got != "Out of memory: the kernel killed a process in this run (peak 8.0 GiB)" {
+	if got := oomMessage(st); got != "Out of memory: the kernel killed a process in this session (peak 8.0 GiB)" {
 		t.Fatalf("unlimited message = %q", got)
 	}
 	if err := os.Remove(filepath.Join(dir, "memory.events")); err != nil {

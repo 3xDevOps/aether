@@ -51,7 +51,7 @@ func (s *Service) Need(ctx context.Context, run *domain.Run, n push.Need) error 
 	case err != nil:
 		return err
 	case link == nil || last.Channel != link.Channel:
-		if err = s.retire(ctx, last, "This message no longer follows the run."); err != nil {
+		if err = s.retire(ctx, last, "This message no longer follows the session."); err != nil {
 			return err
 		}
 		last = nil
@@ -63,7 +63,7 @@ func (s *Service) Need(ctx context.Context, run *domain.Run, n push.Need) error 
 	}
 	c, err := s.local(ctx, link)
 	if err != nil {
-		logged("show a run's need", err, "run", run.ID)
+		logged("show a session's need", err, "run", run.ID)
 		return nil
 	}
 	var info protocol.ServerInfoResult
@@ -118,7 +118,7 @@ func (s *Service) Clear(ctx context.Context, id domain.RunID) error {
 		return err
 	}
 	if link == nil || link.Channel != last.Channel {
-		return s.retire(ctx, last, "This message no longer follows the run.")
+		return s.retire(ctx, last, "This message no longer follows the session.")
 	}
 	m := render(run, nil, nil, "")
 	m.Channel, m.TS = last.Channel, last.TS
@@ -204,7 +204,7 @@ func render(run *domain.Run, n *push.Need, it *protocol.AttentionItem, dashboard
 	case it != nil && len(buttons) == 0:
 		notes = append(notes, "Answer it in the Aether dashboard.")
 	}
-	notes = append(notes, "Reply in this thread to message the run.")
+	notes = append(notes, "Reply in this thread to message the session.")
 	blocks = append(blocks, block{"type": "context", "elements": []block{{"type": "mrkdwn", "text": strings.Join(notes, " · ")}}})
 	return message{Text: escape(title + ": " + line), Blocks: blocks}
 }

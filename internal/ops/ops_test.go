@@ -77,19 +77,19 @@ func TestMessageRetryWithoutKey(t *testing.T) {
 				return out
 			}
 			msg := map[string]any{"run_id": "run-1", "message": "rebase on main"}
-			_, first := run(t, cs, "aether_message_run", msg)
-			text, again := run(t, cs, "aether_message_run", msg)
+			_, first := run(t, cs, "aether_message_session", msg)
+			text, again := run(t, cs, "aether_message_session", msg)
 			if k := keys(); len(k) != 2 || k[0] == "" || k[0] != k[1] || first["idempotency_key"] != k[0] || again["idempotency_key"] != k[0] {
 				t.Fatalf("a retried keyless message used keys %v, results %v %v; want one key", k, first, again)
 			}
 			if first["duplicate"] != nil || again["duplicate"] != true || !strings.Contains(text, "new idempotency_key") {
 				t.Fatalf("a repeated keyless message = %q %v after %v; want it marked a duplicate", text, again, first)
 			}
-			run(t, cs, "aether_message_run", map[string]any{"run_id": "run-1", "message": "and run the tests"})
-			run(t, cs, "aether_message_run", map[string]any{"run_id": "run-2", "message": "rebase on main"})
-			run(t, cs, "aether_message_run", map[string]any{"run_id": "run-1", "message": "rebase on main", "idempotency_key": "m1"})
+			run(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "and run the tests"})
+			run(t, cs, "aether_message_session", map[string]any{"run_id": "run-2", "message": "rebase on main"})
+			run(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "rebase on main", "idempotency_key": "m1"})
 			if k := keys(); len(k) != 5 || slices.Contains(k[2:], k[0]) || k[2] == k[3] || k[4] != "m1" {
-				t.Fatalf("keys = %v, want a new one per text and run, and the caller's", k)
+				t.Fatalf("keys = %v, want a new one per text and session, and the caller's", k)
 			}
 		})
 	}
@@ -122,12 +122,12 @@ func TestAssistantSurface(t *testing.T) {
 		}
 	}
 
-	run(t, cs, "aether_list_runs", nil)
-	run(t, cs, "aether_list_runs", map[string]any{"mine": true})
+	run(t, cs, "aether_list_sessions", nil)
+	run(t, cs, "aether_list_sessions", map[string]any{"mine": true})
 	lists := called(f, protocol.MethodRunList)
-	run(t, cs, "aether_list_runs", map[string]any{"mine": nil})
+	run(t, cs, "aether_list_sessions", map[string]any{"mine": nil})
 	if len(lists) != 2 || strings.Contains(lists[0].params, `"mine"`) || !strings.Contains(lists[1].params, `"mine":true`) {
-		t.Fatalf("run.list = %+v, want everyone's runs by default and the member's with mine", lists)
+		t.Fatalf("run.list = %+v, want everyone's sessions by default and the member's with mine", lists)
 	}
 
 	f.answers[protocol.MethodWorkspaceGet] = returns(protocol.WorkspaceGetResult{Workspace: protocol.Workspace{ID: "ws-1", Name: "api", SteerOthers: "admins_only"}})
@@ -136,14 +136,14 @@ func TestAssistantSurface(t *testing.T) {
 		t.Fatalf("aether_get_workspace = %v, want steer_others under untrusted", out)
 	}
 
-	f.errs[protocol.MethodRunGet] = &protocol.Error{Code: protocol.CodeNotFound, Message: "run run-x not found"}
-	call, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_get_run", Arguments: map[string]any{"run_id": "run-x"}})
+	f.errs[protocol.MethodRunGet] = &protocol.Error{Code: protocol.CodeNotFound, Message: "session run-x not found"}
+	call, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_get_session", Arguments: map[string]any{"run_id": "run-x"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text := call.Content[0].(*mcp.TextContent).Text; !call.IsError || text != "run run-x not found; call aether_list_runs for run ids" ||
+	if text := call.Content[0].(*mcp.TextContent).Text; !call.IsError || text != "session run-x not found; call aether_list_sessions for session ids" ||
 		call.Meta[MetaErrorCode] != float64(protocol.CodeNotFound) {
-		t.Fatalf("an unknown run = %q %v", text, call.Meta)
+		t.Fatalf("an unknown session = %q %v", text, call.Meta)
 	}
 }
 
@@ -241,11 +241,11 @@ func TestKeylessLaunchKeepsKeyAfterUncertainFailure(t *testing.T) {
 	}
 	args := map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "add a health check"}
 	f.errs[protocol.MethodRunLaunch] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "connection closed"}
-	if text, _, failed := try(t, cs, "aether_launch_run", args); !failed || !strings.Contains(text, "retry with idempotency_key") {
+	if text, _, failed := try(t, cs, "aether_launch_session", args); !failed || !strings.Contains(text, "retry with idempotency_key") {
 		t.Fatalf("an uncertain launch failure = %q", text)
 	}
 	delete(f.errs, protocol.MethodRunLaunch)
-	if _, out := run(t, cs, "aether_launch_run", args); out["run_id"] != "run-9" {
+	if _, out := run(t, cs, "aether_launch_session", args); out["run_id"] != "run-9" {
 		t.Fatalf("the retry = %v", out)
 	}
 	if k := keys(); len(k) != 2 || k[0] == "" || k[0] != k[1] {
@@ -254,9 +254,9 @@ func TestKeylessLaunchKeepsKeyAfterUncertainFailure(t *testing.T) {
 
 	args["task"] = "add a readiness check"
 	f.errs[protocol.MethodRunLaunch] = &protocol.Error{Code: protocol.CodeDenied, Message: "declined"}
-	try(t, cs, "aether_launch_run", args)
+	try(t, cs, "aether_launch_session", args)
 	delete(f.errs, protocol.MethodRunLaunch)
-	run(t, cs, "aether_launch_run", args)
+	run(t, cs, "aether_launch_session", args)
 	if k := keys(); len(k) != 4 || k[2] == k[3] {
 		t.Fatalf("a retry after a refused launch used keys %v, want a new one", k)
 	}

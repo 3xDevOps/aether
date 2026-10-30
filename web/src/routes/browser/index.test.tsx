@@ -139,9 +139,9 @@ describe('the first page', () => {
   })
 
   it('shows a status read that fails', async () => {
-    vi.mocked(api.devBrowserStatus).mockRejectedValue(new Error('dev.browser.status: scheduler: the run has no live environment'))
+    vi.mocked(api.devBrowserStatus).mockRejectedValue(new Error('dev.browser.status: scheduler: the session has no live environment'))
     render(<BrowserView {...shared} runID="run_1" />)
-    expect((await screen.findByRole('alert')).textContent).toBe('dev.browser.status: scheduler: the run has no live environment')
+    expect((await screen.findByRole('alert')).textContent).toBe('dev.browser.status: scheduler: the session has no live environment')
   })
 })
 
@@ -599,14 +599,14 @@ describe('pages', () => {
 })
 
 describe('closing and resetting', () => {
-  async function openConfirmation(action: 'Close page…' | 'Reset session…') {
+  async function openConfirmation(action: 'Close page…' | 'Reset browser…') {
     render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click((await menu('Browser actions')).getByRole('menuitem', { name: action }))
     return screen.findByRole('alertdialog')
   }
 
-  it.each(['Close page…', 'Reset session…'] as const)('cancels %s without mutating and returns focus to the menu button', async (action) => {
+  it.each(['Close page…', 'Reset browser…'] as const)('cancels %s without mutating and returns focus to the menu button', async (action) => {
     const close = vi.spyOn(api, 'devBrowserClose')
     const reset = vi.spyOn(api, 'devBrowserReset')
     const dialog = await openConfirmation(action)
@@ -640,10 +640,10 @@ describe('closing and resetting', () => {
 
   it('never resets a replacement session after confirmation was opened', async () => {
     const reset = vi.spyOn(api, 'devBrowserReset')
-    const dialog = await openConfirmation('Reset session…')
+    const dialog = await openConfirmation('Reset browser…')
     vi.mocked(api.devBrowserStatus).mockResolvedValue({ available: true, running: true, state: 'running', session_id: 'replacement-browser' })
     await act(async () => { poll() })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset session' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset browser' }))
     expect(reset).not.toHaveBeenCalled()
   })
 
@@ -654,8 +654,8 @@ describe('closing and resetting', () => {
       return { session_id: 'browser-2' }
     })
     const open = vi.spyOn(api, 'devBrowserOpen').mockRejectedValue(new Error('stop here'))
-    const dialog = await openConfirmation('Reset session…')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset session' }))
+    const dialog = await openConfirmation('Reset browser…')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset browser' }))
     expect(await screen.findByRole('heading', { name: 'Open a page' })).toBeDefined()
     submit('localhost:3000')
     await waitFor(() => expect(open).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'browser-2', url: 'http://localhost:3000' })))
@@ -688,7 +688,7 @@ describe('closing and resetting', () => {
     const reset = vi.spyOn(api, 'devBrowserReset')
     render(<BrowserView {...shared} runID="run_1" />)
     await ready()
-    for (const name of ['Close page…', 'Reset session…']) {
+    for (const name of ['Close page…', 'Reset browser…']) {
       fireEvent.click((await menu('Browser actions')).getByRole('menuitem', { name }))
       expect(await screen.findByText('Pat is driving. Take over to use the page.')).toBeDefined()
       expect(screen.queryByRole('alertdialog')).toBeNull()

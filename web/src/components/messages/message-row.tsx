@@ -37,7 +37,7 @@ function Participant({ runID, label }: { runID: string; label?: ParticipantLabel
   const open = useStore((s) => s.route.name === 'run' && s.route.params.runId === runID)
   const name = label?.(runID, run) ?? (run && runLabel(run))
   const title = run ? runLabel(run) : name
-  if (!name) return <span className="text-ui text-muted">Unknown run</span>
+  if (!name) return <span className="text-ui text-muted">Unknown session</span>
   if (open) return <span className="max-w-64 min-w-0 shrink truncate text-ui text-muted" title={title}>{name}</span>
   return (
     <Button variant="quiet" className="max-w-64 min-w-0 shrink" title={title} onClick={() => navigate('run', { runId: runID })}>

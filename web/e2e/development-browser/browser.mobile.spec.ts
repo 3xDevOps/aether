@@ -14,7 +14,7 @@ test('phone operates the shared login with touch, soft keyboard and composition'
     // A phone is too narrow for two panes, so the Browser stays a tab.
     await expect(page.getByRole('button', { name: /^Show beside/ })).toHaveCount(0)
     const beforeCancel = await fixture.currentPage()
-    await browserAction(page, 'Reset session…')
+    await browserAction(page, 'Reset browser…')
     const resetDialog = page.getByRole('alertdialog')
     await expect(resetDialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused()
     await resetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()

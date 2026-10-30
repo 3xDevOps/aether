@@ -22,7 +22,7 @@ describe('runLabel', () => {
 
   it('falls back to the task and then a placeholder', () => {
     expect(runLabel({ title: '', task: '  fix login  ' })).toBe('fix login')
-    expect(runLabel({ task: '   ' })).toBe('Untitled run')
+    expect(runLabel({ task: '   ' })).toBe('Untitled session')
   })
 
   it('bounds an untitled run to the first line of its prompt', () => {
@@ -212,7 +212,7 @@ describe('run presentation', () => {
       expect(isTerminal(parked.status)).toBe(false)
       expect(awaitingReview(parked)).toBe(true)
       if (outcome === 'success') expect(presentRun(parked, ctx).state).toBe('ready')
-      else expect(presentRun(parked, ctx).reason).toContain('Run remains open for follow-up.')
+      else expect(presentRun(parked, ctx).reason).toContain('Session remains open for follow-up.')
       expect(presentRun({ ...parked, status: 'running', state: 'working', reason: 'agent resumed', outcome_unseen: false }, ctx))
         .toEqual({ state: 'working', reason: 'Agent working' })
     }
@@ -259,10 +259,10 @@ describe('plainReason', () => {
     ['turn ended: something_new', "The agent's turn ended (something_new)"],
     ['working in background: 1 task', 'Working in background: 1 task'],
     ['no update for 30m: CI on PR 12', 'No update for 30m: CI on PR 12'],
-    ['waiting for 1 child run', 'Waiting for 1 child run'],
-    ['waiting for 3 workers', 'Waiting for 3 child runs'],
-    ['2 unread worker messages', '2 unread child messages'],
-    ['review retained evidence', "Review the worker's saved results"],
+    ['waiting for 1 child run', 'Waiting for 1 subsession'],
+    ['waiting for 3 workers', 'Waiting for 3 subsessions'],
+    ['2 unread worker messages', '2 unread subsession messages'],
+    ['review retained evidence', "Review the subsession's saved results"],
     ['killed', 'Stopped'],
     ['disk quota exceeded', 'disk quota exceeded'],
   ])('reads %s', (reason, plain) => {
@@ -278,10 +278,10 @@ describe('state words', () => {
 
   it('names what a run waits on in place of the generic label', () => {
     const children = shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 child runs', cause: 'workers' })
-    expect(stateWords(children)).toEqual({ label: 'Waiting for 2 child runs' })
-    expect(stateLine(children)).toBe('Waiting for 2 child runs')
+    expect(stateWords(children)).toEqual({ label: 'Waiting for 2 subsessions' })
+    expect(stateLine(children)).toBe('Waiting for 2 subsessions')
     expect(stateTitle(children, since, now)).toBe(
-      'Waiting for 2 child runs since 42 minutes ago. Mail from its agents can wake it. Why: its child runs are live.',
+      'Waiting for 2 subsessions since 42 minutes ago. Mail from its agents can wake it. Why: its subsessions are live.',
     )
     expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'reviewers on PR 12' }))).toBe('Waiting for agents · reviewers on PR 12')
   })
@@ -312,7 +312,7 @@ describe('state words', () => {
     expect(toneOf(stalled)).toBe('waiting')
     expect(stateLine(stalled)).toBe("Possibly stalled · No progress for 6m while awaiting the model's first reply; connection open")
     expect(stateTitle(stalled, since, now)).toBe(
-      "Possibly stalled since 42 minutes ago — No progress for 6m while awaiting the model's first reply; connection open. It returns to Working with the agent's next update. Why: the run stalled.",
+      "Possibly stalled since 42 minutes ago — No progress for 6m while awaiting the model's first reply; connection open. It returns to Working with the agent's next update. Why: the session stalled.",
     )
     // A stall with no phase is not judged on progress and keeps its words.
     expect(shown({ status: 'needs-attention', state: 'waiting', reason: 'stalled: no output or file changes for 10m0s', cause: 'stall' }).state).toBe('ended')

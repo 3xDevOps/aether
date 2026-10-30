@@ -29,20 +29,20 @@ type ReservedRunStore interface {
 
 func validateRun(r *domain.Run, op string) error {
 	if !r.Status.Valid() {
-		return fmt.Errorf("store: %s run: invalid status %q", op, r.Status)
+		return fmt.Errorf("store: %s session: invalid status %q", op, r.Status)
 	}
 	if !r.Mode.Valid() {
-		return fmt.Errorf("store: %s run: invalid launch mode %q", op, r.Mode)
+		return fmt.Errorf("store: %s session: invalid launch mode %q", op, r.Mode)
 	}
 	if err := domain.ValidModel(r.Model); err != nil {
-		return fmt.Errorf("store: %s run: %w", op, err)
+		return fmt.Errorf("store: %s session: %w", op, err)
 	}
 	if err := domain.ValidEffort(r.Effort); err != nil {
-		return fmt.Errorf("store: %s run: %w", op, err)
+		return fmt.Errorf("store: %s session: %w", op, err)
 	}
 	permission, err := domain.ParsePermission(string(r.Permission))
 	if err != nil {
-		return fmt.Errorf("store: %s run: %w", op, err)
+		return fmt.Errorf("store: %s session: %w", op, err)
 	}
 	r.Permission = permission
 	return nil
@@ -56,7 +56,7 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 // identity.
 func (d *DB) CreateRunWithID(ctx context.Context, r *domain.Run) error {
 	if r == nil || r.ID == "" {
-		return errors.New("store: create reserved run: id is required")
+		return errors.New("store: create reserved session: id is required")
 	}
 	return d.createRun(ctx, r, true)
 }
@@ -86,27 +86,27 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 	}
 	createdAt, err := encodeTime(ts)
 	if err != nil {
-		return fmt.Errorf("store: create run: %w", err)
+		return fmt.Errorf("store: create session: %w", err)
 	}
 	startedAt, err := encodeTimePtr(r.StartedAt)
 	if err != nil {
-		return fmt.Errorf("store: create run: started at: %w", err)
+		return fmt.Errorf("store: create session: started at: %w", err)
 	}
 	finishedAt, err := encodeTimePtr(r.FinishedAt)
 	if err != nil {
-		return fmt.Errorf("store: create run: finished at: %w", err)
+		return fmt.Errorf("store: create session: finished at: %w", err)
 	}
 	lastCommitAt, err := encodeOptionalTime(r.LastCommitAt)
 	if err != nil {
-		return fmt.Errorf("store: create run: %w", err)
+		return fmt.Errorf("store: create session: %w", err)
 	}
 	baseCheckedAt, err := encodeOptionalTime(r.BaseCheckedAt)
 	if err != nil {
-		return fmt.Errorf("store: create run: %w", err)
+		return fmt.Errorf("store: create session: %w", err)
 	}
 	fallbackOrder, err := jsonText(r.Fallback.Order, "[]")
 	if err != nil {
-		return fmt.Errorf("store: create run: fallback order: %w", err)
+		return fmt.Errorf("store: create session: fallback order: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, home_member_id, task, harness, mode, status,
@@ -122,7 +122,7 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		r.RequestedAccountMemberID, r.Fallback.Disabled, fallbackOrder, r.Model, r.Effort, r.Permission, r.Via,
 		r.Limits.CPUs, r.Limits.MemoryBytes, r.Limits.Pids,
 	); err != nil {
-		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
+		return fmt.Errorf("store: create session: %w", mapConstraint(err, ErrNotFound))
 	}
 	r.ID, r.CreatedAt, r.StatusChangedAt = domain.RunID(id), ts, &ts
 	return nil
@@ -154,7 +154,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(fallbackOrder), &r.Fallback.Order); err != nil {
-		return nil, fmt.Errorf("store: decode run fallback order: %w", err)
+		return nil, fmt.Errorf("store: decode session fallback order: %w", err)
 	}
 	r.CreatedAt = decodeTime(createdAt)
 	r.StartedAt = decodeTimePtr(startedAt)
@@ -215,7 +215,7 @@ func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("store: get run: %w", err)
+		return nil, fmt.Errorf("store: get session: %w", err)
 	}
 	if err := d.attachExtras(ctx, r); err != nil {
 		return nil, err
@@ -224,12 +224,12 @@ func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 }
 
 func (d *DB) ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error) {
-	return d.listRuns(ctx, "list runs by workspace",
+	return d.listRuns(ctx, "list sessions by workspace",
 		runSnapshotQuery(`runs.workspace_id = ?`)+` ORDER BY runs.created_at, runs.rowid`, id)
 }
 
 func (d *DB) ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domain.Run, error) {
-	return d.listRuns(ctx, "list runs by member",
+	return d.listRuns(ctx, "list sessions by member",
 		runSnapshotQuery(`runs.member_id = ?`)+` ORDER BY runs.created_at, runs.rowid`, id)
 }
 
@@ -237,7 +237,7 @@ func (d *DB) ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domai
 // is derived from domain.AllRunStatuses so it cannot drift from the enum.
 func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 	placeholders, args := liveStatusArgs()
-	return d.listRuns(ctx, "list active runs",
+	return d.listRuns(ctx, "list active sessions",
 		runSnapshotQuery(`runs.status IN (`+placeholders+`)`)+` ORDER BY runs.created_at, runs.rowid`, args...)
 }
 
@@ -280,7 +280,7 @@ func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.Workspac
 		 ORDER BY max(COALESCE(status_changed_at, created_at), created_at) DESC, rowid DESC`,
 		append([]any{taskBytes, workspace}, statuses...)...)
 	if err != nil {
-		return nil, fmt.Errorf("store: list live run summaries: %w", err)
+		return nil, fmt.Errorf("store: list live session summaries: %w", err)
 	}
 	return collect(rows, func(row interface{ Scan(...any) error }) (*RunSummary, error) {
 		var r RunSummary
@@ -306,27 +306,27 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	r.AccountMemberID = r.AccountMember()
 	startedAt, err := encodeTimePtr(r.StartedAt)
 	if err != nil {
-		return fmt.Errorf("store: update run: started at: %w", err)
+		return fmt.Errorf("store: update session: started at: %w", err)
 	}
 	finishedAt, err := encodeTimePtr(r.FinishedAt)
 	if err != nil {
-		return fmt.Errorf("store: update run: finished at: %w", err)
+		return fmt.Errorf("store: update session: finished at: %w", err)
 	}
 	lastCommitAt, err := encodeOptionalTime(r.LastCommitAt)
 	if err != nil {
-		return fmt.Errorf("store: update run: last commit at: %w", err)
+		return fmt.Errorf("store: update session: last commit at: %w", err)
 	}
 	baseCheckedAt, err := encodeOptionalTime(r.BaseCheckedAt)
 	if err != nil {
-		return fmt.Errorf("store: update run: base checked at: %w", err)
+		return fmt.Errorf("store: update session: base checked at: %w", err)
 	}
 	statusChangedAt, err := encodeTimePtr(r.StatusChangedAt)
 	if err != nil {
-		return fmt.Errorf("store: update run: status changed at: %w", err)
+		return fmt.Errorf("store: update session: status changed at: %w", err)
 	}
 	reviewChangedAt, err := encodeTimePtr(r.ReviewChangedAt)
 	if err != nil {
-		return fmt.Errorf("store: update run: review changed at: %w", err)
+		return fmt.Errorf("store: update session: review changed at: %w", err)
 	}
 	activity := r.Activity
 	if !r.Status.Live() {
@@ -334,7 +334,7 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	}
 	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return fmt.Errorf("store: update run: %w", err)
+		return fmt.Errorf("store: update session: %w", err)
 	}
 	changed := now
 	if statusChangedAt != nil {
@@ -342,11 +342,11 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: update run: begin: %w", err)
+		return fmt.Errorf("store: update session: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err = recordTransition(ctx, tx, r.ID, r.Status, r.Reason, activity, changed, now); err != nil {
-		return fmt.Errorf("store: update run: %w", err)
+		return fmt.Errorf("store: update session: %w", err)
 	}
 	err = tx.QueryRowContext(ctx,
 		`UPDATE runs SET workspace_id = ?, member_id = ?, account_member_id = ?, task = ?, harness = ?,
@@ -375,10 +375,10 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		return ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
+		return fmt.Errorf("store: update session: %w", mapConstraint(err, ErrNotFound))
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: update run: commit: %w", err)
+		return fmt.Errorf("store: update session: commit: %w", err)
 	}
 	return nil
 }
@@ -411,7 +411,7 @@ func (d *DB) RunResumedSince(ctx context.Context, id domain.RunID, at time.Time)
 	if err := d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_state_transitions
 		WHERE run_id = ? AND at > ? AND reason <> ? AND to_status IN (`+live+`))`,
 		append([]any{id, n, domain.ReportedSuccessReason}, args...)...).Scan(&resumed); err != nil {
-		return false, fmt.Errorf("store: read run %s transitions: %w", id, err)
+		return false, fmt.Errorf("store: read session %s transitions: %w", id, err)
 	}
 	return resumed, nil
 }
@@ -421,17 +421,17 @@ func (d *DB) RunResumedSince(ctx context.Context, id domain.RunID, at time.Time)
 // survives even when GC started from an older run snapshot.
 func (d *DB) ClearRunWorktree(ctx context.Context, id domain.RunID, expected string, status domain.RunStatus) error {
 	if !status.Valid() {
-		return fmt.Errorf("store: clear run worktree: invalid status %q", status)
+		return fmt.Errorf("store: clear session worktree: invalid status %q", status)
 	}
 	result, err := d.db.ExecContext(ctx,
 		`UPDATE runs SET worktree = ? WHERE id = ? AND worktree = ? AND status = ?`,
 		"", id, expected, status)
 	if err != nil {
-		return fmt.Errorf("store: clear run worktree: %w", err)
+		return fmt.Errorf("store: clear session worktree: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("store: clear run worktree: %w", err)
+		return fmt.Errorf("store: clear session worktree: %w", err)
 	}
 	if affected > 0 {
 		return nil
@@ -451,13 +451,13 @@ func (d *DB) ClearRunWorktree(ctx context.Context, id domain.RunID, expected str
 func (d *DB) UpdateRunCommit(ctx context.Context, id domain.RunID, commit string, at time.Time) error {
 	lastCommitAt, err := encodeTime(at)
 	if err != nil {
-		return fmt.Errorf("store: update run commit: %w", err)
+		return fmt.Errorf("store: update session commit: %w", err)
 	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET last_commit = ?, last_commit_at = ? WHERE id = ?`,
 		commit, lastCommitAt, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("store: update run commit: %w", err)
+		return fmt.Errorf("store: update session commit: %w", err)
 	}
 	return err
 }
@@ -467,7 +467,7 @@ func (d *DB) SetRunAgentSession(ctx context.Context, id domain.RunID, session st
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET harness_session_id = ? WHERE id = ?`, session, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set run agent session: %w", err)
+		err = fmt.Errorf("store: set session agent session: %w", err)
 	}
 	return err
 }
@@ -478,7 +478,7 @@ func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) err
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET title = ? WHERE id = ?`, title, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set run title: %w", err)
+		err = fmt.Errorf("store: set session title: %w", err)
 	}
 	return err
 }
@@ -487,7 +487,7 @@ func (d *DB) SetRunCheckout(ctx context.Context, id domain.RunID, worktree, bran
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET worktree = ?, branch = ? WHERE id = ?`, worktree, branch, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set run checkout: %w", err)
+		err = fmt.Errorf("store: set session checkout: %w", err)
 	}
 	return err
 }
@@ -518,30 +518,30 @@ func (d *DB) FinishRunByMember(ctx context.Context, id domain.RunID, status doma
 // expressions see the row before the update.
 func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time, reported, byMember bool) (RunStatusStamp, error) {
 	if !status.Valid() {
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: invalid status %q", status)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: invalid status %q", status)
 	}
 	if activity != "" && !status.Live() {
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: activity %q on a %s run", activity, status)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: activity %q on a %s session", activity, status)
 	}
 	started, err := encodeTimePtr(startedAt)
 	if err != nil {
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: started at: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: started at: %w", err)
 	}
 	finished, err := encodeTimePtr(finishedAt)
 	if err != nil {
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: finished at: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: finished at: %w", err)
 	}
 	changed, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: %w", err)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: begin: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err = recordTransition(ctx, tx, id, status, reason, activity, changed, changed); err != nil {
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: %w", err)
 	}
 	// A write that keeps the run's standing keeps its review, so a replayed
 	// report cannot re-arm one the owner already put off or accepted. A
@@ -572,10 +572,10 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 	case errors.Is(err, sql.ErrNoRows):
 		return RunStatusStamp{}, ErrNotFound
 	case err != nil:
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return RunStatusStamp{}, fmt.Errorf("store: update run status: commit: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update session status: commit: %w", err)
 	}
 	stamp.ReviewChangedAt = decodeTimePtr(reviewChangedAt)
 	return stamp, nil
@@ -597,7 +597,7 @@ type RunStatusStamp struct {
 func (d *DB) SetRunReview(ctx context.Context, id domain.RunID, review domain.RunReview, from ...domain.RunReview) (RunStatusStamp, bool, error) {
 	changed, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return RunStatusStamp{}, false, fmt.Errorf("store: set run review: %w", err)
+		return RunStatusStamp{}, false, fmt.Errorf("store: set session review: %w", err)
 	}
 	args := []any{review, changed, id}
 	marks := make([]string, len(from))
@@ -618,7 +618,7 @@ func (d *DB) SetRunReview(ctx context.Context, id domain.RunID, review domain.Ru
 		return RunStatusStamp{}, false, nil
 	}
 	if err != nil {
-		return RunStatusStamp{}, false, fmt.Errorf("store: set run review: %w", err)
+		return RunStatusStamp{}, false, fmt.Errorf("store: set session review: %w", err)
 	}
 	stamp.ReviewChangedAt = decodeTimePtr(at)
 	return stamp, true, nil
@@ -631,20 +631,20 @@ func (d *DB) SetRunReview(ctx context.Context, id domain.RunID, review domain.Ru
 func (d *DB) TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: transfer run: %w", err)
+		return fmt.Errorf("store: transfer session: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err = notFoundOnZeroRows(tx.ExecContext(ctx, `UPDATE runs SET member_id = ? WHERE id = ?`, to, id)); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return err
 		}
-		return fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
+		return fmt.Errorf("store: transfer session: %w", mapConstraint(err, ErrNotFound))
 	}
 	if _, err = tx.ExecContext(ctx, detachTransferred, id, to); err != nil {
-		return fmt.Errorf("store: transfer run: %w", err)
+		return fmt.Errorf("store: transfer session: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("store: transfer run: %w", err)
+		return fmt.Errorf("store: transfer session: %w", err)
 	}
 	return nil
 }
@@ -654,7 +654,7 @@ func (d *DB) SetRunMode(ctx context.Context, id domain.RunID, mode domain.Launch
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET mode = ?, acp = ? WHERE id = ?`, mode, acp, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set run mode: %w", err)
+		err = fmt.Errorf("store: set session mode: %w", err)
 	}
 	return err
 }
@@ -662,12 +662,12 @@ func (d *DB) SetRunMode(ctx context.Context, id domain.RunID, mode domain.Launch
 // SetRunModel updates only the run's agent model.
 func (d *DB) SetRunModel(ctx context.Context, id domain.RunID, model string) error {
 	if err := domain.ValidModel(model); err != nil {
-		return fmt.Errorf("store: set run model: %w", err)
+		return fmt.Errorf("store: set session model: %w", err)
 	}
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET model = ? WHERE id = ?`, model, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set run model: %w", err)
+		err = fmt.Errorf("store: set session model: %w", err)
 	}
 	return err
 }
@@ -675,12 +675,12 @@ func (d *DB) SetRunModel(ctx context.Context, id domain.RunID, model string) err
 // SetRunEffort updates only the run's effort level.
 func (d *DB) SetRunEffort(ctx context.Context, id domain.RunID, effort string) error {
 	if err := domain.ValidEffort(effort); err != nil {
-		return fmt.Errorf("store: set run effort: %w", err)
+		return fmt.Errorf("store: set session effort: %w", err)
 	}
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET effort = ? WHERE id = ?`, effort, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set run effort: %w", err)
+		err = fmt.Errorf("store: set session effort: %w", err)
 	}
 	return err
 }
@@ -689,7 +689,7 @@ func (d *DB) SetRunProtected(ctx context.Context, id domain.RunID, protected boo
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET protected = ? WHERE id = ?`, protected, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set run protected: %w", err)
+		err = fmt.Errorf("store: set session protected: %w", err)
 	}
 	return err
 }
@@ -707,7 +707,7 @@ func (d *DB) SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time)
 	if at != nil {
 		ts, encErr := encodeTime(*at)
 		if encErr != nil {
-			return false, fmt.Errorf("store: set run archived: %w", encErr)
+			return false, fmt.Errorf("store: set session archived: %w", encErr)
 		}
 		var placeholders []string
 		args := []any{ts, id}
@@ -725,11 +725,11 @@ func (d *DB) SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time)
 			`UPDATE runs SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL`, id)
 	}
 	if err != nil {
-		return false, fmt.Errorf("store: set run archived: %w", err)
+		return false, fmt.Errorf("store: set session archived: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("store: set run archived: %w", err)
+		return false, fmt.Errorf("store: set session archived: %w", err)
 	}
 	return affected > 0, nil
 }
@@ -741,11 +741,11 @@ func (d *DB) ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner d
 	result, err := d.db.ExecContext(ctx,
 		`UPDATE runs SET outcome_unseen = 0, status_seq = status_seq + 1 WHERE id = ? AND member_id = ? AND outcome_unseen = 1`, id, owner)
 	if err != nil {
-		return false, fmt.Errorf("store: clear run outcome unseen: %w", err)
+		return false, fmt.Errorf("store: clear session outcome unseen: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("store: clear run outcome unseen: %w", err)
+		return false, fmt.Errorf("store: clear session outcome unseen: %w", err)
 	}
 	return affected > 0, nil
 }
@@ -757,11 +757,11 @@ func (d *DB) ClearRunFinishUnopened(ctx context.Context, id domain.RunID) (bool,
 	result, err := d.db.ExecContext(ctx,
 		`UPDATE runs SET finish_unopened = 0, status_seq = status_seq + 1 WHERE id = ? AND finish_unopened = 1`, id)
 	if err != nil {
-		return false, fmt.Errorf("store: clear run finish unopened: %w", err)
+		return false, fmt.Errorf("store: clear session finish unopened: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("store: clear run finish unopened: %w", err)
+		return false, fmt.Errorf("store: clear session finish unopened: %w", err)
 	}
 	return affected > 0, nil
 }
@@ -769,14 +769,14 @@ func (d *DB) ClearRunFinishUnopened(ctx context.Context, id domain.RunID) (bool,
 func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: delete run: begin: %w", err)
+		return fmt.Errorf("store: delete session: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := deleteRunRows(ctx, tx, id); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: delete run: commit: %w", err)
+		return fmt.Errorf("store: delete session: commit: %w", err)
 	}
 	return nil
 }
@@ -796,23 +796,23 @@ func deleteRunRows(ctx context.Context, tx *sql.Tx, id domain.RunID) error {
 	}
 	for _, deletion := range deletes {
 		if _, execErr := tx.ExecContext(ctx, deletion.query, deletion.args...); execErr != nil {
-			return fmt.Errorf("store: delete run: %w", mapConstraint(execErr, ErrInUse))
+			return fmt.Errorf("store: delete session: %w", mapConstraint(execErr, ErrInUse))
 		}
 	}
 	if _, err := deleteMemory(ctx, tx, `run_id = ? AND pinned_at IS NULL`, id); err != nil {
-		return fmt.Errorf("store: delete run: memory: %w", err)
+		return fmt.Errorf("store: delete session: memory: %w", err)
 	}
 
 	result, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("store: delete run: %w", mapConstraint(err, ErrInUse))
+		return fmt.Errorf("store: delete session: %w", mapConstraint(err, ErrInUse))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("store: delete run: rows affected: %w", err)
+		return fmt.Errorf("store: delete session: rows affected: %w", err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("store: delete run: %w", ErrNotFound)
+		return fmt.Errorf("store: delete session: %w", ErrNotFound)
 	}
 	return nil
 }
@@ -829,11 +829,11 @@ func (d *DB) AddRunSteerer(ctx context.Context, run domain.RunID, member domain.
 		`INSERT INTO run_steerers (run_id, member_id) VALUES (?, ?)
 		 ON CONFLICT (run_id, member_id) DO NOTHING`, run, member)
 	if err != nil {
-		return false, fmt.Errorf("store: add run steerer: %w", mapConstraint(err, ErrNotFound))
+		return false, fmt.Errorf("store: add session steerer: %w", mapConstraint(err, ErrNotFound))
 	}
 	added, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("store: add run steerer: %w", err)
+		return false, fmt.Errorf("store: add session steerer: %w", err)
 	}
 	return added > 0, nil
 }
@@ -847,7 +847,7 @@ func (d *DB) ListRunSteerers(ctx context.Context, run domain.RunID) ([]*domain.M
 		 WHERE id IN (SELECT member_id FROM run_steerers WHERE run_id = ?)
 		 ORDER BY id`, run)
 	if err != nil {
-		return nil, fmt.Errorf("store: list run steerers: %w", err)
+		return nil, fmt.Errorf("store: list session steerers: %w", err)
 	}
 	return collect(rows, scanMember)
 }

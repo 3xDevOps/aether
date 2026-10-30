@@ -19,7 +19,7 @@ import (
 // ErrBrowserInspectUnsupported means the run's companion was created from an
 // image older than this server. A companion is never replaced in place: it
 // goes when its run stops, and the next one starts from the configured image.
-var ErrBrowserInspectUnsupported = errors.New("this run's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the run to replace the companion")
+var ErrBrowserInspectUnsupported = errors.New("this session's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the session to replace the companion")
 
 func browserPage(p *browser.Page) protocol.DevBrowserPage {
 	if p == nil {
@@ -497,14 +497,14 @@ func (s *Scheduler) openDevelopmentBrowser(ctx context.Context, live LiveRun, p 
 			return nil, readErr
 		}
 		if string(previous) == status.SessionID {
-			return nil, errors.New("browser session already initialized; acquire its current control lease")
+			return nil, errors.New("browser context already initialized; acquire its current control lease")
 		}
 		pages, err := client.Do(ctx, browser.Request{Operation: "pages", SessionID: status.SessionID})
 		if err != nil {
 			return nil, err
 		}
 		if len(pages.Pages) != 0 {
-			return nil, errors.New("browser is already open; acquire its current session before opening another page")
+			return nil, errors.New("browser is already open; acquire its current browser context before opening another page")
 		}
 		acquired, _, err := s.cfg.Control.AcquireSurface(string(live.Run.ID), surface, p, req.ControlSessionID, false, 0, auth)
 		if err != nil {

@@ -17,7 +17,7 @@ func ask(t *testing.T, r *confirmations, ctx context.Context) (protocol.Assistan
 	t.Helper()
 	done := make(chan error, 1)
 	go func() {
-		done <- r.confirm(ctx, &protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1"})
+		done <- r.confirm(ctx, &protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r1"})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -125,7 +125,7 @@ func TestApproverPassesWithoutACardOnlyWhileAutoApprovalIsOn(t *testing.T) {
 	t.Cleanup(func() { _ = svc.Close() })
 	m := svc.member("m1")
 	approve := svc.approver(m)
-	c := protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1"}
+	c := protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r1"}
 	on, off := true, false
 	transcript := func() string {
 		b, _ := os.ReadFile(svc.logPath("m1"))
@@ -136,7 +136,7 @@ func TestApproverPassesWithoutACardOnlyWhileAutoApprovalIsOn(t *testing.T) {
 	if err := answer(true); err != nil {
 		t.Fatalf("approved card = %v", err)
 	}
-	if !strings.Contains(transcript(), `"title":"Approved: Stop run r1"`) {
+	if !strings.Contains(transcript(), `"title":"Approved: Stop session r1"`) {
 		t.Fatalf("transcript = %q, want the approval", transcript())
 	}
 
@@ -150,7 +150,7 @@ func TestApproverPassesWithoutACardOnlyWhileAutoApprovalIsOn(t *testing.T) {
 		t.Fatalf("%d cards shown while auto-approval is on", n)
 	}
 	log := transcript()
-	if !strings.Contains(log, `"title":"Auto-approval turned on"`) || !strings.Contains(log, `"title":"Auto-approved: Stop run r1"`) ||
+	if !strings.Contains(log, `"title":"Auto-approval turned on"`) || !strings.Contains(log, `"title":"Auto-approved: Stop session r1"`) ||
 		!strings.Contains(log, "run.kill passed without a card: auto-approval is on.") {
 		t.Fatalf("transcript = %q, want the change and the auto-approved call", log)
 	}
@@ -189,7 +189,7 @@ func TestAutoApprovalRefusesACallWhoseSessionEndedWhileItWaited(t *testing.T) {
 	m.op.Lock()
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.approver(m)(ctx, protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1"})
+		done <- svc.approver(m)(ctx, protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r1"})
 	}()
 	for {
 		st.mu.Lock()
@@ -224,8 +224,8 @@ func TestAutoApprovalStillAsksForAnotherMembersRunAndUnlistedMethods(t *testing.
 	m := svc.member("m1")
 	for _, c := range []protocol.AssistantConfirmation{
 		{Method: protocol.MethodRunInject, Summary: `Send to run r1, owned by Grace: "hi"`, OtherMember: true},
-		{Method: protocol.MethodRunKill, Summary: "Stop run r1, owned by Grace", OtherMember: true},
-		{Method: "run.delete", Summary: "Delete run r1"},
+		{Method: protocol.MethodRunKill, Summary: "Stop session r1, owned by Grace", OtherMember: true},
+		{Method: "run.delete", Summary: "Delete session r1"},
 	} {
 		if err := answerCard(t, svc, m, c, true); err != nil {
 			t.Fatalf("%s: approved card = %v", c.Summary, err)
@@ -309,9 +309,9 @@ func TestSuggestionFollowsManualApprovals(t *testing.T) {
 	if !suggested() {
 		t.Fatal("not suggested after three approvals in a row")
 	}
-	other := protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1, owned by Grace", OtherMember: true}
+	other := protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r1, owned by Grace", OtherMember: true}
 	if err := answerCard(t, svc, m, other, true); err != nil || !suggested() || st.settings["m1"].Approvals != 3 {
-		t.Fatalf("approving a card on another member's run = %v, approvals %d", err, st.settings["m1"].Approvals)
+		t.Fatalf("approving a card on another member's session = %v, approvals %d", err, st.settings["m1"].Approvals)
 	}
 }
 
@@ -416,7 +416,7 @@ func TestSettingsWritesKeepViewSharingAndTheSuggestion(t *testing.T) {
 	if err := svc.SetShareView(ctx, "m1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := answerCard(t, svc, m, protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1"}, true); err != nil {
+	if err := answerCard(t, svc, m, protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session r1"}, true); err != nil {
 		t.Fatal(err)
 	}
 	if row := st.settings["m1"]; row.Approvals != 1 || row.ShareView {

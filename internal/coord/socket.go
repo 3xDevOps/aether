@@ -266,7 +266,7 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 	retained := make(map[domain.RunID]bool)
 	runs, lerr := s.cfg.Store.ListActiveRuns(ctx)
 	if lerr != nil {
-		return fmt.Errorf("coord: list active runs: %w", lerr)
+		return fmt.Errorf("coord: list active sessions: %w", lerr)
 	}
 	for _, r := range runs {
 		active[r.ID] = true
@@ -397,7 +397,7 @@ func (s *Service) accept(l *net.UnixListener, run domain.RunID, slots chan struc
 		select {
 		case slots <- struct{}{}:
 		default:
-			slog.Warn("coord: connection refused, run is at its concurrency cap",
+			slog.Warn("coord: connection refused, session is at its concurrency cap",
 				"run", run, "cap", maxConnsPerRun)
 			_ = conn.Close()
 			continue
@@ -627,7 +627,7 @@ func (s *Service) handleDevelopment(ctx context.Context, run domain.RunID, metho
 		return nil, rpcErr
 	}
 	if self.Status.Terminal() {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": run has finished"}
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": session has finished"}
 	}
 	if len(params) > protocol.MaxDevParamsBytes {
 		return nil, invalidParams(method, "development request is too large")
@@ -642,7 +642,7 @@ func (s *Service) handleDevelopment(ctx context.Context, run domain.RunID, metho
 	}
 	for field := range fields {
 		if strings.EqualFold(field, "run_id") {
-			return nil, invalidParams(method, "run identity comes from the socket")
+			return nil, invalidParams(method, "session identity comes from the socket")
 		}
 	}
 	result, err := s.cfg.Development.HandleAgent(ctx, run, method, params)
@@ -680,10 +680,10 @@ func leavesRun(method string) bool {
 func (s *Service) refuseIsolated(ctx context.Context, run domain.RunID, method string) *protocol.Error {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return &protocol.Error{Code: protocol.CodeInternal, Message: fmt.Sprintf("%s: read run %s: %v", method, run, err)}
+		return &protocol.Error{Code: protocol.CodeInternal, Message: fmt.Sprintf("%s: read session %s: %v", method, run, err)}
 	}
 	if r.Permission == domain.PermissionIsolated {
-		return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": an isolated run cannot message other runs or write team memory"}
+		return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": an isolated session cannot message other sessions or write team memory"}
 	}
 	return nil
 }
@@ -714,7 +714,7 @@ func decodeParams[T any](method string, raw json.RawMessage) (T, *protocol.Error
 func (s *Service) runDir(run domain.RunID) (string, error) {
 	name := string(run)
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
-		return "", fmt.Errorf("coord: %q is not a usable run directory name", name)
+		return "", fmt.Errorf("coord: %q is not a usable session directory name", name)
 	}
 	return filepath.Join(s.cfg.Dir, name), nil
 }

@@ -51,7 +51,7 @@ function status(over: Partial<AssistantStatus> = {}): AssistantStatus {
 const stop: AssistantConfirmation = {
   id: 'c1',
   method: 'run.kill',
-  summary: 'Stop run run-8x2 ("Fix flaky login test")',
+  summary: 'Stop session run-8x2 ("Fix flaky login test")',
   params: { run_id: 'run-8x2' },
   created_at: '2026-10-14T10:00:00Z',
   expires_at: '2099-10-14T10:10:00Z',
@@ -118,7 +118,7 @@ describe('opening the assistant', () => {
     render(<AppShell />)
     const sidebar = within(screen.getByRole('navigation', { name: 'Aether' }))
     const assistant = sidebar.getByRole('button', { name: 'Assistant' })
-    expect(assistant.parentElement?.parentElement).toBe(sidebar.getByRole('group', { name: 'New run' }).parentElement)
+    expect(assistant.parentElement?.parentElement).toBe(sidebar.getByRole('group', { name: 'New session' }).parentElement)
     expect(assistant.parentElement?.parentElement).not.toBe(sidebar.getByRole('button', { name: 'Search' }).parentElement)
     const header = screen.getAllByRole('banner')[0]!
     expect(within(header).queryByRole('button', { name: 'Assistant' })).toBeNull()
@@ -275,7 +275,7 @@ describe('states', () => {
     acpOpen()
     assistantSocket().send({ status: status({ auto_approve: true }) })
     expect(await within(aside).findByText(/Acts without asking/)).toBeDefined()
-    expect(within(aside).getByText(/launches, messages and stops your runs and saves your environment without asking/)).toBeDefined()
+    expect(within(aside).getByText(/launches, messages and stops your sessions and saves your environment without asking/)).toBeDefined()
     await userEvent.click(within(aside).getByRole('button', { name: 'Change in Settings' }))
     expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'auto-approve' } })
     expect(useStore.getState().assistantOpen).toBe(true)
@@ -284,8 +284,8 @@ describe('states', () => {
   it('offers example prompts that fill the composer', async () => {
     const aside = await openPanel()
     acpOpen()
-    await userEvent.click(await within(aside).findByRole('button', { name: 'Launch a run to …' }))
-    expect((within(aside).getByRole('textbox', { name: 'Message the assistant' }) as HTMLTextAreaElement).value).toBe('Launch a run to ')
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Launch a session to …' }))
+    expect((within(aside).getByRole('textbox', { name: 'Message the assistant' }) as HTMLTextAreaElement).value).toBe('Launch a session to ')
   })
 })
 
@@ -295,7 +295,7 @@ describe('the conversation', () => {
     acpOpen([
       item('turn_start', 1),
       say(1, 'user', 'What is running?'),
-      say(1, 'assistant', 'Two runs are **working**.'),
+      say(1, 'assistant', 'Two sessions are **working**.'),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const log = await within(aside).findByRole('log', { name: 'Assistant conversation' })
@@ -408,14 +408,14 @@ describe('confirmations', () => {
     acpOpen()
     assistantSocket().send({ status: status({ confirmations: [
       { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in api on "Bob"\'s account, falling back to "mem_carol"\'s account in order: "Fix the flaky login test"', other_member: true, other_owner: 'Bob', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', model: 'opus', account_member_id: 'mem_bob', fallback_account_member_ids: ['mem_carol'], task: 'Fix the flaky login test\nthen open a PR' } },
-      { ...stop, id: 'm', method: 'run.inject', summary: 'Message a run', params: { run_id: 'run_9', message: 'Please stop and summarise' } },
+      { ...stop, id: 'm', method: 'run.inject', summary: 'Message a session', params: { run_id: 'run_9', message: 'Please stop and summarise' } },
     ] }) })
     const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude \(acp\) in api on "Bob"'s account/ })
     expect(within(launch).getByText('Launch claude (acp) in api on "Bob"\'s account, falling back to "mem_carol"\'s account in order')).toBeDefined()
     expect(within(launch).getByText("Bob's account pays for this launch, so this asks even with auto-approval on.")).toBeDefined()
     const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
     expect(rows).toEqual({
-      Kind: 'Run: one agent on one task',
+      Kind: 'Session: one agent on one task',
       Workspace: 'ws_1',
       Agent: 'Claude Code opus (Enhanced)',
       Account: "Bob's account, shared with you",
@@ -423,7 +423,7 @@ describe('confirmations', () => {
       Task: 'Fix the flaky login test\nthen open a PR',
       'You hear back': hearBack.run,
     })
-    const inject = within(aside).getByRole('group', { name: 'Approve this action? Message a run' })
+    const inject = within(aside).getByRole('group', { name: 'Approve this action? Message a session' })
     expect(within(inject).getByText('Message')).toBeDefined()
     expect(within(inject).getByText('Please stop and summarise')).toBeDefined()
   })
@@ -472,7 +472,7 @@ describe('confirmations', () => {
     assistantSocket().send({ status: status({ confirmations: [stop, { ...stop, id: 'c2', summary: 'Save your environment' }] }) })
     const card = await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })
     expect(within(card).getByText('run.kill')).toBeDefined()
-    expect(within(card).getByText('Run')).toBeDefined()
+    expect(within(card).getByText('Session')).toBeDefined()
     expect(within(card).getByText('run-8x2')).toBeDefined()
     expect(within(card).getByText(/expires/)).toBeDefined()
 
@@ -562,19 +562,19 @@ describe('temporary chat', () => {
 
 describe('the auto-approval suggestion', () => {
   const title = 'Skip approval cards for the assistant?'
-  const conversation = () => [item('turn_start', 1), say(1, 'user', 'Stop the flaky run'), item('turn_end', 1, { stop_reason: 'end_turn' })]
+  const conversation = () => [item('turn_start', 1), say(1, 'user', 'Stop the flaky session'), item('turn_end', 1, { stop_reason: 'end_turn' })]
 
   it('shows only while the assistant is idle with a conversation and nothing waiting', async () => {
     const aside = await openPanel()
     acpOpen()
     assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
-    await within(aside).findByRole('button', { name: 'Launch a run to …' })
+    await within(aside).findByRole('button', { name: 'Launch a session to …' })
     expect(within(aside).queryByRole('group', { name: title })).toBeNull()
 
     assistantSocket().items(...conversation())
     const notice = await within(aside).findByRole('group', { name: title })
     expect(within(notice).getByText(/Each action is still noted here before it runs/)).toBeDefined()
-    expect(within(notice).getByText("Still asks: messaging or stopping another member's run.")).toBeDefined()
+    expect(within(notice).getByText("Still asks: messaging or stopping another member's session.")).toBeDefined()
     for (const name of ['Turn on auto-approval', 'Not now', "Don't suggest again"]) {
       expect(within(notice).getByRole('button', { name }).className).toBe(within(notice).getByRole('button', { name: 'Not now' }).className)
     }
@@ -693,7 +693,7 @@ describe('the approval card', () => {
     acpOpen()
     assistantSocket().send({ status: status({ auto_approve: true, confirmations: [{ ...stop, summary: `${stop.summary}, owned by Grace`, other_member: true, other_owner: 'Grace' }] }) })
     const card = await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}, owned by Grace` })
-    expect(within(card).getByText('Grace owns this run, so this asks even with auto-approval on.')).toBeDefined()
+    expect(within(card).getByText('Grace owns this session, so this asks even with auto-approval on.')).toBeDefined()
     expect(within(card).queryByRole('button', { name: 'Skip these cards…' })).toBeNull()
   })
 })

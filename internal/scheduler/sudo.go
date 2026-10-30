@@ -54,13 +54,13 @@ func (s *Scheduler) Sudo(ctx context.Context, id domain.RunID, p protocol.RunSud
 	}
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
-		return 0, fmt.Errorf("scheduler: read run %s: %w", id, err)
+		return 0, fmt.Errorf("scheduler: read session %s: %w", id, err)
 	}
 	switch run.Permission {
 	case domain.PermissionIsolated:
-		return 0, sudoRefused("an isolated run cannot run commands as root")
+		return 0, sudoRefused("an isolated session cannot run commands as root")
 	case domain.PermissionRoot:
-		return 0, sudoRefused("a root run's sudo is the image's own, at /usr/bin/sudo")
+		return 0, sudoRefused("a root session's sudo is the image's own, at /usr/bin/sudo")
 	}
 	s.mu.Lock()
 	entry := s.runs[id]
@@ -70,7 +70,7 @@ func (s *Scheduler) Sudo(ctx context.Context, id domain.RunID, p protocol.RunSud
 	}
 	s.mu.Unlock()
 	if cid == "" {
-		return 0, fmt.Errorf("%w: run %s", ErrNoLiveEnvironment, id)
+		return 0, fmt.Errorf("%w: session %s", ErrNoLiveEnvironment, id)
 	}
 	if !rt.SettingUp(cid) {
 		if p.NonInteractive {
@@ -109,7 +109,7 @@ func (s *Scheduler) awaitSudo(ctx context.Context, entry *supervised, p protocol
 	s.mu.Lock()
 	if s.runs[entry.runID] != entry || entry.status.Terminal() {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: run %s", ErrNoLiveEnvironment, entry.runID)
+		return fmt.Errorf("%w: session %s", ErrNoLiveEnvironment, entry.runID)
 	}
 	entry.sudo = append(entry.sudo, req)
 	err := s.sudoChangedLocked(ctx, entry)
@@ -182,7 +182,7 @@ func (s *Scheduler) DecideSudo(ctx context.Context, run domain.RunID, request st
 	}
 	s.publishTimeline(ctx, entry.workspaceID, run, member, events.TimelineNote, verb+" sudo "+req.command)
 	if err = s.sudoChangedLocked(ctx, entry); err != nil {
-		return fmt.Errorf("scheduler: %s the sudo request, then could not publish the run's pending requests: %w", verb, err)
+		return fmt.Errorf("scheduler: %s the sudo request, then could not publish the session's pending requests: %w", verb, err)
 	}
 	return nil
 }

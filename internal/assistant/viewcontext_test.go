@@ -197,7 +197,7 @@ func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
 		{Kind: "failure", RunID: "run-1", Failure: "adapter", Seq: 17},
 		{Kind: "secret", RunID: "run-1"},
 		{Kind: "run"},
-		{Kind: "pr", RunID: "run 1", PR: -3, Repository: "https://github.com/acme/api", Check: "a\nb", Failure: "Bad Word"},
+		{Kind: "pr", RunID: "session 1", PR: -3, Repository: "https://github.com/acme/api", Check: "a\nb", Failure: "Bad Word"},
 		{Kind: "run", RunID: "run-2", Check: strings.Repeat("c", maxViewCheck+1)},
 		{Kind: "check", RunID: "run-3", Check: "lint\u202e"},
 		{Kind: "check", RunID: "run-4", Check: "li\u200bnt"},

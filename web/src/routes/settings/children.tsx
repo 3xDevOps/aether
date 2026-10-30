@@ -9,16 +9,16 @@ import { useStore } from '@/store'
 import { saveChildSettings, useChildSettings, useChildSettingsRead } from '@/store/children'
 import { useCapability } from '@/store/hooks'
 
-export const childRunsLabel = 'Let my runs start child runs'
+export const childRunsLabel = 'Let my sessions start subsessions'
 
 const scope: [string, string][] = [
-  ['Allows', 'An agent in one of your runs starts another agent as a child run, on your account, then messages it and receives its result. You own every child run.'],
-  ['Limits', "The workspace budget and the workspace's child-run limits apply to every child run."],
-  ['One run', "Options → Child runs in the launch dialog, or More → Allow child runs on a run, overrides this for that run."],
+  ['Allows', 'An agent in one of your sessions starts another agent as a subsession, on your account, then messages it and receives its result. You own every subsession.'],
+  ['Limits', "The workspace budget and the workspace's subsession limits apply to every subsession."],
+  ['One session', "Options → Subsessions in the launch dialog, or More → Allow subsessions on a session, overrides this for that session."],
 ]
 
 export function limitsText(limits: ChildLimits): string {
-  return `${limits.max_live} child runs busy at once per parent run (more queue)`
+  return `${limits.max_live} subsessions busy at once per parent session (more queue)`
 }
 
 /** The workspace's child-run limits as a sentence: read, reading, or the refusal. */
@@ -38,7 +38,7 @@ export function useChildLimitsText(client: Api, workspaceID: string, seq = 0): s
 }
 
 export function ChildLimitsRow({ client, workspaceID, seq, control }: { client: Api; workspaceID: string; seq: number; control: ReactNode }) {
-  return <SettingRow label="Child runs" help={useChildLimitsText(client, workspaceID, seq)} control={control} />
+  return <SettingRow label="Subsessions" help={useChildLimitsText(client, workspaceID, seq)} control={control} />
 }
 
 function WorkspaceLimits({ client }: { client: Api }) {
@@ -72,11 +72,11 @@ export function ChildRunsSection({ client }: { client: Api }) {
   const help = settings === null
     ? readError ? null : 'Reading the setting…'
     : settings.enabled
-      ? 'On by default. Agents in your runs may start child runs.'
-      : 'Off. An agent that tries to start a child run is refused.'
+      ? 'On by default. Agents in your sessions may start subsessions.'
+      : 'Off. An agent that tries to start a subsession is refused.'
 
   return (
-    <SettingsSection title="Child runs" id="child-runs" scope="Your account">
+    <SettingsSection title="Subsessions" id="child-runs" scope="Your account">
       <SettingRow
         label={childRunsLabel}
         labelFor="settings-child-runs"
@@ -90,7 +90,7 @@ export function ChildRunsSection({ client }: { client: Api }) {
           />
         )}
       >
-        <dl aria-label="What child runs cover" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm [&_dt]:text-muted">
+        <dl aria-label="What subsessions cover" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm [&_dt]:text-muted">
           {scope.map(([term, text]) => (
             <Fragment key={term}>
               <dt>{term}</dt>

@@ -176,7 +176,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
               {mine.load.kind === 'ready' && mine.load.result.needs_you > 0 && (
                 <p className="text-ui">
                   <Button variant="link" onClick={() => navigate('board')}>
-                    {plural(mine.load.result.needs_you, 'run')} {mine.load.result.needs_you === 1 ? 'needs' : 'need'} you
+                    {plural(mine.load.result.needs_you, 'session')} {mine.load.result.needs_you === 1 ? 'needs' : 'need'} you
                   </Button>
                 </p>
               )}
@@ -222,7 +222,7 @@ function Details({
 }) {
   return (
     <>
-      <p className="text-ui-sm text-muted">The sections below cover only your runs in the last 7 days.</p>
+      <p className="text-ui-sm text-muted">The sections below cover only your sessions in the last 7 days.</p>
       <FinishedList runs={result.recent} workspaceOf={workspaceOf} agentNames={agentNames} prErrors={prErrors} />
       {result.heatmap.some((d) => d.runs > 0) && (
         <Section title="Last 26 weeks">

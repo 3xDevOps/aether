@@ -30,7 +30,7 @@ case "$version" in
     export OPENCODE_CONFIG_CONTENT
     ;;
   2.*)
-    # Own this run's server; never reuse the member home's detached service.
+    # Own this session's server; never reuse the member home's detached service.
     executable=$1
     shift
     set -- "$executable" --standalone "$@"

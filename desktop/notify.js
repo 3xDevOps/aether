@@ -374,7 +374,7 @@ function titleOf(run) {
   const title = (run.title || '').trim()
   if (title) return clip(title, 120)
   const line = (run.task || '').split('\n').map((l) => l.trim()).find(Boolean)
-  return line ? clip(line, 120) : 'Untitled run'
+  return line ? clip(line, 120) : 'Untitled session'
 }
 
 function clip(text, limit) {

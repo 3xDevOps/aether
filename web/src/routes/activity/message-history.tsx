@@ -102,7 +102,7 @@ export function MessageHistory({
         {loaded && shown.length === 0 && !error && (
           <EmptyState icon={<MessageSquare />} title={messages.length === 0 ? 'No agent messages yet' : 'No messages match'}>
             {messages.length === 0
-              ? 'Runs message each other here: questions, replies and reports.'
+              ? 'Sessions message each other here: questions, replies and reports.'
               : 'Change the search or the filters.'}
           </EmptyState>
         )}

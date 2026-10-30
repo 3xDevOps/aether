@@ -66,7 +66,7 @@ func (n *roomNotes) all() []string {
 	return slices.Clone(n.bodies)
 }
 
-const continuedOnGrace = "Your previous turn stopped because Ada's usage ran out. The run continues on Grace's account. Continue the task where you stopped."
+const continuedOnGrace = "Your previous turn stopped because Ada's usage ran out. The session continues on Grace's account. Continue the task where you stopped."
 
 // newFallbackEnv is Ada running Claude on her own account with her own
 // installation, Grace logged in to Claude, and Grace's usage at 10%. Grace
@@ -106,7 +106,7 @@ func (e *shareEnv) share(t *testing.T) {
 
 func (e *shareEnv) assertMovedToOwner(t *testing.T, run domain.RunID, notes *roomNotes) runtime.Spec {
 	t.Helper()
-	waitFor(t, "the run on Grace's account", func() bool {
+	waitFor(t, "the session on Grace's account", func() bool {
 		row, err := e.db.GetRun(t.Context(), run)
 		return err == nil && row.AccountMemberID == e.owner.ID
 	})
@@ -124,7 +124,7 @@ func (e *shareEnv) assertMovedToOwner(t *testing.T, run domain.RunID, notes *roo
 	})
 	c := e.rt.byName(string(run))
 	if c == nil || e.containerCount() != 1 {
-		t.Fatalf("%d containers, want only the run's new one", e.containerCount())
+		t.Fatalf("%d containers, want only the session's new one", e.containerCount())
 	}
 	if c.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.owner.ID) {
 		t.Fatalf("new container account = %q", c.spec.Env["AETHER_ACCOUNT_MEMBER_ID"])
@@ -151,7 +151,7 @@ func TestEnhancedRunContinuesOnAFallbackAccount(t *testing.T) {
 
 	e.assertMovedToOwner(t, run.ID, notes)
 	if e.rt.byName(string(run.ID)) == first {
-		t.Fatal("the run kept Ada's container")
+		t.Fatal("the session kept Ada's container")
 	}
 	waitFor(t, "the continuation prompt", func() bool {
 		execs := rt.all()
@@ -338,7 +338,7 @@ func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 		opts         domain.LaunchOptions
 	}{
 		{"no account qualifies", "Usage limit reached on Ada's account; no other account is shared to fall back on", nil, domain.LaunchOptions{}},
-		{"fallback off", "Usage limit reached on Ada's account; fallback is off for this run", nil,
+		{"fallback off", "Usage limit reached on Ada's account; fallback is off for this session", nil,
 			domain.LaunchOptions{Fallback: domain.AccountFallback{Disabled: true}}},
 		{"no capacity for the replacement", "Usage limit reached on Ada's account; cannot continue on another account: ", func(e *shareEnv) {
 			e.sched.cfg.filesystemCapacity = func(string) (disk.Usage, error) { return disk.Usage{}, errors.New("statfs failed") }
@@ -372,7 +372,7 @@ func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 				t.Fatalf("run = reason %q account %s, want %q", got.Reason, got.AccountMemberID, tc.reason)
 			}
 			if e.rt.byName(string(run.ID)) != first || first.currentState() != "running" || len(notes.all()) != 0 {
-				t.Fatal("a run that did not move lost its container or posted a move")
+				t.Fatal("a session that did not move lost its container or posted a move")
 			}
 			// The launch's wait and at most the move's one probe: a live
 			// container keeps its single wait.
@@ -484,7 +484,7 @@ func TestEnhancedRunWhoseRestoreFailsNeedsAttention(t *testing.T) {
 	rt.mu.Unlock()
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if !strings.HasPrefix(got.Reason, "Usage limit reached on Ada's account; the run is on Grace's account and its session could not be restored: ") ||
+	if !strings.HasPrefix(got.Reason, "Usage limit reached on Ada's account; the session is on Grace's account and its conversation could not be restored: ") ||
 		!strings.Contains(got.Reason, "exec: no such file") || got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
 		t.Fatalf("run = reason %q account %s notes %v", got.Reason, got.AccountMemberID, notes.all())
 	}
@@ -519,7 +519,7 @@ func TestEnhancedRunMovesAgainOnASecondLimit(t *testing.T) {
 		return err == nil && scErr == nil && sc.AccountSwap == nil
 	})
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
-	waitFor(t, "the run on Lin's account", func() bool {
+	waitFor(t, "the session on Lin's account", func() bool {
 		row, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && row.AccountMemberID == lin.ID && !row.Status.Terminal()
 	})
@@ -732,7 +732,7 @@ func TestStandardRunContinuesOnAFallbackAccount(t *testing.T) {
 
 	spec := e.assertMovedToOwner(t, run.ID, notes)
 	if e.rt.byName(string(run.ID)) == first {
-		t.Fatal("the run kept Ada's container")
+		t.Fatal("the session kept Ada's container")
 	}
 	want := []string{"claude", "--dangerously-skip-permissions", "--resume", "sess-1", continuedOnGrace}
 	agent := spec.Command[slices.Index(spec.Command, "aether-run-supervisor")+1:]
@@ -1394,7 +1394,7 @@ func TestMoveRecordsTheReplacementsGitAuthor(t *testing.T) {
 	spec := e.assertMovedToOwner(t, run.ID, notes)
 	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil || spec.Env["GIT_AUTHOR_EMAIL"] != "ada@example.com" || sc.GitAuthorEmail != "ada@example.com" {
-		t.Fatalf("replacement commits as %q, run records %q, %v; want both the new address", spec.Env["GIT_AUTHOR_EMAIL"], sc.GitAuthorEmail, err)
+		t.Fatalf("replacement commits as %q, session records %q, %v; want both the new address", spec.Env["GIT_AUTHOR_EMAIL"], sc.GitAuthorEmail, err)
 	}
 }
 
@@ -1438,7 +1438,7 @@ func TestNoFallbackReason(t *testing.T) {
 		measured fallback.Measured
 		want     string
 	}{
-		{"opencode", fallback.Measured{ada: 100}, "Aether cannot read opencode's usage, so its runs do not move to another account"},
+		{"opencode", fallback.Measured{ada: 100}, "Aether cannot read opencode's usage, so its sessions do not move to another account"},
 		{"claude", fallback.Measured{ada: 100}, "no other account is shared to fall back on"},
 		{"claude", fallback.Measured{ada: 100, grace: 97}, "no fallback has usage left"},
 		{"claude", fallback.Measured{ada: 100, grace: fallback.Unknown}, "no account that may have usage left can run claude here"},

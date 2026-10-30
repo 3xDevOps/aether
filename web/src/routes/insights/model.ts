@@ -118,7 +118,7 @@ export function dayWords(day: Day): string {
     const who = day.members[key].map((m) => `${m.name} ${m.count}`).join(', ')
     return `${day.counts[key]} ${key}${who && ` (${who})`}`
   })
-  return `${dayLabel(day.start, { weekday: 'short', month: 'short', day: 'numeric' })}: runs ${counts.join(', ')}`
+  return `${dayLabel(day.start, { weekday: 'short', month: 'short', day: 'numeric' })}: sessions ${counts.join(', ')}`
 }
 
 export type SectionLoad =

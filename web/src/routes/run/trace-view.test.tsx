@@ -59,7 +59,7 @@ beforeEach(() => {
 describe('TraceView', () => {
   it('folds closed turns but the last and surfaces a failure under a folded turn', async () => {
     show(twoTurns(), { status: 'completed', finished_at: '2026-10-06T10:00:20Z' })
-    expect(rowNames()).toEqual(['Run', 'Fix the tests', 'Ran npm test c1', 'Now the docs', 'Ran npm test c3'])
+    expect(rowNames()).toEqual(['Session', 'Fix the tests', 'Ran npm test c1', 'Now the docs', 'Ran npm test c3'])
     const folded = screen.getByRole('treeitem', { name: /^Fix the tests/ })
     expect(folded.getAttribute('aria-expanded')).toBe('false')
     expect(within(folded).getByText('+2')).toBeDefined()
@@ -72,7 +72,7 @@ describe('TraceView', () => {
     const turn = screen.getByRole('treeitem', { name: /^Fix the tests/ })
     act(() => turn.focus())
     fireEvent.keyDown(turn, { key: 'ArrowRight' })
-    expect(rowNames()).toEqual(['Run', 'Fix the tests', 'Ran npm test c1', 'Ran npm test c2', 'Now the docs', 'Ran npm test c3'])
+    expect(rowNames()).toEqual(['Session', 'Fix the tests', 'Ran npm test c1', 'Ran npm test c2', 'Now the docs', 'Ran npm test c3'])
     fireEvent.keyDown(turn, { key: 'ArrowRight' })
     expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Ran npm test c1/)
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
@@ -94,11 +94,11 @@ describe('TraceView', () => {
     expect(within(detail).getByRole('button', { name: 'Copy command' })).toBeDefined()
     fireEvent.click(within(detail).getByRole('button', { name: /Zoom to this span/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(screen.getByRole('button', { name: 'Whole run' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Whole session' })).toBeDefined()
     const row = screen.getByRole('treeitem', { name: /^Ran npm test c3/ })
     const escape = fireEvent.keyDown(row, { key: 'Escape' })
     expect(escape).toBe(false)
-    expect(screen.queryByRole('button', { name: 'Whole run' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Whole session' })).toBeNull()
     expect(fireEvent.keyDown(row, { key: 'Escape' })).toBe(true)
   })
 

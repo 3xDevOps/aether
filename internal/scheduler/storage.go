@@ -44,7 +44,7 @@ func (s *Scheduler) retention(run *domain.Run) (RetentionInfo, string, error) {
 // The caller holds s.mu.
 func (s *Scheduler) retentionLocked(run *domain.Run) (RetentionInfo, string, error) {
 	if run == nil {
-		return RetentionInfo{}, "", errors.New("scheduler: retention requires a run")
+		return RetentionInfo{}, "", errors.New("scheduler: retention requires a session")
 	}
 	var sc sidecar
 	entry := s.runs[run.ID]
@@ -64,7 +64,7 @@ func (s *Scheduler) retentionLocked(run *domain.Run) (RetentionInfo, string, err
 		sc, err = s.readSidecar(run.ID)
 		if errors.Is(err, os.ErrNotExist) {
 			if !run.Status.Terminal() {
-				return RetentionInfo{}, "Active run", nil
+				return RetentionInfo{}, "Active session", nil
 			}
 			return RetentionInfo{}, "", nil
 		}
@@ -73,7 +73,7 @@ func (s *Scheduler) retentionLocked(run *domain.Run) (RetentionInfo, string, err
 		}
 	}
 	if sc.RunID != string(run.ID) {
-		return RetentionInfo{}, "", fmt.Errorf("scheduler: storage ownership does not match run %s", run.ID)
+		return RetentionInfo{}, "", fmt.Errorf("scheduler: storage ownership does not match session %s", run.ID)
 	}
 	info := RetentionInfo{
 		CleanupPending: finalizing || sc.EvidencePending || sc.DestroyPending || sc.CleanupError != "",
@@ -86,13 +86,13 @@ func (s *Scheduler) retentionLocked(run *domain.Run) (RetentionInfo, string, err
 	}
 	switch {
 	case finalizing:
-		return info, "Run finalization in progress", nil
+		return info, "Session finalization in progress", nil
 	case sc.EvidencePending:
 		return info, "Evidence preservation pending; files protected", nil
 	case sc.DestroyPending:
 		return info, "Execution cleanup pending; files protected", nil
 	case !run.Status.Terminal():
-		return RetentionInfo{}, "Active run", nil
+		return RetentionInfo{}, "Active session", nil
 	case sc.ContainerID != "":
 		if sc.RetainedUntil != nil && !time.Now().Before(*sc.RetainedUntil) {
 			info.CleanupPending = true

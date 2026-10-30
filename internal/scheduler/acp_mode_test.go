@@ -175,13 +175,13 @@ func TestComposerModelChoiceIsRecorded(t *testing.T) {
 	}
 	row, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil || row.Model != "" {
-		t.Fatalf("after a mode change the run's model is %q (%v), want none", row.Model, err)
+		t.Fatalf("after a mode change the session's model is %q (%v), want none", row.Model, err)
 	}
 	if err = e.sched.ACPSetOption(t.Context(), run.ID, "model", "opus"); err != nil {
 		t.Fatal(err)
 	}
 	if row, err = e.db.GetRun(t.Context(), run.ID); err != nil || row.Model != "opus" {
-		t.Fatalf("after a model change the run's model is %q (%v), want opus", row.Model, err)
+		t.Fatalf("after a model change the session's model is %q (%v), want opus", row.Model, err)
 	}
 	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()
@@ -195,7 +195,7 @@ func TestComposerModelChoiceIsRecorded(t *testing.T) {
 				return
 			}
 		case <-timer.C:
-			t.Fatal("no run.model event")
+			t.Fatal("no session.model event")
 		}
 	}
 }
@@ -287,7 +287,7 @@ func TestComposerEffortChoiceIsRecorded(t *testing.T) {
 	}
 	row, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil || row.Effort != "" {
-		t.Fatalf("after a mode change the run's effort is %q (%v), want none", row.Effort, err)
+		t.Fatalf("after a mode change the session's effort is %q (%v), want none", row.Effort, err)
 	}
 	// The adapter's "default" is the agent's own level, which a run records
 	// as no effort.
@@ -296,7 +296,7 @@ func TestComposerEffortChoiceIsRecorded(t *testing.T) {
 			t.Fatal(err)
 		}
 		if row, err = e.db.GetRun(t.Context(), run.ID); err != nil || row.Effort != pick.want {
-			t.Fatalf("after picking %s the run's effort is %q (%v), want %q", pick.value, row.Effort, err, pick.want)
+			t.Fatalf("after picking %s the session's effort is %q (%v), want %q", pick.value, row.Effort, err, pick.want)
 		}
 		timer := time.NewTimer(3 * time.Second)
 		for published := false; !published; {
@@ -309,7 +309,7 @@ func TestComposerEffortChoiceIsRecorded(t *testing.T) {
 					published = true
 				}
 			case <-timer.C:
-				t.Fatalf("no run.effort event after picking %s", pick.value)
+				t.Fatalf("no session.effort event after picking %s", pick.value)
 			}
 		}
 		timer.Stop()

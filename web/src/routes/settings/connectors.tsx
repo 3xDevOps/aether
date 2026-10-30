@@ -28,9 +28,9 @@ type App = 'chatgpt' | 'claude'
 const scopeNames: Record<string, string> = { read: 'Read', write: 'Launch and message', control: 'Stop and approve' }
 
 const scopes: [string, string][] = [
-  ['Read, always', 'Workspaces, agents, every member’s runs and their history, pull requests and team memory.'],
-  ['Launch and message, checked by default', 'Launch runs; message, pause and resume runs; answer agents and teammates; mark runs reviewed.'],
-  ['Stop and approve, unchecked by default', 'Decide permission requests, stop and close runs. Text an agent wrote could talk the assistant into approving or ending work without asking you.'],
+  ['Read, always', 'Workspaces, agents, every member’s sessions and their history, pull requests and team memory.'],
+  ['Launch and message, checked by default', 'Launch sessions; message, pause and resume sessions; answer agents and teammates; mark sessions reviewed.'],
+  ['Stop and approve, unchecked by default', 'Decide permission requests, stop and close sessions. Text an agent wrote could talk the assistant into approving or ending work without asking you.'],
 ]
 
 type Failure = { text: string; fix: ReactNode; old?: boolean }
@@ -441,7 +441,7 @@ function Connectors({ client }: { client: Api }) {
     <SettingsSection title="ChatGPT and Claude" id={CONNECTORS_SECTION_ID}>
       <SettingRow
         label="Connect ChatGPT or Claude"
-        help={<>Launch runs, see what needs you and answer agents from a chat, on your phone too. The connector acts as you. <Link href={`${docs}/connectors.md`}>Connector guide</Link></>}
+        help={<>Launch sessions, see what needs you and answer agents from a chat, on your phone too. The connector acts as you. <Link href={`${docs}/connectors.md`}>Connector guide</Link></>}
       >
         {listError && <FailureCallout failure={listError} />}
         {!tooOld && (

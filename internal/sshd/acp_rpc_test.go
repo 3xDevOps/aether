@@ -108,7 +108,7 @@ func TestACPHistoryAndItem(t *testing.T) {
 		t.Fatalf("missing item: %v", perr)
 	}
 	if _, perr = callJSON(t, e, e.member.ID, protocol.MethodRunACPHistory, protocol.RunACPHistoryParams{RunID: string(e.run.ID)}); perr == nil || perr.Code != protocol.CodeInvalidParams {
-		t.Fatalf("history of a terminal run: %v", perr)
+		t.Fatalf("history of a terminal session: %v", perr)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestACPExpiredItemRevalidatesPermissionBeforeHistory(t *testing.T) {
 	e.runs.setErr(fmt.Errorf("private /host/log: %w", acphost.ErrHistoryExpired))
 	params := protocol.RunACPItemParams{RunID: string(run.ID), Seq: 7}
 	_, perr := callJSON(t, e, viewer.ID, protocol.MethodRunACPItem, params)
-	if perr == nil || perr.Code != protocol.CodeUnavailable || perr.Message != "earlier agent session history has expired" {
+	if perr == nil || perr.Code != protocol.CodeUnavailable || perr.Message != "earlier agent conversation history has expired" {
 		t.Fatalf("expired item = %+v", perr)
 	}
 	e.runs.mu.Lock()

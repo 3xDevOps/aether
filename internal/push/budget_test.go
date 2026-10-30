@@ -66,7 +66,7 @@ func TestAdminsHearOnceWhenAWorkspaceBudgetRises(t *testing.T) {
 	spend(16)
 	expect("Budget warning: $16.00 of $20.00 spent", urgencyNormal)
 	spend(21)
-	expect("Budget reached: $21.00 of $20.00 spent, new runs are refused", urgencyHigh)
+	expect("Budget reached: $21.00 of $20.00 spent, new sessions are refused", urgencyHigh)
 
 	// A warning still waiting out the quiet period when the cap is reached
 	// gives way to it.
@@ -75,7 +75,7 @@ func TestAdminsHearOnceWhenAWorkspaceBudgetRises(t *testing.T) {
 	h.svc.Active(carol.ID)
 	spend(26)
 	spend(31)
-	expect("Budget reached: $31.00 of $30.00 spent, new runs are refused", urgencyHigh)
+	expect("Budget reached: $31.00 of $30.00 spent, new sessions are refused", urgencyHigh)
 
 	// A warning raised again before it went out goes out once.
 	budget(40, 35)

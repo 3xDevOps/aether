@@ -159,7 +159,7 @@ func TestCLISkillOutcomesFollowTheLaunchMode(t *testing.T) {
 		{name: "ordinary", capabilities: reports,
 			want: []string{ordinaryOutcomes, "- answered: ", "- needs-input: only", "never report waiting", coordhooks.ReviewRule}, refuse: []string{"- waiting:"}},
 		{name: "enhanced", enhanced: "1", capabilities: reports,
-			want:   []string{ordinaryOutcomes, "- answered: ", "- needs-input: only", "- waiting: ", "Inbox hooks: not used in Enhanced runs"},
+			want:   []string{ordinaryOutcomes, "- answered: ", "- needs-input: only", "- waiting: ", "Inbox hooks: not used in Enhanced sessions"},
 			refuse: []string{"never report waiting", "): missing"}},
 		{name: "background", background: "1", capabilities: reports,
 			want: []string{backgroundOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting", "- answered"}},

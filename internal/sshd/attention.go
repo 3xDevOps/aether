@@ -372,7 +372,7 @@ var attentionRows = []attentionRow{
 			case strings.HasPrefix(reason, needsInputPrefix), strings.HasPrefix(reason, usageLimitPrefix):
 				item.Reason = plainReason(reason)
 			default:
-				item.Reason = "Open the run to see its request"
+				item.Reason = "Open the session to see its request"
 			}
 		},
 	},
@@ -398,7 +398,7 @@ var attentionRows = []attentionRow{
 		holds:      func(r *attentionRun) bool { return r.run.Activity == domain.ActivityFailed && r.run.OutcomeUnseen },
 		resolvers:  owner,
 		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			item.Reason = "Agent reported failure; review the result. Run remains open for follow-up."
+			item.Reason = "Agent reported failure; review the result. Session remains open for follow-up."
 			if r.run.Reason != "" && r.run.Reason != "agent reported failure" {
 				item.Reason = plainReason(r.run.Reason)
 			}

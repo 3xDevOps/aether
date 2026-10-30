@@ -261,7 +261,7 @@ func TestHookWaitReleaseAndCloseCancelPromptly(t *testing.T) {
 					t.Fatal("teardown admitted a wake")
 				}
 			case <-time.After(2 * time.Second):
-				t.Fatal("observer retained a run reference after teardown")
+				t.Fatal("observer retained a session reference after teardown")
 			}
 		})
 	}

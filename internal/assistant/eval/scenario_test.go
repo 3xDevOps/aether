@@ -11,7 +11,7 @@ import (
 )
 
 func launchCall(args string) ToolCall {
-	return ToolCall{Tool: "aether_launch_run", Args: json.RawMessage(args)}
+	return ToolCall{Tool: "aether_launch_session", Args: json.RawMessage(args)}
 }
 
 func scenario(t *testing.T, id string) Scenario {
@@ -43,7 +43,7 @@ func failed(rs []CheckResult) []string {
 // separates a faithful launch from an expanded one.
 func TestScoreNegation(t *testing.T) {
 	s := scenario(t, "negation")
-	good := Outcome{Calls: []ToolCall{launchCall(`{"workspace_id":"ws-shop","harness":"claude","task":"Add an export button for orders. Do not touch billing/."}`)}, Answer: "Launched run run-1."}
+	good := Outcome{Calls: []ToolCall{launchCall(`{"workspace_id":"ws-shop","harness":"claude","task":"Add an export button for orders. Do not touch billing/."}`)}, Answer: "Launched session run-1."}
 	goodChecks, _ := Score(s, good)
 	if bad := failed(goodChecks); len(bad) != 0 {
 		t.Errorf("faithful launch failed %v", bad)
@@ -94,11 +94,11 @@ func TestScenarioStateIsReadable(t *testing.T) {
 				}
 			}
 			read("aether_list_workspaces", nil)
-			read("aether_list_runs", nil)
+			read("aether_list_sessions", nil)
 			var runs protocol.RunListResult
 			_ = json.Unmarshal(s.Answers["run.list"], &runs)
 			for _, r := range runs.Runs {
-				read("aether_get_run", map[string]any{"run_id": r.ID})
+				read("aether_get_session", map[string]any{"run_id": r.ID})
 				if s.Answers["run.pr.feedback"] != nil {
 					read("aether_pr_status", map[string]any{"run_id": r.ID})
 				}
@@ -125,7 +125,7 @@ func TestWordMatching(t *testing.T) {
 func TestQuestionCount(t *testing.T) {
 	s := scenario(t, "voice-feature")
 	launched := []ToolCall{launchCall(`{"task":"x"}`)}
-	_, fl := Score(s, Outcome{Calls: launched, Answer: "Launched [run](/?run=run-1&page=2) with `a?b`. Want me to show the brief?"})
+	_, fl := Score(s, Outcome{Calls: launched, Answer: "Launched [session](/?run=run-1&page=2) with `a?b`. Want me to show the brief?"})
 	if fl.UnnecessaryQuestions != 0 || fl.OfferedFollowUps != 1 {
 		t.Errorf("flags = %+v", fl)
 	}

@@ -111,7 +111,7 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		}
 		if written >= protocol.MemoryMaxAgentNotesPerRun {
 			return protocol.MemoryAddResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
-				"memory.add: run %s already wrote %d notes, the most one run may write; ask a member to add more (aether memory add)",
+				"memory.add: session %s already wrote %d notes, the most one session may write; ask a member to add more (aether memory add)",
 				run.ID, written)}
 		}
 		var head string
@@ -218,9 +218,9 @@ func agentMayReplace(run *domain.Run) func(*store.Memory) error {
 		case old.Source == store.MemoryFromAgent && (old.Scope != store.MemoryScopeMember || old.RunID == run.ID):
 			return nil
 		case old.Source == store.MemoryFromAgent:
-			standing = "is a member note of " + name(old.AuthorName, string(old.AuthorID)) + " from run " + string(old.RunID)
+			standing = "is a member note of " + name(old.AuthorName, string(old.AuthorID)) + " from session " + string(old.RunID)
 		case old.Source == store.MemoryFromReport:
-			standing = "is the outcome of run " + string(old.RunID)
+			standing = "is the outcome of session " + string(old.RunID)
 		default:
 			standing = "was written by " + name(old.AuthorName, string(old.AuthorID))
 		}
@@ -286,13 +286,13 @@ func name(display, id string) string {
 func (s *Service) head(ctx context.Context, run *domain.Run) (string, error) {
 	before, err := s.cfg.Log.LastSeq(ctx)
 	if err != nil {
-		return "", fmt.Errorf("read the latest diff of run %s: %w", run.ID, err)
+		return "", fmt.Errorf("read the latest diff of session %s: %w", run.ID, err)
 	}
 	filter := events.Filter{Workspace: run.WorkspaceID, Run: run.ID, Types: []events.Type{events.TypeRunDiff}}
 	for before++; ; {
 		diffs, err := s.cfg.Log.ReadBefore(ctx, filter, 0, before, headDiffPage)
 		if err != nil {
-			return "", fmt.Errorf("read the latest diff of run %s: %w", run.ID, err)
+			return "", fmt.Errorf("read the latest diff of session %s: %w", run.ID, err)
 		}
 		for _, event := range diffs {
 			if diff, ok := event.Payload.(events.RunDiffPayload); ok && diff.Repo == "" {
@@ -423,7 +423,7 @@ func (s *Service) Unpin(ctx context.Context, member domain.MemberID, p protocol.
 func (s *Service) Remove(ctx context.Context, member domain.MemberID, p protocol.MemoryRmParams) (protocol.MemoryRmResult, error) {
 	const method = protocol.MethodMemoryRm
 	if p.WorkspaceID == "" || (p.ID == "") == (p.RunID == "") {
-		return protocol.MemoryRmResult{}, invalid(method, "workspace and exactly one of a note ID or a run are required")
+		return protocol.MemoryRmResult{}, invalid(method, "workspace and exactly one of a note ID or a session are required")
 	}
 	workspace := domain.WorkspaceID(p.WorkspaceID)
 	actor, err := s.authorize(ctx, member, workspace)

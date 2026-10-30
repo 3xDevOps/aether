@@ -31,7 +31,7 @@ const logins: Record<string, { command: string; hint: string }> = {
   cursor: { command: 'NO_OPEN_BROWSER=1 agent login', hint: 'Cursor CLI runs as agent. Open the printed URL in your browser.' },
 }
 
-const switchToAsk = 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'
+const switchToAsk = 'Runs with full permissions by default, like Standard; switch its mode in the session to be asked.'
 
 const permissionNotes: Record<string, string> = {
   claude: switchToAsk,
@@ -39,9 +39,9 @@ const permissionNotes: Record<string, string> = {
   omp: 'Runs with full permissions; its ACP mode has no asking option.',
   pi: 'pi never asks for permission.',
   opencode: "Runs with full permissions through its config; a workspace's own permission rules still apply.",
-  copilot: 'Runs with full permissions through --allow-all, which a run cannot take back.',
+  copilot: 'Runs with full permissions through --allow-all, which a session cannot take back.',
   gemini: switchToAsk,
-  cursor: "Runs with full permissions through --force, unless your Cursor team's auto-run controls forbid it; switch to plan or ask in the run for read-only.",
+  cursor: "Runs with full permissions through --force, unless your Cursor team's auto-run controls forbid it; switch to plan or ask in the session for read-only.",
 }
 
 export function label(agent: AgentInfo): string {
@@ -103,14 +103,14 @@ export function modeLines(agent: AgentInfo): { term: string; text: string }[] {
           ? 'Comes with the agent'
           : 'Installed with the agent in the next step',
     },
-    { term: 'Switching', text: agent.switchable ? 'Switch a running agent from its header' : 'Chosen when the run starts' },
+    { term: 'Switching', text: agent.switchable ? 'Switch a running agent from its header' : 'Chosen when the session starts' },
     {
       term: 'Fallback',
-      text: `If ${agent.enhanced === 'native' ? 'Enhanced' : 'the adapter'} fails to start, the run tells you why and offers the terminal`,
+      text: `If ${agent.enhanced === 'native' ? 'Enhanced' : 'the adapter'} fails to start, the session tells you why and offers the terminal`,
     },
   ]
   if (agent.name === 'claude') {
-    lines.push({ term: 'Billing', text: 'Uses your Claude login through the Claude Agent SDK; the run shows which account pays' })
+    lines.push({ term: 'Billing', text: 'Uses your Claude login through the Claude Agent SDK; the session shows which account pays' })
   }
   return lines
 }

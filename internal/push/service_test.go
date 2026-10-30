@@ -418,7 +418,7 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 		t.Errorf("cleared urgency = %v, want %s", got, urgencyNormal)
 	}
 	if got, want := phone.topic.Load(), topicOf(id); got != want {
-		t.Errorf("cleared topic = %v, want the run's %s", got, want)
+		t.Errorf("cleared topic = %v, want the session's %s", got, want)
 	}
 	phone.expectNone(t, testQuiet)
 
@@ -816,10 +816,10 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	h.svc.Active(h.ada.ID)
 	started := time.Now()
 
-	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, `Session "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
-	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID), Notice: true})
+	phone.expect(t, notification{Title: `Session "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID), Notice: true})
 	if waited := time.Since(started); waited < testQuiet {
 		t.Fatalf("sent after %v, want it held for the %v quiet window", waited, testQuiet)
 	}
@@ -848,10 +848,10 @@ func TestNotifyMarksOnlyNewsAsANotice(t *testing.T) {
 	phone := h.subscribe(h.ada)
 	run := h.run(h.ada, "Fix the login redirect", domain.LaunchACP)
 	stands := func(context.Context) bool { return true }
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "Bob's run needs Bob", "which region?", run.ID, true, nil, stands); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "Bob's session needs Bob", "which region?", run.ID, true, nil, stands); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
-	phone.expect(t, notification{Title: "Bob's run needs Bob", Body: "which region?", Run: string(run.ID)})
+	phone.expect(t, notification{Title: "Bob's session needs Bob", Body: "which region?", Run: string(run.ID)})
 }
 
 func TestNotifyReturnsTheDeviceError(t *testing.T) {

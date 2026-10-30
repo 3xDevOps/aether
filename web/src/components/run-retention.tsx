@@ -9,7 +9,7 @@ export function RunRetention({ run, className = '' }: { run: Run; className?: st
       {run.container_retained_until && (
         <p>
           Runtime grace ends <time dateTime={run.container_retained_until}>{new Date(run.container_retained_until).toLocaleString()}</time>.
-          {canReopenRun(run) && ' Relaunch is available until then; closing the relaunched run starts a new grace period.'}
+          {canReopenRun(run) && ' Relaunch is available until then; closing the relaunched session starts a new grace period.'}
           {' '}Paused compute still holds memory during the grace period.
         </p>
       )}

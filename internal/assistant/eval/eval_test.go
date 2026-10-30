@@ -65,7 +65,7 @@ func TestAssistantEval(t *testing.T) {
 		slots   = make(chan struct{}, parallel)
 	)
 	write := func() string {
-		md := Summary("real Claude Code (model "+modelName(results, model)+"), "+label+", "+strconv.Itoa(runs)+" runs per scenario", picked, results)
+		md := Summary("real Claude Code (model "+modelName(results, model)+"), "+label+", "+strconv.Itoa(runs)+" sessions per scenario", picked, results)
 		raw, _ := json.MarshalIndent(results, "", " ")
 		if err := os.WriteFile(filepath.Join(out, label+".json"), raw, 0o600); err != nil {
 			t.Error(err)

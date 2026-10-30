@@ -32,9 +32,9 @@ func TestParseSudo(t *testing.T) {
 		{args: []string{"-E", "-H", "--", "-x"}, want: protocol.RunSudoParams{Argv: []string{"-x"}}},
 		{args: []string{"-nEu", "postgres", "psql"}, want: protocol.RunSudoParams{User: "postgres", NonInteractive: true, Argv: []string{"psql"}}},
 		{args: []string{"-upostgres", "-", "x"}, want: protocol.RunSudoParams{User: "postgres", Argv: []string{"-", "x"}}},
-		{args: []string{"-i"}, err: "-i is not supported in an Aether Default run"},
-		{args: []string{"-Es", "id"}, err: "-s is not supported in an Aether Default run"},
-		{args: []string{"--preserve-env=PATH", "id"}, err: "--preserve-env is not supported in an Aether Default run"},
+		{args: []string{"-i"}, err: "-i is not supported in an Aether Default session"},
+		{args: []string{"-Es", "id"}, err: "-s is not supported in an Aether Default session"},
+		{args: []string{"--preserve-env=PATH", "id"}, err: "--preserve-env is not supported in an Aether Default session"},
 		{args: []string{"-u"}, err: sudoUsage},
 		{args: []string{"-n"}, err: sudoUsage},
 		{args: nil, err: sudoUsage},
@@ -141,7 +141,7 @@ func TestSudoShimPrintsTheRefusal(t *testing.T) {
 		t.Fatalf("a terminal's stdin sent %q", stdin)
 	}
 	errOut.Reset()
-	if code := runSudo(t.Context(), socket, []string{"-v"}, nil, io.Discard, &errOut); code != 1 || errOut.String() != "sudo: -v is not supported in an Aether Default run\n" {
+	if code := runSudo(t.Context(), socket, []string{"-v"}, nil, io.Discard, &errOut); code != 1 || errOut.String() != "sudo: -v is not supported in an Aether Default session\n" {
 		t.Fatalf("sudo -v = %d, stderr %q", code, errOut.String())
 	}
 }

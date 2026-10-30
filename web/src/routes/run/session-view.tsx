@@ -169,7 +169,7 @@ function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession
     seen.current = { finished: finished?.id, pending: pending?.id, status: run.status }
     if (pending && pending.id !== prior.pending) setText(requestAnnouncement(useStore.getState().acpSessions[run.id], pending, agentName))
     else if (finished?.kind === 'finished' && finished.id !== prior.finished) setText(`The agent’s turn ended: ${finished.text}`)
-    else if (run.status !== prior.status) setText(`Run is now ${run.status.replace('-', ' ')}`)
+    else if (run.status !== prior.status) setText(`Session is now ${run.status.replace('-', ' ')}`)
   }, [finished, pending, run.status, run.id, agentName])
   return text
 }
@@ -178,7 +178,7 @@ function SessionWelcome({ run, agentName }: { run: RunRecord; agentName: string 
   const workspace = useStore((s) => s.workspaces[run.workspace_id]?.name ?? run.workspace_id)
   const owner = useStore((s) => memberName(s, run.member_id))
   return (
-    <section aria-label="Run overview" className="flex min-h-0 flex-1 overflow-y-auto px-4 py-6 [scrollbar-gutter:stable_both-edges]">
+    <section aria-label="Session overview" className="flex min-h-0 flex-1 overflow-y-auto px-4 py-6 [scrollbar-gutter:stable_both-edges]">
       <div className="m-auto flex w-full min-w-0 max-w-sm flex-col items-center gap-6">
         <div
           aria-hidden="true"
@@ -354,7 +354,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
       {session?.truncatedBefore && (
         <div className={cn(sessionColumn, 'shrink-0 pt-2')}>
           <Callout tone="needs-you" role="status">
-            Earlier Enhanced history has expired. Retained items and the current session remain available.
+            Earlier Enhanced history has expired. Retained items and the current conversation remain available.
           </Callout>
         </div>
       )}
@@ -370,7 +370,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         {(log?.error || roomError || olderError) && (
           <div className={cn(sessionColumn, 'flex flex-col gap-2 pt-3')}>
             {log?.error && (
-              <Callout tone="failed" title="The session history could not be read" actions={<Button size="sm" variant="secondary" onClick={() => void readSessionLog(useStore, api, run)}>Retry</Button>}>
+              <Callout tone="failed" title="The conversation history could not be read" actions={<Button size="sm" variant="secondary" onClick={() => void readSessionLog(useStore, api, run)}>Retry</Button>}>
                 {log.error}
               </Callout>
             )}
@@ -391,7 +391,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
           ref={list}
           role="log"
           aria-live="off"
-          aria-label="Session"
+          aria-label="Chat"
           className="min-h-0 flex-1"
           style={enhanced && count === 0 ? { display: 'none' } : undefined}
           data={older ? [null, ...flat] : flat}

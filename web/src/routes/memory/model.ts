@@ -55,7 +55,7 @@ export const writableKinds = ['decision', 'convention', 'gotcha', 'preference'] 
 export const sourceLabel: Record<MemorySource, string> = {
   agent: 'Agent note',
   member: 'Member note',
-  report: 'Run report',
+  report: 'Session report',
   answer: 'Answer',
 }
 

@@ -14,7 +14,7 @@ vi.mock('@/lib/push', () => ({
   testPush: vi.fn(),
 }))
 
-const label = 'Notify this device when a run needs me'
+const label = 'Notify this device when a session needs me'
 
 function show(state: PushState, slack?: SlackStatusResult) {
   vi.mocked(readPush).mockResolvedValue(state)

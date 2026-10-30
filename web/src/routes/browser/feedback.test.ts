@@ -85,8 +85,8 @@ describe('feedbackMessage', () => {
       screenshotNote({ body: 'Compare the header with the mock.' }),
     ])
     expect(feedbackMessage(notes, [consoleRow, failedRow, lostRow])).toBe([
-      "Feedback from the page in this run's browser: 1 annotation, 1 screenshot, 1 console message, 2 failed requests.",
-      'Each screenshot path is an image file inside the run; open it to see what I saw.',
+      "Feedback from the page in this session's browser: 1 annotation, 1 screenshot, 1 console message, 2 failed requests.",
+      'Each screenshot path is an image file inside the session; open it to see what I saw.',
       'Page: http://localhost:3000/settings (viewport 1280x800)',
       '',
       '1. button "Save changes"',
@@ -125,8 +125,8 @@ describe('feedbackMessage', () => {
       screenshotNote({ page: { ...page, url: 'http://localhost:3000/' } }),
     ])
     expect(feedbackMessage(notes, [])).toBe([
-      "Feedback from the page in this run's browser: 1 annotation, 1 screenshot.",
-      'Each screenshot path is an image file inside the run; open it to see what I saw.',
+      "Feedback from the page in this session's browser: 1 annotation, 1 screenshot.",
+      'Each screenshot path is an image file inside the session; open it to see what I saw.',
       '',
       '1. div',
       'Too much padding.',

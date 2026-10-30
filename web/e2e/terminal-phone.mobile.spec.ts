@@ -86,7 +86,7 @@ async function takeControlFromRawHolder(page: Page, presence: Locator): Promise<
   }
 }
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('a phone can reach and type into a desktop-sized agent without resizing it', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
@@ -109,7 +109,7 @@ done`)
   const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
     workspace_id: workspaces[0].id,
     harness: 'claude',
-    task: 'a run watched from a phone',
+    task: 'a session watched from a phone',
   })
 
   // A desktop viewer, steering at a desktop window's size. It is the only
@@ -176,7 +176,7 @@ done`)
 
   // The raw desktop attach still owns the controller lease. Hold Take control,
   // then let its unanswered decision window grant the phone control.
-  const presence = page.getByRole('group', { name: 'Run presence' })
+  const presence = page.getByRole('group', { name: 'Session presence' })
   await expect(presence.getByText(/in another session|controls/)).toBeVisible()
   await takeControlFromRawHolder(page, presence)
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
@@ -381,7 +381,7 @@ done`)
     expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
 
     // Browsing while steering must not focus xterm's keyboard or emit input.
-    const presence = page.getByRole('group', { name: 'Run presence' })
+    const presence = page.getByRole('group', { name: 'Session presence' })
     await expect(presence.getByText(/in another session|controls/)).toBeVisible()
     await takeControlFromRawHolder(page, presence)
     await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()

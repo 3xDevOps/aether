@@ -704,7 +704,7 @@ func pullGateway(t *testing.T) (*Gateway, *verbStubBackend, string, string) {
 		t.Fatal(err)
 	}
 	localGit(t, remote, "init", "-b", "aether/run_1")
-	localGit(t, remote, "commit", "--allow-empty", "-m", "run work")
+	localGit(t, remote, "commit", "--allow-empty", "-m", "session work")
 	local := t.TempDir()
 	localGit(t, local, "init", "-b", "main")
 	localGit(t, local, "remote", "add", "aether", remote)
@@ -905,7 +905,7 @@ func TestLocalSyncLifecycle(t *testing.T) {
 
 	rec = do(g, http.MethodPost, "/local/v1/sync.stop", `{"run_id":"run_9"}`, true)
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("sync.stop unknown run = %d", rec.Code)
+		t.Fatalf("sync.stop unknown session = %d", rec.Code)
 	}
 }
 
@@ -1172,6 +1172,6 @@ func TestTerminalRelinkStopsSyncsAndForwards(t *testing.T) {
 	}
 	syncs := g.local.sync.Status()
 	if len(syncs) != 1 || syncs[0].State != "stopped" || len(g.local.forward.Status()) != 0 {
-		t.Fatalf("after relink, syncs %+v and forwards %+v still run", syncs, g.local.forward.Status())
+		t.Fatalf("after relink, syncs %+v and forwards %+v still session", syncs, g.local.forward.Status())
 	}
 }

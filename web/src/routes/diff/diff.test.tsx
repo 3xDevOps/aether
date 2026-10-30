@@ -67,7 +67,7 @@ function added(path: string, lines: number): string {
 }
 
 const active = run({ id: 'run_1', base_branch: 'main', base_commit: 'abcdef1234567890' })
-const peerRun = run({ id: 'run_2', member_id: bob.id, task: 'the other run' })
+const peerRun = run({ id: 'run_2', member_id: bob.id, task: 'the other session' })
 
 function seed(diff?: Partial<RunDiffState>) {
   useStore.setState({
@@ -274,7 +274,7 @@ test('a diff snapshot refetches the patch and joins the Compare menu', async () 
   openMenu('All changes')
   expect(screen.getByRole('menuitemradio', { name: /^All changes/ }).textContent).toContain('Against main @ abcdef1')
   expect(screen.getByRole('menuitemradio', { name: /ago|now/ }).textContent).toContain('Latest checkpoint')
-  expect(screen.queryByRole('menuitemradio', { name: /Since the run started/ })).toBeNull()
+  expect(screen.queryByRole('menuitemradio', { name: /Since the session started/ })).toBeNull()
 })
 
 test('checkpoints load from history when the view opens, newest first, and older ones on request', async () => {
@@ -304,7 +304,7 @@ test('checkpoints load from history when the view opens, newest first, and older
   const rows = screen.getAllByRole('menuitemradio').slice(1)
   expect(rows.map((row) => row.textContent)).toEqual([
     expect.stringContaining('After fix the parser · latest checkpoint'),
-    expect.stringMatching(/Run had 1 file · \+2\s*−1/),
+    expect.stringMatching(/Session had 1 file · \+2\s*−1/),
   ])
   expect(rows[0].textContent).toContain(clockTime(hour(11)))
 
@@ -377,7 +377,7 @@ test('Since the run started appears only once the base has moved past the fork p
   useStore.setState({ runs: { [active.id]: toRecord({ ...active, base_commit: 'abcdef1234567890' }) } })
   const view = renderDiff()
   openMenu('All changes')
-  expect(screen.queryByRole('menuitemradio', { name: /Since the run started/ })).toBeNull()
+  expect(screen.queryByRole('menuitemradio', { name: /Since the session started/ })).toBeNull()
   view.unmount()
 
   // A recorded patch names its base by tree; the fork tree means no upstream merge.
@@ -385,7 +385,7 @@ test('Since the run started appears only once the base has moved past the fork p
   useStore.setState({ runs: { [active.id]: toRecord({ ...active, base_commit: 'abcdef1234567890' }) } })
   const recorded = renderDiff()
   openMenu('All changes')
-  expect(screen.queryByRole('menuitemradio', { name: /Since the run started/ })).toBeNull()
+  expect(screen.queryByRole('menuitemradio', { name: /Since the session started/ })).toBeNull()
   recorded.unmount()
 
   seed({ ...ready, forkTree: 'forktree' })
@@ -393,14 +393,14 @@ test('Since the run started appears only once the base has moved past the fork p
   vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'forktree', patch: newFile, truncated: false })
   renderDiff()
   openMenu('All changes')
-  const row = screen.getByRole('menuitemradio', { name: /Since the run started/ })
+  const row = screen.getByRole('menuitemradio', { name: /Since the session started/ })
   expect(row.textContent).toContain('Against 1111111')
   expect(row.textContent).toContain('upstream work merged since')
   fireEvent.click(row)
 
   expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
   expect(api.runPatch).toHaveBeenCalledWith(active.id, { from: 'forktree' })
-  expect(screen.getByRole('button', { name: 'Since the run started' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Since the session started' })).toBeTruthy()
 })
 
 test('a comparison that fails shows the server message, keeps the other patch off screen, and Refresh retries it', async () => {
@@ -740,7 +740,7 @@ test('send posts every comment as one message under the lease this tab holds and
   })
   expect(screen.queryByRole('article')).toBeNull()
 
-  fireEvent.click(bar.getByRole('button', { name: 'Open the session' }))
+  fireEvent.click(bar.getByRole('button', { name: 'Open the chat' }))
   expect(useStore.getState().route.params).toEqual({ runId: active.id, view: 'session' })
 })
 
@@ -839,7 +839,7 @@ test('a send error stays in the bar when the run stops taking messages', async (
   act(() => useStore.setState({ runs: { [active.id]: toRecord(run({ id: active.id, status: 'completed' })) } }))
 
   expect(screen.getByRole('alert').textContent).toBe('run.room.post: connection lost')
-  expect(screen.getByText('This run has finished.')).toBeTruthy()
+  expect(screen.getByText('This session has finished.')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', true)
 })
 
@@ -848,13 +848,13 @@ test('a message the server could not deliver keeps the comments and says why', a
   renderDiff()
   comment('cmd/main.go', '+new line', 'use the helper')
   vi.mocked(api.runRoomPost).mockResolvedValueOnce({
-    message: roomMessage({ run_id: active.id, kind: 'steer_request', state: 'not_sent', failure: { code: 'session_unavailable', message: 'run session unavailable' } }),
+    message: roomMessage({ run_id: active.id, kind: 'steer_request', state: 'not_sent', failure: { code: 'session_unavailable', message: 'session session unavailable' } }),
     receipt: 'not_sent',
   })
 
   fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
 
-  expect((await screen.findByRole('alert')).textContent).toBe('Not sent: run session unavailable.')
+  expect((await screen.findByRole('alert')).textContent).toBe('Not sent: session session unavailable.')
   expect(screen.getByRole('article', { name: 'Comment on cmd/main.go:11' })).toBeTruthy()
 })
 
@@ -872,7 +872,7 @@ test('without the lease the message waits for the controller, and the bar says s
   expect(vi.mocked(api.runRoomPost).mock.calls[0][0]).not.toHaveProperty('control_session_id')
 
   act(() => useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_queued', run_id: active.id, kind: 'steer_request', state: 'denied', updated_at: '2026-08-14T10:01:00Z' })))
-  expect(screen.getByRole('status').textContent).toContain('The controller declined your 1 comment. The text is in the session.')
+  expect(screen.getByRole('status').textContent).toContain('The controller declined your 1 comment. The text is in the chat.')
 })
 
 test('while you control the run from another tab, the bar promises no 45 s wait unless that tab is reconnecting', () => {
@@ -898,7 +898,7 @@ test('a run that cannot take a message disables send and says why', () => {
   comment('cmd/main.go', '+new line', 'use the helper')
   const bar = within(screen.getByRole('group', { name: 'Review' }))
   expect(bar.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', true)
-  expect(bar.getByText('This run has finished.')).toBeTruthy()
+  expect(bar.getByText('This session has finished.')).toBeTruthy()
   view.unmount()
 
   onTestFinished(() => {
@@ -907,7 +907,7 @@ test('a run that cannot take a message disables send and says why', () => {
   useStore.setState({ runs: { [active.id]: toRecord(run({ id: active.id, member_id: bob.id })) }, info: { ...serverInfo, member: vera } })
   renderDiff()
   expect(screen.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', true)
-  expect(screen.getByText('You can watch this run but not message the agent.')).toBeTruthy()
+  expect(screen.getByText('You can watch this session but not message the agent.')).toBeTruthy()
 })
 
 test('discarding asks first, then removes every comment', async () => {

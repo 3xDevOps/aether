@@ -9,7 +9,7 @@ import { runCoordCLI, waitForCoordCLI } from './harness/coord'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'the run that writes the log needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'the session that writes the log needs a reachable Docker daemon')
 
 test('Activity narrows the log from one filter and switches to agent messages', async ({ page, aether }) => {
   const alice = await aether.member('alice')
@@ -27,14 +27,14 @@ test('Activity narrows the log from one filter and switches to agent messages', 
   await page.goto(alice.url)
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Activity', exact: true }).click()
   const feed = page.getByRole('region', { name: 'Activity feed' })
-  const runState = /Run queued|Run starting|Working|Waiting for agents|Waiting for CI|Waiting for process|Waiting|Needs you|Ready for review|Completed|Failed|Disconnected|Stopped/
+  const runState = /Run queued|Session starting|Working|Waiting for agents|Waiting for CI|Waiting for process|Waiting|Needs you|Ready for review|Completed|Failed|Disconnected|Stopped/
   await expect(feed.getByRole('listitem').filter({ hasText: 'Working' }).first()).toBeVisible({ timeout: 120_000 })
   await expect(feed.getByText(/run\.status|needs-attention/)).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Filter', exact: true }).click()
   const filter = page.getByRole('dialog')
   await filter.getByLabel('Show').click()
-  await page.getByRole('option', { name: 'Run state' }).click()
+  await page.getByRole('option', { name: 'Session state' }).click()
   await expect(page.getByRole('button', { name: 'Filter, 1 active' })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(filter).toBeHidden()

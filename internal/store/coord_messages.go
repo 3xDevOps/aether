@@ -37,7 +37,7 @@ type RunMessagePage struct {
 
 func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessagePage, error) {
 	if f.WorkspaceID == "" {
-		return nil, errors.New("store: list run messages: workspace_id is required")
+		return nil, errors.New("store: list session messages: workspace_id is required")
 	}
 	limit := normalizeCollaborationLimit(f.Limit)
 	query := `SELECT m.rowid, m.id, m.workspace_id, m.from_run, m.to_run, m.body, m.kind,
@@ -67,7 +67,7 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 		// A cursor issued before cursors carried the rowid holds the message ID.
 		beforeAt, beforeID, ok := decodeEvidenceCursor(f.Before)
 		if !ok {
-			return nil, fmt.Errorf("store: list run messages: %w %q", ErrInvalidCursor, f.Before)
+			return nil, fmt.Errorf("store: list session messages: %w %q", ErrInvalidCursor, f.Before)
 		}
 		query += ` AND (m.created_at, m.rowid) < (?, (SELECT rowid FROM run_messages WHERE id = ?))`
 		args = append(args, beforeAt.UnixNano(), beforeID)
@@ -76,12 +76,12 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 	args = append(args, limit+1)
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("store: list run messages: %w", err)
+		return nil, fmt.Errorf("store: list session messages: %w", err)
 	}
 	var rowids []int64
 	items, err := collect(rows, scanWithRowid(scanListedRunMessage, &rowids))
 	if err != nil {
-		return nil, fmt.Errorf("store: list run messages: %w", err)
+		return nil, fmt.Errorf("store: list session messages: %w", err)
 	}
 	page := &RunMessagePage{Items: items}
 	if len(items) > limit {
@@ -97,11 +97,11 @@ func (d *DB) LastSentRunMessages(ctx context.Context, from domain.RunID) (map[do
 	rows, err := d.db.QueryContext(ctx, `SELECT `+runMessageCols+` FROM run_messages
 		WHERE rowid IN (SELECT MAX(rowid) FROM run_messages WHERE from_run = ? GROUP BY to_run)`, from)
 	if err != nil {
-		return nil, fmt.Errorf("store: last sent run messages for %s: %w", from, err)
+		return nil, fmt.Errorf("store: last sent session messages for %s: %w", from, err)
 	}
 	msgs, err := collect(rows, scanRunMessage)
 	if err != nil {
-		return nil, fmt.Errorf("store: last sent run messages for %s: %w", from, err)
+		return nil, fmt.Errorf("store: last sent session messages for %s: %w", from, err)
 	}
 	byPeer := make(map[domain.RunID]*RunMessage, len(msgs))
 	for _, m := range msgs {

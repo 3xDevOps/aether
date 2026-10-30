@@ -5,7 +5,7 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'the run Insights counts needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'the session Insights counts needs a reachable Docker daemon')
 
 test('Insights counts a finished run and keeps it across period and scope', async ({ page, aether }) => {
   const alice = await aether.member('alice')
@@ -35,7 +35,7 @@ test('Insights counts a finished run and keeps it across period and scope', asyn
   const mine = page.getByRole('region', { name: 'My statistics' })
   const team = page.getByRole('region', { name: 'Team statistics' })
   for (const section of [mine, team]) {
-    await expect(section.getByRole('article', { name: 'Runs completed' })).toContainText('1 run', { timeout: 30_000 })
+    await expect(section.getByRole('article', { name: 'Sessions completed' })).toContainText('1 session', { timeout: 30_000 })
     await expect(section.getByRole('article', { name: 'Success rate' })).toContainText('0%')
     await expect(section.getByRole('article', { name: 'Total tokens used' })).toBeVisible()
     await expect(section.getByRole('img')).toHaveCount(7)
@@ -118,9 +118,9 @@ test('Insights dims the other days while one is hovered, for me and for the team
 
   const mine = page.getByRole('region', { name: 'My statistics' })
   const team = page.getByRole('region', { name: 'Team statistics' })
-  await expect(mine.getByRole('article', { name: 'Runs completed' })).toContainText('11 runs', { timeout: 30_000 })
+  await expect(mine.getByRole('article', { name: 'Sessions completed' })).toContainText('11 sessions', { timeout: 30_000 })
   await expect(mine.getByRole('article', { name: 'Total tokens used' })).toContainText(/used 56% of the 100K tokens/)
-  await expect(team.getByRole('article', { name: 'Runs completed' })).toContainText('24 runs')
+  await expect(team.getByRole('article', { name: 'Sessions completed' })).toContainText('24 sessions')
 
   for (const section of [mine, team]) {
     const days = section.getByRole('img')

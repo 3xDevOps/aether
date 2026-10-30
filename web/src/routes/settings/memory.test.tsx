@@ -70,7 +70,7 @@ describe('memory in settings', () => {
       pref({ last_used_at: '2026-10-27T11:00:00Z' }),
       pref({ id: 'pref-2', text: 'Use pnpm here', workspace_id: workspace.id, source: 'settings', updated_at: '2026-10-26T10:00:00Z' }),
     ])
-    expect(screen.getByText(/Only you can see these\. Teammates, admins, your runs and connected apps can't\. Server operators can read the server database\./)).toBeDefined()
+    expect(screen.getByText(/Only you can see these\. Teammates, admins, your sessions and connected apps can't\. Server operators can read the server database\./)).toBeDefined()
     expect(screen.getByText('The assistant uses them when they fit; what you say in a message always wins.')).toBeDefined()
     const rows = within(await screen.findByRole('list', { name: 'Preferences' })).getAllByRole('listitem')
     expect(rows).toHaveLength(2)

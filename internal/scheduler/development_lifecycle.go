@@ -35,7 +35,7 @@ func (s *Scheduler) developmentClosedPath(id domain.RunID) string {
 
 // ErrDevelopmentClosed refuses a new surface in the container of a run that
 // is being closed.
-var ErrDevelopmentClosed = errors.New("development environment was closed; explicitly relaunch the run before starting new surfaces")
+var ErrDevelopmentClosed = errors.New("development environment was closed; explicitly relaunch the session before starting new surfaces")
 
 func (s *Scheduler) checkDevelopmentOpen(id domain.RunID, cid containerruntime.ID) error {
 	data, err := os.ReadFile(s.developmentClosedPath(id))

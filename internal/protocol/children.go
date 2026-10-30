@@ -95,10 +95,10 @@ type ChildOptionsResult struct {
 
 // ChildStartParams starts one child run of the calling run.
 type ChildStartParams struct {
-	Harness         string `json:"harness" jsonschema:"agent from aether_child_options"`
+	Harness         string `json:"harness" jsonschema:"agent from aether_subsession_options"`
 	Model           string `json:"model,omitempty" jsonschema:"model id; empty keeps the agent's default"`
 	Mode            string `json:"mode,omitempty" jsonschema:"standard, enhanced or background; empty picks enhanced where installed"`
-	AccountMemberID string `json:"account_member_id,omitempty" jsonschema:"account from aether_child_options; empty is the owner's own"`
+	AccountMemberID string `json:"account_member_id,omitempty" jsonschema:"account from aether_subsession_options; empty is the owner's own"`
 	Purpose         string `json:"purpose" jsonschema:"3-8 words shown in the dashboard, e.g. adversarial review of auth change"`
 	Task            string `json:"task" jsonschema:"everything the child needs: it sees only this text and your last commit"`
 	IdempotencyKey  string `json:"idempotency_key" jsonschema:"a stable key you choose; a retry with the same key returns the first receipt"`

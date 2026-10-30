@@ -15,11 +15,11 @@ import { refreshAssistant } from '@/store/assistant-stream'
 export const autoApproveLabel = 'Let the assistant act without asking'
 
 export const autoApproveWarning =
-  'The assistant will launch runs, message and stop your runs and save your environment on its own, with no approval card. Text it reads from runs, files or web pages could steer it into doing so.'
+  'The assistant will launch sessions, message and stop your sessions and save your environment on its own, with no approval card. Text it reads from sessions, files or web pages could steer it into doing so.'
 
 const scope: [string, string][] = [
-  ['Without a card', 'Launching runs, messaging and stopping your own runs, saving your environment. Each is noted in the assistant’s conversation before it runs.'],
-  ['Always asks', 'Messaging or stopping another member’s run.'],
+  ['Without a card', 'Launching sessions, messaging and stopping your own sessions, saving your environment. Each is noted in the assistant’s conversation before it runs.'],
+  ['Always asks', 'Messaging or stopping another member’s session.'],
   ['Not affected', 'The assistant’s own shell and file tools, which run without asking either way.'],
 ]
 
@@ -66,8 +66,8 @@ export function AssistantSection({ client }: { client: Api }) {
   const help = on === null
     ? error ? null : 'Reading the setting…'
     : on
-      ? 'On. The assistant launches runs, messages and stops your runs and saves your environment without a card.'
-      : 'Off. The assistant asks on a card before it launches, messages or stops a run, or saves your environment.'
+      ? 'On. The assistant launches sessions, messages and stops your sessions and saves your environment without a card.'
+      : 'Off. The assistant asks on a card before it launches, messages or stops a session, or saves your environment.'
 
   return (
     <>

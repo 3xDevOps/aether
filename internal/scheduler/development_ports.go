@@ -72,10 +72,10 @@ func (s *Scheduler) listeningPorts(ctx context.Context, cid runtime.ID) ([]proto
 	defer cancel()
 	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", listeningScript}, "")
 	if err != nil {
-		return nil, fmt.Errorf("read the run's listening ports: %w", err)
+		return nil, fmt.Errorf("read the session's listening ports: %w", err)
 	}
 	if code != 0 {
-		return nil, fmt.Errorf("read the run's listening ports: exit %d: %s", code, strings.TrimSpace(stderr))
+		return nil, fmt.Errorf("read the session's listening ports: exit %d: %s", code, strings.TrimSpace(stderr))
 	}
 	return parseListeningPorts(stdout), nil
 }

@@ -17,10 +17,10 @@ const phone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch:
 
 async function openLaunch(page: Page, onPhone: boolean): Promise<Locator> {
   const button = onPhone
-    ? page.getByRole('banner').getByRole('button', { name: 'New run' })
-    : page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New run' })
+    ? page.getByRole('banner').getByRole('button', { name: 'New session' })
+    : page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New session' })
   await button.click()
-  const dialog = page.getByRole('dialog', { name: 'New run' })
+  const dialog = page.getByRole('dialog', { name: 'New session' })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('radio', { name: /^custom/ })).toBeVisible()
   return dialog

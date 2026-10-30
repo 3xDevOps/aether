@@ -47,7 +47,7 @@ func (a coordWakeAdmission) Admit(ctx context.Context, run domain.RunID, dispatc
 		}
 		if current == nil || current.ID != run || !current.Mode.Interactive() || current.Protected ||
 			(current.Status != domain.RunRunning && current.Status != domain.RunNeedsAttention) {
-			return errors.New("coord wake: run is not an eligible live interactive run")
+			return errors.New("coord wake: session is not an eligible live interactive session")
 		}
 		if err := checkCtx.Err(); err != nil {
 			return err

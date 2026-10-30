@@ -19,7 +19,7 @@ function useTargetTitle(target: WatchTarget | null): string {
     switch (target.kind) {
       case 'run': {
         const run = target.run_id ? s.runs[target.run_id] : undefined
-        return run ? `“${runLabel(run)}”` : 'this run'
+        return run ? `“${runLabel(run)}”` : 'this session'
       }
       case 'pr':
         return `pull request #${target.number}${target.repo ? ` in ${target.repo}` : ''}`

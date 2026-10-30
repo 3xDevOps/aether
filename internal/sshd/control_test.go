@@ -230,7 +230,7 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 		t.Fatalf("run.relaunch: %v", err)
 	}
 	if rr.Run.ID != string(e.run.ID) {
-		t.Errorf("relaunch returned %q, want the addressed run %q", rr.Run.ID, e.run.ID)
+		t.Errorf("relaunch returned %q, want the addressed session %q", rr.Run.ID, e.run.ID)
 	}
 
 	want := []string{
@@ -383,7 +383,7 @@ func TestControlErrorMapping(t *testing.T) {
 
 	err := c.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: "run_missing"}, nil)
 	if pe := rpcErrOf(t, err); pe.Code != protocol.CodeNotFound {
-		t.Errorf("unknown run code = %d, want %d", pe.Code, protocol.CodeNotFound)
+		t.Errorf("unknown session code = %d, want %d", pe.Code, protocol.CodeNotFound)
 	}
 
 	e.runs.setErr(errInvalidTransition)

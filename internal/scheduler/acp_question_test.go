@@ -24,7 +24,7 @@ func mailTurnEnded(items []acphost.Item) bool {
 
 func (e *testEnv) askWhileHeld(t *testing.T, run domain.RunID) {
 	t.Helper()
-	waitFor(t, "the run to report its task", func() bool {
+	waitFor(t, "the session to report its task", func() bool {
 		r, err := e.db.GetRun(t.Context(), run)
 		return err == nil && r.Reason == "working in background: 1 task"
 	})
@@ -75,7 +75,7 @@ func TestEnhancedClaudeRunKeepsAQuestionThroughAMailPromptTurn(t *testing.T) {
 	trail = append(trail, e.runStatusEvents(sub, run.ID)...)
 	for _, p := range trail[statusIndex(trail, domain.RunNeedsAttention, heldQuestion):] {
 		if p.To != domain.RunNeedsAttention || p.Reason != heldQuestion {
-			t.Fatalf("status events %+v, want nothing to move the run off its question", trail)
+			t.Fatalf("status events %+v, want nothing to move the session off its question", trail)
 		}
 	}
 	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunNeedsAttention || r.Reason != heldQuestion {
@@ -99,7 +99,7 @@ func TestEnhancedClaudeRunQuestionClearsWhenAMemberMessageReachesTheAgent(t *tes
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "us-east"}, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the answer to resume the run", func() bool {
+	waitFor(t, "the answer to resume the session", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Status == domain.RunRunning
 	})
@@ -139,7 +139,7 @@ func TestEnhancedClaudeRunKeepsAQuestionAskedAfterTheMessageWasSent(t *testing.T
 
 func (e *testEnv) waitRunReason(t *testing.T, run domain.RunID, reason string) {
 	t.Helper()
-	waitFor(t, "the run to need attention because "+reason, func() bool {
+	waitFor(t, "the session to need attention because "+reason, func() bool {
 		r, err := e.db.GetRun(t.Context(), run)
 		return err == nil && r.Status == domain.RunNeedsAttention && r.Reason == reason
 	})

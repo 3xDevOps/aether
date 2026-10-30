@@ -210,9 +210,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	// by a retry of this failed call.
 	if childrenErr != nil {
 		if killErr := s.cfg.Runs.Kill(context.WithoutCancel(ctx), run.ID, member); killErr != nil {
-			return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; stopping run %s also failed: %v", childrenErr.Message, run.ID, killErr)}
+			return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; stopping session %s also failed: %v", childrenErr.Message, run.ID, killErr)}
 		}
-		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; run %s was stopped, so launch again", childrenErr.Message, run.ID)}
+		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; session %s was stopped, so launch again", childrenErr.Message, run.ID)}
 	}
 	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed, SkippedFallbackAccounts: skipped}, nil
 }
@@ -525,7 +525,7 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	run, err := s.cfg.Runs.Review(ctx, domain.RunID(p.RunID), member, p.Action, reportedOnly)
 	if errors.Is(err, scheduler.ErrReviewNotReported) {
 		id, _ := ctx.Value(connIdentityKey{}).(connIdentity)
-		return nil, scopeRefusal(id, protocol.MethodRunReview+" complete of a run with no reported success awaiting review", scopeControl)
+		return nil, scopeRefusal(id, protocol.MethodRunReview+" complete of a session with no reported success awaiting review", scopeControl)
 	}
 	if err != nil {
 		return nil, rpcError(err)
@@ -610,7 +610,7 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	}
 	recipientActor := permissions.Actor{ID: recipient.ID, Role: recipient.Role}
 	if derr := permissions.Check(permissions.Launch, recipientActor, permissions.Target{}); derr != nil {
-		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own runs", recipient.DisplayName))
+		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own sessions", recipient.DisplayName))
 	}
 	from := run.MemberID
 	outbox, ok := s.cfg.Store.(store.HandoffOutboxStore)
@@ -843,7 +843,7 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	if p.Repo != "" && domain.WorkspaceID(p.Repo) != run.WorkspaceID {
 		extra, ok := run.ExtraRepo(domain.WorkspaceID(p.Repo))
 		if !ok {
-			return nil, invalidParams("repo " + p.Repo + " is not one of the run's repos")
+			return nil, invalidParams("repo " + p.Repo + " is not one of the session's repos")
 		}
 		workspace, branch = extra.WorkspaceID, extra.Branch
 	}

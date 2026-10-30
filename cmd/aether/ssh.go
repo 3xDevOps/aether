@@ -12,22 +12,22 @@ import (
 func init() {
 	register(command{
 		name:  "ssh",
-		short: "open a shell or run a command in a run, through the system ssh",
-		usage: "aether ssh [ssh options] <run-id> [command]",
+		short: "open a shell or run a command in a session, through the system ssh",
+		usage: "aether ssh [ssh options] <session-id> [command]",
 		example: "aether ssh run-d6ay38tj8j\n" +
 			"aether ssh run-d6ay38tj8j git status",
 		run: runSSH,
 	})
 	register(command{
 		name:    "ssh-config",
-		short:   "let ssh, scp and editors reach every run as <run-id>" + cli.RunHostSuffix,
+		short:   "let ssh, scp and editors reach every session as <session-id>" + cli.RunHostSuffix,
 		usage:   "aether ssh-config",
 		example: "aether ssh-config",
 		run:     runSSHConfig,
 	})
 }
 
-const sshUsage = "usage: aether ssh [ssh options] <run> [command]"
+const sshUsage = "usage: aether ssh [ssh options] <session> [command]"
 
 // runSSH runs the system ssh against a run with the options aether
 // ssh-config would have written, so it needs no ~/.ssh/config. With --stdio
@@ -128,6 +128,6 @@ func runSSHConfig(args []string) error {
 	} else {
 		fmt.Printf("%s already includes it\n", result.Config)
 	}
-	fmt.Printf("ssh <run-id>%s now opens a shell in that run. scp, sftp, rsync and editors take the same host name.\n", cli.RunHostSuffix)
+	fmt.Printf("ssh <session-id>%s now opens a shell in that session. scp, sftp, rsync and editors take the same host name.\n", cli.RunHostSuffix)
 	return nil
 }

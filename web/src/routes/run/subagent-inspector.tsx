@@ -54,7 +54,7 @@ function ReadError({ what, error, onRetry }: { what: string; error: string; onRe
 function PromptNote({ error, cut, onRetry }: { error: string | undefined; cut: boolean; onRetry: () => void }) {
   if (error) return <ReadError what="prompt" error={error} onRetry={onRetry} />
   return cut
-    ? <p className="text-ui-sm text-muted">The launch input is longer than the session log keeps, so its prompt is not available.</p>
+    ? <p className="text-ui-sm text-muted">The launch input is longer than the conversation log keeps, so its prompt is not available.</p>
     : <p className="text-ui-sm text-muted">Loading the prompt…</p>
 }
 
@@ -133,7 +133,7 @@ export function SubagentInspector({ run, agentID, agent: terminal, nav, onClose 
   }
 
   let notice: React.ReactNode
-  if (!ready) notice = <p role="status" className="text-ui-sm text-muted">Loading the session…</p>
+  if (!ready) notice = <p role="status" className="text-ui-sm text-muted">Loading the conversation…</p>
   else if (incomplete && olderError) {
     notice = (
       <Callout tone="failed" title="Earlier items could not be read" actions={<Button size="sm" variant="secondary" onClick={loadOlder}>Retry</Button>}>
@@ -155,7 +155,7 @@ export function SubagentInspector({ run, agentID, agent: terminal, nav, onClose 
     <div ref={root} tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
       <div className="flex shrink-0 items-center gap-1 border-b border-seam bg-chrome px-2 py-1">
         <nav aria-label="Subagent path" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-ui-sm text-muted">
-          <Button variant="quiet" className="shrink-0" onClick={onClose}>Session</Button>
+          <Button variant="quiet" className="shrink-0" onClick={onClose}>Chat</Button>
           {path.map((crumb) => (
             <span key={crumb.id} className={cn('flex min-w-0 items-center gap-1', crumb.id === agentID && 'max-w-[50%] shrink-0')}>
               <span aria-hidden className="shrink-0 px-0.5">›</span>

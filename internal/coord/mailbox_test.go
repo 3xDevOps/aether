@@ -36,9 +36,9 @@ func TestSendAuthorizationFollowsTheRadar(t *testing.T) {
 	if err == nil || err.Code != protocol.CodeDenied {
 		t.Fatalf("send without an overlap = %v, want CodeDenied", err)
 	}
-	if want := fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s: member %s (collaborator) "+
-		"may not message it: run is protected: only its owner or an admin may message it; "+
-		"run `aether-internal status` to list the runs it can message", b, a, h.runs[0].MemberID); err.Message != want {
+	if want := fmt.Sprintf("coord.send: session %s is not an authorized peer of session %s: member %s (collaborator) "+
+		"may not message it: session is protected: only its owner or an admin may message it; "+
+		"run `aether-internal status` to list the sessions it can message", b, a, h.runs[0].MemberID); err.Message != want {
 		t.Fatalf("denial message = %q, want %q", err.Message, want)
 	}
 
@@ -56,8 +56,8 @@ func TestSendAuthorizationFollowsTheRadar(t *testing.T) {
 		t.Fatalf("send to a non-overlapping run = %v, want CodeDenied", err)
 	}
 	if err = send(a, "run_does_not_exist"); err == nil || err.Code != protocol.CodeNotFound ||
-		err.Message != "coord.send: unknown run run_does_not_exist" {
-		t.Fatalf("send to an unknown run = %v, want CodeNotFound", err)
+		err.Message != "coord.send: unknown session run_does_not_exist" {
+		t.Fatalf("send to an unknown session = %v, want CodeNotFound", err)
 	}
 
 	// The overlap clears; the grace window opens where it cleared and
@@ -124,7 +124,7 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	for _, target := range []domain.RunID{b, c, d} {
 		_, serr := h.svc.Send(ctx, a, sendParams(target, "ping"))
 		if listed[string(target)] != (serr == nil) {
-			t.Fatalf("run %s listed=%v but send error=%v", target, listed[string(target)], serr)
+			t.Fatalf("session %s listed=%v but send error=%v", target, listed[string(target)], serr)
 		}
 	}
 	if st.Unread != 0 {
@@ -204,8 +204,8 @@ func TestSendRejectsFinishedAndSelfTargets(t *testing.T) {
 	}
 	_, err := h.svc.Send(ctx, a, sendParams(b, "hi-finished"))
 	if err == nil || err.Code != protocol.CodeUnavailable ||
-		err.Message != fmt.Sprintf("coord.send: run %s has finished", b) {
-		t.Fatalf("send to a finished run = %v, want CodeUnavailable", err)
+		err.Message != fmt.Sprintf("coord.send: session %s has finished", b) {
+		t.Fatalf("send to a finished session = %v, want CodeUnavailable", err)
 	}
 	if st, serr := h.svc.Status(ctx, a); serr != nil || len(st.Peers) != 0 || st.PeerTotal != 0 {
 		t.Fatalf("status peers = %+v (err %v), want the finished overlapping run omitted", st, serr)
@@ -249,7 +249,7 @@ func TestInboxBatchAndTokenSemantics(t *testing.T) {
 	}
 	// A token from the other run acknowledges nothing.
 	if _, oerr := h.svc.Inbox(ctx, a, protocol.CoordInboxParams{AckToken: first.AckToken}); oerr != nil {
-		t.Fatalf("Inbox (other run): %v", oerr)
+		t.Fatalf("Inbox (other session): %v", oerr)
 	}
 	if again, aerr := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{}); aerr != nil || len(again.Messages) != 1 {
 		t.Fatalf("after a foreign ack = %+v (err %v), want the batch outstanding", again, aerr)
@@ -364,7 +364,7 @@ func TestSendHasNoPeerCap(t *testing.T) {
 	for i := 1; i < len(h.runs); i++ {
 		h.advance(sendRefill)
 		if _, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(i), "ping")); err != nil {
-			t.Fatalf("send to run %d: %v", i, err)
+			t.Fatalf("send to session %d: %v", i, err)
 		}
 	}
 }
@@ -788,7 +788,7 @@ func TestCoordReportPublishesEvidenceOnlyAfterFinalizationOnce(t *testing.T) {
 	case event := <-sub.Events():
 		payload, ok := event.Payload.(events.EvidencePacketPayload)
 		if !ok || payload.PacketID != first.EvidenceRef || event.WorkspaceID != h.workspace || event.RunID != run {
-			t.Fatalf("evidence event = %+v, want packet %q on run %s", event, first.EvidenceRef, run)
+			t.Fatalf("evidence event = %+v, want packet %q on session %s", event, first.EvidenceRef, run)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("coord.report returned without publishing its finalized evidence event")

@@ -150,7 +150,7 @@ func parseAgentAdd(args []string) (agentAddOptions, error) {
 	standard := fs.String("standard", "", "Standard mode command template")
 	background := fs.String("background", "", "Background mode command template")
 	acp := fs.String("acp", "", "Agent Client Protocol server command")
-	acpMode := fs.String("acp-mode", "", "ACP session mode an Enhanced run starts in")
+	acpMode := fs.String("acp-mode", "", "ACP mode an Enhanced session starts in")
 	var login stringList
 	fs.Var(&login, "login", "file whose presence shows the agent is logged in, such as ~/.cursor/auth.json (repeatable)")
 	enhanced := fs.Bool("enhanced", false, "also install the shipped agent's enhanced-mode adapter")
@@ -285,10 +285,10 @@ func agentAdd(args []string) error {
 	})
 }
 
-const codexHookNote = `Trust Aether's hooks once. Standard Codex runs load Aether's inbox hooks. Codex runs a hook
-only after you trust it, so your first Standard run opens "Hooks need review": choose
+const codexHookNote = `Trust Aether's hooks once. Standard Codex sessions load Aether's inbox hooks. Codex runs a hook
+only after you trust it, so your first Standard session opens "Hooks need review": choose
 "Trust all and continue". Codex remembers this in ~/.codex/config.toml for every workspace and
-asks again only if Aether's hooks change. If a child run is your first Standard Codex run,
+asks again only if Aether's hooks change. If a subsession is your first Standard Codex session,
 open its terminal to answer. If the list shows hooks you don't recognize, choose "Review hooks"
 instead.`
 

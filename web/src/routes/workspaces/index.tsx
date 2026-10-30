@@ -80,7 +80,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
       <div className="min-h-0 flex-1 overflow-y-auto">
         <PageBody>
           <p className="text-ui text-muted">
-            A workspace is one repository and the base branch its runs start from. The sidebar shows one workspace at a time.
+            A workspace is one repository and the base branch its sessions start from. The sidebar shows one workspace at a time.
           </p>
           {showCreate && (
             <div className="rounded-panel border border-seam p-4">
@@ -159,7 +159,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
       {deleting && canDelete && (
         <Confirm
           title={`Delete ${deleting.name}?`}
-          description="This permanently deletes the workspace, its finished runs, retained containers, files, history and server repository. Members, their environments and external repositories stay."
+          description="This permanently deletes the workspace, its finished sessions, retained containers, files, history and server repository. Members, their environments and external repositories stay."
           action="Delete workspace"
           onConfirm={() => client.workspaceDelete(deleting.id)}
           onDone={() => {
@@ -170,7 +170,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
           onClose={() => setDeleting(null)}
         >
           <p className="text-ui-sm text-muted">
-            The server refuses while a run is unfinished, review work or cleanup is pending, or a schedule remains.
+            The server refuses while a session is unfinished, review work or cleanup is pending, or a schedule remains.
           </p>
         </Confirm>
       )}

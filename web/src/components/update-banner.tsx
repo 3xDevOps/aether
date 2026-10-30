@@ -271,7 +271,7 @@ function waitingLine(waiting: ServerUpdateWaiting | undefined): string {
   if (!waiting) return ''
   const parts: string[] = []
   if (waiting.runs > 0) {
-    parts.push(`${waiting.runs} ${waiting.runs === 1 ? 'run' : 'runs'}`)
+    parts.push(`${waiting.runs} ${waiting.runs === 1 ? 'session' : 'sessions'}`)
   }
   if (waiting.shells > 0) {
     parts.push(`${waiting.shells} open ${waiting.shells === 1 ? 'shell' : 'shells'}`)
@@ -281,9 +281,9 @@ function waitingLine(waiting: ServerUpdateWaiting | undefined): string {
 
 function confirmLine(active: number): string {
   if (active === 0) {
-    return 'No runs are active right now. Attached terminals reconnect on their own.'
+    return 'No sessions are active right now. Attached terminals reconnect on their own.'
   }
-  const runs = active === 1 ? '1 run is' : `${active} runs are`
+  const runs = active === 1 ? '1 session is' : `${active} sessions are`
   return `${runs} active right now. They keep running: the server reattaches to their containers when it comes back, and attached terminals reconnect on their own.`
 }
 
@@ -425,7 +425,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <p className="mt-1.5 leading-5">
-                Updating replaces the server binaries and restarts the server. Runs
+                Updating replaces the server binaries and restarts the server. Sessions
                 keep going - the server reattaches to their containers when it comes
                 back - and attached terminals reconnect on their own. Clients update
                 after the server.
@@ -436,7 +436,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
         {target.state === 'scheduled' && (
           <>
             <p className="text-muted">
-              Scheduled by {scheduledBy}, applies when no run is active.
+              Scheduled by {scheduledBy}, applies when no session is active.
             </p>
             {waiting && <p className="text-muted">{waiting}</p>}
           </>

@@ -1,6 +1,6 @@
 # Watches
 
-A watch is a subscription you keep on one run or one pull
+A watch is a subscription you keep on one session or one pull
 request. The server evaluates it, not your browser or an agent, so it keeps
 working after you close the dashboard and across server restarts. When the
 target needs you or reaches the state you asked about, the server records a
@@ -20,27 +20,27 @@ takes the target's defaults, marked *.
 
 | Target | Condition | Notified when |
 | --- | --- | --- |
-| `run` | `needs_you`* | The run waits on a person: a permission request, a question, a blocked report, a usage limit, a disconnected agent, a turn cut short, or a live failure nobody has seen. This is the rule the **Needs you** list uses (`domain.Run.NeedsAttention`). A run waiting on child runs, on CI, on tools or on nothing, an answered run, and a turn that ended without a report never notify. One notice per distinct need, and each open permission request or question is a need of its own; an unchanged question is never repeated. |
-| `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the run ended completed without a success report, because the agent exited with its results committed or a member or its parent run closed it as completed. A retained run that is relaunched and completes again is announced again. A member accepting or closing a reported success is not announced again, but a success reported after the run went back to work is. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
-| `run` | `pr_merged`, `ci` | Every pull request the run recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
+| `run` | `needs_you`* | The session waits on a person: a permission request, a question, a blocked report, a usage limit, a disconnected agent, a turn cut short, or a live failure nobody has seen. This is the rule the **Needs you** list uses (`domain.Run.NeedsAttention`). A session waiting on subsessions, on CI, on tools or on nothing, an answered session, and a turn that ended without a report never notify. One notice per distinct need, and each open permission request or question is a need of its own; an unchanged question is never repeated. |
+| `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the session was interrupted. `Completed`: the session ended completed without a success report, because the agent exited with its results committed or a member or its parent session closed it as completed. A retained session that is relaunched and completes again is announced again. A member accepting or closing a reported success is not announced again, but a success reported after the session went back to work is. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
+| `run` | `pr_merged`, `ci` | Every pull request the session recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | See [Pull requests and CI](#pull-requests-and-ci). |
 
 Aether has no deploy signal. `deployed` is refused with that reason; watch
 `finished` or `pr_merged` instead.
 
-A notice's title is the run's title. Its body is the
+A notice's title is the session's title. Its body is the
 line above, or the question's own text, and it links to the target:
-`/?run=<id>` for a run.
+`/?run=<id>` for a session.
 
-A run that has ended (failed, stopped, merged or abandoned) cannot be watched: `watch.create` says how it ended. A finish the
-target reached before the watch began, such as a run whose agent already
+A session that has ended (failed, stopped, merged or abandoned) cannot be watched: `watch.create` says how it ended. A finish the
+target reached before the watch began, such as a session whose agent already
 reported done is not announced; the next one is.
 
 ## Pull requests and CI
 
 A `pr` target is `{"kind": "pr", "repo": "owner/name", "number": 7}`, with
-an optional `run_id` for the run that opened it. A run target's `pr_merged`
-and `ci` follow every pull request the run recorded (`run.pr.create`), and
+an optional `run_id` for the session that opened it. A session target's `pr_merged`
+and `ci` follow every pull request the session recorded (`run.pr.create`), and
 start the moment it records one.
 
 The server reads GitHub with the watch owner's own `gh` login in their
@@ -59,7 +59,7 @@ merged or closed.
 
 | Condition | Notice |
 | --- | --- |
-| `ci` | When every check run and commit status on the head commit is final: `Checks passed on #7`, or `2 checks failed on #7: build, lint`. One notice per head commit and set of check runs, so a failure, a rerun and a pass send the failure, then the pass, and a new push sends one more. A cancelled check run counts as failed unless a newer run of the same job replaced it in the same check suite or GitHub Actions workflow. Telling workflows apart reads the head commit's Actions runs; when GitHub refuses that read (HTTP 403 or 404, for example a fine-grained token without Actions read access), the cancelled run counts as failed and the watch's summary says so. A pull request with no checks on its head commit never sends one; its summary says so. |
+| `ci` | When every check run and commit status on the head commit is final: `Checks passed on #7`, or `2 checks failed on #7: build, lint`. One notice per head commit and set of check runs, so a failure, a rerun and a pass send the failure, then the pass, and a new push sends one more. A cancelled check run counts as failed unless a newer run of the same job replaced it in the same check suite or GitHub Actions workflow. Telling workflows apart reads the head commit's Actions runs; when GitHub refuses that read (HTTP 403 or 404, for example a fine-grained token without Actions read access), the cancelled session counts as failed and the watch's summary says so. A pull request with no checks on its head commit never sends one; its summary says so. |
 | `review` | `mona approved #7`, `mona requested changes on #7`, `mona commented on #7` (a review with a body). One per review. |
 | `merged`, `pr_merged` | `PR #7 merged on GitHub`. Only GitHub's merged state sends it; an agent reporting success does not. |
 | `closed` | `PR #7 closed without merging on GitHub`. |
@@ -74,10 +74,10 @@ GitHub sends Aether no webhooks, so the server polls:
   requested, or the pull request changed since the last read; every 5
   minutes once nothing changes. `next_check_at` and `last_check_at` on the
   watch say when.
-- At once on a `run.pr` event for the watched run.
+- At once on a `run.pr` event for the watched session.
 - Polling stops when the pull request is merged or closed and every
-  condition is final. A `pr` watch is then `done`; a run watch stays on
-  the run.
+  condition is final. A `pr` watch is then `done`; a session watch stays on
+  the session.
 - Requests are conditional on the last ETags, which are stored, so a
   restart neither re-reads everything nor repeats a notice. Unchanged
   answers do not count against GitHub's rate limit.
@@ -86,8 +86,8 @@ GitHub sends Aether no webhooks, so the server polls:
 - A rate limit puts the watch in `error` with `GitHub rate limit, retrying
   at <time>` and sends nothing to GitHub before that time.
 
-A read that finds a run's pull request merged or closed also records it on
-the run, so every surface that shows the run's pull request sees it.
+A read that finds a session's pull request merged or closed also records it on
+the session, so every surface that shows the session's pull request sees it.
 
 ## States
 
@@ -95,13 +95,13 @@ the run, so every surface that shows the run's pull request sees it.
 | --- | --- |
 | `active` | Evaluated on every event about the target. |
 | `paused` | You paused it. Nothing is evaluated or sent until you resume it. |
-| `error` | Evaluation failed, including the check every live watch gets when the server starts; `error` holds the real error. It retries with backoff from 30 seconds, doubling to at most 15 minutes, and returns to `active` once an evaluation succeeds. A startup check whose retry cannot be saved either is retried every tick until one is. A watch created, changed or resumed while the server is still recovering its runs is first checked once recovery ends, so a request not yet restored never reads as a need. `access revoked: ...` means you no longer exist, await approval, or cannot see the workspace; it is not retried on a timer, only on the target's next event. |
-| `done` | The target reached its final state (a run merged, abandoned, failed or or stopped) and its last notice is recorded. |
+| `error` | Evaluation failed, including the check every live watch gets when the server starts; `error` holds the real error. It retries with backoff from 30 seconds, doubling to at most 15 minutes, and returns to `active` once an evaluation succeeds. A startup check whose retry cannot be saved either is retried every tick until one is. A watch created, changed or resumed while the server is still recovering its sessions is first checked once recovery ends, so a request not yet restored never reads as a need. `access revoked: ...` means you no longer exist, await approval, or cannot see the workspace; it is not retried on a timer, only on the target's next event. |
+| `done` | The target reached its final state (a session merged, abandoned, failed or or stopped) and its last notice is recorded. |
 | `expired` | It passed `expires_at`. Give it a new `expires_at` to watch again. |
 
 A watch expires 14 days after creation unless you set `expires_at`, at most
 90 days ahead. Done and expired watches and their notices are deleted 30 days
-after they ended. Deleting the run, the workspace or your member
+after they ended. Deleting the session, the workspace or your member
 account deletes its watches.
 
 ## Delivery
@@ -119,22 +119,22 @@ the notice is recorded and updated in place as the push resolves:
 | `push` | `held_quiet_hours` | Quiet hours hold it; `detail` says until when. |
 | `push` | `failed` | No device took it after 5 attempts with backoff; `detail` is the push service's error. Each attempt is counted before it is sent, so a server that stops mid-send retries it rather than sending it more than 5 times. |
 | `push` | `cleared` | Dropped unsent: a `needs_you` push whose need was resolved (answered, dismissed, granted) first, or that `watch.update` stopped watching for (`detail` reads `You stopped watching for needs you`), or a push of a watch paused until it expired. |
-| `push` | `withdrawn` | A delivered `needs_you` push whose target then needed nothing more from you. Your devices got a silent replacement reading `No longer needs you` under the same notification, the way a run's own need notification is cleared; it is sent through quiet hours and while you use a dashboard. A watch's needs have a notification of their own, apart from the run's, so the run's own clears never replace them. Removing `needs_you` with `watch.update` withdraws its delivered pushes the same way, with `detail` `Withdrawn: You stopped watching for needs you`; every `watch.update` that leaves `needs_you` out does this, so retrying one whose cleanup failed finishes it. When a newer need of the same target is open by then, no replacement is sent, since that need's push shares the notification, and `detail` reads `Replaced by a newer need`. A push sent inside a quiet-hours summary (`detail` starts `Sent in one push with other notices`) has no notification of its own and is not withdrawn. If no device takes the replacement after 5 attempts, the row is `failed` and `detail` says the push was delivered and why withdrawing it failed. |
-| `push` | `skipped` | `detail` is `The run notification already sent it`: the run's own notification pushes this to you; see [No double pushes](#no-double-pushes). |
+| `push` | `withdrawn` | A delivered `needs_you` push whose target then needed nothing more from you. Your devices got a silent replacement reading `No longer needs you` under the same notification, the way a session's own need notification is cleared; it is sent through quiet hours and while you use a dashboard. A watch's needs have a notification of their own, apart from the session's, so the session's own clears never replace them. Removing `needs_you` with `watch.update` withdraws its delivered pushes the same way, with `detail` `Withdrawn: You stopped watching for needs you`; every `watch.update` that leaves `needs_you` out does this, so retrying one whose cleanup failed finishes it. When a newer need of the same target is open by then, no replacement is sent, since that need's push shares the notification, and `detail` reads `Replaced by a newer need`. A push sent inside a quiet-hours summary (`detail` starts `Sent in one push with other notices`) has no notification of its own and is not withdrawn. If no device takes the replacement after 5 attempts, the row is `failed` and `detail` says the push was delivered and why withdrawing it failed. |
+| `push` | `skipped` | `detail` is `The session notification already sent it`: the session's own notification pushes this to you; see [No double pushes](#no-double-pushes). |
 | `assistant` | `pending`, `delivered`, `failed` | Only on watches whose `source` is `assistant`: the notice written into your assistant conversation. `failed` carries the error; `delivered` with a `detail` means it is in the conversation but its toast could not be raised. One still pending when the server stops is written after it starts again; one of a paused watch waits until you resume it. |
 
 A paused watch's pending pushes wait until you resume it, and are dropped if
-it expires first. A `needs_you` push about a run the server paused waits
-until the run resumes.
+it expires first. A `needs_you` push about a session the server paused waits
+until the session resumes.
 
 A device whose push service answers `404` or `410` is unsubscribed, as for
 every other notification.
 
 While you are using a dashboard, pushes wait until you have been away from
-every dashboard for a minute, the same hold run notifications use.
+every dashboard for a minute, the same hold session notifications use.
 
 The desktop app shows a native notification for each new notice while it is
-open. A run's `needs_you` notice closes when the need ends, and its `finished`
+open. A session's `needs_you` notice closes when the need ends, and its `finished`
 notice closes when you see or put off the outcome. A notice whose need or
 outcome ended before it could be shown is not shown. If the app loses its
 connection to the server, it closes these notices, because it can no longer
@@ -142,45 +142,45 @@ tell when they end.
 
 ### No double pushes
 
-Your own run already pushes you when it needs you
-([push notifications](networking.md#notifications)). A watch on a run you own
+Your own session already pushes you when it needs you
+([push notifications](networking.md#notifications)). A watch on a session you own
 therefore records push `skipped` instead of
 pushing, when you have a device to push to (with none it is
 `no_destination`):
 
 - every `needs_you` notice;
 - `Agent reported done` while the result waits for your review, which the
-  run's notification announces as `Agent reported success, review the
+  session's notification announces as `Agent reported success, review the
   result`. Once you chose **Later** or accepted it, the watch pushes it;
-- `Failed: ...` while you have not opened the failed run, which the run's
+- `Failed: ...` while you have not opened the failed session, which the session's
   notification announces as `Failed, review the result`.
 
-Every other notice is pushed: the run closed as merged or abandoned, stopped,
+Every other notice is pushed: the session closed as merged or abandoned, stopped,
 completed, its pull request merged or its checks finished. A watch on someone
-else's run pushes every notice.
+else's session pushes every notice.
 
 ## Assistant watches
 
-When the [assistant](assistant.md#notifications) launches a run or sends a
-message to one for you, it keeps one watch on that run with `source`
-`assistant` and the run's default conditions, `needs_you` and `finished`. It
+When the [assistant](assistant.md#notifications) launches a session or sends a
+message to one for you, it keeps one watch on that session with `source`
+`assistant` and the session's default conditions, `needs_you` and `finished`. It
 shows in **Settings > Watches** like any other watch; pause it there to stop
-the notices. Messaging the run again returns that watch as it stands: a paused
+the notices. Messaging the session again returns that watch as it stands: a paused
 one stays paused, an expired one is renewed for 14 days, and a deleted one is
-made again. A run relaunched after its watch was done gets a new watch. A need the run stands in when the assistant acts on it is taken as
-seen, since the assistant has just acted on it. A run that already
+made again. A session relaunched after its watch was done gets a new watch. A need the session stands in when the assistant acts on it is taken as
+seen, since the assistant has just acted on it. A session that already
 failed, stopped or was closed when the watch began, such as a launch that
 failed at once, has that end announced. A watch you keep on the same
-run from the dashboard is separate and notifies on its own, unless an
+session from the dashboard is separate and notifies on its own, unless an
 `aether_watch` call made it an assistant watch: then it is the one watch.
 
 Each notice of an assistant watch is also written into your assistant
 conversation, with a link to the watch, and raises the assistant's toast and
 badge.
 
-Servers upgraded from a release before watches turn each run the assistant
+Servers upgraded from a release before watches turn each session the assistant
 followed into such a watch, expiring 14 days after the upgrade. The state each
-follow last announced is not announced again; follows of runs that had already
+follow last announced is not announced again; follows of sessions that had already
 ended are dropped.
 
 ## Notification preferences

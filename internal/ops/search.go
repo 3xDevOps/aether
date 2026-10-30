@@ -122,7 +122,7 @@ func fetchRun(ctx context.Context, read Call, l links, id string) (fetchResult, 
 		return fetchResult{}, err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Run %s, %s with %s, created %s.\n%s\nTitle: %s\nTask: %s\n", r.ID, r.Status, r.Harness, r.CreatedAt, untrustedBelow, r.Title, r.Task)
+	fmt.Fprintf(&b, "Session %s, %s with %s, created %s.\n%s\nTitle: %s\nTask: %s\n", r.ID, r.Status, r.Harness, r.CreatedAt, untrustedBelow, r.Title, r.Task)
 	if r.Reason != "" {
 		fmt.Fprintf(&b, "Reason: %s\n", r.Reason)
 	}

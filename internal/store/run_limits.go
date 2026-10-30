@@ -25,7 +25,7 @@ func (d *DB) ServerRunLimits(ctx context.Context) (domain.RunLimits, error) {
 	err := d.db.QueryRowContext(ctx, `SELECT cpus, memory_bytes, pids FROM server_run_limits WHERE id = 1`).
 		Scan(&l.CPUs, &l.MemoryBytes, &l.Pids)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return domain.RunLimits{}, fmt.Errorf("store: server run limits: %w", err)
+		return domain.RunLimits{}, fmt.Errorf("store: server session limits: %w", err)
 	}
 	return l, nil
 }
@@ -38,7 +38,7 @@ func (d *DB) UpdateServerRunLimits(ctx context.Context, cpus *float64, memory, p
 		 RETURNING cpus, memory_bytes, pids`,
 		cpus, memory, pids).Scan(&l.CPUs, &l.MemoryBytes, &l.Pids)
 	if err != nil {
-		return domain.RunLimits{}, fmt.Errorf("store: update server run limits: %w", err)
+		return domain.RunLimits{}, fmt.Errorf("store: update server session limits: %w", err)
 	}
 	return l, nil
 }

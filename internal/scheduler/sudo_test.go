@@ -199,7 +199,7 @@ func TestSudoRefusesAnIsolatedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := e.sched.Sudo(t.Context(), isolated.ID, protocol.RunSudoParams{Argv: []string{"id"}, Dir: "/"}, nil, io.Discard, io.Discard)
-	if refusal(t, err) != "an isolated run cannot run commands as root" || len(rt.ran()) != 0 || len(e.sched.PendingInputs(isolated.ID)) != 0 {
+	if refusal(t, err) != "an isolated session cannot run commands as root" || len(rt.ran()) != 0 || len(e.sched.PendingInputs(isolated.ID)) != 0 {
 		t.Fatalf("Sudo = %v, execs %+v", err, rt.ran())
 	}
 }

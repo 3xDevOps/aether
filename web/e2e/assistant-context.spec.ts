@@ -14,7 +14,7 @@ import { seedWorkspace } from './harness/setup'
 
 const task = 'repair the failing importer'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 const ready = {
   state: 'idle',
@@ -28,7 +28,7 @@ const ready = {
 
 async function askToFix(page: Page) {
   await page.getByRole('button', { name: 'More', exact: true }).first().click()
-  await page.getByRole('menuitem', { name: 'Ask the assistant to fix this run' }).click()
+  await page.getByRole('menuitem', { name: 'Ask the assistant to fix this session' }).click()
 }
 
 test('Fix this on a failed run attaches the run and sends exactly what Inspect shows', async ({ page, aether }, testInfo) => {
@@ -62,7 +62,7 @@ test('Fix this on a failed run attaches the run and sends exactly what Inspect s
   await expect(box).toHaveValue('Fix this')
   await expect(box).toBeFocused()
   const chips = assistant.getByRole('list', { name: 'Sent with this message' })
-  await expect(chips.getByRole('button', { name: `Remove run ${task} from the message` })).toBeVisible()
+  await expect(chips.getByRole('button', { name: `Remove session ${task} from the message` })).toBeVisible()
   // The run attached on its own page is one chip; the payload still names both.
   await expect(chips.getByRole('button', { name: `Remove page ${task} from the message` })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('fix-this-desktop.png') })
@@ -90,7 +90,7 @@ test('Fix this on a failed run attaches the run and sends exactly what Inspect s
   await sheet.getByRole('button', { name: 'Close assistant' }).click()
   await askToFix(page)
   await expect(sheet.getByRole('textbox', { name: 'Message the assistant' })).toHaveValue('Fix this')
-  await expect(sheet.getByRole('list', { name: 'Sent with this message' }).getByRole('button', { name: `Remove run ${task} from the message` })).toBeVisible()
+  await expect(sheet.getByRole('list', { name: 'Sent with this message' }).getByRole('button', { name: `Remove session ${task} from the message` })).toBeVisible()
   await expect.poll(async () => (await sheet.boundingBox())?.x).toBe(0)
   await page.screenshot({ path: testInfo.outputPath('fix-this-mobile.png') })
 })

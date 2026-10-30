@@ -103,7 +103,7 @@ export function SidebarRuns() {
     <section
       ref={region}
       id="sidebar-runs"
-      aria-label="Runs"
+      aria-label="Sessions"
       className={cn(
         'min-h-0 flex-1 overflow-y-auto px-2 pb-2',
         moreBelow && '[mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]',
@@ -119,7 +119,7 @@ export function SidebarRuns() {
           ) : loading ? (
             <LoadingRuns />
           ) : hydrated && (
-            <p className="px-2 py-1 text-ui-sm text-muted">No runs yet.</p>
+            <p className="px-2 py-1 text-ui-sm text-muted">No sessions yet.</p>
           )
         ) : (
           groups.map((group) => {
@@ -147,7 +147,7 @@ const bar = 'bg-hover-chrome after:via-raised'
 
 function LoadingRuns() {
   return (
-    <div role="status" aria-label="Loading runs" className="flex flex-col pt-2">
+    <div role="status" aria-label="Loading sessions" className="flex flex-col pt-2">
       {loadingWidths.map((width, row) => (
         <div key={row} className="flex h-7 items-center gap-2 px-2">
           <Skeleton className={cn(bar, 'size-2.5 shrink-0 rounded-full')} />
@@ -196,7 +196,7 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
             {tree.children.length > 0 && (
-              <ul aria-label={`Runs in ${runLabel(tree.run)}`}>
+              <ul aria-label={`Sessions in ${runLabel(tree.run)}`}>
                 {tree.children.map((child) => (
                   <li key={child.run.id} className={connectors}>
                     <RunRowItem tree={{ ...child, children: [] }} />
@@ -244,7 +244,7 @@ function MineToggle() {
     <Button
       variant={mineOnly ? 'secondary' : 'ghost'}
       size="sm"
-      hint="Show only your runs under Working and Finished"
+      hint="Show only your sessions under Working and Finished"
       aria-pressed={mineOnly}
       onClick={() => setMineOnly(!mineOnly)}
     >
@@ -331,7 +331,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
     childRuns && counts,
     unopened && 'Not opened yet',
     timeAgo(since),
-    run.member_id === self ? 'your run' : `${name(run.member_id)}'s run`,
+    run.member_id === self ? 'your session' : `${name(run.member_id)}'s session`,
     controller
       ? controller === self ? 'you control' : `${name(controller)} controls`
       : controller === '' && people.length > 0 && !isTerminal(run.status) && 'nobody controls',

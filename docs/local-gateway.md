@@ -66,10 +66,10 @@ than retrying a credential the gateway has already rejected. Open the URL
 `aether gui` printed again to get a working one.
 
 `run` is the other query parameter the dashboard reads on first load.
-`?run=<run_id>` opens that run's terminal, even when the local gateway has no
+`?run=<run_id>` opens that session's terminal, even when the local gateway has no
 project clone, and stays in the address bar: the dashboard keeps its current
-view in the query string, so a reload reopens the run. An authorized run link
-takes precedence over optional local onboarding. A run the member cannot see
+view in the query string, so a reload reopens the session. An authorized session link
+takes precedence over optional local onboarding. A session the member cannot see
 is replaced, without a history entry (`replaceState`), by the board, or by
 onboarding for a member who has not finished it. This is how both shells
 deliver an `aether://run/<id>` deep link - the desktop shell
@@ -91,40 +91,40 @@ and opens onboarding's Connect step with the link.
 
 Onboarding is an initial landing page, not a reconnect redirect. A gateway that already has a configured server, linked through the edge or through a clone, opens the board instead. Choosing
 **Manage workspaces** during startup keeps that route, and linking a clone
-must not erase an in-progress wizard's workspace or first-run draft. Public
+must not erase an in-progress wizard's workspace or first-session draft. Public
 and private remote import need no local clone and remain available from
 onboarding and workspace management on hosted gateways.
 
 ### Forwarding a port
 
 A forward opens a port on `127.0.0.1` of the machine it is started on and
-carries each connection to the same port in a run's container, or in your
+carries each connection to the same port in a session's container, or in your
 environment's. It needs the caller's machine, so the CLI and the local gateway
 can start one and the server gateway cannot:
 
 ```sh
-aether forward <run-id> <port>               # a run's port on this machine
+aether forward <session-id> <port>               # a session's port on this machine
 aether forward terminal <port>               # a port in your environment
-aether forward <run-id> 5173 --local 8080    # on another local port
+aether forward <session-id> 5173 --local 8080    # on another local port
 ```
 
-`run:<run-id>` names the same run as `<run-id>`. The command forwards until
+`run:<run-id>` names the same session as `<run-id>`. The command forwards until
 it is interrupted.
 
-In the dashboard, a run's **Browser** view lists the ports the run is
+In the dashboard, a session's **Browser** view lists the ports the session is
 listening on. On the local gateway each one has **Open on this computer**,
 which starts the forward and opens `http://localhost:<port>` in your own
 browser. **More > Forward a port…** forwards a port you type and lists the
-ports forwarded from that run, each a link beside **Stop**. A forward started
+ports forwarded from that session, each a link beside **Stop**. A forward started
 in the dashboard lasts until it is stopped there or `aether gui` exits. On the
 server gateway the Browser view shows the `aether forward` command for the
 port instead.
 
-The server connects to the run from outside its container, so a forward
+The server connects to the session from outside its container, so a forward
 reaches a server listening on every interface (`0.0.0.0` or `::`) and not one
 bound to `127.0.0.1` or `::1`. The dashboard names that address instead of
-starting a forward. The run's own Browser reaches both, because it runs
-inside the run's network. A CLI forward to a port that is closed or bound to
+starting a forward. The session's own Browser reaches both, because it runs
+inside the session's network. A CLI forward to a port that is closed or bound to
 loopback accepts each local connection and closes it.
 
 ### Agent OAuth logins
@@ -132,7 +132,7 @@ loopback accepts each local connection and closes it.
 When an agent prints an OAuth URL in the dashboard, click it. If the URL
 contains an HTTP loopback callback, the dashboard opens a blank browser tab,
 starts the local forward, and only then loads the authorization page. The
-forward targets the run or the environment where the link appeared.
+forward targets the session or the environment where the link appeared.
 
 The server gateway has no `forward.start` verb to do that with, and the
 callback port only exists on the machine that runs the forward, so opening
@@ -141,7 +141,7 @@ unopened and shows a toast carrying it, the command to run on the machine
 where the login will be finished, and a **Copy link** action:
 
 ```sh
-aether forward run:<run-id> <port>     # a link that appeared in a run's terminal
+aether forward run:<session-id> <port>     # a link that appeared in a session's terminal
 aether forward terminal <port>         # a link in your environment
 ```
 
@@ -152,7 +152,7 @@ For a CLI terminal, or as a dashboard fallback, forward the callback port
 before completing authorization:
 
 ```sh
-aether forward <run-id|terminal> 1455
+aether forward <session-id|terminal> 1455
 ```
 
 The local port defaults to the container port; use `--local <port>` only when
@@ -202,7 +202,7 @@ the tailnet.
 For the local backend, a replay-safe call that fails on transport (a server
 restart or dropped network) redials once and retries once before surfacing
 `-32004` (unavailable). A method unsafe to run twice is not replayed: one
-whose second run creates a duplicate (`run.launch`, `template.launch`,
+whose second session creates a duplicate (`run.launch`, `template.launch`,
 `workspace.add`, `member.invite`), repeats an external side effect
 (`server.update`, `terminal.exec`, `github.connect`, `run.git.*`,
 `run.pr.*`, `dev.*`), or fails where the first succeeded (`run.delete`,
@@ -315,13 +315,13 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
-| `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
-| `GET` | `/ws/acp/<run_id>` | the session item stream of a run with `acp: true` (WebSocket) |
-| `GET` | `/ws/assistant` | the caller's assistant session: `AssistantFrame` lines, each an item, a reset, or the whole `AssistantStatus` (WebSocket). A status frame follows the ack and every change of the state or the pending confirmations. Header `{"after_seq":0}`; the ack is an `ACPStreamResponse`. There is no control lease. Every end other than a revocation closes 1012 and the client resubscribes from its last seq |
+| `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable session-container shell tab (WebSocket) |
+| `GET` | `/ws/acp/<run_id>` | the session item stream of a session with `acp: true` (WebSocket) |
+| `GET` | `/ws/assistant` | the caller's assistant: `AssistantFrame` lines, each an item, a reset, or the whole `AssistantStatus` (WebSocket). A status frame follows the ack and every change of the state or the pending confirmations. Header `{"after_seq":0}`; the ack is an `ACPStreamResponse`. There is no control lease. Every end other than a revocation closes 1012 and the client resubscribes from its last seq |
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket); with `assistant_login=<agent>` instead, that agent's sign-in for the caller's assistant |
 | `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
 | `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
-| `GET` | `/api/v1/run/<run_id>/messages/<message_id>/attachments/<index>` | persisted chat image bytes; zero-based attachment index, requires View on the run |
+| `GET` | `/api/v1/run/<run_id>/messages/<message_id>/attachments/<index>` | persisted chat image bytes; zero-based attachment index, requires View on the session |
 | `POST` | `/local/v1/<verb>` | client-machine verbs, on `aether gui` only |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
@@ -349,10 +349,10 @@ File and configuration exceptions are listed below.
 
 The chat image route identifies a persisted room message and its attachment
 index, never a client-selected filesystem path. The message must belong to the
-requested run and workspace. Both gateways stream the validated PNG, JPEG,
+requested session and workspace. Both gateways stream the validated PNG, JPEG,
 GIF or WebP bytes through the existing binary artifact transport, with
 `no-store`, `nosniff` and sandbox headers. It works after the container stops;
-deleting the run/message or revoking View access prevents further downloads.
+deleting the session/message or revoking View access prevents further downloads.
 
 The artifact stream request carries `room_message_id` and `attachment_index`
 with canonical `artifact_id: "room:<message_id>:<index>"`. These selectors
@@ -363,7 +363,7 @@ not the Steer authority of live development captures.
 
 Development control calls use the existing `POST /api/v1/dev.*` RPC routes.
 Transient capture downloads, browser observation and development-terminal
-attaches require **Steer** and access to the run's backing account. Adding
+attaches require **Steer** and access to the session's backing account. Adding
 `evidence_packet_id` to the existing artifact route selects the immutable
 retained copy instead: the server checks packet/run/artifact identity and
 existing evidence **View** permission and expiry, including during transfer.
@@ -375,7 +375,7 @@ and attachment headers; they do not return base64 in a control response.
 `page_revision`) and returns a JSON acknowledgement or refusal. Each following
 binary message is one complete frame: two big-endian 32-bit lengths, JSON
 metadata (at most 16 KiB), then image bytes (at most 2 MiB). Metadata carries
-run/session/page/revision/viewport identity and image dimensions; clients must
+session/page/revision/viewport identity and image dimensions; clients must
 honor these fences. Input goes through `dev.browser.action`, never this stream.
 Late subscribers receive the latest complete frame of the active stream;
 slow viewers skip obsolete frames rather than building an image backlog.
@@ -393,7 +393,7 @@ Development control changes
 use `dev.control.*` and reconnect, not interactive primary-agent attach.
 
 `dev.port.list` takes `{"run_id":"..."}` and returns the TCP ports listening
-in the run's network namespace, lowest first:
+in the session's network namespace, lowest first:
 
 ```json
 {"ports":[{"port":5173,"address":"::1","process":"node"},
@@ -401,11 +401,11 @@ in the run's network namespace, lowest first:
 ```
 
 `address` is what the port is bound to. `process` is the owner's executable
-name, absent when the run's user cannot see the owner. A port bound more than
+name, absent when the session's user cannot see the owner. A port bound more than
 once is listed once, by its widest binding: every interface before one
 address before loopback. The server reads the list with one `/bin/sh` exec in
-the run container, which needs `grep` and `ls` there, so the run must be live
-and not paused. Run agents cannot call it; they are inside that namespace.
+the session container, which needs `grep` and `ls` there, so the session must be live
+and not paused. Session agents cannot call it; they are inside that namespace.
 
 Cancellation and authority revocation stop source work and close download
 readers before waiting for SSH status or close messages. A stalled SSH close
@@ -421,13 +421,13 @@ The dashboard browses recorded output through
 `POST /api/v1/terminal.history`. Like every gateway RPC, it uses the local
 bearer token or server-side Tailscale WhoIs identity; the guarded method also
 requires **View** permission for the named run. A member who cannot view the
-run cannot page or search its transcript.
+session cannot page or search its transcript.
 
 The request names `run_id`, an optional opaque `before` cursor returned as
 `next_cursor` by the previous response, an optional case-insensitive literal
 `query`, and a bounded `limit`. An omitted or zero limit defaults to 100; the
 server caps it at 200. Queries are limited to 256 UTF-8 bytes. A cursor must be
-returned unchanged and used with the same run and query; it is authenticated
+returned unchanged and used with the same session and query; it is authenticated
 server state, not an offset for clients to construct or edit. Malformed,
 tampered, or mismatched cursors are rejected as invalid parameters.
 An authenticated cursor whose segment has since been pruned instead returns
@@ -442,7 +442,7 @@ and returns only matching normalized lines. Escape sequences and terminal
 controls are interpreted into text rather than sent to the browser.
 `truncated_before:true` means an earlier prefix has expired. It is derived
 from the same retained-history snapshot as the page, including empty pages;
-`has_more:false` means the retained boundary, not necessarily the run's start.
+`has_more:false` means the retained boundary, not necessarily the session's start.
 
 Line count is not the only bound. Each request also limits raw disk reads,
 decoded bytes and events, decoding time, cast segments per page and concurrent
@@ -463,30 +463,30 @@ discarding older lines. Prepending pages preserves the cursor-linked row,
 relative pixel offset and horizontal offset. A frozen VT presentation is
 separated from normalized recorded text by an inline boundary; the two are
 not text-deduplicated, and normalized history is not exact historical VT
-reconstruction. Leaving a run closes its main attach but keeps its static
+reconstruction. Leaving a session closes its main attach but keeps its static
 read position. A fresh live bootstrap on return does not overwrite that view.
 Scrolling down to the bottom or `End` returns live; only a subsequent new
 reading episode refreshes paging from the newest archive head.
 
 Cache state is fenced by identity, terminal-data epoch and run creation
-identity, and invalidated for deleted runs. Storage failures are reported;
+identity, and invalidated for deleted sessions. Storage failures are reported;
 an in-memory fallback when storage is unavailable is not a persistence
 guarantee. These are browser policies, not changes to the request, cursor or
 authorization contract.
 
 The raw `GET /api/runs/<run_id>/terminal-history` route remains only for
 non-dashboard compatibility consumers that need all currently retained raw
-bytes, not a guarantee of the complete recording from run start. The
+bytes, not a guarantee of the complete recording from session start. The
 dashboard neither calls it nor exposes a full-history download action. The
 route performs the normal gateway and member authorization, then streams the
 available cast incarnations as raw ANSI bytes with
 `Content-Type: application/octet-stream`, `Cache-Control: no-store`, and
 `Content-Disposition: attachment; filename="terminal-history-<run_id>.ansi"`.
 It supplies the archive byte count as `Content-Length`; the stream ends at the
-finite archive boundary captured for the request even if the run is live. It
+finite archive boundary captured for the request even if the session is live. It
 does not parse the bytes into a screen snapshot, buffer the archive in memory,
 acquire control, or write to the PTY. The same-origin rule and the gateway's
-normal bearer-token or Tailscale WhoIs authorization apply. If the run has no
+normal bearer-token or Tailscale WhoIs authorization apply. If the session has no
 retained transcript, the route returns the gateway's normal not-found or
 unavailable refusal rather than an empty archive.
 
@@ -533,16 +533,16 @@ Param and result shapes are the ones in `internal/protocol` (`wire.go` and
 the per-feature files), unchanged by this transport, and every call passes
 the same capability and member-authorization checks regardless of transport.
 
-`run.get` adds `pull_requests`: each pull request the run opened, newest
+`run.get` adds `pull_requests`: each pull request the session opened, newest
 first, as the server last recorded it (`repo`, `repository`, `number`, `url`,
 `state`, `merged_at`, `checked_at`), without asking GitHub. `run.pr.status`
 refreshes that record.
 
-`account_member_id` on a run snapshot is the account the run uses.
+`account_member_id` on a session snapshot is the account the session uses.
 `requested_account_member_id` appears only when [usage
-fallback](teams.md#usage-fallback) launched the run on another account than
-the one asked for, and holds that one; after a mid-run move it holds the
-account the run first used, and is absent again if the run moves back to
+fallback](teams.md#usage-fallback) launched the session on another account than
+the one asked for, and holds that one; after a mid-session move it holds the
+account the session first used, and is absent again if the session moves back to
 it. Each move publishes a `run.account` event `{account_member_id,
 previous_account_member_id, requested_account_member_id}` carrying the same
 fields. A headless Claude run whose output reports the usage limit
@@ -551,7 +551,7 @@ takes the fallback policy as `fallback_account_member_ids` (member IDs, tried
 in order) or `no_fallback: true`; omitting both orders the launcher's
 accounts by usage left, and sending both is refused with `-32602`
 `fallback_account_member_ids and no_fallback cannot both be set`. When no
-account qualifies, the run launches on the requested account. Run snapshots
+account qualifies, the session launches on the requested account. Session snapshots
 carry the policy back in the same two fields. A fallback account
 whose check failed, rather than one that is exhausted or not shared, is left
 out, and `run.launch` lists it in
@@ -565,27 +565,27 @@ not know with `-32602` `unknown param "<name>"; this server does not support
 it`, so a client never launches without an option it asked for. Other
 methods ignore unknown params.
 
-Run snapshots carry `status_changed_at` (RFC 3339): when the run entered its
+Session snapshots carry `status_changed_at` (RFC 3339): when the session entered its
 current `status`, or its current `reason` while it is `needs-attention`. A
 same-status rewrite of the reason, such as retention expiry relabelling a
-finished run, leaves it alone. It is absent on a run whose status last
+finished session, leaves it alone. It is absent on a session whose status last
 changed before the server recorded it; a client then estimates from
 `finished_at`, `started_at` or `created_at`.
 
-A live run (`running` or `needs-attention`) carries `state`: `working`,
+A live session (`running` or `needs-attention`) carries `state`: `working`,
 `waiting-agents`, `waiting-ci`, `waiting-tools`, `waiting`, `answered`,
 `needs-you`, `finished`, `failed` or `disconnected`
-([run activity](failure-handling.md#run-activity)); it is absent on any
+([session activity](failure-handling.md#session-activity)); it is absent on any
 other status. Rows and events written before `waiting` existed carry `idle`,
-which means `waiting`. A live run also carries `cause`, what chose its
+which means `waiting`. A live session also carries `cause`, what chose its
 `state`, as in the `run.status` event
-([run activity](failure-handling.md#run-activity)); it is absent on any other
+([session activity](failure-handling.md#session-activity)); it is absent on any other
 status and from older servers. `status_seq` is always present, starts at 1 and
 increases on every published change of status, reason, state,
-`outcome_unseen`, `finish_unopened` or `review`. Every run carries `review`
+`outcome_unseen`, `finish_unopened` or `review`. Every session carries `review`
 (`""`, `ready`, `later` or `accepted`) and, once it has changed,
 `review_changed_at` (RFC 3339) ([review](failure-handling.md#review)).
-Every `run.status` payload carries the run's `state`, `status_seq`,
+Every `run.status` payload carries the session's `state`, `status_seq`,
 `review` and `review_changed_at` after it; ignore one whose `status_seq` is not
 greater than the one you hold. A `run.status` event stored before the server
 had `status_seq` carries `0` and no `state`: label it by its status alone.
@@ -596,7 +596,7 @@ agent's default ([harnesses.md](harnesses.md#choose-a-model)). A model with
 whitespace or control characters, a leading `-`, or more than 128 bytes is
 `-32602` with
 `model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes`.
-Run snapshots and templates carry the `model` they launch with, omitted when
+Session snapshots and templates carry the `model` they launch with, omitted when
 empty.
 
 They take an optional `effort` in the same places: one of the agent's
@@ -605,7 +605,7 @@ They take an optional `effort` in the same places: one of the agent's
 control characters, a leading `-`, or more than 32 bytes is `-32602` with
 `effort "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 32 bytes`;
 a level the agent does not list, or an effort for an agent with no effort flag
-outside an Enhanced run, is refused with the scheduler's error. Run
+outside an Enhanced session, is refused with the scheduler's error. Run
 snapshots and templates carry `effort`, omitted when empty; a composer change
 publishes `run.effort` with `{"effort": "<level>"}`.
 
@@ -614,16 +614,16 @@ publishes `run.effort` with `{"effort": "<level>"}`.
 Another value is `-32602` with
 `run.launch: permission "x" is not root, default or isolated`. `server.info`
 lists the `permission` feature when `run.launch` takes it; an older server
-drops it and runs the agent as root. Run snapshots carry `permission`, and
+drops it and runs the agent as root. Session snapshots carry `permission`, and
 `launch.defaults` keeps the `permission` the launch form preselects.
 
 `run.launch` takes an optional `extra_workspace_ids`:
-other workspaces checked out at `/repos/<name>` in the run. An empty id, the primary workspace or a repeated
+other workspaces checked out at `/repos/<name>` in the session. An empty id, the primary workspace or a repeated
 id is `-32602`. `server.info` lists the `multi-repo` feature when `run.launch`
 takes them; an older server drops
 the field.
 
-Run snapshots, including mutation results, also expose
+Session snapshots, including mutation results, also expose
 `container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`
 when applicable. These describe the retained runtime, not the lifetime of
 files, history, or published Git results. Changes arrive as `run.retention`
@@ -638,23 +638,23 @@ another `run.status` completion.
 `run.get` and `run.list` always include `pending_inputs`, an array of
 `{"id":"request-1","session_id":"session-a","kind":"question"}` objects.
 An empty set is `[]`, never `null`. Execution remains in `status`: a
-`running` run can have pending input while another session continues
-working, and a `needs-attention` run need not have any. The dashboard's
+`running` session can have pending input while another session continues
+working, and a `needs-attention` session need not have any. The dashboard's
 **Needs you** state is derived from both and is not a new execution status
 or answer transport.
 
-A live or provisioning Enhanced run's `run.get` and `run.list` entries carry
-`liveness`, read from the agent session when asked, not pushed:
+A live or provisioning Enhanced session's `run.get` and `run.list` entries carry
+`liveness`, read from the agent when asked, not pushed:
 `{"phase":"streaming","last_progress_at":"...","connected_at":"...","transport":"open"}`.
 `phase` is `setup` (provisioning), `awaiting-first-event`, `streaming`,
 `tool-running`, `awaiting-input` or `between-turns`. `last_progress_at` is the agent's last
 message, thought, tool call, plan, subagent, compaction or request since
 `connected_at`, and is absent until there is one. `transport` is `open`,
 `closed` (the session ended or failed to open) or `unknown` (no session
-yet). Other runs omit `liveness`.
+yet). Other sessions omit `liveness`.
 
-Native reporters send `run.report` through their run-scoped coordination
-socket, not the member's gateway control endpoint. The socket supplies the run
+Native reporters send `run.report` through their session-scoped coordination
+socket, not the member's gateway control endpoint. The socket supplies the session
 identity. The report accepts the existing `state` (`working` or `waiting`),
 optional `reason`, and optional `input_updates`:
 
@@ -671,8 +671,8 @@ optional `reason`, and optional `input_updates`:
 omitted only when `input_updates` is nonempty; an input-only report preserves
 execution, including when the last request closes. `reason` is execution
 metadata, not a prompt body or evidence of input. An optional `session_id`
-names the agent's own top-level session; a Standard run stores the latest one
-as `harness_session_id` so [a mode switch](enhanced-runs.md#switching-a-running-agent)
+names the agent's own top-level session; a Standard session stores the latest one
+as `harness_session_id` so [a mode switch](enhanced-sessions.md#switching-a-running-agent)
 can resume it. One that is not 1-128 characters of letters, digits, `.`,
 `_`, `:` and `-` is ignored and the rest of the report applies.
 
@@ -686,15 +686,15 @@ can resume it. One that is not 1-128 characters of letters, digits, `.`,
 Kinds are `question`, `permission`, `form`, and `extension_ui`. IDs and session
 IDs must be valid UTF-8, nonblank, control-free strings of 1 to 256 bytes. There
 are at most 128 updates per report, 128 requests per replacement, and 128
-pending requests per run. Unknown operations/kinds, missing identities, and
+pending requests per session. Unknown operations/kinds, missing identities, and
 conflicting operation fields are rejected rather than normalized or truncated.
 `open`/`close` do not accept nonempty `requests`; `clear` accepts no request
 identity or request list; `replace` accepts no top-level request identity.
 Reports carry only correlation metadata, never prompts, answers, paths, or
 transcripts.
 
-A Default run's `sudo` command waiting for a person
-([security.md](security.md#sudo-in-a-default-run)) is in the same pending set,
+A Default session's `sudo` command waiting for a person
+([security.md](security.md#sudo-in-a-default-session)) is in the same pending set,
 first: `{id, session_id: "aether-sudo", kind: "permission", title}`, where
 `id` starts with `sudo-` and `title` is `Run as root in <directory>: <command>`. It is never
 saved; a server restart ends the shim's wait. A report cannot open, close or
@@ -703,8 +703,8 @@ replace one: the session ID and a `title` are refused.
 Repeated opens, closes, and unchanged replacements are idempotent. Turn
 completion, silence, prose, and idle execution do not clear outstanding input.
 The pending set is persisted independently from the last execution report and
-survives server restart for still-live runs. Actual terminated or relaunched
-run lifetimes discard it; stale saved snapshots cannot restore a previous
+survives server restart for still-live sessions. Actual terminated or relaunched
+session lifetimes discard it; stale saved snapshots cannot restore a previous
 lifetime's requests. Persistence errors are returned to the reporter rather than
 announcing input state that was not saved.
 
@@ -713,34 +713,34 @@ Each actual change publishes a durable `run.input` event with payload
 `{"pending_inputs":[]}`. This is a complete replacement snapshot, independent
 of `run.status`, and uses the existing event envelope and replay sequence on
 `/ws/events`. An unchanged set emits no event unless a previous publication
-failed: retrying the report or recovering the live run publishes the current
+failed: retrying the report or recovering the live session publishes the current
 set, including an empty set after the last close. Clients must preserve
 events received after a snapshot request began when merging that response,
 so an older `run.get`/`run.list` response cannot resurrect closed input.
 
 
 `run.release` accepts `{"run_id":"..."}` and returns `{}`. It uses the same
-`Kill` permission as `run.kill`, but only releases a finished run's retained
+`Kill` permission as `run.kill`, but only releases a finished session's retained
 container and browser companion. It preserves the outcome, archive state,
-checkout, transcript and run record under their existing retention rules.
-A run whose container was released cannot be reopened. A run that has become active is
+checkout, transcript and session record under their existing retention rules.
+A session whose container was released cannot be reopened. A session that has become active is
 rejected with `-32002`; repeating a successful release is a no-op. Evidence
 capture or runtime cleanup errors are returned without claiming release.
-The dashboard offers this as **Free container…** on one run and, for the
-selected workspace including archived runs, **Free retained containers…**.
+The dashboard offers this as **Free container…** on one session and, for the
+selected workspace including archived sessions, **Free retained containers…**.
 
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
-same `{"run_id":"..."}` params. For a live run it stops the container and
+same `{"run_id":"..."}` params. For a live session it stops the container and
 waits for supervision to publish the final branch before removing the
-checkout, transcripts and run-owned database records. For an old run it
-removes the checkout and transcripts directly. The run's timeline remains as
+checkout, transcripts and run-owned database records. For an old session it
+removes the checkout and transcripts directly. The session's timeline remains as
 audit history.
 
 `workspace.delete` is admin-only and accepts `{"workspace_id":"..."}`,
 returning `{"ok":true}`. It permanently removes an inactive workspace and its
 server-side data, repository and mirror keys. It preserves member accounts,
 homes, local clones and upstream repositories. Revoke remote deploy keys
-separately. Active runs, pending runtime work, configured schedules block deletion; the
+separately. Active sessions, pending runtime work, configured schedules block deletion; the
 error names the blocker. In-flight control or Git operations return `-32003`
 instead of waiting behind them. Cleanup errors leave the workspace available
 for retry but do not restore already removed data. Success publishes
@@ -748,12 +748,12 @@ for retry but do not restore already removed data. Success publishes
 the payload.
 
 `run.archive` also uses the `Kill` capability and accepts
-`{"run_id":"...","archived":true}`. It hides a finished run from the board
-and keeps its data, restorable any time: only a run in a final disposition
+`{"run_id":"...","archived":true}`. It hides a finished session from the board
+and keeps its data, restorable any time: only a session in a final disposition
 (`merged`, `abandoned`, `failed`, or `interrupted`) can be archived, and
-archiving any other status returns `-32002` naming the run's real status.
-Archiving an already-archived run is a no-op that leaves its timestamp
-unchanged; calling it with `"archived":false` restores the run. The response
+archiving any other status returns `-32002` naming the session's real status.
+Archiving an already-archived session is a no-op that leaves its timestamp
+unchanged; calling it with `"archived":false` restores the session. The response
 is a `RunResult` with `run.archived_at` set while archived and absent otherwise.
 Archiving does not schedule deletion; the obsolete `deletes_at` field is no
 longer emitted. Both calls publish `run.archived` with `archived_at` (null on
@@ -766,45 +766,45 @@ name is `-32602` with the reason. Each rename publishes `member.changed`
 (`{"member_id":"...","display_name":"..."}`) in every workspace.
 
 `run.seen` accepts `{"run_id":"..."}` and returns a `RunResult`. It records
-that the caller opened the run, which clears up to two flags on it:
+that the caller opened the session, which clears up to two flags on it:
 
 - `run.outcome_unseen` is set by an agent's success or failure outcome (see
-  [coordination.md](coordination.md)), including when an interactive run
-  stays open at `needs-attention`. Only a call from the run's current owner
+  [coordination.md](coordination.md)), including when an interactive session
+  stays open at `needs-attention`. Only a call from the session's current owner
   clears it; a call from anyone else, admins included, leaves it set.
 - `run.finish_unopened` is set by that same outcome, and by any change into a
   terminal status (`completed`, `failed`, `interrupted`, `merged` or
   `abandoned`) that no member asked for: an exit, a failure, a server
-  restart, or a parent run closing its children. A member's own
-  `run.close` or `run.kill` leave it clear whatever it was before: that member has dealt with the run.
-  That includes a close or kill of a run that had already finished. When the
-  call relabels the run, its `run.status` event carries the cleared flag;
+  restart, or a parent session closing its subsessions. A member's own
+  `run.close` or `run.kill` leave it clear whatever it was before: that member has dealt with the session.
+  That includes a close or kill of a session that had already finished. When the
+  call relabels the session, its `run.status` event carries the cleared flag;
   when it changes nothing else, the server publishes `run.finish_opened`.
-  `run.release` frees a container without dismissing the run and leaves the
-  flag as it was. A `run.seen` call from any member who may view the run
-  clears it. Runs that finished before the server had this flag never carry
+  `run.release` frees a container without dismissing the session and leaves the
+  flag as it was. A `run.seen` call from any member who may view the session
+  clears it. Sessions that finished before the server had this flag never carry
   it.
 
 One call publishes at most one event, with an empty payload:
 `run.outcome_seen` and a timeline note when it cleared `outcome_unseen`, which
 also tells clients that `finish_unopened` is clear; otherwise
 `run.finish_opened` when it cleared `finish_unopened`. A call that clears
-neither returns the run and publishes nothing. Every `run.status` payload
-carries both flags as the run's flags after that event. A same-status
+neither returns the session and publishes nothing. Every `run.status` payload
+carries both flags as the session's flags after that event. A same-status
 re-label such as retention expiry keeps them. `outcome_unseen` is `true` when
 a reported outcome becomes reviewable until the owner opens it, `false` after
 work resumes, Close or another status change. `finish_unopened` is `true`
-from the finish until a member opens or closes the run, `false` after work
+from the finish until a member opens or closes the session, `false` after work
 resumes.
 
 `run.review` accepts `{"run_id":"...","action":"complete"}` or
 `"action":"later"` and returns a `RunResult`. It needs the kill permission,
-as `run.close` does. `complete` closes a live run as `run.close` does but
-records `completed`, or only records the acceptance on a `completed` run,
+as `run.close` does. `complete` closes a live session as `run.close` does but
+records `completed`, or only records the acceptance on a `completed` session,
 and sets `review` to `accepted`; it is idempotent once accepted, and refused
 with `-32002` for other terminal statuses. `later` without a `ready` or `later`
 review is `-32002` too. `later` sets
-`review` to `later` and leaves the run where it is.
+`review` to `later` and leaves the session where it is.
 Each change publishes `run.review` with
 `{"review":"...","review_changed_at":"...","status_seq":N}`; apply it only
 when `status_seq` is above the one you hold.
@@ -829,29 +829,29 @@ a minute. Every method but `push.status` returns `{}`.
 `run.relaunch` is another proxied control-channel method:
 
 ```sh
-aether reopen <run-id>
+aether reopen <session-id>
 ```
 
 The equivalent gateway call is `POST /api/v1/run.relaunch` with
 `{"run_id":"run_..."}` and a `RunResult` response. It is eligible for a
-Standard or Enhanced run that retained its container and whose
+Standard or Enhanced session that retained its container and whose
 `--run-container-ttl` deadline has not passed: `merged` or `abandoned`
 after `run.close` (`reason` is `closed; retained container`). Older
-agent-finished retained runs remain eligible. Interactive outcome reports
-now leave the run open and do not require reopening. `run.relaunch` resumes the
-same run row in the same container and checkout; it does not create a new run
+agent-finished retained sessions remain eligible. Interactive outcome reports
+now leave the session open and do not require reopening. `run.relaunch` resumes the
+same session row in the same container and checkout; it does not create a new session
 or container and does not perform a new launch or disk-floor admission.
 The response's `container_retained_until` is absent: the deadline is cleared
-while the run is live, `finished_at` is null, `started_at` is the relaunch, and
+while the session is live, `finished_at` is null, `started_at` is the relaunch, and
 the next close starts a new `--run-container-ttl` period.
 
 Retention expiry is swept within at most one minute and reconciled on server
 boot. Once expiry destroys the retained container, the call returns `-32002`
-(invalid state, retained container unavailable), and the run cannot be
-reopened. An expired or otherwise unavailable retained run cannot be
+(invalid state, retained container unavailable), and the session cannot be
+reopened. An expired or otherwise unavailable retained session cannot be
 reopened; a row removed by `run.delete` instead returns not found. The
 default `--run-container-ttl` is `168h` (7 days); negative values disable
-retention, so a closed interactive run is unavailable to `run.relaunch` immediately.
+retention, so a closed interactive session is unavailable to `run.relaunch` immediately.
 
 ### `GET /api/v1/capabilities`
 
@@ -876,7 +876,7 @@ cannot run verbs on the browser's machine:
 
 `methods` is `["*", "run.repos"]` because both transports dispatch every
 control-channel method; `run.repos` is not a method but marks a gateway whose
-runs carry `repos` (`aether run --repo`), which the SPA checks before showing a
+sessions carry `repos` (`aether session --repo`), which the SPA checks before showing a
 repo picker. `ws` lists the WebSocket surfaces served; `local` is the sorted
 `/local/v1` verb list, absent where there are none. A client probes this
 descriptor rather than hard-coding its transport. The SPA gates local linking,
@@ -896,12 +896,12 @@ the file reads and the member and workspace writes below. `aether gui`
 proxies these methods over SSH; the server gateway dispatches them in-process.
 Both transports therefore expose the same API shape and authorization checks.
 
-### Enhanced-run methods
+### Enhanced-session methods
 
-These act on the agent session of a run with `acp: true`: an
-[enhanced run](enhanced-runs.md), or a
-[background run over ACP](enhanced-runs.md#background-runs). The first
-three need **Steer** and the run's control lease (`control_session_id` and
+These act on the agent of a session with `acp: true`: an
+[enhanced session](enhanced-sessions.md), or a
+[background session over ACP](enhanced-sessions.md#background-sessions). The first
+three need **Steer** and the session's control lease (`control_session_id` and
 `control_generation`, from `/ws/acp` or a terminal attach); without them the
 call is refused with `-32602`, and with a lease another session holds with
 `-32003`.
@@ -910,10 +910,10 @@ call is refused with `-32602`, and with a lease another session holds with
 | --- | --- | --- |
 | `run.input.answer` | `{run_id, request_id, option_id, values, control_session_id, control_generation}`; `values` is the form answer object for `accept` on a form question, omitted otherwise | `{}`; a request already answered or cancelled is `-32003` with `data.reason` `already_answered` |
 | `run.acp.cancel` | `{run_id, control_session_id, control_generation}` | `{}`; pending requests are answered `cancelled` |
-| `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item. A model selection also updates the run's `model`, so a reopened session keeps it |
+| `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item. A model selection also updates the session's `model`, so a reopened session keeps it |
 | `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 1000 | `{frames: [...], oldest_seq, truncated_before?}`, oldest first, cut like stream frames; metadata and items are one atomic retained page |
 | `run.acp.item` | `{run_id, seq}` (View) | `{item: {...}}`, whole; expired IDs return unavailable with an explicit retained-history expiry message, missing IDs return not-found |
-| `run.mode.switch` | `{run_id, mode, control_session_id, control_generation}`; `mode` is `tui` (Standard) or `acp` (Enhanced); the lease may be omitted while nobody holds the run's control | `{run: {...}}` once the switch is done; see [Switching a running agent](enhanced-runs.md#switching-a-running-agent) |
+| `run.mode.switch` | `{run_id, mode, control_session_id, control_generation}`; `mode` is `tui` (Standard) or `acp` (Enhanced); the lease may be omitted while nobody holds the session's control | `{run: {...}}` once the switch is done; see [Switching a running agent](enhanced-sessions.md#switching-a-running-agent) |
 
 Use the option IDs and values from the session's `config_options` snapshot,
 including selectors synthesized from an agent's separate `models` or `modes`.
@@ -924,27 +924,27 @@ authoritative if that request later returns an older option snapshot.
 A mode-only notification preserves that mode without discarding accepted model,
 effort or other option changes returned by the request.
 
-A run whose session is not running answers `-32004` with the reason.
-`run.mode.switch` also takes a Standard run, needs **Steer**, and while
-anyone holds the run's control needs that lease (`-32003` otherwise). It
+A session whose session is not running answers `-32004` with the reason.
+`run.mode.switch` also takes a Standard session, needs **Steer**, and while
+anyone holds the session's control needs that lease (`-32003` otherwise). It
 answers `-32002` with the real error as the message and a `data.reason` the
 dashboard can act on: `not_switchable` for an agent whose `agent.list` entry
-has `switchable: false`, `session_not_reported` for a Standard run whose
+has `switchable: false`, `session_not_reported` for a Standard session whose
 agent has not reported its session yet (it does on its first turn), and
 `adapter_not_installed` for a switch to Enhanced while the agent's ACP
-server is not installed. Any other run it cannot switch now answers
-`-32002` with the reason and no `data`. A run snapshot carries `switching` (`tui` or
+server is not installed. Any other session it cannot switch now answers
+`-32002` with the reason and no `data`. A session snapshot carries `switching` (`tui` or
 `acp`) while a switch is in flight; a `run.mode` event
 `{mode, previous, switching, reason}` with the same `switching` opens each
 switch, and one without `switching` closes it.
 `run.inject` takes `steer: true` to add a message to the agent's running
 turn, and `control_session_id`/`control_generation` to deliver it at once
 rather than after the room's moderation delay; its result's `outcome` is
-`sent`, `queued` or `injected` for an enhanced run. A `queued` message
+`sent`, `queued` or `injected` for an enhanced session. A `queued` message
 carries `agent_delivery: "queued"` until the agent takes it
 (`"delivered"`), or turns `not_sent` with `failure.code` `agent_refused` or
 `agent_disconnected`; each change publishes `workspace.room_message`
-([enhanced-runs.md](enhanced-runs.md#permissions-and-input)).
+([enhanced-sessions.md](enhanced-sessions.md#permissions-and-input)).
 
 `run.inject` also accepts `attachments`, an ordered array of at most eight
 references returned by `terminal.image` or `terminal.file`. Text may be empty
@@ -966,7 +966,7 @@ These serve a client with no dashboard and no stream, such as the
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first: each run that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it |
+| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first: each session that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it |
 | `run.input.respond` | `{"run_id":"...","request_id":"...","option_id":"...","values":{...}}`; Steer | `{"status":"answered"}`, or `{"status":"already_answered"}` when an earlier answer won |
 
 An `AttentionItem` is `{kind, run_id, workspace_id, title,
@@ -975,11 +975,11 @@ harness, reason, since}` plus what answering it needs. `kind` is one of
 `disconnected`,
 `blocked`, `needs-input`, `ready` or `failed`. `permission` and
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
-run's `options` are `{id, label, kind}`, `kind` being `allow_once`,
+session's `options` are `{id, label, kind}`, `kind` being `allow_once`,
 `allow_always`, `reject_once` or `reject_always` for a permission, and a
-Standard run's request has none: it is answered in the terminal. A sudo
+Standard session's request has none: it is answered in the terminal. A sudo
 request, in either mode, offers `allow-once` (`allow_once`) and `deny-once`
-(`reject_once`), and is listed only to the run's owner and admins. A link
+(`reject_once`), and is listed only to the session's owner and admins. A link
 request is a `question` whose `request` also carries `url`: open that page,
 then accept or decline.
 `room-question` and `queued-message` carry
@@ -990,7 +990,7 @@ says `A teammate asked a question` and has no `message`. An item with no
 known `since` sorts last.
 
 `run.input.respond` is `run.input.answer` without a control lease. It
-answers under the run's control admission, so nobody can take control
+answers under the session's control admission, so nobody can take control
 between its check and the answer. With nobody in control, or the caller in
 control from another tab, it answers. While another member holds control,
 including during their reconnect window, it answers `-32003` with
@@ -1000,37 +1000,37 @@ a dashboard action with its hold and review. An unknown request is
 `-32000`.
 
 A sudo request is answered whoever holds control. `allow-once` needs the
-run's owner or an admin, `-32001` otherwise; `deny-once` needs only Steer.
+session's owner or an admin, `-32001` otherwise; `deny-once` needs only Steer.
 One already decided, withdrawn or timed out is `-32000`, so the gateway does
 not replay `run.input.respond`.
 
 `run.launch` and `template.launch` take an optional `idempotency_key`
 (at most 256 bytes). A retry by the same member with the same key and
-params returns the run the first launch started, with `"replayed":
+params returns the session the first launch started, with `"replayed":
 true`, and launches nothing; one with other params is `-32003`, and one
-whose run was deleted is `-32000`. One key names one launch across both
-methods. The key is reserved before the launch and records the run as
+whose session was deleted is `-32000`. One key names one launch across both
+methods. The key is reserved before the launch and records the session as
 soon as its row exists, so a launch that fails after that replays as the
-run it left. A retry while the first launch is still provisioning
-returns that run at once instead of waiting for it. A retry of a key
-whose launch failed before creating a run launches again; so does one
-after the server stopped in the instant between creating the run and
-recording it. When recording the run fails, the launch answers the store
-error naming the run it started: a retry with that key would launch
-again, so look the run up instead.
+session it left. A retry while the first launch is still provisioning
+returns that session at once instead of waiting for it. A retry of a key
+whose launch failed before creating a session launches again; so does one
+after the server stopped in the instant between creating the session and
+recording it. When recording the session fails, the launch answers the store
+error naming the session it started: a retry with that key would launch
+again, so look the session up instead.
 
 `run.pr.status` and `run.pr.feedback` default an omitted `expected` to the
 checkout's branch and head, and an omitted `target` to the pull request the
 dashboard proposes: the branch's upstream (else `origin`, when the workspace
-sets an origin) as the head, into the run's base branch on the workspace's
+sets an origin) as the head, into the session's base branch on the workspace's
 GitHub source, or on the head repository without one. A checkout with no GitHub
 push remote answers `error` saying to pass `target`, and one on a detached HEAD
 answers `error` saying to pass both. `run.pr.status` returns the `expected` and
-`target` it used, to pass to `run.pr.create`. Once a finished run's container is
-gone, both report the pull request the run last recorded (`number`, `url`,
+`target` it used, to pass to `run.pr.create`. Once a finished session's container is
+gone, both report the pull request the session last recorded (`number`, `url`,
 `state`). `run.pr.feedback` then reads the pull request, its checks and its
-reviews from GitHub in one read, with the GitHub login of the run's home, as
-`gh` in the run did, so `head_oid`, `state` and `merged_at` match the checks;
+reviews from GitHub in one read, with the GitHub login of the session's home, as
+`gh` in the session did, so `head_oid`, `state` and `merged_at` match the checks;
 it has no comments, `mergeable` or `merge_state_status`, and sets
 `comments_unavailable: true` so empty comment lists do not read as none,
 within the same `limit` and byte budget; `truncated` is also set when a review
@@ -1038,7 +1038,7 @@ body was cut at 2000 characters, and `error` says why when that read fails.
 When only the reviews fail, it keeps the checks, sets
 `reviews_unavailable: true` and says why in `error`.
 
-A server without child runs answers their methods with `-32004` and
+A server without subsessions answers their methods with `-32004` and
 `data: {"reason":"children_unavailable"}`.
 
 `template.list` gives each template a `version`, which changes whenever its
@@ -1046,32 +1046,32 @@ task, agent, mode, model, effort or parameter defaults do. `template.launch` wit
 `expected_version` fails with `-32003` `templates: template changed: <name>
 was saved again and is now version <new>, not <old>` instead of launching a
 template changed since it was read. A retry with the launch's `idempotency_key` replays its
-run whatever `expected_version` it names. With `replay_only: true` it launches
-nothing: it returns the key's run, or fails with `-32000` when the key started
+session whatever `expected_version` it names. With `replay_only: true` it launches
+nothing: it returns the key's session, or fails with `-32000` when the key started
 none.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the
-dashboard's query state: `<dashboard_url>/?run=<run_id>` opens a run. The edge serves no
+dashboard's query state: `<dashboard_url>/?run=<run_id>` opens a session. The edge serves no
 dashboard, so there is no link without `web-port`.
 
 The dashboard also calls these methods through the same route:
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"...","repo":"..."}`; `from` and `to` optional, `to` only with `from`; `repo` is a workspace ID from the run's `repos`, empty for the primary repo) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
+| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"...","repo":"..."}`; `from` and `to` optional, `to` only with `from`; `repo` is a workspace ID from the session's `repos`, empty for the primary repo) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `coord.messages.list` | `{"workspace_id":"...","run_id":"...","correlation_id":"...","before":"...","limit":50}` (only `workspace_id` required; `run_id` matches either side) | `{"messages":[{"id":"...","workspace_id":"...","from_run_id":"...","to_run_id":"...","kind":"message"\|"question"\|"reply"\|"report","correlation_id":"...","body":"...","created_at":"...","delivered_at":"...","acked_at":"...","outcome":"...","summary":"...","next_action":"..."}],"next_before":"..."}` newest first; report fields only on `report` rows. See [coordination.md](coordination.md#seeing-agent-messages) |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
-| `system.stats` | `{"since_ms":1761100000000}` (optional; Unix milliseconds, 0 or absent returns the whole window) | `SystemStatsResult` - `{"interval_ms":5000,"retention_ms":3600000,"host":{"cpu_cores","memory_total_bytes","swap_total_bytes","uptime_seconds"},"host_error":"","samples":[{"t_ms","cpu_user","cpu_system","cpu_iowait","cpu_steal","memory_used_bytes","memory_available_bytes","memory_free_bytes","swap_used_bytes","load1","load5","load15","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps","pressure_cpu","pressure_memory","pressure_io"}],"containers_at_ms":0,"containers_error":"","containers":[{"owner_kind":"run"\|"browser"\|"member","owner_id","member_id","workspace_id","title","status","cpu_cores","cpu_limit_cores","cpu_throttled_percent","memory_bytes","memory_limit_bytes","pids","pids_limit","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps"}],"others":{"containers","cpu_cores","memory_bytes"}}`. The host is sampled every 5 s from server start and kept for an hour; CPU fields are percent of all cores over the interval, and the `pressure_*` fields (PSI `some avg10`) are absent without `/proc/pressure`. Host sampling reads `/proc` and `/sys`, so on a non-Linux server `host_error` says so. Containers are sampled only while a `system.stats` call arrived in the last 60 s; a call while idle starts sampling without waiting for it and the next sample follows 1 s later. `containers` is empty and `containers_at_ms` 0 when the latest snapshot is older than two intervals, and `containers_error` carries the Docker error when sampling failed. A run's browser sidecar is its own entry with `owner_kind` `browser`, the run's id and its own limits. `cpu_cores` and the rate fields are absent until a container has two samples; `cpu_limit_cores` is absent when unlimited. A member sees only their own containers; `others` sums the rest and any container with no run or member owner, and is absent when empty |
-| `server.run_limits` | optional `cpus`, `memory_bytes`, `pids` (`0` clears one); setting any is admin only | `{"limits":{...},"default":{...},"effective":{...}}` - what an admin set, what an unset field gets (the flag or automatic value), and what a run with no override of its own gets. New containers only. `run.launch` takes `limits` `{cpus,memory_bytes,pids}` to override them for one run |
+| `system.stats` | `{"since_ms":1761100000000}` (optional; Unix milliseconds, 0 or absent returns the whole window) | `SystemStatsResult` - `{"interval_ms":5000,"retention_ms":3600000,"host":{"cpu_cores","memory_total_bytes","swap_total_bytes","uptime_seconds"},"host_error":"","samples":[{"t_ms","cpu_user","cpu_system","cpu_iowait","cpu_steal","memory_used_bytes","memory_available_bytes","memory_free_bytes","swap_used_bytes","load1","load5","load15","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps","pressure_cpu","pressure_memory","pressure_io"}],"containers_at_ms":0,"containers_error":"","containers":[{"owner_kind":"run"\|"browser"\|"member","owner_id","member_id","workspace_id","title","status","cpu_cores","cpu_limit_cores","cpu_throttled_percent","memory_bytes","memory_limit_bytes","pids","pids_limit","net_rx_bps","net_tx_bps","disk_read_bps","disk_write_bps"}],"others":{"containers","cpu_cores","memory_bytes"}}`. The host is sampled every 5 s from server start and kept for an hour; CPU fields are percent of all cores over the interval, and the `pressure_*` fields (PSI `some avg10`) are absent without `/proc/pressure`. Host sampling reads `/proc` and `/sys`, so on a non-Linux server `host_error` says so. Containers are sampled only while a `system.stats` call arrived in the last 60 s; a call while idle starts sampling without waiting for it and the next sample follows 1 s later. `containers` is empty and `containers_at_ms` 0 when the latest snapshot is older than two intervals, and `containers_error` carries the Docker error when sampling failed. A session's browser sidecar is its own entry with `owner_kind` `browser`, the session's id and its own limits. `cpu_cores` and the rate fields are absent until a container has two samples; `cpu_limit_cores` is absent when unlimited. A member sees only their own containers; `others` sums the rest and any container with no session or member owner, and is absent when empty |
+| `server.run_limits` | optional `cpus`, `memory_bytes`, `pids` (`0` clears one); setting any is admin only | `{"limits":{...},"default":{...},"effective":{...}}` - what an admin set, what an unset field gets (the flag or automatic value), and what a session with no override of its own gets. New containers only. `run.launch` takes `limits` `{cpus,memory_bytes,pids}` to override them for one session |
 | `server.sysbox.status` | none; admin only | `{"state":"on"\|"off"\|"unsupported"\|"installing"\|"failed","reason":"...","log":"..."}` - whether Docker lists `sysbox-runc`. `reason` explains `off`, `unsupported` and `failed`; `off` with a reason naming `sudo aether-server sysbox install` means the server is not root. `log` is the last 8 KiB of installer output |
 | `server.sysbox.install` | none; admin only | the same status. Starts the installer in the background, one at a time; a call while one runs returns `installing`. Poll `server.sysbox.status` until `on`, `unsupported` or `failed`. The server then uses Sysbox for new containers at once. Never retried after a transport failure. While it runs, `server.update` answers `-32003` |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
 | `insights.get` | `{"workspace_id":"","scope":"mine"\|"everyone","from":"<RFC3339>","to":"<RFC3339>","time_zone":"America/Los_Angeles"}` | `{"generated_at":"...","from":"...","to":"...","time_zone":"...","bucket":"day"\|"week","totals":Totals,"previous":Totals,"series":[{"start":"2026-10-09","launched":3,"completed":2,"merged":1,"failed":0,"interrupted":0,"abandoned":0}],"heatmap":[{"date":"2026-04-20","runs":2}],"by_workspace":[{"workspace_id":"...","name":"...","launched":4,"finished":3,"failed":1}],"by_agent":[{"harness":"claude","model":"","launched":4,"finished":3,"failed":1}],"durations":{"runs_measured":9,"median_run_seconds":1260,"p90_run_seconds":4100,"state_runs_measured":6,"median_working_seconds":900,"median_waiting_seconds":240,"median_response_seconds":75},"cost":{"metered_runs":3,"unmetered_runs":6,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000,"by_agent":[{"harness":"claude","metered_runs":3,"unmetered_runs":0,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000}]},"pull_requests":{"opened":2,"merged":1},"success":{"runs":{"succeeded":4,"finished":9}},"outcomes":{"runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}],"members":[{"member_id":"...","display_name":"...","color":"#e6194b","runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}]}]},"recent":[{"run_id":"...","title":"...","workspace_id":"...","status":"completed","reason":"","harness":"claude","model":"","created_at":"...","finished_at":"...","duration_seconds":1200,"pr_url":"","pr_state":""}],"needs_you":2,"coverage":{"state_times_since":"...","pull_requests_since":""}}`; `Outcome` is `{"done","failed","abandoned"}`; `outcomes.members` is filled only for `scope` `everyone`. `Totals` is `{"launched","completed","merged","failed","interrupted","abandoned","killed","active","finished"}`. What each number counts is in [insights.md](insights.md) |
-| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","login_command":"claude auth login","login_kind":"interactive","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-adapters); `default_mode` is `acp` when `enhanced_installed` is true, else `tui`, the mode a `run.launch` without `mode` starts in; `executable` is the command the agent runs, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `login_command` is the vendor's sign-in command `aether agent login` types, `login_kind` is `device` when it prints a URL and code and needs nothing typed back, else `interactive`; both are absent for a member-defined agent. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
+| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","login_command":"claude auth login","login_kind":"interactive","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-adapters); `default_mode` is `acp` when `enhanced_installed` is true, else `tui`, the mode a `run.launch` without `mode` starts in; `executable` is the command the agent sessions, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `login_command` is the vendor's sign-in command `aether agent login` types, `login_kind` is `device` when it prints a URL and code and needs nothing typed back, else `interactive`; both are absent for a member-defined agent. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
 | `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"fallback"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds an older or fallback list. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#choose-a-model) |
 | `agent.install` | `{"name":"claude","enhanced":true}` (`enhanced` optional) | `{"log_tail":"...","installed":true,"enhanced_installed":true,"error":"the install command exited 1"}` - runs a shipped agent's install command, and its adapter's with `enhanced`, in the caller's environment terminal, starting it if needed; `error` is set when the command failed. Needs the launch capability. Answers within 10 minutes; one install per member at a time, a second answers `-32003` |
-| `agent.remove` | `{"name":"claude"}` | `{"removed":["~/.local/bin/claude","~/.local/bin/claude-agent-acp"]}` - removes an agent from the caller's own environment so new runs cannot start it. A shipped name (it wins over a member's definition of the same name; `custom` is not removable) deletes its `~/.local/bin` links, the Enhanced adapter's too; `removed` lists those that existed, and none existing answers `-32602` `agent "claude" is not installed in your environment: ~/.local/bin/claude does not exist`. Any other name deletes the caller's definition and answers `{}`, or `-32602` `you have no agent "x"; aether agent list shows yours`. `-32004` `persistent homes are not enabled` without member homes. Needs the launch capability; refused with `-32003` while an install or a harness update runs in the home. Package files, logins and settings stay. Not replayed on a transport failure |
+| `agent.remove` | `{"name":"claude"}` | `{"removed":["~/.local/bin/claude","~/.local/bin/claude-agent-acp"]}` - removes an agent from the caller's own environment so new sessions cannot start it. A shipped name (it wins over a member's definition of the same name; `custom` is not removable) deletes its `~/.local/bin` links, the Enhanced adapter's too; `removed` lists those that existed, and none existing answers `-32602` `agent "claude" is not installed in your environment: ~/.local/bin/claude does not exist`. Any other name deletes the caller's definition and answers `{}`, or `-32602` `you have no agent "x"; aether agent list shows yours`. `-32004` `persistent homes are not enabled` without member homes. Needs the launch capability; refused with `-32003` while an install or a harness update runs in the home. Package files, logins and settings stay. Not replayed on a transport failure |
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
@@ -1098,7 +1098,7 @@ The dashboard also calls these methods through the same route:
 | `terminal.file` | `TerminalFileParams` (`{"run_id":"<run-id>","name":"notes.md","content":"<base64-file-bytes>"}`; `run_id` optional) | `TerminalUploadResult` (`{"path":"/home/<account>/.aether/terminal-files/<random>/notes.md"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
-| `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `idle`, `installing`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the run belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `installing` means a start is installing the agent in the assistant's container |
+| `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `idle`, `installing`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error`, the pending `confirmations` (each with `other_member` and `other_owner`, the owner's name, when the session belongs to another member), `auto_approve`, `suggest_auto_approve` and `share_view`. `installing` means a start is installing the agent in the assistant's container |
 | `assistant.start` | `{"agent":"claude"}` (optional) | `AssistantStatus` - starts the caller's assistant, an Enhanced session of their agent in the caller's assistant container, resuming the stored session. `agent` defaults to the stored agent, which is never replaced unasked: when it is not ready the call fails with `<Agent> is not ready: <reason>; sign in again or start with another agent` (`-32004`). With no stored agent it picks the first ready of `claude`, `codex`. Naming a different agent begins a new conversation |
 | `assistant.prompt` | `{"text":"...","idempotency_key":"...","view_context":{...}}` (`view_context` optional) | empty result; needs the Launch capability, starts the assistant when needed, and ignores a key it already accepted. While a turn runs it answers `-32002`: cancel the turn first. `view_context` is `{"version":1,"captured_at":"...","route":{"name":"run","run_id":"...","view":"changes"},"open_file":{"kind":"workspace","path":"..."},"recent":[],"attachments":[{"kind":"check","run_id":"...","pr":42,"repository":"owner/name","check":"lint"}]}`. `route` is optional: a prompt whose page the member removed has none. Each attachment names what the message is about: `kind` (`workspace`, `run`, `pr`, `check`, `failure`) and any of `workspace_id`, `run_id`, `pr`, `repository`, `check` (at most 128 bytes, no control or format characters), `failure` and `seq`. Malformed ids, paths and fields are dropped, as is an attachment of unknown kind or naming no id; `recent` is cut to 8 pages and `attachments` to 6; the oldest pages, then `open_file`, then the last attachments go until it fits 4096 bytes, and an unknown `version` is dropped. It reaches the agent as an `aether://view-context` resource. With `share_view` off only `attachments` reach it, since the member picked them for this message. Otherwise its page part, never the attachments, becomes the caller's held view context, with `source` `prompt`; a prompt without `route` leaves the held view alone, as does a retry of a key already accepted |
 | `assistant.view` | `{"view_context":{...}}` | empty result; replaces the caller's held view context, which the assistant reads with `aether_view_context` along with its `source` (`prompt` or `navigation`) and `age_seconds`, unless `share_view` is off. An update whose `captured_at` is before the held view's is dropped while that view is under 10 seconds old, so a late update never replaces the view a prompt just carried; after that the last one received wins, whatever the device's clock. One without `route` forgets the held view: the member removed the page from their draft. Kept in memory only |
@@ -1106,10 +1106,10 @@ The dashboard also calls these methods through the same route:
 | `assistant.answer` | `{"request_id":"...","option_id":"...","values":{}}` | empty result; answers one of the harness's permission prompts or questions |
 | `assistant.confirm` | `{"confirmation_id":"...","approve":true}` | empty result; answers a tool call waiting for approval. A confirmation expires after 10 minutes |
 | `assistant.reset` | none | `AssistantStatus` - stops the session, discards the conversation and deletes the agent's state in the assistant's home |
-| `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false}`) - the caller's own assistant settings. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's run. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
+| `assistant.settings` | `{"auto_approve":true,"share_view":false}`, `{"suggestion":"later"}` or `{"suggestion":"never"}` (each optional; omitted reads) | `AssistantSettings` (`{"auto_approve":true,"suggest_auto_approve":false,"suggestion_off":false,"share_view":false}`) - the caller's own assistant settings. With `auto_approve` on, the assistant's confirmed tools run without a card, except on another member's session. `suggestion` answers the [suggestion](assistant.md#auto-approval) to turn it on; `suggestion_off` means it will not show again. `share_view` (default on) lets prompts and `assistant.view` carry the caller's view context; off forgets the one held. The assistant's tool socket does not serve this method |
 | `assistant.history` | `{"before_seq":0,"limit":1000}` | like `run.acp.history`. A `notice` item may carry an `action` record, below |
 | `assistant.item` | `{"seq":12}` | like `run.acp.item` |
-| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
+| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new session checkout's `origin` remote points at |
 | `workspace.environment.get` | `WorkspaceEnvironmentGetParams` (`{"workspace_id":"..."}`) | Any member. `WorkspaceEnvironmentResult` (`{"workspace_id":"...","setup_script":"npm ci\n","variables":[{"name":"API_URL","value":"https://api.example.test"},{"name":"NPM_TOKEN","secret":true}]}`), variables sorted by name; a secret never carries `value` |
 | `workspace.environment.set` | `WorkspaceEnvironmentSetParams` (`{"workspace_id":"...","setup_script":"npm ci\n","set":[{"name":"NPM_TOKEN","value":"...","secret":true}],"unset":["OLD_NAME"]}`; every field but `workspace_id` optional). Admin only. `set` adds or replaces, `unset` removes, a present `setup_script` replaces the script and `""` clears it; whatever is not named is kept. The script and each value are limited to 64 KiB | `WorkspaceEnvironmentResult` after the change, with `warning` when the change is saved and its timeline note was not recorded. A `run.launch` or `template.launch` the setup script fails answers with error data `{"setup_output":"..."}`: the end of what the script printed, secret values masked |
 | `workspace.mirror.status` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | Read-only for admitted members. `WorkspaceMirrorResult` reports whether mirroring is enabled, source, branch, status, observed and accepted commits, check times, public key, and safe warning/error fields; no private key or server path |
@@ -1147,7 +1147,7 @@ empty fields omitted.
 | --- | --- | --- |
 | `memory.search` | `{"workspace_id":"...","words":"lease reattach","kind":"gotcha","source":"agent"\|"member"\|"report"\|"answer","file":"web/bun.lock","all":false,"replaced":false,"pinned":false,"limit":10}` (all but `workspace_id` optional; without `words` the newest come first; `source` keeps notes from that source; `all` includes replaced notes and `replaced` keeps only them; `pinned` keeps pinned notes; `limit` is 1 to 100, default 10) | `{"items":[MemoryItem]}`, best first |
 | `memory.show` | `{"workspace_id":"...","id":"note-..."}` | `{"item":MemoryItem,"chain":[MemoryItem]}`; `chain` holds the notes it replaced and was replaced by, in replacement order ([memory.md](memory.md#what-a-note-holds)) |
-| `memory.brief` | `{"workspace_id":"...","member_id":"..."}` (`member_id` optional, default the caller) | `{"text":"<team-memory workspace=..."}`: the brief a new run of that member gets now, `""` when there is nothing to brief |
+| `memory.brief` | `{"workspace_id":"...","member_id":"..."}` (`member_id` optional, default the caller) | `{"text":"<team-memory workspace=..."}`: the brief a new session of that member gets now, `""` when there is nothing to brief |
 | `memory.add` | `{"workspace_id":"...","kind":"decision"\|"convention"\|"gotcha"\|"preference","text":"...","files":["..."],"supersedes":"note-...","scope":"workspace"\|"member","pin":false}` (only `workspace_id`, `kind` and `text` required) | `{"item":MemoryItem,"duplicate":false,"similar":[MemoryItem]}`; with `duplicate` the item is the live note that already holds the text; up to 3 `similar` live notes |
 | `memory.pin` | `{"workspace_id":"...","id":"note-...","scope":"workspace"\|"member"}` (`scope` optional, default the note's own) | `{"item":MemoryItem}` |
 | `memory.unpin` | `{"workspace_id":"...","id":"note-..."}` | `{"item":MemoryItem}` |
@@ -1185,13 +1185,13 @@ caller already keeps for the same `workspace_id`, or for none, fails with
 `-32003` `already remembered as preference <id>`. None of these writes
 anything.
 
-### Run branch and pull request methods
+### Session branch and pull request methods
 
-These run native `git` and `gh` in a live run's container, as the run's
+These session native `git` and `gh` in a live session's container, as the session's
 account, like the other `run.git.*` and `run.pr.*` methods. `run.git.log`
 needs view; `run.pr.merge` needs push and steering, re-checked before every
-command. A run whose container is gone fails with `-32002`
-(`scheduler: the run has no live environment: the run is completed and its
+command. A session whose container is gone fails with `-32002`
+(`scheduler: the session has no live environment: the session is completed and its
 container is gone`). A failed `git`
 or `gh` command is not an RPC error: the result carries `error` and the
 command's `output` (`exit_code`, `stdout`, `stderr`, `truncated`) verbatim.
@@ -1202,7 +1202,7 @@ command's `output` (`exit_code`, `stdout`, `stderr`, `truncated`) verbatim.
 | `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","expected_head":"<sha>","repository":"owner/name","number":128,"expected_login":"octocat","expected_base":"main"}` (`repository` and `number` optional, together; `expected_login` and `expected_base` optional) | `{"identity":"octocat","pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
 
 `run.git.log` compares the checkout's `HEAD` with its upstream base: the
-checkout's `origin/<base branch>` (`base_ref`), or the commit the run forked
+checkout's `origin/<base branch>` (`base_ref`), or the commit the session forked
 from when that ref is missing (`base_ref` empty). The server does not fetch;
 `behind` counts what the checkout last fetched. `commits` is
 `merge_base..head` and `upstream` is `merge_base..base`, newest first, each
@@ -1213,7 +1213,7 @@ at most `limit`; `truncated` is set when `ahead` or `behind` exceeds it. A
 `head` and `base` reports as conflicting, empty when they merge cleanly;
 an `upstream` commit that touches one of them lists those in `paths`;
 the index and worktree are untouched. When the prediction fails, for
-example with Git older than 2.38 in the run's image or an upstream with no
+example with Git older than 2.38 in the session's image or an upstream with no
 common history, `conflicts_error` carries Git's error, `conflicts` is empty
 and means unknown, and the rest of the answer stands.
 
@@ -1221,10 +1221,10 @@ and means unknown, and the rest of the answer stands.
 --<method> --match-head-commit <expected_head>`, so GitHub refuses the
 merge when the pull request's head is no longer the `head_oid` the member
 reviewed. The host is explicit, as in every other read, so a `GH_HOST` in
-the run's environment cannot send the merge elsewhere. With `expected_base`
+the session's environment cannot send the merge elsewhere. With `expected_base`
 it first reads the pull request and refuses, without merging, when it now
 targets another base branch: a retarget leaves the head unchanged.
-Without `repository` and `number` it merges the pull request the run most
+Without `repository` and `number` it merges the pull request the session most
 recently opened through `run.pr.create`, and fails with `-32602` when there
 is none. A pull request an agent opened with native `gh` must be named.
 It first reads the GitHub login `gh` uses (`identity`) and, like
@@ -1248,7 +1248,7 @@ request's head moved between that read and the one the checks used.
 
 Both gateways expose the same administrator flow; it needs no local clone or
 loopback OAuth callback. The assembled server wires `Services.GitHubOAuth`
-directly to the scheduler, independently of run-control decorators.
+directly to the scheduler, independently of session-control decorators.
 The authenticated transport supplies the member; none of these methods accepts
 a credential owner selected by the browser. Existing `github.connect` and
 `github.probe` remain member-scoped for native terminal setup.
@@ -1325,7 +1325,7 @@ rebinds to the current admin's verified account (and can check
 ### Files and member configuration
 
 `files.tree` and `files.read` address a workspace's base branch when
-`run_id` is omitted, or a live run checkout when it is present. A run
+`run_id` is omitted, or a live session checkout when it is present. A session
 checkout's tree lists tracked, untracked and ignored files, but not a folder
 that is ignored as a whole, such as `node_modules/`. Complete
 valid UTF-8 text without NUL bytes is returned with an exact SHA-256
@@ -1337,15 +1337,15 @@ the wire shape for compatibility.
 
 `files.write` without `run_id` requires **Push** and creates a one-file commit
 on the workspace base branch; it does not push upstream. With `run_id`, it
-requires **Steer** and changes that run's uncommitted checkout. Existing file
-modes are preserved and new files use `0644`. Run-checkout saves recheck the
+requires **Steer** and changes that session's uncommitted checkout. Existing file
+modes are preserved and new files use `0644`. Session-checkout saves recheck the
 revision immediately before atomic rename under Aether's root lock. Base
 commits compare-and-swap the branch head. Aether's locks do not serialize
 arbitrary live-agent filesystem writers. `content` is text without NUL bytes.
 
 `files.upload` adds one new file of any bytes, up to the same 64 MiB, to a
-run's checkout, the dashboard's **Upload files…**. It requires `run_id` and
-**Steer**, like a run-checkout `files.write`, and never replaces a file: a path
+session's checkout, the dashboard's **Upload files…**. It requires `run_id` and
+**Steer**, like a session-checkout `files.write`, and never replaces a file: a path
 the checkout already has answers `-32003` `files.upload: file changed; reload
 before saving`.
 
@@ -1357,12 +1357,12 @@ extra request field. `config.write` has the same explicit-save and revision
 rules as `files.write`. `config.import` writes a batch of files into one
 agent's directory in that home; `aether config push` calls it over the SSH
 control channel ([Upload agent configuration](quickstart.md#upload-agent-configuration)).
-All runs the member launches and the environment terminal mount one shared
+All sessions the member launches and the environment terminal mount one shared
 read-write persistent HOME; an account share exposes only the agent login
 from it, except that an `omp` share exposes the whole `~/.omp/agent`, and a
 recipient with no installation of the agent also gets the owner's
 installation read-only ([security.md](security.md#account-sharing)). A file edit, configuration upload, or
-manual CLI profile operation is therefore visible to active and future runs,
+manual CLI profile operation is therefore visible to active and future sessions,
 although a tool may need to reload its configuration.
 Configuration saves and imports bind inherited permissions to the observed
 destination inode and mode. After staging, they recheck that identity and mode
@@ -1383,7 +1383,7 @@ path, a `..` or empty segment, a backslash, or a NUL byte is refused.
 
 | Method | Does |
 | --- | --- |
-| `home.tree` | Lists the immediate children of a directory, sorted by name, with nothing left out: dotfiles, agent runtime folders, and credential files are listed. `kind` is `dir`, `file`, or `link` for a symlink; sockets, FIFOs, and devices are omitted. `locked` marks a credential file. |
+| `home.tree` | Lists the immediate subsessions of a directory, sorted by name, with nothing left out: dotfiles, agent runtime folders, and credential files are listed. `kind` is `dir`, `file`, or `link` for a symlink; sockets, FIFOs, and devices are omitted. `locked` marks a credential file. |
 | `home.read` | Reads one file with the rules and result of `config.read`. |
 | `home.write` | Saves complete UTF-8 text with the revision rules of `config.write`. An empty `revision` creates the file as `0644`, with any missing parent directories, and refuses an existing one. |
 | `home.mkdir` | Creates one directory, `0700`. Its parent must exist and the name must be free. |
@@ -1436,7 +1436,7 @@ admission.
 `config.roots` returns each agent's `runtime_ignores` and
 `credential_names`. `runtime_ignores` contains case-sensitive patterns
 anchored at the agent's directory; one matches a path and everything below
-it, `*` matches any run of characters within one name, and trailing slashes
+it, `*` matches any session of characters within one name, and trailing slashes
 are ignored for matching. These lists are per agent, so a runtime file
 ignored for Claude is not implicitly ignored for OMP or a member-defined
 custom agent. Known credential names wherever they occur in a path, and every
@@ -1472,7 +1472,7 @@ identical, and differs exclusions. Explicit CLI profile `push`, `status`, and
 `rollback` remain separate manual operations; neither `config.import` nor
 **Files** edits create CLI snapshot history. The persistent HOME does not
 depend on snapshots. Snapshot pins record optional launch provenance, not
-isolated writable run copies. Manual push and rollback overlay snapshot files
+isolated writable session copies. Manual push and rollback overlay snapshot files
 into the same HOME without deleting files absent from the snapshot; rollback
 is not an exact-tree restore. There is no directory watcher, automatic
 configuration synchronization, or automatic import retry.
@@ -1522,15 +1522,15 @@ tree each snapshot wrote, never patch text, and no patch text is stored
 anywhere in the server, so the diff timeline reads the text here and uses
 those events to know when to ask again and which snapshot to ask from.
 
-`repo=<workspace_id>` selects one of a multi-repo run's repos (the run's
-`repos`, from `aether run --repo`); without it the primary repo is rendered.
+`repo=<workspace_id>` selects one of a multi-repo session's repos (the session's
+`repos`, from `aether session --repo`); without it the primary repo is rendered.
 
-With no query params the server renders the run checkout's whole diff against
-the run's effective base, covering committed work, uncommitted edits and
+With no query params the server renders the session checkout's whole diff against
+the session's effective base, covering committed work, uncommitted edits and
 untracked files alike - the same set of changes a `run.diff` snapshot counts.
-The effective base is the newest upstream commit the run's `HEAD` contains:
+The effective base is the newest upstream commit the session's `HEAD` contains:
 the merge base of `HEAD` and the checkout's `refs/remotes/origin/<base
-branch>`, which `git fetch` or `git pull` inside the run updates. A run that
+branch>`, which `git fetch` or `git pull` inside the session updates. A session that
 merges or rebases onto newer upstream work is therefore charged only for its
 own changes, as in a GitHub pull request. The base never moves behind the
 fork point (the `aether.base` commit its identity record pins): when the
@@ -1559,23 +1559,23 @@ untracked content to count lines. Past that the event carries
 floor.
 
 `from` alone renders everything that changed since a recorded snapshot: the
-diff from that snapshot's `tree`, off a `run.diff` event, to the run's current
+diff from that snapshot's `tree`, off a `run.diff` event, to the session's current
 state. With a checkout the worktree is staged exactly as for the whole diff,
 so edits made after the snapshot count, committed or not, and the base is the
 `from` tree. After checkout cleanup the diff runs from `from` to the last
 recorded snapshot and carries `recorded:true`. `fork_tree`, on every render
 without `from`, is the tree of the fork-point commit; passing it as `from`
-renders the run's current state against where it started, including upstream
+renders the session's current state against where it started, including upstream
 work merged since.
 
 `from` and `to` together render one interval: the diff between the two trees,
-which is what the run changed in that interval. `to` without `from` is an
+which is what the session changed in that interval. `to` without `from` is an
 invalid-params error. An id has to be a full object id, has to be recorded in
-that run's own snapshot store and no other, and has to name a tree: a commit
+that session's own snapshot store and no other, and has to name a tree: a commit
 id would otherwise peel to its tree and render a diff the timeline never
 offered. The fork-point tree counts as recorded.
 
-Snapshot sidecars preserve captured trees until explicit run deletion, even
+Snapshot sidecars preserve captured trees until explicit session deletion, even
 after checkout cleanup. Consecutive unchanged trees do not add duplicate refs.
 Range reads and evidence imports share the snapshot lock with explicit
 deletion. Published interval refs change atomically, and in-flight pins protect
@@ -1586,7 +1586,7 @@ A cumulative response after checkout cleanup is the last recorded snapshot,
 not a live filesystem read, and carries `recorded:true`. It is measured
 against the tree of the effective base that snapshot's stats used, which the
 snapshot store records in the same ref transaction that publishes the
-snapshot, so the pair never splits. Stopping a run's watcher, as run
+snapshot, so the pair never splits. Stopping a session's watcher, as run
 completion does, takes one last snapshot first, so the final `run.diff` and
 the recorded diff include changes made in the seconds before the stop.
 
@@ -1617,7 +1617,7 @@ claim the checkout was removed, and it never returns a partial complete diff.
 ```
 
 - Visibility is `run.get`'s, applied by calling it: a member who could not
-  read the run over the control channel gets that method's refusal here,
+  read the session over the control channel gets that method's refusal here,
   unchanged.
 - `base` is what the patch is measured from: the effective base commit on a
   live cumulative render, its tree when `recorded` is true, the `from` tree on
@@ -1627,8 +1627,8 @@ claim the checkout was removed, and it never returns a partial complete diff.
 - `patch` contains the complete rendered diff up to 64 MiB. An oversized
   response sets `truncated:true` and ends at a whole line. The dashboard
   renders the response inline; it does not serve repositories.
-- `503` with `-32004` when the server has no git engine wired, when the run
-  has no checkout to diff (`run.patch: this run has no checkout to diff`),
+- `503` with `-32004` when the server has no git engine wired, when the session
+  has no checkout to diff (`run.patch: this session has no checkout to diff`),
   when a requested tree has expired from retained snapshot history (possibly
   before checkout cleanup), or when rendering ran past the engine's 30s
   ceiling (`run.patch: rendering the diff took longer than 30s: ...`) - the
@@ -1691,7 +1691,7 @@ layer: files written outside its mounted home, checkout and cache, such as
 `/tmp`. They are deleted with the container, live outside the data directory,
 and are not part of any total above. Each item has `owner_kind` (`run`, or
 `member` for that member's environment), `owner_id` and `bytes`, largest
-first. Admins receive every container; other members receive their own runs
+first. Admins receive every container; other members receive their own sessions
 and environment. Docker walks each layer to answer, so the server measures in
 the background at most every five minutes: `containers_measured_at` (ISO 8601)
 is absent until the first measurement completes, and `containers_error` carries
@@ -1745,10 +1745,10 @@ An HTTP body over the 12 MiB image cap is still rejected before dispatch as a
 `400` parse error; it is not passed to the control channel.
 
 Omit `run_id` to target the authenticated caller's live environment terminal;
-that terminal must already be running. Supplying `run_id` targets that run's
+that terminal must already be running. Supplying `run_id` targets that session's
 live supervised container and requires the caller's `Steer` capability. The
 server stores the generated file in the persistent member home that container
-mounts (the run's launcher's, also on a shared account) and returns its
+mounts (the session's launcher's, also on a shared account) and returns its
 absolute path as mounted at `$HOME` there.
 The path and filename are server-generated; callers cannot choose a host path
 or ask this method to read an arbitrary path.
@@ -1768,7 +1768,7 @@ exceeds the 64 MiB limit`.
   they do on the `GET`.
 - The read methods answer `-32004` (unavailable) when the read cannot be
   served: `run.patch` when diff rendering is not enabled (no git engine
-  wired), when the run has no checkout left to diff, or when a requested tree
+  wired), when the session has no checkout left to diff, or when a requested tree
   is gone (`run.patch: retained snapshot history has expired or is unavailable`),
   `server.disk` when the server was not told where the data directory is,
   the filesystem holding it could not be read, or its first walk of the data
@@ -1787,7 +1787,7 @@ exceeds the 64 MiB limit`.
   what gh, or the container that could not run it, printed - prefixed with
   `gh --version exited <code>` when the status is `broken`, and the output
   after it when there was any. A gh that
-  cannot do the login also carries `remedy`, the command the member runs,
+  cannot do the login also carries `remedy`, the command the member sessions,
   and `admin_remedy`, what a server admin has to run first when the
   server's own standard image is the one without a usable gh:
 
@@ -2111,7 +2111,7 @@ the server snapshot from loading.
   as a full 40-hex commit id.
 - The branch keeps whatever tracking remote it already had. A member's
   `<base>` usually tracks their own remote, and a catch-up that repointed it at
-  the workspace would redirect their next `git pull`; only run branches
+  the workspace would redirect their next `git pull`; only session branches
   `pull` creates track `aether`.
 - Another branch checked out does not stop it: exactly as `pull` does, it
   updates the branch ref and leaves the working tree alone. When `<base>` is
@@ -2125,7 +2125,7 @@ the server snapshot from loading.
   the worktree holding it, and no other worktree is ever written to. The
   message names that worktree and the
   `git -C <worktree> merge --ff-only aether/<base>` that catches it up
-  there. `pull` refuses a run branch held by another worktree the same way.
+  there. `pull` refuses a session branch held by another worktree the same way.
 - `repo.fast-forward` refuses with `-32002` (invalid state) on the same
   local preconditions as `repo.push`, and in every state but `behind`,
   naming what to do instead: the workspace has no branch named `<base>` yet
@@ -2137,7 +2137,7 @@ the server snapshot from loading.
   change, answers `-32002` too, carrying git's message, because the member
   fixes it in their own repository. Only a failed fetch - an unreachable
   server, a key git could not use - answers `-32603`.
-- Every git command that dials a remote is bounded at ten minutes and runs
+- Every git command that dials a remote is bounded at ten minutes and sessions
   with `GIT_TERMINAL_PROMPT=0`, so git cannot block on its own credential
   prompt. The bound covers the compare and the push separately, so a
   `repo.push` that compares and then pushes can take twenty minutes;
@@ -2145,13 +2145,13 @@ the server snapshot from loading.
   bound does not reach `ssh`: a passphrase-protected key with no agent still
   waits on ssh's own prompt until the ten minutes are up. Load the key into an
   agent before pushing or fast-forwarding from the dashboard.
-- `pull` fetches the run branch, fast-forwards it when it is checked out, and
+- `pull` fetches the session branch, fast-forwards it when it is checked out, and
   otherwise creates or updates the local branch without switching branches.
   `current` reports whether the checkout is on that branch and `dirty` reports
   uncommitted changes after the operation. `pull.switch` refuses a dirty
   checkout and switches to the pulled branch when it is clean.
 - `pull` answers `-32002` (invalid state) for a branch move the member
-  fixes in their own repository, the run branch held by another worktree
+  fixes in their own repository, the session branch held by another worktree
   above being the one such state, and `-32603` for anything else git ran
   and lost. Both carry git's own words.
 - A gateway started with `AETHER_PACKAGED` set, as the Android app does with
@@ -2174,7 +2174,7 @@ the server snapshot from loading.
   `/etc/resolv.conf` is absent; the app writes the phone's DNS servers there.
 - `pull`, `pull.switch`, `repo.push`, `repo.fast-forward`, `sync.start`, and
   `sync.stop` refuse with `-32002` when no repo is linked.
-- A sync session's states are `starting` (the overlay is dialing the run
+- A sync session's states are `starting` (the overlay is dialing the session
   worktree), `running`, `stopped`, `conflict` (with the conflict text in
   `conflict`), and `error`. A conflict is also reported to the server as a
   `sync.conflict` call so both affected members see the event;
@@ -2289,7 +2289,7 @@ the server snapshot from loading.
   against `checksums.txt`, staged beside the binary and renamed over it,
   exactly as the command does. On macOS with a directory this account
   cannot write (`admin-prompt`) the route is longer, and its one privileged
-  step runs outside this process:
+  step sessions outside this process:
 
   1. It downloads and verifies the release as the user into a private
      staging directory, `<user cache>/aether/update`
@@ -2304,7 +2304,7 @@ the server snapshot from loading.
      through. Aether never sees your password.`), and the system's own
      last line, "Touch ID or enter your password to allow this." The
      password or Touch ID match goes to macOS's authorization service;
-     nothing is stored, piped, or logged by Aether. Root runs one fixed
+     nothing is stored, piped, or logged by Aether. Root sessions one fixed
      `sh` command made of
      system tools - a `0600` temp file in the destination directory, a
      copy, a SHA-256 check against the digest baked into the command text,
@@ -2386,7 +2386,7 @@ the temp directory so it never holds the app directory open), and exits
     GUI session (started over SSH), which `update.check` already reported
     as `manual`: the same refusal the command prints, ending in ``re-run as
     `sudo aether update` ``, before anything is downloaded. If osascript
-    still reports no session at run time, ``no GUI session to show the
+    still reports no session at launch time, ``no GUI session to show the
     macOS authorization dialog in: ... (-1713); run `sudo aether update` in
     a terminal on this Mac``. Also a dev build, `AETHER_NO_UPDATE_CHECK`
     set, Windows, and nothing to install: `already on <latest>, the newest
@@ -2430,12 +2430,12 @@ If an attach is still inside its bootstrap boundary when `online` fires, the
 client cancels that parser and drain with an explicit cancellation signal,
 clears the partial operations, and drops the socket while keeping the terminal
 hidden. The replacement attach starts a fresh hidden bootstrap; the incomplete
-prefix is never revealed. For a dashboard run attach the replacement is a
+prefix is never revealed. For a dashboard session attach the replacement is a
 compact current-screen snapshot captured without scanning the retained raw
 archive. If the replacement is finally refused, the client settles the
 bootstrap gate before showing the server's error. An attach the gateway
-refused, one parked on a `session ended` close, and a run still waiting for
-its PTY session are not reopened by either event.
+refused, one parked on a `session ended` close, and a session still waiting for
+its PTY are not reopened by either event.
 
 Every live socket - `events`, `attach`, `acp`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
@@ -2479,8 +2479,8 @@ anything dropped.
 ### Assistant notices
 
 When a member's [assistant](assistant.md#notifications) launches or messages a
-run, the server publishes `assistant.notice` as the run finishes or needs the
-member. The envelope carries the run's `workspace_id` and `run_id`, and the
+session, the server publishes `assistant.notice` as the session finishes or needs the
+member. The envelope carries the session's `workspace_id` and `run_id`, and the
 member as `actor_id`. It is a workspace event, so every subscriber of the
 workspace receives it; a client shows it only to the member in `member_id`.
 
@@ -2497,8 +2497,8 @@ The event is published once per announced state.
 
 These tell a client what to re-read; none carries the full state.
 
-- `git.branch`: a run branch moved in the workspace repository, by a
-  publish from the run's checkout or a push. `previous` is the tip before
+- `git.branch`: a session branch moved in the workspace repository, by a
+  publish from the session's checkout or a push. `previous` is the tip before
   (empty for a new branch); `forced` is true when `previous` is not an
   ancestor of `commit`, so the branch was rebased, reset or amended, and
   false when Git could not tell.
@@ -2509,10 +2509,10 @@ These tell a client what to re-read; none carries the full state.
    "branch":"aether/run-...","commit":"<sha>","previous":"<sha>","forced":false}}
   ```
 
-- `run.pr`: a pull request recorded for the run was opened through
+- `run.pr`: a pull request recorded for the session was opened through
   `run.pr.create`, or a `run.pr.status` or `run.pr.merge` read found its
   state or `merged_at` changed. A read that changes nothing, and a pull
-  request the run has no record of, publish nothing. `merged_at` is present
+  request the session has no record of, publish nothing. `merged_at` is present
   once GitHub reports the merge. Re-read `run.pr.feedback`.
 
   ```json
@@ -2526,8 +2526,8 @@ These tell a client what to re-read; none carries the full state.
 PTY attach. Output is binary; JSON text frames carry the header, input,
 resize, control, geometry, and acknowledgements.
 
-1. Client sends one **text** header frame (the run comes from the path). The
-   header must arrive within 10 seconds or the socket closes. A dashboard run
+1. Client sends one **text** header frame (the session comes from the path). The
+   header must arrive within 10 seconds or the socket closes. A dashboard session
    terminal sends the interactive header:
 
    ```json
@@ -2544,14 +2544,14 @@ resize, control, geometry, and acknowledgements.
    snapshot store are capped at 4,096 rows, 4,096 columns, and 1,048,576 cells.
    The dashboard's xterm independently requests up to 5,000 live-scrollback
    rows and reduces that count as needed to keep its normal and alternate
-   buffers within 1,000,000 cells. A finished run whose compact checkpoint is
+   buffers within 1,000,000 cells. A finished session whose compact checkpoint is
    temporarily unavailable falls back to at most 1 MiB of recent output while
    checkpoint repair proceeds separately. It never falls through to a complete
-   archive replay. `screen:true` is the dashboard run default.
+   archive replay. `screen:true` is the dashboard session default.
    `screen:false` deliberately selects the retained raw transcript stream for
    compatibility clients such as the CLI; the dashboard does not request it.
    `interactive:true` opts into same-stream acknowledged control frames and is
-   the dashboard run default. Shell and CLI attachments do not gain this
+   the dashboard session default. Shell and CLI attachments do not gain this
    browser control protocol merely by using the attach endpoint.
 
    An already-mounted dashboard surface deliberately reopening while its
@@ -2573,7 +2573,7 @@ resize, control, geometry, and acknowledgements.
    incarnation cannot serve that gap, the ack says `"resumed":false` and the
    server sends a compact current-screen bootstrap instead. The dashboard
    replaces that hidden surface; it does not replay the retained raw archive.
-   A finished run with `screen:true` likewise supplies bounded current/recent
+   A finished session with `screen:true` likewise supplies bounded current/recent
    state read-only. Non-dashboard compatibility consumers may request the
    complete raw archive through `GET` or the legacy form `POST` at
    `/api/runs/<run_id>/terminal-history` instead.
@@ -2583,7 +2583,7 @@ resize, control, geometry, and acknowledgements.
    not override a live or recorded screen's geometry.
 
    Geometry `follow` is independent of viewport follow-bottom state. Live
-   xterm follows output at the bottom; upward reading in the dashboard run
+   xterm follows output at the bottom; upward reading in the dashboard session
    pane switches to a static, virtualized surface with its own row/pixel
    anchor. Compact bootstrap and live geometry changes do not overwrite that
    saved presentation. For xterm's own structural replay or column reflow,
@@ -2632,9 +2632,9 @@ resize, control, geometry, and acknowledgements.
    Client frames are capped at 64 KiB; the SPA splits larger input in ordered frames.
 
    A write attach requires **steer** permission and otherwise refuses with
-   `-32001`; an unknown run is `-32000`. A `queued`, `provisioning`, or
-   `running` run without a session is `-32004` rather than a held socket.
-   A finished run remains readable through its snapshot or raw replay,
+   `-32001`; an unknown session is `-32000`. A `queued`, `provisioning`, or
+   `running` session without a session is `-32004` rather than a held socket.
+   A finished session remains readable through its snapshot or raw replay,
    depending on `screen`.
 
 3. Server then streams terminal output as **binary** frames. For framed
@@ -2682,7 +2682,7 @@ resize, control, geometry, and acknowledgements.
    only after the server atomically rechecks the captured holder generation
    and live connection, current requester authority, and terminal readiness. A raw CLI holder cannot answer the dashboard dialog;
    the same deadline still applies. Either participant disconnecting, holder
-   replacement/release, or lost run/member authority cancels the request.
+   replacement/release, or lost session/member authority cancels the request.
    Reconnecting the same generation does not revive an old request.
 
    Both interactive participants receive prompt `type:"takeover"` snapshots:
@@ -2732,9 +2732,9 @@ resize, control, geometry, and acknowledgements.
    `control_session_id`, and `control_generation`. A lease revocation that
    was not requested is an unsolicited `type:"control"` frame with no
    `request_id`; the displaced client remains a read-only observer.
-   `revocation_reason` identifies `takeover` by another control session,
+   `revocation_reason` identifies `takeover` by another controller,
    `permission` loss (including protection), or generic `revoked` invalidation.
-   The browser applies it only to its exact control session and generation;
+   The browser applies it only to its exact controller and generation;
    only `takeover` triggers the red control-border exit animation. Input is
    disabled immediately, without waiting for that animation. The browser changes
    its input state from acknowledged metadata, not the requested `write` bit.
@@ -2760,11 +2760,11 @@ resize, control, geometry, and acknowledgements.
    without replaying or reconnecting. A raw legacy (non-interactive) attach
    keeps the named close behavior: **1008**, reason `steer permission
    withdrawn`. Membership withdrawal closes every attach with **1008**, reason
-   `membership withdrawn`, and stops reconnecting. A terminal session ending
+   `membership withdrawn`, and stops reconnecting. A terminal ending
    closes with **1000**, reason `session ended`; other failures use **1011**.
 
-Closing the socket detaches; the run is unaffected. Changing away from a
-dashboard run route closes that socket and unmounts its xterm, removing
+Closing the socket detaches; the session is unaffected. Changing away from a
+dashboard session route closes that socket and unmounts its xterm, removing
 Watching presence, control transport, and geometry participation. The browser
 does not keep a fixed cache of recently visited terminal routes. A deliberate
 reopen of the same mounted surface may use a bounded same-incarnation gap;
@@ -2778,32 +2778,32 @@ state and never the archive. A writable CLI attach still discards input that
 arrives before its announced replay has been written; it does not defer those
 keystrokes.
 
-#### Run shell tabs
+#### Session shell tabs
 
 `GET /ws/attach/<run_id>?shell=<tab>` opens a writable shell tab inside the
-run container instead of attaching to the agent process. A shell tab always
+session container instead of attaching to the agent process. A shell tab always
 requires **steer** permission and ignores the `write` value in the header;
 there is no read-only shell mode. Tab names must match
 `^[a-z0-9-]{1,32}$`, and at most four shells started by people can run in a
-run at once; the agent's shells are counted apart.
+session at once; the agent's shells are counted apart.
 The shell starts in `/workspace`. When it exits, the socket closes normally
 with **1000** and the tab name is free to reopen with a fresh shell.
 Closing the socket only detaches: the shell keeps running, still counts
 toward that limit, and reconnecting the same tab name reattaches to
-it. Every shell ends with the run's container. An unsuccessful initial TUI
+it. Every shell ends with the session's container. An unsuccessful initial TUI
 agent exit returns the session to a login shell, so another installed agent
-can use the same run checkout. A run shell can only be opened while the
-container is live; finished runs expose their recorded terminal output but do
+can use the same session checkout. A session shell can only be opened while the
+container is live; finished sessions expose their recorded terminal output but do
 not create new shell tabs.
 
 ### `GET /ws/acp/<run_id>`
 
-The session item log of a run with `acp: true` ([enhanced-runs.md](enhanced-runs.md)):
+The session item log of a session with `acp: true` ([enhanced-sessions.md](enhanced-sessions.md)):
 the items already logged after the client's cursor, then each new one as the
-agent sends it. Any other run is refused with `-32602` and `run <run_id>
+agent sends it. Any other session is refused with `-32602` and `run <run_id>
 does not run its agent over ACP`. Every frame is JSON text.
 
-1. Client sends one header frame. `write` asks for the run's control lease
+1. Client sends one header frame. `write` asks for the session's control lease
    with the same fields a terminal attach uses (`takeover`,
    `release_control`); without it the socket only reads.
 
@@ -2874,9 +2874,9 @@ does not run its agent over ACP`. Every frame is JSON text.
    ones. `approval` is `card`, `auto`, or absent for a pause or resume.
    `target` has the `workspace_id` and `run_id` the call named, none for
    `env.save`, the `watch_id` of a watch change or delete, and under
-   `watch` the `watch.create` target; `other_owner` names the run's owner when it is another
+   `watch` the `watch.create` target; `other_owner` names the session's owner when it is another
    member's; `error` is the failure's exact text; `result` holds the
-   `run_id` and `workspace_id` of a launched run.
+   `run_id` and `workspace_id` of a launched session.
 4. Lease frames are the attach's: the client sends
    `{"type":"control","request_id":1,"write":true}` to take control or
    `{"type":"control","request_id":2,"control_generation":7}` to release it,
@@ -2893,12 +2893,12 @@ does not run its agent over ACP`. Every frame is JSON text.
    the seven-second review expires.
 
 The socket closes **1012** `session stream ended; resubscribe with
-after_seq` when the session ends or restarts, when the run has no session
+after_seq` when the session ends or restarts, when the session has no session
 and one starts, or when the client falls 1024 items behind: reconnect with
 your last `seq`. It closes **1008** when membership is withdrawn. Losing
 Steer only drops the lease, as on an interactive attach: the server sends a
 `control` frame with `revocation_reason:"permission"` and the socket stays
-open as a viewer. A run accepts at most 32 of these sockets at once; the next is refused with
+open as a viewer. A session accepts at most 32 of these sockets at once; the next is refused with
 `-32003`.
 
 ### `GET /ws/terminal?tab=<tab>`
@@ -2922,7 +2922,7 @@ ends when the sign-in exits; there is no replay of an earlier sign-in.
    framed dashboard terminal, the replay is a compact current-screen snapshot
    with bounded scrollback, not the shell's full recorded output. Each
    reconnect requests a fresh snapshot; environment-terminal attaches do not
-   use the run attach's cursor-delta resume protocol.
+   use the session attach's cursor-delta resume protocol.
    `replay` is the exact number of binary output bytes that follow the ack
    before live output. A binary frame may straddle that boundary, so the client
    splits it by the count. That declaration must be a finite, nonnegative safe

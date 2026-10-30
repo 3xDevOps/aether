@@ -24,20 +24,20 @@ func TestWaitExitsWithTheRunsOutcome(t *testing.T) {
 		code     int
 		lines    []string
 	}{
-		{name: "completed", run: protocol.Run{Status: "completed"}, code: waitFinished, lines: []string{"run r1 Completed\n"}},
+		{name: "completed", run: protocol.Run{Status: "completed"}, code: waitFinished, lines: []string{"session r1 Completed\n"}},
 		{name: "reported success", run: protocol.Run{Status: "needs-attention", Activity: "finished", Review: "ready"},
 			items: []protocol.AttentionItem{{Kind: protocol.AttentionKindReady, RunID: "r1"}}, code: waitFinished},
 		{name: "failed", run: protocol.Run{Status: "failed", Reason: "agent exited 1: boom"}, code: waitFailed,
-			lines: []string{"run r1 Failed: agent exited 1: boom\n"}},
+			lines: []string{"session r1 Failed: agent exited 1: boom\n"}},
 		{name: "permission request", run: protocol.Run{Status: "needs-attention", Activity: "needs-you"},
 			items: []protocol.AttentionItem{permissionItem()}, code: waitNeedsYou,
 			lines: []string{"r1 permission req-1: Run rm -rf build\n", "  aether answer r1 req-1 allow-1    # Allow once\n"}},
 		{name: "turn ended without a report", run: protocol.Run{Status: "needs-attention", Activity: "waiting", Reason: "turn ended without a report"},
-			code: waitWaiting, lines: []string{"run r1 Waiting: turn ended without a report\n", "  aether message r1 \"<reply>\"\n"}},
+			code: waitWaiting, lines: []string{"session r1 Waiting: turn ended without a report\n", "  aether message r1 \"<reply>\"\n"}},
 		{name: "answered", run: protocol.Run{Status: "needs-attention", Activity: "answered", Reason: "explained the retry policy"},
-			code: waitWaiting, lines: []string{"run r1 Answered: explained the retry policy\n", "  aether message r1 \"<reply>\"\n"}},
+			code: waitWaiting, lines: []string{"session r1 Answered: explained the retry policy\n", "  aether message r1 \"<reply>\"\n"}},
 		{name: "blocked", run: protocol.Run{Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no token"}, code: waitNeedsYou,
-			lines: []string{"run r1 Needs you: blocked: no token\n", "  it waits on another member; aether runs r1 shows its state\n"}},
+			lines: []string{"session r1 Needs you: blocked: no token\n", "  it waits on another member; aether sessions r1 shows its state\n"}},
 		{name: "disconnected", run: protocol.Run{Status: "needs-attention", Activity: "disconnected"}, code: waitNeedsYou},
 		{name: "stalled", run: protocol.Run{Status: "needs-attention", Activity: "waiting", Reason: "stalled: no output or file changes for 10m"},
 			code: waitWaiting, lines: []string{"  aether message r1 \"<reply>\"\n"}},
@@ -45,13 +45,13 @@ func TestWaitExitsWithTheRunsOutcome(t *testing.T) {
 		{name: "waiting on an unreadable condition", run: protocol.Run{Status: "needs-attention", Activity: "waiting-ci", Reason: "CI on #12",
 			Wait: &domain.RunWait{Kind: domain.WaitSourceUnknown, Detail: "pr:o/r#12:checks: status unknown", Error: "gh: API rate limit exceeded"}},
 			deadline: timedOut, code: waitTimedOut,
-			lines: []string{"run r1 Waiting for CI (status unknown): CI on #12\n  pr:o/r#12:checks: status unknown: gh: API rate limit exceeded\n"}},
+			lines: []string{"session r1 Waiting for CI (status unknown): CI on #12\n  pr:o/r#12:checks: status unknown: gh: API rate limit exceeded\n"}},
 		{name: "broken wait", run: protocol.Run{Status: "needs-attention", Activity: "needs-you", Cause: "wait-fault",
 			Reason: "wait broken: pr:o/r#12:checks resolved, but the agent was not woken"}, code: waitBroken,
-			lines: []string{"run r1 Needs you: wait broken: pr:o/r#12:checks resolved, but the agent was not woken\n", "  aether message r1 \"<reply>\"\n"}},
+			lines: []string{"session r1 Needs you: wait broken: pr:o/r#12:checks resolved, but the agent was not woken\n", "  aether message r1 \"<reply>\"\n"}},
 		{name: "paused", run: protocol.Run{Status: "needs-attention", Activity: "needs-you", Paused: true}, deadline: timedOut, code: waitTimedOut},
 		{name: "working", run: protocol.Run{Status: "running", Activity: "working"}, deadline: timedOut, code: waitTimedOut,
-			lines: []string{"run r1 Working\n"}},
+			lines: []string{"session r1 Working\n"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.run.ID, tc.run.WorkspaceID = "r1", "ws1"
@@ -105,7 +105,7 @@ func TestWaitWakesOnAStatusEvent(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("wait after the run completed = %v", err)
+			t.Fatalf("wait after the session completed = %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("a status event did not wake the wait")
@@ -146,19 +146,19 @@ func TestWaitWarnsOnceOnAnUnknownSource(t *testing.T) {
 		case changed <- struct{}{}:
 		case err := <-done:
 			if err != nil {
-				t.Fatalf("wait after the run completed = %v", err)
+				t.Fatalf("wait after the session completed = %v", err)
 			}
 			ended = true
 		case <-timeout:
 			t.Fatal("the wait did not end")
 		}
 	}
-	if want := "run r1 still waits, but pr:o/r#12:checks: status unknown: gh: API rate limit exceeded, resets in 40s\n"; stderr.String() != want {
+	if want := "session r1 still waits, but pr:o/r#12:checks: status unknown: gh: API rate limit exceeded, resets in 40s\n"; stderr.String() != want {
 		t.Fatalf("stderr = %q, want once %q", stderr.String(), want)
 	}
 	var v runView
 	if err := json.Unmarshal(out.Bytes(), &v); err != nil || v.State != "completed" {
-		t.Fatalf("stdout = %q (%v), want the run as JSON", out.String(), err)
+		t.Fatalf("stdout = %q (%v), want the session as JSON", out.String(), err)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestWaitCutConnectionTimesOut(t *testing.T) {
 	if err := timedOutAfterCut(stalled, false, time.Minute, "r1"); err != stalled {
 		t.Fatalf("uncut connection = %v, want the call's error", err)
 	}
-	needsYou := &exitStatusError{code: waitNeedsYou, err: errors.New("run r1 needs you")}
+	needsYou := &exitStatusError{code: waitNeedsYou, err: errors.New("session r1 needs you")}
 	if err := timedOutAfterCut(needsYou, true, time.Minute, "r1"); err != needsYou {
 		t.Fatalf("outcome after cut = %v, want it unchanged", err)
 	}

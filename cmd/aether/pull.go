@@ -13,8 +13,8 @@ import (
 func init() {
 	register(command{
 		name:    "pull",
-		short:   "fetch a run's branches into the linked clones (no merge)",
-		usage:   "aether pull <run-id>",
+		short:   "fetch a session's branches into the linked clones (no merge)",
+		usage:   "aether pull <session-id>",
 		example: "aether pull run-d6ay38tj8j",
 		run:     runPull,
 	})
@@ -22,7 +22,7 @@ func init() {
 
 func runPull(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: aether pull <run>")
+		return errors.New("usage: aether pull <session>")
 	}
 	cfg, err := cli.Load()
 	if err != nil {

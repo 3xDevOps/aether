@@ -86,7 +86,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 		t.Fatalf("coord.status: %v", cerr)
 	}
 	if status.RunID != string(a) || len(status.Peers) != 1 || status.Peers[0].RunID != string(b) {
-		t.Fatalf("status = %+v, want run %s with peer %s", status, a, b)
+		t.Fatalf("status = %+v, want session %s with peer %s", status, a, b)
 	}
 
 	var sent protocol.CoordSendResult
@@ -118,7 +118,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	case e := <-timeline.Events():
 		p, ok := e.Payload.(events.CoordMessagePayload)
 		if !ok || e.RunID != a || e.ActorID != "" || p.MessageID != sent.MessageID || p.ToRunID != b {
-			t.Fatalf("message event = %+v, want the server-originated send on run %s", e, a)
+			t.Fatalf("message event = %+v, want the server-originated send on session %s", e, a)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the coordination message was never published")
@@ -241,14 +241,14 @@ func TestRestartRecovery(t *testing.T) {
 			t.Errorf("socket mode after recovery = %o, want %o (a reused socket would keep the scuffed mode)", got, socketMode)
 		}
 		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(finished))); !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("the finished run's directory survived recovery: %v", err)
+			t.Errorf("the finished session's directory survived recovery: %v", err)
 		}
 		var status protocol.CoordStatusResult
 		if err := h.dial(t, alive).Call(protocol.MethodCoordStatus, nil, &status); err != nil {
 			t.Fatalf("coord.status after recovery: %v", err)
 		}
 		if status.RunID != string(alive) {
-			t.Fatalf("status after recovery = %+v, want run %s", status, alive)
+			t.Fatalf("status after recovery = %+v, want session %s", status, alive)
 		}
 	})
 
@@ -272,7 +272,7 @@ func TestRestartRecovery(t *testing.T) {
 		}
 		for _, r := range []domain.RunID{retained, expired} {
 			if _, err := h.db.UpdateRunStatus(ctx, r, domain.RunMerged, "", "", nil, nil); err != nil {
-				t.Fatalf("finish run %s: %v", r, err)
+				t.Fatalf("finish session %s: %v", r, err)
 			}
 		}
 		socket := filepath.Join(h.dir, "coord", string(retained), coordtransport.SocketName)

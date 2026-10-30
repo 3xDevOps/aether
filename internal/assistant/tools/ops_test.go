@@ -109,24 +109,24 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	want := map[string]string{
 		protocol.MethodRunLaunch:       `Launch claude (default mode) in shop on "Grace"'s account, falling back to your account in order, with repositories "web": "fix it"`,
 		protocol.MethodTemplateLaunch:  `Launch template "triage" in shop: claude (acp, opus) on your account: "triage issue 42…"`,
-		protocol.MethodRunInject:       `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
-		protocol.MethodRunKill:         `Stop run run-1 ("Fix login"), owned by Grace`,
-		protocol.MethodRunClose:        `Close run run-1 ("Fix login") as abandoned, owned by Grace`,
-		protocol.MethodEnvSave:         `Save your environment as a new image; new runs and terminals start from it`,
-		protocol.MethodRunInputRespond: `Allow once run run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
-		protocol.MethodRunRoomPost:     `Reply on run run-1 ("Fix login"), owned by Grace: "yes", anchored at "main.go:3-9"`,
-		protocol.MethodRunRelaunch:     `Relaunch run run-1 ("Fix login"), owned by Grace`,
-		protocol.MethodRunModeSwitch:   `Switch run run-1 ("Fix login") to Enhanced mode, owned by Grace`,
-		protocol.MethodRunProtect:      `Protect run run-1 ("Fix login") from cleanup, owned by Grace`,
-		protocol.MethodRunArchive:      `Restore run run-1 ("Fix login") from the archive, owned by Grace`,
-		protocol.MethodRunHandoff:      `Hand run run-1 ("Fix login"), owned by Grace, to Ada (m1), who then owns it`,
-		protocol.MethodRunPRCreate:     `Open a draft pull request from run run-1 ("Fix login"), owned by Grace, branch fix-login at 0123456, into the workspace's base branch: "Fix login"`,
-		protocol.MethodRunPRMerge:      `Merge (squash) acme/shop#7 of run run-1 ("Fix login"), owned by Grace, at fedcba9 into main; GitHub reports 1 failing checks, 1 pending checks and 1 reviewers requesting changes`,
+		protocol.MethodRunInject:       `Send to session run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
+		protocol.MethodRunKill:         `Stop session run-1 ("Fix login"), owned by Grace`,
+		protocol.MethodRunClose:        `Close session run-1 ("Fix login") as abandoned, owned by Grace`,
+		protocol.MethodEnvSave:         `Save your environment as a new image; new sessions and terminals start from it`,
+		protocol.MethodRunInputRespond: `Allow once session run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
+		protocol.MethodRunRoomPost:     `Reply on session run-1 ("Fix login"), owned by Grace: "yes", anchored at "main.go:3-9"`,
+		protocol.MethodRunRelaunch:     `Relaunch session run-1 ("Fix login"), owned by Grace`,
+		protocol.MethodRunModeSwitch:   `Switch session run-1 ("Fix login") to Enhanced mode, owned by Grace`,
+		protocol.MethodRunProtect:      `Protect session run-1 ("Fix login") from cleanup, owned by Grace`,
+		protocol.MethodRunArchive:      `Restore session run-1 ("Fix login") from the archive, owned by Grace`,
+		protocol.MethodRunHandoff:      `Hand session run-1 ("Fix login"), owned by Grace, to Ada (m1), who then owns it`,
+		protocol.MethodRunPRCreate:     `Open a draft pull request from session run-1 ("Fix login"), owned by Grace, branch fix-login at 0123456, into the workspace's base branch: "Fix login"`,
+		protocol.MethodRunPRMerge:      `Merge (squash) acme/shop#7 of session run-1 ("Fix login"), owned by Grace, at fedcba9 into main; GitHub reports 1 failing checks, 1 pending checks and 1 reviewers requesting changes`,
 		protocol.MethodMemoryAdd:       `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0 ("CI needs Docker") and moving its pin`,
-		protocol.MethodMemoryPin:       `Pin, into new runs' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
+		protocol.MethodMemoryPin:       `Pin, into new sessions' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
 		protocol.MethodMemoryUnpin:     `Unpin note mem-1 (gotcha), taking it out of Grace's briefs: "CI needs Docker"`,
 		protocol.MethodAssistantForget: `Forget your preference pref-1: "Prefer table output"`,
-		protocol.MethodWatchDelete:     `Delete your watch w-1 on run "Fix login" (needs_you, finished) and its 2 notices`,
+		protocol.MethodWatchDelete:     `Delete your watch w-1 on session "Fix login" (needs_you, finished) and its 2 notices`,
 		protocol.MethodLaunchDefaultsSet: `Replace your saved launch choices: launch on Grace's (m2) account; run claude in acp mode with model opus; ` +
 			`run codex in its default mode with its default model; when usage runs out, move only to your own account, then m3's (m3) account`,
 	}
@@ -186,7 +186,7 @@ func TestWatchDeleteCardCountsAFullPageAsALowerBound(t *testing.T) {
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodWatchDelete, Params: raw}); perr != nil {
 		t.Fatal(perr)
 	}
-	if want := `Delete your watch w-1 on run "Fix login" (finished) and at least 50 notices`; got.Summary != want {
+	if want := `Delete your watch w-1 on session "Fix login" (finished) and at least 50 notices`; got.Summary != want {
 		t.Fatalf("summary = %q, want %q", got.Summary, want)
 	}
 }
@@ -242,7 +242,7 @@ func TestLaunchCardNamesChildRuns(t *testing.T) {
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
 		t.Fatal(perr)
 	}
-	if want := `Launch claude (default mode) in shop, no fallback, child runs on: "fix it"`; got.Summary != want {
+	if want := `Launch claude (default mode) in shop, no fallback, subsessions on: "fix it"`; got.Summary != want {
 		t.Fatalf("summary = %q, want %q", got.Summary, want)
 	}
 }

@@ -30,7 +30,7 @@ const (
 
 var (
 	errAppServerPaused      = errors.New("the container is paused")
-	errAppServerUnavailable = errors.New("scheduler: the run's Codex app-server is not connected")
+	errAppServerUnavailable = errors.New("scheduler: the session's Codex app-server is not connected")
 )
 
 // appServerDriver hosts a Standard Codex run. The primary PTY runs Codex's

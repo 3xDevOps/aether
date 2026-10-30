@@ -34,7 +34,7 @@ export function ForwardDialog() {
   const [silent, setSilent] = useState<number | null>(null)
 
   const runID = target?.startsWith('run:') ? target.slice('run:'.length) : null
-  const place = runID ? 'the run' : 'your environment'
+  const place = runID ? 'the session' : 'your environment'
 
   const refresh = async () => {
     if (!target) return
@@ -115,7 +115,7 @@ export function ForwardDialog() {
       <DialogContent {...returnFocus} className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>
-            {runID ? 'Forward a port from this run' : 'Forward a port from your environment'}
+            {runID ? 'Forward a port from this session' : 'Forward a port from your environment'}
           </DialogTitle>
           <DialogDescription>
             Opens the same port on this computer and carries its connections to {place}, until you stop it or quit Aether.
@@ -154,7 +154,7 @@ export function ForwardDialog() {
           )}
           {silent !== null && (
             <p role="status" className="text-ui-sm text-muted">
-              Nothing in the run is listening on port {silent} yet. Its link works once something does.
+              Nothing in the session is listening on port {silent} yet. Its link works once something does.
             </p>
           )}
           <div className="space-y-1.5" aria-label="Forwarded ports">

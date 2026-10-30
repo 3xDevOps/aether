@@ -32,11 +32,11 @@ type Pop =
 function treeLabel(lane: Lane, now: number): string {
   switch (lane.kind) {
     case 'section':
-      return [`${lane.label}, ${lane.count} ${lane.count === 1 ? 'run' : 'runs'}`, lane.before > 0 && `${lane.before} ended before this window`].filter(Boolean).join(', ')
+      return [`${lane.label}, ${lane.count} ${lane.count === 1 ? 'session' : 'sessions'}`, lane.before > 0 && `${lane.before} ended before this window`].filter(Boolean).join(', ')
     case 'summary':
       return lane.label
     case 'family':
-      return `Run ${lane.title}, ${lane.detail}`
+      return `Session ${lane.title}, ${lane.detail}`
     case 'run': {
       const { card } = lane
       const words = stateWords(card, undefined, now)
@@ -402,7 +402,7 @@ export function LanesView(props: LanesViewProps) {
     <div
       ref={scroller}
       role="region"
-      aria-label="Run lanes"
+      aria-label="Session lanes"
       className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-canvas"
     >
       <div className="sticky top-0 z-20 flex border-b border-seam bg-canvas" style={{ height: axisHeight, width: totalWidth }}>
@@ -453,7 +453,7 @@ export function LanesView(props: LanesViewProps) {
         <EdgeStrokes shapes={shapes} g={g} height={layout.height} />
         <div
           role="tree"
-          aria-label="Run lanes"
+          aria-label="Session lanes"
           onKeyDown={keyDown}
           onFocus={(event) => {
             setTreeFocused(true)

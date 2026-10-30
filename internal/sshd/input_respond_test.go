@@ -51,7 +51,7 @@ func TestRunInputRespondAnswersWithoutALease(t *testing.T) {
 	}
 	if perr == nil || perr.Code != protocol.CodeConflict || json.Unmarshal(perr.Data, &data) != nil ||
 		data.Reason != protocol.ErrorReasonControlHeld || data.MemberID != string(bob.ID) {
-		t.Fatalf("respond while Bob controls the run = %+v", perr)
+		t.Fatalf("respond while Bob controls the session = %+v", perr)
 	}
 	if status, perr := respond(bob.ID); perr != nil || status != protocol.RunInputRespondAnswered {
 		t.Fatalf("respond from the controller's member = %q, %v", status, perr)
@@ -100,7 +100,7 @@ func TestSudoRequestIsTheOwnersOrAnAdminsToAllow(t *testing.T) {
 		return perr
 	}
 	if perr := respond(bob.ID, "sudo-a", domain.SudoAllow); perr == nil || perr.Code != protocol.CodeDenied ||
-		perr.Message != "run.input.respond: permission denied: allowing a command to run as root requires the run's owner or an admin" {
+		perr.Message != "run.input.respond: permission denied: allowing a command to run as root requires the session's owner or an admin" {
 		t.Fatalf("Bob allows = %+v", perr)
 	}
 	if perr := respond(bob.ID, "sudo-a", "allow"); perr == nil || perr.Code != protocol.CodeInvalidParams {

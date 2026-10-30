@@ -22,12 +22,12 @@ func TestDispatchHelp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bare aether: %v", err)
 	}
-	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "terminal", "runs", "pull", "workspace", "member", "invite", "gui", "gui build", "profile", "kill", "delete", "archive", "unarchive", "pause", "resume", "message", "close", "reopen", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
+	for _, name := range []string{"daemon", "version", "init", "link", "session", "attach", "terminal", "sessions", "pull", "workspace", "member", "invite", "gui", "gui build", "profile", "kill", "delete", "archive", "unarchive", "pause", "resume", "message", "close", "reopen", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("help missing %q:\n%s", name, out)
 		}
 	}
-	if !strings.Contains(out, "reopen a finished run that still keeps its container") {
+	if !strings.Contains(out, "reopen a finished session that still keeps its container") {
 		t.Errorf("relaunch help = %q, want the kept-container wording", out)
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -127,13 +127,13 @@ func TestSubcommandHelpShowsFlagDefaults(t *testing.T) {
 }
 
 func TestFlagSetHelpAndErrors(t *testing.T) {
-	out, err := captureStdout(t, func() error { return dispatch([]string{"runs", "--json", "-h"}) })
+	out, err := captureStdout(t, func() error { return dispatch([]string{"sessions", "--json", "-h"}) })
 	if err != nil || !strings.Contains(out, "\nflags:\n  -archived") {
-		t.Errorf("aether runs --json -h = %q, %v; want the flags and no error", out, err)
+		t.Errorf("aether sessions --json -h = %q, %v; want the flags and no error", out, err)
 	}
-	err = dispatch([]string{"runs", "--nope"})
-	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -nope; see aether runs --help") {
-		t.Errorf("aether runs --nope = %v, want the flag error and the help command", err)
+	err = dispatch([]string{"sessions", "--nope"})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -nope; see aether sessions --help") {
+		t.Errorf("aether sessions --nope = %v, want the flag error and the help command", err)
 	}
 	out, err = captureStdout(t, func() error { return dispatch([]string{"help", "agents"}) })
 	if err != nil || !strings.HasPrefix(out, "# ") {
@@ -211,19 +211,19 @@ func TestSteerUsage(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"kill"}, "usage: aether kill <run-id>"},
-		{[]string{"delete"}, "usage: aether delete <run-id>"},
-		{[]string{"delete", "run-1", "run-2"}, "usage: aether delete <run-id>"},
-		{[]string{"archive"}, "usage: aether archive <run-id>"},
-		{[]string{"archive", "run-1", "run-2"}, "usage: aether archive <run-id>"},
-		{[]string{"unarchive"}, "usage: aether unarchive <run-id>"},
-		{[]string{"pause"}, "usage: aether pause <run-id>"},
-		{[]string{"resume"}, "usage: aether resume <run-id>"},
-		{[]string{"message"}, "usage: aether message <run-id> <message...>"},
-		{[]string{"message", "run-1"}, "usage: aether message <run-id> <message...>"},
-		{[]string{"close"}, "usage: aether close <run-id> --outcome merged|abandoned"},
-		{[]string{"close", "run-1"}, "usage: aether close <run-id> --outcome merged|abandoned"},
-		{[]string{"reopen"}, "usage: aether reopen <run-id>"},
+		{[]string{"kill"}, "usage: aether kill <session-id>"},
+		{[]string{"delete"}, "usage: aether delete <session-id>"},
+		{[]string{"delete", "run-1", "run-2"}, "usage: aether delete <session-id>"},
+		{[]string{"archive"}, "usage: aether archive <session-id>"},
+		{[]string{"archive", "run-1", "run-2"}, "usage: aether archive <session-id>"},
+		{[]string{"unarchive"}, "usage: aether unarchive <session-id>"},
+		{[]string{"pause"}, "usage: aether pause <session-id>"},
+		{[]string{"resume"}, "usage: aether resume <session-id>"},
+		{[]string{"message"}, "usage: aether message <session-id> <message...>"},
+		{[]string{"message", "run-1"}, "usage: aether message <session-id> <message...>"},
+		{[]string{"close"}, "usage: aether close <session-id> --outcome merged|abandoned"},
+		{[]string{"close", "run-1"}, "usage: aether close <session-id> --outcome merged|abandoned"},
+		{[]string{"reopen"}, "usage: aether reopen <session-id>"},
 		{[]string{"env"}, "usage: aether env save|reset"},
 		{[]string{"env", "save", "extra"}, "usage: aether env save|reset"},
 		{[]string{"env", "reset", "extra"}, "usage: aether env save|reset"},

@@ -116,7 +116,7 @@ function ContainerLayers({ disk }: { disk: DiskUsage }) {
                 className="justify-between text-ui-sm text-muted"
                 onOpen={c.owner_kind === 'run' ? () => navigate('run', { runId: c.owner_id }) : c.owner_id === selfID ? () => navigate('environment') : undefined}
               >
-                <span className="min-w-0 break-words font-medium text-text">{c.owner_kind === 'run' ? 'run' : 'environment'}{name ? ` ${name}` : ''} ({c.owner_id})</span>
+                <span className="min-w-0 break-words font-medium text-text">{c.owner_kind === 'run' ? 'session' : 'environment'}{name ? ` ${name}` : ''} ({c.owner_id})</span>
                 <span className="shrink-0 tabular-nums">{formatBytes(c.bytes)}</span>
               </InsetListItem>
             )
@@ -193,7 +193,7 @@ export function StorageSection() {
         <Block title="Aether data">
           <BarList items={categories(disk)} />
           <p className="text-ui-sm text-muted">
-            Snapshots {known(disk.snapshot_bytes)} (included in worktrees). These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space. Run and terminal pools
+            Snapshots {known(disk.snapshot_bytes)} (included in worktrees). These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space. Session and terminal pools
             belong to the launching member. Automatic cleanup protects active, retained and uncertain owners.
           </p>
           {disk.warnings && disk.warnings.length > 0 && (

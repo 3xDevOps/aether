@@ -43,7 +43,7 @@ func envSave() error {
 		if err := c.Call(protocol.MethodEnvSave, struct{}{}, &result); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(os.Stdout, "saved %s\nnew runs and terminals start from this environment\n", result.Image); err != nil {
+		if _, err := fmt.Fprintf(os.Stdout, "saved %s\nnew sessions and terminals start from this environment\n", result.Image); err != nil {
 			return err
 		}
 		return nil

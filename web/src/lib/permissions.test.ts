@@ -69,39 +69,39 @@ describe('the permission mirror answers as internal/permissions does', () => {
 
 // The named rules the matrix derives, mirroring TestCheckSpotRules.
 test.each<[string, RunPermission, Actor, Parameters<typeof allowed>[2], boolean]>([
-  ['viewer cannot steer own run', 'steer', { id: actor, role: 'viewer' }, { owner: actor }, false],
+  ['viewer cannot steer own session', 'steer', { id: actor, role: 'viewer' }, { owner: actor }, false],
   ['viewer cannot launch', 'launch', { id: actor, role: 'viewer' }, {}, false],
   ['collaborator launches', 'launch', { id: actor, role: 'collaborator' }, {}, true],
   [
-    'collaborator kills another run by default',
+    'collaborator kills another session by default',
     'kill',
     { id: actor, role: 'collaborator' },
     { owner: other },
     true,
   ],
   [
-    'admins_only blocks a collaborator steering another run',
+    'admins_only blocks a collaborator steering another session',
     'steer',
     { id: actor, role: 'collaborator' },
     { owner: other, steerOthers: STEER_OTHERS_ADMINS_ONLY },
     false,
   ],
   [
-    'admins_only keeps own runs steerable',
+    'admins_only keeps own sessions steerable',
     'steer',
     { id: actor, role: 'collaborator' },
     { owner: actor, steerOthers: STEER_OTHERS_ADMINS_ONLY },
     true,
   ],
   [
-    'a protected run blocks a non-owner kill even by default',
+    'a protected session blocks a non-owner kill even by default',
     'kill',
     { id: actor, role: 'collaborator' },
     { owner: other, protected: true },
     false,
   ],
   [
-    'a protected run stays open to its owner',
+    'a protected session stays open to its owner',
     'steer',
     { id: actor, role: 'collaborator' },
     { owner: actor, protected: true },

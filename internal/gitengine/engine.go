@@ -28,11 +28,11 @@ import (
 
 var (
 	ErrRepoNotFound     = errors.New("gitengine: workspace repo not found")
-	ErrCheckoutNotFound = errors.New("gitengine: run checkout not found")
+	ErrCheckoutNotFound = errors.New("gitengine: session checkout not found")
 	// ErrRunMetadataNotFound reports a missing server-owned run identity
 	// record. Unlike a malformed record, this is a permanently unavailable
 	// source after checkout cleanup.
-	ErrRunMetadataNotFound = errors.New("gitengine: run metadata not found")
+	ErrRunMetadataNotFound = errors.New("gitengine: session metadata not found")
 	// ErrInvalidObjectID reports a patch range end that is not a full git
 	// object id, or a range with only one end set.
 	ErrInvalidObjectID = errors.New("gitengine: not a git object id")
@@ -264,7 +264,7 @@ zero="0000000000000000000000000000000000000000"
 [ "$oldrev" = "$zero" ] && exit 0 # branch creation is allowed
 [ "$newrev" = "$zero" ] && exit 0 # deletion: receive.denyDeletes decides
 git merge-base --is-ancestor "$oldrev" "$newrev" && exit 0
-echo "aether: rejected non-fast-forward push to $refname: run branches are owned by the Aether server" >&2
+echo "aether: rejected non-fast-forward push to $refname: session branches are owned by the Aether server" >&2
 exit 1
 `
 
@@ -376,7 +376,7 @@ func (e *Engine) existingRepoPath(ws domain.WorkspaceID) (string, error) {
 // existence.
 func (e *Engine) checkoutPath(run domain.RunID) (string, error) {
 	if err := validateID(string(run)); err != nil {
-		return "", fmt.Errorf("gitengine: run id %q: %w", run, err)
+		return "", fmt.Errorf("gitengine: session id %q: %w", run, err)
 	}
 	return filepath.Join(e.cfg.CheckoutsDir, string(run)), nil
 }

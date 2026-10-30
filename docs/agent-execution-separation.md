@@ -1,8 +1,8 @@
-# Separating the agent session from execution
+# Separating the agent from execution
 
 ## Decision
 
-Aether does not currently split a native agent session from its tools. Keep
+Aether does not currently split a native agent from its tools. Keep
 that boundary unchanged until one supported harness can delegate its complete
 enabled tool surface. Do not advertise a partial bridge as isolation, and do
 not replace native agents with an Aether-owned agent loop without a separate
@@ -25,7 +25,7 @@ commands, tests, builds and their child processes. A real split lets an
 execution process or container fail without killing the agent process that
 receives and explains the failure.
 
-A **run** is Aether's durable identity for an agent session, including
+A **session** is Aether's durable identity for one agent working on a task, including
 follow-up tasks. Its compute, checkout and recorded history have separate
 lifetimes. Separating execution does not
 require deleting history: recordings and captured diff history persist until
@@ -53,16 +53,16 @@ for owned processes and terminals, not just gaps between model requests.
 
 ## Aether's current boundary and adapter findings
 
-Aether runs the native CLI and its tools in the same run container. Enhanced
+Aether runs the native CLI and its tools in the same session container. Enhanced
 mode changes the session protocol and presentation, not execution placement.
 The [ACP host](../internal/acphost/conn.go) advertises terminal authentication
 and output display, not client-side filesystem or terminal execution.
 Tool-call updates are observations; they are not instructions for Aether to
 execute again.
 
-Interactive runs already remain replyable after a success/failure report;
+Interactive sessions already remain replyable after a success/failure report;
 explicit Close ends that live use and starts the configured compute grace.
-Background runs still complete automatically. That
+Background sessions still complete automatically. That
 [lifecycle policy](environments.md#resource-limits-and-launch-admission)
 provides conversation continuity without a second runtime. A split would
 need to justify its additional complexity through execution isolation or
@@ -109,17 +109,17 @@ isolation result.
 | Execution can be replaced after failure while completed file writes survive. | Persistent mounts, image/user identity, working directory and process ownership must remain consistent. A filesystem snapshot is not an exact-process resume. |
 | Tool attribution and resource ownership become clearer. | Every operation needs authorization, identity and an unambiguous result or unknown-outcome state across transport failure. |
 | Agent credentials can be kept away from arbitrary build commands. | Only credentials needed by execution should cross the boundary. Sharing the whole home with both sides weakens this benefit. |
-| Small agent processes may support more concurrent sessions on a host. | A second runtime and transport add baseline memory, startup latency and operational work. Measure many child runs on a 32 GiB host; do not assume a savings figure. |
+| Small agent processes may support more concurrent sessions on a host. | A second runtime and transport add baseline memory, startup latency and operational work. Measure many subsessions on a 32 GiB host; do not assume a savings figure. |
 
 A split is not a logging policy, a substitute for capacity admission, or a
 promise of exactly-once commands. Disk space and durable history still need
 capacity planning. Existing [runtime limits](environments.md#resource-limits-and-launch-admission)
-protect between runs; they do not promise that the native agent survives its
+protect between sessions; they do not promise that the native agent survives its
 own tools exhausting their shared container.
 
 ## Smallest plausible architecture
 
-Keep one Aether server and one run identity. For one fully supported harness,
+Keep one Aether server and one session identity. For one fully supported harness,
 place the agent process and execution environment in separate managed
 containers/cgroups on the same host. Reuse the existing scheduler, authority,
 resource limits, history storage and cleanup ownership. Do not introduce a
@@ -127,15 +127,15 @@ second control-plane service, a distributed queue, or a container per command.
 
 ```mermaid
 flowchart LR
-    B[Native agent session] -->|Tool request| S[Aether server]
+    B[Native agent] -->|Tool request| S[Aether server]
     S -->|Authorized operation| E[Execution container]
     E -->|Output and result| S
     S -->|Tool result| B
-    S --> H[(Durable run history)]
+    S --> H[(Durable session history)]
     E --> W[(Persistent workspace files)]
 ```
 
-The agent owns its native conversation and login state. The server owns run
+The agent owns its native conversation and login state. The server owns session
 and operation identity, approvals, cancellation and recordings. The executor
 owns command processes and the intended writable workspace. Files and logs
 are not deleted when the executor stops. Neither container gets the Docker
@@ -155,7 +155,7 @@ with the same workspace. Do not silently restart tools after a lost reply.
    executor support; do not ship a misleading partial mode.
 2. **Run a same-host execution-boundary experiment.** Keep the existing native
    login/session behavior and generous execution limits. Use server-authored
-   run/session/operation identities and generation fencing for replacement.
+   session/operation identities and generation fencing for replacement.
    Record started, completed and unknown outcomes in existing durable state.
 3. **Exercise failures against actual processes.** Cause an execution-side OOM
    in its own cgroup and show the agent can receive the failure and answer a

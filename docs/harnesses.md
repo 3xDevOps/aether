@@ -2,9 +2,9 @@
 
 Aether does not install or bundle coding agents. You install the agent CLI in
 your [environment](environments.md) (your own persistent container shell) and
-sign in with the vendor's own login. Runs then launch that CLI inside a
+sign in with the vendor's own login. Sessions then launch that CLI inside a
 container. This guide lists which agents work, how to sign in to each, and what
-does not work. Terms such as run, child run and workspace are in the
+does not work. Terms such as run, subsession and workspace are in the
 [glossary](README.md#concepts).
 
 ## Supported agents
@@ -12,15 +12,15 @@ does not work. Terms such as run, child run and workspace are in the
 Aether launches an agent in one of two modes. **Standard** shows the agent's
 own terminal UI. **Enhanced** drives the agent over the Agent Client Protocol
 and shows messages, tool calls and permission prompts as dashboard controls
-([Enhanced runs](enhanced-runs.md)). A third mode, **Background**, runs the
+([Enhanced sessions](enhanced-sessions.md)). A third mode, **Background**, runs the
 agent once without input, commits the result and exits.
 
 | `--agent` | CLI | Sign in | Known limits |
 | --- | --- | --- | --- |
 | `antigravity` | Antigravity CLI (runs as `agy`) | run `agy` | None known |
 | `claude` | Claude Code | `claude auth login`, or `/login` inside `claude` | Set up suggests Standard until the Enhanced adapter is installed: it runs on the Claude Agent SDK |
-| `codex` | OpenAI Codex CLI | `codex login --device-auth` | Standard runs need Codex 0.131.0 or newer; subagents do not nest in Enhanced |
-| `copilot` | GitHub Copilot CLI | `copilot login --device-code` | Enhanced runs cannot take back `--allow-all` |
+| `codex` | OpenAI Codex CLI | `codex login --device-auth` | Standard sessions need Codex 0.131.0 or newer; subagents do not nest in Enhanced |
+| `copilot` | GitHub Copilot CLI | `copilot login --device-code` | Enhanced sessions cannot take back `--allow-all` |
 | `cursor` | Cursor CLI (runs as `agent`) | `NO_OPEN_BROWSER=1 agent login` | A Cursor admin policy can bring back approval prompts |
 | `gemini` | Gemini CLI | API key, or `NO_BROWSER=true gemini` | Serves paid API keys and Code Assist only |
 | `omp` | oh-my-pi | log in inside `omp` | Sharing an account shares a whole directory |
@@ -41,31 +41,31 @@ What each agent can do:
 | `opencode` | turn start and end | hooks and idle wake | built in | no | no | Enhanced |
 | `pi` | turn start and end | hooks and idle wake | adapter | no | no | Standard |
 
-- **Standard status** is what a Standard run reports of its turns
-  ([Status reporting](#status-reporting)). With none, a run that goes quiet for
+- **Standard status** is what a Standard session reports of its turns
+  ([Status reporting](#status-reporting)). With none, a session that goes quiet for
   `--stall-threshold` parks as **Waiting** with a reason starting `stalled:`
   ([failure-handling.md](failure-handling.md)).
-- **Standard mail** is how a Standard run learns that mail, a message from a
-  person or another run, is waiting in its inbox: hooks at turn boundaries,
+- **Standard mail** is how a Standard session learns that mail, a message from a
+  person or another session, is waiting in its inbox: hooks at turn boundaries,
   plus idle wake, which starts a turn in a waiting session
-  ([Incoming coordination hooks](#incoming-coordination-hooks)). Enhanced runs
+  ([Incoming coordination hooks](#incoming-coordination-hooks)). Enhanced sessions
   need neither: the server prompts the idle session
-  ([Mail](enhanced-runs.md#mail)). **Mid-turn steer** means mail and your
+  ([Mail](enhanced-sessions.md#mail)). **Mid-turn steer** means mail and your
   messages reach a working session as a steer instead of waiting for its turn
   to end.
 - **Enhanced** is built into the agent's CLI, served by a separate
   [adapter](#enhanced-adapters), or missing.
 - **Mode switch** moves a running session between Standard and Enhanced
-  ([Switching a running agent](enhanced-runs.md#switching-a-running-agent)).
-- **Background tasks**: an Enhanced run stays working while the agent's
+  ([Switching a running agent](enhanced-sessions.md#switching-a-running-agent)).
+- **Background tasks**: an Enhanced session stays working while the agent's
   background subagents and commands run
-  ([Background work](enhanced-runs.md#background-work)).
+  ([Background work](enhanced-sessions.md#background-work)).
 - **Set up suggests** is the mode **Set up** picks first. The dashboard then
   remembers your choice per agent
-  ([Choose Enhanced](enhanced-runs.md#choose-enhanced)), and `aether run`
-  defaults to Enhanced where it is installed, else Standard. A Background run of an agent it suggests Enhanced for
+  ([Choose Enhanced](enhanced-sessions.md#choose-enhanced)), and `aether session`
+  defaults to Enhanced where it is installed, else Standard. A Background session of an agent it suggests Enhanced for
   uses the agent's ACP server once it is installed
-  ([Background runs](enhanced-runs.md#background-runs)).
+  ([Background sessions](enhanced-sessions.md#background-sessions)).
 
 Other CLIs work as [custom agents](#custom-and-unlisted-agents).
 
@@ -169,20 +169,20 @@ You do this once per agent, per person.
    `--json` prints the `account.usage` result.
 
 The login and executable live in your home, so every container you launch sees
-them. If you skip the login, the agent's own login prompt appears in the run's
-terminal. Attach with `aether attach <run>` and finish it there.
+them. If you skip the login, the agent's own login prompt appears in the session's
+terminal. Attach with `aether attach <session>` and finish it there.
 
 Installing `codex`, `pi`, `copilot` or `gemini` needs `npm`. If `npm` is not on
 the environment's `PATH`, the install fails with, for example,
 `npm is not in this environment's PATH, and codex installs through npm`. The
-dashboard's **Set up** and `aether agent add` without a terminal run the
+dashboard's **Set up** and `aether agent add` without a terminal the
 install under `mktemp` and `timeout`, so the image must provide both. Without
 them it fails with `timeout: not found` and exit status 127.
 
 ### Use an API key
 
 A key stored as a workspace secret replaces the agent's login in that
-workspace's runs. The human runs this on their own computer, for example:
+workspace's sessions. The human runs this on their own computer, for example:
 
 ```sh
 aether workspace env set --secret ANTHROPIC_API_KEY
@@ -190,14 +190,14 @@ aether workspace env set --secret ANTHROPIC_API_KEY
 
 The value is read from stdin; on a terminal the command prompts with input
 hidden. Codex ignores `OPENAI_API_KEY` and reads `CODEX_API_KEY` in
-Background runs only; for every Codex mode, run `codex login --with-api-key`
+Background sessions only; for every Codex mode, run `codex login --with-api-key`
 in `aether terminal`. Each agent's key is under
 [Per-agent setup](#per-agent-setup). Pick another workspace with `--workspace
 <name-or-id>`. Never pass a key as `NAME=value`: that puts it on the command
 line and stores a plain variable that `aether workspace env list` shows.
 
 > [!WARNING]
-> On a team server, anyone who can launch a run in the workspace or message one
+> On a team server, anyone who can launch a session in the workspace or message one
 > can read the key ([environments.md](environments.md#secrets)).
 
 ### Enhanced adapters
@@ -231,7 +231,7 @@ For an API key, set `ANTHROPIC_API_KEY` in the server's environment, and
 subscription logins.
 
 Claude Code refuses `--dangerously-skip-permissions` as root, so every `claude`
-run gets `IS_SANDBOX=1`.
+session gets `IS_SANDBOX=1`.
 
 #### Codex
 
@@ -240,13 +240,13 @@ nothing typed back. Device code login must be on first: in ChatGPT's security
 settings for a personal account, or in the workspace permissions for a ChatGPT
 workspace ([OpenAI](https://learn.chatgpt.com/docs/auth)). The login lands in
 `~/.codex/auth.json`. For an API key, `codex login --with-api-key` reads one
-from stdin into the same file, which every run mode uses. `CODEX_API_KEY` in
-the server's environment signs in Background runs only. Codex ignores
+from stdin into the same file, which every session mode uses. `CODEX_API_KEY` in
+the server's environment signs in Background sessions only. Codex ignores
 `OPENAI_API_KEY` there, except that its sign-in screen's **Use an OpenAI API
 key** comes filled in with it. Codex reads no base-URL variable; for a gateway,
 set `openai_base_url` in `~/.codex/config.toml`.
 
-A Standard Codex run starts `codex app-server` in the run's container and
+A Standard Codex run starts `codex app-server` in the session's container and
 attaches the Codex terminal to it with `codex --remote`. Aether follows the same
 session through that app-server: Codex reports the start and end of each turn,
 and mail and your messages from the dashboard or `aether message` arrive as a
@@ -255,19 +255,19 @@ in the terminal as prompts, under Aether's attribution banner. Press Esc in the
 terminal to stop a turn. Aether loads no hooks into Standard Codex, so remove
 any copy of its hooks from `~/.codex/hooks.json`: it would announce mail twice.
 
-Standard runs need Codex 0.131.0 or newer. With an older one, the run's terminal
+Standard sessions need Codex 0.131.0 or newer. With an older one, the session's terminal
 prints:
 
 ```text
 codex-cli 0.130.0 is too old: Aether attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
-Update it here, then start a new run:
+Update it here, then start a new session:
   npm install -g --prefix "$HOME/.local" @openai/codex@latest
 ```
 
 If the app-server exits before it listens, the terminal prints
 `codex app-server exited before listening on /tmp/aether-codex/app-server.sock:`
 with its exit status and the end of its log, `/tmp/aether-codex/app-server.log`.
-If Aether cannot reach the app-server, the run shows **Needs you** with a reason
+If Aether cannot reach the app-server, the session shows **Needs you** with a reason
 starting `codex app-server unavailable:` and the real error.
 
 The app-server ends with the Codex terminal. In the login shell that follows,
@@ -321,9 +321,9 @@ access token with the "Copilot Requests" permission. Classic `ghp_` tokens do
 not work. For an OpenAI-compatible gateway, set `COPILOT_PROVIDER_BASE_URL` and
 `COPILOT_PROVIDER_API_KEY` instead; Copilot then needs no GitHub login.
 
-Runs set `COPILOT_ALLOW_ALL=true`, which trusts the working directory, so
+Sessions set `COPILOT_ALLOW_ALL=true`, which trusts the working directory, so
 Copilot loads that directory's skills, plugins, MCP servers and hooks. Enhanced
-runs start `copilot --acp --allow-all`, and a run cannot take those permissions
+sessions start `copilot --acp --allow-all`, and a session cannot take those permissions
 back.
 
 #### Gemini CLI
@@ -336,19 +336,19 @@ Antigravity CLI
 With an API key, put `GEMINI_API_KEY=<key>` in `~/.gemini/.env`, or set it in the
 server's environment. For a gateway, set `GOOGLE_GEMINI_BASE_URL` the same way
 and put `{"security":{"auth":{"selectedType":"gemini-api-key"}}}` in
-`~/.gemini/settings.json`; without it a Background run fails with
+`~/.gemini/settings.json`; without it a Background session fails with
 `Invalid auth method selected.` Gemini reads only the first `.env` it finds
-walking up from the run's directory, so a `.env` in the checkout wins over
+walking up from the session's directory, so a `.env` in the checkout wins over
 `~/.gemini/.env`.
 
 With Code Assist, run `NO_BROWSER=true gemini`, choose Sign in with Google, open
 the printed URL and paste the code back. Also put `GOOGLE_CLOUD_PROJECT=<project>`
 in `~/.gemini/.env`. The login lands in `~/.gemini/oauth_creds.json`.
 
-Runs set `GEMINI_CLI_TRUST_WORKSPACE=true`. Without it, Gemini in a folder it
+Sessions set `GEMINI_CLI_TRUST_WORKSPACE=true`. Without it, Gemini in a folder it
 does not trust silently drops `--approval-mode=yolo` to `default` and ignores
-`~/.gemini/.env`. An Enhanced run starts in session mode `yolo`; you can change
-the mode in the run.
+`~/.gemini/.env`. An Enhanced session starts in session mode `yolo`; you can change
+the mode in the session.
 
 #### Cursor CLI
 
@@ -358,7 +358,7 @@ Log in with `NO_OPEN_BROWSER=1 agent login` and open the printed URL. The login
 lands in `~/.config/cursor/auth.json`. `CURSOR_API_KEY` in the server's
 environment is the API-key alternative.
 
-Aether passes `--force`, which approves everything. In an Enhanced run, a Cursor
+Aether passes `--force`, which approves everything. In an Enhanced session, a Cursor
 team whose admin enables auto-run controls without "Run Everything" overrides
 `--force`, and the agent asks again.
 
@@ -377,17 +377,17 @@ Google Cloud application default credentials, set `AGY_ADC_AUTH=true`.
 
 Antigravity has no Enhanced mode, and an Enhanced launch is refused. `agy` has no
 ACP command, and Google's separate `antigravity-acp` package cannot finish its
-Google sign-in inside a run container.
+Google sign-in inside a session container.
 
 ### Install hooks by hand
 
 Claude Code, Copilot, pi, oh-my-pi and OpenCode load Aether's inbox hooks for
-you on a Standard run that has a task. Codex needs none: its app-server hands it
+you on a Standard session that has a task. Codex needs none: its app-server hands it
 mail. Gemini CLI and Cursor CLI do not load hooks.
 Without hooks, mail reaches those agents only when they run
 `aether-internal inbox`.
 
-To install hooks for Gemini or Cursor, run these inside a run and merge the
+To install hooks for Gemini or Cursor, run these inside a session and merge the
 output into the agent's settings, keeping any hooks you already have:
 
 ```sh
@@ -396,9 +396,9 @@ aether-internal hook file cursor.json    # merge into ~/.cursor/hooks.json
 ```
 
 Restart the agent afterwards. In Gemini, `/hooks list` shows the hook, named
-`aether-inbox`. Do not install a copy for an agent whose run already loads
+`aether-inbox`. Do not install a copy for an agent whose session already loads
 hooks. `aether-internal skill` prints `Inbox hooks (<agent>): loaded by this
-run's launch; do not install a manual copy.` when the launch loaded them.
+session's launch; do not install a manual copy.` when the launch loaded them.
 
 ### Remove an agent
 
@@ -411,8 +411,8 @@ stops offering it. For an agent you defined, it deletes the definition and
 leaves the executable alone. The dashboard has **More → Remove…** on the agent's
 row.
 
-Removal leaves the package files, the login, the agent's settings and your runs'
-history. Runs already going keep going. A mode switch, resume, reattach or usage
+Removal leaves the package files, the login, the agent's settings and your sessions'
+history. Sessions already going keep going. A mode switch, resume, reattach or usage
 fallback that needs the removed agent fails until you set it up again, as do
 templates that name it. Removal only touches your own home. It
 is refused while an install or an update runs in the home. A launch of a removed
@@ -420,12 +420,12 @@ agent you defined answers `unknown harness "x"; register it with: aether agent a
 
 ### Updates before launch
 
-When a run launches, the server updates the shipped agent in your
+When a session launches, the server updates the shipped agent in your
 `~/.local/bin`, using the agent's own update command or `npm`. It checks on the
 first launch per agent since the server started, and then at most every 6 hours
 (15 minutes after a failed update). A launch never waits for the update: the
 agent starts on the installed version and the update finishes in the
-background. A new version shows on the timeline of the run that started it:
+background. A new version shows on the timeline of the session that started it:
 
 ```text
 updated <agent> from <old> to <new> for the next launch
@@ -439,7 +439,7 @@ could not update claude from 2.1.288 (Claude Code): the updater exited 1: <updat
 
 Updates skip OpenCode, agents you defined, shipped names an administrator
 overrides, agents installed in the image, and an account owner's installation
-that a recipient's run borrows. A `codex`, `pi`, `copilot` or `gemini` in
+that a recipient's session borrows. A `codex`, `pi`, `copilot` or `gemini` in
 `~/.local/bin` that `npm` did not install is not updated and reports, for
 example, `codex in ~/.local/bin was not installed with npm, so Aether cannot
 update it`.
@@ -454,7 +454,7 @@ run `sudo aether-server config set agent-update false`, then restart it.
 The dashboard shows how much of a subscription is used for Claude Code and
 Codex. The server reads the native login in your home and asks the vendor's
 usage endpoint. Credentials and the vendor's responses never reach the browser
-or a run. Only native subscription logins count: API keys, pi, oh-my-pi,
+or a session. Only native subscription logins count: API keys, pi, oh-my-pi,
 OpenCode, Copilot, Gemini, Cursor and Antigravity have no quota display. A row
 can read `unauthenticated`, `unsupported`, `unavailable`, `stale` or `error`.
 Missing data is never shown as zero. Re-authenticating is up to you, in your
@@ -465,42 +465,42 @@ can change without notice.
 
 ### Usage-limit signals
 
-A run moves to another account mid-run only when its agent reports that the
+A session moves to another account mid-session only when its agent reports that the
 account's subscription usage limit stopped it
 ([usage fallback](teams.md#usage-fallback); [shared accounts](teams.md#agent-accounts)).
-An account counts as exhausted when a window the run draws on is at 95% used or
+An account counts as exhausted when a window the session draws on is at 95% used or
 more: the five-hour and seven-day windows for Claude Code, the primary and
 secondary windows for Codex. A quota row that is not `ok` means unknown usage,
 not exhausted.
 
 | Agent | Moves to another account | Does not |
 | --- | --- | --- |
-| `claude` | Enhanced and Background runs; Standard runs while lifecycle reporting is on | Transient 429s ("Server is temporarily limiting requests (not your usage limit)") |
-| `codex` | Enhanced runs, and Background runs over ACP | Background `codex exec`, and Standard runs: Aether reads neither |
-| `opencode` | Nothing qualifies: Aether cannot read OpenCode usage, so the run stops with the no-fallback reason | Everything else |
+| `claude` | Enhanced and Background sessions; Standard sessions while lifecycle reporting is on | Transient 429s ("Server is temporarily limiting requests (not your usage limit)") |
+| `codex` | Enhanced sessions, and Background sessions over ACP | Background `codex exec`, and Standard sessions: Aether reads neither |
+| `opencode` | Nothing qualifies: Aether cannot read OpenCode usage, so the session stops with the no-fallback reason | Everything else |
 | `pi`, `omp`, `copilot`, `gemini`, `cursor`, `antigravity` | Never | All usage-limit errors |
 
-If a vendor changes its signal, the run fails or ends its turn with the vendor's
+If a vendor changes its signal, the session fails or ends its turn with the vendor's
 error instead of moving.
 
 ## Launching
 
-### Modes and what the run container does
+### Modes and what the session container does
 
-`aether run` takes `--mode enhanced`, `standard` or `background`. Without
+`aether session` takes `--mode enhanced`, `standard` or `background`. Without
 `--mode`, the server starts Enhanced where the agent's Enhanced mode is
 installed on the launch's account, and Standard otherwise.
 
-- Standard runs the agent's terminal UI in a persistent PTY. `aether attach
-  <run>` puts you in it. After the agent exits, the container opens a login
-  shell, and the run stays open until you Close, Kill or Delete it.
-- Enhanced runs the agent over ACP next to a login shell. Close and reopen work
+- Standard sessions the agent's terminal UI in a persistent PTY. `aether attach
+  <session>` puts you in it. After the agent exits, the container opens a login
+  shell, and the session stays open until you Close, Kill or Delete it.
+- Enhanced sessions the agent over ACP next to a login shell. Close and reopen work
   like Standard.
-- Background runs the agent once. On exit Aether commits and publishes the
+- Background sessions the agent once. On exit Aether commits and publishes the
   branch, records `completed` or `failed`, and destroys the container. It cannot
   be reopened. `codex`, `omp`, `opencode`, `copilot`, `gemini` and `cursor` run
   the task over ACP when their server is installed
-  ([Background runs](enhanced-runs.md#background-runs)). Claude Code keeps
+  ([Background sessions](enhanced-sessions.md#background-sessions)). Claude Code keeps
   `claude -p`.
 
 In all modes the agent runs with its permission prompts turned off. The
@@ -528,14 +528,14 @@ value of that variable is merged over it key by key, so a workspace that sets
 `permission` keeps its rules.
 
 The task is optional in Standard and Enhanced mode. Launch without one and you
-land in the agent's terminal with an empty prompt, or an Enhanced run waits for
+land in the agent's terminal with an empty prompt, or an Enhanced session waits for
 your first message. Background mode requires a task.
 
 ### Choose a model
 
-`aether run --model <model>` or the **Model** field in the dashboard passes the
+`aether session --model <model>` or the **Model** field in the dashboard passes the
 model to the agent as is. Empty keeps the agent's default. Every shipped agent
-takes a model. For Enhanced runs the model is set over ACP after the session
+takes a model. For Enhanced sessions the model is set over ACP after the session
 opens.
 
 A custom agent with no model flag refuses a Standard or Background launch with
@@ -562,8 +562,8 @@ saying so. A failed discovery shows the CLI's error, for example
 
 ### Choose an effort
 
-`aether run --effort <level>` or the **Effort** field in the dashboard sets the
-agent's effort or thinking level for the run. Empty keeps the agent's default.
+`aether session --effort <level>` or the **Effort** field in the dashboard sets the
+agent's effort or thinking level for the session. Empty keeps the agent's default.
 The dashboard shows the field only for an agent that has levels, and offers
 only those:
 
@@ -591,8 +591,8 @@ effort:
 scheduler: agent "gemini" has no effort flag; launch it without an effort
 ```
 
-For Enhanced runs the effort is set over ACP after the model; see
-[enhanced-runs.md](enhanced-runs.md#launch-an-enhanced-run).
+For Enhanced sessions the effort is set over ACP after the model; see
+[enhanced-sessions.md](enhanced-sessions.md#launch-an-enhanced-session).
 
 If a launch fails because the CLI rejects its own arguments, the installed CLI
 has drifted from what Aether expects. Install a compatible version in your
@@ -600,9 +600,9 @@ environment.
 
 ### Agent instructions and the team memory brief
 
-Aether gives each run its role card and the co-author rule
+Aether gives each session its role card and the co-author rule
 ([agent instructions](coordination.md#agent-instructions)), followed by the
-[team memory brief](memory.md#what-runs-see-automatically). How the text
+[team memory brief](memory.md#what-sessions-see-automatically). How the text
 reaches the agent depends on the agent:
 
 | Agent | Delivery |
@@ -611,7 +611,7 @@ reaches the agent depends on the agent:
 | `codex` | `-c developer_instructions=...`, passed to `codex app-server`, which replaces any `developer_instructions` in your `config.toml`. Aether copies the top-level value of `~/.codex/config.toml` in first. A value in a Codex profile, a project `.codex/config.toml` or a workspace `CODEX_HOME` is replaced for that launch: put such instructions in `AGENTS.md` |
 | `opencode`, `copilot` | An instructions file the agent loads through its config or `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` |
 | `gemini`, `cursor`, `antigravity` | After the task prompt. A launch with no task gets none |
-| Enhanced runs | Over ACP ([Enhanced runs](enhanced-runs.md#instructions-and-the-session-log)) |
+| Enhanced sessions | Over ACP ([Enhanced sessions](enhanced-sessions.md#instructions-and-the-session-log)) |
 
 System-prompt delivery survives compaction. Instructions after the task do not.
 A launch with no instructions has no brief either. In that case the agent has
@@ -619,7 +619,7 @@ to run `aether-internal skill` and `aether-internal memory brief` itself.
 
 ### Custom and unlisted agents
 
-Any CLI can be a run's agent. Register one for yourself:
+Any CLI can be a session's agent. Register one for yourself:
 
 ```sh
 aether agent add mycli --standard "mycli {task}" --background "mycli -p {task}"
@@ -635,7 +635,7 @@ in.
 | `--standard <argv>` | The Standard-mode command |
 | `--background <argv>` | The Background-mode command |
 | `--acp <argv>` | The command that serves ACP. Without it the agent has no Enhanced mode |
-| `--acp-mode <id>` | The session mode a new Enhanced run starts in. Pick one that acts without asking, or the run waits on the prompt. Needs `--acp`, no whitespace |
+| `--acp-mode <id>` | The session mode a new Enhanced session starts in. Pick one that acts without asking, or the session waits on the prompt. Needs `--acp`, no whitespace |
 | `--login <path>` | A login file, such as `--login ~/.cursor/auth.json`. With it the Agents page shows **Login found**. Without it setup never shows the agent as logged in |
 
 The name is what you choose at launch, and it need not match the executable.
@@ -658,7 +658,7 @@ For inbox support, status reporting and the contract the CLI has to follow, see
 #### The `fake` agent
 
 `fake` has no login and no fixed command. The server reads its command from
-`AETHER_FAKE_AGENT` at launch, so it runs whatever script you name. The run's
+`AETHER_FAKE_AGENT` at launch, so it runs whatever script you name. The session's
 checkout is mounted at `/workspace`:
 
 ```sh
@@ -670,7 +670,7 @@ uses it to prove the whole lifecycle without a vendor account.
 
 ## Incoming coordination hooks
 
-When agents run child runs or share files, other runs and people send them
+When agents run subsessions or share files, other sessions and people send them
 messages. Aether keeps those in a durable mailbox and tells the agent to read it.
 The reading itself is a command, `aether-internal inbox`. The agent learns mail
 is waiting in one of two ways. A **hook** runs at a boundary such as a prompt or
@@ -678,10 +678,10 @@ a finished tool call. **Idle wake** starts a new turn in a session that has been
 waiting. Which agents get which is in the table above. Both are managed for you,
 except where [Install hooks by hand](#install-hooks-by-hand) says otherwise.
 
-Hooks work only for a coordinated run that has a task, in Standard mode. A
-taskless launch, a Background run, a run with `--conflict-coordination=false`,
+Hooks work only for a coordinated session that has a task, in Standard mode. A
+taskless launch, a Background session, a session with `--conflict-coordination=false`,
 and an agent whose command an administrator overrode do not get them. Enhanced
-runs do not use hooks: the server prompts the idle session instead. So does a
+sessions do not use hooks: the server prompts the idle session instead. So does a
 Standard Codex run, through its app-server, with or without a task: the server
 prompts the session with the inbox notice, as a new turn when idle and as a
 steer mid-turn. Without any of these, the agent reads mail only when it runs
@@ -697,28 +697,28 @@ session, and only while idle.
 Hooks that you installed yourself and Aether's managed ones do not double up for
 Claude Code. If an OpenCode, pi or oh-my-pi setting disables extensions, Aether
 leaves it alone and skips the managed hooks. For OpenCode, `OPENCODE_PURE=1` or
-`true` in the workspace environment disables Aether's plugins too. The run still
+`true` in the workspace environment disables Aether's plugins too. The session still
 launches but reports nothing, and is judged on silence.
 
 ## Status reporting
 
 An agent with status reporting tells Aether when it is working and when it is
-waiting. The dashboard shows a waiting run as **Needs you**
-([failure-handling.md](failure-handling.md#needs-you)). Standard runs of
+waiting. The dashboard shows a waiting session as **Needs you**
+([failure-handling.md](failure-handling.md#needs-you)). Standard sessions of
 `claude`, `codex`, `pi`, `omp` and `opencode` report both ends of a turn.
-While Codex asks you a question in its terminal, the run waits with the reason
+While Codex asks you a question in its terminal, the session waits with the reason
 `waiting for your answer in the terminal`. Copilot, Gemini, Cursor and
 Antigravity have none.
 
-Enhanced and Background-over-ACP runs need no reporter: the session reports both
-ends of each turn. Background runs without ACP are never reported.
+Enhanced and Background-over-ACP sessions need no reporter: the session reports both
+ends of each turn. Background sessions without ACP are never reported.
 
 A Standard Claude Code turn that ends without an outcome report is held once:
 its Stop hook blocks the stop and Claude Code shows **Stop hook feedback**
 asking the agent to report
 ([coordination.md](coordination.md#lifecycle-status-is-separate)). Enhanced
-runs get a [report reminder](enhanced-runs.md#report-reminder) prompt
-instead. Standard runs of other agents are not held: Codex runs load no
+sessions get a [report reminder](enhanced-sessions.md#report-reminder) prompt
+instead. Standard sessions of other agents are not held: Codex sessions load no
 hooks, and the app-server reports an idle thread the same way after a
 finished turn and after you press Esc.
 
@@ -727,7 +727,7 @@ finished turn and after you press Esc.
 `aether config push` uploads an agent's configuration directory from your
 computer to your home on the server, and **Files → Home** edits it there
 ([environment-home.md](environment-home.md#upload-and-edit-configuration)).
-Existing and future runs see the change at once. A shared account does not
+Existing and future sessions see the change at once. A shared account does not
 expose your configuration, except the `~/.omp/agent` directory an `omp` share
 mounts.
 
@@ -735,10 +735,10 @@ mounts.
 
 - Antigravity has no Enhanced mode.
 - Only Claude Code and oh-my-pi can switch a running session between Standard
-  and Enhanced ([Switching a running agent](enhanced-runs.md#switching-a-running-agent)).
+  and Enhanced ([Switching a running agent](enhanced-sessions.md#switching-a-running-agent)).
 - Codex subagents do not nest in the Enhanced timeline.
 - No idle wake exists for Copilot, Gemini or Cursor, and Antigravity has no
-  hooks at all. A [child run](teams.md#child-runs) refuses them Standard, so they run
+  hooks at all. A [subsession](teams.md#subsessions) refuses them Standard, so they run
   Enhanced there.
 - Standard Codex needs Codex 0.131.0 or newer. Its app-server ends with its
   terminal, so a `codex resume` in the shell runs without Aether's status and
@@ -746,7 +746,7 @@ mounts.
 - Only Claude Code and Codex show subscription usage and can move to another
   account on a usage limit.
 - Sharing an `omp` account shares the whole `~/.omp/agent` directory. oh-my-pi
-  loads extensions and MCP commands from there, so a recipient's run can plant
+  loads extensions and MCP commands from there, so a recipient's session can plant
   code that runs in the owner's sessions. Share an `omp` account only with
   someone you would give your home to ([security.md](security.md#account-sharing)).
 - Aether does not update OpenCode, and does not roll back any update.

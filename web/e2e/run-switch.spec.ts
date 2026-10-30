@@ -12,7 +12,7 @@ import { OnboardingWizard } from './pages/wizard'
  * from the run checkout the scheduler mounts at /workspace. */
 const agentShim = 'sh /workspace/agent.sh'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 type BusyRunWriter = {
   socket: WebSocket
   generation: () => number
@@ -200,7 +200,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   // The picker offers only the agents this account has installed.
   aether.installAgent(await memberID(alice), 'claude', agentShim)
   await wizard.agent.skip().click()
-  await wizard.expectStep('First run')
+  await wizard.expectStep('First session')
   await wizard.firstRun.launch('claude', 'write the result file')
 
   const pane = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
@@ -212,14 +212,14 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
     workspace_id: workspaces[0].id,
     harness: 'claude',
-    task: 'the second run',
+    task: 'the second session',
   })
   unanswered = run.id
 
   const sidebar = page.getByRole('navigation', { name: 'Aether' })
   await sidebar.getByRole('button', { name: /the second run/ }).click()
   await expect(
-    page.getByRole('heading', { name: 'the second run', exact: true }),
+    page.getByRole('heading', { name: 'the second session', exact: true }),
   ).toBeVisible()
   // The attach is still unanswered, so nothing has written to this pane yet.
   await expect(page.getByText('Connecting')).toBeVisible()
@@ -321,7 +321,7 @@ done
 
   await page.setViewportSize({ width: 1568, height: 1000 })
   await page.goto(alice.url)
-  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
   const surfaces = page.getByRole('navigation', { name: 'Main navigation' })
   const open = (task: string) => sidebar.getByRole('button', { name: task }).click()
   const board = () => surfaces.getByRole('button', { name: 'Board', exact: true }).click()
@@ -369,7 +369,7 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>(
     'workspace.list',
   )
-  const tasks = ['steered run A', 'steered run B']
+  const tasks = ['steered session A', 'steered session B']
   const runIDs: string[] = []
   for (const task of tasks) {
     const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
@@ -397,7 +397,7 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
     return controller
   }
   await page.goto(alice.url)
-  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
   const open = async (task: string) => {
     await sidebar.getByRole('button', { name: task }).click()
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
@@ -434,7 +434,7 @@ test('reviewing a run leaves its control free until its terminal is shown', asyn
   const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
     workspace_id: workspaces[0].id,
     harness: 'claude',
-    task: 'reviewed run',
+    task: 'reviewed session',
   })
   await expect
     .poll(
@@ -452,8 +452,8 @@ test('reviewing a run leaves its control free until its terminal is shown', asyn
   url.searchParams.set('run', run.id)
   url.searchParams.set('view', 'changes')
   await page.goto(url.toString())
-  await expect(page.getByRole('heading', { name: 'reviewed run', exact: true })).toBeVisible()
-  await page.getByRole('tab', { name: 'Session' }).click()
+  await expect(page.getByRole('heading', { name: 'reviewed session', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'Chat' }).click()
   await page.waitForTimeout(3000)
   expect(await controller()).toBeUndefined()
 

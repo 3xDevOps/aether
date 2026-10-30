@@ -77,7 +77,7 @@ afterEach(() => {
 describe('run frame', () => {
   it('opens a Standard run on its terminal and names the agent and mode', async () => {
     open()
-    const views = screen.getByRole('tablist', { name: 'Run views' })
+    const views = screen.getByRole('tablist', { name: 'Session views' })
     expect(within(views).getByRole('tab', { name: 'Terminal' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByRole('heading', { level: 1, name: 'rewrite the checkout flow' })).toBeDefined()
     await waitFor(() => expect(screen.getByRole('banner').textContent).toContain('Claude Code · Standard'))
@@ -135,8 +135,8 @@ describe('run frame', () => {
 
   it('opens an Enhanced run on Session and never attaches an agent terminal', async () => {
     open({ mode: 'acp' })
-    const views = screen.getByRole('tablist', { name: 'Run views' })
-    expect(within(views).getByRole('tab', { name: 'Session' }).getAttribute('aria-selected')).toBe('true')
+    const views = screen.getByRole('tablist', { name: 'Session views' })
+    expect(within(views).getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
     fireEvent.mouseDown(within(views).getByRole('tab', { name: 'Terminal' }))
     expect(await screen.findByText('No agent terminal')).toBeDefined()
     expect(StubSocket.opened).toHaveLength(0)
@@ -168,11 +168,11 @@ describe('run frame', () => {
 })
 
 describe('the Trace view', () => {
-  const views = () => within(screen.getByRole('tablist', { name: 'Run views' }))
+  const views = () => within(screen.getByRole('tablist', { name: 'Session views' }))
 
   it('follows Session for an Enhanced run and mounts only while shown', () => {
     const view = open({ mode: 'acp', acp: true })
-    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Session', 'Trace', 'Terminal', 'Changes', 'Files', 'Browser'])
+    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Chat', 'Trace', 'Terminal', 'Changes', 'Files', 'Browser'])
     expect(screen.queryByRole('tree', { name: 'Trace' })).toBeNull()
     view.rerender(rerouted('trace'))
     expect(screen.getByRole('tree', { name: 'Trace' })).toBeDefined()
@@ -189,14 +189,14 @@ describe('the Trace view', () => {
 })
 
 describe('the Files view', () => {
-  const views = () => within(screen.getByRole('tablist', { name: 'Run views' }))
+  const views = () => within(screen.getByRole('tablist', { name: 'Session views' }))
 
   it('sits between Changes and Browser, and stays for a finished run that still has its checkout', () => {
     const live = open()
-    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Session', 'Terminal', 'Changes', 'Files', 'Browser'])
+    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Chat', 'Terminal', 'Changes', 'Files', 'Browser'])
     live.unmount()
     open({ status: 'completed' })
-    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Session', 'Terminal', 'Changes', 'Files'])
+    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Chat', 'Terminal', 'Changes', 'Files'])
   })
 
   it('is not offered once the checkout is gone or by a gateway that cannot list files', () => {
@@ -233,7 +233,7 @@ describe('the Files view', () => {
 })
 
 describe('the Browser view', () => {
-  const views = () => within(screen.getByRole('tablist', { name: 'Run views' }))
+  const views = () => within(screen.getByRole('tablist', { name: 'Session views' }))
   /** Lays the run's frame out at `width`, which jsdom never does. */
   function measured(width: number) {
     vi.stubGlobal('ResizeObserver', class {
@@ -305,11 +305,11 @@ describe('the Browser view', () => {
   it('sits beside the other views on a wide frame, from one remembered toggle', async () => {
     measured(1200)
     const view = open({ mode: 'acp' }, 'browser')
-    fireEvent.click(await screen.findByRole('button', { name: 'Show beside Session' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show beside Chat' }))
     expect(useStore.getState().browserBeside).toBe(true)
     view.rerender(rerouted(useStore.getState().route.params.view!))
     expect(views().queryByRole('tab', { name: 'Browser' })).toBeNull()
-    expect(views().getByRole('tab', { name: 'Session' }).getAttribute('aria-selected')).toBe('true')
+    expect(views().getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
     const beside = within(screen.getByRole('region', { name: 'Browser' }))
     expect(beside.getByRole('toolbar', { name: 'Browser' })).toBeDefined()
     expect(screen.getByRole('group', { name: 'Multiplayer controls' })).toBeDefined()
@@ -373,7 +373,7 @@ describe('switching the mode from More', () => {
 
   it('disables the item with the reason after an early refusal', async () => {
     claude()
-    vi.mocked(api.runModeSwitch).mockRejectedValueOnce(new ApiError(200, 'run.mode.switch: scheduler: invalid run state transition: the agent has not reported its session yet', -32002, { reason: 'session_not_reported' }))
+    vi.mocked(api.runModeSwitch).mockRejectedValueOnce(new ApiError(200, 'run.mode.switch: scheduler: invalid session state transition: the agent has not reported its session yet', -32002, { reason: 'session_not_reported' }))
     open()
     await waitFor(() => expect(useStore.getState().agentList).not.toBeNull())
     fireEvent.click((await openMore()).getByRole('menuitem', { name: 'Switch to Enhanced…' }))
@@ -395,17 +395,17 @@ describe('the header primary action', () => {
   it('sends a Standard permission to the terminal', () => {
     open({ status: 'needs-attention', pending_inputs: [{ id: 'in_1', session_id: 's', kind: 'permission' }] }, 'session')
     expect(screen.getByText('Permission: answer in the terminal')).toBeDefined()
-    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Run actions' })).getByRole('button', { name: 'Open terminal' }))
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Session actions' })).getByRole('button', { name: 'Open terminal' }))
     expect(useStore.getState().route.params.view).toBe('terminal')
   })
 
   it('allows a sudo command from the Details card it reveals', async () => {
     vi.mocked(api.runInputRespond).mockResolvedValue({ status: 'answered' })
-    const title = 'Run as root in /workspace: apt-get install -y jq'
+    const title = 'Session as root in /workspace: apt-get install -y jq'
     open({ status: 'needs-attention', pending_inputs: [{ id: 'sudo-1', session_id: 'aether-sudo', kind: 'permission', title }] }, 'session')
     expect(screen.getByText('Permission requested')).toBeDefined()
-    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Run actions' })).getByRole('button', { name: 'Answer' }))
-    const details = await screen.findByRole('dialog', { name: 'Run details' })
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Session actions' })).getByRole('button', { name: 'Answer' }))
+    const details = await screen.findByRole('dialog', { name: 'Session details' })
     const card = within(details).getByText(title).closest('[data-slot=request-card]') as HTMLElement
     fireEvent.click(within(card).getByRole('button', { name: 'Approve' }))
     await waitFor(() => expect(api.runInputRespond).toHaveBeenCalledWith('run_1', 'sudo-1', 'allow-once'))
@@ -422,7 +422,7 @@ describe('the header primary action', () => {
     vi.mocked(api.runRoomList).mockResolvedValue({ messages: [question] })
     open({ unanswered_questions: 1 })
     fireEvent.click(await screen.findByRole('button', { name: 'Answer' }))
-    const details = await screen.findByRole('dialog', { name: 'Run details' })
+    const details = await screen.findByRole('dialog', { name: 'Session details' })
     const card = within(details).getByText('Bob asked').closest('[data-slot=request-card]') as HTMLElement
     await userEvent.type(within(card).getByRole('textbox'), 'yes, keep it')
     fireEvent.click(within(card).getByRole('button', { name: 'Reply' }))
@@ -435,7 +435,7 @@ describe('the header primary action', () => {
 describe('run details', () => {
   async function details() {
     fireEvent.click(screen.getByRole('button', { name: 'Show details' }))
-    return within(await screen.findByRole('dialog', { name: 'Run details' }))
+    return within(await screen.findByRole('dialog', { name: 'Session details' }))
   }
 
   it('lists what waits on the viewer, the notes and the run record', async () => {
@@ -610,12 +610,12 @@ describe('run details', () => {
   })
 
   it('takes a refused note back into the input and shows the server error', async () => {
-    vi.mocked(api.runRoomPost).mockRejectedValueOnce(refusal('run.room.post: 403 forbidden: notes are closed on this run'))
+    vi.mocked(api.runRoomPost).mockRejectedValueOnce(refusal('run.room.post: 403 forbidden: notes are closed on this session'))
     open()
     const panel = await details()
     const box = panel.getByRole('textbox', { name: 'Add a note' })
     await userEvent.type(box, 'reviewing now{Enter}')
-    expect((await panel.findByRole('alert')).textContent).toContain('403 forbidden: notes are closed on this run')
+    expect((await panel.findByRole('alert')).textContent).toContain('403 forbidden: notes are closed on this session')
     expect(box).toHaveProperty('value', 'reviewing now')
     expect(within(panel.getByRole('region', { name: 'Notes' })).getAllByText('reviewing now')).toHaveLength(1)
   })
@@ -626,10 +626,10 @@ describe('run details', () => {
     let panel = await details()
     await userEvent.type(panel.getByRole('textbox', { name: 'Add a note' }), 'reviewing now{Enter}')
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Run details' })).toBeNull())
-    await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this run')))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Session details' })).toBeNull())
+    await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this session')))
     panel = await details()
-    expect(panel.getByRole('alert').textContent).toContain('403 forbidden: notes are closed on this run')
+    expect(panel.getByRole('alert').textContent).toContain('403 forbidden: notes are closed on this session')
     expect(panel.getByRole('textbox', { name: 'Add a note' })).toHaveProperty('value', 'reviewing now')
   })
 
@@ -645,7 +645,7 @@ describe('run details', () => {
       useStore.getState().resetNotes()
     })
     expect((await details()).queryByText('reviewing now')).toBeNull()
-    await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this run')))
+    await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this session')))
     expect(useStore.getState().failedNotes).toEqual({})
     expect(useStore.getState().noteKeys).toEqual({})
   })
@@ -743,8 +743,8 @@ describe('run details', () => {
       fireEvent.submit(box.closest('form')!)
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       await act(async () => {})
-      await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this run')))
-      expect(panel.getByRole('alert').textContent).toContain('403 forbidden: notes are closed on this run')
+      await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this session')))
+      expect(panel.getByRole('alert').textContent).toContain('403 forbidden: notes are closed on this session')
       expect(panel.queryByRole('button', { name: 'Retry' })).toBeNull()
       expect(box).toHaveProperty('value', 'reviewing now')
     } finally {
@@ -957,7 +957,7 @@ describe('the session composer', () => {
     { status: 'failed', mode: 'headless' },
     { status: 'provisioning' },
     { member_id: bob.id, protected: true },
-  ] as const)('does not accept messages when the run is unavailable: %j', (over) => {
+  ] as const)('does not accept messages when the session is unavailable: %j', (over) => {
     useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'collaborator' } } })
     open(over, 'session')
     expect(screen.queryByRole('textbox', { name: 'Message the agent' })).toBeNull()

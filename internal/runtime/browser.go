@@ -41,7 +41,7 @@ type BrowserInfo struct {
 
 func (s BrowserSpec) Validate() error {
 	if s.RunContainer == "" || strings.ContainsAny(string(s.RunContainer), "/:\x00\r\n") {
-		return errors.New("runtime: browser requires a run container identity")
+		return errors.New("runtime: browser requires a session container identity")
 	}
 	if strings.TrimSpace(s.Image) == "" || s.CreationKey == "" {
 		return errors.New("runtime: browser image and creation key are required")

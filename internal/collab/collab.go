@@ -195,7 +195,7 @@ func (s *Service) recordOverdueError(err error) {
 // once the process has attached its lifecycle context.
 func New(cfg Config) (*Service, error) {
 	if cfg.Store == nil || cfg.Runs == nil {
-		return nil, fmt.Errorf("%w: store and runs are required", ErrInvalidRequest)
+		return nil, fmt.Errorf("%w: store and sessions are required", ErrInvalidRequest)
 	}
 	if cfg.Now == nil {
 		cfg.Now = func() time.Time { return time.Now().UTC() }
@@ -368,7 +368,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 			return err
 		}
 		if freshRun.Protected {
-			return fmt.Errorf("%w: protected runs do not accept steering requests", permissions.ErrDenied)
+			return fmt.Errorf("%w: protected sessions do not accept steering requests", permissions.ErrDenied)
 		}
 		if err := permissions.Check(permissions.Steer,
 			permissions.Actor{ID: freshActor.ID, Role: freshActor.Role},
@@ -452,7 +452,7 @@ func (s *Service) observeExisting(ctx context.Context, msg *store.RoomMessage) (
 
 func (s *Service) validateInput(ctx context.Context, in *MessageInput) error {
 	if in.WorkspaceID == "" || in.RunID == "" || in.ActorID == "" || !in.Kind.Valid() || strings.TrimSpace(in.IdempotencyKey) == "" {
-		return fmt.Errorf("%w: workspace, run, actor, kind, and idempotency key are required", ErrInvalidRequest)
+		return fmt.Errorf("%w: workspace, session, actor, kind, and idempotency key are required", ErrInvalidRequest)
 	}
 	if len(in.Body) > s.cfg.BodyLimit || strings.TrimSpace(in.Body) == "" && (in.Kind != store.RoomMessageSteerRequest || len(in.Attachments) == 0) {
 		return fmt.Errorf("%w: body is required unless steering with attachments, and must not exceed %d bytes", ErrInvalidRequest, s.cfg.BodyLimit)
@@ -582,7 +582,7 @@ func (s *Service) settleRoomMessage(ctx context.Context, msg *store.RoomMessage,
 		delivered = &now
 	case ReceiptNotSent:
 		state = store.RoomMessageNotSent
-		failure = &store.RoomMessageFailure{Code: "session_unavailable", Message: "run session unavailable"}
+		failure = &store.RoomMessageFailure{Code: "session_unavailable", Message: "agent unavailable"}
 	case ReceiptUncertain:
 		state = store.RoomMessageUncertain
 		failure = &store.RoomMessageFailure{Code: "write_uncertain", Message: "delivery outcome uncertain", Retryable: true}
@@ -713,7 +713,7 @@ func (s *Service) Protect(ctx context.Context, runID domain.RunID, by domain.Mem
 		}
 		ps, ok := s.cfg.Store.(ProtectedStore)
 		if !ok {
-			return fmt.Errorf("%w: store cannot protect runs", ErrInvalidRequest)
+			return fmt.Errorf("%w: store cannot protect sessions", ErrInvalidRequest)
 		}
 		if err := ps.SetRunProtected(ctx, runID, true); err != nil {
 			return err

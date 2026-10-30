@@ -151,7 +151,7 @@ describe('the Enhanced session view', () => {
       say(1, 'assistant', 'Totals now **round** to cents.'),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     expect(await within(log).findByText('Round the totals')).toBeDefined()
     expect(within(log).getByText('round').tagName).toBe('STRONG')
     const header = within(log).getByRole('button', { name: /Read 2 files and ran 1 command/ })
@@ -175,7 +175,7 @@ describe('the Enhanced session view', () => {
       item('thought', 1, { message: { role: 'assistant', message_id: 't1', text: 'Check the module first.', complete: true } }),
       tool(1, 'x1', 'execute', 'npm test', 'in_progress'),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     const header = await within(log).findByRole('button', { name: /^Running npm test, Ran 1 command/ })
     expect(header.getAttribute('aria-expanded')).toBe('true')
     expect(within(log).queryByText('Working')).toBeNull()
@@ -193,7 +193,7 @@ describe('the Enhanced session view', () => {
       ...Array.from({ length: 45 }, (_, n) => tool(1, `x${n}`, 'execute', `step ${n}`, 'completed')),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     await userEvent.click(await within(log).findByRole('button', { name: /^Ran 45 commands/ }))
     expect(within(log).getByRole('button', { name: /Ran step 4(?!\d)/ })).toBeDefined()
     expect(within(log).queryByRole('button', { name: /Ran step 5(?!\d)/ })).toBeNull()
@@ -208,7 +208,7 @@ describe('the Enhanced session view', () => {
       item('turn_start', 1),
       ...Array.from({ length: 40 }, (_, n) => tool(1, `x${n}`, 'execute', `step ${n}`, 'completed')),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     const step = (await within(log).findByText('step 7')).closest('button')!
     act(() => step.focus())
     session.items(tool(1, 'x40', 'execute', 'step 40', 'in_progress'))
@@ -219,12 +219,12 @@ describe('the Enhanced session view', () => {
 
   it('keeps a step opened in the first loaded block once the turn\'s prompt pages in', async () => {
     const earlier = [item('turn_start', 1), say(1, 'user', 'Round the totals')]
-    const loaded = [tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'ok\n', exit_code: 0 }), tool(1, 'x2', 'execute', 'npm run build', 'in_progress')]
+    const loaded = [tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'ok\n', exit_code: 0 }), tool(1, 'x2', 'execute', 'npm session build', 'in_progress')]
     const page = Promise.withResolvers<SessionHistory>()
     vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(page.promise)
     open()
     acpSocket().open({ oldest_seq: loaded[0]!.seq }, loaded)
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     await userEvent.click(await within(log).findByRole('button', { name: /Ran npm test/ }))
     expect(await within(log).findByText('$ npm test')).toBeDefined()
     await waitFor(() => expect(api.runACPHistory).toHaveBeenCalledTimes(1))
@@ -241,7 +241,7 @@ describe('the Enhanced session view', () => {
     })
     session.send({ reset: true, epoch: 0 })
     session.items({ ...say(1, 'assistant', 'Current retained response'), seq: 20 })
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     expect(await within(log).findByText('Current retained response')).toBeDefined()
     expect(screen.getByText(/Earlier Enhanced history has expired/)).toBeDefined()
     // The tool-call frame expired; the authoritative pending request still permits an answer,
@@ -263,7 +263,7 @@ describe('the Enhanced session view', () => {
     const start = item('turn_start', 1)
     const entry = tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'retained excerpt', exit_code: 0 })
     acpSocket().open({}, [start, { ...entry, truncated: true }])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     await userEvent.click(await within(log).findByRole('button', { name: /Ran npm test/ }))
     expect(await within(log).findByText('retained excerpt')).toBeDefined()
     expect((await within(log).findByRole('alert')).textContent).toContain(expired)
@@ -274,7 +274,7 @@ describe('the Enhanced session view', () => {
   it('reads Queued on a message the agent holds behind its turn, then why it was not sent', async () => {
     open()
     acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true }) }, [item('turn_start', 1)])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     const queued = roomMessage({ id: 'msg_q', kind: 'steer_request', body: 'and docs', state: 'sent', agent_delivery: 'queued', updated_at: '2026-08-14T10:00:01Z' })
     act(() => useStore.getState().upsertRoomMessage(queued))
     expect(await within(log).findByText('Queued')).toBeDefined()
@@ -295,7 +295,7 @@ describe('the Enhanced session view', () => {
     vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(page.promise)
     open()
     acpSocket().open({ oldest_seq: latest.seq }, [latest])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     act(() => {
       useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_first', kind: 'steer_request', body: 'Round the totals', agent_delivery: 'delivered', created_at: prompt.time }))
       useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_queued', kind: 'steer_request', body: 'and docs', agent_delivery: 'queued', created_at: prompt.time }))
@@ -324,7 +324,7 @@ describe('the Enhanced session view', () => {
     vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(page.promise)
     open()
     acpSocket().open({ oldest_seq: loaded[0]!.seq }, loaded)
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     log.scrollTo = vi.fn()
     log.scrollBy = ((to: ScrollToOptions) => {
       log.scrollTop += to.top ?? 0
@@ -352,7 +352,7 @@ describe('the Enhanced session view', () => {
       start, prompt, ...Array.from({ length: 40 }, (_, n) => say(1, 'assistant', `Reply ${n}`)),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     log.scrollTo = ((to: ScrollToOptions) => {
       log.scrollTop = to.top ?? log.scrollTop
       fireEvent.scroll(log)
@@ -369,7 +369,7 @@ describe('the Enhanced session view', () => {
     vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(Promise.withResolvers<SessionHistory>().promise)
     open()
     acpSocket().open({ oldest_seq: prompt.seq }, [prompt])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     act(() => {
       useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_sent', kind: 'steer_request', body: 'continue', agent_delivery: 'delivered', created_at: gone.time }))
       useStore.getState().upsertRoomMessage(roomMessage({
@@ -387,7 +387,7 @@ describe('the Enhanced session view', () => {
     const prompt = item('message', 1, { message: { role: 'user', message_id: 'u', text: 'read the notes', complete: true, attachments: [{ type: 'resource_link', uri: `file://${file}` }] } })
     open()
     acpSocket().open({}, [item('turn_start', 1), prompt])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     act(() => useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_file', kind: 'steer_request', body: 'read the notes', attachments: [file], agent_delivery: 'delivered', created_at: prompt.time })))
     expect(await within(log).findByText('Sent')).toBeDefined()
     expect(within(log).getAllByText('read the notes')).toHaveLength(1)
@@ -399,7 +399,7 @@ describe('the Enhanced session view', () => {
     vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(Promise.withResolvers<SessionHistory>().promise)
     open()
     acpSocket().open({ oldest_seq: reply.seq }, [reply, prompt])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     act(() => {
       useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_early', kind: 'steer_request', body: 'continue', agent_delivery: 'delivered', created_at: gone.time }))
       useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_recent', kind: 'steer_request', body: 'continue', agent_delivery: 'delivered', created_at: reply.time }))
@@ -471,7 +471,7 @@ describe('the Enhanced session view', () => {
     acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, pending: [edit] }) }, [start, cut])
     const card = await screen.findByRole('group', { name: /wants to edit totals\.go/ })
     expect(await within(card).findByRole('region', { name: /Files/ })).toBeDefined()
-    expect(within(card).getByText('This call is longer than the session log keeps, so the preview may be incomplete.')).toBeDefined()
+    expect(within(card).getByText('This call is longer than the conversation log keeps, so the preview may be incomplete.')).toBeDefined()
     expect(within(card).queryByText('Loading the full change…')).toBeNull()
     expect(api.runACPItem).toHaveBeenCalledWith('run_1', cut.seq)
   })
@@ -503,11 +503,11 @@ describe('the Enhanced session view', () => {
     ])
     expect(await screen.findByText(body)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Show details' }))
-    const details = within(await screen.findByRole('dialog', { name: 'Run details' }))
-    fireEvent.click(details.getByRole('button', { name: 'Hide from Session' }))
-    expect(details.getByRole('button', { name: 'Show in Session' })).toBeDefined()
+    const details = within(await screen.findByRole('dialog', { name: 'Session details' }))
+    fireEvent.click(details.getByRole('button', { name: 'Hide from Chat' }))
+    expect(details.getByRole('button', { name: 'Show in Chat' })).toBeDefined()
     expect(screen.getAllByText(body)).toHaveLength(1)
-    fireEvent.click(details.getByRole('button', { name: 'Show in Session' }))
+    fireEvent.click(details.getByRole('button', { name: 'Show in Chat' }))
     await waitFor(() => expect(screen.getAllByText(body)).toHaveLength(2))
   })
 
@@ -520,7 +520,7 @@ describe('the Enhanced session view', () => {
     ])
     expect(await screen.findByText('Waiting for your approval: rm -rf build')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Show details' }))
-    const needs = within(within(await screen.findByRole('dialog', { name: 'Run details' })).getByRole('region', { name: 'Needs you' }))
+    const needs = within(within(await screen.findByRole('dialog', { name: 'Session details' })).getByRole('region', { name: 'Needs you' }))
     expect(needs.queryByRole('generic', { name: /Allow this command\?/ })).toBeNull()
     fireEvent.click(needs.getByRole('button', { name: '1 request, shown below the timeline' }))
     await waitFor(() => expect(document.activeElement?.id).toBe('session-request-docked'))
@@ -545,7 +545,7 @@ describe('the Enhanced session view', () => {
   it('shows a run waiting on a background task and stops the wait from the composer', async () => {
     open()
     acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true, tasks: [{ id: 'bg1', holds: true }] }) }, waitingItems())
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     expect(await within(log).findByText('Working in background: 1 task')).toBeDefined()
     expect(screen.getByText(/Stops waiting for background work/)).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Stop waiting for background work' }))
@@ -555,7 +555,7 @@ describe('the Enhanced session view', () => {
   it('offers Stop waiting for a wait the run stalled in, without the live row', async () => {
     open({ status: 'needs-attention', reason: 'stalled: no output or file changes for 10m0s' })
     acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true, tasks: [{ id: 'bg1', holds: true }] }) }, waitingItems())
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     expect(await within(log).findByText('start the build')).toBeDefined()
     expect(within(log).queryByText(/Working in background/)).toBeNull()
     await userEvent.click(await screen.findByRole('button', { name: 'Stop waiting for background work' }))
@@ -565,7 +565,7 @@ describe('the Enhanced session view', () => {
   it('offers neither once the wait was cancelled and the run is parked', async () => {
     open({ status: 'needs-attention', reason: 'turn cancelled' })
     acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true }) }, waitingItems())
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     expect(await within(log).findByText('start the build')).toBeDefined()
     expect(within(log).queryByText(/Working in background/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Stop waiting for background work' })).toBeNull()
@@ -577,7 +577,7 @@ describe('the Enhanced session view', () => {
       ...waitingItems(),
       item('turn_start', 2, { autonomous: true }),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     expect(await within(log).findByText('Working')).toBeDefined()
     expect(within(log).queryByText(/Working in background/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Stop waiting for background work' })).toBeNull()
@@ -711,7 +711,7 @@ describe('the Enhanced session view', () => {
       item('turn_end', 1, { stop_reason: 'end_turn' }),
       item('turn_start', 2),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     await within(log).findByText('Finished in 2s')
     const before = eventRenders.get('Finished in 2s')
     for (let i = 0; i < 5; i++) session.items(say(2, 'assistant', `part ${i}`, 'reply'))
@@ -735,12 +735,12 @@ describe('the Enhanced session view', () => {
   it('shows the adapter failure with its stderr and the two ways on', async () => {
     open({ status: 'needs-attention', model: 'opus', effort: 'high' })
     acpSocket().open({ live: false }, [
-      item('notice', 0, { notice: { severity: 'error', title: 'Enhanced session ended', description: "the agent's ACP server exited with code 1; stderr: boom" } }),
+      item('notice', 0, { notice: { severity: 'error', title: 'Enhanced agent exited', description: "the agent's ACP server exited with code 1; stderr: boom" } }),
     ])
     expect(await screen.findByText(/stderr: boom/, { selector: 'pre' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Retry Enhanced' })).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Open in Standard' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Start a Standard run' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a Standard session' }))
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ mode: 'tui', model: 'opus', effort: 'high' })))
   })
 })
@@ -774,7 +774,7 @@ describe('the Enhanced composer draft', () => {
 
     show('run_2')
     expect(await box()).toHaveProperty('value', '')
-    await userEvent.type(await box(), 'Other run')
+    await userEvent.type(await box(), 'Other session')
     uploaded({ path: '/home/alice/totals.png' })
     view.rerender(<p>Board</p>)
     show('run_1')
@@ -788,7 +788,7 @@ describe('the Enhanced composer draft', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect((await screen.findByRole('alert')).textContent).toContain('acphost: agent connection closed')
     show('run_2')
-    expect(await box()).toHaveProperty('value', 'Other run')
+    expect(await box()).toHaveProperty('value', 'Other session')
     show('run_1')
     expect(await box()).toHaveProperty('value', prompt)
 
@@ -802,7 +802,7 @@ describe('the Enhanced composer draft', () => {
     const [failed, retried] = vi.mocked(api.runInject).mock.calls
     expect(retried).toEqual(['run_1', prompt, failed![2], expect.objectContaining({ attachments: ['/home/alice/totals.png'] })])
     show('run_2')
-    expect(await box()).toHaveProperty('value', 'Other run')
+    expect(await box()).toHaveProperty('value', 'Other session')
     show('run_1')
     expect(await box()).toHaveProperty('value', '')
     expect(screen.queryByRole('button', { name: /Remove attached image/ })).toBeNull()
@@ -951,7 +951,7 @@ describe('Enhanced multiplayer controls', () => {
     vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
     open()
     const session = acpSocket().open({ has_control: true, control_generation: 4 })
-    const controller = within(await screen.findByRole('group', { name: 'Run controller' }))
+    const controller = within(await screen.findByRole('group', { name: 'Session controller' }))
     expect(controller.getByRole('img', { name: alice.display_name })).toBeDefined()
     expect(controller.queryByRole('img', { name: bob.display_name })).toBeNull()
     expect(controller.getByText(/Alice.*You control/)).toBeDefined()
@@ -969,7 +969,7 @@ describe('Enhanced multiplayer controls', () => {
     open()
     acpSocket().open({ has_control: false })
     const controls = within(await screen.findByRole('group', { name: 'Multiplayer controls' }))
-    expect(await controls.findByText(`${alice.display_name} · You control in another session since ${clockTime(acquired)}`)).toBeDefined()
+    expect(await controls.findByText(`${alice.display_name} · You control in another tab since ${clockTime(acquired)}`)).toBeDefined()
   })
 
   it('releases the acknowledged lease without closing the session and remains reachable on Terminal', async () => {
@@ -1086,7 +1086,7 @@ describe('Enhanced multiplayer controls', () => {
     const box = await screen.findByRole('combobox', { name: 'Message the agent' })
     box.focus()
     receiveTakeover(session, 'review')
-    const dialog = await screen.findByRole('alertdialog', { name: 'Run control requested' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Session control requested' })
     expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Deny' }))
     await userEvent.click(within(dialog).getByRole('button', { name: decision === 'accept' ? 'Accept' : 'Deny' }))
     expect(session.socket.frames().at(-1)).toMatchObject({ type: 'takeover', action: decision, takeover_id: 'takeover-request', control_generation: 4 })

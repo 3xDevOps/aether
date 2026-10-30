@@ -45,7 +45,7 @@ describe('GitHub repository onboarding', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review repository' }))
     const outcome = await screen.findByRole('region', { name: 'Review repository revision' })
     expect(outcome.textContent).toContain(revision)
-    expect(outcome.textContent).toContain('Use trunk for new runs.')
+    expect(outcome.textContent).toContain('Use trunk for new sessions.')
     expect(onCreated).not.toHaveBeenCalled()
     expect(client.workspaceMirrorAdopt).not.toHaveBeenCalled()
     expect(client.workspaceImport).toHaveBeenCalledWith(expect.objectContaining({ base_branch: 'trunk', auth: 'github', github_account_id: 7, origin: '' }))

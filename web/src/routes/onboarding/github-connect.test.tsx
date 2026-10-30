@@ -204,7 +204,7 @@ describe('member publishing GitHub connection', { timeout: 20_000 }, () => {
     // a connection counts the way a set-up agent does for Continue.
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(
-      await screen.findByText('Connected in this session as octocat'),
+      await screen.findByText('Connected as octocat'),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDefined()
   })

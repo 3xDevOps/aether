@@ -106,18 +106,18 @@ func TestConflictRadarFlagsBothRunsAndClears(t *testing.T) {
 
 	got := waitFor(func(m map[string]protocol.Overlap) bool {
 		return len(m) == 2
-	}, "both runs to flag the shared file")
+	}, "both sessions to flag the shared file")
 	for _, pair := range [][2]*domain.Run{{e.run, other}, {other, e.run}} {
 		o := got[string(pair[0].ID)]
 		if len(o.With) != 1 {
-			t.Fatalf("run %s overlaps = %+v, want exactly one peer", pair[0].ID, o.With)
+			t.Fatalf("session %s overlaps = %+v, want exactly one peer", pair[0].ID, o.With)
 		}
 		peer := o.With[0]
 		if peer.RunID != string(pair[1].ID) || peer.MemberID != string(pair[1].MemberID) {
-			t.Errorf("run %s peer = %+v, want run %s owned by %s", pair[0].ID, peer, pair[1].ID, pair[1].MemberID)
+			t.Errorf("session %s peer = %+v, want session %s owned by %s", pair[0].ID, peer, pair[1].ID, pair[1].MemberID)
 		}
 		if len(peer.Files) != 1 || peer.Files[0] != "main.go" {
-			t.Errorf("run %s overlap files = %v, want [main.go] only (solo.go is not shared)", pair[0].ID, peer.Files)
+			t.Errorf("session %s overlap files = %v, want [main.go] only (solo.go is not shared)", pair[0].ID, peer.Files)
 		}
 	}
 
@@ -131,5 +131,5 @@ func TestConflictRadarFlagsBothRunsAndClears(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish status: %v", err)
 	}
-	waitFor(func(m map[string]protocol.Overlap) bool { return len(m) == 0 }, "the flag to clear when a run finishes")
+	waitFor(func(m map[string]protocol.Overlap) bool { return len(m) == 0 }, "the flag to clear when a session finishes")
 }

@@ -34,11 +34,11 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-var ErrInvalidTransition = errors.New("scheduler: invalid run state transition")
+var ErrInvalidTransition = errors.New("scheduler: invalid session state transition")
 
 // ErrReviewNotReported refuses a reportedOnly complete of a live run whose
 // reported success does not await review.
-var ErrReviewNotReported = errors.New("scheduler: the run has no reported success awaiting review")
+var ErrReviewNotReported = errors.New("scheduler: the session has no reported success awaiting review")
 
 type BaseCapture interface {
 	Capture(context.Context, domain.WorkspaceID, string) (mirror.CaptureResult, error)
@@ -778,7 +778,7 @@ func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string
 	entry := s.runs[run]
 	if entry == nil {
 		s.mu.Unlock()
-		return "", errors.New("run has no live container")
+		return "", errors.New("session has no live container")
 	}
 	containerID := entry.containerID
 	s.mu.Unlock()

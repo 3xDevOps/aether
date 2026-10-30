@@ -18,17 +18,17 @@ import (
 
 func init() {
 	register(command{
-		name:  "run",
-		short: "launch an agent run",
-		usage: "aether run <task> [flags]\n" +
-			"aether run - [flags]\n" +
-			"aether run --template <name> [--param <name=value>]... [--workspace <name>]\n" +
-			"aether run switch <run-id> --mode standard|enhanced",
-		example: "aether run \"fix the flaky login test\" --agent claude\n" +
-			"aether run \"review this dependency upgrade\" --agent claude --permission isolated\n" +
-			"aether run - --agent codex --idempotency-key fix-login-1 < task.md\n" +
-			"aether run --template nightly-audit\n" +
-			"aether run switch run-d6ay38tj8j --mode enhanced",
+		name:  "session",
+		short: "launch an agent session",
+		usage: "aether session <task> [flags]\n" +
+			"aether session - [flags]\n" +
+			"aether session --template <name> [--param <name=value>]... [--workspace <name>]\n" +
+			"aether session switch <session-id> --mode standard|enhanced",
+		example: "aether session \"fix the flaky login test\" --agent claude\n" +
+			"aether session \"review this dependency upgrade\" --agent claude --permission isolated\n" +
+			"aether session - --agent codex --idempotency-key fix-login-1 < task.md\n" +
+			"aether session --template nightly-audit\n" +
+			"aether session switch run-d6ay38tj8j --mode enhanced",
 		flags: true,
 		run:   runRun,
 	})
@@ -38,22 +38,22 @@ func runRun(args []string) error {
 	if len(args) > 1 && args[0] == "switch" && !strings.HasPrefix(args[1], "-") {
 		return runSwitch(args[1:])
 	}
-	fs := newFlagSet("run")
+	fs := newFlagSet("session")
 	agent := fs.String("agent", "", "agent name")
 	mode := fs.String("mode", "", launchModeHelp+" (default: "+defaultModeHelp+")")
 	model := fs.String("model", "", modelHelp)
 	effort := fs.String("effort", "", effortHelp)
-	permission := fs.String("permission", "", "root, default or isolated: root lets sudo run without asking, default asks you before each sudo, isolated keeps every change outside the checkout to the run (default: default)")
+	permission := fs.String("permission", "", "root, default or isolated: root lets sudo run without asking, default asks you before each sudo, isolated keeps every change outside the checkout to the session (default: default)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	account := fs.String("account", "", "member ID whose shared agent account to use")
 	template := fs.String("template", "", "launch a saved task template instead of a prompt")
 	cachedBase := fs.String("cached-base", "", "retry a launch from an exact accepted base commit")
 	fallbackOrder := fs.String("fallback", "", fallbackHelp)
 	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
-	children := fs.String("children", "", "child runs this run's agent may start: on or off for this run only (default: your setting, aether children)")
-	idempotencyKey := fs.String("idempotency-key", "", "the key a failed or interrupted launch printed: the retry returns that launch's run instead of starting another (default: a new key)")
+	children := fs.String("children", "", "subsessions this session's agent may start: on or off for this session only (default: your setting, aether subsessions)")
+	idempotencyKey := fs.String("idempotency-key", "", "the key a failed or interrupted launch printed: the retry returns that launch's session instead of starting another (default: a new key)")
 	var repos stringList
-	fs.Var(&repos, "repo", "also check out this workspace ID or name at /repos/<name> with its own run branch (repeatable)")
+	fs.Var(&repos, "repo", "also check out this workspace ID or name at /repos/<name> with its own session branch (repeatable)")
 	params := kvFlag{}
 	fs.Var(params, "param", "value for a template parameter, name=value (repeatable)")
 
@@ -90,7 +90,7 @@ func runRun(args []string) error {
 		return fmt.Errorf("invalid --children %q: want on or off", *children)
 	}
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--permission root|default|isolated] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: aether session [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--permission root|default|isolated] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether session --template <name> [--param k=v] [--workspace]\n   or: aether session switch <session-id> --mode standard|enhanced")
 	}
 	fromStdin := task == "-"
 	task, err = stdinText(task, "task", os.Stdin)
@@ -112,7 +112,7 @@ func runRun(args []string) error {
 				return err
 			}
 			if len(repos) > 0 && !slices.Contains(info.Features, protocol.FeatureMultiRepo) {
-				return fmt.Errorf("--repo: server %s does not support runs with several repositories; update the server with aether server update", info.ServerVersion)
+				return fmt.Errorf("--repo: server %s does not support sessions with several repositories; update the server with aether server update", info.ServerVersion)
 			}
 			if *permission != "" && !slices.Contains(info.Features, protocol.FeaturePermission) {
 				return fmt.Errorf("--permission: server %s runs every agent as root and has no permission tiers; update the server with aether server update", info.ServerVersion)
@@ -135,9 +135,9 @@ func runRun(args []string) error {
 			return launchError(err, params, fromStdin)
 		}
 		if res.Replayed {
-			_, _ = fmt.Fprintf(os.Stderr, "idempotency key %s already launched run %s; nothing new was launched\n", params.IdempotencyKey, res.Run.ID)
+			_, _ = fmt.Fprintf(os.Stderr, "idempotency key %s already launched session %s; nothing new was launched\n", params.IdempotencyKey, res.Run.ID)
 		}
-		fmt.Printf("run %s %s\n", res.Run.ID, res.Run.Status)
+		fmt.Printf("session %s %s\n", res.Run.ID, res.Run.Status)
 		return nil
 	})
 }
@@ -166,18 +166,18 @@ func launchError(err error, params protocol.RunLaunchParams, fromStdin bool) err
 	var rpcErr *protocol.Error
 	switch {
 	case errors.Is(err, errInterrupted):
-		return &exitStatusError{code: 130, err: fmt.Errorf("%w; the launch continues on the server. aether runs lists it, and aether kill <run-id> stops it once it is listed.\nto get its run id without launching twice, run:\n  %s", errInterrupted, launchCommand(params, fromStdin))}
+		return &exitStatusError{code: 130, err: fmt.Errorf("%w; the launch continues on the server. aether sessions lists it, and aether kill <session-id> stops it once it is listed.\nto get its session id without launching twice, run:\n  %s", errInterrupted, launchCommand(params, fromStdin))}
 	case errors.As(err, &rpcErr):
 		return cachedBaseLaunchError(err, params, fromStdin)
 	}
-	return fmt.Errorf("%w\nthe launch may still be starting; aether runs lists it. To retry without launching twice, run:\n  %s", err, launchCommand(params, fromStdin))
+	return fmt.Errorf("%w\nthe launch may still be starting; aether sessions lists it. To retry without launching twice, run:\n  %s", err, launchCommand(params, fromStdin))
 }
 
 // The server fingerprints every launch param but the key, so
 // launchCommand must reproduce params exactly or a retry with the same key
 // conflicts.
 func launchCommand(params protocol.RunLaunchParams, fromStdin bool) string {
-	args := []string{"aether", "run", "--agent", shellquote.Quote(params.Harness)}
+	args := []string{"aether", "session", "--agent", shellquote.Quote(params.Harness)}
 	if params.Mode != "" {
 		args = append(args, "--mode", modeName(params.Mode))
 	}

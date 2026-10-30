@@ -50,7 +50,7 @@ func TestEnhancedRunChargesWhatTheRunningCostAdds(t *testing.T) {
 				}
 				return
 			case <-timeout:
-				t.Fatalf("%s: no run.cost event", when)
+				t.Fatalf("%s: no session.cost event", when)
 			}
 		}
 	}

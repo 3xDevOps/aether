@@ -43,7 +43,7 @@ beforeEach(async () => {
 const nav = () => within(screen.getByRole('navigation', { name: 'Aether' }))
 // jsdom counts a header inside main as a banner; a browser does not.
 const topBanners = () => screen.queryAllByRole('banner').filter((header) => !header.closest('main'))
-const runList = () => within(nav().getByRole('region', { name: 'Runs' }))
+const runList = () => within(nav().getByRole('region', { name: 'Sessions' }))
 
 describe('shell landmarks', () => {
   it('puts the skip link first, then the sidebar, then one main with one h1', async () => {
@@ -63,7 +63,7 @@ describe('shell landmarks', () => {
     useStore.setState({ info: null, linkStatus: { server_configured: false, linked: false, addr: '', user: '', repo: '' } })
     render(<AppShell />)
 
-    const launch = nav().getByRole('button', { name: /New run/ })
+    const launch = nav().getByRole('button', { name: /New session/ })
     expect(launch.getAttribute('aria-disabled')).toBe('true')
     fireEvent.click(launch)
     expect(useStore.getState().paletteDialog).toBeNull()
@@ -96,9 +96,9 @@ describe('shell landmarks', () => {
     try {
       useStore.setState({ runs: {}, hydrated: false, hydrationError: null })
       render(<AppShell />)
-      expect(screen.queryByRole('status', { name: 'Loading runs' })).toBeNull()
+      expect(screen.queryByRole('status', { name: 'Loading sessions' })).toBeNull()
       act(() => void vi.advanceTimersByTime(250))
-      expect(screen.getByRole('status', { name: 'Loading runs' }).querySelectorAll('[data-slot="skeleton"]')).toHaveLength(18)
+      expect(screen.getByRole('status', { name: 'Loading sessions' }).querySelectorAll('[data-slot="skeleton"]')).toHaveLength(18)
     } finally {
       vi.useRealTimers()
     }
@@ -152,7 +152,7 @@ describe('run rows', () => {
       }))
       render(<AppShell />)
 
-      const row = runList().getByRole('button', { name: 'Working · rewrite the checkout flow · 15 minutes ago · your run' })
+      const row = runList().getByRole('button', { name: 'Working · rewrite the checkout flow · 15 minutes ago · your session' })
       const age = within(row).getByText('15m')
       expect(age.getAttribute('dateTime')).toBe('2026-08-14T10:02:00Z')
       // No native tooltip; the exact time is the row's description and is in its details box.
@@ -167,7 +167,7 @@ describe('run rows', () => {
         vi.advanceTimersByTime(60_000)
       })
       expect(within(row).getByText('16m')).toBe(age)
-      expect(row.getAttribute('aria-label')).toMatch(/ · 16 minutes ago · your run$/)
+      expect(row.getAttribute('aria-label')).toMatch(/ · 16 minutes ago · your session$/)
     } finally {
       vi.useRealTimers()
     }
@@ -222,7 +222,7 @@ describe('run rows', () => {
       render(<AppShell />)
 
       expect(row().querySelector<HTMLElement>('[data-slot=owner-mark]')?.style.backgroundColor).toBe('rgb(60, 180, 75)')
-      expect(row().getAttribute('aria-label')).toContain(" · Bob's run · Vera controls")
+      expect(row().getAttribute('aria-label')).toContain(" · Bob's session · Vera controls")
     })
 
     it('stacks who is on the run with its controller in front, and counts past three', () => {
@@ -230,7 +230,7 @@ describe('run rows', () => {
       render(<AppShell />)
 
       expect(faces()).toEqual(['Bob', 'Alice', 'Vera'])
-      expect(row().getAttribute('aria-label')).toMatch(/ · your run · Vera controls · you and Bob watching$/)
+      expect(row().getAttribute('aria-label')).toMatch(/ · your session · Vera controls · you and Bob watching$/)
 
       act(() => useStore.getState().setPresence(on(bob, alice, vera, dan)))
       expect(faces()).toEqual(['Alice', 'Vera'])
@@ -313,10 +313,10 @@ describe('run rows', () => {
         act(() => {
           vi.advanceTimersByTime(400)
         })
-        const lines = () => [...within(details()!).getByText('On this run').parentElement!.children].map((line) => line.textContent)
+        const lines = () => [...within(details()!).getByText('On this session').parentElement!.children].map((line) => line.textContent)
 
         expect(lines()).toEqual([
-          'On this run',
+          'On this session',
           'Nobody is controllingMember 8 had control last',
           'MMember 8', 'MMember 0', 'MMember 1', 'MMember 2', 'MMember 3', 'MMember 4',
           'and 3 more',
@@ -324,7 +324,7 @@ describe('run rows', () => {
 
         act(() => useStore.getState().setPresence(on(...crowd.slice(0, 7))))
         expect(lines()).toEqual([
-          'On this run',
+          'On this session',
           'Nobody is controllingMember 8 had control last',
           ...crowd.slice(0, 7).map((member) => `M${member.display_name}`),
         ])
@@ -475,11 +475,11 @@ describe('workspace switcher', () => {
   it('shows the Needs you total closed and each workspace its own count', async () => {
     render(<AppShell />)
 
-    const trigger = nav().getByRole('button', { name: 'Workspace: main-repo, 2 runs need you' })
+    const trigger = nav().getByRole('button', { name: 'Workspace: main-repo, 2 sessions need you' })
     fireEvent.keyDown(trigger, { key: 'Enter' })
 
-    expect(await screen.findByRole('menuitemradio', { name: 'main-repo, 1 run needs you' })).toBeDefined()
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'docs-site, 1 run needs you' }))
+    expect(await screen.findByRole('menuitemradio', { name: 'main-repo, 1 session needs you' })).toBeDefined()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'docs-site, 1 session needs you' }))
     expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
   })
 
@@ -568,7 +568,7 @@ describe('phone shell', () => {
 
     expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
     const banner = within(topBanners()[0]!)
-    fireEvent.click(banner.getByRole('button', { name: 'Open sidebar, 2 runs need you' }))
+    fireEvent.click(banner.getByRole('button', { name: 'Open sidebar, 2 sessions need you' }))
 
     const drawer = within(await screen.findByRole('dialog', { name: 'Aether' }))
     fireEvent.click(drawer.getByRole('button', { name: 'Settings' }))
@@ -583,9 +583,9 @@ describe('phone shell', () => {
     render(<AppShell />)
 
     const banner = within(topBanners()[0]!)
-    expect(banner.getByText('Run')).toBeDefined()
+    expect(banner.getByText('Session')).toBeDefined()
     expect(banner.queryByText('answer the schema question')).toBeNull()
-    expect(banner.getByRole('button', { name: 'New run' }).textContent).toBe('')
+    expect(banner.getByRole('button', { name: 'New session' }).textContent).toBe('')
   })
 })
 

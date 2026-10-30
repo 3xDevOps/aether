@@ -5,7 +5,7 @@ import { dockerReachable } from './harness/server'
 import { expect, test } from './mobile'
 import { launchWaits, missing, showEvidence, spec, tasks, undelivered, unreadable } from './waits'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 test.use({ viewport: { width: 390, height: 844 } })
 
 test('a waiting run says what Aether last read on a phone', async ({ page, aether }) => {
@@ -24,7 +24,7 @@ test('a waiting run says what Aether last read on a phone', async ({ page, aethe
   await page.screenshot({ path: test.info().outputPath('phone-run-list.png'), fullPage: true })
 
   await page.getByRole('banner').getByRole('button', { name: /^Open sidebar/ }).click()
-  const sidebar = page.getByRole('dialog', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+  const sidebar = page.getByRole('dialog', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
   await expect(sidebar.getByRole('button', { name: new RegExp(`^Needs you · .*${tasks.broken}`) })).toBeVisible()
   await expect(sidebar.getByRole('button', { name: new RegExp(`${tasks.unknown} · Waiting on .*status unknown since`) })).toBeVisible()
   await page.screenshot({ path: test.info().outputPath('phone-sidebar.png') })

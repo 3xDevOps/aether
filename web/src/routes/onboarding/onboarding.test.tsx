@@ -57,7 +57,7 @@ const olderCaps: GatewayCapabilities = {
 }
 
 const chooserTimeout =
-  'the window held focus for the last 10s, so no chooser seems to have opened. Electron asks xdg-desktop-portal for the chooser when the portal offers one (version 4 or newer), kdialog on KDE when installed, and GTK otherwise; run the app from a terminal to see any error Electron prints'
+  'the window held focus for the last 10s, so no chooser seems to have opened. Electron asks xdg-desktop-portal for the chooser when the portal offers one (version 4 or newer), kdialog on KDE when installed, and GTK otherwise; session the app from a terminal to see any error Electron prints'
 
 const localTip = '9f1c2ab3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9'
 const workspaceTip = '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b'
@@ -178,7 +178,7 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
     const steps = within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')
-    expect(steps.map((step) => step.textContent)).toEqual(['1Connect', '2Repository', '3Agent', '4First run'])
+    expect(steps.map((step) => step.textContent)).toEqual(['1Connect', '2Repository', '3Agent', '4First session'])
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.queryByText(/Step \d of \d/)).toBeNull()
     expect(await screen.findByRole('region', { name: 'Connect' })).toBeDefined()
@@ -217,7 +217,7 @@ describe('onboarding wizard', () => {
 
     await toWorkspaceStep()
     const repository = await screen.findByRole('region', { name: 'Repository' })
-    expect(repository.textContent).toContain('A workspace is one repository and base branch, and the runs started from it.')
+    expect(repository.textContent).toContain('A workspace is one repository and base branch, and the sessions started from it.')
     expect(client.workspaceListFull).toHaveBeenCalled()
   })
 
@@ -343,9 +343,9 @@ describe('onboarding wizard', () => {
     expect(await view.findByRole('region', { name: 'Agent' })).toBeDefined()
     view.unmount()
 
-    seed({ onboardingStep: 'First run', onboardingFurthest: 'First run', onboardingWorkspace: '' })
+    seed({ onboardingStep: 'First session', onboardingFurthest: 'First session', onboardingWorkspace: '' })
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
-    const firstRun = await screen.findByRole('region', { name: 'First run' })
+    const firstRun = await screen.findByRole('region', { name: 'First session' })
     expect(firstRun.textContent).toContain('choose a workspace first')
     fireEvent.click(within(firstRun).getByRole('button', { name: 'Choose a repository' }))
     expect(currentStep()).toContain('Repository')
@@ -1032,7 +1032,7 @@ describe('onboarding wizard', () => {
     // The optional Agents step sits between Repository and First run.
     fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
     expect(
-      await screen.findByRole('region', { name: 'First run' }),
+      await screen.findByRole('region', { name: 'First session' }),
     ).toBeDefined()
   })
 
@@ -1053,7 +1053,7 @@ describe('onboarding wizard', () => {
     // Every line git printed, newlines kept - the user reads the real reason.
     const output = await screen.findByText(/remote rejected/)
     expect(output.textContent).toBe(refusal)
-    expect(screen.queryByRole('region', { name: 'First run' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'First session' })).toBeNull()
     // Both ways out survive the failure: retry, or run the command by hand.
     expect(screen.getByRole('button', { name: 'Push now' })).toBeDefined()
     expect(
@@ -1616,7 +1616,7 @@ describe('onboarding wizard', () => {
     // The optional Agents step sits between Repository and First run.
     fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
     expect(
-      await screen.findByRole('region', { name: 'First run' }),
+      await screen.findByRole('region', { name: 'First session' }),
     ).toBeDefined()
     expect(client.localRepoPush).not.toHaveBeenCalled()
   })
@@ -1641,8 +1641,8 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    const step = await screen.findByRole('region', { name: 'First run' })
-    expect(step.textContent).toContain('A run is one agent working on its own branch in its own container')
+    const step = await screen.findByRole('region', { name: 'First session' })
+    expect(step.textContent).toContain('A session is one agent working on its own branch in its own container')
     // The launch dialog's own fields, not a copy.
     expect(within(step).getByRole('radiogroup', { name: 'Agent' })).toBeDefined()
     fireEvent.click(within(step).getByRole('radio', { name: /^Claude Code/ }))
@@ -1780,7 +1780,7 @@ describe('onboarding wizard', () => {
     await toFirstRunStep()
 
     expect(
-      await within(await screen.findByRole('region', { name: 'First run' })).findByText('agent.list: environment home unreadable'),
+      await within(await screen.findByRole('region', { name: 'First session' })).findByText('agent.list: environment home unreadable'),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined()
     expect(screen.queryByText('No agent is installed yet')).toBeNull()
@@ -1798,9 +1798,9 @@ describe('onboarding wizard', () => {
     expect(useStore.getState().onboardingStep).toBe('Repository')
     // Everything already reached stays reachable, or a jump backwards would
     // strand the member on a step whose own Back is gone.
-    expect(useStore.getState().onboardingFurthest).toBe('First run')
-    fireEvent.click(within(steps).getByRole('button', { name: /First run/ }))
-    expect(await screen.findByRole('region', { name: 'First run' })).toBeDefined()
+    expect(useStore.getState().onboardingFurthest).toBe('First session')
+    fireEvent.click(within(steps).getByRole('button', { name: /First session/ }))
+    expect(await screen.findByRole('region', { name: 'First session' })).toBeDefined()
   })
 
   it('leaves a step it has never reached inert in the header', async () => {
@@ -1808,9 +1808,9 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
     const steps = screen.getByLabelText('Steps')
-    expect(within(steps).queryByRole('button', { name: /First run/ })).toBeNull()
+    expect(within(steps).queryByRole('button', { name: /First session/ })).toBeNull()
     expect(within(steps).getByRole('button', { name: /Repository, visited/ })).toBeDefined()
-    fireEvent.click(within(steps).getByText('First run'))
+    fireEvent.click(within(steps).getByText('First session'))
     expect(useStore.getState().onboardingStep).toBe('Connect')
     expect(await screen.findByRole('region', { name: 'Connect' })).toBeDefined()
   })
@@ -1885,7 +1885,7 @@ describe('onboarding wizard', () => {
     await screen.findByRole('region', { name: 'Repository' })
     fireEvent.click(
       within(steps).getByRole('button', {
-        name: /First run, .*go to this step/,
+        name: /First session, .*go to this step/,
       }),
     )
 

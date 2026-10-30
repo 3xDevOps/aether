@@ -35,7 +35,7 @@ var runHostLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 func RunHostID(host string) (string, error) {
 	id := strings.TrimSuffix(host, RunHostSuffix)
 	if !runHostLabel.MatchString(id) {
-		return "", fmt.Errorf("%q does not name a run: a run id holds only lowercase letters, digits and hyphens", host)
+		return "", fmt.Errorf("%q does not name a session: a session id holds only lowercase letters, digits and hyphens", host)
 	}
 	return id, nil
 }
@@ -60,7 +60,7 @@ func (c *Conn) RunSSH(runID string) (io.ReadWriteCloser, ssh.PublicKey, error) {
 	var ack protocol.RunSSHResponse
 	out, err := c.openStream(protocol.SubsystemRunSSH, nil, protocol.RunSSHRequest{RunID: runID}, "ssh", &ack)
 	if errors.Is(err, errSubsystemRefused) {
-		return nil, nil, errors.New("the server does not support ssh into a run; update aether-server")
+		return nil, nil, errors.New("the server does not support ssh into a session; update aether-server")
 	}
 	if err != nil {
 		return nil, nil, err
@@ -79,7 +79,7 @@ func (c *Conn) RunSSH(runID string) (io.ReadWriteCloser, ssh.PublicKey, error) {
 	}
 	if !c.verified(hostKey) {
 		_ = out.Close()
-		return nil, nil, fmt.Errorf("cli: the server named %s as the run's host key, which is not the key this link verified", ssh.FingerprintSHA256(hostKey))
+		return nil, nil, fmt.Errorf("cli: the server named %s as the session's host key, which is not the key this link verified", ssh.FingerprintSHA256(hostKey))
 	}
 	return out, hostKey, nil
 }
@@ -198,7 +198,7 @@ func InstallSSHConfig() (SSHConfigResult, error) {
 	if slices.Contains(strings.Split(strings.ReplaceAll(string(existing), "\r\n", "\n"), "\n"), include) {
 		return out, nil
 	}
-	updated := "# Aether runs as ssh hosts: <run-id>" + RunHostSuffix + " (aether ssh-config)\n" + include + "\n"
+	updated := "# Aether sessions as ssh hosts: <session-id>" + RunHostSuffix + " (aether ssh-config)\n" + include + "\n"
 	if len(existing) > 0 {
 		updated += "\n" + string(existing)
 	}

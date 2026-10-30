@@ -19,7 +19,7 @@ import (
 // fits the run socket's 64 KiB request limit.
 const MaxTaskBytes = 24 << 10
 
-const startNext = "The child's report arrives in your inbox and wakes you: end your turn or report waiting --for agents. Do not poll it."
+const startNext = "The subsession's report arrives in your inbox and wakes you: end your turn or report waiting --for agents. Do not poll it."
 
 // Capabilities are the child methods run may call now.
 func (s *Service) Capabilities(ctx context.Context, run domain.RunID) ([]string, error) {
@@ -64,7 +64,7 @@ func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method stri
 			return nil, perr
 		}
 		if c.Detached {
-			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: child %s is detached from run %s and runs on its own", method, c.RunID, run)}
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: subsession %s is detached from session %s and runs on its own", method, c.RunID, run)}
 		}
 		if method == protocol.MethodChildCancel {
 			return s.cancelChild(ctx, c)
@@ -131,7 +131,7 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 	case req.Purpose == "":
 		return protocol.ChildReceipt{}, invalid("purpose is required: 3-8 words the dashboard shows")
 	case strings.TrimSpace(req.Task) == "":
-		return protocol.ChildReceipt{}, invalid("task is required: the child sees only this text")
+		return protocol.ChildReceipt{}, invalid("task is required: the subsession sees only this text")
 	case len(req.Task) > MaxTaskBytes:
 		return protocol.ChildReceipt{}, invalid("task exceeds %d bytes", MaxTaskBytes)
 	case req.IdempotencyKey == "" || len(req.IdempotencyKey) > protocol.CoordMaxIdempotencyKeyBytes || strings.ContainsAny(req.IdempotencyKey, "\x00\r\n"):
@@ -207,7 +207,7 @@ func requestHash(req protocol.ChildStartParams) string {
 }
 
 func idempotencyConflict(key string) *protocol.Error {
-	return &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("child.start: idempotency key %q already started a different child; use a new key", key)}
+	return &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("child.start: idempotency key %q already started a different subsession; use a new key", key)}
 }
 
 func (s *Service) receipt(ctx context.Context, c *domain.ChildReservation, err error) (protocol.ChildReceipt, error) {
@@ -220,7 +220,7 @@ func (s *Service) receipt(ctx context.Context, c *domain.ChildReservation, err e
 	}
 	next := startNext
 	if child.State == protocol.ChildQueued {
-		next = "Queued until one of this run's children finishes (aether-internal child options shows the limits). " + next
+		next = "Queued until one of this session's subsessions finishes (aether-internal subsession options shows the limits). " + next
 	}
 	return protocol.ChildReceipt{Child: child, Next: next}, nil
 }
@@ -273,7 +273,7 @@ func (s *Service) list(ctx context.Context, run domain.RunID, req protocol.Child
 func (s *Service) ownChild(ctx context.Context, run domain.RunID, id, method string) (*domain.ChildReservation, *protocol.Error) {
 	c, err := s.cfg.Store.GetChild(ctx, domain.RunID(id))
 	if errors.Is(err, store.ErrNotFound) || (err == nil && c.ParentRunID != run) {
-		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: run %s is not a child of run %s", method, id, run)}
+		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: session %s is not a subsession of session %s", method, id, run)}
 	}
 	if err != nil {
 		return nil, rpcErr(method, err)
@@ -291,7 +291,7 @@ func (s *Service) cancelChild(ctx context.Context, c *domain.ChildReservation) (
 		return protocol.Child{}, rpcErr(protocol.MethodChildCancel, err)
 	}
 	if fresh.Detached {
-		return protocol.Child{}, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: child %s is detached and runs on its own", protocol.MethodChildCancel, c.RunID)}
+		return protocol.Child{}, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: subsession %s is detached and runs on its own", protocol.MethodChildCancel, c.RunID)}
 	}
 	if err := s.stop(ctx, fresh); err != nil {
 		return protocol.Child{}, rpcErr(protocol.MethodChildCancel, err)
@@ -318,7 +318,7 @@ func (s *Service) stop(ctx context.Context, c *domain.ChildReservation) error {
 	case domain.ChildLaunching, domain.ChildStarted:
 		r, err := s.cfg.Store.GetRun(ctx, c.RunID)
 		if errors.Is(err, store.ErrNotFound) {
-			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("child %s is starting; cancel it again in a few seconds", c.RunID)}
+			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("subsession %s is starting; cancel it again in a few seconds", c.RunID)}
 		}
 		if err == nil && r.Status.Terminal() {
 			return nil
@@ -334,7 +334,7 @@ func (s *Service) stop(ctx context.Context, c *domain.ChildReservation) error {
 func (s *Service) fetch(ctx context.Context, c *domain.ChildReservation) (protocol.ChildFetchResult, error) {
 	const method = protocol.MethodChildFetch
 	if c.State != domain.ChildStarted {
-		return protocol.ChildFetchResult{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("%s: child %s has not started", method, c.RunID)}
+		return protocol.ChildFetchResult{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("%s: subsession %s has not started", method, c.RunID)}
 	}
 	r, err := s.cfg.Store.GetRun(ctx, c.RunID)
 	if err != nil {
@@ -344,10 +344,10 @@ func (s *Service) fetch(ctx context.Context, c *domain.ChildReservation) (protoc
 	// it ended.
 	if !r.Status.Terminal() {
 		if _, err = s.cfg.Git.PublishRunBranch(ctx, c.RunID); err != nil {
-			return protocol.ChildFetchResult{}, rpcErr(method, fmt.Errorf("publish the child's branch: %w", err))
+			return protocol.ChildFetchResult{}, rpcErr(method, fmt.Errorf("publish the subsession's branch: %w", err))
 		}
 	}
-	ref := "refs/remotes/children/" + string(c.RunID)
+	ref := "refs/remotes/subsessions/" + string(c.RunID)
 	commit, err := s.cfg.Git.FetchRunBranch(ctx, r.WorkspaceID, r.Branch, c.ParentRunID, ref)
 	if err != nil {
 		return protocol.ChildFetchResult{}, rpcErr(method, err)

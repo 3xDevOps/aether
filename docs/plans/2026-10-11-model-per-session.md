@@ -1,12 +1,12 @@
-# Choose the model for a run
+# Choose the model for a session
 
 **Status:** Planned.
 
-**Goal:** Whoever launches a run picks the agent's model: from the New run
+**Goal:** Whoever launches a session picks the agent's model: from the New session
 dialog, a swarm, a template or the CLI. The choice survives a reopen, a
 resume, a mode switch and a recovery relaunch.
 
-A **run** is one agent working in one container on a workspace's code. Its
+A **session** is one agent working in one container on a workspace's code. Its
 **harness** is the agent CLI it runs (Claude Code, Codex, pi, oh-my-pi,
 OpenCode), described by a harness profile in `internal/harness/harness.go`.
 A **Standard** run drives that CLI in a terminal; a **Background** run starts
@@ -18,7 +18,7 @@ runs for them. A **template** is a saved launch.
 ## 1. Today
 
 Nobody picks a model at launch. The only control is the composer menu of an
-Enhanced run after it has started (`run.acp.set_option` →
+Enhanced session after it has started (`run.acp.set_option` →
 `session/set_model`), and reopening the session does not re-apply it. A
 swarm cannot say "Opus for the integrator, a cheap model for workers".
 Templates and the CLI have no model.
@@ -32,8 +32,8 @@ Templates and the CLI have no model.
 2. `domain.ValidModel` accepts empty, or at most 128 bytes with no
    whitespace or control characters and no leading `-`. Anything else is the
    agent's business: it reports a bad model and Aether shows that error.
-3. The model is set in the New run dialog, the Swarm tab, templates,
-   `aether run --model`, `aether swarm create --model`,
+3. The model is set in the New session dialog, the Swarm tab, templates,
+   `aether session --model`, `aether swarm create --model`,
    `--worker agent[:mode[:model]]`, `aether template save --model` and
    `aether-internal worker start --model`.
 4. Model is part of a swarm's execution choice. The tuple becomes
@@ -43,7 +43,7 @@ Templates and the CLI have no model.
    CLI flag. The flag goes before the task prompt in argv, so a CLI that stops
    parsing options at the prompt still reads it; a resume command has no
    task, so the flag is appended.
-6. An Enhanced run sets the model after the session opens, where the
+6. An Enhanced session sets the model after the session opens, where the
    starting mode is set today (`sess.SetMode` in
    `internal/scheduler/acp_driver.go`). It uses the agent's native `model`
    config option when advertised, else `session/set_model`. A failure is an
@@ -54,9 +54,9 @@ Templates and the CLI have no model.
    keeps that agent's model flag, because it runs the same CLI.
 8. The model is re-applied on reopen of an Enhanced session, on resume, on a
    Standard↔Enhanced switch (the resume argv) and on a recovery relaunch of
-   a swarm run. A model picked from the composer menu updates the run's
+   a swarm run. A model picked from the composer menu updates the session's
    recorded model (`SetRunModel`), so a reopen keeps it.
-9. The run header shows the model next to the agent and mode.
+9. The session header shows the model next to the agent and mode.
 
 ## 3. Per-agent flags
 
@@ -74,7 +74,7 @@ Each row was read from the installed CLI's help on 2026-10-11.
 OpenCode reads `OPENCODE_CONFIG_CONTENT` on every launch, and `opencode acp`
 reads nothing else for a model, so every opencode launch merges the `model`
 key into it with `harness.MergeEnv`. The launch-level value is merged after
-the workspace's variables, so an explicit per-run model wins over a
+the workspace's variables, so an explicit per-session model wins over a
 workspace default.
 
 ## 4. Where the model lives
@@ -136,7 +136,7 @@ task placeholder; with no task it appends them.
 ### Scheduler
 
 `command()` refuses a model for a profile without `ModelArgs` and assembles
-argv and env. The resume argv in `mode_switch.go` carries the run's model.
+argv and env. The resume argv in `mode_switch.go` carries the session's model.
 The ACP driver sets the model after open and posts a failure notice.
 `ACPSetOption` records the model the composer picked.
 
@@ -152,20 +152,20 @@ recovery relaunches with it.
 
 ### CLI
 
-`aether run --model`, `aether template save --model`,
+`aether session --model`, `aether template save --model`,
 `aether swarm create --model` for the integrator,
 `--worker agent[:mode[:model]]`, and `aether-internal worker start --model`.
 
 ### Dashboard
 
-A **Model** field beside Mode in New run, remembered per agent like Mode:
+A **Model** field beside Mode in New session, remembered per agent like Mode:
 the persisted `launchDefaults` entry becomes `{mode, model, at}`. A model
 per integrator and per worker row in the Swarm tab. A Model field in the
-template editor. The model in the run header.
+template editor. The model in the session header.
 
 ### Docs
 
-`docs/harnesses.md` (the flag table), `docs/enhanced-runs.md`,
+`docs/harnesses.md` (the flag table), `docs/enhanced-sessions.md`,
 `docs/dashboard-frontend.md`, `docs/teams.md`, `docs/coordination.md`,
 `docs/local-gateway.md`, `docs/testing.md`.
 
@@ -179,7 +179,7 @@ template editor. The model in the run header.
 - Mission: tuple tests for choice match, dedup, receipt comparison and
   recovery staleness, with two choices that differ only in model.
 - Store: v59 round trip, and a pre-v59 receipt that still matches.
-- Web: one test per new field (New run, Swarm row, template editor).
+- Web: one test per new field (New session, Swarm row, template editor).
 
 ## 8. Out of scope
 
@@ -187,4 +187,4 @@ template editor. The model in the run header.
 - Validating a model against what the agent advertises.
 - Model flags for custom definitions.
 - Effort and reasoning settings; see
-  [effort-per-run](2026-10-27-effort-per-run.md).
+  [effort-per-session](2026-10-27-effort-per-session.md).

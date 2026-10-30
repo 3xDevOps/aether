@@ -43,7 +43,7 @@ func TestTerminalReportsAreNotTyping(t *testing.T) {
 		"APC string":            "\x1b_Gi=1;OK\x1b\\",
 		"empty paste":           "\x1b[200~\x1b[201~",
 		"focus out then in":     "\x1b[O\x1b[I",
-		"wheel over a run":      "\x1b[<64;1;1M\x1b[<64;1;1M\x1b[<64;1;1M",
+		"wheel over a session":  "\x1b[<64;1;1M\x1b[<64;1;1M\x1b[<64;1;1M",
 		"reports back to back":  "\x1b[I\x1b[?1;2c\x1b]11;rgb:0000/0000/0000\x07\x1b[<64;9;9M\x1b[O",
 	}
 	for name, seq := range reports {

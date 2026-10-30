@@ -95,9 +95,9 @@ export function FirstRunStep({
   if (!workspace) {
     return (
       <Step
-        label="First run"
-        title="Start your first run"
-        lead="A run is one agent working on its own branch in its own container. It starts from a workspace's base branch, so choose a workspace first."
+        label="First session"
+        title="Start your first session"
+        lead="A session is one agent working on its own branch in its own container. It starts from a workspace's base branch, so choose a workspace first."
         actions={<><Button onClick={onBackToRepository}>Choose a repository</Button><Button variant="secondary" onClick={goToBoard}>Go to board</Button>{back}</>}
       />
     )
@@ -134,9 +134,9 @@ export function FirstRunStep({
 
   return (
     <Step
-      label="First run"
-      title="Start your first run"
-      lead={<>A run is one agent working on its own branch in its own container, starting from <Code>{workspace.base_branch}</Code> in {workspace.name}.</>}
+      label="First session"
+      title="Start your first session"
+      lead={<>A session is one agent working on its own branch in its own container, starting from <Code>{workspace.base_branch}</Code> in {workspace.name}.</>}
       actions={
         <>
           {noAgents ? (
@@ -156,7 +156,7 @@ export function FirstRunStep({
       }
     >
       {!launchable && (
-        <Callout tone="neutral">Your membership or this gateway cannot launch runs. Ask an administrator for launch access; you can still prepare your account.</Callout>
+        <Callout tone="neutral">Your membership or this gateway cannot launch sessions. Ask an administrator for launch access; you can still prepare your account.</Callout>
       )}
       {source.error && (
         <Callout
@@ -176,7 +176,7 @@ export function FirstRunStep({
       )}
       {noAgents ? (
         <Callout tone="neutral" title="No agent is installed yet">
-          A run starts an agent, and your environment has none. Set one up, then come back here.
+          A session starts an agent, and your environment has none. Set one up, then come back here.
         </Callout>
       ) : (
         <div className="flex min-w-0 flex-col gap-4">
@@ -186,14 +186,14 @@ export function FirstRunStep({
       {error && <Callout tone="failed" role="alert" title="Launch failed" className="whitespace-pre-wrap">{error}</Callout>}
       {!noAgents && (
         <p className="text-ui-sm text-muted">
-          After Launch the run starts its container, pulls the image the first time this server uses it, then starts the agent (about 5 s in Enhanced).
+          After Launch the session starts its container, pulls the image the first time this server uses it, then starts the agent (about 5 s in Enhanced).
         </p>
       )}
       {caps.hasMethod('connector.list') && (
         <p className="text-ui-sm text-muted">
           Optional:{' '}
           <Button variant="link" size="sm" onClick={() => navigate('settings', { section: CONNECTORS_SECTION_ID })}>Finish setup and connect ChatGPT or Claude</Button>
-          {' '}to launch runs and answer agents from a chat, on your phone too. Settings has it any time.
+          {' '}to launch sessions and answer agents from a chat, on your phone too. Settings has it any time.
         </p>
       )}
     </Step>

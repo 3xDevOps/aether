@@ -148,7 +148,7 @@ example:
 	"sysbox": `usage: aether-server sysbox status
        aether-server sysbox install
 
-report or install the Sysbox runtime that lets runs start their own Docker daemon
+report or install the Sysbox runtime that lets sessions start their own Docker daemon
 
 example:
   sudo aether-server sysbox install
@@ -176,7 +176,7 @@ commands:
   serve    run the server
   install  write the systemd unit and the config file (same options as serve)
   setup    walk through the install interactively
-  sysbox   status | install: let runs start their own Docker daemon
+  sysbox   status | install: let sessions start their own Docker daemon
   config   show | path | set <key> <value> | edit
   update   [--version <tag>]: replace the server and aether binaries and restart the service
   edge     status | claim-code | trust | leave
@@ -251,30 +251,30 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.edgeReviewer = fs.Bool("edge-reviewer", false,
 		"let a connector authorized by the edge's reviewer account, for an app directory's review, act as the member an admin binds it to "+
 			"with aether member link --reviewer; needs edge-access account; changed only on this host")
-	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
+	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping sessions exchange coordination messages")
 	o.agentUpdate = fs.Bool("agent-update", true, "update a shipped agent installed in the member home before launching it")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
-		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
+		"how long a session may go with no output and no file changes before it parks needs-attention (0 = 10m)")
 	o.firstEventGrace = fs.Duration("first-event-grace", 0,
 		"how long an Enhanced turn may wait for the agent's first update before it parks as a possible stall, at most -stall-threshold (0 = 3m)")
 	o.streamQuietGrace = fs.Duration("stream-quiet-grace", 0,
 		"how long an Enhanced turn with no tool running may go without agent progress before it parks as a possible stall, at most -stall-threshold (0 = 5m)")
 	o.pollInterval = fs.Duration("poll-interval", 0, "how often stalls are checked (0 = 30s)")
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
-		"how long a finished run's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
+		"how long a finished session's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
-		"how long explicitly closed Standard and Enhanced run containers are retained (0 = 168h, negative = no retention)")
+		"how long explicitly closed Standard and Enhanced session containers are retained (0 = 168h, negative = no retention)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"free-byte reserve on data/runtime filesystems (0 = automatic 5-20GiB, negative = disable disk admission)")
 	o.runCPUs = new(runCPUValue)
-	fs.Var(o.runCPUs, "run-cpus", "CPU ceiling per run/member environment (0 = automatic, up to 8 host CPUs)")
+	fs.Var(o.runCPUs, "run-cpus", "CPU ceiling per session/member environment (0 = automatic, up to 8 host CPUs)")
 	o.runMemory = new(runCountValue)
-	fs.Var(o.runMemory, "run-memory", "memory ceiling in bytes per run/member environment (0 = automatic 8GiB)")
+	fs.Var(o.runMemory, "run-memory", "memory ceiling in bytes per session/member environment (0 = automatic 8GiB)")
 	o.runPids = new(runCountValue)
-	fs.Var(o.runPids, "run-pids", "process ceiling per run/member environment (0 = automatic 4096)")
+	fs.Var(o.runPids, "run-pids", "process ceiling per session/member environment (0 = automatic 4096)")
 	o.containerRuntime = fs.String("container-runtime", server.DefaultContainerRuntime,
 		"OCI runtime for run and member environment containers: auto uses sysbox-runc when Docker has it registered "+
-			"(Docker inside runs without --privileged), otherwise the daemon default; any other value is used as given, e.g. runc to opt out")
+			"(Docker inside sessions without --privileged), otherwise the daemon default; any other value is used as given, e.g. runc to opt out")
 	return o
 }
 

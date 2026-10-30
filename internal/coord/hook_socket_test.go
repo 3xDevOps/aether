@@ -155,7 +155,7 @@ func TestHookWaitFullFramePrecedesLateConsumerWithoutBlockingOtherRuns(t *testin
 	select {
 	case reply := <-consume(a):
 		if reply.err != nil || len(reply.result.Messages) != 1 || reply.result.AckToken == "" {
-			t.Fatalf("other run consumer = %+v", reply)
+			t.Fatalf("other session consumer = %+v", reply)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("stalled wake frame held the global service boundary")

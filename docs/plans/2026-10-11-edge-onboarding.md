@@ -62,7 +62,7 @@ As found in the code:
 3. **A pending device is an event.** The server publishes `member.device`
    on the event stream when a device is recorded pending, approved or
    revoked, and the dashboard keeps its device list current from it. Needs
-   you gains a card that is not a run, with **Approve** and **Deny**:
+   you gains a card that is not a session, with **Approve** and **Deny**:
 
    | Viewer | Device | Card |
    | --- | --- | --- |
@@ -168,7 +168,7 @@ As found in the code:
 
 Admin:
 
-1. Runs `sudo aether-server setup`, chooses the access policy, and sees the
+1. Sessions `sudo aether-server setup`, chooses the access policy, and sees the
    claim link and the `aether link --claim <code>` line.
 2. Opens the link on their computer, which opens the desktop app at the
    claim; without the app, they paste the link or run the
@@ -182,7 +182,7 @@ Admin:
 Admin, on a tailnet, SSH key or approved-device connection:
 
 1. Opens Settings › Remote access, which shows the edge, server id, policy
-   and `owner: none`, and clicks **Connect my GitHub account**; or runs
+   and `owner: none`, and clicks **Connect my GitHub account**; or sessions
    `aether edge connect`.
 2. Signs in with GitHub if needed. The app mints the code with
    `server.edge.claimcode` and claims with it. The account is bound to
@@ -192,7 +192,7 @@ Admin, on a tailnet, SSH key or approved-device connection:
 
 Admin:
 
-1. Runs `aether invite --github <login> --role <role>`, or uses Members ›
+1. Sessions `aether invite --github <login> --role <role>`, or uses Members ›
    Invite. A server the edge has not recorded refuses and names decision 5.
 2. Sees the join link and the server id, and sends the link.
 

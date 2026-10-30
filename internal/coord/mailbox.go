@@ -312,7 +312,7 @@ func (s *Service) Reply(ctx context.Context, from domain.RunID, p protocol.Coord
 	if _, serr := s.cfg.Store.GetRun(ctx, from); serr != nil {
 		if errors.Is(serr, store.ErrNotFound) {
 			return protocol.CoordReplyResult{}, &protocol.Error{
-				Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown run %s", method, from),
+				Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: unknown session %s", method, from),
 			}
 		}
 		return protocol.CoordReplyResult{}, internalError(method, serr)
@@ -320,7 +320,7 @@ func (s *Service) Reply(ctx context.Context, from domain.RunID, p protocol.Coord
 	if question.ToRun != from {
 		return protocol.CoordReplyResult{}, &protocol.Error{
 			Code:    protocol.CodeDenied,
-			Message: fmt.Sprintf("%s: question %s is not addressed to run %s", method, p.QuestionID, from),
+			Message: fmt.Sprintf("%s: question %s is not addressed to session %s", method, p.QuestionID, from),
 		}
 	}
 	if question.FromRun == "" || question.FromRun == from {
@@ -423,7 +423,7 @@ func (s *Service) resolveRun(ctx context.Context, method string, run domain.RunI
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, &protocol.Error{
 			Code:    protocol.CodeNotFound,
-			Message: fmt.Sprintf("%s: unknown run %s", method, run),
+			Message: fmt.Sprintf("%s: unknown session %s", method, run),
 		}
 	}
 	if err != nil {
@@ -541,7 +541,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if errors.Is(err, store.ErrCoordReportConflict) ||
 		errors.Is(err, store.ErrCoordReportIdempotencyConflict) ||
 		errors.Is(err, store.ErrCoordReportSuperseded) {
-		message := fmt.Sprintf("%s: run %s already reported success or failure under another idempotency key", method, run)
+		message := fmt.Sprintf("%s: session %s already reported success or failure under another idempotency key", method, run)
 		switch {
 		case errors.Is(err, store.ErrCoordReportIdempotencyConflict):
 			message = fmt.Sprintf("%s: idempotency_key %q was used with different report inputs", method, p.IdempotencyKey)
@@ -699,17 +699,17 @@ func (s *Service) enqueueChildReport(ctx context.Context, report *store.CoordRep
 	}
 	recipient, err := s.cfg.Children.ReportRecipient(ctx, report.RunID)
 	if err != nil {
-		return fmt.Errorf("child report recipient: %w", err)
+		return fmt.Errorf("subsession report recipient: %w", err)
 	}
 	if recipient == "" {
 		return nil
 	}
 	target, err := s.cfg.Store.GetRun(ctx, recipient)
 	if err != nil {
-		return fmt.Errorf("child report parent: %w", err)
+		return fmt.Errorf("subsession report parent: %w", err)
 	}
 	if target == nil || target.WorkspaceID != report.WorkspaceID || target.ID == report.RunID {
-		return errors.New("child report parent is outside the reporting child's workspace")
+		return errors.New("subsession report parent is outside the reporting subsession's workspace")
 	}
 	msg := &store.RunMessage{
 		WorkspaceID: report.WorkspaceID, FromRun: report.RunID, ToRun: target.ID,
@@ -717,11 +717,11 @@ func (s *Service) enqueueChildReport(ctx context.Context, report *store.CoordRep
 		IdempotencyKey: "coord-report-" + string(report.Outcome) + ":" + report.ID + ":" + string(target.ID),
 	}
 	if err = s.cfg.Mail.RetireProvisionalReports(ctx, report.RunID, target.ID, report.CreatedAt); err != nil {
-		return fmt.Errorf("enqueue child report: %w", err)
+		return fmt.Errorf("enqueue subsession report: %w", err)
 	}
 	created, err := appendRunMessage(ctx, s.cfg.Mail, msg)
 	if err != nil {
-		return fmt.Errorf("enqueue child report: %w", err)
+		return fmt.Errorf("enqueue subsession report: %w", err)
 	}
 	if created {
 		s.wakeInbox(target.ID)
@@ -1113,7 +1113,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 	if target.Status.Terminal() {
 		return nil, "", &protocol.Error{
 			Code:    protocol.CodeUnavailable,
-			Message: fmt.Sprintf("%s: run %s has finished", method, to),
+			Message: fmt.Sprintf("%s: session %s has finished", method, to),
 		}
 	}
 	if !correlated {
@@ -1135,7 +1135,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 	if errors.Is(err, store.ErrInboxFull) {
 		return nil, "", &protocol.Error{
 			Code: protocol.CodeConflict,
-			Message: fmt.Sprintf("%s: run %s inbox is full (%d unacknowledged messages)",
+			Message: fmt.Sprintf("%s: session %s inbox is full (%d unacknowledged messages)",
 				method, to, protocol.CoordMaxUnread),
 		}
 	}
@@ -1170,7 +1170,7 @@ func validateMessageParams(method string, from, to domain.RunID, body, key strin
 	case to == "":
 		return invalidParams(method, "to_run_id is required")
 	case to == from:
-		return invalidParams(method, "a run cannot message itself")
+		return invalidParams(method, "a session cannot message itself")
 	case body == "":
 		return invalidParams(method, "body is required")
 	case len(body) > protocol.CoordMaxBodyBytes:

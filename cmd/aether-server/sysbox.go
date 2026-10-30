@@ -21,7 +21,7 @@ var (
 
 const sysboxManual = "sudo aether-server sysbox install"
 
-const sysboxNeedsDocker = "Skipping Docker inside runs (Sysbox), which needs Docker; once Docker answers: " + sysboxManual
+const sysboxNeedsDocker = "Skipping Docker inside sessions (Sysbox), which needs Docker; once Docker answers: " + sysboxManual
 
 // sysboxOn reports whether Docker already has Sysbox. A Docker that cannot
 // be asked counts as off so the installer reports the real problem.
@@ -44,11 +44,11 @@ func installSysbox(w io.Writer) {
 	switch {
 	case err == nil:
 	case errors.As(err, &detached):
-		_, _ = fmt.Fprintf(w, "Stopped waiting for Sysbox: %v\nOnce it has, check Docker inside runs with: aether-server sysbox status\n", err)
+		_, _ = fmt.Fprintf(w, "Stopped waiting for Sysbox: %v\nOnce it has, check Docker inside sessions with: aether-server sysbox status\n", err)
 	case errors.As(err, &unsupported):
-		_, _ = fmt.Fprintf(w, "Docker inside runs is unavailable on this host: %s\n", unsupported.Reason)
+		_, _ = fmt.Fprintf(w, "Docker inside sessions is unavailable on this host: %s\n", unsupported.Reason)
 	default:
-		_, _ = fmt.Fprintf(w, "Docker inside runs is not installed: %v\nInstall it later with: %s\n", err, sysboxManual)
+		_, _ = fmt.Fprintf(w, "Docker inside sessions is not installed: %v\nInstall it later with: %s\n", err, sysboxManual)
 	}
 }
 

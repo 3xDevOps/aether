@@ -20,7 +20,7 @@ const turnEnds: Record<string, string> = {
 
 // Phases as stalledReason writes them, dashes spaced: domain.TurnPhase in internal/domain/liveness.go.
 const stallPhases: Record<string, string> = {
-  setup: 'while the run was starting',
+  setup: 'while the session was starting',
   'awaiting first event': "while awaiting the model's first reply",
   streaming: 'since the agent last replied',
   'tool running': 'while a tool was running',
@@ -28,7 +28,7 @@ const stallPhases: Record<string, string> = {
   'between turns': 'between turns',
 }
 
-const savedResults = "the worker's saved results"
+const savedResults = "the subsession's saved results"
 
 const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^(.*); retained container$/, (rest) => plainReason(rest)],
@@ -39,6 +39,7 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^enhanced session ended: (.*)$/s, (why) => `Agent disconnected: ${why}`],
   [/^enhanced turn failed: (.*)$/s, (why) => `Turn failed: ${why}`],
   [/^agent exited (-?\d+)(.*)$/s, (code, rest) => `Agent exited with code ${code}${rest}`],
+  [/^worker finished$/, () => 'Subsession finished'],
   [/^closed$/, () => 'Closed'],
   [/^killed$/, () => 'Stopped'],
   [/^retained container expired$/, () => 'Its container was removed when it expired'],
@@ -47,8 +48,8 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^server restarted: container exited (-?\d+)$/, (code) => `Its container had stopped with exit code ${code} when the server restarted`],
   [/^(?:agent idle|turn ended without a report)$/, () => 'Turn ended without a report'],
   [/^no update for ([^\s:]+)(: .*)?$/s, (span, summary = '') => `No update for ${span}${summary}`],
-  [/^waiting for (\d+) (?:worker|child run)(s?)$/, (count, plural) => `Waiting for ${count} child run${plural}`],
-  [/^(\d+) unread (?:worker|child) message(s?)$/, (count, plural) => `${count} unread child message${plural}`],
+  [/^waiting for (\d+) (?:worker|child run)(s?)$/, (count, plural) => `Waiting for ${count} subsession${plural}`],
+  [/^(\d+) unread (?:worker|child) message(s?)$/, (count, plural) => `${count} unread subsession message${plural}`],
   [/^agent resumed$/, () => 'Agent resumed'],
   [/^agent failed$/, () => 'Agent failed'],
   [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
@@ -63,7 +64,7 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^send the task to the agent: (.*)$/s, (err) => `Could not send the task to the agent: ${err}`],
   [/^review retained evidence$/, () => `Review ${savedResults}`],
   [/^resolve the blocker using the retained evidence$/, () => `Resolve the blocker using ${savedResults}`],
-  [/^retained evidence (?:is )?unavailable(.*)$/s, (rest) => `The worker's saved results are unavailable${rest}`],
+  [/^retained evidence (?:is )?unavailable(.*)$/s, (rest) => `The subsession's saved results are unavailable${rest}`],
 ]
 
 export function plainReason(reason: string): string {

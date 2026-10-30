@@ -148,8 +148,8 @@ func TestAssistantTools(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	for _, name := range []string{"aether_needs_attention", "aether_answer", "aether_decide_approval",
-		"aether_run_changes", "aether_pr_status", "aether_overlaps", "aether_activity_summary", "aether_run_history", "aether_docs", "aether_view_context",
-		"aether_usage", "aether_environment_status", "aether_save_environment", "aether_stop_run"} {
+		"aether_session_changes", "aether_pr_status", "aether_overlaps", "aether_activity_summary", "aether_session_history", "aether_docs", "aether_view_context",
+		"aether_usage", "aether_environment_status", "aether_save_environment", "aether_stop_session"} {
 		if !slices.Contains(names, name) {
 			t.Errorf("the assistant does not offer %s: %v", name, names)
 		}
@@ -160,21 +160,21 @@ func TestAssistantTools(t *testing.T) {
 
 	// Reads pass the socket's tiers unconfirmed, bounded, with links and
 	// what others wrote under untrusted.
-	_, out := callOK(t, cs, "aether_list_runs", nil)
+	_, out := callOK(t, cs, "aether_list_sessions", nil)
 	row := out["runs"].([]any)[0].(map[string]any)
 	if row["url"] != "https://aether.example/?run=run-1" || strings.Contains(trustedJSON(t, out), injection) {
-		t.Fatalf("aether_list_runs = %v", out)
+		t.Fatalf("aether_list_sessions = %v", out)
 	}
 	for _, c := range []struct {
 		name string
 		args map[string]any
 	}{
 		{"aether_needs_attention", nil},
-		{"aether_run_changes", map[string]any{"run_id": "run-1"}},
+		{"aether_session_changes", map[string]any{"run_id": "run-1"}},
 		{"aether_pr_status", map[string]any{"run_id": "run-1"}},
 		{"aether_overlaps", nil},
 		{"aether_activity_summary", map[string]any{"period": "week"}},
-		{"aether_run_history", map[string]any{"run_id": "run-1"}},
+		{"aether_session_history", map[string]any{"run_id": "run-1"}},
 		{"aether_changes", nil},
 		{"aether_launch_options", map[string]any{"workspace_id": "ws-1"}},
 	} {
@@ -184,7 +184,7 @@ func TestAssistantTools(t *testing.T) {
 		}
 	}
 	if got := rpc.called(protocol.MethodTerminalHistory); len(got) != 1 {
-		t.Fatalf("aether_run_history of a TUI run called terminal.history %v", got)
+		t.Fatalf("aether_session_history of a TUI session called terminal.history %v", got)
 	}
 	if len(confirmed) != 0 {
 		t.Fatalf("reads asked for approval: %+v", confirmed)
@@ -193,7 +193,7 @@ func TestAssistantTools(t *testing.T) {
 	// Confirmed ops ask once per action, naming the target and its owner.
 	callOK(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-1", "answer_id": "req-1", "decision": "allow", "action": "Run git push"})
 	want := []string{
-		`Allow once run run-1's request ("Fix login ` + injection + `"), owned by Grace: "Run git push", choosing "Allow once"`,
+		`Allow once session run-1's request ("Fix login ` + injection + `"), owned by Grace: "Run git push", choosing "Allow once"`,
 	}
 	if len(confirmed) != 1 || confirmed[0].Summary != want[0] || !confirmed[0].OtherMember {
 		t.Fatalf("confirmations = %+v, want %q", confirmed, want)
@@ -201,8 +201,8 @@ func TestAssistantTools(t *testing.T) {
 
 	// A keyless message retried delivers once: both calls carry one key.
 	msg := map[string]any{"run_id": "run-1", "message": "use postgres"}
-	callOK(t, cs, "aether_message_run", msg)
-	_, out = callOK(t, cs, "aether_message_run", msg)
+	callOK(t, cs, "aether_message_session", msg)
+	_, out = callOK(t, cs, "aether_message_session", msg)
 	sent := rpc.called(protocol.MethodRunInject)
 	if len(sent) != 2 || sent[0] != sent[1] || !strings.Contains(sent[0], out["idempotency_key"].(string)) || out["write"] != "done" {
 		t.Fatalf("a retried message sent %v, result %v; want one idempotency key", sent, out)

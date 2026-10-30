@@ -66,7 +66,7 @@ func TestTermSizeDefaultsWhenNoConsole(t *testing.T) {
 }
 func TestAttachShellFlagUsage(t *testing.T) {
 	err := runAttach([]string{"--shell"})
-	if err == nil || err.Error() != "flag needs an argument: -shell\nusage: aether attach [--read-only] [--shell <tab>] <run>" {
+	if err == nil || err.Error() != "flag needs an argument: -shell\nusage: aether attach [--read-only] [--shell <tab>] <session>" {
 		t.Fatalf("runAttach missing shell value error = %v", err)
 	}
 }

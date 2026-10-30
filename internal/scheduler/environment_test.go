@@ -191,7 +191,7 @@ func TestBuildEnvironmentPlanRefusesAnIsolatedRunOnASharedLoginDirectory(t *test
 	}
 	run := &domain.Run{ID: "run-iso", Permission: domain.PermissionIsolated, AccountMemberID: "owner"}
 	_, err = s.BuildEnvironmentPlan(context.Background(), run, &domain.Workspace{ID: "ws"}, &domain.Member{ID: "member"}, omp, EnvironmentPurposeRun)
-	if err == nil || !strings.Contains(err.Error(), "an isolated run cannot use another member's omp login") {
+	if err == nil || !strings.Contains(err.Error(), "an isolated session cannot use another member's omp login") {
 		t.Fatalf("err = %v, want the refusal", err)
 	}
 }

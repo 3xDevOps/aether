@@ -498,7 +498,7 @@ export function TerminalDock({
         </Menu>
         {savedConfirmation && (
           <span role="status" className="text-ui-sm text-muted">
-            Saved - new runs use this environment
+            Saved - new sessions use this environment
           </span>
         )}
       </div>
@@ -560,7 +560,7 @@ export function TerminalDock({
                   title="Your environment starts on first open"
                   action={<Button ref={openTrigger} type="button" onClick={open}>Open</Button>}
                 >
-                  A container with your home directory, for installing tools and logging in to agents. Save it and new runs start from it.
+                  A container with your home directory, for installing tools and logging in to agents. Save it and new sessions start from it.
                 </EmptyState>
               </div>
             ) : empty ? (

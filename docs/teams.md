@@ -24,7 +24,7 @@ the server.
 
 The server must have tailnet sign-in on. `aether-server setup` turns it on when
 you answer yes to its tailnet question ([install.md](install.md#first-boot)).
-The teammate joins your tailnet and runs:
+The teammate joins your tailnet and sessions:
 
 ```sh
 aether link my-server
@@ -133,12 +133,12 @@ Someone who already became two members can merge them. Run `aether member merge
 start` on one sign-in, which prints a code valid for 10 minutes. On the other,
 run `aether member merge <code>` (options `--keep <member id>`, `--keep-admin`,
 `--yes`), then `aether member merge accept` back on the first. Both show what is
-discarded before you confirm. The survivor takes the other member's runs,
+discarded before you confirm. The survivor takes the other member's sessions,
 schedules, devices and accounts, and the lower of the two roles. The absorbed
 member's home moves to `<data-dir>/merged/<merge id>/home` and their private
 signing key to `signing-key` beside it. Both hold credentials, so remove the
 directory with `sudo rm -r` once nothing in it is needed. A merge is
-refused, with the reason, when either member is pending or has an unfinished run
+refused, with the reason, when either member is pending or has an unfinished session
 or terminal. Nothing undoes a merge.
 
 ### Remove access
@@ -150,7 +150,7 @@ revokes the devices that signed in with it and deletes the connectors its
 sign-in authorized. `aether invite revoke <id>` kills
 a link.
 
-`aether member remove` fails with `in use` while runs or schedules still belong
+`aether member remove` fails with `in use` while sessions or schedules still belong
 to the member. Delete those first. `aether member transfer <member id>` makes
 another admin the server's owner at its edge.
 
@@ -181,25 +181,25 @@ aether member list                 # their member id
 aether member remove <member-id>   # deletes their SSH key, devices, GitHub sign-ins and connectors
 ```
 
-It fails with `in use` until their runs and schedules are gone
+It fails with `in use` until their sessions and schedules are gone
 ([Remove access](#remove-access)).
 
 ## Roles
 
-| Role | Own runs | Other members' runs | Workspace |
+| Role | Own sessions | Other members' sessions | Workspace |
 | --- | --- | --- | --- |
 | viewer | Cannot launch | View | Read the feed |
-| collaborator (default) | Everything | View, message, steer, stop | Launch runs, push, use templates, set schedules, add memory notes |
+| collaborator (default) | Everything | View, message, steer, stop | Launch sessions, push, use templates, set schedules, add memory notes |
 | admin | Everything | Everything | Also members, workspaces and their settings, budgets, saving templates, `aether server update` |
 
-Steering a run means typing into its terminal, messaging its agent, answering
+Steering a session means typing into its terminal, messaging its agent, answering
 its permission prompts and pausing or resuming it. Pushing means writing to the
 workspace's git repository. Everyone who joins is a collaborator, so teammates
 can message and stop each other's agents with no setup. Every such act is
 recorded in the workspace timeline with who did it. Change a role with
 `aether member role <id> viewer|collaborator|admin`. It applies to connections
 that are already open: a demoted member's live attach drops with
-`detached: you can no longer control this run`. Member approvals,
+`detached: you can no longer control this session`. Member approvals,
 removals and role changes, account shares and connector writes are kept in the
 audit history; `aether audit` shows yours, or everyone's to an admin
 ([connectors.md](connectors.md#audit-history)).
@@ -208,22 +208,22 @@ The last admin cannot be removed or demoted: `refusing to delete the last admin`
 or `refusing to demote the last admin`. Admin-only commands fail for others with
 `aether: rpc error -32001: workspace.add requires the admin role`.
 
-To limit who can control runs:
+To limit who can control sessions:
 
 ```sh
-aether protect <run>                                    # owner and admins only
-aether workspace settings --message-others admins-only  # every member's runs
+aether protect <session>                                    # owner and admins only
+aether workspace settings --message-others admins-only  # every member's sessions
 aether workspace settings --message-others everyone     # the default
 ```
 
-A refused member sees `workspace restricts steer of others' runs to their owner
-and admins`. `aether unprotect <run>` lifts a protection.
+A refused member sees `workspace restricts steer of others' sessions to their owner
+and admins`. `aether unprotect <session>` lifts a protection.
 
 ## Workspaces
 
-A workspace is a repository plus its settings. Runs, the activity feed,
+A workspace is a repository plus its settings. Sessions, the activity feed,
 templates, schedules, costs and the budget all belong to one. A
-run and its shells use the launching member's saved image, or the server's
+session and its shells use the launching member's saved image, or the server's
 standard image ([environments.md](environments.md)).
 
 An admin creates a workspace. In the dashboard, open **Manage workspaces** from
@@ -246,28 +246,28 @@ client keeps one linked clone per workspace: linking another clone of it
 replaces the first, and `aether status` lists them.
 
 Branches named `aether/run-*` belong to the server and cannot be force-pushed or
-deleted. Every other branch behaves like a normal git remote. `aether pull <run>`
-brings a run's branches into the linked clones.
+deleted. Every other branch behaves like a normal git remote. `aether pull <session>`
+brings a session's branches into the linked clones.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Base branch | `main` | New runs branch from it. Set with `--base` at creation |
-| Publish destination (**Publish changes to**) | The `origin` of the first clone linked | The git URL each run checkout gets as `origin`, where run branches are pushed for review |
+| Base branch | `main` | New sessions branch from it. Set with `--base` at creation |
+| Publish destination (**Publish changes to**) | The `origin` of the first clone linked | The git URL each session checkout gets as `origin`, where session branches are pushed for review |
 | Source mirror | Off (local-only) | Follows an upstream repository read-only |
-| Message-others policy | `everyone` | Whether collaborators can message and stop each other's runs |
+| Message-others policy | `everyone` | Whether collaborators can message and stop each other's sessions |
 
-A run can also check out other workspaces beside its own; see [Working across
+A session can also check out other workspaces beside its own; see [Working across
 repos](quickstart.md#working-across-repos).
 
 A later clone that points elsewhere does not overwrite the publish destination.
-Change it on purpose; a change reaches new runs only:
+Change it on purpose; a change reaches new sessions only:
 
 ```sh
 aether workspace origin --workspace myproject https://github.com/acme/myproject.git
 aether workspace origin --workspace myproject --clear
 ```
 
-A `git@github.com:` address is stored as its HTTPS form, because runs can
+A `git@github.com:` address is stored as its HTTPS form, because sessions can
 authenticate over HTTPS only.
 
 ### Source mirror
@@ -284,8 +284,8 @@ aether workspace mirror refresh --workspace myproject
 `--auth` is `public`, `github` (your own GitHub login on the server, read access
 is enough) or `deploy-key` (Aether prints a public key to add as a read-only
 deploy key). A new mirror starts pending: verify it and adopt its first revision
-before the first run. Fast-forward updates apply on their own. If upstream
-rewrote history, the base stays put until an admin reviews the candidate and runs
+before the first session. Fast-forward updates apply on their own. If upstream
+rewrote history, the base stays put until an admin reviews the candidate and sessions
 `aether workspace mirror adopt --workspace myproject --generation <n> --commit
 <reviewed-sha> --yes`. `aether workspace mirror status` shows where it stands.
 
@@ -295,63 +295,63 @@ Pushing a mirrored base branch is rejected. Update the upstream and refresh:
 aether: rejected write to protected ref refs/heads/<base>: this mirrored base is owned by the upstream; use the configured upstream to update it
 ```
 
-A scheduled run refreshes the mirror first and creates no run if that fails. See
+A scheduled session refreshes the mirror first and creates no session if that fails. See
 [security.md](security.md#workspace-source-mirrors).
 
 ### Delete a workspace
 
-`aether workspace delete myproject --yes` removes the workspace with its runs,
+`aether workspace delete myproject --yes` removes the workspace with its sessions,
 checkouts, transcripts, templates, budget and costs. Member accounts,
 local clones and the upstream repository stay. It never stops work: stop active
-runs and remove schedules first. The error names what blocks it.
+sessions and remove schedules first. The error names what blocks it.
 
 ## Work together
 
 Commands that depend on a workspace take `--workspace <name-or-id>` and default
 to the only workspace. With several, they insist: `--workspace is required when
-more than one workspace exists`. `aether runs` lists runs from every workspace.
+more than one workspace exists`. `aether sessions` lists sessions from every workspace.
 
 | Command | What it does |
 | --- | --- |
-| `aether runs` | Every run you can see, colored by owner, with an overlap column. `--needs-you` lists only runs that need you |
-| `aether who` | Who is online and which runs they watch |
-| `aether attach [--read-only] <run>` | Attach to a run's terminal. Several people can attach at once |
-| `aether message <run> "..."` | Message a run's agent. It shows as a banner in your color |
-| `aether pause`, `resume`, `kill <run>` | Suspend, thaw or stop a run. The checkout and transcript survive a kill |
-| `aether runs --needs-you` | Runs waiting on you. `aether runs <run-id>` shows what one needs and the command that answers it |
-| `aether timeline` | The workspace history. `aether timeline <run-id>` shows one run's. Filter with `--member`, `--type`, `--limit`. `--jsonl` exports |
-| `aether changes` | Run changes since a cursor: status, reports, mail, pull requests and lifecycle. `--follow` keeps polling ([coordination.md](coordination.md#follow-changes-from-a-cursor)) |
+| `aether sessions` | Every session you can see, colored by owner, with an overlap column. `--needs-you` lists only sessions that need you |
+| `aether who` | Who is online and which sessions they watch |
+| `aether attach [--read-only] <session>` | Attach to a session's terminal. Several people can attach at once |
+| `aether message <session> "..."` | Message a session's agent. It shows as a banner in your color |
+| `aether pause`, `resume`, `kill <session>` | Suspend, thaw or stop a session. The checkout and transcript survive a kill |
+| `aether sessions --needs-you` | Sessions waiting on you. `aether sessions <session-id>` shows what one needs and the command that answers it |
+| `aether timeline` | The workspace history. `aether timeline <session-id>` shows one session's. Filter with `--member`, `--type`, `--limit`. `--jsonl` exports |
+| `aether changes` | Session changes since a cursor: status, reports, mail, pull requests and lifecycle. `--follow` keeps polling ([coordination.md](coordination.md#follow-changes-from-a-cursor)) |
 | `aether cost --runs` | Token spend per member and run |
 
-The dashboard shows each run as **Needs you**, **Working**, **Paused**, **Done**
-or **Failed**. **Needs you** means something blocks the run that you can
-resolve, such as a permission or question, a stalled run of yours, or an unreviewed
-finish. Everyone else sees that run as **Working** with
+The dashboard shows each session as **Needs you**, **Working**, **Paused**, **Done**
+or **Failed**. **Needs you** means something blocks the session that you can
+resolve, such as a permission or question, a stalled session of yours, or an unreviewed
+finish. Everyone else sees that session as **Working** with
 "Waiting for Alice" ([failure-handling.md](failure-handling.md#needs-you)).
 
-Answer an agent's plan or permission prompt in the run's Session view
+Answer an agent's plan or permission prompt in the session's Chat view
 (Enhanced) or its terminal (Standard).
 
-### Hand off and finish runs
+### Hand off and finish sessions
 
-`aether handoff <run> <member>` changes the run's owner and notifications at
+`aether handoff <session> <member>` changes the session's owner and notifications at
 once, with no acceptance step. The agent account, cost attribution and the
 container's home stay the launcher's.
 
-When a run is handed off or finishes, Aether saves an **evidence packet**: the
+When a session is handed off or finishes, Aether saves an **evidence packet**: the
 objective, base and final git revisions, changed files and a transcript copy. It
 records what Aether observed and does not prove a command succeeded or that
-anyone reviewed the result. Packets expire after 30 days, and a run whose
+anyone reviewed the result. Packets expire after 30 days, and a session whose
 checkout exceeds 64 MiB gets no finish packet. If saving fails, Aether keeps the
 checkout and transcript instead of deleting them.
 
 ```sh
-aether close <run> --outcome merged|abandoned   # clear a finished run off Needs you
-aether archive <run>                            # hide a finished run; unarchive restores it
-aether delete <run>                             # stop it and remove its checkout and records
+aether close <session> --outcome merged|abandoned   # clear a finished session off Needs you
+aether archive <session>                            # hide a finished session; unarchive restores it
+aether delete <session>                             # stop it and remove its checkout and records
 ```
 
-These need the same permission as stopping a run. A published run branch stays in
+These need the same permission as stopping a session. A published session branch stays in
 the workspace repository after `delete`.
 
 ### Task templates and schedules
@@ -363,14 +363,14 @@ saves and deletes templates. Any collaborator launches them and sets schedules.
 aether template save nightly-triage --agent claude --task "triage new issues" \
   [--mode standard|enhanced|background] [--model <model>] [--effort <level>] \
   [--param key=value] [--budget <usd>]
-aether run --template nightly-triage [--param key=value]
+aether session --template nightly-triage [--param key=value]
 aether schedule set nightly-triage "0 6 * * *"
 ```
 
-`--mode` defaults to `background`, and `--budget` is an advisory per-run cost
+`--mode` defaults to `background`, and `--budget` is an advisory per-session cost
 hint in USD. Use `{{name}}` in the task for a parameter. The dashboard's
 Templates page fills parameters inline before **Launch** and edits their
-defaults; any run's composer can insert a filled-in template as a draft. Cron is five-field
+defaults; any session's composer can insert a filled-in template as a draft. Cron is five-field
 syntax or an `@descriptor`, in UTC. A schedule that was due while the server was
 down waits for its next occurrence. `aether template list|delete` and `aether
 schedule list|delete` manage the rest. A `--model` the agent has no flag for
@@ -380,32 +380,32 @@ model`, and an `--effort` it does not take fails with the error in
 
 ### Attribution
 
-Each member has a color, shown on run rows, message banners and timeline dots.
+Each member has a color, shown on session rows, message banners and timeline dots.
 Change yours with `aether member color <#rrggbb>` and your display name under
 **Profile → Display name**. Every privileged act (message, stop, approve, hand
 off, change settings) is recorded in the timeline with who did it.
 
 Set your git identity under **Profile → Git identity**, or `aether member git
---name "Dana Lee" --email dana@example.com`. The agent in a run commits as the
+--name "Dana Lee" --email dana@example.com`. The agent in a session commits as the
 member who launched it, fixed when the container starts. Aether's own commits
-(when a run finishes, is stopped or is recovered) use the run's current owner.
+(when a session finishes, is stopped or is recovered) use the session's current owner.
 With no identity set, commits use your display name and `<member-id>@aether.local`,
 which matches no GitHub account. Signed commits show **Verified** on GitHub only
 if the commit email is verified there
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
-Anyone who messages a run is added to its co-authors. Aether's commits end with a
-`Co-authored-by:` line for each, and the run's agent finds the list in
+Anyone who messages a session is added to its co-authors. Aether's commits end with a
+`Co-authored-by:` line for each, and the session's agent finds the list in
 `/run/aether/co-authors` ([coordination.md](coordination.md)).
 
 ### Conflict radar
 
-When two runs change the same file, `aether runs` shows it in the `OVERLAP`
+When two sessions change the same file, `aether sessions` shows it in the `OVERLAP`
 column and the dashboard puts a warning on both cards that opens the shared
 files. It warns and does not block. Changes merged in from `main` do not count.
 
 Agents in one workspace can also message each other. `aether-internal status`
-inside a run lists the runs it can reach, and protection and the message-others
+inside a session lists the sessions it can reach, and protection and the message-others
 policy limit this the same way. Every message appears in **Activity** as an
 **Agent message** ([coordination.md](coordination.md#seeing-agent-messages)).
 
@@ -414,58 +414,58 @@ policy limit this the same way. Every message appears in **Activity** as an
 ```sh
 aether budget                                  # show
 aether budget set --limit 25 --warn 20         # hard cap and soft warning, in USD
-aether budget set --override                   # admit new runs past the cap
+aether budget set --override                   # admit new sessions past the cap
 aether budget set --override=false             # and stop again
 ```
 
 An omitted flag keeps its value, and `--limit 0` clears the budget. At the cap,
-new runs are refused and running runs finish. Claude Code reports spend in
-Background and Enhanced runs, and OpenCode and omp in Enhanced runs and
-Background runs over ACP. An Enhanced run's spend counts as each turn ends.
-Every other run is unmetered, so totals are a floor. Deleting a run or a member
+new sessions are refused and running sessions finish. Claude Code reports spend in
+Background and Enhanced sessions, and OpenCode and omp in Enhanced sessions and
+Background sessions over ACP. An Enhanced session's spend counts as each turn ends.
+Every other session is unmetered, so totals are a floor. Deleting a session or a member
 keeps their spend in the totals. Only an admin sets a budget. Every admin is
 [notified](networking.md#notifications) once when spend reaches the warning and
 once at the cap; a budget change that puts spend back below either re-arms it.
 
 ### Team memory
 
-Runs and members keep shared notes, and every new run is given the pinned ones.
+Sessions and members keep shared notes, and every new session is given the pinned ones.
 See [memory.md](memory.md).
 
 ## Agent accounts
 
 Each member signs in to each agent once, in their own environment (`aether agent
-add <name>`, then `aether terminal`). That home is mounted into every run they
+add <name>`, then `aether terminal`). That home is mounted into every session they
 launch. A member's **agent account** is that vendor login and the subscription
-behind it. One member can let a collaborator launch runs on theirs.
+behind it. One member can let a collaborator launch sessions on theirs.
 
 The owner shares under **Profile → Agent account sharing → Share account**. The
-recipient selects **New run → Options → Account** and picks `<name> (shared)`
+recipient selects **New session → Options → Account** and picks `<name> (shared)`
 From the CLI:
 
 ```sh
 aether account share <member-id>      # owner
 aether account list
-aether run "triage the failures" --agent codex --account <owner-member-id>   # recipient
+aether session "triage the failures" --agent codex --account <owner-member-id>   # recipient
 aether account revoke <member-id>     # owner
 ```
 
-A run on a shared account belongs to whoever launched it and uses their image,
+A session on a shared account belongs to whoever launched it and uses their image,
 home, git identity and GitHub login. The shared account supplies the agent login,
 the vendor quota and the cost attribution. The recipient needs neither the agent
 nor a login of their own, but must connect their own GitHub first, because the
-run pushes and opens pull requests as them. [security.md](security.md#account-sharing)
+session pushes and opens pull requests as them. [security.md](security.md#account-sharing)
 lists exactly what is shared.
 
 > [!WARNING]
-> `omp` shares the owner's whole `~/.omp/agent` directory. A recipient's run can
+> `omp` shares the owner's whole `~/.omp/agent` directory. A recipient's session can
 > plant code that runs in the owner's own omp sessions with the owner's home, gh
 > token and signing key. Share an `omp` account only with someone you would give
 > your home to.
 
 - Sharing is one-way. Admins get no implicit access to anyone's account.
 - Revoking blocks new launches, but runs already going continue. Stop them with
-  **Kill run** in the run header's **More** menu, or `aether kill <run-id>`.
+  **Kill run** in the session header's **More** menu, or `aether kill <session-id>`.
 - An agent you defined with `aether agent add` runs only on your own account. A
   shared account shows it disabled as **Your account only**.
 - An owner with no login shows **Not logged in**. A CLI launch fails with `Grace
@@ -474,12 +474,12 @@ lists exactly what is shared.
 - Every member's containers mount their own Claude Code and Gemini login files
   in place, so a token refresh rewrites the file instead of replacing it. A
   server on Docker Engine older than 26.0 mounts none, and cannot share either.
-  Recipients see the owner's refreshed login, and a run on a shared account
+  Recipients see the owner's refreshed login, and a session on a shared account
   keeps the owner's login mounted. A container started before v0.7.7-beta.1
   can still replace its member's login file, which detaches the owner's login
-  from that member's runs on shared accounts: those runs then sign in as the
+  from that member's sessions on shared accounts: those sessions then sign in as the
   member. Restart such environments with **Stop environment** in **Profile**,
-  or `aether terminal stop`, and relaunch such runs.
+  or `aether terminal stop`, and relaunch such sessions.
 - Before the agent starts, the server checks that the container sees the
   owner's login file itself, not the recipient's own. Otherwise the launch, or
   the move to the account, fails with `runtime: /root/.claude/.credentials.json
@@ -494,7 +494,7 @@ lists exactly what is shared.
 ### Usage fallback
 
 When a `claude` or `codex` launch's account has used 95% or more of its
-subscription quota, Aether starts the run on another account with usage left.
+subscription quota, Aether starts the session on another account with usage left.
 Other agents always launch as requested, and so does an account whose usage
 cannot be read (an API-key login, signed out, or a vendor read over 3 seconds).
 
@@ -505,37 +505,37 @@ dialog, **Options → Fall back to another account** turns it off and lists
 
 ```sh
 # If Grace's account is exhausted, try Lin's, then your own
-aether run "triage the failures" --agent claude --account <grace-member-id> \
+aether session "triage the failures" --agent claude --account <grace-member-id> \
   --fallback <lin-member-id>,<your-member-id>
 
 # Launch on the requested account even when it is exhausted
-aether run "triage the failures" --agent claude --no-fallback
+aether session "triage the failures" --agent claude --no-fallback
 ```
 
 Passing both flags fails with `--fallback and --no-fallback cannot be used
 together`. With no qualifying account
-the run launches on the requested one. A run that fell back stays owned by its
+the session launches on the requested one. A session that fell back stays owned by its
 launcher. Its header reads **On `<name>`'s account (fallback)**, and `aether
-runs` appends ` (fallback)` to the `ACCOUNT` column.
+sessions` appends ` (fallback)` to the `ACCOUNT` column.
 
-A run also moves to another account mid-run when its agent reports the usage
+A session also moves to another account mid-session when its agent reports the usage
 limit. Aether starts a new container on the next account and resumes the agent's
-session there. The run keeps its ID, checkout and branch, but processes in the
+session there. The session keeps its ID, checkout and branch, but processes in the
 old container, terminals included, end. This works for Enhanced and Background
-runs of `claude` and `codex` and Standard `claude` runs
+sessions of `claude` and `codex` and Standard `claude` sessions
 ([harnesses.md](harnesses.md#usage-limit-signals)). Cost stays with the account
 that spent it. The account that ran out is not read again: the agent's report
 counts as exhausted. The move picks an account with usage left as a launch
 does; when none has, it tries one whose usage cannot be read, in the same
-order, since the run would stop anyway. Your own account qualifies there only
+order, since the session would stop anyway. Your own account qualifies there only
 with a login, or an API key the agent signs in with in that mode:
 `ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for a Background Codex run
-([per-agent setup](harnesses.md#per-agent-setup)). An account the run already used is
+([per-agent setup](harnesses.md#per-agent-setup)). An account the session already used is
 never tried again: your own, or a shared one whose login the server confirmed
-in the run's container. A shared account whose login never reached the
-container spent none of its quota, so it stays a candidate. A run that cannot
+in the session's container. A shared account whose login never reached the
+container spent none of its quota, so it stays a candidate. A session that cannot
 move parks or fails with a reason that says why
-([Usage limit mid-run](failure-handling.md#usage-limit-mid-run)).
+([Usage limit mid-session](failure-handling.md#usage-limit-mid-session)).
 
 ### Saved launch choices
 
@@ -551,7 +551,7 @@ them, and the launch is authorized as if nothing were saved. The built-in
 assistant's and the connectors' launch tools fill each field a launch leaves
 out from them ([Launch options](connectors.md#launch-options)).
 
-The dashboard's launch panel opens on them, the right half of **New run**
+The dashboard's launch panel opens on them, the right half of **New session**
 launches the last agent, mode, model and permission tier at once, and the
 panel saves the agent, mode and model of each launch, and the permission tier
 as soon as you change it. It saves the account and fallback only when you select
@@ -589,94 +589,94 @@ A [member merge](#link-or-merge-sign-ins) keeps the survivor's saved choices.
 Any account or fallback member that names the absorbed member, in anyone's
 choices, is moved to the survivor, and those choices get a new `revision`.
 
-## Child runs
+## Subsessions
 
-An agent can start a **child run**: a session with a completely fresh context
+An agent can start a **subsession**: a session with a completely fresh context
 on any agent and model you have installed, such as Codex reviewing what Claude
-wrote. A child can orchestrate its own subagents. Agents dispatch one for a
+wrote. A subsession can orchestrate its own subagents. Agents dispatch one for a
 complex task that splits into parallel parts, as a dispatch-and-forget
 shortcut, or when you ask for session orchestration; small lookups
-stay with the agent's own subagents. The child appears under its parent in the
+stay with the agent's own subagents. The subsession appears under its parent in the
 dashboard, with its purpose, agent, model, account and state, and you open,
-message, take over or stop it like any run. Its result reaches the parent's
+message, take over or stop it like any session. Its result reaches the parent's
 inbox, as does a notice when it has sat idle or waiting for over an hour, so
 the parent can wake or stop it. The agent commands are in
-[coordination.md](coordination.md#child-runs).
+[coordination.md](coordination.md#subsessions).
 
-Child runs go one level deep: a child cannot start children. A parent must be
-a Standard or Enhanced run that wakes when mail arrives; `child start` from a
-Standard run of an agent with no idle wake is refused with
+Subsessions go one level deep: a subsession cannot start subsessions. A parent must be
+a Standard or Enhanced session that wakes when mail arrives; `subsession start` from a
+Standard session of an agent with no idle wake is refused with
 `<agent> in Standard mode has no idle wake; start it in Enhanced`. A
-Background run cannot start children.
+Background session cannot start subsessions.
 
-### Turn child runs off
+### Turn subsessions off
 
-Child runs are on for every Standard or Enhanced run you own. **Settings →
-Child runs** or:
+Subsessions are on for every Standard or Enhanced session you own. **Settings →
+Subsessions** or:
 
 ```sh
-aether children off                         # every run you own
-aether children on
-aether run "fix the login bug" --agent claude --children off   # this run only
+aether subsessions off                         # every session you own
+aether subsessions on
+aether session "fix the login bug" --agent claude --subsessions off   # this session only
 ```
 
-A child runs on your own account and uses its parent's launch fallback
+A subsessions on your own account and uses its parent's launch fallback
 policy: when its Claude or Codex account has used 95% of its quota, the
-child moves to the account with the most usage left among yours and those
+subsession moves to the account with the most usage left among yours and those
 shared with you, as [usage fallback](#usage-fallback) does for every launch,
 unless the parent was launched with `--no-fallback`. The agent and model never
 change.
 
-**Allow child runs** in a run's **More** menu, or the **Child runs**
-switch in the launch panel, allows or stops them for that one run without changing your
-setting. Only the run's owner allows it, and a handoff to another member voids
-it. An admin can turn it off. Handing a run to another member detaches it from
-its parent and from its children, so no lineage spans two owners.
+**Allow subsessions** in a session's **More** menu, or the **Subsessions**
+switch in the launch panel, allows or stops them for that one session without changing your
+setting. Only the session's owner allows it, and a handoff to another member voids
+it. An admin can turn it off. Handing a session to another member detaches it from
+its parent and from its subsessions, so no lineage spans two owners.
 
 When a parent is closed (merged, abandoned, or completed and accepted), its
-children are closed with it: finished ones are relabeled the same way and
-working ones are stopped first. A child its parent cancels ends `completed`
-with the reason `stopped by parent run <id>`.
+subsessions are closed with it: finished ones are relabeled the same way and
+working ones are stopped first. A subsession its parent cancels ends `completed`
+with the reason `stopped by parent session <id>`.
 
 ### Limits and usage
 
-A workspace admin sets how many children each parent may have busy at once:
+A workspace admin sets how many subsessions each parent may have busy at once:
 
 ```sh
 aether workspace settings --child-max-live 8
 ```
 
-`--child-max-live` (default 8, at most 64) counts a parent's busy children;
-more wait in a queue and start as slots free, oldest first. A child that
-reported or waits on a human holds no slot. A queued child is cancelled with
-its parent. Every child is also admitted against the workspace
+`--child-max-live` (default 8, at most 64) counts a parent's busy subsessions;
+more wait in a queue and start as slots free, oldest first. A subsession that
+reported or waits on a human holds no slot. A queued subsession is cancelled with
+its parent. Every subsession is also admitted against the workspace
 [budget](#budgets) when it is queued and when it starts.
 
-Each child's spend counts once, on the account that paid. `aether children
-<run-id>` and the parent's **Child runs** section add up the parent and its
-children, split by account. A run that reports no cost (Codex, Gemini, pi) is
+Each subsession's spend counts once, on the account that paid. `aether subsessions
+<session-id>` and the parent's **Subsessions** section add up the parent and its
+subsessions, split by account. A session that reports no cost (Codex, Gemini, pi) is
 counted as unmetered, so totals read "at least".
 
-- A budget admits runs; it does not stop running ones. A parent can pass the
-  cap by what its live children spend.
-- A parked parent woken by other mail can work beside its busy children, so
+- A budget admits sessions; it does not stop running ones. A parent can pass the
+  cap by what its live subsessions spend.
+- A parked parent woken by other mail can work beside its busy subsessions, so
   it can briefly exceed `--child-max-live`.
-- A child gets the workspace's environment and secrets like any run of yours,
+- A subsession gets the workspace's environment and secrets like any session of yours,
   but not its parent's transcript. It works in the parent's repositories,
   extra `--repo` ones included, from the parent's last commit, and inherits
   the parent's permission tier.
-- Deleting a child takes its spend out of the parent's total; the
+- Deleting a subsession takes its spend out of the parent's total; the
   workspace totals and `aether cost` keep it.
-- Turning child runs off stops queued children from starting; running ones
-  continue. Kill them from the parent's **Child runs** section or with
-  `aether kill <run-id>`.
+- Turning subsessions off stops queued subsessions from starting; running ones
+  continue. Kill them from the parent's **Subsessions** section or with
+  `aether kill <session-id>`.
 
 ## Limits
 
 - Roles are viewer, collaborator and admin. There are no custom roles.
-- The permissive default lets any collaborator stop any run. Use `aether protect`
+- The permissive default lets any collaborator stop any session. Use `aether protect`
   or `--message-others admins-only` to narrow it.
-- A run's extra repos (`aether run --repo`) share its primary workspace's
+- A session's extra repos (`aether session --repo`) share its primary workspace's
   environment, account and budget. Templates take one workspace.
 - Evidence packets expire after 30 days.
 - A merge of two members cannot be undone.

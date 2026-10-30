@@ -104,7 +104,7 @@ func TestRPCErrorMapping(t *testing.T) {
 		{errMemberPending, protocol.CodeDenied},
 		{errNoSession, protocol.CodeUnavailable},
 		{errSessionEnded, protocol.CodeUnavailable},
-		{fmt.Errorf("%w: the run is completed", scheduler.ErrNoLiveEnvironment), protocol.CodeInvalidState},
+		{fmt.Errorf("%w: the session is completed", scheduler.ErrNoLiveEnvironment), protocol.CodeInvalidState},
 		{errors.New("boom"), protocol.CodeInternal},
 	}
 	for _, tt := range tests {

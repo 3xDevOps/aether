@@ -134,7 +134,7 @@ export function TemplatesRoute({ params, client = api }: RouteProps & { client?:
       const result = await client.templateLaunch(workspaceID, template.name, launchParams(template, typed))
       upsertRun(result.run)
       navigate('run', { runId: result.run.id })
-      toast.success('Run launched')
+      toast.success('Session launched')
     } catch (err) {
       toast.error(errorSentence(err))
     } finally {

@@ -63,7 +63,7 @@ export function BudgetDialog({
         <DialogHeader>
           <DialogTitle>Workspace budget</DialogTitle>
           <DialogDescription>
-            A budget warns and reports; it never stops a run.
+            A budget warns and reports; it never stops a session.
           </DialogDescription>
         </DialogHeader>
         <form

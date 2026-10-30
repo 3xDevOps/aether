@@ -118,11 +118,11 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		}
 		run, err := s.store.GetRun(ctx, domain.RunID(t.RunID))
 		if err != nil {
-			return "", "", nil, fmt.Errorf("run %s: %w", t.RunID, err)
+			return "", "", nil, fmt.Errorf("session %s: %w", t.RunID, err)
 		}
 		if run.Status.Final() && !ended {
 			_, body, _ := runFinish(run, "")
-			return "", "", nil, invalid("run %s has already ended (%s); there is nothing left to watch", t.RunID, body)
+			return "", "", nil, invalid("session %s has already ended (%s); there is nothing left to watch", t.RunID, body)
 		}
 		ws, title = run.WorkspaceID, push.RunTitle(run)
 		if key, _, ok := runFinish(run, ""); ok && !run.Status.Final() {
@@ -135,7 +135,7 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		if t.RunID != "" {
 			run, err := s.store.GetRun(ctx, domain.RunID(t.RunID))
 			if err != nil {
-				return "", "", nil, fmt.Errorf("run %s: %w", t.RunID, err)
+				return "", "", nil, fmt.Errorf("session %s: %w", t.RunID, err)
 			}
 			ws = run.WorkspaceID
 		}
@@ -359,7 +359,7 @@ var conditionWords = map[string]string{
 }
 
 var kindWords = map[string]string{
-	protocol.WatchTargetRun: "run", protocol.WatchTargetPR: "pull request",
+	protocol.WatchTargetRun: "session", protocol.WatchTargetPR: "pull request",
 }
 
 // receipt says in one line what w watches and where its notices go.

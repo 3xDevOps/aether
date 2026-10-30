@@ -12,7 +12,7 @@ import (
 // and rewriting the rest of its row.
 func (s *Scheduler) recordCommit(ctx context.Context, run domain.RunID, commit string, at time.Time) error {
 	if err := s.cfg.Store.UpdateRunCommit(ctx, run, commit, at); err != nil {
-		return fmt.Errorf("scheduler: record commit for run %s: %w", run, err)
+		return fmt.Errorf("scheduler: record commit for session %s: %w", run, err)
 	}
 	return nil
 }

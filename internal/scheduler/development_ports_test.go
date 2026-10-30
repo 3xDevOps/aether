@@ -97,7 +97,7 @@ func TestDevelopmentPortList(t *testing.T) {
 	}
 
 	answer(1, "", "grep: /proc/net/tcp: Permission denied\n")
-	if _, err := list(); err == nil || err.Error() != "read the run's listening ports: exit 1: grep: /proc/net/tcp: Permission denied" {
+	if _, err := list(); err == nil || err.Error() != "read the session's listening ports: exit 1: grep: /proc/net/tcp: Permission denied" {
 		t.Fatalf("unreadable socket table: %v", err)
 	}
 
@@ -105,6 +105,6 @@ func TestDevelopmentPortList(t *testing.T) {
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if _, err := list(); !errors.Is(err, ErrNoLiveEnvironment) {
-		t.Fatalf("finished run: %v", err)
+		t.Fatalf("finished session: %v", err)
 	}
 }

@@ -16,8 +16,8 @@ import (
 // against the coordination socket mounted with it.
 func mcp(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
-	socket := fs.String("socket", "", "socket to bridge (default: the run coordination socket, or the assistant socket with --assistant)")
-	assistant := fs.Bool("assistant", false, "serve the member assistant's tools instead of the run coordination tools")
+	socket := fs.String("socket", "", "socket to bridge (default: the session coordination socket, or the assistant socket with --assistant)")
+	assistant := fs.Bool("assistant", false, "serve the member assistant's tools instead of the session coordination tools")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

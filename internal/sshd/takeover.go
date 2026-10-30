@@ -164,7 +164,7 @@ func (s *Server) handleTakeover(a *takeoverAttach, ctl protocol.DashAttachContro
 	defer c.mu.Unlock()
 	refuse := func(message string) { takeoverRefusal(a, ctl.RequestID, protocol.CodeConflict, message) }
 	if s.cfg.Control == nil {
-		takeoverRefusal(a, ctl.RequestID, protocol.CodeDenied, "run control is not enabled")
+		takeoverRefusal(a, ctl.RequestID, protocol.CodeDenied, "session control is not enabled")
 		return
 	}
 	if a.session == "" {
@@ -198,11 +198,11 @@ func (s *Server) handleTakeover(a *takeoverAttach, ctl protocol.DashAttachContro
 		}
 		lease, present := s.cfg.Control.Status(string(a.run.ID))
 		if !present || (lease.MemberID == a.member && lease.SessionID == a.session) {
-			refuse("takeover requires another controller session")
+			refuse("takeover requires another controller")
 			return
 		}
 		if !lease.Connected {
-			refuse("controller session is disconnected")
+			refuse("controller is disconnected")
 			return
 		}
 		var holder *takeoverAttach

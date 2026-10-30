@@ -695,13 +695,13 @@ describe('hydrate', () => {
     const draft = { harness: 'claude', task: 'Review the imported repository' }
     store.setState({
       hydrated: false, onboarded: false, route: { name: 'board', params: {} },
-      onboardingWorkspace: workspace.id, onboardingStep: 'First run', onboardingFurthest: 'First run',
+      onboardingWorkspace: workspace.id, onboardingStep: 'First session', onboardingFurthest: 'First session',
       onboardingSource: 'remote', onboardingFirstRun: draft,
     })
     await hydrate(store, fakeApi())
     expect(store.getState().route.name).toBe('onboarding')
     expect(store.getState().onboardingWorkspace).toBe(workspace.id)
-    expect(store.getState().onboardingStep).toBe('First run')
+    expect(store.getState().onboardingStep).toBe('First session')
     expect(store.getState().onboardingFirstRun).toEqual(draft)
   })
 
@@ -1496,7 +1496,7 @@ describe('applyEvent', () => {
     await hydrate(store, fakeApi())
     const client = fakeApi({
       runGet: vi.fn(async () => {
-        throw new Error('run snapshot unavailable')
+        throw new Error('session snapshot unavailable')
       }),
     })
     const event: Event = {
@@ -2056,7 +2056,7 @@ describe('connect', () => {
 
   it.each([
     { identity: 'a different member', member: bob },
-    { identity: 'the same member with a newer run list', member: alice },
+    { identity: 'the same member with a newer session list', member: alice },
   ])('ignores a disposed snapshot after reconnecting as $identity', async ({ member }) => {
     const store = createRootStore()
     const oldRuns = Promise.withResolvers<Run[]>()

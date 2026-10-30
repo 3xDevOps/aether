@@ -585,7 +585,7 @@ func TestRunLimitsPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := (domain.RunLimits{CPUs: 4, MemoryBytes: 1 << 30, Pids: 4096}); got != want {
-		t.Fatalf("runLimits = %+v, want %+v: the run beats the server, the server beats the flags", got, want)
+		t.Fatalf("runLimits = %+v, want %+v: the session beats the server, the server beats the flags", got, want)
 	}
 }
 

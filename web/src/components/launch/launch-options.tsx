@@ -83,7 +83,7 @@ function FallbackList({
             })}
           </ul>
           <p className="text-ui-sm text-muted">
-            The run starts on {fallback.order ? 'the first ticked account, top to bottom, with usage left' : 'the account here with the most usage left'} if {owner}&apos;s usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-run.
+            The session starts on {fallback.order ? 'the first ticked account, top to bottom, with usage left' : 'the account here with the most usage left'} if {owner}&apos;s usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-session.
           </p>
         </>
       )}
@@ -163,7 +163,7 @@ export function ChildRunsSwitch({ value, onChange, enabled, readError, unavailab
   return (
     <div className="flex flex-col gap-1">
       <div className="flex min-h-7 items-center justify-between gap-3 coarse:min-h-11">
-        <Label htmlFor="launch-child-runs">Child runs</Label>
+        <Label htmlFor="launch-child-runs">Subsessions</Label>
         <Switch
           id="launch-child-runs"
           aria-describedby="launch-child-runs-help"
@@ -173,7 +173,7 @@ export function ChildRunsSwitch({ value, onChange, enabled, readError, unavailab
         />
       </div>
       <p id="launch-child-runs-help" className="text-ui-sm text-muted">
-        {unavailable ?? (enabled === undefined ? (readError ? `Could not read your setting: ${readError}` : 'Reading your child runs setting…') : ['Lets the agent start other agents as child runs.', value ? 'Set for this run only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
+        {unavailable ?? (enabled === undefined ? (readError ? `Could not read your setting: ${readError}` : 'Reading your subsessions setting…') : ['Lets the agent start other agents as subsessions.', value ? 'Set for this run only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
       </p>
     </div>
   )

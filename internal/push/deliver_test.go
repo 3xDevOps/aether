@@ -38,6 +38,6 @@ func TestDeliverTagsTheNotificationWithItsTopic(t *testing.T) {
 		t.Fatalf("Deliver = %+v, %v; want one delivered device", results, err)
 	}
 	if got := <-tags; got != topic {
-		t.Fatalf("tag = %q, want %q, apart from the run's own notification", got, topic)
+		t.Fatalf("tag = %q, want %q, apart from the session's own notification", got, topic)
 	}
 }

@@ -72,7 +72,7 @@ func parseSudo(args []string) (protocol.RunSudoParams, error) {
 		}
 		if strings.HasPrefix(arg, "--") {
 			name, _, _ := strings.Cut(arg, "=")
-			return p, fmt.Errorf("%s is not supported in an Aether Default run", name)
+			return p, fmt.Errorf("%s is not supported in an Aether Default session", name)
 		}
 		for flags := arg[1:]; flags != ""; {
 			flag, size := utf8.DecodeRuneInString(flags)
@@ -90,7 +90,7 @@ func parseSudo(args []string) (protocol.RunSudoParams, error) {
 					return p, errSudoUsage
 				}
 			default:
-				return p, fmt.Errorf("-%c is not supported in an Aether Default run", flag)
+				return p, fmt.Errorf("-%c is not supported in an Aether Default session", flag)
 			}
 		}
 	}

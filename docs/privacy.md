@@ -31,10 +31,10 @@ request ([What an edge stores](#what-an-edge-stores)).
   mode, which turns it off), and the
   dashboard's own local record of how you use it. That record holds how the
   dashboard looks (theme, text size, sidebar width and whether it is
-  collapsed, whether a run's Details panel is open, the embedded
+  collapsed, whether a session's Details panel is open, the embedded
   Environment terminal's height, terminal font size, line wrapping in
   Changes, whether single-key shortcuts are on); where you were (the
-  workspace you last opened, whether the sidebar lists only your own runs);
+  workspace you last opened, whether the sidebar lists only your own sessions);
   the mode you last launched each agent in; which update notices you
   dismissed, by version; and the onboarding wizard's progress. The dashboard writes these
   preferences in origin-local `aether.ui` storage: they are separate for each
@@ -62,8 +62,8 @@ device-to-device transfer (`allowBackup=false` and
   items).
   That includes what you type into a terminal, the messages you send an
   agent, an image you pick from the phone to paste into a terminal, the
-  contents of files you edit in the dashboard, approvals, and the run controls
-  you use. The server keeps them as part of each run's record, on its own disk
+  contents of files you edit in the dashboard, approvals, and the session controls
+  you use. The server keeps them as part of each session's record, on its own disk
   ([install.md](install.md#what-lives-in-the-data-directory)); who on your
   team can see them is in [teams.md](teams.md#roles) and
   [security.md](security.md#the-dashboard-gateways). The app refuses a plain
@@ -103,7 +103,7 @@ device-to-device transfer (`allowBackup=false` and
   publisher, and lasts until an administrator removes it.
 - **Your teammates see when you are online and what you have open.** The
   dashboard tells the server every 15 seconds that you are there and which
-  workspace you have open, and an open run terminal adds you to that run's
+  workspace you have open, and an open session terminal adds you to that session's
   **Watching** list; the other members of that server see both
   ([teams.md](teams.md)). It is not kept as history.
 - **Optional GitHub authorization opens GitHub in your external browser.**
@@ -146,9 +146,9 @@ in server memory and the fetch child's temporary environment.
 This is fetch-only source access, **not a read-only token scope**: native gh
 permissions can include broad repository access. Your own agents already
 have access to your native login in your member home. Imported code is
-deliberately shared with the workspace's authorized members and runs; the
+deliberately shared with the workspace's authorized members and sessions; the
 token is not. Repository data remains on your server until the relevant
-workspace/run data is deleted; removing upstream access does not erase
+workspace/session data is deleted; removing upstream access does not erase
 already imported code.
 
 Logout, token expiry or revocation, member removal, or an account switch
@@ -160,7 +160,7 @@ and revoke GitHub authorization, see
 
 ## Push notifications
 
-Off until you turn on **Notify this device when a run needs me** in the
+Off until you turn on **Notify this device when a session needs me** in the
 dashboard's Settings, in a browser or in the dashboard added to a home screen
 ([networking.md](networking.md#notifications)). The Android app cannot
 receive them, so it never registers with a push service; the one thing in
@@ -174,19 +174,19 @@ ID. It removes them when you turn the switch off on that device, when the
 push service reports the address gone, and when your member record is
 removed.
 
-When one of your runs starts needing you, or a run your
+When one of your sessions starts needing you, or a session your
 [assistant](assistant.md#notifications) launched or messaged finishes, or
 needs you and is another member's, your server sends one HTTPS request per
 subscribed browser to that browser's address, and one more to each of those
-browsers when the run stops needing you. Nothing is sent for a member
+browsers when the session stops needing you. Nothing is sent for a member
 with no subscribed browser, and nothing is sent to the publisher. The
 push service receives:
 
 - **The address**, which is its own identifier for your browser, and your
   server's IP address.
 - **The notification, encrypted** on your server so that only that browser
-  can read it (RFC 8291): the run's title or the first line of its task, one
-  line saying why it needs you, and the run's ID. The push service sees its
+  can read it (RFC 8291): the session's title or the first line of its task, one
+  line saying why it needs you, and the session's ID. The push service sees its
   size, at most 4096 bytes, and when it was sent.
 - **A signed token** (RFC 8292): the public half of a key your server
   generated for this purpose, the push service's own address, an expiry, and
@@ -194,12 +194,12 @@ push service receives:
   your server nor you.
 - **Delivery settings**: a 24-hour time to live, high urgency (normal for a
   reported success and for the message that clears a need), and a topic,
-  which is a hash of the run's ID, so that a newer notification for a run
+  which is a hash of the session's ID, so that a newer notification for a session
   replaces an undelivered older one.
 
 The push service relays the message to your browser under its own policy.
 **Send test notification** sends the same request with the text
-`Notifications work on this device.` and no run.
+`Notifications work on this device.` and no session.
 
 While you use a dashboard, in any browser, the desktop app or the Android
 app, it tells your server so at most every 20 seconds. Your server keeps the
@@ -210,9 +210,9 @@ you are there. It is not stored, and no other member sees it.
 
 Off until an admin runs `sudo aether-server slack setup`
 ([slack.md](slack.md)) and a member links a Slack account. For each linked
-member the server sends Slack the titles of the runs that need them, the
+member the server sends Slack the titles of the sessions that need them, the
 need lines (which can quote an agent's reason), the text and options of
-pending requests, run IDs and the dashboard's address, and, in the
+pending requests, session IDs and the dashboard's address, and, in the
 link confirmation, the member's Aether display name and the server's host name.
 Replies and button presses pass through Slack to the server. Nothing is sent
 to Slack for members who never linked.
@@ -240,7 +240,7 @@ address, path, status and user agent.
 | --- | --- | --- |
 | Your GitHub account: an account id the edge assigns, GitHub's user id, your login, verified primary email and display name, and when you last signed in with GitHub | To sign you in and to match invitations | Until you delete it on the edge's Account page, or its operator deletes it with `aether-edge accounts delete` |
 | Each signed-in device: its label (the machine's host name unless you chose one), its public key, a hash of its token, when it signed in and was last used | To let that device connect | Until you revoke it with `aether logout` or the edge's Devices page |
-| Browser sessions at the edge: a hash of the cookie | To keep you signed in there | 30 days after last use |
+| Browser sign-ins at the edge: a hash of the cookie | To keep you signed in there | 30 days after last use |
 | A pending sign-in from `aether login`: the device label, public key and the IP address it started from | To show you on the confirmation page where the sign-in came from | Until the device collects its token or is denied; an expired one (after 10 minutes) until the next sign-in starts |
 | Each server you claim: its id, its host name, the access policy it announces, you as its owner | To route connections and show you your servers | Until the owner removes it, or the edge's operator removes or blocks it. Deleting your account removes you as its owner |
 | Each server the edge let your account connect to: its id and your GitHub user id | To tell every server that may hold your identity when you delete your account | Until you delete your account |
@@ -271,69 +271,69 @@ project's edge, who runs `aether-edge accounts delete`.
 
 ## Remote-development data
 
-An [enhanced run](enhanced-runs.md), and a background run over ACP, records its agent session on your server
+An [enhanced session](enhanced-sessions.md), and a background session over ACP, records its agent session on your server
 in `<data-dir>/transcripts/<run_id>.items.jsonl`: the prompts members send, the
 agent's messages and thoughts, tool call inputs, command output and diffs,
 permission requests and their answers. Whatever the agent or a tool prints,
-a secret included, can land there. Anyone with **View** on the run can read
+a secret included, can land there. Anyone with **View** on the session can read
 it through the dashboard; answering or messaging the agent needs the `steer`
-permission and the run's control lease. The log and terminal recordings persist
-until the run is explicitly deleted, including through workspace
-deletion. Checkout cleanup and archiving do not remove them. Standard runs
+permission and the session's control lease. The log and terminal recordings persist
+until the session is explicitly deleted, including through workspace
+deletion. Checkout cleanup and archiving do not remove them. Standard sessions
 keep their terminal recording; older servers may already have trimmed history.
 
-Files selected or pasted into chat are uploaded to the run's persistent member
+Files selected or pasted into chat are uploaded to the session's persistent member
 home before sending. So is the picture of each page element annotated in a
-run's Browser, when its note is sent; the note's text names that file and
+session's Browser, when its note is sent; the note's text names that file and
 carries the element's markup and visible text as the page had them. Sending an Enhanced prompt passes image bytes to the agent
 and its configured model provider; any other file reaches the agent as its
 path, which the agent can read and pass on. Room records and the session item
 log retain small attachment references and file paths, not copies of the bytes. Members with
-**View** can fetch images attached to that run's retained messages. Removing a
-draft thumbnail or deleting a run does not remove the member-home file; see
+**View** can fetch images attached to that session's retained messages. Removing a
+draft thumbnail or deleting a session does not remove the member-home file; see
 [image retention](security.md#terminal-image-uploads).
 
 The shared app browser runs on your server, not in the phone's WebView.
 Browser input, app-terminal input, observations, frames, and explicit capture
 requests travel through your Aether server. A page opened there makes its
-own network requests from the run's network namespace; those app endpoints
+own network requests from the session's network namespace; those app endpoints
 and any third parties the page contacts receive the usual browser requests
 under their own policies. This is separate from the Android shell's lack of
 analytics or third-party reporting.
 
-An app session can contain test-account cookies, tokens, personal data, page
+The app browser can contain test-account cookies, tokens, personal data, page
 URLs, or secrets printed by an app or terminal. Reading the live session,
 streaming it, or taking a transient capture requires the `steer` permission
-and access to the backing account, not merely permission to view a run.
+and access to the backing account, not merely permission to view a session.
 Deliberately retained copies instead use capture access and
-expiry; review what you retain for that audience. Human members and the run
+expiry; review what you retain for that audience. Human members and the session
 agent have distinct
 per-surface control identities; taking over a shared app surface does not
-isolate that run's other processes or credentials from it.
+isolate that session's other processes or credentials from it.
 
 The companion has no member-home or source-checkout mount. Its browser
 context/profile is transient companion state, outside source control.
 Resetting the browser context removes its pages and session state; a lost
 browser process does not silently restore an authenticated session. Private
 control sockets and lifecycle journals live below
-`<data-dir>/scheduler/browser/`, not in the checkout or the run's visible
+`<data-dir>/scheduler/browser/`, not in the checkout or the session's visible
 coordination files. See
 [security.md](security.md#remote-development-and-browser-isolation).
 
-Captures are explicit PNG files, not continuous recording. Each run can keep
+Captures are explicit PNG files, not continuous recording. Each session can keep
 at most **64 captures**, **128 MiB of PNG bytes in total**, and **8 MiB per
 image**. Reaching either aggregate limit refuses a new capture with
-`run capture limit reached; delete captures before taking another`; it does
+`session capture limit reached; delete captures before taking another`; it does
 not silently evict old captures. Files and their metadata are stored below
-`<data-dir>/coord/<run-id>/captures/`, exposed read-only to the run as
-`/run/aether/captures/<random-id>.png`. Metadata identifies the run,
+`<data-dir>/coord/<run-id>/captures/`, exposed read-only to the session as
+`/run/aether/captures/<random-id>.png`. Metadata identifies the session,
 terminal or page, session/revision, capture time, dimensions, and page URL
 where applicable. Optional Git HEAD and dirty-state fields describe only what
 was actually observed at capture time; absent fields mean **unknown**, not a
 clean checkout or the packet's later retained revision.
 
-These captures remain transient run-owned files until explicit deletion or
-cleanup of that run's coordination mount. A retained Standard run
+These captures remain transient session-owned files until explicit deletion or
+cleanup of that session's coordination mount. A retained Standard session
 keeps its mount and captures until expiry or deletion. The live browser's
 frame stream is not automatically archived. Browser diagnostics are bounded
 observations, not a full traffic recording: the companion retains up to 100
@@ -342,7 +342,7 @@ per page.
 URLs and logged messages can still reveal sensitive information.
 
 To preserve a reviewed capture before cleanup, open **Captures…** from the
-run's **More** menu or a terminal's **Tools**, select it under **Select
+session's **More** menu or a terminal's **Tools**, select it under **Select
 transient captures to retain**, optionally enter verification notes, and
 choose **Retain selected captures**. An agent with the advertised capability uses
 `aether-internal artifact retain` with selected `artifact_ids`, optional
@@ -355,7 +355,7 @@ can remove the transient originals. A capture handle or live frame alone is
 not a durable record.
 
 Retained copies remain readable after development processes stop, subject
-to capture access and expiry. Each run's retained copies are separately
+to capture access and expiry. Each session's retained copies are separately
 bounded to **64 captures**, **128 MiB total**, and **8 MiB per PNG** across
 packets; deleting transient captures does not reclaim retained-copy space.
 Verification notes are bounded to **4096 UTF-8 bytes**. Original source,
@@ -374,7 +374,7 @@ exports or publishes a capture creates a separate copy under that
 destination's access and retention rules.
 
 Messages one agent sends another stay on your server as workspace history
-until the sending or receiving run is deleted. Every member of the workspace
+until the sending or receiving session is deleted. Every member of the workspace
 can read their bodies, the same audience the **Activity** page has. Do not
 ask agents to pass credentials to each other.
 
@@ -403,7 +403,7 @@ vendor's sign-in service and the new access token to its profile endpoint
   tool socket.
 
 Only the server process and your assistant's container read or write them;
-no run, environment or other member can, including members you
+no session, environment or other member can, including members you
 [share your account](security.md#account-sharing) with. Anyone with access to
 the server's data directory, such as its administrator, can read them. Your
 prompts and the files the agent reads go to the agent's vendor under the
@@ -425,26 +425,26 @@ Team memory is a store of short notes per workspace, kept in
 `<data-dir>/aether.db` (tables `memory` and its full-text index
 `memory_fts`). A note holds its text, its kind (decision, convention,
 gotcha, preference or outcome), up to 20 file paths it cites, the member it
-is attributed to, the run, agent and commit it came from, and who pinned
+is attributed to, the session, agent and commit it came from, and who pinned
 it and when. Notes reach the store three ways:
 
 - An agent writes one with `aether-internal memory add`, or a member with
   `aether memory add`: at most 1024 bytes of text.
-- When a run's agent reports success or failure, the server writes one
-  outcome note for that run: the report's summary and next action, with the
-  files and HEAD commit of the run's latest snapshot. A later report
+- When a session's agent reports success or failure, the server writes one
+  outcome note for that session: the report's summary and next action, with the
+  files and HEAD commit of the session's latest snapshot. A later report
   rewrites it and clears its pin.
 
 Every member of the server, viewers included, can read every note, and
-every run in the workspace can search them. The first line of each pinned
-note also goes into the brief each new run in the workspace receives at
-launch; a note a member pinned for themselves goes only into their own runs'
+every session in the workspace can search them. The first line of each pinned
+note also goes into the brief each new session in the workspace receives at
+launch; a note a member pinned for themselves goes only into their own sessions'
 briefs. That limits whose briefs carry the note, not who reads it: team
 memory is never private. Only the note's owner or an admin may change a
 member note, and only an admin may read another member's brief.
 
 Team memory never reads transcripts, terminal recordings, messages between
-runs, run-room chat, the files in a checkout, or an agent's own memory
+sessions, session-room chat, the files in a checkout, or an agent's own memory
 files such as those under `~/.claude` or `~/.codex`. Nothing leaves your
 server: there is no embedding service and no model call.
 
@@ -455,7 +455,7 @@ report or answer with a secret is still recorded, with its text replaced by
 secrets it has rules for, so keep credentials out of reports and answers.
 
 Notes do not expire. A collaborator or admin deletes one with
-`aether memory rm <id>`, or every note attributed to a run with `aether memory rm --run <run>`. Deleting a run deletes its unpinned notes; pinned notes stay until
+`aether memory rm <id>`, or every note attributed to a session with `aether memory rm --run <session>`. Deleting a session deletes its unpinned notes; pinned notes stay until
 removed. Deleting the workspace deletes all of its notes. A replaced note stays, hidden from
 search unless asked for with `--all`, until it is removed. Removing a member
 keeps the notes attributed to them.
@@ -474,7 +474,7 @@ or Settings) with the id of the message it was quoted from, and when it was
 created, changed and last read.
 
 Only you can read, change or delete your preferences. Teammates and admins
-cannot through Aether, nor can your runs or connected apps. Server operators
+cannot through Aether, nor can your sessions or connected apps. Server operators
 with access to the database file can read it.
 
 Forgetting a preference deletes its row. SQLite overwrites the deleted text
@@ -494,7 +494,7 @@ not remove:
 - the `aether.db.pre-update` copy an update keeps until the new release
   starts;
 - backups an operator made of the data directory;
-- runs already launched with the text in their task;
+- sessions already launched with the text in their task;
 - the assistant transcript (`<data-dir>/assistant/<member>/items.jsonl`)
   and the agent's session files in `home/` until you start a **New
   conversation**, which deletes both but the sign-in, as it does for a
@@ -527,24 +527,24 @@ which no other app can hold and which grants nothing.
   since the edge keeps its record of the device until you do.
 - At an edge: see [What an edge stores](#what-an-edge-stores).
 - On the server: the server's administrator owns the data directory and can
-  delete a run, a member home, or the whole directory
+  delete a session, a member home, or the whole directory
   ([install.md](install.md#uninstalling)). `aether member remove` removes
   your environment container, deletes your member record and erases your
-  member home. It refuses while anything still points at you - a run you
+  member home. It refuses while anything still points at you - a session you
   launched, a schedule you own, or an agent profile you pushed - so an
-  administrator deletes those first; what a run wrote stays in the data
+  administrator deletes those first; what a session wrote stays in the data
   directory until it is deleted too ([teams.md](teams.md#roles)). The
   publisher holds no copy and cannot delete anything on your behalf.
-- Evidence: deleting a run, or the packet's 30-day expiry, removes its
+- Evidence: deleting a session, or the packet's 30-day expiry, removes its
   evidence packets at once. The Git objects they retained stay in the
   workspace repository until one background `git gc` runs there, 30 seconds
-  after the last such removal in that workspace. A gc that fails or runs
+  after the last such removal in that workspace. A gc that fails or sessions
   past 5 minutes logs `gitengine: evidence prune failed` and is retried at
   the next hourly evidence sweep or server start.
 
-## Children
+## Subsessions
 
-The app is not directed at children and has no age-specific content or
+The app is not directed at subsessions and has no age-specific content or
 features.
 
 ## Licence and open source notices

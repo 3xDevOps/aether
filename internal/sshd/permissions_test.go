@@ -196,14 +196,14 @@ func TestRunProtectRechecksOwnerAfterHandoff(t *testing.T) {
 	close(releaseLookup)
 
 	if perr := <-protectDone; perr == nil || perr.Code != protocol.CodeDenied {
-		t.Fatalf("stale run.protect result = %+v, want CodeDenied", perr)
+		t.Fatalf("stale session.protect result = %+v, want CodeDenied", perr)
 	}
 	stored, err := e.store.GetRun(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.Protected {
-		t.Fatal("stale run.protect mutated the handed-off run")
+		t.Fatal("stale session.protect mutated the handed-off run")
 	}
 }
 
@@ -301,7 +301,7 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 		t.Fatalf("create run: %v", cerr)
 	}
 	if err := cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(own.ID), Message: "x", IdempotencyKey: "own-x"}, nil); err != nil {
-		t.Fatalf("admins_only steer of own run: %v", err)
+		t.Fatalf("admins_only steer of own session: %v", err)
 	}
 
 	// workspace.settings itself is admin-only.
@@ -350,7 +350,7 @@ func TestHandoffOwnerOrAdminOnly(t *testing.T) {
 	case ev := <-sub.Events():
 		p, ok := ev.Payload.(events.TimelinePayload)
 		if !ok || p.Kind != events.TimelineHandoff || ev.ActorID != cm.ID || ev.RunID != own.ID {
-			t.Errorf("handoff event = %+v actor %s run %s", ev.Payload, ev.ActorID, ev.RunID)
+			t.Errorf("handoff event = %+v actor %s session %s", ev.Payload, ev.ActorID, ev.RunID)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no timeline event for handoff")
@@ -446,7 +446,7 @@ func TestRunProtectPublishesEvents(t *testing.T) {
 		select {
 		case ev := <-sub.Events():
 			if ev.ActorID != e.member.ID || ev.RunID != e.run.ID {
-				t.Errorf("protect event = %+v actor %s run %s", ev.Payload, ev.ActorID, ev.RunID)
+				t.Errorf("protect event = %+v actor %s session %s", ev.Payload, ev.ActorID, ev.RunID)
 			}
 			switch ev.Type {
 			case events.TypeTimeline:
@@ -465,7 +465,7 @@ func TestRunProtectPublishesEvents(t *testing.T) {
 				t.Errorf("unexpected protect event type %q", ev.Type)
 			}
 		case <-time.After(5 * time.Second):
-			t.Fatal("missing run.protect event")
+			t.Fatal("missing session.protect event")
 		}
 	}
 	if !timelineSeen || !protectedSeen {
@@ -533,6 +533,6 @@ func TestGuardUnknownRunIsNotFound(t *testing.T) {
 	err := c.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: "run_missing"}, nil)
 	var pe *protocol.Error
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
-		t.Fatalf("guarded kill of unknown run = %v, want CodeNotFound", err)
+		t.Fatalf("guarded kill of unknown session = %v, want CodeNotFound", err)
 	}
 }

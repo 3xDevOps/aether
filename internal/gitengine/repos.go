@@ -24,7 +24,7 @@ func (e *Engine) extraKeys(run domain.RunID, history bool) ([]domain.RunID, erro
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("gitengine: list extra repositories of run %s: %w", run, err)
+		return nil, fmt.Errorf("gitengine: list extra repositories of session %s: %w", run, err)
 	}
 	pattern := regexp.MustCompile("^" + regexp.QuoteMeta(string(run)) + `-r([0-9]+)(` + regexp.QuoteMeta(snapshotStoreSuffix) + `)?$`)
 	positions := make(map[int]domain.RunID)
@@ -146,7 +146,7 @@ func (e *Engine) FetchRunBranch(ctx context.Context, ws domain.WorkspaceID, bran
 		return "", err
 	}
 	if dst.Workspace != ws {
-		return "", fmt.Errorf("gitengine: run %s is not in workspace %s", into, ws)
+		return "", fmt.Errorf("gitengine: session %s is not in workspace %s", into, ws)
 	}
 	repo, err := e.existingRepoPath(ws)
 	if err != nil {
@@ -157,7 +157,7 @@ func (e *Engine) FetchRunBranch(ctx context.Context, ws domain.WorkspaceID, bran
 		return "", err
 	}
 	if _, err := e.git(ctx, checkout, "fetch", "--quiet", "--no-tags", repo, "+refs/heads/"+branch+":"+ref); err != nil {
-		return "", fmt.Errorf("gitengine: fetch %s into run %s: %w", branch, into, err)
+		return "", fmt.Errorf("gitengine: fetch %s into session %s: %w", branch, into, err)
 	}
 	return e.git(ctx, checkout, "rev-parse", "--verify", ref)
 }

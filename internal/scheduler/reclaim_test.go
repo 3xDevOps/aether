@@ -58,7 +58,7 @@ func TestReclaimDiskIgnoresAFloorLargerThanTheDisk(t *testing.T) {
 
 func TestReclaimDiskRemovesClosedRunContainerFirstAndStopsWhenRecovered(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
-	run := closeRetained(t, e, "closed run")
+	run := closeRetained(t, e, "closed session")
 	var free atomic.Uint64
 	free.Store(1 << 30)
 	e.sched.cfg.filesystemCapacity = func(string) (disk.Usage, error) {
@@ -70,7 +70,7 @@ func TestReclaimDiskRemovesClosedRunContainerFirstAndStopsWhenRecovered(t *testi
 	cache := writeCacheFixture(t, e, e.member.ID, "runs", 4096)
 	e.sched.reclaimDisk(t.Context(), "")
 	if e.rt.byName(string(run.ID)) != nil {
-		t.Fatal("retained container of the closed run survived reclaim")
+		t.Fatal("retained container of the closed session survived reclaim")
 	}
 	if row, err := e.db.GetRun(t.Context(), run.ID); err != nil || row.Reason != retainedReclaimedReason {
 		t.Fatalf("reclaimed run = %+v, %v; want reason %q", row, err, retainedReclaimedReason)
@@ -90,12 +90,12 @@ func TestReclaimDiskSkipsRunNoLongerRetained(t *testing.T) {
 	e.sched.mu.Unlock()
 	e.sched.reclaimDiskLocked(t.Context(), "")
 	if e.rt.byName(string(run.ID)) == nil {
-		t.Fatal("container of a run that is no longer retained was removed")
+		t.Fatal("container of a session that is no longer retained was removed")
 	}
 	for {
 		select {
 		case ev := <-sub.Events():
-			if p, ok := ev.Payload.(events.TimelinePayload); ok && ev.RunID == run.ID && strings.Contains(p.Message, "Removed this closed run's container") {
+			if p, ok := ev.Payload.(events.TimelinePayload); ok && ev.RunID == run.ID && strings.Contains(p.Message, "Removed this closed session's container") {
 				t.Fatalf("posted removal note: %q", p.Message)
 			}
 		default:
@@ -107,7 +107,7 @@ func TestReclaimDiskSkipsRunNoLongerRetained(t *testing.T) {
 func TestReclaimDiskRemovesLegacyCachesOnlyUnderPressureWhileRunIsOpen(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.sched.cfg.Runtime = &cacheImageRuntime{fakeRuntime: e.rt}
-	e.launchFake(t, "open run")
+	e.launchFake(t, "open session")
 	home, err := e.sched.cfg.Homes.Path(e.member.ID)
 	if err != nil {
 		t.Fatal(err)

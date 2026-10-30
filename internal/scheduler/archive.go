@@ -26,7 +26,7 @@ func (s *Scheduler) SetArchived(ctx context.Context, run domain.RunID, actor dom
 			return nil, err
 		}
 		if !current.Status.Final() {
-			return nil, fmt.Errorf("%w: run is %s; only merged, abandoned, failed or interrupted runs can be archived",
+			return nil, fmt.Errorf("%w: session is %s; only merged, abandoned, failed or interrupted sessions can be archived",
 				ErrInvalidTransition, current.Status)
 		}
 		now := time.Now().UTC()
@@ -53,9 +53,9 @@ func (s *Scheduler) SetArchived(ctx context.Context, run domain.RunID, actor dom
 func (s *Scheduler) publishArchived(ctx context.Context, run *domain.Run, actor domain.MemberID) {
 	wire := protocol.RunFromDomain(run)
 	payload := events.RunArchivedPayload{ArchivedAt: wire.ArchivedAt}
-	msg := "run restored from archive"
+	msg := "session restored from archive"
 	if wire.ArchivedAt != nil {
-		msg = "run archived"
+		msg = "session archived"
 	}
 	s.publish(ctx, events.Event{
 		WorkspaceID: run.WorkspaceID,

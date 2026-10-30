@@ -104,7 +104,7 @@ type repoRef struct {
 }
 
 // launchReceipt is what a launch started and on what, the result field
-// launch of aether_launch_run and aether_get_run. RequestedAccount is set when usage
+// launch of aether_launch_session and aether_get_session. RequestedAccount is set when usage
 // fallback moved a run off the account asked for.
 type launchReceipt struct {
 	Kind        string `json:"kind"`
@@ -367,7 +367,7 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 	return summary, out, nil
 }
 
-// launchTemplate runs aether_launch_run's template on the caller's own
+// launchTemplate runs aether_launch_session's template on the caller's own
 // account, refused if template_version names one it no longer is;
 // template.launch takes nothing else a run launch does, so naming it is
 // refused rather than dropped.
@@ -408,21 +408,21 @@ func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (stri
 		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	if res.Run.ID == "" {
-		return starting("aether_launch_run", params.IdempotencyKey, err)
+		return starting("aether_launch_session", params.IdempotencyKey, err)
 	}
 	receipt := runReceipt(res.Run, l, book)
 	receipt.IdempotencyKey = params.IdempotencyKey
-	out := map[string]any{"run_id": res.Run.ID, "state": res.Run.Status, "url": l.run(res.Run.ID), "launch": receipt, "next": "poll aether_get_run with run_id"}
+	out := map[string]any{"run_id": res.Run.ID, "state": res.Run.Status, "url": l.run(res.Run.ID), "launch": receipt, "next": "poll aether_get_session with run_id"}
 	switch {
 	case dup:
 		out["duplicate"] = true
-		return fmt.Sprintf("You are already launching this template; returning run %s.", res.Run.ID), out, nil
+		return fmt.Sprintf("You are already launching this template; returning session %s.", res.Run.ID), out, nil
 	case !finished:
 		out["state"], out["write"] = "starting", writePending
-		return fmt.Sprintf("Run %s is starting from template %s.", res.Run.ID, in.Template), out, nil
+		return fmt.Sprintf("Session %s is starting from template %s.", res.Run.ID, in.Template), out, nil
 	case res.Replayed:
 		out["replayed"] = true
-		return fmt.Sprintf("This idempotency_key already launched run %s; nothing new was launched.", res.Run.ID), out, nil
+		return fmt.Sprintf("This idempotency_key already launched session %s; nothing new was launched.", res.Run.ID), out, nil
 	}
-	return fmt.Sprintf("Launched run %s from template %s (%s).", res.Run.ID, in.Template, res.Run.Status), out, nil
+	return fmt.Sprintf("Launched session %s from template %s (%s).", res.Run.ID, in.Template, res.Run.Status), out, nil
 }

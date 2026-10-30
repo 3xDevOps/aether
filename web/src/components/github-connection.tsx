@@ -85,7 +85,7 @@ export function GitHubConnection({ client = api, onConnected, onDisconnected }: 
   if (!admin) return null
   const waiting = pending(result?.state)
   return <section aria-label="GitHub connection" className="space-y-3 text-ui">
-    <p className="text-ui-sm text-muted">Connect GitHub to choose repositories and let your runs publish changes.</p>
+    <p className="text-ui-sm text-muted">Connect GitHub to choose repositories and let your sessions publish changes.</p>
     <p role="status">{result?.state === 'connected' ? `Connected as ${result.login ?? result.connection?.login ?? 'GitHub member'}`
       : result?.state === 'finishing' ? 'Finishing GitHub setup…'
         : waiting ? 'Waiting for GitHub authorization…'

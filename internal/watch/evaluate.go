@@ -227,7 +227,7 @@ func (s *Service) read(ctx context.Context, w *store.Watch, prev protocol.WatchO
 func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.WatchObserved) (reading, error) {
 	run, err := s.store.GetRun(ctx, w.RunID)
 	if err != nil {
-		return reading{}, fmt.Errorf("read run %s: %w", w.RunID, err)
+		return reading{}, fmt.Errorf("read session %s: %w", w.RunID, err)
 	}
 	r := reading{ok: true, title: push.RunTitle(run), final: run.Status.Final()}
 	link := RunLink(run.ID)
@@ -248,7 +248,7 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 		}
 		resumed, err := s.store.RunResumedSince(ctx, run.ID, time.Unix(0, nanos))
 		if err != nil {
-			return reading{}, fmt.Errorf("read run %s history: %w", run.ID, err)
+			return reading{}, fmt.Errorf("read session %s history: %w", run.ID, err)
 		}
 		if resumed {
 			fired = ""
@@ -444,7 +444,7 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 				break
 			}
 			if ownerPushed(w, run, n, s.startedAt()) {
-				d.Status, d.Detail = protocol.WatchStatusSkipped, "The run notification already sent it"
+				d.Status, d.Detail = protocol.WatchStatusSkipped, "The session notification already sent it"
 				break
 			}
 			rec.PushState, rec.PushNextAt = store.WatchPushPending, &now

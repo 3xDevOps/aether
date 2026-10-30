@@ -6,7 +6,7 @@ import { expect, test } from './mobile'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('a phone creates, pauses, resumes and deletes a watch, and sees its notice after a reload', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
@@ -22,13 +22,13 @@ test('a phone creates, pauses, resumes and deletes a watch, and sees its notice 
   })
 
   await page.goto(`${alice.url}&run=${run.id}`)
-  await expect(page.getByRole('log', { name: 'Session' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
-  await page.getByRole('toolbar', { name: 'Run actions' }).getByRole('button', { name: 'More', exact: true }).tap()
+  await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('toolbar', { name: 'Session actions' }).getByRole('button', { name: 'More', exact: true }).tap()
   await page.getByRole('menuitem', { name: 'Watch…' }).tap()
   const form = page.getByRole('dialog', { name: /^Watch / })
   await form.getByRole('button', { name: 'Watch', exact: true }).tap()
   await expect(form).toBeHidden()
-  const receipt = page.getByText(/^Watching run .* for: needs you, finished\./)
+  const receipt = page.getByText(/^Watching session .* for: needs you, finished\./)
   await expect(receipt).toBeVisible()
   await testInfo.attach('watch receipt', { body: await page.screenshot(), contentType: 'image/png' })
   await page.getByRole('button', { name: 'View watch' }).tap()

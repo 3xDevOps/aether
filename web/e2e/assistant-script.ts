@@ -36,7 +36,7 @@ function frame(turn: number, kind: string, fields: Record<string, unknown>) {
 }
 
 const launchCall = (status: string, extra: Record<string, unknown>) =>
-  frame(1, 'tool_call', { tool_call: { id: 'call-launch', title: 'aether_launch_run', tool_kind: 'other', status, tool_name: 'mcp__aether__aether_launch_run', ...extra } })
+  frame(1, 'tool_call', { tool_call: { id: 'call-launch', title: 'aether_launch_session', tool_kind: 'other', status, tool_name: 'mcp__aether__aether_launch_session', ...extra } })
 
 async function failedRun(aether: Aether, alice: Member) {
   const repo = await aether.seedRepo('project')
@@ -80,12 +80,12 @@ export async function fixThisJourney(page: Page, aether: Aether, testInfo: TestI
   await page.goto(`${alice.url}&run=${run.id}`)
   await expect(page.getByRole('heading', { level: 1, name: task, exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'More', exact: true }).first().click()
-  await page.getByRole('menuitem', { name: 'Ask the assistant to fix this run' }).click()
+  await page.getByRole('menuitem', { name: 'Ask the assistant to fix this session' }).click()
 
   const assistant = page.locator('#assistant')
   const box = assistant.getByRole('textbox', { name: 'Message the assistant' })
   await expect(box).toHaveValue('Fix this')
-  await expect(assistant.getByRole('list', { name: 'Sent with this message' }).getByRole('button', { name: `Remove run ${task} from the message` })).toBeVisible()
+  await expect(assistant.getByRole('list', { name: 'Sent with this message' }).getByRole('button', { name: `Remove session ${task} from the message` })).toBeVisible()
   await expect.poll(() => socket !== undefined).toBe(true)
   await assistant.getByRole('button', { name: /^Send/ }).click()
   await expect.poll(() => prompts.length).toBe(1)
@@ -95,18 +95,18 @@ export async function fixThisJourney(page: Page, aether: Aether, testInfo: TestI
   send(
     frame(1, 'turn_start', {}),
     frame(1, 'message', { message: { role: 'user', message_id: 'u1', text: 'Fix this', complete: true } }),
-    frame(1, 'message', { message: { role: 'assistant', message_id: 'a1', text: `Run ${run.id} failed: the agent exited 3 after printing importer-broke. One run fits: one coherent change.`, complete: true } }),
+    frame(1, 'message', { message: { role: 'assistant', message_id: 'a1', text: `Session ${run.id} failed: the agent exited 3 after printing importer-broke. One session fits: one coherent change.`, complete: true } }),
     launchCall('in_progress', { raw_input: params }),
     { status: status([{ id: 'conf-1', method: 'run.launch', summary: `Launch fake (headless) in ${workspace.name}: "${fix}"`, params, created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 600_000).toISOString() }], 'running') },
   )
   const card = assistant.getByRole('group', { name: /^Approve this action\?/ })
   const starts = card.getByRole('region', { name: 'What starts' })
-  await expect(starts).toContainText('Run: one agent on one task')
+  await expect(starts).toContainText('Session: one agent on one task')
   await expect(starts).toContainText(workspace.name)
   await expect(starts).toContainText('Yours')
   await expect(starts).toContainText('Any account you may launch on, most usage left first')
   await expect(starts).toContainText(fix)
-  await expect(assistant.getByRole('group', { name: /^Launching run on .*Waiting for your approval$/ })).toBeVisible()
+  await expect(assistant.getByRole('group', { name: /^Launching session on .*Waiting for your approval$/ })).toBeVisible()
   await card.scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath(`${shot}-approval.png`) })
   await card.getByRole('button', { name: 'Approve' }).click()
@@ -116,13 +116,13 @@ export async function fixThisJourney(page: Page, aether: Aether, testInfo: TestI
   send(
     { status: status([], 'running') },
     frame(1, 'notice', { notice: { severity: 'info', title: `Approved: Launch fake (headless) in ${workspace.name}`, description: 'run.launch passed after you approved its card.' } }),
-    launchCall('completed', { raw_input: params, content: [{ type: 'text', text: `Launched run ${launched.id}.\n${JSON.stringify({ run_id: launched.id, state: 'queued', workspace_id: workspace.id, harness: 'fake', url: `?run=${launched.id}` })}` }] }),
-    frame(1, 'message', { message: { role: 'assistant', message_id: 'a2', text: `Launched run ${launched.id} in ${workspace.name}.`, complete: true } }),
+    launchCall('completed', { raw_input: params, content: [{ type: 'text', text: `Launched session ${launched.id}.\n${JSON.stringify({ run_id: launched.id, state: 'queued', workspace_id: workspace.id, harness: 'fake', url: `?run=${launched.id}` })}` }] }),
+    frame(1, 'message', { message: { role: 'assistant', message_id: 'a2', text: `Launched session ${launched.id} in ${workspace.name}.`, complete: true } }),
     frame(1, 'turn_end', { stop_reason: 'end_turn' }),
     { status: status() },
   )
-  const action = assistant.getByRole('group', { name: /^Launched run on / })
-  await expect(action).toContainText(`run · ${workspace.name} · fake`)
+  const action = assistant.getByRole('group', { name: /^Launched session on / })
+  await expect(action).toContainText(`session · ${workspace.name} · fake`)
   await expect(action).toContainText('approved by you')
   // The launched run fails at once on the seeded agent.sh; its card loses the working-in-the-background line when it does, which would move Open run under the click.
   await expect
@@ -131,7 +131,7 @@ export async function fixThisJourney(page: Page, aether: Aether, testInfo: TestI
   await expect(action).toContainText('Done')
   await action.scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath(`${shot}-action.png`) })
-  await action.getByRole('button', { name: 'Open run' }).click()
+  await action.getByRole('button', { name: 'Open session' }).click()
   await expect(page).toHaveURL(new RegExp(`[?&]run=${launched.id}\\b`))
   await expect(page.getByRole('heading', { level: 1, name: fix, exact: true })).toBeVisible()
   return { launched: launched.id }

@@ -61,30 +61,30 @@ func (s *Service) dispatch(ctx context.Context) error {
 func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	refuse := func(reason string) {
 		if err := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildRefused, reason, domain.ChildLaunching); err != nil {
-			slog.Warn("children: refuse child", "child", c.RunID, "error", err)
+			slog.Warn("subsessions: refuse subsession", "child", c.RunID, "error", err)
 			return
 		}
 		s.publish(ctx, c.ParentRunID, "")
 		// A child that never started has no run to send from.
 		_ = s.notify(ctx, c.ParentRunID, c.ParentRunID,
-			fmt.Sprintf("Child run %s (%s) did not start: %s", c.RunID, c.Purpose, reason), "child-refused:"+string(c.RunID))
+			fmt.Sprintf("Subsession %s (%s) did not start: %s", c.RunID, c.Purpose, reason), "child-refused:"+string(c.RunID))
 	}
 	p, err := s.resolve(ctx, c.ParentRunID)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		_ = s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "the parent run was deleted", domain.ChildLaunching)
+		_ = s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "the parent session was deleted", domain.ChildLaunching)
 		return
 	case err != nil:
 		refuse(err.Error())
 		return
 	case p.parent.Status.Terminal() && !c.Detached:
-		_ = s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "the parent run ended before it started", domain.ChildLaunching)
+		_ = s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "the parent session ended before it started", domain.ChildLaunching)
 		return
 	case p.refusal != "":
 		refuse(p.refusal)
 		return
 	case p.owner != c.OwnerID:
-		refuse(fmt.Sprintf("the parent run now belongs to %s, not %s, who asked for it", p.owner, c.OwnerID))
+		refuse(fmt.Sprintf("the parent session now belongs to %s, not %s, who asked for it", p.owner, c.OwnerID))
 		return
 	}
 	if s.cfg.Cost != nil {
@@ -108,7 +108,7 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	parent, getErr := s.cfg.Store.GetRun(ctx, c.ParentRunID)
 	if getErr != nil || parent.MemberID != c.OwnerID || parent.Status.Terminal() {
 		unlock()
-		refuse("the parent run ended or changed owner before this child started")
+		refuse("the parent session ended or changed owner before this subsession started")
 		return
 	}
 	requested, err := s.cfg.Authorize(ctx, s.cfg.Store, c.OwnerID, string(c.AccountID))
@@ -121,7 +121,7 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		return s.cfg.Runs.FallbackLaunchable(ctx, c.OwnerID, requested, account, c.Harness, c.Mode)
 	})
 	if excluded != nil {
-		slog.Warn("children: fallback accounts left out of a child launch", "child", c.RunID, "error", excluded)
+		slog.Warn("subsessions: fallback accounts left out of a subsession launch", "child", c.RunID, "error", excluded)
 	}
 	created := false
 	extras := make([]domain.WorkspaceID, len(p.parent.Extras))
@@ -134,7 +134,7 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		Created: func(domain.RunID) {
 			created = true
 			if stateErr := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildStarted, "", domain.ChildLaunching); stateErr != nil {
-				slog.Warn("children: mark child started", "child", c.RunID, "error", stateErr)
+				slog.Warn("subsessions: mark subsession started", "child", c.RunID, "error", stateErr)
 			}
 		},
 	})
@@ -179,7 +179,7 @@ func (s *Service) settle(ctx context.Context) error {
 			// A child still provisioning cannot be closed; stop it first.
 			if child.Status == domain.RunQueued || child.Status == domain.RunProvisioning {
 				if stopErr := s.stop(ctx, c); stopErr != nil {
-					slog.Warn("children: stop the child of a closed run", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
+					slog.Warn("subsessions: stop the subsession of a closed session", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
 				}
 				continue
 			}
@@ -199,7 +199,7 @@ func (s *Service) settle(ctx context.Context) error {
 				closeErr = s.cfg.Runs.CloseRun(ctx, c.RunID, c.OwnerID, parent.Status)
 			}
 			if closeErr != nil {
-				slog.Warn("children: close the child of a closed run", "child", c.RunID, "parent", c.ParentRunID, "error", closeErr)
+				slog.Warn("subsessions: close the subsession of a closed session", "child", c.RunID, "parent", c.ParentRunID, "error", closeErr)
 				continue
 			}
 			if _, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID); err != nil {
@@ -223,7 +223,7 @@ func (s *Service) settle(ctx context.Context) error {
 				continue
 			}
 			if stopErr := s.stop(ctx, c); stopErr != nil {
-				slog.Warn("children: stop the child of an ended run", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
+				slog.Warn("subsessions: stop the subsession of an ended session", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
 			}
 			continue
 		}
@@ -240,7 +240,7 @@ func (s *Service) settle(ctx context.Context) error {
 			return err
 		} else if err != nil {
 			// The notice's key makes a resend after a failed mark a no-op.
-			msg := fmt.Sprintf("Child run %s (%s) ended %s without a final report", c.RunID, c.Purpose, child.Status)
+			msg := fmt.Sprintf("Subsession session %s (%s) ended %s without a final report", c.RunID, c.Purpose, child.Status)
 			if child.Reason != "" {
 				msg += ": " + child.Reason
 			}
@@ -297,9 +297,9 @@ func (s *Service) noticeIdle(ctx context.Context) error {
 		}
 		// The commands come before the reason and report, which a long
 		// question can push past the mailbox's body limit.
-		msg := fmt.Sprintf("Child run %s (%s) has been %s for %s.", c.Child.RunID, c.Child.Purpose, c.Run.Activity, now.Sub(c.Since).Round(time.Minute)) +
+		msg := fmt.Sprintf("Subsession %s (%s) has been %s for %s.", c.Child.RunID, c.Child.Purpose, c.Run.Activity, now.Sub(c.Since).Round(time.Minute)) +
 			"\nCheck what it is doing, then wake it with an instruction: aether-internal send --to " + string(c.Child.RunID) +
-			" --body <text>, or stop it: aether-internal child cancel --run-id " + string(c.Child.RunID)
+			" --body <text>, or stop it: aether-internal subsession cancel --run-id " + string(c.Child.RunID)
 		if c.Run.Reason != "" {
 			msg += "\nIts status reason: " + truncateSummary(c.Run.Reason)
 		}

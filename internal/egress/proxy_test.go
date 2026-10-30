@@ -321,19 +321,19 @@ func TestProxyLimitsAnIsolatedRunToAgentHosts(t *testing.T) {
 	tp := newTestProxy(t, fakeNetwork{netip.MustParseAddr("127.0.0.1"): "run-1"})
 	tp.store.run.Permission = domain.PermissionIsolated
 
-	const denied = "aether: egress to allowed.test denied; an isolated run reaches only the agents' own hosts"
+	const denied = "aether: egress to allowed.test denied; an isolated session reaches only the agents' own hosts"
 	if resp, body, _, _ := tp.connect(t, "allowed.test:"+tp.port); resp.StatusCode != http.StatusForbidden || body != denied+"\n" {
-		t.Fatalf("CONNECT allowed.test from an isolated run = %s %q, want 403 %q", resp.Status, body, denied)
+		t.Fatalf("CONNECT allowed.test from an isolated session = %s %q, want 403 %q", resp.Status, body, denied)
 	}
 	if resp, body, _, _ := tp.connect(t, "api.anthropic.com:"+tp.port); resp.StatusCode != http.StatusOK {
-		t.Fatalf("CONNECT api.anthropic.com from an isolated run = %s %q, want 200", resp.Status, body)
+		t.Fatalf("CONNECT api.anthropic.com from an isolated session = %s %q, want 200", resp.Status, body)
 	}
 }
 
 func TestProxyRefusesUnknownSources(t *testing.T) {
 	tp := newTestProxy(t, fakeNetwork{})
 	resp, body, _, _ := tp.connect(t, "allowed.test:"+tp.port)
-	if want := "aether: 127.0.0.1 is not a run with egress control on\n"; resp.StatusCode != http.StatusForbidden || body != want {
+	if want := "aether: 127.0.0.1 is not a session with egress control on\n"; resp.StatusCode != http.StatusForbidden || body != want {
 		t.Fatalf("CONNECT from an unknown source = %s %q, want 403 %q", resp.Status, body, want)
 	}
 }

@@ -30,7 +30,7 @@ function help(state: PushState | null): ReactNode {
     return 'This browser blocks notifications from this dashboard. Allow them in its site settings, then reload.'
   }
   if (state.kind !== 'unsupported') {
-    return 'When one of your runs asks for a permission or an answer, waits for your reply, or reports a result to review. Tapping the notification opens the run.'
+    return 'When one of your sessions asks for a permission or an answer, waits for your reply, or reports a result to review. Tapping the notification opens the session.'
   }
   switch (state.why) {
     case 'desktop':
@@ -81,10 +81,10 @@ export function SlackSection({ client }: { client: Api }) {
   if (status && !status.configured) {
     help = <>This server has no Slack bot. An admin sets one up with <Code>sudo aether-server slack setup</Code>. <Guide page="slack">Slack guide</Guide></>
   } else if (status?.link) {
-    help = `Linked to Slack user ${status.link.user_id}. Runs that need you arrive as direct messages from ${bot}.`
+    help = `Linked to Slack user ${status.link.user_id}. Sessions that need you arrive as direct messages from ${bot}.`
     control = <Button size="sm" variant="secondary" disabled={busy} onClick={unlink}>Unlink</Button>
   } else if (status) {
-    help = 'Get a direct message in Slack when a run needs you, and answer it there.'
+    help = 'Get a direct message in Slack when a session needs you, and answer it there.'
     control = (
       <div className="flex gap-2">
         {code && <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(read())}>Check again</Button>}
@@ -171,7 +171,7 @@ export function PushSection({ client, onSubscriptionChange }: { client: Api; onS
   return (
     <SettingsSection title="Push notifications" id="push" scope="This device">
       <SettingRow
-        label="Notify this device when a run needs me"
+        label="Notify this device when a session needs me"
         labelFor="settings-push"
         help={help(state)}
         control={(

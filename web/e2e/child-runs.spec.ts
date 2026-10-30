@@ -15,7 +15,7 @@ import { runCoordCLI, waitForCoordCLI } from './harness/coord'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'the runs need a reachable Docker daemon')
+test.skip(!dockerReachable(), 'the sessions need a reachable Docker daemon')
 
 const launchTimeout = 3 * 60 * 1000
 const shots = process.env.AETHER_E2E_SHOTS
@@ -50,7 +50,7 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   settings.searchParams.set('page', 'settings')
   settings.searchParams.set('id', 'children')
   await page.goto(settings.toString())
-  const toggle = page.getByRole('checkbox', { name: 'Let my runs start child runs' })
+  const toggle = page.getByRole('checkbox', { name: 'Let my sessions start subsessions' })
   await expect(toggle).toBeChecked({ timeout: 30_000 })
   const saved = await alice.api.rpc<{ enabled: boolean }>('child.settings', {})
   expect(saved).toEqual({ enabled: true })
@@ -75,7 +75,7 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   const parentURL = new URL(alice.url)
   parentURL.searchParams.set('run', parent.id)
   await page.goto(parentURL.toString())
-  const section = page.getByRole('region', { name: 'Child runs' })
+  const section = page.getByRole('region', { name: 'Subsessions' })
   await expect(section.getByText('Adversarial review of the redirect fix')).toBeVisible({ timeout: 60_000 })
   await expect(section.getByText(/^Working · codex · On \S+'s account · Cost not reported$/)).toBeVisible()
   if (shots) await page.screenshot({ path: `${shots}/parent.png`, fullPage: true })
@@ -91,8 +91,8 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   const childURL = new URL(alice.url)
   childURL.searchParams.set('run', receipt.run_id)
   await page.goto(childURL.toString())
-  const lineage = page.getByRole('navigation', { name: 'Run lineage' })
-  await expect(lineage.getByText('This child run')).toBeVisible({ timeout: 60_000 })
+  const lineage = page.getByRole('navigation', { name: 'Session lineage' })
+  await expect(lineage.getByText('This subsession')).toBeVisible({ timeout: 60_000 })
   if (shots) await page.screenshot({ path: `${shots}/child.png` })
   if (shots) {
     const phone = await browser.newPage({ viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true })
@@ -110,5 +110,5 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: launchTimeout }).toBe('running')
   await alice.api.rpc('run.kill', { run_id: parent.id })
   await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: 60_000 }).toBe('completed')
-  expect((await runStatus(alice, second.run_id)).reason).toContain(`stopped by parent run ${parent.id}`)
+  expect((await runStatus(alice, second.run_id)).reason).toContain(`stopped by parent session ${parent.id}`)
 })

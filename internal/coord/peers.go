@@ -185,7 +185,7 @@ func ownerDenial(owner *domain.Member, err error) string {
 func deniedPeer(method string, from, to domain.RunID, reason string) *protocol.Error {
 	return &protocol.Error{
 		Code: protocol.CodeDenied,
-		Message: fmt.Sprintf("%s: run %s is not an authorized peer of run %s: %s; "+
-			"run `aether-internal status` to list the runs it can message", method, to, from, reason),
+		Message: fmt.Sprintf("%s: session %s is not an authorized peer of session %s: %s; "+
+			"run `aether-internal status` to list the sessions it can message", method, to, from, reason),
 	}
 }

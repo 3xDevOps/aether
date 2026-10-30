@@ -58,13 +58,13 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	})
 	switch {
 	case errors.Is(err, gitengine.ErrInvalidObjectID):
-		return nil, invalidParams("run.patch: from, or from and to, must be tree ids taken from a run.diff event (full lowercase hex, naming a tree and not a commit); to alone is not allowed")
+		return nil, invalidParams("run.patch: from, or from and to, must be tree ids taken from a session.diff event (full lowercase hex, naming a tree and not a commit); to alone is not allowed")
 	case errors.Is(err, gitengine.ErrSnapshotTreeMissing):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: retained snapshot history has expired or is unavailable"}
 	case errors.Is(err, gitengine.ErrSnapshotStorageLimit):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: current diff input exceeds 128 MiB or available disk headroom"}
 	case errors.Is(err, gitengine.ErrCheckoutNotFound), errors.Is(err, gitengine.ErrRunMetadataNotFound):
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: this run has no checkout to diff"}
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: this session has no checkout to diff"}
 	case errors.Is(err, context.DeadlineExceeded):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: rendering the diff took longer than 30s: " + err.Error()}
 	case err != nil:

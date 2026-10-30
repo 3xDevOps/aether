@@ -61,7 +61,7 @@ func (e *testEnv) expireReportDeadline(t *testing.T, run domain.RunID) {
 	entry := e.sched.runs[run]
 	if entry == nil || (entry.reported == "" && entry.idleReason == "") {
 		e.sched.mu.Unlock()
-		t.Fatalf("run %s is not armed", run)
+		t.Fatalf("session %s is not armed", run)
 	}
 	entry.reportedAt = time.Now().UTC().Add(-reportFinishDeadline)
 	if entry.idleReason != "" {
@@ -142,7 +142,7 @@ func TestReportedSuccessParksWhenTheTurnEndsWhileProvisioning(t *testing.T) {
 		go func() { turnEnd <- e.sched.ReportAgentState(ctx, run, waitingForInput) }()
 		select {
 		case err := <-turnEnd:
-			t.Errorf("turn end returned %v while the run was provisioning, want it to wait", err)
+			t.Errorf("turn end returned %v while the session was provisioning, want it to wait", err)
 			turnEnd <- err
 		case <-time.After(100 * time.Millisecond):
 		}
@@ -175,7 +175,7 @@ func TestReportedFailureParksAtDeadlineAndResumesWithoutRelaunch(t *testing.T) {
 	}
 	fresh := e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	if fresh.OutcomeUnseen || e.rt.byName(string(run.ID)) != container {
-		t.Fatalf("follow-up did not retain the same live run: %+v", fresh)
+		t.Fatalf("follow-up did not retain the same live session: %+v", fresh)
 	}
 }
 
@@ -271,7 +271,7 @@ func (e *testEnv) expireReportDeadlineAfterClose(t *testing.T, run domain.RunID)
 	entry := e.sched.runs[run]
 	if entry == nil {
 		e.sched.mu.Unlock()
-		t.Fatalf("run %s has no owner", run)
+		t.Fatalf("session %s has no owner", run)
 	}
 	e.sched.startReportedFinishLocked(entry)
 	e.sched.mu.Unlock()
@@ -490,7 +490,7 @@ func TestSeenClearsEachFlagForWhoOpens(t *testing.T) {
 	e.waitStoreStatus(t, ownerFirst, domain.RunMerged)
 	seen(ownerFirst, e.member.ID, false)
 	if _, err := e.sched.Seen(ctx, "run_missing", e.member.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("Seen on a missing run = %v, want ErrNotFound", err)
+		t.Fatalf("Seen on a missing session = %v, want ErrNotFound", err)
 	}
 
 	var got []string
@@ -622,7 +622,7 @@ func TestBlockedReasonWaitsForTheTurnEnd(t *testing.T) {
 	}
 	stall := func(t *testing.T, e *testEnv, run domain.RunID) {
 		t.Helper()
-		waitFor(t, "the run to stall", func() bool {
+		waitFor(t, "the session to stall", func() bool {
 			e.sched.checkStalls(t.Context())
 			r, err := e.db.GetRun(t.Context(), run)
 			return err == nil && r.Status == domain.RunNeedsAttention
@@ -752,7 +752,7 @@ func TestStaleReportNeverArmsAReopenedRun(t *testing.T) {
 	armed, blocked := entry.reported, entry.idleReason
 	e.sched.mu.Unlock()
 	if armed != "" || blocked != "" {
-		t.Fatalf("reopened run after stale reports: armed %q, blocked %q; want neither", armed, blocked)
+		t.Fatalf("reopened session after stale reports: armed %q, blocked %q; want neither", armed, blocked)
 	}
 }
 
@@ -1211,7 +1211,7 @@ func TestStalledInteractiveOutcomeParksAtTheDeadline(t *testing.T) {
 		t.Fatalf("permission wait: %v", err)
 	}
 	expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning)
-	waitFor(t, "the run to stall", func() bool {
+	waitFor(t, "the session to stall", func() bool {
 		e.sched.checkStalls(ctx)
 		r, err := e.db.GetRun(ctx, run.ID)
 		return err == nil && r.Status == domain.RunNeedsAttention
@@ -1223,7 +1223,7 @@ func TestStalledInteractiveOutcomeParksAtTheDeadline(t *testing.T) {
 	finishing := e.sched.runs[run.ID].reportFinishing
 	e.sched.mu.Unlock()
 	if finishing {
-		t.Fatal("the deadline started finishing a run parked at a permission prompt")
+		t.Fatal("the deadline started finishing a session parked at a permission prompt")
 	}
 	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("close")); err != nil {
 		t.Fatalf("permission answered: %v", err)

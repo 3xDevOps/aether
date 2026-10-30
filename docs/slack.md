@@ -1,6 +1,6 @@
 # Slack
 
-A Slack bot inside `aether-server` sends you a direct message when a run needs
+A Slack bot inside `aether-server` sends you a direct message when a session needs
 you and lets you answer from Slack, for example on your phone. It connects out
 to Slack over Socket Mode, so it works on a tailnet-only server with no edge
 and no public URL.
@@ -15,7 +15,7 @@ An admin does this once, on the server.
    ```yaml
    display_information:
      name: Aether
-     description: Tells you when a run needs you, and lets you answer it.
+     description: Tells you when a session needs you, and lets you answer it.
    features:
      bot_user:
        display_name: Aether
@@ -100,42 +100,42 @@ SSH key or a tailnet connection has no device.
 ## What it sends
 
 Exactly what web push sends ([the table of needs and lines](networking.md#notifications)),
-to the same member, when the run starts needing them, and to every admin when
+to the same member, when the session starts needing them, and to every admin when
 a workspace's spend reaches its budget's warning or cap. The wait is the same:
 while you use a dashboard, nothing is sent until you have left every dashboard
 alone for a minute. A budget notice is a new direct message with a link to the
 workspace's budget.
 
-Each run gets one direct message with:
+Each session gets one direct message with:
 
-- the run's title and the need line;
-- a link to the run in the dashboard, when the server serves one (`web-port`);
+- the session's title and the need line;
+- a link to the session in the dashboard, when the server serves one (`web-port`);
 - buttons, when the need can be answered there.
 
 The message is edited in place as the need changes and says
 `Nothing needs you now.` once it stops. Slack does not notify for an edit, so
 each new need also arrives as a reply in that message's thread. When Slack does not take a message, the server tries again
-every minute while the run still needs you. After you unlink, or when a run
+every minute while the session still needs you. After you unlink, or when a session
 changes hands, a message still showing a need is edited to say only that it
-no longer follows the run.
+no longer follows the session.
 
 ## What you can do
 
-**Reply in a run's thread.** The reply goes to the run as a message from you,
+**Reply in a session's thread.** The reply goes to the session as a message from you,
 shown as `<member> via Slack` in the dashboard. The usual rules apply: to your
-own run that no one controls, or to a run you control, it reaches the agent at
+own session that no one controls, or to a session you control, it reaches the agent at
 once; otherwise it waits about 45 seconds for the member in control to approve
 it.
 The bot answers in the thread with what happened, or the server's error.
 
 **Press a button.** Each answers once:
 
-- an Enhanced run's permission request: its allow-once and reject-once
+- an Enhanced session's permission request: its allow-once and reject-once
   options. There is no "always" option, so Slack cannot change what the agent
   may do next time;
-- an Enhanced run's question with options: one button per option;
-- a Default run's `sudo` command, in either mode: **Allow once** and **Deny**
-  ([security.md](security.md#sudo-in-a-default-run)).
+- an Enhanced session's question with options: one button per option;
+- a Default session's `sudo` command, in either mode: **Allow once** and **Deny**
+  ([security.md](security.md#sudo-in-a-default-session)).
 
 The bot answers in the thread, for example `Answered: Reject.` or
 `Already answered, or no longer pending.`
@@ -146,9 +146,9 @@ The message links to the dashboard instead of showing buttons for:
   decide text you did not see);
 - a question that is a form or asks you to open a link;
 - more than 25 options, or an option label longer than 75 characters;
-- a Standard run's own request, which is answered in its terminal.
+- a Standard session's own request, which is answered in its terminal.
 
-Your role still decides: a viewer cannot answer. You cannot launch runs or run
+Your role still decides: a viewer cannot answer. You cannot launch sessions or run
 other commands, and the bot posts in no channel. A top-level direct message
 to the bot, outside a thread, only links.
 
@@ -157,7 +157,7 @@ to the bot, outside a thread, only links.
 - 30 actions (replies and buttons) at once, then one more every 2 seconds.
   Past that the bot answers `your Slack link <Slack user id> used its 30
   actions and gets one more every 2s; retry in <seconds>`.
-- Agent text is cut: run title 120 characters, need line 240, request text
+- Agent text is cut: session title 120 characters, need line 240, request text
   600. It is escaped, so an agent cannot mention people (`@channel`) or
   disguise links.
 - One Slack workspace per server: the one the app is installed in.

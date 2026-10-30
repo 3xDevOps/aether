@@ -35,7 +35,7 @@ func (g *Gateway) handleACP(w http.ResponseWriter, r *http.Request) {
 	req.RunID = r.PathValue("run")
 	backend, ok := s.Backend.(ACPBackend)
 	if !ok {
-		_ = s.WriteJSON(protocol.ACPStreamResponse{Code: protocol.CodeUnavailable, Error: "enhanced session streams unavailable"})
+		_ = s.WriteJSON(protocol.ACPStreamResponse{Code: protocol.CodeUnavailable, Error: "Enhanced agent streams unavailable"})
 		_ = s.Conn.Close(websocket.StatusPolicyViolation, "acp refused")
 		return
 	}

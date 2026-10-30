@@ -94,13 +94,13 @@ describe('CompletionPrompt', () => {
 
   it('puts the prompt back and shows the server’s error when Mark complete is refused', async () => {
     seed()
-    vi.mocked(api.runReview).mockRejectedValueOnce(new ApiError(400, 'run is protected', -32602))
+    vi.mocked(api.runReview).mockRejectedValueOnce(new ApiError(400, 'session is protected', -32602))
     vi.mocked(api.runGet).mockResolvedValueOnce(reported())
     render(<Prompt />)
     fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
     expect(banner()).toBeNull()
     await waitFor(() => expect(banner()).not.toBeNull())
     expect(useStore.getState().runs.run_1).toMatchObject({ review: 'ready', status: 'needs-attention' })
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('run is protected'))
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('session is protected'))
   })
 })

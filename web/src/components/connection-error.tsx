@@ -157,7 +157,7 @@ function copyFor({ kind, dead, edge, serverID, approvalCode }: ConnectionErrorPr
       description: (
         <>
           The edge holds no valid sign-in for this computer: it signed out, or its sign-in was
-          revoked on the edge&apos;s Devices page. Run{' '}
+          revoked on the edge&apos;s Devices page. Session{' '}
           <Cmd>{edge ? `aether login --edge ${edge}` : 'aether login'}</Cmd>, then retry.
         </>
       ),

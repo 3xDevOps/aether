@@ -49,7 +49,7 @@ func TestLocalCallDispatchesWithThePendingGate(t *testing.T) {
 	}
 	_, perr = lp.Call(ctx, protocol.MethodRunList, nil)
 	if perr == nil || perr.Code != protocol.CodeDenied || !strings.Contains(perr.Message, "pending") {
-		t.Fatalf("pending run.list error = %v, want the pending refusal", perr)
+		t.Fatalf("pending session.list error = %v, want the pending refusal", perr)
 	}
 }
 
@@ -101,7 +101,7 @@ func TestLocalAttachRunsTheAttachHandler(t *testing.T) {
 
 	_, ack, err = l.Attach(ctx, protocol.AttachRequest{RunID: "run_missing"})
 	if err == nil || ack.OK || ack.Code != protocol.CodeNotFound {
-		t.Fatalf("missing run: ack=%+v err=%v, want a not-found refusal", ack, err)
+		t.Fatalf("missing session: ack=%+v err=%v, want a not-found refusal", ack, err)
 	}
 }
 

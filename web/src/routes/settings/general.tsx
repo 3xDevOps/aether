@@ -78,7 +78,7 @@ export function GeneralSections() {
         <SettingsSection title="Profile" id="profile" scope="Your account">
           <SettingRow
             label="Name, colour and git identity"
-            help="How other members see you, and the author of your runs' commits."
+            help="How other members see you, and the author of your sessions' commits."
             control={<Button size="sm" variant="secondary" onClick={() => openProfile(true)}>Open profile</Button>}
           />
         </SettingsSection>
@@ -87,7 +87,7 @@ export function GeneralSections() {
         <SettingsSection title="Setup guide" id="setup-guide">
           <SettingRow
             label="Setup guide"
-            help="Link this computer, add a repository, set up an agent and start a first run. It resumes where you left it."
+            help="Link this computer, add a repository, set up an agent and start a first session. It resumes where you left it."
             control={<Button size="sm" variant="secondary" onClick={() => navigate('onboarding')}>Open guide</Button>}
           />
         </SettingsSection>

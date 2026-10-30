@@ -29,7 +29,7 @@ var memoryOps = []Op{
 		enum("kind", protocol.MemoryKindDecision, protocol.MemoryKindConvention, protocol.MemoryKindGotcha, protocol.MemoryKindPreference).
 		hints(false, false).offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodMemoryAdd, protocol.MethodMemoryShow),
 	opOf("aether_memory_pin", "Pin team memory", ScopeWrite, true, "call aether_memory_search for note ids",
-		"Use this when the user pins a note into new runs' briefs, or unpins it.", memoryPin).
+		"Use this when the user pins a note into new sessions' briefs, or unpins it.", memoryPin).
 		hints(false, false).offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin),
 }
 

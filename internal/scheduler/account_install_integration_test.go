@@ -49,7 +49,7 @@ func TestIntegrationSharedAccountBorrowsInstallationDocker(t *testing.T) {
 
 	shared := launchShareRun(t, e, docker, cli, e.member.ID, owner.ID, "borrowed install", "grace-login")
 	if out := e.pty.session(shared.run.ID).output(); !strings.Contains(out, "harness-path:/root/.aether/account/bin/claude") {
-		t.Fatalf("the run did not execute Grace's claude through the borrowed bin; pty output = %q", out)
+		t.Fatalf("the session did not execute Grace's claude through the borrowed bin; pty output = %q", out)
 	}
 	code, table := shared.sh(t, "cat /proc/self/mountinfo")
 	if code != 0 {

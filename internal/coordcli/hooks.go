@@ -27,7 +27,7 @@ Run a native lifecycle hook, reading its JSON event from stdin. Supported
 harnesses: claude, codex, copilot, gemini, cursor, pi, omp, opencode, generic.
 The extension and generic integrations use "context" for plain context text;
 command hooks receive their harness's native JSON. Context/event hooks are
-empty outside an Aether run. Errors go to stderr with a nonzero exit.
+empty outside an Aether session. Errors go to stderr with a nonzero exit.
 
 omp, pi, opencode and generic also accept "wake": read JSON
 {"seen_message_ids":[],"wait_seconds":30} from stdin (wait defaults to 30,
@@ -35,7 +35,7 @@ range 0..30), then make exactly one cancellable server wait. Output is JSON
 with wait_supported, unread_message_ids, wake_admitted and context. Context
 is a trusted inbox instruction only when admitted, never peer message text.
 No hook consumes or acknowledges mail. Unsupported wake servers fail with
-exit 2: stop the receiver and upgrade/relaunch the run, do not retry in a loop.
+exit 2: stop the receiver and upgrade/relaunch the session, do not retry in a loop.
 
 claude also accepts "wake", the asyncRewake hook a managed launch's settings
 run on SessionStart and Stop. It reads Claude Code's hook JSON and waits for
@@ -45,7 +45,7 @@ turn in the idle session. It exits 0 when a prompt, a newer waiter or the end
 of Claude Code ends the wait, and 1 on errors; it never exits 2 otherwise.
 
 Loaded native integrations can wake a live idle session; other command hooks
-cannot. Neither starts an exited run or types into its terminal.
+cannot. Neither starts an exited session or types into its terminal.
 
 "hook file" lists the shipped integrations. With a filename, it writes that
 copyable file to stdout without needing a coordination socket. Merge JSON
@@ -73,7 +73,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	claudeWaiter := harness == "claude" && event == "wake"
 	if os.Getenv(coordtransport.EnhancedEnv) == "1" {
 		if event == "wake" && !claudeWaiter {
-			return ExitUsage, errors.New("hook wake: this is an enhanced run, whose agent Aether wakes with a session prompt; stop this receiver")
+			return ExitUsage, errors.New("hook wake: this is an enhanced session, whose agent Aether wakes with a prompt; stop this receiver")
 		}
 		return ExitOK, nil
 	}

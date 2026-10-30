@@ -31,6 +31,6 @@ export function applyAssistantNotice(store: RootStore, ev: Event): void {
   const show = p.kind === 'finished' ? toast : toast.warning
   show(p.title, {
     description: p.body || undefined,
-    action: { label: 'Open run', onClick: () => store.getState().navigate('run', { runId: p.run_id }) },
+    action: { label: 'Open session', onClick: () => store.getState().navigate('run', { runId: p.run_id }) },
   })
 }

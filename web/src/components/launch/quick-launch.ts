@@ -43,7 +43,7 @@ export async function quickLaunch(last: LastLaunch, saved: LaunchDefaultsResult 
     let accounts = [] as Awaited<ReturnType<typeof api.accountList>>['accounts']
     if (wanted || (policy && policy.policy !== 'automatic')) {
       accounts = (await api.accountList()).accounts
-      if (wanted && wanted !== own && !accounts.some((member) => member.id === wanted)) throw new Error('your saved account is no longer shared with you; choose another in New run')
+      if (wanted && wanted !== own && !accounts.some((member) => member.id === wanted)) throw new Error('your saved account is no longer shared with you; choose another in New session')
       account = wanted === own ? '' : wanted
       fallback = fallbackFromSaved(policy, accounts)
     }
@@ -58,7 +58,7 @@ export async function quickLaunch(last: LastLaunch, saved: LaunchDefaultsResult 
     })
     upsertRun(run)
     navigate('run', { runId: run.id })
-    toast.success('Run launched')
+    toast.success('Session launched')
   } catch (err) {
     toast.error(`Launch failed: ${message(err)}`)
   }

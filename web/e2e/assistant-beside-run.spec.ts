@@ -8,12 +8,12 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 
-const task = 'keep the run readable beside the assistant'
+const task = 'keep the session readable beside the assistant'
 
 /** minReadableWidth in src/lib/breakpoints.ts. */
 const readable = 560
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 function mainWidth(page: Page): Promise<number> {
   return page.locator('#main').evaluate((element) => element.getBoundingClientRect().width)
@@ -37,9 +37,9 @@ test('the assistant beside a run leaves the run readable and usable', async ({ p
 
   const toggle = page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /^Assistant/ })
   const assistant = page.getByRole('complementary', { name: 'Assistant' })
-  const inlineDetails = page.getByRole('complementary', { name: 'Run details' })
-  const overlayDetails = page.getByRole('dialog', { name: 'Run details' })
-  const views = page.getByRole('tablist', { name: 'Run views' })
+  const inlineDetails = page.getByRole('complementary', { name: 'Session details' })
+  const overlayDetails = page.getByRole('dialog', { name: 'Session details' })
+  const views = page.getByRole('tablist', { name: 'Session views' })
 
   await expect(inlineDetails).toBeVisible()
 

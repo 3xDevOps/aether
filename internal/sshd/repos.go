@@ -26,7 +26,7 @@ func (s *Server) resolveRepo(ctx context.Context, run, workspace, repo string) (
 	}
 	extra, ok := r.ExtraRepo(domain.WorkspaceID(repo))
 	if !ok {
-		return "", "", invalidParams("repo " + repo + " is not one of the run's repos")
+		return "", "", invalidParams("repo " + repo + " is not one of the session's repos")
 	}
 	return extra.Key, extra.WorkspaceID, nil
 }

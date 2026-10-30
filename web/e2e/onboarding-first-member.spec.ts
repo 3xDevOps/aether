@@ -14,7 +14,7 @@ test('the first member links, creates a workspace and seeds it', async ({
   const wizard = await OnboardingWizard.open(page, alice.url)
 
   await wizard.expectStep('Connect')
-  await expect(wizard.page.getByRole('list', { name: 'Steps' })).toHaveText(/Connect.*Repository.*Agent.*First run/)
+  await expect(wizard.page.getByRole('list', { name: 'Steps' })).toHaveText(/Connect.*Repository.*Agent.*First session/)
   await wizard.connect.link(aether.server.addr, { name: 'Alice' })
   // The first identity to authenticate on a fresh server becomes the admin,
   // and the gateway had no SSH key until this step made one.

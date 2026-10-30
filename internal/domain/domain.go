@@ -164,7 +164,7 @@ const BlockedReasonPrefix = "blocked: "
 const ReportedSuccessReason = "agent reported success"
 
 // NeedsAttention is the one rule for whether a run needs a member, which
-// push notifications, assistant follow notices, aether runs --needs-you and
+// push notifications, assistant follow notices, aether sessions --needs-you and
 // the dashboard's Needs you list share: a live run with an open human
 // request, a disconnected agent, or a failure nobody has seen, or a reported
 // success awaiting review. A paused run never does.

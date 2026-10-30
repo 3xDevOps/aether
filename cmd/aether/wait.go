@@ -18,8 +18,8 @@ import (
 func init() {
 	register(command{
 		name:    "wait",
-		short:   "wait until a run finishes, needs you or ends its turn (exit 0 finished, 1 failed, 3 needs you, 4 parked until a message, 5 its wait broke, 124 timed out)",
-		usage:   "aether wait <run-id> [--timeout <duration>] [--json]",
+		short:   "wait until a session finishes, needs you or ends its turn (exit 0 finished, 1 failed, 3 needs you, 4 parked until a message, 5 its wait broke, 124 timed out)",
+		usage:   "aether wait <session-id> [--timeout <duration>] [--json]",
 		example: "aether wait run-d6ay38tj8j --timeout 30m --json",
 		flags:   true,
 		run:     runWait,
@@ -50,13 +50,13 @@ const waitOutputGrace = 15 * time.Second
 func runWait(args []string) error {
 	fs := newFlagSet("wait")
 	timeout := fs.Duration("timeout", 0, "give up after this long and exit 124, e.g. 30m (default: no limit)")
-	asJSON := fs.Bool("json", false, "print the run as aether runs <run-id> --json does")
+	asJSON := fs.Bool("json", false, "print the session as aether sessions <session-id> --json does")
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether wait <run-id> [--timeout <duration>] [--json]", err)
+		return fmt.Errorf("%w\nusage: aether wait <session-id> [--timeout <duration>] [--json]", err)
 	}
 	if runID == "" {
-		return fmt.Errorf("usage: aether wait <run-id> [--timeout <duration>] [--json]")
+		return fmt.Errorf("usage: aether wait <session-id> [--timeout <duration>] [--json]")
 	}
 	var deadline <-chan time.Time
 	end := time.Now().Add(*timeout)
@@ -105,7 +105,7 @@ func timedOutAfterCut(err error, cut bool, timeout time.Duration, runID string) 
 	if err == nil || !cut || errors.As(err, &status) {
 		return err
 	}
-	return &exitStatusError{code: waitTimedOut, err: fmt.Errorf("timed out after %s waiting for run %s: the server stopped answering: %w", timeout, runID, err)}
+	return &exitStatusError{code: waitTimedOut, err: fmt.Errorf("timed out after %s waiting for session %s: the server stopped answering: %w", timeout, runID, err)}
 }
 
 func signalLines(stream io.Reader, changed chan<- struct{}) {
@@ -137,7 +137,7 @@ func waitRun(c *protocol.Client, w, stderr io.Writer, runID string, asJSON bool,
 		if r.Wait != nil && (r.Wait.Kind == domain.WaitSourceUnknown || r.Wait.Kind == domain.WaitFault) {
 			if key := string(r.Wait.Kind) + "|" + r.Wait.Detail; key != doubt {
 				doubt = key
-				_, _ = fmt.Fprintf(stderr, "run %s still waits, but %s\n", r.ID, printable(r.Wait.Text(time.Now())))
+				_, _ = fmt.Fprintf(stderr, "session %s still waits, but %s\n", r.ID, printable(r.Wait.Text(time.Now())))
 			}
 		}
 		items, err := attentionItems(c, r.WorkspaceID)
@@ -169,22 +169,22 @@ func waitRun(c *protocol.Client, w, stderr io.Writer, runID string, asJSON bool,
 		}
 		switch {
 		case timedOut:
-			return &exitStatusError{code: code, err: fmt.Errorf("timed out after %s waiting for run %s", timeout, r.ID)}
+			return &exitStatusError{code: code, err: fmt.Errorf("timed out after %s waiting for session %s", timeout, r.ID)}
 		case code == waitFailed:
-			return &exitStatusError{code: code, err: fmt.Errorf("run %s failed", r.ID)}
+			return &exitStatusError{code: code, err: fmt.Errorf("session %s failed", r.ID)}
 		case code == waitNeedsYou:
-			return &exitStatusError{code: code, err: fmt.Errorf("run %s needs you", r.ID)}
+			return &exitStatusError{code: code, err: fmt.Errorf("session %s needs you", r.ID)}
 		case code == waitWaiting:
-			return &exitStatusError{code: code, err: fmt.Errorf("run %s is parked and waits for a message", r.ID)}
+			return &exitStatusError{code: code, err: fmt.Errorf("session %s is parked and waits for a message", r.ID)}
 		case code == waitBroken:
-			return &exitStatusError{code: code, err: fmt.Errorf("run %s will not wake on its own: %s", r.ID, printable(r.Reason))}
+			return &exitStatusError{code: code, err: fmt.Errorf("session %s will not wake on its own: %s", r.ID, printable(r.Reason))}
 		}
 		return nil
 	}
 }
 
 // A paused run waits for its resume. A run needs you when the Needs you list
-// holds one of its requests for you, or by the rule aether runs --needs-you
+// holds one of its requests for you, or by the rule aether sessions --needs-you
 // shares; one parked with nothing pending waits for a message, which is not a
 // request for a person. Waiting on agents, CI or a process keeps the wait going. A wait
 // whose condition resolved but whose wake never reached the agent, or whose
@@ -236,7 +236,7 @@ func printWaited(w io.Writer, v runView, r protocol.Run, items []protocol.Attent
 				return printNeeds(w, r.ID, items)
 			}
 		}
-		_, err := fmt.Fprintf(w, "  it waits on another member; aether runs %s shows its state\n", r.ID)
+		_, err := fmt.Fprintf(w, "  it waits on another member; aether sessions %s shows its state\n", r.ID)
 		return err
 	}
 	return nil

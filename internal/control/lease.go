@@ -22,13 +22,13 @@ const (
 var (
 	// ErrOccupied means another session currently controls the run. Taking
 	// over an occupied run requires force=true.
-	ErrOccupied = errors.New("control: run is already controlled")
+	ErrOccupied = errors.New("control: session is already controlled")
 	// ErrTakeoverRequired rejects bypassing the interactive handoff protocol.
 	ErrTakeoverRequired = errors.New("control: occupied takeover requires a timed hold and review")
 	// ErrAdmissionBusy means another action owns the run's admission boundary.
-	ErrAdmissionBusy = errors.New("control: run admission is busy")
+	ErrAdmissionBusy = errors.New("control: session admission is busy")
 	// ErrHeld means a member holds the run's control.
-	ErrHeld = errors.New("control: a member controls the run")
+	ErrHeld = errors.New("control: a member controls the session")
 	// ErrStale means that the lease no longer names the current authority.
 	ErrStale = errors.New("control: stale lease")
 	// ErrInvalid is returned for an empty run or member identifier.

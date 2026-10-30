@@ -27,7 +27,7 @@ export const MapWorld = memo(function MapWorld({ layout, agentNames, ghosts, onF
       {layout.sections.map((section) => (
         <section
           key={section.key}
-          aria-label={section.kind === 'visiting' ? section.label : `${section.label}'s runs`}
+          aria-label={section.kind === 'visiting' ? section.label : `${section.label}'s sessions`}
           data-glide-key={`s:${section.key}`}
           className={cn('absolute', section.framed && 'rounded-panel border border-seam')}
           style={{ left: section.x, top: section.y, width: section.width, height: section.height }}
@@ -55,7 +55,7 @@ function SectionHeader({ section }: { section: MapSection }) {
     >
       {section.kind === 'owner' && <Avatar name={section.label} color={section.member?.color} />}
       <h3 className="truncate rounded-chip bg-chrome px-1 text-ui font-medium">{section.label}</h3>
-      <span className="ml-auto shrink-0 rounded-chip bg-chrome px-1 text-ui-sm text-muted tabular-nums">{section.count} {section.count === 1 ? 'run' : 'runs'}</span>
+      <span className="ml-auto shrink-0 rounded-chip bg-chrome px-1 text-ui-sm text-muted tabular-nums">{section.count} {section.count === 1 ? 'session' : 'sessions'}</span>
     </header>
   )
 }
@@ -66,7 +66,7 @@ function Unit({ unit, section, agentNames, onFold }: {
   agentNames: Record<string, string>
   onFold: FoldHandler
 }) {
-  const childRuns = `${unit.childRuns} ${unit.childRuns === 1 ? 'child run' : 'child runs'}`
+  const childRuns = `${unit.childRuns} ${unit.childRuns === 1 ? 'subsession' : 'subsessions'}`
   const childrenId = `map-children-${unit.key}`
   const node = (entry: MapNode) => (
     <div
@@ -97,7 +97,7 @@ function Unit({ unit, section, agentNames, onFold }: {
       data-map-unit
       data-glide-key={`u:${unit.key}`}
       role="group"
-      aria-label={unit.kind === 'standalone' ? 'Standalone run' : `Run with child runs: ${runLabel(unit.nodes[0].card.run)}, ${childRuns}`}
+      aria-label={unit.kind === 'standalone' ? 'Standalone session' : `Session with subsessions: ${runLabel(unit.nodes[0].card.run)}, ${childRuns}`}
       className="absolute"
       style={{ left: unit.x - section.x, top: unit.y - section.y, width: unit.width, height: unit.height }}
     >

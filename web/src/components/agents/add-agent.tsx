@@ -71,10 +71,10 @@ export function AddAgent({
     >
       <h2 className="text-title text-text">Add agent</h2>
       <p className="text-ui text-muted">Any coding CLI you install in your environment can run as an agent.</p>
-      <FormField label="Name" help="How the agent is listed and chosen when a run starts.">
+      <FormField label="Name" help="How the agent is listed and chosen when a session starts.">
         <Input autoFocus required placeholder="myagent" value={name} onChange={(event) => setName(event.target.value)} />
       </FormField>
-      <FormField label="Standard command" help="The first word is the executable, installed in ~/.local/bin. {task} is replaced with the run's task.">
+      <FormField label="Standard command" help="The first word is the executable, installed in ~/.local/bin. {task} is replaced with the session's task.">
         <Input required value={standardValue} onChange={(event) => setStandard(event.target.value)} />
       </FormField>
       <FormField label="Background command" help="Runs the task once with no terminal.">
@@ -83,7 +83,7 @@ export function AddAgent({
       <FormField label="Enhanced command" help="Optional. The command that serves the Agent Client Protocol on stdio, such as myagent acp.">
         <Input value={enhanced} onChange={(event) => setEnhanced(event.target.value)} />
       </FormField>
-      <FormField label="Enhanced start mode" help="Optional. The ACP session mode an Enhanced run starts in, such as agent. Pick the one that does not ask before each tool, or workers stall on prompts.">
+      <FormField label="Enhanced start mode" help="Optional. The ACP mode an Enhanced session starts in, such as agent. Pick the one that does not ask before each tool, or agents stall on prompts.">
         <Input value={mode} onChange={(event) => setMode(event.target.value)} />
       </FormField>
       <FormField label="Login file" help="Optional. A file or folder that exists once the agent is signed in, such as ~/.cursor/auth.json. Without one the agent shows as installed, never as logged in.">

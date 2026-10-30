@@ -97,7 +97,7 @@ func (r *upstreamRun) finalDiff(t *testing.T) events.RunDiffPayload {
 	r.e.StopDiffWatch(r.run)
 	ev, ok := nextEvent(t, r.diffs, time.Second)
 	if !ok {
-		t.Fatal("stopping the watch published no run.diff")
+		t.Fatal("stopping the watch published no session.diff")
 	}
 	return ev.Payload.(events.RunDiffPayload)
 }
@@ -139,7 +139,7 @@ func TestDiffExcludesMergedUpstream(t *testing.T) {
 				t.Errorf("patch base = %s, want upstream tip %s", patch.Base, tip)
 			}
 			if !strings.Contains(patch.Text, "own.txt") || !strings.Contains(patch.Text, "wip.txt") || strings.Contains(patch.Text, "up1.txt") {
-				t.Errorf("live patch should list only the run's own files:\n%s", patch.Text)
+				t.Errorf("live patch should list only the session's own files:\n%s", patch.Text)
 			}
 
 			final := r.finalDiff(t)
@@ -159,7 +159,7 @@ func TestDiffExcludesMergedUpstream(t *testing.T) {
 			}
 			if !recorded.Recorded || !strings.Contains(recorded.Text, "own.txt") ||
 				!strings.Contains(recorded.Text, "wip.txt") || strings.Contains(recorded.Text, "up1.txt") {
-				t.Errorf("recorded patch should list only the run's own files:\n%s", recorded.Text)
+				t.Errorf("recorded patch should list only the session's own files:\n%s", recorded.Text)
 			}
 		})
 	}
@@ -246,7 +246,7 @@ func TestUpstreamAcceptingTheRunClearsItsStats(t *testing.T) {
 
 	final := r.finalDiff(t)
 	if final.Base != head || len(final.Files) != 0 {
-		t.Fatalf("run.diff after upstream took the run = base %s files %v, want base %s and no files", final.Base, paths(final.Files), head)
+		t.Fatalf("run.diff after upstream took the session = base %s files %v, want base %s and no files", final.Base, paths(final.Files), head)
 	}
 	if err := r.e.RemoveRunCheckout(t.Context(), r.run); err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func TestUpstreamAcceptingTheRunClearsItsStats(t *testing.T) {
 		t.Fatal(err)
 	}
 	if recorded.Text != "" {
-		t.Errorf("recorded patch after upstream took the run should be empty:\n%s", recorded.Text)
+		t.Errorf("recorded patch after upstream took the session should be empty:\n%s", recorded.Text)
 	}
 }
 

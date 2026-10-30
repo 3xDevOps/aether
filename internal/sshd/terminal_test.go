@@ -92,7 +92,7 @@ func TestTerminalHistoryIsUniversalReadAndMapsResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	if history.run != e.run.ID || history.before != before || history.query != "needle" || history.limit != 17 {
-		t.Fatalf("history call = run %q before %q query %q limit %d", history.run, history.before, history.query, history.limit)
+		t.Fatalf("history call = session %q before %q query %q limit %d", history.run, history.before, history.query, history.limit)
 	}
 	if len(got.Lines) != 1 || got.Lines[0].Text != "visible" || got.Lines[0].Cursor != lineCursor ||
 		got.NextCursor != nextCursor || !got.HasMore || !got.TruncatedBefore {
@@ -279,7 +279,7 @@ func TestTerminalHistoryRejectsMalformedBoundsBeforePTY(t *testing.T) {
 		t.Fatalf("terminal.history invalid UTF-8 error = %v", rpcErr)
 	}
 	if calls := lookups.calls.Load(); calls != 0 {
-		t.Fatalf("malformed requests reached run lookup: calls = %d", calls)
+		t.Fatalf("malformed requests reached session lookup: calls = %d", calls)
 	}
 	if history.calls != 0 {
 		t.Fatalf("malformed requests reached PTY history: calls = %d", history.calls)

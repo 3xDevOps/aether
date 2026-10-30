@@ -18,17 +18,17 @@ import (
 func init() {
 	register(command{
 		name:  "answer",
-		short: "answer a run's question or permission request (aether runs <run-id> lists them)",
-		usage: "aether answer <run-id> <request-id> <option-id> [--values <json>]\n" +
-			"aether answer <run-id> <question-id> <answer|->",
+		short: "answer a session's question or permission request (aether sessions <session-id> lists them)",
+		usage: "aether answer <session-id> <request-id> <option-id> [--values <json>]\n" +
+			"aether answer <session-id> <question-id> <answer|->",
 		example: "aether answer run-d6ay38tj8j req-7 allow-1\n" +
 			"aether answer run-d6ay38tj8j q-1 \"use the staging database\"",
 		run: runAnswer,
 	})
 }
 
-const answerUsage = "usage: aether answer <run-id> <request-id> <option-id> [--values '<json object>']\n" +
-	"   or: aether answer <run-id> <question-id> \"<answer>\"|-   (a teammate's question)"
+const answerUsage = "usage: aether answer <session-id> <request-id> <option-id> [--values '<json object>']\n" +
+	"   or: aether answer <session-id> <question-id> \"<answer>\"|-   (a teammate's question)"
 
 func runAnswer(args []string) error {
 	if len(args) < 3 || strings.HasPrefix(args[0], "-") || strings.HasPrefix(args[1], "-") {
@@ -103,7 +103,7 @@ func needLines(it protocol.AttentionItem) []string {
 		options := answerOptions(it)
 		switch {
 		case it.Request == nil || len(it.Request.Options) == 0:
-			add("answer it in the run's terminal: aether attach %s", run)
+			add("answer it in the session's terminal: aether attach %s", run)
 		case len(options) == 0:
 			add("it offers no allow once or reject once option, and aether answer never answers for always; decide it in the Aether dashboard")
 		default:
@@ -119,7 +119,7 @@ func needLines(it protocol.AttentionItem) []string {
 		}
 	case protocol.AttentionKindRoomQuestion:
 		if it.Message == nil {
-			add("open the run in the Aether dashboard")
+			add("open the session in the Aether dashboard")
 			break
 		}
 		add("aether answer %s %s \"<answer>\"", run, quoted)
@@ -133,7 +133,7 @@ func needLines(it protocol.AttentionItem) []string {
 		add("aether message %s \"<reply>\"", run)
 		add("aether close %s --outcome abandoned", run)
 	default:
-		add("open the run in the Aether dashboard")
+		add("open the session in the Aether dashboard")
 	}
 	return lines
 }
@@ -178,7 +178,7 @@ func answer(c *protocol.Client, w io.Writer, stdin io.Reader, runID, id, reply s
 		if err = c.Call(protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: r.ID, RequestID: id, OptionID: reply}, nil); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(w, "run %s sudo request %s: answered %s\n", r.ID, id, reply)
+		_, err = fmt.Fprintf(w, "session %s sudo request %s: answered %s\n", r.ID, id, reply)
 		return err
 	}
 	items, err := attentionItems(c, r.WorkspaceID)
@@ -193,9 +193,9 @@ func answer(c *protocol.Client, w io.Writer, stdin io.Reader, runID, id, reply s
 	}
 	if it == nil {
 		if slices.ContainsFunc(r.PendingInputs, func(in domain.RunInputRequest) bool { return in.ID == id }) {
-			return fmt.Errorf("request %s on run %s is queued behind the one the server is showing; answer that one first, then aether runs %s shows the next", id, r.ID, r.ID)
+			return fmt.Errorf("request %s on session %s is queued behind the one the server is showing; answer that one first, then aether sessions %s shows the next", id, r.ID, r.ID)
 		}
-		return fmt.Errorf("run %s has nothing pending for you with id %s; it may be answered already. aether runs %s lists what is pending", r.ID, id, r.ID)
+		return fmt.Errorf("session %s has nothing pending for you with id %s; it may be answered already. aether sessions %s lists what is pending", r.ID, id, r.ID)
 	}
 	if values != nil && it.Kind != protocol.AttentionKindQuestion {
 		return fmt.Errorf("--values is for an agent's question; %s is a %s", id, it.Kind)
@@ -215,11 +215,11 @@ func answer(c *protocol.Client, w io.Writer, stdin io.Reader, runID, id, reply s
 			Kind: protocol.RoomMessageReply, Body: text, CorrelationID: id, IdempotencyKey: key}, &res); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(w, "replied to question %s on run %s\n", id, r.ID)
+		_, err = fmt.Fprintf(w, "replied to question %s on session %s\n", id, r.ID)
 		return err
 	case protocol.AttentionKindQuestion, protocol.AttentionKindPermission:
 		if it.Request == nil || len(it.Request.Options) == 0 {
-			return fmt.Errorf("run %s's %s is answered in its terminal: aether attach %s", r.ID, it.Kind, r.ID)
+			return fmt.Errorf("session %s's %s is answered in its terminal: aether attach %s", r.ID, it.Kind, r.ID)
 		}
 		var picked *protocol.AttentionOption
 		options := answerOptions(*it)
@@ -242,7 +242,7 @@ func answer(c *protocol.Client, w io.Writer, stdin io.Reader, runID, id, reply s
 					return fmt.Errorf("option %s is not allow once or reject once, and aether answer never answers for always: %s", reply, instead)
 				}
 			}
-			return fmt.Errorf("run %s's %s %s has no option %s: %s", r.ID, it.Kind, id, reply, instead)
+			return fmt.Errorf("session %s's %s %s has no option %s: %s", r.ID, it.Kind, id, reply, instead)
 		}
 		var res protocol.RunInputRespondResult
 		if err = c.Call(protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: r.ID, RequestID: id,
@@ -250,11 +250,11 @@ func answer(c *protocol.Client, w io.Writer, stdin io.Reader, runID, id, reply s
 			return controlHeld(r.ID, err)
 		}
 		if res.Status == protocol.RunInputRespondAlreadyAnswered {
-			_, err = fmt.Fprintf(w, "run %s %s %s: already answered\n", r.ID, it.Kind, id)
+			_, err = fmt.Fprintf(w, "session %s %s %s: already answered\n", r.ID, it.Kind, id)
 			return err
 		}
-		_, err = fmt.Fprintf(w, "run %s %s %s: answered %s (%s)\n", r.ID, it.Kind, id, picked.ID, printable(picked.Label))
+		_, err = fmt.Fprintf(w, "session %s %s %s: answered %s (%s)\n", r.ID, it.Kind, id, picked.ID, printable(picked.Label))
 		return err
 	}
-	return fmt.Errorf("run %s's %s is not answered with aether answer:\n%s", r.ID, it.Kind, strings.Join(needLines(*it), "\n"))
+	return fmt.Errorf("session %s's %s is not answered with aether answer:\n%s", r.ID, it.Kind, strings.Join(needLines(*it), "\n"))
 }

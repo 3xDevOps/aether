@@ -244,7 +244,7 @@ func (i *Index) apply(e events.Event) bool {
 func (i *Index) Overlaps(ctx context.Context) ([]Entry, error) {
 	active, err := i.runs.ListActiveRuns(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("overlap: list active runs: %w", err)
+		return nil, fmt.Errorf("overlap: list active sessions: %w", err)
 	}
 	member := make(map[domain.RunID]domain.MemberID, len(active))
 	for _, r := range active {
@@ -281,7 +281,7 @@ func (i *Index) Snapshot(ctx context.Context, run domain.RunID) ([]string, bool,
 	}
 	active, err := i.runs.ListActiveRuns(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("overlap: list active runs: %w", err)
+		return nil, false, fmt.Errorf("overlap: list active sessions: %w", err)
 	}
 	found := false
 	for _, r := range active {
