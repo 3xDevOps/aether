@@ -1102,8 +1102,8 @@ Removal also repairs the selection and open route before any refresh awaits.
   `run.pr` bump a per-run `gitSeq` and `prSeq`, and `mission.changed`
   a per-swarm `missionSeq`
   (`src/store/workflow-signals.ts`). A view that shows that state keys its
-  `run.git.log` or `run.pr.feedback` re-read on the
-  counter (`useStore(gitSeqOf(runID))`) instead of polling.
+  `run.git.log` or `run.pr.feedback` re-read when the counter changes (a
+  store subscription on `gitSeq[runID]`) instead of polling.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
   generic copy never overwrites a more precise error already recorded.

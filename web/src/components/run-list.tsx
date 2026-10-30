@@ -10,8 +10,6 @@ import { useDelayed } from '@/lib/hooks'
 import { runLabel, stateLabel, stateName, stateTitle, stateTone, stateWords, toneOf, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
-import { useRunPresentation } from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
 import type { RunRow } from '@/store/selectors'
 import { rootKey, runKey, runParents } from '@/routes/board/map-layout'
 import { connectors } from '@/components/shell/sidebar-runs'
@@ -240,11 +238,6 @@ function Row({
       />
     </div>
   )
-}
-
-export function RunStatusChip({ run }: { run: RunRecord }) {
-  const shown = useRunPresentation(run)
-  return <StatusChip state={shown.state} tone={toneOf(shown)} />
 }
 
 export function StatusChip({ state, tone = stateTone[state], label = stateLabel[state], title }: { state: PresentationState; tone?: Tone; label?: string; title?: string }) {

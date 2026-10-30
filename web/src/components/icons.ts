@@ -65,7 +65,6 @@ import {
   CircleX as LucideCircleX,
   ClipboardCheck as LucideClipboardCheck,
   File as LucideFile,
-  FolderPlus as LucideFolderPlus,
   FoldVertical as LucideFoldVertical,
   ListFilter as LucideListFilter,
   CircleHelp as LucideCircleHelp,
@@ -75,8 +74,6 @@ import {
   Pencil as LucidePencil,
   Globe as LucideGlobe,
   Trash2 as LucideTrash2,
-  Circle as LucideCircle,
-  CircleDot as LucideCircleDot,
   ArrowRightLeft as LucideArrowRightLeft,
   Brain as LucideBrain,
   ListPlus as LucideListPlus,
@@ -236,7 +233,6 @@ export const CircleX = icon(LucideCircleX)
 export const ClipboardCheck = icon(LucideClipboardCheck)
 export const File = icon(LucideFile)
 export const Folder = icon(LucideFolder)
-export const FolderPlus = icon(LucideFolderPlus)
 export const FoldVertical = icon(LucideFoldVertical)
 export const ListFilter = icon(LucideListFilter)
 export const CircleHelp = icon(LucideCircleHelp)
@@ -245,8 +241,6 @@ export const ArrowRight = icon(LucideArrowRight)
 export const Pencil = icon(LucidePencil)
 export const Globe = icon(LucideGlobe)
 export const Trash2 = icon(LucideTrash2)
-export const Circle = icon(LucideCircle)
-export const CircleDot = icon(LucideCircleDot)
 export const ArrowRightLeft = icon(LucideArrowRightLeft)
 export const Brain = icon(LucideBrain)
 export const ListPlus = icon(LucideListPlus)
