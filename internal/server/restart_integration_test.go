@@ -577,7 +577,8 @@ func TestIntegrationRestartAcceptance(t *testing.T) {
 		t.Skipf("the full restart matrix takes four minutes; set %s=1", soakFullEnv)
 	}
 	runRestartScenario(t, soakProfile{
-		probes: []string{"a", "b"}, mail: true, duration: 105 * time.Second, long: 120,
+		probes: []string{"a", "b"}, mail: true, external: true, burst: true, every: 4 * time.Second,
+		duration: 105 * time.Second, long: 120,
 		steps: func(e *soakEnv) []soakStep {
 			return []soakStep{
 				{"SIGTERM + restart", 8 * time.Second, e.restart("sigterm-1", e.term, nil)},
@@ -1041,14 +1042,20 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 				}
 			}
 			missing, dup := 0, 0
+			var gaps []string
 			for n := 1; n <= top; n++ {
 				switch seen[n] {
 				case 0:
 					missing++
+					gaps = append(gaps, fmt.Sprintf("-%d", n))
 				case 1:
 				default:
 					dup++
+					gaps = append(gaps, fmt.Sprintf("+%d", n))
 				}
+			}
+			if len(gaps) > 0 {
+				fmt.Fprintf(&report, "run %s: stream anomalies (- missing, + repeated): %s\n", name, strings.Join(gaps, " "))
 			}
 			fmt.Fprintf(&report, "run %s: streamed ticks=%d missing=%d duplicated=%d\n", name, top, missing, dup)
 			if (!prof.external || prof.mail) && (missing > 0 || dup > 0 || top == 0) {
