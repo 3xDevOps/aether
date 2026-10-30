@@ -58,6 +58,7 @@ func main() {
 	fixedPeer := flag.String("peer", "", "run to send to; without it the peer is discovered through the conflict radar")
 	every := flag.Duration("every", 2*time.Second, "interval of the CLI and bridge status probes")
 	burstMode := flag.Bool("burst", false, "send a burst of keyed sends and one terminal input when <dir>/burst appears")
+	tickN := flag.Int("ticks", 0, "only stream this many numbered lines, 100 ms apart, recording when each was written")
 	long := flag.Int("long", 120, "seconds the long shell command runs")
 	flag.Parse()
 
@@ -71,6 +72,14 @@ func main() {
 		os.Exit(1)
 	}
 	rec := &recorder{f: f}
+	if *tickN > 0 {
+		for i := 1; i <= *tickN; i++ {
+			rec.add("tick", time.Now(), fmt.Sprint(i), nil)
+			fmt.Printf("tick %d\n", i)
+			time.Sleep(100 * time.Millisecond)
+		}
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *duration+5*time.Minute)
 	defer cancel()
 

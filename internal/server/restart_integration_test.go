@@ -333,7 +333,7 @@ func (e *soakEnv) history(runID string) ([]acphost.Item, error) {
 			}
 		}
 		all = append(items, all...)
-		if !page.TruncatedBefore || len(page.Frames) == 0 {
+		if len(page.Frames) < protocol.ACPHistoryMaxLimit || page.OldestSeq <= 1 {
 			return all, nil
 		}
 		before = page.OldestSeq
@@ -417,7 +417,11 @@ func gapAround(events []soakEvent, kind string, down time.Time) (time.Duration, 
 
 // watcher samples a run's status and streamed ticks through the restarts.
 type soakWatcher struct {
-	mu       sync.Mutex
+	mu sync.Mutex
+	// arrivals is when the server's stream first showed each numbered line.
+	arrivals map[int]time.Time
+	lastTick int
+	items    []string
 	statuses []string
 	ticks    []tickObs
 }
@@ -527,6 +531,13 @@ func (w *soakWatcher) follow(ctx context.Context, e *soakEnv, runID string) {
 				}
 			}
 			w.mu.Lock()
+			if w.arrivals == nil {
+				w.arrivals = map[int]time.Time{}
+			}
+			for k := w.lastTick + 1; k <= n; k++ {
+				w.arrivals[k] = time.Now()
+			}
+			w.lastTick = max(w.lastTick, n)
 			if n > 0 && (len(w.ticks) == 0 || w.ticks[len(w.ticks)-1].n < n) {
 				w.ticks = append(w.ticks, tickObs{time.Now(), n})
 			}
@@ -621,7 +632,7 @@ func soakEvery(prof soakProfile) time.Duration {
 // soakTickTask is an agent turn that streams a numbered line every 100 ms
 // for the profile's duration.
 func soakTickTask(prof soakProfile) string {
-	return fmt.Sprintf("%si=0; while [ $i -lt %d ]; do i=$((i+1)); echo tick $i; sleep 0.1; done",
+	return fmt.Sprintf("%s/workspace/soakagent -name ticker -ticks %d",
 		acpmock.PromptRunPrefix, int((prof.duration+40*time.Second)/(100*time.Millisecond)))
 }
 
@@ -887,6 +898,45 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 			cell("a", "cli"), cell("a", "mcp"), cell("b", "cli"), cell("b", "mcp"), stream)
 	}
 
+	if w := watchers["a"]; w != nil && prof.external && prof.mail {
+		emit := map[int]time.Time{}
+		for _, ev := range readEvents(ids["a"], "ticker") {
+			if n, err := strconv.Atoi(ev.ID); err == nil && ev.Kind == "tick" {
+				emit[n] = time.UnixMilli(ev.T)
+			}
+		}
+		w.mu.Lock()
+		fmt.Fprintf(&report, "agent-side stream delay (server receipt minus the agent writing the line), max per window around each restart:\n")
+		for _, o := range e.outages {
+			worst, at := time.Duration(0), 0
+			for n, em := range emit {
+				arr, ok := w.arrivals[n]
+				if !ok || em.Before(o.down.Add(-time.Second)) || em.After(o.up.Add(5*time.Second)) {
+					continue
+				}
+				if d := arr.Sub(em); d > worst {
+					worst, at = d, n
+				}
+			}
+			fmt.Fprintf(&report, "  %-10s max %5d ms at tick %d\n", o.name, worst.Milliseconds(), at)
+		}
+		var steady time.Duration
+		for n, em := range emit {
+			if arr, ok := w.arrivals[n]; ok && arr.Sub(em) > steady {
+				steady = arr.Sub(em)
+			}
+		}
+		var never []int
+		for n := range emit {
+			if _, ok := w.arrivals[n]; !ok {
+				never = append(never, n)
+			}
+		}
+		sort.Ints(never)
+		fmt.Fprintf(&report, "  worst of all %d lines %d ms; lines the live stream never showed: %v\n", len(emit), steady.Milliseconds(), never)
+		w.mu.Unlock()
+	}
+
 	failures := map[string]int{}
 	for name, evs := range logs {
 		for _, ev := range evs {
@@ -1019,6 +1069,9 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 				interrupted = append(interrupted, "turn_end:"+it.StopReason)
 			case it.Kind == acphost.KindMessage && it.Message != nil && it.Message.Role == "assistant":
 				text.WriteString(it.Message.Text)
+				if len(it.Message.Text) > 20 {
+					fmt.Fprintf(&report, "run %s coalesced message item seq=%d len=%d starts %q\n", name, it.Seq, len(it.Message.Text), it.Message.Text[:16])
+				}
 			}
 		}
 		fmt.Fprintf(&report, "run %s: interrupted-turn markers=%v\n", name, interrupted)
