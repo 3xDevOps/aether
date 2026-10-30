@@ -40,6 +40,12 @@ func (e *testEnv) restart(t *testing.T, s *Scheduler) *Scheduler {
 	}
 	t.Cleanup(func() { _ = next.Close() })
 	startScheduler(t, next)
+	// Closing a scheduler that is still recovering races its recovery.
+	select {
+	case <-next.RecoveryReady():
+	case <-time.After(30 * time.Second):
+		t.Fatal("recovery did not finish")
+	}
 	waitFor(t, "the adopted session", func() bool { return next.acp.session(e.onlyRun(t, next)) != nil })
 	return next
 }

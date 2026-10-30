@@ -311,25 +311,39 @@ func (d *acpDriver) session(run domain.RunID) *acphost.Session {
 	return nil
 }
 
-// live waits for recovery, which reopens the sessions an earlier server
-// process left, so a call right after a restart is not refused.
+// live waits, while Start recovers runs, for a run that has no session or
+// failure recorded yet, so a call right after a restart is not refused.
 func (d *acpDriver) live(run domain.RunID) (*acphost.Session, error) {
-	if d.s.recovering.Load() {
-		select {
-		case <-d.s.RecoveryReady():
-		case <-time.After(acpRecoveryWait):
-		}
+	sess, err, opened := d.liveNow(run)
+	if opened || !d.s.recovering.Load() {
+		return sess, err
 	}
+	_, started, release := d.started(run)
+	defer release()
+	select {
+	case <-started:
+	case <-d.s.RecoveryReady():
+	case <-time.After(acpRecoveryWait):
+	}
+	sess, err, _ = d.liveNow(run)
+	return sess, err
+}
+
+// liveNow is live without waiting; opened is false when nothing has opened
+// or failed to open the run's session yet.
+func (d *acpDriver) liveNow(run domain.RunID) (*acphost.Session, error, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r := d.runs[run]
 	switch {
-	case r != nil && r.session != nil && !r.ended:
-		return r.session, nil
-	case r != nil && r.err != nil:
-		return nil, fmt.Errorf("%w: %w", ErrACPNotRunning, r.err)
+	case r == nil:
+		return nil, ErrACPNotRunning, false
+	case r.session != nil && !r.ended:
+		return r.session, nil, true
+	case r.err != nil:
+		return nil, fmt.Errorf("%w: %w", ErrACPNotRunning, r.err), true
 	}
-	return nil, ErrACPNotRunning
+	return nil, ErrACPNotRunning, true
 }
 
 // openError is the failure the run's last open recorded, nil when it opened.
