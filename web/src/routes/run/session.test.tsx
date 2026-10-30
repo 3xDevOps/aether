@@ -219,7 +219,7 @@ describe('the Enhanced session view', () => {
 
   it('keeps a step opened in the first loaded block once the turn\'s prompt pages in', async () => {
     const earlier = [item('turn_start', 1), say(1, 'user', 'Round the totals')]
-    const loaded = [tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'ok\n', exit_code: 0 }), tool(1, 'x2', 'execute', 'npm session build', 'in_progress')]
+    const loaded = [tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'ok\n', exit_code: 0 }), tool(1, 'x2', 'execute', 'npm run build', 'in_progress')]
     const page = Promise.withResolvers<SessionHistory>()
     vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(page.promise)
     open()

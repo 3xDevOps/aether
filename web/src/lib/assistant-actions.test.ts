@@ -21,6 +21,9 @@ describe('aetherTool', () => {
     ['mcp__aether__aether_launch_session', 'aether_launch_session'],
     ['aether.aether_pr_merge', 'aether_pr_merge'],
     ['aether_get_session', 'aether_get_session'],
+    ['mcp__aether__aether_message_run', 'aether_message_session'],
+    ['aether_list_runs', 'aether_list_sessions'],
+    ['aether_child_start', 'aether_subsession_start'],
     ['mcp__tracker__get', undefined],
     ['Bash', undefined],
   ])('reads %s as %s', (name, tool) => expect(aetherTool(name)).toBe(tool))

@@ -198,7 +198,7 @@ attributed to it, pinned notes and its outcome note
 included:
 
 ```sh
-aether memory rm --session run-955qyxqmae
+aether memory rm --run run-955qyxqmae
 aether memory rm note-hwwtypyr97             # or one note
 ```
 

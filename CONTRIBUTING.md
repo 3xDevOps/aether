@@ -283,7 +283,7 @@ CI also keeps the binaries of each push to `main` for seven days, as
 come with no checksums, and nothing installs them for you:
 
 ```sh
-gh session list --workflow ci.yml --branch main --event push --status success --limit 1
+gh run list --workflow ci.yml --branch main --event push --status success --limit 1
 gh run download <session-id> --name binaries-go --dir aether-main
 ```
 

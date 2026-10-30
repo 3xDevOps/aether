@@ -195,7 +195,7 @@ func TestComposerModelChoiceIsRecorded(t *testing.T) {
 				return
 			}
 		case <-timer.C:
-			t.Fatal("no session.model event")
+			t.Fatal("no run.model event")
 		}
 	}
 }
@@ -309,7 +309,7 @@ func TestComposerEffortChoiceIsRecorded(t *testing.T) {
 					published = true
 				}
 			case <-timer.C:
-				t.Fatalf("no session.effort event after picking %s", pick.value)
+				t.Fatalf("no run.effort event after picking %s", pick.value)
 			}
 		}
 		timer.Stop()

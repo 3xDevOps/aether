@@ -100,12 +100,17 @@ const readTools: Record<string, [string, string]> = {
 
 /** The Aether tool a call's `tool_name` names: Claude Code's `mcp__aether__aether_get_session`, or a bare name. */
 export function aetherTool(name: string | undefined): string | undefined {
-  return /(?:^|__|[./])(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(name ?? '')?.[1]
+  return currentTool(/(?:^|__|[./])(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(name ?? '')?.[1])
+}
+
+/** Saved transcripts name tools from before runs became sessions; read them under today's names. */
+function currentTool(tool: string | undefined): string | undefined {
+  return tool?.replace(/^aether_child_/, 'aether_subsession_').replace(/^aether_children$/, 'aether_subsessions').replace(/_runs?(?=_|$)/g, (m) => m.replace('run', 'session'))
 }
 
 /** Codex reports no tool name; its MCP call's title is `mcp.<server>.<tool>`. */
 function codexTool(call: SessionToolCall | undefined): string | undefined {
-  return /^mcp\.aether\.(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(call?.title ?? '')?.[1]
+  return currentTool(/^mcp\.aether\.(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(call?.title ?? '')?.[1])
 }
 
 function isRead(tool: string): boolean {

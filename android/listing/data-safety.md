@@ -93,7 +93,7 @@ data, and nothing is downloaded or installed.
 | --- | --- |
 | Ads | No, the app contains no ads |
 | Advertising ID | Not used; the manifest declares no `com.google.android.gms.permission.AD_ID` |
-| Target audience | 18 and over; not designed for subsessions |
+| Target audience | 18 and over; not designed for children |
 | Content rating questionnaire | Utility / productivity; no violence, no gambling. Users **can** communicate and share content with other users: shared live terminals, injected banners, coordination messages and approvals, all restricted to members an administrator invited to the server. Expect the "Users Interact" descriptor. Nothing is shared publicly |
 | News app | No |
 | Government app | No |

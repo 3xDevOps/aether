@@ -685,7 +685,7 @@ func TestDiffWatchReconcilesLiveIgnoreRules(t *testing.T) {
 	}
 	ev, ok := nextEvent(t, diffs, 5*time.Second)
 	if !ok {
-		t.Fatal("no session.diff after removing a live ignore rule")
+		t.Fatal("no run.diff after removing a live ignore rule")
 	}
 	payload := ev.Payload.(events.RunDiffPayload)
 	seen := make(map[string]bool, len(payload.Files))
@@ -744,7 +744,7 @@ func TestDiffWatchIgnoresDirectoryCreatedAfterStart(t *testing.T) {
 	}
 	ev, ok := nextEvent(t, diffs, 5*time.Second)
 	if !ok {
-		t.Fatal("no session.diff after creating a visible file alongside ignored tree")
+		t.Fatal("no run.diff after creating a visible file alongside ignored tree")
 	}
 	payload := ev.Payload.(events.RunDiffPayload)
 	seenVisible := false
@@ -934,7 +934,7 @@ func TestDiffWatchReconcilesTrackedAndNegatedPaths(t *testing.T) {
 	}
 	ev, ok := nextEvent(t, diffs, 5*time.Second)
 	if !ok {
-		t.Fatal("no session.diff after force-adding an ignored file")
+		t.Fatal("no run.diff after force-adding an ignored file")
 	}
 	payload := ev.Payload.(events.RunDiffPayload)
 	seen := make(map[string]bool, len(payload.Files))
@@ -951,7 +951,7 @@ func TestDiffWatchReconcilesTrackedAndNegatedPaths(t *testing.T) {
 	}
 	ev, ok = nextEvent(t, diffs, 5*time.Second)
 	if !ok {
-		t.Fatal("no session.diff after creating a negated file")
+		t.Fatal("no run.diff after creating a negated file")
 	}
 	payload = ev.Payload.(events.RunDiffPayload)
 	seen = make(map[string]bool, len(payload.Files))
@@ -993,7 +993,7 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	}
 	ev, ok := nextEvent(t, diffs, 5*time.Second)
 	if !ok {
-		t.Fatal("no session.diff event after write")
+		t.Fatal("no run.diff event after write")
 	}
 	if ev.WorkspaceID != "ws1" || ev.RunID != "run1" {
 		t.Fatalf("event scope = %s/%s", ev.WorkspaceID, ev.RunID)

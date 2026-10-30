@@ -196,14 +196,14 @@ func TestRunProtectRechecksOwnerAfterHandoff(t *testing.T) {
 	close(releaseLookup)
 
 	if perr := <-protectDone; perr == nil || perr.Code != protocol.CodeDenied {
-		t.Fatalf("stale session.protect result = %+v, want CodeDenied", perr)
+		t.Fatalf("stale run.protect result = %+v, want CodeDenied", perr)
 	}
 	stored, err := e.store.GetRun(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.Protected {
-		t.Fatal("stale session.protect mutated the handed-off run")
+		t.Fatal("stale run.protect mutated the handed-off run")
 	}
 }
 
@@ -465,7 +465,7 @@ func TestRunProtectPublishesEvents(t *testing.T) {
 				t.Errorf("unexpected protect event type %q", ev.Type)
 			}
 		case <-time.After(5 * time.Second):
-			t.Fatal("missing session.protect event")
+			t.Fatal("missing run.protect event")
 		}
 	}
 	if !timelineSeen || !protectedSeen {

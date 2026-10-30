@@ -617,7 +617,7 @@ Subsessions** or:
 ```sh
 aether subsessions off                         # every session you own
 aether subsessions on
-aether session "fix the login bug" --agent claude --subsessions off   # this session only
+aether session "fix the login bug" --agent claude --children off   # this session only
 ```
 
 A subsessions on your own account and uses its parent's launch fallback

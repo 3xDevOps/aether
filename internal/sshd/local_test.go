@@ -49,7 +49,7 @@ func TestLocalCallDispatchesWithThePendingGate(t *testing.T) {
 	}
 	_, perr = lp.Call(ctx, protocol.MethodRunList, nil)
 	if perr == nil || perr.Code != protocol.CodeDenied || !strings.Contains(perr.Message, "pending") {
-		t.Fatalf("pending session.list error = %v, want the pending refusal", perr)
+		t.Fatalf("pending run.list error = %v, want the pending refusal", perr)
 	}
 }
 

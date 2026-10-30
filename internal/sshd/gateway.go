@@ -58,7 +58,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	})
 	switch {
 	case errors.Is(err, gitengine.ErrInvalidObjectID):
-		return nil, invalidParams("run.patch: from, or from and to, must be tree ids taken from a session.diff event (full lowercase hex, naming a tree and not a commit); to alone is not allowed")
+		return nil, invalidParams("run.patch: from, or from and to, must be tree ids taken from a run.diff event (full lowercase hex, naming a tree and not a commit); to alone is not allowed")
 	case errors.Is(err, gitengine.ErrSnapshotTreeMissing):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: retained snapshot history has expired or is unavailable"}
 	case errors.Is(err, gitengine.ErrSnapshotStorageLimit):

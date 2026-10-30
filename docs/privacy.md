@@ -542,9 +542,9 @@ which no other app can hold and which grants nothing.
   past 5 minutes logs `gitengine: evidence prune failed` and is retried at
   the next hourly evidence sweep or server start.
 
-## Subsessions
+## Children
 
-The app is not directed at subsessions and has no age-specific content or
+The app is not directed at children and has no age-specific content or
 features.
 
 ## Licence and open source notices

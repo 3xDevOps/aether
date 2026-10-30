@@ -97,7 +97,7 @@ func (r *upstreamRun) finalDiff(t *testing.T) events.RunDiffPayload {
 	r.e.StopDiffWatch(r.run)
 	ev, ok := nextEvent(t, r.diffs, time.Second)
 	if !ok {
-		t.Fatal("stopping the watch published no session.diff")
+		t.Fatal("stopping the watch published no run.diff")
 	}
 	return ev.Payload.(events.RunDiffPayload)
 }

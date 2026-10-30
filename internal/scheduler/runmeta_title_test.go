@@ -49,7 +49,7 @@ func TestEnhancedRunTitleFollowsAgentAcrossReopen(t *testing.T) {
 				}
 				return
 			case <-timer.C:
-				t.Fatalf("no session.title event for %q", want)
+				t.Fatalf("no run.title event for %q", want)
 			}
 		}
 	}
@@ -112,7 +112,7 @@ func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
 					return title.Title
 				}
 			case <-timer.C:
-				t.Fatal("no session.title event")
+				t.Fatal("no run.title event")
 			}
 		}
 	}
@@ -121,7 +121,7 @@ func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
 	const prompt = "\nReply with exactly the word pong\nand nothing else; do not use tools."
 	inject(e.sched, run.ID, prompt)
 	if title := nextTitle(); title != "Reply with exactly the word pong" {
-		t.Fatalf("first session.title = %q, want the prompt's first line", title)
+		t.Fatalf("first run.title = %q, want the prompt's first line", title)
 	}
 	if title := storedTitle(run.ID); title != "Reply with exactly the word pong" {
 		t.Fatalf("title after the first prompt = %q, want its first line", title)

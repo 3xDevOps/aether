@@ -313,7 +313,7 @@ so you do not save the environment. See
 [GitHub](environment-home.md#connect-github).
 
 For a login that opens a browser, click the OAuth URL printed in the terminal.
-In the CLI, first session `aether forward terminal <callback-port>` in a second
+In the CLI, first run `aether forward terminal <callback-port>` in a second
 terminal on your computer: the environment has no `aether` command. Device-code
 logins, `gh auth login --web` among them, need no forward.
 
