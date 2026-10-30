@@ -18,7 +18,6 @@ import { useCapability, useNeedsYouCount, useSelfRole } from '@/store/hooks'
 
 const titles: Record<string, string> = {
   overview: 'All workspaces',
-  missions: 'Swarms',
 }
 
 export function TopBar({ navigation = true }: { navigation?: boolean }) {
@@ -70,7 +69,7 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
 function HeaderNavigation() {
   const cap = useCapability()
   const list = useMemo(() => surfaces(cap).filter((surface) => surface.place === 'nav'), [cap])
-  const pinned = list.filter(({ name }) => name === 'board' || name === 'missions').length
+  const pinned = list.filter(({ name }) => name === 'board').length
   const current = useStore((s) => s.route.name)
   const navigate = useStore((s) => s.navigate)
   const row = useRef<HTMLUListElement>(null)

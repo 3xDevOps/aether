@@ -274,7 +274,7 @@ export function WatchDetail({ watchID, client, onClose }: { watchID: string; cli
                 <span aria-hidden>·</span>
                 {sourceLabel(watch) && <><span>{sourceLabel(watch)}</span><span aria-hidden>·</span></>}
                 <span>{watch.conditions.map((c) => conditionLabel(watch.target.kind, c)).join(', ')}</span>
-                <span aria-hidden>·</span><LinkTo link={targetLink(watch.target)}>Open {watch.target.kind === 'mission' ? 'swarm' : watch.target.kind === 'pr' ? 'pull request' : 'run'}</LinkTo>
+                <span aria-hidden>·</span><LinkTo link={targetLink(watch.target)}>Open {watch.target.kind === 'pr' ? 'pull request' : 'run'}</LinkTo>
               </div>
             </DialogDescription>
           )}

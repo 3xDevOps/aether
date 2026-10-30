@@ -10,7 +10,6 @@ import {
 import {
   alice,
   bob,
-  mission,
   otherWorkspace,
   run,
   stateContext,
@@ -87,64 +86,6 @@ describe('runGroups', () => {
   })
 })
 
-describe('swarms', () => {
-  const integrator = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
-  const worker = (id: string, over: Parameters<typeof run>[0] = {}) =>
-    record({
-      id,
-      member_id: bob.id,
-      mission_id: 'mission_1',
-      mission_role: 'worker',
-      integrator_run_id: integrator.id,
-      mode: 'headless',
-      ...over,
-    })
-
-  it('folds a swarm into one collapsed entry with its counts', () => {
-    const groups = runGroups(
-      input([
-        integrator,
-        worker('w1'),
-        worker('w2', { status: 'needs-attention', state: 'needs-you' }),
-        worker('w3', { status: 'completed' }),
-        worker('w4', { status: 'interrupted' }),
-      ]),
-    )
-    expect(ids(groups.working)).toEqual(['run_integrator'])
-    const [swarm] = groups.working
-    expect(swarm.children).toEqual([])
-    expect(swarm.swarm).toMatchObject({ collapsed: true, counts: { working: 2, needsYou: 0, done: 1, failed: 1 } })
-    expect(ids(swarm.swarm?.members ?? []).sort()).toEqual(['w1', 'w2', 'w3', 'w4'])
-  })
-
-  it('lists the swarm in Needs you with only the members that need the viewer', () => {
-    const blocked = worker('blocked', {
-      status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access', started_at: '2026-08-14T09:30:00Z',
-    })
-    const groups = runGroups(input([integrator, worker('w1'), blocked], {}, { missions: { mission_1: mission() } }))
-    expect(ids(groups['needs-you'])).toEqual(['run_integrator'])
-    const [swarm] = groups['needs-you']
-    expect(swarm.state).toBe('working')
-    expect(ids(swarm.children)).toEqual(['blocked'])
-    expect(swarm.swarm?.counts).toEqual({ working: 1, needsYou: 1, done: 0, failed: 0 })
-    expect(swarm.waitingSince).toBe(blocked.stateChangedAt)
-    expect(swarm.since).toBe(integrator.stateChangedAt)
-  })
-
-  it("roots a replaced integrator's swarm at the current one", () => {
-    const old = record({ id: 'old', mission_id: 'mission_1', mission_role: 'integrator', status: 'failed' })
-    const groups = runGroups(input([old, integrator, worker('w1')], {}, { missions: { mission_1: mission() } }))
-    expect(ids(groups.working)).toEqual(['run_integrator'])
-    expect(groups.finished).toEqual([])
-  })
-
-  it('roots a swarm at its oldest worker when no integrator is listed', () => {
-    const groups = runGroups(input([worker('w1'), worker('w2', { created_at: '2026-08-14T09:00:00Z' })]))
-    expect(ids(groups.working)).toEqual(['w2'])
-    expect(ids(groups.working[0].swarm?.members ?? [])).toEqual(['w1'])
-  })
-})
-
 describe('child runs', () => {
   const parent = record({ id: 'parent' })
   const child = (id: string, parentID: string, over: Parameters<typeof run>[0] = {}) =>
@@ -157,29 +98,17 @@ describe('child runs', () => {
     expect(groups.working).toEqual([])
     const [tree] = groups['needs-you']
     expect(ids(tree.children)).toEqual(['grandchild'])
-    expect(tree.swarm).toBeUndefined()
     expect(tree.childRuns).toMatchObject({ collapsed: true, counts: { working: 1, needsYou: 1, done: 1, failed: 0 } })
     expect(ids(tree.childRuns?.members ?? []).sort()).toEqual(['c1', 'c2', 'grandchild'])
     expect(tree.waitingSince).toBe(asking.stateChangedAt)
-  })
-
-  it('keeps swarm workers grouped by mission and folds their child runs into the swarm', () => {
-    const integrator = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
-    const worker = record({ id: 'w1', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: integrator.id, parent_run_id: integrator.id })
-    const review = child('review', 'w1', { root_run_id: integrator.id })
-    const groups = runGroups(input([integrator, worker, review]))
-    expect(ids(groups.working)).toEqual(['run_integrator'])
-    expect(groups.working[0].childRuns).toBeUndefined()
-    expect(ids(groups.working[0].swarm?.members ?? []).sort()).toEqual(['review', 'w1'])
   })
 
   it('lists a child on its own when its parent is not loaded', () => {
     expect(ids(runGroups(input([child('c1', 'gone')])).working)).toEqual(['c1'])
   })
 
-  it('lists descendants nearest first and leaves swarm workers to the swarm', () => {
-    const worker = record({ id: 'w1', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'parent', parent_run_id: 'parent' })
-    const runs = [parent, child('c2', 'c1', { created_at: '2026-08-14T09:00:00Z' }), child('c1', 'parent', { created_at: '2026-08-14T10:00:00Z' }), worker]
+  it('lists descendants nearest first', () => {
+    const runs = [parent, child('c2', 'c1', { created_at: '2026-08-14T09:00:00Z' }), child('c1', 'parent', { created_at: '2026-08-14T10:00:00Z' })]
     expect(descendantRuns(Object.fromEntries(runs.map((r) => [r.id, r])), ['parent']).map((r) => r.id)).toEqual(['c1', 'c2'])
   })
 })
@@ -203,54 +132,28 @@ describe('sidebarGroups', () => {
     expect(ids(groups[0].runs[0].children)).toEqual(['c1', 'c2'])
   })
 
-  it('keeps every visible swarm run beneath its current integrator without inflating Needs you', () => {
-    const swarmRun = (id: string, over: Parameters<typeof run>[0] = {}) => record({
-      id, mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'old', ...over,
-    })
+  it('keeps every visible child run beneath its parent without inflating Needs you', () => {
+    const childRun = (id: string, over: Parameters<typeof run>[0] = {}) => record({ id, parent_run_id: 'run_parent', ...over })
     const groups = sidebarGroups(input([
-      swarmRun('old', { mission_role: 'integrator', status: 'failed' }),
-      swarmRun('run_integrator', { mission_role: 'integrator' }),
-      swarmRun('working'),
-      swarmRun('blocked', { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
-      swarmRun('done', { status: 'merged' }),
-      swarmRun('archived', { status: 'merged', archived_at: '2026-08-15T00:00:00Z' }),
-    ], {}, { missions: { mission_1: mission() } }))
+      record({ id: 'run_parent' }),
+      childRun('working'),
+      childRun('blocked', { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
+      childRun('done', { status: 'merged' }),
+      childRun('archived', { status: 'merged', archived_at: '2026-08-15T00:00:00Z' }),
+    ]))
 
     expect(groups.map((group) => [group.key, group.count])).toEqual([['needs-you', 1]])
-    expect(ids(groups[0].runs)).toEqual(['run_integrator'])
-    expect(ids(groups[0].runs[0].children)).toEqual(['blocked', 'done', 'old', 'working'])
+    expect(ids(groups[0].runs)).toEqual(['run_parent'])
+    expect(ids(groups[0].runs[0].children)).toEqual(['blocked', 'done', 'working'])
   })
 
-  it('applies Mine to swarm children without hiding Needs you context', () => {
-    const root = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
-    const mine = record({ id: 'mine', mission_id: 'mission_1', mission_role: 'worker' })
-    const theirs = record({ id: 'theirs', member_id: bob.id, mission_id: 'mission_1', mission_role: 'worker' })
-    const scope = input([root, mine, theirs], {}, { missions: { mission_1: mission() } })
+  it('applies Mine to child runs', () => {
+    const root = record({ id: 'run_parent' })
+    const mine = record({ id: 'mine', parent_run_id: root.id })
+    const theirs = record({ id: 'theirs', member_id: bob.id, parent_run_id: root.id })
+    const scope = input([root, mine, theirs])
     expect(ids(sidebarGroups(scope)[0].runs[0].children)).toEqual(['mine', 'theirs'])
     expect(ids(sidebarGroups({ ...scope, mineOnly: true })[0].runs[0].children)).toEqual(['mine'])
-
-    scope.ctx.runs.theirs = { ...theirs, status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }
-    const [waiting] = sidebarGroups({ ...scope, mineOnly: true })
-    expect(waiting.key).toBe('needs-you')
-    expect(waiting.count).toBe(1)
-    expect(ids(waiting.runs[0].children)).toEqual(['mine', 'theirs'])
-  })
-
-  it('keeps active workers visible under a missing-integrator fallback outside the selected workspace', () => {
-    const worker = (id: string, over: Parameters<typeof run>[0] = {}) => record({
-      id, mission_id: 'mission_1', mission_role: 'worker', workspace_id: otherWorkspace.id, ...over,
-    })
-    const groups = sidebarGroups(input([
-      worker('root', { created_at: '2026-08-14T09:00:00Z' }),
-      worker('working'),
-      worker('blocked', { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
-    ], { mineOnly: true }))
-
-    expect(ids(groups[0].runs)).toEqual(['root'])
-    expect(groups[0].count).toBe(1)
-    expect(groups[0].runs[0].children.map((row) => [row.run.id, row.workspaceName])).toEqual([
-      ['blocked', otherWorkspace.name], ['working', otherWorkspace.name],
-    ])
   })
 
   it('is empty without runs', () => {

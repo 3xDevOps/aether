@@ -65,6 +65,11 @@ export function compactAge(iso: string, now = Date.now()): string {
   return suffix && value < 0 ? `${-value}${suffix}` : 'now'
 }
 
+export function elapsed(from: string, to: string | number): string {
+  const age = compactAge(from, typeof to === 'string' ? Date.parse(to) : to)
+  return age === 'now' ? '<1m' : age
+}
+
 /** Release tags are "v1.2.3" but the desktop shell records "1.2.3". */
 export function bareVersion(version: string): string {
   return version.replace(/^v/, '')

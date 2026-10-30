@@ -1,7 +1,6 @@
 package coord
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -110,8 +109,7 @@ func (s *Service) wakeEnhancedLocked(run domain.RunID) {
 	}()
 }
 
-// Each set of unread message IDs and each integrator notice wakes at most
-// once. retry means admission refused the wake while the session stayed
+// Each set of unread message IDs wakes at most once. retry means admission refused the wake while the session stayed
 // idle, which no turn end will retry.
 func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	mail, ok := s.cfg.Mail.(store.UnackedRunMessageIDsStore)
@@ -126,9 +124,6 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	opens := s.enhancedOpens[run]
 	if refusal, ok := s.enhancedRefusals[run]; ok && refusal.opens != opens {
 		delete(s.enhancedWoken, run)
-		if refusal.noticed {
-			s.enhancedNotices[run] = refusal.notice
-		}
 		delete(s.enhancedRefusals, run)
 	}
 	s.mu.Unlock()
@@ -139,9 +134,7 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 		slog.Warn("coord: enhanced wake: list unread mail", "run", run, "error", err)
 		return false
 	}
-	notice := s.integratorNotice(ctx, run)
 	freshMail := s.unwoken(run, ids)
-	changes := s.missionChanges(run, notice)
 	// Like the hooks, tell only a working agent about overlapping edits, once
 	// per set of them.
 	var overlap string
@@ -155,7 +148,7 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	}
 	freshOverlap := overlap != "" && overlap != s.enhancedOverlaps[run]
 	s.mu.Unlock()
-	if !freshMail && len(changes) == 0 && !freshOverlap {
+	if !freshMail && !freshOverlap {
 		return false
 	}
 	overlapSent := false
@@ -171,9 +164,6 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 		var prompt strings.Builder
 		if len(ids) > 0 && !reading {
 			prompt.WriteString(protocol.CoordInboxContext(len(ids)))
-		}
-		if len(changes) > 0 {
-			prompt.WriteString(protocol.CoordMissionUpdateContext(notice.mission, changes))
 		}
 		// The turn may have ended while admission waited.
 		steers := s.cfg.Waker.InTurn(run)
@@ -202,8 +192,7 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, refused := s.enhancedRefusals[run]; err != nil && !refused {
-		baseline, noticed := s.enhancedNotices[run]
-		s.enhancedRefusals[run] = wakeRefusal{opens: opens, notice: baseline, noticed: noticed}
+		s.enhancedRefusals[run] = wakeRefusal{opens: opens}
 	}
 	woken := s.enhancedWoken[run]
 	if woken == nil {
@@ -212,9 +201,6 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	}
 	for _, id := range ids {
 		woken[id] = struct{}{}
-	}
-	if len(changes) > 0 {
-		s.enhancedNotices[run] = notice
 	}
 	if overlapSent {
 		s.enhancedOverlaps[run] = overlap
@@ -240,67 +226,13 @@ func (s *Service) overlapState(ctx context.Context, run domain.RunID) string {
 	return strings.Join(overlap, "\n")
 }
 
-type missionNotice struct {
-	mission string
-	seq     uint64
-	changes map[domain.MissionChange]uint64
-}
-
-func (s *Service) integratorNotice(ctx context.Context, run domain.RunID) missionNotice {
-	if s.cfg.Mission == nil {
-		return missionNotice{}
-	}
-	a, err := s.cfg.Mission.Assignment(ctx, run)
-	if err != nil {
-		slog.Debug("coord: enhanced wake: read mission assignment", "run", run, "error", err)
-		return missionNotice{}
-	}
-	if a.Role != "integrator" {
-		return missionNotice{}
-	}
-	return missionNotice{mission: a.MissionID, seq: a.ChangeSeq, changes: a.Changes}
-}
-
-// The first notice seen is the baseline: the integrator's own task already
-// describes the mission it starts in.
-func (s *Service) missionChanges(run domain.RunID, notice missionNotice) []domain.MissionChange {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if notice.mission == "" {
-		delete(s.enhancedNotices, run)
-		return nil
-	}
-	seen, ok := s.enhancedNotices[run]
-	if !ok {
-		s.enhancedNotices[run] = notice
-		return nil
-	}
-	var changes []domain.MissionChange
-	for kind, seq := range notice.changes {
-		if seq > seen.seq {
-			changes = append(changes, kind)
-		}
-	}
-	if len(changes) == 0 {
-		s.enhancedNotices[run] = notice
-		return nil
-	}
-	slices.SortFunc(changes, func(a, b domain.MissionChange) int { return cmp.Compare(notice.changes[a], notice.changes[b]) })
-	return changes
-}
-
 // wakeRefusal is a wake the agent refused. It counts as delivered only to
-// the opens sessions opened before it; a later session is woken for its mail
-// and for mission changes since notice, the baseline it replaced.
+// the opens sessions opened before it; a later session is woken for its mail.
 type wakeRefusal struct {
-	opens   uint64
-	notice  missionNotice
-	noticed bool
+	opens uint64
 }
 
-// EnhancedSessionOpened takes the baseline before the session's first turn,
-// so a change during that turn wakes it when the turn ends.
-func (s *Service) EnhancedSessionOpened(ctx context.Context, run domain.RunID) {
+func (s *Service) EnhancedSessionOpened(run domain.RunID) {
 	if s.cfg.Disabled || !s.enterRun(run) {
 		return
 	}
@@ -308,18 +240,6 @@ func (s *Service) EnhancedSessionOpened(ctx context.Context, run domain.RunID) {
 	s.mu.Lock()
 	s.enhancedOpens[run]++
 	s.mu.Unlock()
-	s.missionChanges(run, s.integratorNotice(ctx, run))
-}
-
-// Only integrators a wake has already seen are offered the change.
-func (s *Service) wakeMissionIntegrators(mission domain.MissionID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for run, notice := range s.enhancedNotices {
-		if notice.mission == string(mission) {
-			s.wakeEnhancedLocked(run)
-		}
-	}
 }
 
 func (s *Service) unwoken(run domain.RunID, ids []string) bool {
@@ -358,8 +278,7 @@ func (s *Service) enhancedWakeLock(run domain.RunID) *sync.Mutex {
 
 // RemindReport hands an idle session the server drives prompt, the reminder
 // to report the turn that just ended, under ReminderAdmission: a protected
-// run, a worker a human holds, a run a member controls or a stale assignment
-// is not prompted.
+// run, a child run a human holds or a run a member controls is not prompted.
 func (s *Service) RemindReport(ctx context.Context, run domain.RunID, prompt string) error {
 	if s.cfg.Disabled || s.cfg.Waker == nil || s.cfg.ReminderAdmission == nil {
 		return errors.New("coord: report reminder: no session waker")

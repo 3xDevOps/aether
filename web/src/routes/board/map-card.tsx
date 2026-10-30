@@ -20,11 +20,10 @@ import { diffTotals } from '@/store/diff'
 
 export interface FoldProps {
   unitKey: string
-  workers: number
+  childRuns: number
   hidden: number
   hiddenNeedsYou: number
   controls: string
-  noun: 'workers' | 'child runs'
   onFold: (unitKey: string, fold: boolean) => void
 }
 
@@ -116,7 +115,7 @@ export const MapNodeCard = memo(function MapNodeCard({ card, agentName, showOwne
   )
 }, dequal)
 
-function FoldButton({ label, unitKey, workers, hidden, hiddenNeedsYou, controls, noun, onFold }: FoldProps & { label: string }) {
+function FoldButton({ label, unitKey, childRuns, hidden, hiddenNeedsYou, controls, onFold }: FoldProps & { label: string }) {
   const folded = hidden > 0
   return (
     <Button
@@ -125,12 +124,12 @@ function FoldButton({ label, unitKey, workers, hidden, hiddenNeedsYou, controls,
       data-map-fold
       aria-expanded={!folded}
       aria-controls={controls}
-      aria-label={folded ? `Expand the ${noun} of ${label}, ${hidden} hidden` : `Collapse the ${noun} of ${label}`}
+      aria-label={folded ? `Expand the child runs of ${label}, ${hidden} hidden` : `Collapse the child runs of ${label}`}
       className={cn('gap-1 px-1.5 tabular-nums', hiddenNeedsYou > 0 && 'text-state-needs-you')}
       onClick={() => onFold(unitKey, !folded)}
     >
       {hiddenNeedsYou > 0 && <StatusDot tone="needs-you" />}
-      {folded ? `+${hidden}` : workers}
+      {folded ? `+${hidden}` : childRuns}
       {hiddenNeedsYou > 0 && ` · ${hiddenNeedsYou} need you`}
       <ChevronDown aria-hidden className={cn('size-3 transition-transform duration-100 motion-reduce:transition-none', folded && '-rotate-90')} />
     </Button>

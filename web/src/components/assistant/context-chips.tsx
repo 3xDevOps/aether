@@ -23,8 +23,7 @@ interface Row {
 
 /** An attachment that names the page itself: one chip shows both, the payload still carries both. */
 function samePage(route: ViewEntry, attachment: ViewAttachment): boolean {
-  if (attachment.kind === 'run') return route.run_id !== undefined && attachment.run_id === route.run_id
-  return attachment.kind === 'mission' && route.run_id === undefined && route.mission_id !== undefined && attachment.mission_id === route.mission_id
+  return attachment.kind === 'run' && route.run_id !== undefined && attachment.run_id === route.run_id
 }
 
 /** The chips come from the payload itself, so they cannot show what the next message does not send. */

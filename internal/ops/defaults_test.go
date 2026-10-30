@@ -28,7 +28,6 @@ func savedFake(t *testing.T, saved protocol.LaunchDefaultsResult) *fakeServer {
 		r.Harness, r.Mode, r.Model, r.AccountMemberID = p.Harness, p.Mode, p.Model, p.AccountMemberID
 		return protocol.RunLaunchResult{Run: r}
 	})
-	f.answers[protocol.MethodMissionCreate] = returns(protocol.MissionCreateResult{Mission: protocol.Mission{ID: "mis-1"}})
 	return f
 }
 
@@ -243,48 +242,6 @@ func TestRepeatedLaunchReceiptOmitsSavedDefaults(t *testing.T) {
 	}
 }
 
-// A swarm's saved agent, mode and model fill only its integrator; the
-// saved account fills the integrator and each worker that names none.
-func TestSwarmAppliesSavedDefaultsToIntegrator(t *testing.T) {
-	f := savedFake(t, savedChoices)
-	cs := connectorSession(t, f, ScopeWrite)
-	_, out := run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o",
-		"workers": []any{map[string]any{"harness": "codex"}, map[string]any{"harness": "codex", "account_member_id": "mem-me"}}, "idempotency_key": "s1"})
-	var p protocol.MissionCreateParams
-	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.Integrator != (protocol.MissionIntegrator{AccountMemberID: "mem-ada", Harness: "claude", Mode: "acp", Model: "opus"}) {
-		t.Fatalf("integrator = %+v, want the saved choices", p.Integrator)
-	}
-	workers := map[string]protocol.MissionExecutionChoice{}
-	for _, c := range p.ExecutionChoices[1:] {
-		workers[c.AccountMemberID] = c
-	}
-	if workers["mem-ada"] != (protocol.MissionExecutionChoice{AccountMemberID: "mem-ada", Harness: "codex", Mode: "tui"}) || workers["mem-me"].Harness != "codex" {
-		t.Fatalf("workers = %+v, want codex on the saved account and on yours, in its own mode and no saved model", p.ExecutionChoices[1:])
-	}
-	if !slices.Equal(p.FallbackAccountMemberIDs, []string{"mem-me"}) {
-		t.Fatalf("fallback = %v, want the saved order swarm-wide", p.FallbackAccountMemberIDs)
-	}
-	if jsonOf(t, out["launch"].(map[string]any)["defaults_applied"]) != `["account_member_id","fallback","harness","mode","model","workers.account_member_id"]` {
-		t.Fatalf("receipt = %v", out["launch"])
-	}
-
-	// An integrator account given explicitly leaves the saved one for the
-	// workers that name none.
-	f = savedFake(t, savedChoices)
-	cs = connectorSession(t, f, ScopeWrite)
-	run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "account_member_id": "mem-me",
-		"workers": []any{map[string]any{"harness": "codex"}}, "idempotency_key": "s2"})
-	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.Integrator.AccountMemberID != "mem-me" || p.ExecutionChoices[len(p.ExecutionChoices)-1].AccountMemberID != "mem-ada" {
-		t.Fatalf("choices = %+v, want the integrator on yours and the worker on the saved account", p.ExecutionChoices)
-	}
-}
-
 // aether_launch_options lists the saved defaults with each unusable field.
 func TestLaunchOptionsListSavedDefaults(t *testing.T) {
 	saved := savedChoices
@@ -371,18 +328,6 @@ func TestSavedAgentLaunchesWhenAgentsCannotBeListed(t *testing.T) {
 	unchecked := jsonOf(t, out["launch"].(map[string]any)["defaults_unchecked"])
 	if !strings.Contains(unchecked, `"field":"harness"`) || !strings.Contains(unchecked, `"field":"mode"`) || !strings.Contains(unchecked, "permission denied") {
 		t.Fatalf("defaults_unchecked = %s", unchecked)
-	}
-}
-
-// A swarm whose integrator usage fallback started on another account says
-// its saved model went unchecked there, as a run's receipt does.
-func TestFallbackMovedIntegratorReportsSavedModelUnchecked(t *testing.T) {
-	f := savedFake(t, savedChoices)
-	f.answers[protocol.MethodMissionCreate] = returns(protocol.MissionCreateResult{Mission: protocol.Mission{ID: "mis-1", CurrentIntegratorRunID: "run-int"}})
-	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: protocol.Run{ID: "run-int", AccountMemberID: "mem-me"}})
-	_, out := run(t, connectorSession(t, f, ScopeWrite), "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "idempotency_key": "s1"})
-	if unchecked := jsonOf(t, out["launch"].(map[string]any)["defaults_unchecked"]); !strings.Contains(unchecked, `"field":"model"`) || !strings.Contains(unchecked, "mem-me") {
-		t.Fatalf("defaults_unchecked = %s, want the saved model noted unchecked on mem-me", unchecked)
 	}
 }
 

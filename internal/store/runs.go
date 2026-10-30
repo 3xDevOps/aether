@@ -51,7 +51,7 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	return d.createRun(ctx, r, false)
 }
 
-// CreateRunWithID is the reserved-ID variant used by mission attempts. It
+// CreateRunWithID is the reserved-ID variant used by child runs. It
 // accepts only a caller-supplied ID and never silently substitutes another
 // identity.
 func (d *DB) CreateRunWithID(ctx context.Context, r *domain.Run) error {
@@ -104,7 +104,7 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 	if err != nil {
 		return fmt.Errorf("store: create run: %w", err)
 	}
-	fallbackOrder, err := missionJSON(r.Fallback.Order, "[]")
+	fallbackOrder, err := jsonText(r.Fallback.Order, "[]")
 	if err != nil {
 		return fmt.Errorf("store: create run: fallback order: %w", err)
 	}
@@ -113,19 +113,14 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
 		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at, acp,
-		                   status_changed_at, requested_account_member_id, fallback_disabled, fallback_order, model, effort, permission, via, cpu_limit, memory_limit_bytes, pids_limit, swarm_run)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		         ? AND ? IN (SELECT run_id FROM mission_attempts WHERE run_id IS NOT NULL
-		                     UNION ALL SELECT current_integrator_run_id FROM missions WHERE current_integrator_run_id IS NOT NULL
-		                     UNION ALL SELECT initial_run_id FROM mission_create_receipts
-		                     UNION ALL SELECT run_id FROM mission_integrator_replacements
-		                     UNION ALL SELECT run_id FROM run_children WHERE mission_id <> ''))`,
+		                   status_changed_at, requested_account_member_id, fallback_disabled, fallback_order, model, effort, permission, via, cpu_limit, memory_limit_bytes, pids_limit)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
 		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP, createdAt,
 		r.RequestedAccountMemberID, r.Fallback.Disabled, fallbackOrder, r.Model, r.Effort, r.Permission, r.Via,
-		r.Limits.CPUs, r.Limits.MemoryBytes, r.Limits.Pids, reserved, id,
+		r.Limits.CPUs, r.Limits.MemoryBytes, r.Limits.Pids,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -154,7 +149,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.Review, &reviewChangedAt, &r.ACP,
 		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.Effort, &r.Permission, &r.Via,
 		&r.Children, &r.ChildrenSetBy, &r.Limits.CPUs, &r.Limits.MemoryBytes, &r.Limits.Pids, &r.UnansweredQuestions,
-		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked,
+		&r.UnackedMessages, &oldestUnacked,
 		&r.ParentRunID, &r.RootRunID, &r.ChildPurpose, &r.Detached); err != nil {
 		return nil, err
 	}
@@ -192,23 +187,12 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 // once per run.
 func runSnapshotQuery(where string) string {
 	return `SELECT ` + runCols + `, COUNT(question.id),
-		COALESCE(integrator.id, worker_mission.id, ''),
-		CASE WHEN integrator.id IS NOT NULL THEN 'integrator'
-		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
-		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, ''),
 		(SELECT COUNT(*) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `),
 		(SELECT MIN(created_at) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `),
-		COALESCE(child.parent_run_id, CASE WHEN integrator.id IS NULL THEN worker_mission.current_integrator_run_id END, ''),
-		COALESCE(child.root_run_id, CASE WHEN integrator.id IS NULL THEN worker_mission.current_integrator_run_id END, ''),
+		COALESCE(child.parent_run_id, ''), COALESCE(child.root_run_id, ''),
 		COALESCE(child.purpose, ''), COALESCE(child.detached, 0)
 		FROM runs
 		LEFT JOIN run_children child ON child.run_id = runs.id
-		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
-		LEFT JOIN missions worker_mission ON worker_mission.id = (
-			SELECT MIN(attempt.mission_id) FROM mission_attempts attempt
-			WHERE attempt.run_id = runs.id
-			HAVING COUNT(DISTINCT attempt.mission_id) = 1
-		)
 		LEFT JOIN room_messages question
 			ON question.run_id = runs.id
 			AND question.kind = 'question'

@@ -77,12 +77,10 @@ export interface Turn {
 }
 
 const inboxWake = /^Aether has \d+ unacknowledged inbox item\(s\)\./
-const missionWake = /^Mission update(?: \([^)]*\))?: run \/usr\/local\/bin\/aether-internal mission plan show/
 
 /** What Aether's own wake-up prompt reads as, or undefined for a person's message. */
 export function wakeText(prompt: string): string | undefined {
   if (inboxWake.test(prompt)) return 'Woken by new agent messages'
-  if (missionWake.test(prompt)) return 'Woken by a swarm update'
   return undefined
 }
 

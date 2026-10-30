@@ -117,21 +117,19 @@ can push branches and open pull requests.
 
 | Tool | Read-only | Destructive | Open world | Justification |
 | --- | --- | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `aether_launch_options`, `aether_changes`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
+| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `aether_launch_options`, `aether_changes`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
 | `aether_get_run` | yes | no | no | Reads one run on the user's server. It also reads the run's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_pr_status` | yes | no | no | Reads a run's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
-| `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds a run or swarm, which can be stopped; its agents can push branches and open pull requests |
+| `aether_launch_run` | no | no | yes | Adds a run, which can be stopped; its agents can push branches and open pull requests |
 | `aether_message_run`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back, and the agent acts on it |
 | `aether_pause_run` | no | no | no | Freezes the run's container; resume continues it |
 | `aether_resume_run` | no | no | yes | The agent goes on working and can push |
 | `aether_mark_reviewed` | no | yes | no | `complete` closes the run, which cannot be reopened; records state on the server only |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
-| `aether_stop_run`, `aether_cancel_swarm` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
+| `aether_stop_run` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
 | `aether_run_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |
 | `aether_switch_run_mode` | no | yes | yes | Discards the turn in progress; the switched agent goes on working |
-| `aether_swarm_manage` | no | yes | yes | Archiving closes the swarm's completed runs; a released worker goes on working under its integrator |
 | `aether_handoff_run` | no | yes | no | Only the teammate can hand the run back |
-| `aether_replace_integrator` | no | yes | yes | The old integrator loses its authority; the new one can push and open PRs |
 | `aether_pr_create` | no | no | yes | Opens a pull request on GitHub; it can be closed |
 | `aether_pr_merge` | no | yes | yes | A merge on GitHub cannot be taken back |
 | `aether_memory_add`, `aether_memory_pin` | no | no | no | Notes stay on the user's server; unpin and remove undo them |
@@ -295,7 +293,7 @@ use, the categories of recipients, data retention timelines"
 [legal/privacy-connectors.md](legal/privacy-connectors.md) drafts the policy
 from them.
 
-**Collected from ChatGPT or Claude.** Tool arguments: workspace, run, swarm
+**Collected from ChatGPT or Claude.** Tool arguments: workspace, run
 and note ids, task and message text, answers, template parameters,
 pull request titles and bodies, team memory note text and cited paths, the
 member ids of agent accounts to launch on or read, a teammate's member id or
@@ -310,16 +308,16 @@ read or kept.
 branches, file paths and dashboard links; and, under `untrusted`, text other
 people and agents wrote: run titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
-request reviews and comments with their GitHub usernames, swarm tasks,
+request reviews and comments with their GitHub usernames,
 questions and messages, template tasks, team memory notes with their
-author's name, integration verification output, and watch receipts and
+author's name, and watch receipts and
 notices with the target's title. A handoff to an unknown
 teammate returns teammates' member ids and roles. `aether_launch_options` and
 launch receipts return the display names and member ids of the agent
 accounts the user may launch on (their own and those teammates shared with
 them), each account's agents and whether they are signed in, and each usage
 window's label, percentage used and reset time; never money, plan prices or
-credentials. A run or swarm's receipt names its account's owner by id, and by
+credentials. A run's receipt names its account's owner by id, and by
 name when the account is the user's or shared with them. No tool returns
 member emails or logins. Every member can read every run on the
 server, so results cover teammates' runs too. Sizes are capped

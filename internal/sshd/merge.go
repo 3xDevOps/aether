@@ -219,7 +219,7 @@ func (s *Server) memberMergePending(ctx context.Context, member domain.MemberID,
 }
 
 // memberMergeAccept merges under registerMu, so the last-admin check
-// holds, and authorizationMu, so no run, swarm or terminal is admitted for
+// holds, and authorizationMu, so no run or terminal is admitted for
 // either member while their rows move. Nothing changes, no terminal stops
 // and no lease is fenced, until the proposal is the caller's to accept as
 // it was proposed. The absorbed member's connections

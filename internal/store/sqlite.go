@@ -832,3 +832,14 @@ func collect[T any](rows *sql.Rows, scan func(interface{ Scan(...any) error }) (
 	}
 	return out, nil
 }
+
+func jsonText(v any, fallback string) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	if len(b) == 0 || string(b) == "null" {
+		return fallback, nil
+	}
+	return string(b), nil
+}

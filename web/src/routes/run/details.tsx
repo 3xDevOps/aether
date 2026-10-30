@@ -72,7 +72,7 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   const [loading, setLoading] = useState(false)
   const hidden = useStore((s) => s.hiddenAgentMessages[run.id] === true)
   useMessageList(useStore, api, scope)
-  if (messages.length === 0 && !run.mission_id) return null
+  if (messages.length === 0) return null
   const label = (id: string) => (id === run.id ? 'This run' : undefined)
   const shown = all ? messages : messages.slice(-recentMessages)
   const older = async () => {

@@ -3,7 +3,7 @@
 What Aether does when the host reboots, a disk fills, an agent hangs or a
 connection drops, and what you do next, for whoever runs the server and for
 members who find a run in an unexpected state. Terms such as environment,
-Enhanced mode and swarm are defined in [Concepts](README.md#concepts).
+Enhanced mode and child run are defined in [Concepts](README.md#concepts).
 
 A run is one agent working on one task in its own container on the server.
 While it is live its status is `running` or `needs-attention`; when it ends it
@@ -28,14 +28,11 @@ shown beside the status says why it is there.
 | An SSH connection drops during an attach | The CLI or dashboard disconnects. | Nothing changes for the run: its terminal lives on the server. Input that never reached the server is dropped whole. | Attach again. The full transcript replays before live output. |
 | An `aether forward` connection drops | The local port stops answering. | Closes both ends of the tunnel. | Run `aether forward <run-id|terminal> <port>` again. |
 | A launch cannot refresh the workspace mirror | The launch fails with `gitengine: mirror <kind> for branch "<branch>": <diagnostic>`. No run is created. | Never falls back to an older base on its own. | [Launch and mirror failures](#launch-and-mirror-failures). |
-| A swarm worker start times out with `-32004` | `<method>: coordination is not reachable: <cause> [aether error -32004]` | The start may still launch. | Retry with the same `--dispatch-key`; a repeat returns the original attempt. |
-| A swarm's integrator does not launch | `swarm <swarm-id> exists but its integrator run <run-id> ...` | Keeps the swarm. | [Integrator launch failures](#integrator-launch-failures). |
 | Your environment's main shell exits | The environment terminal closes. | Stops the terminal and keeps the stopped container. | Open the environment again. It starts the container, or rebuilds it from your saved image. |
 | An Enhanced session fails | **Disconnected**, with `enhanced session failed: <error>` or `enhanced session ended: ...`. | Keeps the run up on its login shell. | [Enhanced runs](#enhanced-runs). |
 | A run runs out of memory | Timeline note `Out of memory: the kernel killed a process in this run at its <n> GiB memory limit (peak <n> GiB)`. | Nothing automatic. The killed process may be a tool, the agent or the shell. | Check whether the agent is still running. Raise `--run-memory` if it keeps happening. |
 | The kernel's file-watch limits are spent | Server log `gitengine: cannot watch checkout for file changes; polling for diff snapshots instead`. | Launches the run anyway and checks its files every 60 seconds. | [Raise file-watch limits](#raise-file-watch-limits). |
 | Another process holds the database at startup | `store: begin migration <n>: database is locked (5) (SQLITE_BUSY)` | The server exits. | Find and stop the other writer, then start again. Never delete the database. |
-| Swarm state cannot be read at startup | `server: start service mission: mission: recover durable state: <cause>` | The server exits. Saved swarms are kept. | Fix the store error it names, then start again. |
 | The server is down when a schedule is due | Nothing. | Skips the missed occurrence and waits for the next one. | Launch the run by hand if it matters. |
 
 A lost connection does not prove that a command failed. Before you retry
@@ -51,7 +48,7 @@ A live run carries a state that says what it is doing. The dashboard and
 | State | Label | Meaning |
 | --- | --- | --- |
 | `working` | Working | A turn or tool is running. |
-| `waiting-agents` | Waiting for agents | No turn runs, but the run waits on its own subagents, swarm workers (`waiting for <n> workers`), or a `waiting --for agents` report. |
+| `waiting-agents` | Waiting for agents | No turn runs, but the run waits on its own subagents, child runs (`waiting for <n> child runs`), or a `waiting --for agents` report. |
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
@@ -66,11 +63,11 @@ working, failed, finished, waiting-agents, waiting-ci, waiting-tools,
 answered, waiting. An answer never goes stale.
 A wait the agent reported with no condition goes stale after three times
 `--stall-threshold` (30 minutes by default) with no activity, unless the run
-still holds background tasks or, as a swarm integrator, has a live worker
-attempt or unread worker mail. Its reason becomes `no update for <duration>: <summary>`.
+still holds background tasks or, as a parent, has a live child run
+or unread child mail. Its reason becomes `no update for <duration>: <summary>`.
 A CI or process wait keeps its state; an agents wait shows `waiting`, or
-`waiting-agents` while a worker is live again. A wait goes stale once; the
-next turn starts it over. A wait Aether infers from a swarm or background
+`waiting-agents` while a child run is live again. A wait goes stale once; the
+next turn starts it over. A wait Aether infers from child runs or background
 tasks lasts exactly as long as they do.
 
 ### Waits Aether can check
@@ -99,11 +96,10 @@ The dashboard words the same evidence as "Waiting on <condition>: <status>
 A broken wait is the only one that needs you, because only then can nothing
 but a person move the run. While another of its conditions is still pending
 or its wake is on its way, or the run still holds background tasks or, as a
-swarm integrator, has a live worker attempt, a child run or unread worker
+parent, has a live child run or unread child
 mail, those can wake it: the run keeps its waiting state, marked `(wait fault)`, and needs you
 only once they end. Its reason holds no time or source status, and names
-broken conditions in a fixed order, so it is announced once. A swarm worker's broken wait is not announced to you: its
-integrator sees it in peer status and from `aether wait` (exit 5). A paused
+broken conditions in a fixed order, so it is announced once. A paused
 run is judged again when it resumes.
 
 Each `run.status` event for a live run carries a `cause` naming what chose
@@ -117,10 +113,10 @@ filtered to `run.status`, `changes.list` leaves it out, and the
 dashboard's lanes and trace bars never draw it as a state change. A live
 run's record carries its latest `cause` too. `aether timeline <run-id>`
 prints it after the state, for example
-`running -> needs-attention (waiting for 2 workers) · waiting-agents by
+`running -> needs-attention (waiting for 2 child runs) · waiting-agents by
 workers`. The dashboard ends each state's tooltip with it, for example
-`Waiting for 2 workers since 3 minutes ago. Mail from its agents can wake it.
-Why: its swarm workers or child runs are live or have unread mail for it.`
+`Waiting for 2 child runs since 3 minutes ago. Mail from its agents can wake it.
+Why: its child runs are live or have unread mail for it.`
 
 An agent's `blocked` report reads `blocked: <summary>`, and its question reads
 `needs input: <question>`.
@@ -131,8 +127,7 @@ A reported success puts the run up for review. The run page asks **Your agent
 reports this task is finished. Mark it complete?**
 
 - **Mark complete** closes a live run as `completed`: it commits, publishes
-  the branch and keeps the container like **Close**. A swarm worker completes
-  through its integrator instead.
+  the branch and keeps the container like **Close**.
 - **Not yet** keeps the run open and takes it out of **Needs you**.
 
 Any new turn clears the review, and a later success report asks again.
@@ -159,7 +154,6 @@ waiting on agents, CI or a process and a reported success.
 | A broken wait (`wait-fault`) | Yes | Once: `Wait broken, send a message to continue: <condition> ...`. |
 | `working` or any waiting state, including `turn cancelled` | No | No. |
 | Any state while the run is paused | No | Checked again on resume. |
-| A swarm worker | Only for its `blocked` report | Its other requests go to its integrator. |
 
 A need is announced once: opening the run or restarting the server does not
 repeat it. When it ends, or the run is handed to another member, each
@@ -347,27 +341,6 @@ An upstream that was rewritten or diverged stays held (`rewritten` or
 --commit <reviewed-sha> --yes`. Published run branches stay fetchable while a
 mirror is failing.
 
-## Integrator launch failures
-
-Creating a swarm stores it before it launches the integrator run. When that
-launch fails, the swarm is kept and the error says what happens next:
-
-```text
-swarm <swarm-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically, follow it with aether swarm show <swarm-id>: <cause>
-swarm <swarm-id> exists but its integrator run <run-id> failed to start; replace it with aether swarm replace-integrator <swarm-id> --agent <agent> or from its swarm page, or read it with aether swarm show <swarm-id>: <cause>
-```
-
-- "did not launch": the server retries on its own and logs each failure as
-  `mission: recover integrator`. The swarm page shows `The integrator run has
-  not started.` Fix the cause and wait, or follow it with `aether swarm show
-  <swarm-id>`.
-- "failed to start": nothing retries it. Fix the cause, then press **Replace
-  integrator…** on the swarm page or run `aether swarm replace-integrator
-  <swarm-id> --agent <agent>`.
-
-Deleting an integrator run that did launch does not bring it back either:
-replace it, or cancel the swarm.
-
 ## Enhanced runs
 
 An [Enhanced run](enhanced-runs.md) talks to its agent through a separate
@@ -395,8 +368,7 @@ When an agent reports that its account's usage limit stopped it, Aether moves
 the run to another account that has usage left
 ([usage fallback](teams.md#usage-fallback)): the same run, checkout and branch
 continue on the new account's login, and a room note says so. When it cannot
-move, interactive runs park as **Needs you**, a Background run fails (a swarm's
-Background worker parks), and the reason says why:
+move, interactive runs park as **Needs you**, a Background run fails, and the reason says why:
 
 | Reason | Meaning |
 | --- | --- |
@@ -449,7 +421,6 @@ polling until it is reopened.
 | --- | --- | --- | --- |
 | **Close** (`aether close <run-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the run ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <run-id>`. The deadline is cleared while the run is live; the next close sets a new 7 days. |
 | A Background run finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the run ends. | No. |
-| A swarm worker reports | Paused and kept for `--run-container-ttl`. | Kept as for **Close**. | No. |
 | **Kill run** (`aether kill <run-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the run ends. | No. |
 | **Free container…** | Removed. History stays. | Kept until `--checkout-ttl` after the run ended. | No. |
 | **Delete run** (`aether delete <run-id>`) | Removed. | Removed with the transcript and records. | No. |
@@ -479,7 +450,7 @@ sudo systemctl restart aether-server
 | `--stream-quiet-grace` | `5m` | How long an Enhanced turn with no tool running may go without agent progress before it parks as stalled. At most `--stall-threshold`. | As above. |
 | `--poll-interval` | `30s` | How often stalls, retention and disk are checked. Values above `1m` act as `1m`. | Keep it at a third of the threshold or less. |
 | `--checkout-ttl` | `72h` | How long a finished run's checkout is kept after the run ends. It also stays while the run's container is kept. Negative keeps every checkout, and disk cleanup leaves them alone. | Lower on a small disk. |
-| `--run-container-ttl` | `168h` | How long a closed run's container, or a finished swarm worker's, is kept for reopening. Negative removes it at once. | Lower when paused containers hold too much memory. |
+| `--run-container-ttl` | `168h` | How long a closed run's container is kept for reopening. Negative removes it at once. | Lower when paused containers hold too much memory. |
 | `--min-free-disk` | automatic | The free-space reserve per filesystem, in bytes. Negative turns the disk check off; the memory check stays. | See below. |
 | `--run-cpus` | 8, or the host's CPU count if lower | CPU ceiling per run and environment. | Lower to share a small host. |
 | `--run-memory` | 8 GiB | Memory ceiling per run and environment, in bytes. Swap adds a quarter of it. | Raise when runs hit out-of-memory kills. |

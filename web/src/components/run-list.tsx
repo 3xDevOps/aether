@@ -79,7 +79,6 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                     ? {
                         count: foldable(workers),
                         expanded: open(row),
-                        noun: row.run.mission_role === 'integrator' ? 'worker' : 'child run',
                         onToggle: () => setExpanded((prev) => ({ ...prev, [row.run.id]: !open(row) })),
                       }
                     : undefined
@@ -89,7 +88,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                 <ul
                   id={workersID(row.run.id)}
                   hidden={shown(row, workers).length === 0}
-                  aria-label={`${row.run.mission_role === 'integrator' ? 'Workers' : 'Child runs'} of ${runLabel(row.run)}`}
+                  aria-label={`Child runs of ${runLabel(row.run)}`}
                   className={cn(
                     '[--wire:--spacing(4.75)]',
                     foldable(workers) > 0 ? '[--trunk:--spacing(12.75)] coarse:[--trunk:--spacing(17.75)]' : '[--trunk:--spacing(4.75)]',
@@ -135,7 +134,7 @@ function Row({
 }: {
   row: RunRow
   nested?: boolean
-  toggle?: { count: number; expanded: boolean; noun: string; onToggle: () => void }
+  toggle?: { count: number; expanded: boolean; onToggle: () => void }
 }) {
   const navigate = useStore((s) => s.navigate)
   const now = useClock()
@@ -165,7 +164,7 @@ function Row({
           <Button
             variant="ghost"
             size="icon-sm"
-            label={`${toggle.expanded ? 'Hide' : 'Show'} ${toggle.count} ${toggle.noun}${toggle.count === 1 ? '' : 's'}`}
+            label={`${toggle.expanded ? 'Hide' : 'Show'} ${toggle.count} child run${toggle.count === 1 ? '' : 's'}`}
             aria-expanded={toggle.expanded}
             aria-controls={workersID(run.id)}
             onClick={toggle.onToggle}

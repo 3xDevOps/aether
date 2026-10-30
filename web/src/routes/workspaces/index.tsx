@@ -170,7 +170,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
           onClose={() => setDeleting(null)}
         >
           <p className="text-ui-sm text-muted">
-            The server refuses while a run is unfinished, swarm or review work or cleanup is pending, or a schedule remains.
+            The server refuses while a run is unfinished, review work or cleanup is pending, or a schedule remains.
           </p>
         </Confirm>
       )}

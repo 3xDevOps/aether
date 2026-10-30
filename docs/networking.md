@@ -301,15 +301,10 @@ and to every admin when a workspace's spend rises past its
 | fails a turn or reports failure | `Turn failed: <error>`, `Agent failed` or `Agent reported failure, review the result` |
 | reports success | `Agent reported success, review the result` |
 | ends `failed` with a result nobody has seen | `Failed, review the result` |
-| is a swarm's integrator and asks with `aether-internal mission question ask` | `The integrator asks: <question>` |
-| is a swarm's integrator and stops or fails to launch | `Integrator stopped, replace it to continue` or `Integrator failed to launch, replace it to continue` |
 | *(admins, titled with the workspace)* spend reaches the budget's warning or cap | `Budget warning: $8.50 of $10.00 spent` or `Budget reached: $21.00 of $20.00 spent, new runs are refused` |
 
-The two integrator lines go to the swarm's accountable human
-([coordination.md](coordination.md#mission-phases)), not the integrator's
-owner, once per question and once per stopped integrator. A working, waiting
-or stalled run does not notify. A Background run does not notify for a
-question, and a swarm worker notifies only when blocked. One notification per
+A working, waiting or stalled run does not notify. A Background run does not notify for a
+question. One notification per
 run or workspace budget: a newer one replaces the older, and tapping it opens
 the run or the workspace's budget. When a run stops needing you, its
 notification is replaced, silently, by `No longer needs you`; a push must

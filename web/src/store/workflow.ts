@@ -1,8 +1,5 @@
 import type { Tone } from '@/components/ui/status-dot'
 import { stateLabel, stateTone, type PresentationState, type RunPresentation } from '@/lib/status'
-import type { MissionAttempt, MissionAttemptState, MissionSubmission, MissionTask } from '@/lib/types'
-import { missionTree, taskTitle } from '@/routes/missions/tree'
-import type { MissionDetail } from '@/store/missions'
 import { isLaunch } from '@/store/session-rows'
 import { workSummary } from '@/store/session-steps'
 import { agentLabel, agentState, type AgentIndex, type AgentState, type Subagent } from '@/store/subagents'
@@ -10,10 +7,10 @@ import { agentLabel, agentState, type AgentIndex, type AgentState, type Subagent
 /** A run's states, plus Not started for work nobody picked up and Not checked yet for a fact nobody read. */
 export type WorkflowState = PresentationState | 'pending' | 'unknown'
 
-export type WorkflowKind = 'run' | 'request' | 'agent' | 'workflow' | 'integrator' | 'task' | 'attempt' | 'submission'
+export type WorkflowKind = 'run' | 'request' | 'agent' | 'workflow'
 
 export interface WorkflowCounts {
-  noun: 'task' | 'agent'
+  noun: 'agent'
   done: number
   total: number
   running?: number
@@ -32,7 +29,7 @@ export interface WorkflowNode {
   runId?: string
   /** The subagent the inspector opens for an agent or workflow row. */
   agentId?: string
-  /** A worker's or run's branch, for its one-line git summary. */
+  /** A run's branch, for its one-line git summary. */
   branch?: string
   children: WorkflowNode[]
 }
@@ -63,7 +60,6 @@ export function needsYouBelow(node: WorkflowNode): WorkflowNode[] {
 
 export function countsText(counts: WorkflowCounts): string {
   const noun = (n: number) => `${counts.noun}${n === 1 ? '' : 's'}`
-  if (counts.noun === 'task') return `${counts.done} of ${counts.total} ${noun(counts.total)} done`
   if (counts.running) return `${counts.running} ${noun(counts.running)} running`
   return `${counts.done} of ${counts.total} ${noun(counts.total)} done`
 }
@@ -211,166 +207,6 @@ export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentInd
     startedAt: run.startedAt,
     endedAt: run.endedAt,
     runId: runID,
-    children,
-  }
-}
-
-const attemptStates: Record<MissionAttemptState, WorkflowState> = {
-  reserved: 'working',
-  launching: 'working',
-  running: 'working',
-  unknown: 'unknown',
-  submitted: 'ready',
-  completed: 'completed',
-  failed: 'failed',
-  cancelled: 'closed',
-  superseded: 'closed',
-  abandoned: 'closed',
-}
-
-const attemptWord: Record<MissionAttemptState, string> = {
-  reserved: 'Reserved',
-  launching: 'Launching',
-  running: 'Running',
-  unknown: 'State unknown',
-  submitted: 'Submitted',
-  completed: 'Completed',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-  superseded: 'Superseded',
-  abandoned: 'Abandoned',
-}
-
-function submissionNode(submission: MissionSubmission, task: MissionTask, parentId: string): WorkflowNode {
-  const earlier = submission.task_revision !== task.current_revision ? ` for revision ${submission.task_revision}` : ''
-  const shown: Record<MissionSubmission['state'], { state: WorkflowState; label: string }> = {
-    proposed: { state: 'waiting-agents', label: 'Submitted, waiting for the integrator' },
-    accepted: { state: 'completed', label: 'Accepted' },
-    rejected: { state: 'failed', label: 'Rejected' },
-    superseded: { state: 'closed', label: 'Superseded' },
-    abandoned: { state: 'closed', label: 'Abandoned' },
-  }
-  const { state, label } = shown[submission.state]
-  const violations = submission.scope_violations ?? []
-  return {
-    id: `submission:${submission.id}`,
-    parentId,
-    kind: 'submission',
-    state,
-    label: `${label}${earlier}`,
-    detail: violations.length > 0 ? `Out of scope: ${violations.join(', ')}` : undefined,
-    startedAt: submission.created_at,
-    endedAt: submission.decided_at ?? undefined,
-    runId: submission.ref.run_id,
-    children: [],
-  }
-}
-
-function attemptNode(attempt: MissionAttempt, name: string, note: string | undefined, submissions: MissionSubmission[], task: MissionTask, run: RunFacts | undefined, childRuns: ChildRunFacts[], parentId: string): WorkflowNode {
-  const id = `attempt:${attempt.id}`
-  const live = run && !['cancelled', 'superseded', 'abandoned'].includes(attempt.state)
-  const state: WorkflowState = live ? run.state : attemptStates[attempt.state]
-  const reason = live ? detailOf(run.state, run.reason) : undefined
-  return {
-    id,
-    parentId,
-    kind: 'attempt',
-    state,
-    label: name,
-    detail: [attemptWord[attempt.state], reason, attempt.last_error, note].filter(Boolean).join(' · '),
-    startedAt: attempt.started_at ?? undefined,
-    endedAt: attempt.finished_at ?? run?.endedAt,
-    runId: attempt.run_id || undefined,
-    branch: run?.branch,
-    children: [
-      ...submissions.filter((item) => item.attempt_id === attempt.id).map((item) => submissionNode(item, task, id)),
-      ...(attempt.run_id ? childRunNodes(attempt.run_id, id, childRuns) : []),
-    ],
-  }
-}
-
-function taskState(task: MissionTask, latest: WorkflowNode | undefined, waitingOn: string[], accepted: boolean): { state: WorkflowState; detail?: string } {
-  if (accepted || task.status === 'done') return { state: 'completed' }
-  switch (task.status) {
-    case 'abandoned':
-      return { state: 'closed', detail: 'Abandoned' }
-    case 'proposed':
-      return { state: 'pending', detail: 'Proposed, not accepted yet' }
-    case 'blocked': {
-      if (waitingOn.length > 0) return { state: 'waiting', detail: `Waiting on ${waitingOn.join(', ')}` }
-      const blocker = task.blockers?.[0]
-      return { state: 'waiting', detail: blocker ? `Blocked on ${blocker.kind}: ${blocker.action}` : 'Blocked' }
-    }
-    case 'review':
-      return { state: 'waiting-agents', detail: 'Waiting for the integrator to review' }
-  }
-  if (latest && ['ready', 'completed', 'merged'].includes(latest.state)) return { state: 'waiting-agents', detail: 'Worker finished, waiting for the integrator' }
-  if (latest && latest.state !== 'closed') return { state: latest.state, detail: latest.detail }
-  if (waitingOn.length > 0) return { state: 'waiting', detail: `Waiting on ${waitingOn.join(', ')}` }
-  return { state: 'pending', detail: 'No worker yet' }
-}
-
-export interface SwarmInput {
-  detail: MissionDetail
-  runs: Record<string, RunFacts>
-  /** Child runs the integrator and workers started, at any depth. */
-  childRuns?: ChildRunFacts[]
-  integratorLabel: string
-  workerLabel?: (attempt: MissionAttempt, name: string) => string
-}
-
-export function deriveSwarmWorkflow({ detail, runs, childRuns = [], integratorLabel, workerLabel = (_, name) => name }: SwarmInput): WorkflowNode {
-  const { mission } = detail
-  const rootID = `integrator:${mission.id}`
-  const runID = mission.current_integrator_run_id
-  const integrator = runID ? runs[runID] : undefined
-  const titles = new Map(detail.tasks.map((task) => [task.id, taskTitle(task)]))
-  const accepted = new Set(
-    detail.tasks
-      .filter((task) => detail.submissions.some((item) => item.task_id === task.id && item.state === 'accepted' && item.task_revision === task.current_revision))
-      .map((task) => task.id),
-  )
-  const unfinished = new Set(detail.tasks.filter((task) => task.status !== 'done' && !accepted.has(task.id)).map((task) => task.id))
-  let done = 0
-  const tasks = missionTree(detail).map((entry): WorkflowNode => {
-    const { task } = entry
-    const id = `task:${task.id}`
-    const attempts = entry.attempts.map((item) =>
-      attemptNode(item.attempt, workerLabel(item.attempt, item.name), item.earlierIntegrator ? 'from a replaced integrator' : undefined, detail.submissions, task, runs[item.attempt.run_id], childRuns, id),
-    )
-    const waitingOn = (task.dependencies ?? []).filter((item) => unfinished.has(item.depends_on_task_id)).map((item) => titles.get(item.depends_on_task_id) ?? item.depends_on_task_id)
-    const current = attempts[entry.attempts.findIndex((item) => item.attempt.task_revision === task.current_revision)]
-    const { state, detail: why } = taskState(task, current, waitingOn, accepted.has(task.id))
-    if (state === 'completed') done++
-    const depends = entry.dependsOn.length > 0 ? `Depends on ${entry.dependsOn.map(taskTitle).join(', ')}` : undefined
-    return {
-      id,
-      parentId: rootID,
-      kind: 'task',
-      state,
-      label: entry.title,
-      detail: [why, state === 'waiting' ? undefined : depends].filter(Boolean).join(' · ') || undefined,
-      startedAt: attempts.at(-1)?.startedAt,
-      endedAt: state === 'completed' ? attempts[0]?.endedAt : undefined,
-      children: attempts,
-    }
-  })
-  const children = [
-    ...tasks,
-    ...(runID ? childRunNodes(runID, rootID, childRuns) : []),
-  ]
-  const state: WorkflowState = integrator?.state ?? (mission.phase === 'completed' ? 'completed' : mission.phase === 'cancelled' ? 'closed' : 'unknown')
-  return {
-    id: rootID,
-    parentId: null,
-    kind: 'integrator',
-    state,
-    label: integratorLabel,
-    detail: integrator ? detailOf(integrator.state, integrator.reason) : runID ? 'Run not loaded' : 'No integrator run',
-    counts: tasks.length > 0 ? { noun: 'task', done, total: tasks.length } : undefined,
-    startedAt: integrator?.startedAt,
-    endedAt: integrator?.endedAt,
-    runId: runID || undefined,
     children,
   }
 }

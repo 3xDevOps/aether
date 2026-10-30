@@ -111,7 +111,6 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 		Heatmap:     heatmap,
 		ByWorkspace: make([]protocol.InsightsWorkspace, 0, len(got.ByWorkspace)),
 		ByAgent:     make([]protocol.InsightsAgent, 0, len(got.ByAgent)),
-		Swarms:      protocol.InsightsSwarms(got.Swarms),
 		Durations: protocol.InsightsDurations{
 			RunsMeasured:          got.Durations.RunsMeasured,
 			MedianRunSeconds:      seconds(got.Durations.MedianRun),
@@ -124,13 +123,12 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 		Cost: protocol.InsightsCost{
 			MeteredRuns: got.Cost.MeteredRuns, UnmeteredRuns: got.Cost.UnmeteredRuns, CostUSD: got.Cost.CostUSD,
 			InputTokens: got.Cost.InputTokens, OutputTokens: got.Cost.OutputTokens,
-			TotalTokens: got.Cost.InputTokens + got.Cost.OutputTokens + got.Cost.SwarmTokens,
+			TotalTokens: got.Cost.InputTokens + got.Cost.OutputTokens,
 			ByAgent:     make([]protocol.InsightsCostAgent, 0, len(got.Cost.ByAgent)),
 		},
 		PullRequests: protocol.InsightsPullRequests(got.PullRequests),
 		Success: protocol.InsightsSuccess{
-			Runs:   protocol.InsightsSuccessCount{Succeeded: got.Success.RunsSucceeded, Finished: got.Success.RunsFinished},
-			Swarms: protocol.InsightsSuccessCount{Succeeded: got.Success.SwarmsSucceeded, Finished: got.Success.SwarmsFinished},
+			Runs: protocol.InsightsSuccessCount{Succeeded: got.Success.RunsSucceeded, Finished: got.Success.RunsFinished},
 		},
 		Outcomes: protocol.InsightsOutcomes{
 			Series:  make([]protocol.InsightsOutcomeBucket, len(got.Series)),
@@ -152,21 +150,13 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 	for _, a := range got.Cost.ByAgent {
 		out.Cost.ByAgent = append(out.Cost.ByAgent, protocol.InsightsCostAgent{
 			Harness: a.Harness, MeteredRuns: a.MeteredRuns, UnmeteredRuns: a.UnmeteredRuns, CostUSD: a.CostUSD,
-			InputTokens: a.InputTokens, OutputTokens: a.OutputTokens, TotalTokens: a.InputTokens + a.OutputTokens + a.SwarmTokens,
+			InputTokens: a.InputTokens, OutputTokens: a.OutputTokens, TotalTokens: a.InputTokens + a.OutputTokens,
 		})
-	}
-	swarms := make([]store.InsightsOutcome, len(got.Series))
-	for _, m := range got.Members {
-		for i, o := range m.Swarms {
-			swarms[i].Done += o.Done
-			swarms[i].Abandoned += o.Abandoned
-		}
 	}
 	for i, c := range got.Series {
 		runs := store.InsightsOutcome{Done: c.Completed + c.Merged, Failed: c.Failed, Abandoned: c.Abandoned + c.Interrupted}
-		out.Outcomes.Series[i] = protocol.InsightsOutcomeBucket{Start: labels[i], Runs: outcome(runs), Swarms: outcome(swarms[i])}
+		out.Outcomes.Series[i] = protocol.InsightsOutcomeBucket{Start: labels[i], Runs: outcome(runs)}
 		addOutcome(&out.Outcomes.Runs, runs)
-		addOutcome(&out.Outcomes.Swarms, swarms[i])
 	}
 	if p.Scope == protocol.InsightsScopeEveryone {
 		for _, m := range got.Members {
@@ -175,9 +165,8 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 				Series: make([]protocol.InsightsOutcomeBucket, len(labels)),
 			}
 			for i, label := range labels {
-				member.Series[i] = protocol.InsightsOutcomeBucket{Start: label, Runs: outcome(m.Runs[i]), Swarms: outcome(m.Swarms[i])}
+				member.Series[i] = protocol.InsightsOutcomeBucket{Start: label, Runs: outcome(m.Runs[i])}
 				addOutcome(&member.Runs, m.Runs[i])
-				addOutcome(&member.Swarms, m.Swarms[i])
 			}
 			out.Outcomes.Members = append(out.Outcomes.Members, member)
 		}

@@ -66,3 +66,19 @@ func sendMessage(c *protocol.Client, w io.Writer, runID, text, key string) error
 	_, err := fmt.Fprintln(w, line)
 	return err
 }
+
+// stdinText returns value, or all of stdin when value is "-".
+func stdinText(value, what string, stdin io.Reader) (string, error) {
+	if value != "-" {
+		return value, nil
+	}
+	raw, err := io.ReadAll(stdin)
+	if err != nil {
+		return "", fmt.Errorf("read %s from stdin: %w", what, err)
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return "", fmt.Errorf("%s on stdin is empty", what)
+	}
+	return text, nil
+}

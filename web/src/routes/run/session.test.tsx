@@ -4,14 +4,14 @@ import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import { clockTime } from '@/lib/format'
 import type { SessionHistory } from '@/lib/session-types'
-import type { MissionAttempt, Run } from '@/lib/types'
+import type { Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
 import type { TakeoverState } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
-import { alice, bob, mission, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
+import { alice, bob, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 import { StubSocket } from '@/test/stub-socket'
 
@@ -732,36 +732,6 @@ describe('the Enhanced session view', () => {
     await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'go', expect.any(String), expect.objectContaining({ steer: false, lease: expect.objectContaining({ control_generation: 5 }) })))
   })
 
-  it('never asks for write on a swarm worker you own without a click: open, reconnect, wake, freed lease', async () => {
-    const acpSockets = () => StubSocket.opened.filter((s) => s.url.includes('/ws/acp/run_1'))
-    open({ controller_member_id: '', mission_id: 'mission_1', mission_role: 'worker' })
-    acpSocket().open({ has_control: false }).close(1006)
-    await waitFor(() => expect(acpSockets()).toHaveLength(2))
-    acpSocket().open({ has_control: false })
-    act(() => {
-      window.dispatchEvent(new Event('online'))
-    })
-    await waitFor(() => expect(acpSockets()).toHaveLength(3))
-    acpSocket().open({ has_control: false })
-    act(() => {
-      useStore.getState().applyRunController('run_1', bob.id)
-      useStore.getState().applyRunController('run_1', '')
-    })
-    await act(async () => {})
-    expect(acpSockets().flatMap((socket) => socket.frames())).not.toContainEqual(expect.objectContaining({ write: true }))
-  })
-
-  it('sends from the owner of a swarm worker nobody controls without taking control', async () => {
-    vi.mocked(api.runInject).mockClear().mockResolvedValue({ message: { id: 'm', run_id: 'run_1', workspace_id: workspace.id, kind: 'steer_request', state: 'queued', actor_id: alice.id, body: 'go', created_at: new Date().toISOString() } } as never)
-    open({ controller_member_id: '', mission_id: 'mission_1', mission_role: 'worker' })
-    const session = acpSocket().open({ has_control: false }, [])
-    await userEvent.type(await screen.findByRole('combobox', { name: 'Message the agent' }), 'go')
-    expect(screen.queryByText('Delivers in 45 s unless the controller decides sooner.')).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: /Send/ }))
-    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'go', expect.any(String), expect.objectContaining({ lease: undefined })))
-    expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ type: 'control', write: true }))
-  })
-
   it('shows the adapter failure with its stderr and the two ways on', async () => {
     open({ status: 'needs-attention', model: 'opus', effort: 'high' })
     acpSocket().open({ live: false }, [
@@ -991,31 +961,15 @@ describe('Enhanced multiplayer controls', () => {
     expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
   })
 
-  it('names a worker hold in another session and releases its current generation from this tab', async () => {
+  it('names a hold in another session', async () => {
     const acquired = '2026-10-08T11:00:00Z'
     vi.spyOn(api, 'runRoomStatus').mockResolvedValue({
       ...occupiedRoom, controller: { member_id: alice.id, control_session_id: 'acp-session-other', connected: true, acquired_at: acquired },
     })
-    const held = { id: 'attempt_1', run_id: 'run_1', number: 2, takeover_active: true, takeover_member_id: alice.id, takeover_generation: 7 } as MissionAttempt
-    vi.mocked(api.missionWorkerRelease).mockClear()
-    vi.mocked(api.missionShow).mockImplementation(async () => ({
-      mission: mission(), tasks: [], submissions: [], diagnostics: [], questions: [],
-      attempts: [{ ...held, takeover_active: vi.mocked(api.missionWorkerRelease).mock.calls.length === 0 }],
-    }))
-    const takenAgain = () => {
-      held.takeover_generation = 8
-      useStore.getState().bumpWorkflowSignal('missionSeq', mission().id)
-    }
-    open({ mission_id: mission().id, mission_role: 'worker' })
+    open()
     acpSocket().open({ has_control: false })
     const controls = within(await screen.findByRole('group', { name: 'Multiplayer controls' }))
     expect(await controls.findByText(`${alice.display_name} · You control in another session since ${clockTime(acquired)}`)).toBeDefined()
-    await controls.findByRole('button', { name: 'Release' })
-    act(takenAgain)
-    await waitFor(() => expect(useStore.getState().missionDetails[mission().id]?.attempts[0]?.takeover_generation).toBe(8))
-    await userEvent.click(controls.getByRole('button', { name: 'Release' }))
-    expect(api.missionWorkerRelease).toHaveBeenCalledWith({ run_id: 'run_1', expected_takeover_generation: 8 })
-    await waitFor(() => expect(controls.queryByRole('button', { name: 'Release' })).toBeNull())
   })
 
   it('releases the acknowledged lease without closing the session and remains reachable on Terminal', async () => {

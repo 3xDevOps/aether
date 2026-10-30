@@ -176,22 +176,12 @@ describe('run presentation', () => {
   it('reads what the agent is doing from its tool activity while it works', () => {
     const reading = { ...toRecord(run({ state: 'working' })), toolActivity: { verb: 'Reading', target: 'src/auth.ts', at: '2026-08-14T10:19:00Z' } }
     expect(presentRun(reading, ctx).reason).toBe('Reading src/auth.ts')
-    expect(presentRun({ ...reading, state: 'waiting-agents', reason: 'waiting on 3 workers' }, ctx).reason).toBe('waiting on 3 workers')
+    expect(presentRun({ ...reading, state: 'waiting-agents', reason: 'waiting on 3 child runs' }, ctx).reason).toBe('waiting on 3 child runs')
   })
 
   it('counts held background tasks in the reason', () => {
     expect(backgroundReason([])).toBe('Working in background')
     expect(backgroundReason([{ id: 'a', holds: true }, { id: 'b', holds: true }, { id: 'c' }])).toBe('Working in background: 2 tasks')
-  })
-
-  it('names an integrator that has left agent messages unread for over two minutes', () => {
-    const integrator = (over: Parameters<typeof run>[0]) =>
-      presentRun(toRecord(run({ mission_id: 'mission_1', mission_role: 'integrator', state: 'waiting-agents', ...over })), ctx)
-    expect(integrator({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })).toEqual({
-      state: 'waiting-agents', reason: 'Integrator has not read 3 messages (12 min)', unread: 3,
-    })
-    expect(integrator({ unacked_messages: 1, oldest_unacked_at: '2026-08-14T10:19:00Z' }).reason).toBe('Waiting for its agents to report')
-    expect(presentRun(toRecord(run({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })), ctx).reason).toBe('Agent working')
   })
 
   it('shows a paused live run as Paused, grouped under Working', () => {
@@ -253,7 +243,6 @@ describe('plainReason', () => {
   it.each([
     ['agent reported success; retained container', 'Agent reported success'],
     ['closed; retained container', 'Closed'],
-    ['worker finished; retained container', 'Worker finished'],
     ['agent exited; results committed', 'Agent exited and its changes were committed'],
     ['agent exited 1: relation "invoices" does not exist', 'Agent exited with code 1: relation "invoices" does not exist'],
     ['retained container expired', 'Its container was removed when it expired'],
@@ -270,7 +259,9 @@ describe('plainReason', () => {
     ['turn ended: something_new', "The agent's turn ended (something_new)"],
     ['working in background: 1 task', 'Working in background: 1 task'],
     ['no update for 30m: CI on PR 12', 'No update for 30m: CI on PR 12'],
-    ['waiting for 1 worker', 'Waiting for 1 worker'],
+    ['waiting for 1 child run', 'Waiting for 1 child run'],
+    ['waiting for 3 workers', 'Waiting for 3 child runs'],
+    ['2 unread worker messages', '2 unread child messages'],
     ['review retained evidence', "Review the worker's saved results"],
     ['killed', 'Stopped'],
     ['disk quota exceeded', 'disk quota exceeded'],
@@ -286,11 +277,11 @@ describe('state words', () => {
   const since = '2026-08-14T10:18:00Z'
 
   it('names what a run waits on in place of the generic label', () => {
-    const workers = shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers', cause: 'workers' })
-    expect(stateWords(workers)).toEqual({ label: 'Waiting for 2 workers' })
-    expect(stateLine(workers)).toBe('Waiting for 2 workers')
-    expect(stateTitle(workers, since, now)).toBe(
-      'Waiting for 2 workers since 42 minutes ago. Mail from its agents can wake it. Why: its swarm workers or child runs are live or have unread mail for it.',
+    const children = shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 child runs', cause: 'workers' })
+    expect(stateWords(children)).toEqual({ label: 'Waiting for 2 child runs' })
+    expect(stateLine(children)).toBe('Waiting for 2 child runs')
+    expect(stateTitle(children, since, now)).toBe(
+      'Waiting for 2 child runs since 42 minutes ago. Mail from its agents can wake it. Why: its child runs are live.',
     )
     expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'reviewers on PR 12' }))).toBe('Waiting for agents · reviewers on PR 12')
   })
@@ -307,10 +298,6 @@ describe('state words', () => {
   it('carries the cause only while the run shows the state the server chose', () => {
     expect(shown({ status: 'needs-attention', state: 'waiting', cause: 'turn-end' }).cause).toBe('turn-end')
     expect(shown({ status: 'completed', cause: 'report' }).cause).toBeUndefined()
-    // A worker's question waits on its integrator, an agent: the server's human cause does not apply.
-    const asking = shown({ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?', mission_role: 'worker', cause: 'human' })
-    expect(asking).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for the integrator' })
-    expect(asking.cause).toBeUndefined()
     expect(stateTitle({ state: 'ended', reason: 'Turn ended without a report', cause: 'turn-end' }, since, now)).toBe('Turn ended since 42 minutes ago. Why: the turn ended.')
     expect(stateTitle({ state: 'working', reason: 'Agent working', cause: 'something-new' as never }, since, now)).toBe('Working since 42 minutes ago. Why: something-new.')
   })

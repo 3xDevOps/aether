@@ -69,7 +69,7 @@ const detachTransferred = `UPDATE run_children SET detached = 1 WHERE (run_id = 
 
 const terminalStatuses = `'completed', 'merged', 'abandoned', 'failed', 'interrupted'`
 
-const childCols = `rc.run_id, rc.parent_run_id, rc.root_run_id, rc.tree_key, rc.mission_id, rc.workspace_id,
+const childCols = `rc.run_id, rc.parent_run_id, rc.root_run_id, rc.tree_key, rc.workspace_id,
 	rc.owner_member_id, rc.account_member_id, rc.harness, rc.mode, rc.model, rc.purpose, rc.task,
 	rc.base_commit, rc.base_branch, rc.fallback_disabled, rc.fallback_order, rc.idempotency_key, rc.request_hash, rc.state,
 	rc.detached, rc.error, rc.end_notified, rc.created_at, rc.started_at`
@@ -101,7 +101,7 @@ func scanChild(row interface{ Scan(...any) error }) (*domain.ChildReservation, e
 		createdAt int64
 		startedAt *int64
 	)
-	if err := row.Scan(&c.RunID, &c.ParentRunID, &c.RootRunID, &c.TreeKey, &c.MissionID, &c.WorkspaceID,
+	if err := row.Scan(&c.RunID, &c.ParentRunID, &c.RootRunID, &c.TreeKey, &c.WorkspaceID,
 		&c.OwnerID, &c.AccountID, &c.Harness, &c.Mode, &c.Model, &c.Purpose, &c.Task,
 		&c.BaseCommit, &c.BaseBranch, &c.Fallback.Disabled, &order, &c.IdempotencyKey, &c.RequestHash, &c.State,
 		&c.Detached, &c.Error, &c.EndNotified, &createdAt, &startedAt); err != nil {
@@ -134,7 +134,7 @@ func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation) (*dom
 	if err != nil {
 		return nil, false, err
 	}
-	order, err := missionJSON(c.Fallback.Order, "[]")
+	order, err := jsonText(c.Fallback.Order, "[]")
 	if err != nil {
 		return nil, false, fmt.Errorf("store: reserve child: %w", err)
 	}
@@ -144,11 +144,11 @@ func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation) (*dom
 	}
 	c.RunID, c.CreatedAt, c.State = domain.RunID(id), ts, domain.ChildQueued
 	if _, err = tx.ExecContext(ctx,
-		`INSERT INTO run_children (run_id, parent_run_id, root_run_id, tree_key, mission_id, workspace_id,
+		`INSERT INTO run_children (run_id, parent_run_id, root_run_id, tree_key, workspace_id,
 			owner_member_id, account_member_id, harness, mode, model, purpose, task, base_commit,
 			base_branch, fallback_disabled, fallback_order, idempotency_key, request_hash, state, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.RunID, c.ParentRunID, c.RootRunID, c.TreeKey, c.MissionID, c.WorkspaceID, c.OwnerID, c.AccountID,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.RunID, c.ParentRunID, c.RootRunID, c.TreeKey, c.WorkspaceID, c.OwnerID, c.AccountID,
 		c.Harness, c.Mode, c.Model, c.Purpose, c.Task, c.BaseCommit, c.BaseBranch,
 		c.Fallback.Disabled, order, c.IdempotencyKey, c.RequestHash, c.State, createdAt); err != nil {
 		return nil, false, fmt.Errorf("store: reserve child: %w", mapConstraint(err, ErrNotFound))

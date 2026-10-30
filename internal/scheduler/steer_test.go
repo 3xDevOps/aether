@@ -957,11 +957,11 @@ func TestMemberDismissalOpensAnAlreadyFinishedRun(t *testing.T) {
 		return got
 	}
 
-	t.Run("close at the outcome a swarm left", func(t *testing.T) {
+	t.Run("close at the outcome a kill left", func(t *testing.T) {
 		t.Parallel()
 		e := newTestEnv(t, nil)
 		ctx := t.Context()
-		run, _ := e.launchFake(t, "stopped by its swarm")
+		run, _ := e.launchFake(t, "killed without an actor")
 		if err := e.sched.Kill(ctx, run.ID, ""); err != nil {
 			t.Fatalf("Kill without an actor: %v", err)
 		}
@@ -985,36 +985,6 @@ func TestMemberDismissalOpensAnAlreadyFinishedRun(t *testing.T) {
 		got := dismissed(t, e, run.ID, func() error { return e.sched.Kill(ctx, run.ID, e.member.ID) })
 		if want := []string{fmt.Sprintf("run.finish_opened by %s", e.member.ID)}; !slices.Equal(got, want) {
 			t.Fatalf("events = %v, want %v", got, want)
-		}
-	})
-	t.Run("kill of a retained run", func(t *testing.T) {
-		t.Parallel()
-		e := newTestEnv(t, nil)
-		ctx := t.Context()
-		run, _ := launchRetentionWorker(t, e, domain.LaunchTUI)
-		if err := e.sched.CompleteMission(ctx, run.ID, domain.RunCompleted); err != nil {
-			t.Fatalf("CompleteMission: %v", err)
-		}
-		e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-		got := dismissed(t, e, run.ID, func() error { return e.sched.Kill(ctx, run.ID, e.member.ID) })
-		if want := []string{fmt.Sprintf("run.status completed unopened=false by %s", e.member.ID)}; !slices.Equal(got, want) {
-			t.Fatalf("events = %v, want %v", got, want)
-		}
-	})
-	t.Run("release is not a dismissal", func(t *testing.T) {
-		t.Parallel()
-		e := newTestEnv(t, nil)
-		ctx := t.Context()
-		run, _ := launchRetentionWorker(t, e, domain.LaunchTUI)
-		if err := e.sched.CompleteMission(ctx, run.ID, domain.RunCompleted); err != nil {
-			t.Fatalf("CompleteMission: %v", err)
-		}
-		e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-		if err := e.sched.Release(ctx, run.ID, e.member.ID); err != nil {
-			t.Fatalf("Release: %v", err)
-		}
-		if row, err := e.db.GetRun(ctx, run.ID); err != nil || !row.FinishUnopened {
-			t.Fatalf("released row = %+v, %v; want the finish still unopened", row, err)
 		}
 	})
 }

@@ -27,7 +27,7 @@ func (s *Service) memoryCapabilities(ctx context.Context, run *domain.Run, capab
 	}
 	available, err := s.cfg.Memory.Capabilities(ctx, run.ID)
 	if err != nil {
-		return nil, missionRPCError(protocol.MethodCoordStatus, err)
+		return nil, rpcError(protocol.MethodCoordStatus, err)
 	}
 	for _, capability := range available {
 		if isMemoryMethod(capability) {
@@ -68,5 +68,5 @@ func (s *Service) handleMemory(ctx context.Context, run domain.RunID, method str
 		}
 	}
 	result, err := s.cfg.Memory.HandleAgent(ctx, run, method, params)
-	return result, missionRPCError(method, err)
+	return result, rpcError(method, err)
 }

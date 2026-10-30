@@ -84,8 +84,7 @@ it, does not give you input.
 
 - On a desktop, the owner's terminal takes control automatically when the
   Terminal view first opens. Opening on Session or Changes keeps it a mirror.
-- Phones, other members and swarm workers start as read-only mirrors. A swarm
-  worker is a run an integrator assigned work to. Tap or click **Take control**
+- Phones and other members start as read-only mirrors. Tap or click **Take control**
   to type, and **Release** to go back to watching.
 - A second tab of your own is a different session, not a second writer. The
   toolbar reads **You control in another session since <time>**.
@@ -108,13 +107,10 @@ The run owner or an admin can turn on protection. It immediately removes the
 current controller and cancels every queued message. While protected, other
 members cannot message the run.
 
-On a swarm worker, taking control also sets a hold: the integrator cannot steer
-the worker while you control it. **Release** or leaving the run page clears
-it, as does **Release control** on the worker's task in the swarm page. If
-that release never arrives, as when the tab is killed, the lease lapses 15
-seconds later and the hold with it. See
-[coordination.md](coordination.md#delivery-acknowledgement-and-retries) for every session
-that keeps a hold.
+While you control a [child run](teams.md#child-runs), mail from its parent waits
+and shows as `held`; it is delivered when you **Release** or leave the run
+page, or when the lease lapses 15 seconds after the tab is killed. See
+[coordination.md](coordination.md#child-runs).
 
 ### The Terminal toolbar
 
@@ -139,8 +135,7 @@ eight files per message.
 
 - A message from the current controller reaches the agent's terminal at once
   (**Sends to the agent's terminal.**). The owner of an uncontrolled run takes
-  the lease first, then sends; on a swarm worker it sends without
-  the lease, so sending never sets a hold. A message you send without the lease, from the
+  the lease first, then sends. A message you send without the lease, from the
   assistant, `aether message` or a connector, also arrives at once while you
   are the controller.
 - A message from anyone else waits 45 seconds (**Delivers in 45 s unless the
@@ -205,8 +200,6 @@ keep driving a shell you only read.
   take a free shell but never one from a person.
 - **Release** releases only that shell. Leaving the Terminal view releases it
   for you. Switching tabs or closing the page lets it lapse after 15 seconds.
-- On a swarm worker, shell control also sets the hold described above, so the
-  shell stays a mirror until **Take control**.
 
 ### Close a shell
 
@@ -310,17 +303,6 @@ by UNKNOWN port 65535`:
 | `start the port forwarding relay: the helper exited 125: dev-exec: expected ...` | The run was created before this server version. Launch a new run. |
 | `aether: not linked; run aether link <host:port>, or aether login and then aether link --claim <code>` | Link this computer first. |
 | `ssh: Could not resolve hostname <run-id>.aether` | Run `aether ssh-config`. |
-
-### Swarm workers over SSH
-
-A shell, command or file transfer in a swarm worker takes control of it and
-sets the hold described under [Run control](#run-control). Port forwarding
-alone does not. Closing the connection releases the hold unless someone else
-still controls the worker. `ssh` prints this first:
-
-```
-aether: this run is a swarm worker: a shell, command or file transfer here takes control of it, and its integrator cannot steer it until you disconnect or control is released on the swarm page
-```
 
 ## Sign in to agents and set up GitHub
 

@@ -38,8 +38,6 @@ func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.M
 		return r, nil
 	case r.Status.Live() && reportedOnly && r.Review != domain.ReviewReady:
 		return nil, fmt.Errorf("%w: run %s", ErrReviewNotReported, run)
-	case r.Status.Live() && r.MissionRole == "worker":
-		return nil, fmt.Errorf("%w: swarm worker %s completes through its integrator", ErrInvalidTransition, run)
 	case r.Status.Live():
 		spec := humanClose(domain.RunCompleted, actor)
 		spec.reportedOnly = reportedOnly

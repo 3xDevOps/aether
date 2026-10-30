@@ -217,33 +217,10 @@ func TestIntegrationConnectorFlows(t *testing.T) {
 	}
 	tool("aether_run_history", map[string]any{"run_id": ids[1]})
 
-	swarm := tool("aether_launch_swarm", map[string]any{"workspace_id": ws, "objective": "add audit logging", "harness": "fake", "mode": "acp",
-		"idempotency_key": "swarm-1"})
-	swarmID, integratorRun := swarm["swarm_id"].(string), swarm["integrator_run_id"].(string)
-	tool("aether_get_swarm", map[string]any{"swarm_id": swarmID})
-	integrator := waitMissionSocket(t, filepath.Join(env.data, "coord", integratorRun))
-	var asked protocol.MissionQuestionResult
-	if err := pacedCall(ctx, integrator, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
-		Body: "log to a file or to the database?", IdempotencyKey: "ask"}, &asked); err != nil {
-		t.Fatalf("mission.question.ask: %v", err)
-	}
-	var question map[string]any
-	for _, it := range tool("aether_needs_attention", nil)["items"].([]any) {
-		if it := it.(map[string]any); it["answer_id"] == asked.Question.ID {
-			question = it
-		}
-	}
-	if question == nil {
-		t.Fatalf("the integrator's question %s does not need attention", asked.Question.ID)
-	}
-	tool("aether_answer", map[string]any{"run_id": question["run_id"], "answer_id": asked.Question.ID, "answer": "the database"})
-	tool("aether_get_swarm", nil)
-
 	for _, id := range ids {
 		tool("aether_stop_run", map[string]any{"run_id": id})
 	}
-	tool("aether_cancel_swarm", map[string]any{"swarm_id": swarmID})
-	for _, id := range append(ids, integratorRun) {
+	for _, id := range ids {
 		for {
 			r := tool("aether_get_run", map[string]any{"run_id": id})["run"].(map[string]any)
 			if r["state"] != "running" && r["state"] != "needs-attention" {

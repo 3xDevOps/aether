@@ -27,8 +27,7 @@ self.addEventListener('push', (event) => {
 async function display(message) {
   const cleared = message.tag || message.run || message.url
   if (message.clear && cleared) {
-    // The need of a watch, of the run, or of the page a swarm's need opens,
-    // ended. A push that shows nothing would cost the subscription on
+    // The need of a watch, of the run, or of the page a need opens, ended. A push that shows nothing would cost the subscription on
     // Safari, so the notification is replaced quietly instead of closed.
     const [current] = await self.registration.getNotifications({ tag: cleared })
     // An assistant's newer notice about the run stays, shown again as it was.

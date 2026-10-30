@@ -14,7 +14,7 @@ import { useStore } from '@/store'
 export function PaletteDialogs() {
   const dialog = useStore((s) => s.paletteDialog)
   const identity = useStore((s) => s.identityKey)
-  const launchOpen = dialog === 'launch' || dialog === 'swarm'
+  const launchOpen = dialog === 'launch'
   const launchShown = useLingering(launchOpen)
   // Opening again while the last panel is still sliding out starts a fresh form, not the old one mid-launch.
   const opened = useRef({ open: false, count: 0 })

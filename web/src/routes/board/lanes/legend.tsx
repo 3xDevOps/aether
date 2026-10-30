@@ -17,25 +17,19 @@ const bars: { label: string; className: string }[] = [
   { label: 'History not loaded', className: barFill('unloaded') },
 ]
 
-function Line({ className, dash, cap, head, tail }: { className: string; dash?: string; cap?: 'round'; head?: 'filled' | 'hollow'; tail?: 'dot' | 'open' }) {
+function Line({ className, dash, cap, head, tail }: { className: string; dash?: string; cap?: 'round'; head?: 'filled' | 'hollow'; tail?: 'dot' }) {
   return (
     <svg aria-hidden viewBox="0 0 40 10" className={cn('h-2.5 w-10 shrink-0', className)}>
       <path d="M4 5H32" fill="none" stroke="currentColor" strokeWidth={1.5} strokeDasharray={dash} strokeLinecap={cap} />
-      {tail && <circle cx={4} cy={5} r={tail === 'open' ? 2.5 : 2} fill={tail === 'open' ? 'var(--raised)' : 'currentColor'} stroke="currentColor" strokeWidth={1.25} />}
+      {tail && <circle cx={4} cy={5} r={2} fill="currentColor" stroke="currentColor" strokeWidth={1.25} />}
       {head && <polygon points="38,5 32,1.5 32,8.5" fill={head === 'hollow' ? 'var(--raised)' : 'currentColor'} stroke="currentColor" strokeWidth={1} strokeLinejoin="round" />}
     </svg>
   )
 }
 
 const lines = [
-  { label: 'Integrator launched a worker', line: <Line className={edgeTone.orchestration} head="filled" /> },
-  { label: 'Same, across owners', line: <Line className={edgeTone.orchestration} dash="5 3" head="filled" /> },
   { label: 'Agent message, acknowledged', line: <Line className={edgeTone.message} dash="0.5 3" cap="round" tail="dot" head="filled" /> },
   { label: 'Agent message, not acknowledged', line: <Line className={edgeTone.message} dash="0.5 3" cap="round" tail="dot" head="hollow" /> },
-  { label: 'Submission accepted', line: <Line className="text-state-done" tail="open" head="filled" /> },
-  { label: 'Submission rejected', line: <Line className="text-state-failed" tail="open" head="filled" /> },
-  { label: 'Submission waiting or superseded', line: <Line className="text-muted" tail="open" head="filled" /> },
-  { label: 'Task waits for another task', line: <Line className={edgeTone.dependency} dash="2 2" /> },
   { label: 'Edits the same files (selected run)', line: <Line className={edgeTone.overlap} dash="4 2" /> },
 ]
 
@@ -66,7 +60,7 @@ export function Legend() {
             </li>
           ))}
         </ul>
-        <p className="mt-1.5 text-ui-sm text-muted">A finished run&apos;s working time takes its outcome&apos;s colour. Folded swarms and Finished show a strip of the most urgent state at each moment, in this order:</p>
+        <p className="mt-1.5 text-ui-sm text-muted">A finished run&apos;s working time takes its outcome&apos;s colour. Folded child-run groups and Finished show a strip of the most urgent state at each moment, in this order:</p>
         <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-ui-sm">
           {strips.map((strip) => (
             <li key={strip.label} className="flex items-center gap-1.5">

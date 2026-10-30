@@ -78,7 +78,7 @@ func TestIntegrationRealAgents(t *testing.T) {
 	srv := e.seed(ctx, t, false)
 	ctrl, sshClient := srv.control(t, e.ada.key)
 	sender := e.launch(t, ctrl, "send mail to the agents under test", "fake")
-	senderSocket := waitMissionSocket(t, e.coordDir(sender.ID))
+	senderSocket := waitCoordSocket(t, e.coordDir(sender.ID))
 
 	// The sender's launch created the agent network, whose gateway is the
 	// host as run containers reach it.
@@ -134,7 +134,7 @@ func TestIntegrationRealAgents(t *testing.T) {
 		}
 		a.run = launched.Run
 		if a.mode == domain.LaunchTUI {
-			a.observer = openMissionObserver(t, sshClient, a.run.ID)
+			a.observer = openObserver(t, sshClient, a.run.ID)
 		}
 	}
 
@@ -171,7 +171,7 @@ func TestIntegrationRealAgents(t *testing.T) {
 					}
 
 					t.Run("wake", func(t *testing.T) {
-						if err := harness.SwarmRefusal(agent, mode); err != nil {
+						if err := harness.WakeRefusal(agent, mode); err != nil {
 							t.Skipf("Aether cannot wake this run: %v", err)
 						}
 						seq := a.get(t).StatusSeq
@@ -403,7 +403,7 @@ func (a *realAgentRun) get(t *testing.T) protocol.Run {
 func needsYou(r protocol.Run) bool {
 	run := domain.Run{
 		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
-		OutcomeUnseen: r.OutcomeUnseen, MissionRole: r.MissionRole, Review: domain.RunReview(r.Review),
+		OutcomeUnseen: r.OutcomeUnseen, Review: domain.RunReview(r.Review),
 	}
 	return run.NeedsAttention(r.Paused)
 }

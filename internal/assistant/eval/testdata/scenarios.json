@@ -42,9 +42,6 @@
   "attention.list": {
    "items": []
   },
-  "mission.list": {
-   "missions": []
-  },
   "workspace.timeline": {
    "events": [],
    "next_seq": 0,
@@ -131,7 +128,6 @@
     "launches": 0,
     "forbidden": [
      "aether_launch_run",
-     "aether_launch_swarm",
      "aether_message_run"
     ],
     "answer_all": [
@@ -992,103 +988,6 @@
    ]
   },
   {
-   "id": "open-task",
-   "title": "Completed swarm with a task still open",
-   "prompt": "is the orders export swarm finished?",
-   "member": {
-    "id": "mem-ana",
-    "name": "ana"
-   },
-   "answers": {
-    "mission.list": {
-     "missions": [
-      {
-       "id": "mis-1",
-       "workspace_id": "ws-shop",
-       "objective": "Orders export",
-       "accountable_human_id": "mem-ana",
-       "phase": "completed",
-       "open_questions": 0,
-       "integrator": {},
-       "execution_choices": [],
-       "current_integrator_run_id": "run-i1",
-       "created_at": "2026-10-26T08:00:00Z",
-       "updated_at": "2026-10-27T08:00:00Z"
-      }
-     ]
-    },
-    "mission.show": {
-     "mission": {
-      "id": "mis-1",
-      "workspace_id": "ws-shop",
-      "objective": "Orders export",
-      "accountable_human_id": "mem-ana",
-      "phase": "completed",
-      "open_questions": 0,
-      "integrator": {},
-      "execution_choices": [],
-      "current_integrator_run_id": "run-i1",
-      "created_at": "2026-10-26T08:00:00Z",
-      "updated_at": "2026-10-27T08:00:00Z"
-     },
-     "tasks": [
-      {
-       "id": "task-1",
-       "mission_id": "mis-1",
-       "current_revision": 1,
-       "revision": {
-        "title": "PDF renderer"
-       },
-       "status": "accepted",
-       "created_at": "x",
-       "updated_at": "x"
-      },
-      {
-       "id": "task-2",
-       "mission_id": "mis-1",
-       "current_revision": 1,
-       "revision": {
-        "title": "Orders page button"
-       },
-       "status": "working",
-       "created_at": "x",
-       "updated_at": "x"
-      }
-     ]
-    }
-   },
-   "checks": {
-    "launches": 0,
-    "answer_all": [
-     [
-      "button"
-     ],
-     [
-      "remain",
-      "still",
-      "open",
-      "not finished",
-      "not done",
-      "incomplete"
-     ]
-    ],
-    "forbidden": [
-     "aether_launch_run",
-     "aether_launch_swarm"
-    ]
-   },
-   "view_context": {
-    "version": 1,
-    "route": {
-     "name": "workspace",
-     "workspace_id": "ws-shop"
-    }
-   },
-   "review": [
-    "The reply says work remains and names the open task even though the swarm phase is completed."
-   ]
-  },
-  {
    "id": "reopened-session",
    "title": "New session continues earlier work",
    "prompt": "continue this",
@@ -1146,7 +1045,6 @@
     "launches": 0,
     "forbidden": [
      "aether_launch_run",
-     "aether_launch_swarm",
      "aether_message_run"
     ],
     "answer_all": [

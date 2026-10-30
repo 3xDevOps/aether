@@ -13,7 +13,6 @@ type changesFeedInput struct {
 	Cursor      string   `json:"cursor,omitempty"`
 	WorkspaceID string   `json:"workspace_id,omitempty"`
 	RunID       string   `json:"run_id,omitempty"`
-	SwarmID     string   `json:"swarm_id,omitempty"`
 	Kinds       []string `json:"kinds,omitempty"`
 	Limit       int      `json:"limit,omitempty" jsonschema:"default 20"`
 }
@@ -23,7 +22,7 @@ var changesOps = []Op{
 		"Use this when the user asks what changed since a cursor, paged by next_cursor. "+
 			"CI checks: aether_pr_status."+untrustedRule, changesFeed).
 		enum("kinds", protocol.ChangeKindStatus, protocol.ChangeKindReports, protocol.ChangeKindMessages, protocol.ChangeKindPR,
-			protocol.ChangeKindSwarm, protocol.ChangeKindLifecycle).
+			protocol.ChangeKindLifecycle).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodChangesList),
 }
 
@@ -48,7 +47,7 @@ func changesFeed(ctx context.Context, c calls, in changesFeedInput) (string, any
 	}
 	var res protocol.ChangesListResult
 	err = c.read(ctx, protocol.MethodChangesList, protocol.ChangesListParams{Cursor: in.Cursor, WorkspaceID: in.WorkspaceID, RunID: in.RunID,
-		MissionID: in.SwarmID, Kinds: in.Kinds, Limit: rowLimit(in.Limit)}, &res)
+		Kinds: in.Kinds, Limit: rowLimit(in.Limit)}, &res)
 	// A cursor the server's history no longer matches, such as one from
 	// before a restore, gets how to recover.
 	var perr *protocol.Error
@@ -63,9 +62,6 @@ func changesFeed(ctx context.Context, c calls, in changesFeedInput) (string, any
 	rows := make([]changeRow, 0, len(res.Changes))
 	for _, ch := range res.Changes {
 		row := changeRow{Change: ch, URL: l.run(ch.RunID)}
-		if ch.RunID == "" {
-			row.URL = l.swarm(ch.MissionID)
-		}
 		if u := ch.Untrusted; u != nil {
 			row.Untrusted = &changeUntrusted{ChangeUntrusted: protocol.ChangeUntrusted{ReportID: u.ReportID, Summary: clip(u.Summary, maxReport),
 				Reason: clip(u.Reason, maxReport)}}

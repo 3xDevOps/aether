@@ -31,7 +31,6 @@ const destinationCommandIDs: Record<string, true> = {
   connectors: true,
   assistant: true,
   launch: true,
-  swarm: true,
   template: true,
   inject: true,
   forward: true,

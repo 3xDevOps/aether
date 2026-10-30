@@ -5,7 +5,6 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/tls"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -130,7 +128,7 @@ func TestRetryingAnUpdateThatFailedCleanupSettlesAPausedWatchsNeeds(t *testing.T
 	_ = h.svc.Close()
 	st := &failingDrop{DB: h.db}
 	svc, err := New(Config{
-		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Store: st, Bus: h.bus, Runs: h.runs, Push: h.push, Head: h.log.LastSeq,
 		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
 	})
 	if err != nil {
@@ -375,7 +373,6 @@ type harness struct {
 	ws    *domain.Workspace
 	ada   *domain.Member
 	bob   *domain.Member
-	swarm atomic.Pointer[protocol.AttentionItem]
 	keys  int
 	pr    PRSource
 	// assistant, when set, is the conversation the next start writes to.
@@ -412,7 +409,7 @@ func newHarness(t *testing.T) *harness {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
 	svc, err := push.New(push.Config{
-		Store: db, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Budgets: noBudgets{},
+		Store: db, Bus: h.bus, Runs: h.runs, Budgets: noBudgets{},
 		KeyPath: filepath.Join(t.TempDir(), "vapid.pem"), Client: insecure,
 	})
 	if err != nil {
@@ -423,18 +420,11 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
-func (h *harness) swarmOf(_ context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-	if run.MissionRole != "integrator" {
-		return nil, "", nil
-	}
-	return h.swarm.Load(), h.ada.ID, nil
-}
-
 // start runs a new Service on the harness's store, as a server start does.
 func (h *harness) start() {
 	h.t.Helper()
 	svc, err := New(Config{
-		Store: h.bg, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Store: h.bg, Bus: h.bus, Runs: h.runs, Push: h.push, Head: h.log.LastSeq,
 		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now, Recovered: h.recovered,
 	})
 	if err != nil {
@@ -791,7 +781,7 @@ func TestAFailedCheckAtStartIsRetried(t *testing.T) {
 	st := &failingPrefs{DB: h.db}
 	st.fail.Store(true)
 	svc, err := New(Config{
-		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Store: st, Bus: h.bus, Runs: h.runs, Push: h.push, Head: h.log.LastSeq,
 		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
 	})
 	if err != nil {
@@ -844,7 +834,7 @@ func TestAStartCheckWhoseRetryCannotBeSavedIsRetried(t *testing.T) {
 	st := &failingSaves{failingPrefs: failingPrefs{DB: h.db}}
 	st.fail.Store(true)
 	svc, err := New(Config{
-		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Store: st, Bus: h.bus, Runs: h.runs, Push: h.push, Head: h.log.LastSeq,
 		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
 	})
 	if err != nil {
@@ -1319,146 +1309,6 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	}
 }
 
-// setPhase moves the swarm's phase, and on a finish its finish time, on
-// the harness's database file directly, which the store offers no method
-// for.
-func (h *harness) setPhase(mission domain.MissionID, phase domain.MissionPhase) {
-	h.t.Helper()
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(h.path)+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	defer raw.Close() //nolint:errcheck // test cleanup
-	if _, err := raw.ExecContext(h.ctx, `UPDATE missions SET phase = ?1,
-		finished_at = CASE WHEN ?1 IN ('completed', 'cancelled') THEN ?2 ELSE finished_at END WHERE id = ?3`,
-		phase, time.Now().UnixNano(), mission); err != nil {
-		h.t.Fatalf("set swarm phase: %v", err)
-	}
-}
-
-func TestSwarmWatchSaysSwarmTransitionsOnly(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t)
-	m := &domain.Mission{WorkspaceID: h.ws.ID, Objective: "Ship watches\nmore detail", AccountableHumanID: h.ada.ID,
-		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchTUI}, IdempotencyKey: "swarm"}
-	if err := h.db.CreateMission(h.ctx, m); err != nil {
-		t.Fatal(err)
-	}
-	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "integrate",
-		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning, MissionID: m.ID, MissionRole: "integrator"}
-	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
-		t.Fatal(err)
-	}
-	w := h.watch(h.ada, protocol.WatchTarget{Kind: protocol.WatchTargetMission, MissionID: string(m.ID)}).Watch
-
-	// Each open question is a need of its own, whichever is answered first.
-	first, err := h.db.InsertMissionQuestion(h.ctx, m.ID, integrator.ID, "merge now?", "q-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = h.db.InsertMissionQuestion(h.ctx, m.ID, integrator.ID, "which base?", "q-2"); err != nil {
-		t.Fatal(err)
-	}
-	h.swarm.Store(&protocol.AttentionItem{Kind: protocol.AttentionKindSwarmQuestion, Reason: "The integrator asks: merge now?"})
-	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("both swarm questions", func() bool { return len(h.notices(w.ID)) == 2 })
-	if got := h.notices(w.ID)[0]; got.Title != "Ship watches" || got.Link != "/?page=missions&id="+string(m.ID) {
-		t.Fatalf("notice = %+v", got)
-	}
-	if got := bodies(h.notices(w.ID)); got[0] != "needs_you: The integrator asks: merge now?" || got[1] != "needs_you: The integrator asks: which base?" {
-		t.Fatalf("notices = %q, want each question", got)
-	}
-	if _, _, err = h.db.AnswerMissionQuestion(h.ctx, first.ID, h.ada.ID, "yes", "a-1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = h.db.InsertMissionQuestion(h.ctx, m.ID, integrator.ID, "squash?", "q-3"); err != nil {
-		t.Fatal(err)
-	}
-	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("the third question", func() bool { return len(h.notices(w.ID)) == 3 })
-	h.setPhase(m.ID, domain.MissionPhaseActive)
-	// The integrator's own run states are not the swarm's.
-	h.swarm.Store(nil)
-	h.status(integrator, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting on 2 workers")
-	h.settle()
-	if got := h.notices(w.ID); len(got) != 3 {
-		t.Fatalf("notices = %q, want the questions alone", bodies(got))
-	}
-
-	// A completed swarm can be reopened or still deliver, so its watch
-	// stays; a cancelled one is over.
-	h.setPhase(m.ID, domain.MissionPhaseCompleted)
-	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("the swarm to complete", func() bool { return len(h.notices(w.ID)) == 4 })
-	if got := bodies(h.notices(w.ID)); got[3] != "finished: Swarm completed" || h.watchState(w.ID).State != protocol.WatchActive {
-		t.Fatalf("notices = %q, state %s; want Swarm completed last and the watch active", got, h.watchState(w.ID).State)
-	}
-	// Reopened, it is announced again when it completes again.
-	h.setPhase(m.ID, domain.MissionPhaseActive)
-	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.settle()
-	h.setPhase(m.ID, domain.MissionPhaseCompleted)
-	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("the second completion", func() bool { return len(h.notices(w.ID)) == 5 })
-	h.setPhase(m.ID, domain.MissionPhaseCancelled)
-	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("the watch to end", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
-}
-
-func TestACancelledSwarmNoLongerNeedsYou(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t)
-	h.subscribe(h.ada)
-	m := &domain.Mission{WorkspaceID: h.ws.ID, Objective: "Ship watches", AccountableHumanID: h.ada.ID,
-		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchTUI}, IdempotencyKey: "swarm"}
-	if err := h.db.CreateMission(h.ctx, m); err != nil {
-		t.Fatal(err)
-	}
-	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "integrate",
-		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning, MissionID: m.ID, MissionRole: "integrator"}
-	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
-		t.Fatal(err)
-	}
-	w := h.watch(h.ada, protocol.WatchTarget{Kind: protocol.WatchTargetMission, MissionID: string(m.ID)}).Watch
-	if _, err := h.db.InsertMissionQuestion(h.ctx, m.ID, integrator.ID, "merge now?", "q-1"); err != nil {
-		t.Fatal(err)
-	}
-	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("the question's push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
-
-	// Its question stays unanswered, but nobody can act on it any more.
-	h.setPhase(m.ID, domain.MissionPhaseCancelled)
-	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("the watch to end", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
-	h.eventually("the withdrawal", func() bool { return pushOf(h.notices(w.ID)[0]).Status == protocol.WatchStatusWithdrawn })
-	var observed protocol.WatchObserved
-	if err := json.Unmarshal(h.watchState(w.ID).Observed, &observed); err != nil || observed.Need != "" || observed.Summary != "Swarm cancelled" {
-		t.Fatalf("observed = %+v, %v; want no need and Swarm cancelled", observed, err)
-	}
-	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[1] != "finished: Swarm cancelled" {
-		t.Fatalf("notices = %q, want the question and the finish", got)
-	}
-}
-
-func TestAnIntegratorThatNeverLaunchedNeedsYou(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t)
-	m := &domain.Mission{WorkspaceID: h.ws.ID, Objective: "Unlaunched", AccountableHumanID: h.ada.ID,
-		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchTUI}, IdempotencyKey: "unlaunched"}
-	if err := h.db.CreateMission(h.ctx, m); err != nil {
-		t.Fatal(err)
-	}
-	w := h.watch(h.ada, protocol.WatchTarget{Kind: protocol.WatchTargetMission, MissionID: string(m.ID)}).Watch
-	if _, err := h.db.RecordIntegratorLaunch(h.ctx, m.ID, m.CurrentIntegratorRunID, "capture base: repository is empty", false, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	h.publish("", events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("the launch failure", func() bool { return len(h.notices(w.ID)) == 1 })
-	if got := bodies(h.notices(w.ID)); got[0] != "needs_you: Integrator failed to launch, replace it to continue: capture base: repository is empty" {
-		t.Fatalf("notices = %q", got)
-	}
-}
-
 func TestPushOfAPausedRunWaitsForItsResumption(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -1504,17 +1354,6 @@ func TestWatchingAFinishedTargetAnnouncesOnlyWhatComesNext(t *testing.T) {
 		t.Fatalf("notices = %q, want Closed as merged alone", got)
 	}
 
-	m := &domain.Mission{WorkspaceID: h.ws.ID, Objective: "Done swarm", AccountableHumanID: h.ada.ID,
-		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchTUI}, IdempotencyKey: "done"}
-	if err := h.db.CreateMission(h.ctx, m); err != nil {
-		t.Fatal(err)
-	}
-	h.setPhase(m.ID, domain.MissionPhaseCompleted)
-	sw := h.watch(h.ada, protocol.WatchTarget{Kind: protocol.WatchTargetMission, MissionID: string(m.ID)}).Watch
-	h.settle()
-	if got := h.notices(sw.ID); len(got) != 0 || h.watchState(sw.ID).State != protocol.WatchActive {
-		t.Fatalf("notices = %q, want none and the watch active for a swarm completed before it", bodies(got))
-	}
 }
 
 // slowList widens the gap between looking for a matching watch and
@@ -1530,7 +1369,7 @@ func (s slowList) ListWatches(ctx context.Context, f store.WatchFilter) ([]*stor
 func TestConcurrentCreatesMakeOneWatch(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	svc, err := New(Config{Store: slowList{h.db}, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Now: h.clock.now})
+	svc, err := New(Config{Store: slowList{h.db}, Bus: h.bus, Runs: h.runs, Push: h.push, Now: h.clock.now})
 	if err != nil {
 		t.Fatal(err)
 	}

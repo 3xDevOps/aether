@@ -3,13 +3,30 @@ package sshd
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
+
+type takeoverTestClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *takeoverTestClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *takeoverTestClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	c.mu.Unlock()
+}
 
 const testTakeoverID = "3c108774-c2e6-40e0-af51-2825ca226135"
 
@@ -27,8 +44,8 @@ func expectTakeover(t *testing.T, wire *interactiveSSHAttach, phase string) *pro
 	return record
 }
 
-func takeoverClock(e *testEnv) *missionControlTestClock {
-	clock := &missionControlTestClock{now: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)}
+func takeoverClock(e *testEnv) *takeoverTestClock {
+	clock := &takeoverTestClock{now: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)}
 	e.srv.takeovers.now = clock.Now
 	e.srv.cfg.revalidateInterval = time.Hour
 	return clock
@@ -74,7 +91,7 @@ func beginTakeover(t *testing.T, holder, requester *interactiveSSHAttach) {
 	}
 }
 
-func confirmTakeover(t *testing.T, holder, requester *interactiveSSHAttach, clock *missionControlTestClock, requestID uint64) {
+func confirmTakeover(t *testing.T, holder, requester *interactiveSSHAttach, clock *takeoverTestClock, requestID uint64) {
 	t.Helper()
 	clock.Advance(takeoverHold)
 	requester.send(t, takeoverCommand("confirm", requestID, 0))
@@ -316,45 +333,35 @@ func TestTimedTakeoverPermissionAndRunInvalidation(t *testing.T) {
 	}
 }
 
-func TestTimedTakeoverMissionAndReadinessFailurePreserveHolder(t *testing.T) {
-	for _, failure := range []string{"readiness", "mission"} {
-		t.Run(failure, func(t *testing.T) {
-			e, db, mission := missionWorkerTestEnv(t)
-			e.srv.cfg.Control = control.New(control.Config{})
-			clock := takeoverClock(e)
-			authority := &failingInteractiveMissionControl{missionControlStoreAdapter: missionControlStoreAdapter{store: db, control: e.srv.cfg.Control}}
-			authority.failTakeover.Store(failure == "mission")
-			e.srv.cfg.Services.MissionControl = authority
-			interactive := &interactiveTestPTY{fakePTY: e.pty, readyError: func(readOnly bool) error {
-				if !readOnly && failure == "readiness" {
-					return errors.New("readiness refused")
-				}
-				return nil
-			}}
-			e.srv.cfg.PTY = interactive
-			lease, _, err := e.srv.cfg.Control.Acquire(string(e.run.ID), string(e.member.ID), "holder", false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			requester, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "requester", ReadOnly: true})
-			if !ack.OK {
-				t.Fatal(ack.Error)
-			}
-			beginTakeover(t, nil, requester)
-			confirmTakeover(t, nil, requester, clock, 2)
-			pending := activeTakeover(t, e)
-			clock.Advance(takeoverReview)
-			e.srv.advanceTakeover(pending)
-			_, refused := requester.next(t)
-			if refused == nil || refused.Type != protocol.DashAttachControlFrame || refused.OK || refused.HasControl {
-				t.Fatalf("failed admission = %+v", refused)
-			}
-			expectTakeover(t, requester, "cancelled")
-			if err := e.srv.cfg.Control.Validate(string(e.run.ID), "holder", lease.Generation); err != nil {
-				t.Fatalf("failed admission displaced holder: %v", err)
-			}
-			assertInteractiveMissionState(t, e, db, mission, interactive, false, false)
-		})
+func TestTimedTakeoverReadinessFailurePreservesHolder(t *testing.T) {
+	e := controlAttachEnv(t)
+	clock := takeoverClock(e)
+	e.srv.cfg.PTY = &interactiveTestPTY{fakePTY: e.pty, readyError: func(readOnly bool) error {
+		if !readOnly {
+			return errors.New("readiness refused")
+		}
+		return nil
+	}}
+	lease, _, err := e.srv.cfg.Control.Acquire(string(e.run.ID), string(e.member.ID), "holder", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requester, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "requester", ReadOnly: true})
+	if !ack.OK {
+		t.Fatal(ack.Error)
+	}
+	beginTakeover(t, nil, requester)
+	confirmTakeover(t, nil, requester, clock, 2)
+	pending := activeTakeover(t, e)
+	clock.Advance(takeoverReview)
+	e.srv.advanceTakeover(pending)
+	_, refused := requester.next(t)
+	if refused == nil || refused.Type != protocol.DashAttachControlFrame || refused.OK || refused.HasControl {
+		t.Fatalf("failed admission = %+v", refused)
+	}
+	expectTakeover(t, requester, "cancelled")
+	if err := e.srv.cfg.Control.Validate(string(e.run.ID), "holder", lease.Generation); err != nil {
+		t.Fatalf("failed admission displaced holder: %v", err)
 	}
 }
 

@@ -149,15 +149,11 @@ const ReportedSuccessReason = "agent reported success"
 // push notifications, assistant follow notices, aether runs --needs-you and
 // the dashboard's Needs you list share: a live run with an open human
 // request, a disconnected agent, or a failure nobody has seen, or a reported
-// success awaiting review. A paused run never does. A swarm worker's
-// integrator answers for it, so a worker needs a member only while it
-// reports itself blocked.
+// success awaiting review. A paused run never does.
 func (r *Run) NeedsAttention(paused bool) bool {
 	switch {
 	case paused:
 		return false
-	case r.MissionRole == "worker":
-		return r.Status.Live() && r.Activity == ActivityNeedsYou && strings.HasPrefix(r.Reason, BlockedReasonPrefix)
 	case r.Review == ReviewReady && (r.Status.Live() || r.Status == RunCompleted):
 		return true
 	case !r.Status.Live():
@@ -258,15 +254,13 @@ func ValidEffort(effort string) error {
 // LaunchOptions carries launch controls that are not part of the strict
 // Launch seam. Model is the run's agent model and Effort its effort or
 // thinking level; empty keeps the agent's default. CachedBase pins a retry to the exact accepted mirror commit
-// returned by a prior base-capture failure. AssignedRunID is reserved by
-// durable mission state and is never exposed through generic run.launch.
+// returned by a prior base-capture failure.
 type LaunchOptions struct {
-	Limits        RunLimits
-	Model         string
-	Effort        string
-	Permission    Permission
-	CachedBase    string
-	AssignedRunID RunID
+	Limits     RunLimits
+	Model      string
+	Effort     string
+	Permission Permission
+	CachedBase string
 	// RequestedAccount is the account the launcher asked for, recorded on the
 	// run when a fallback launched it on another one.
 	RequestedAccount MemberID
@@ -280,8 +274,7 @@ type LaunchOptions struct {
 	// Admitted; a replayed or refused launch never calls it.
 	Created         func(RunID)
 	ExtraWorkspaces []WorkspaceID
-	// ReservedRunID creates the run under an ID minted beforehand, like
-	// AssignedRunID but without a swarm worker's lifecycle.
+	// ReservedRunID creates the run under an ID minted beforehand.
 	ReservedRunID RunID
 	// FromCommit starts the checkout at this commit of the workspace repo,
 	// recorded with FromBranch, instead of capturing the workspace base.
@@ -820,15 +813,9 @@ type Run struct {
 	// OldestUnackedAt is when the oldest of that mail was sent; nil when
 	// there is none.
 	OldestUnackedAt *time.Time
-	// Mission fields are read-only snapshot metadata from durable mission and
-	// attempt relationships, not authorization. MissionRole is "integrator"
-	// only for the current integrator, or "worker" even for finished attempts.
-	MissionID       MissionID
-	MissionRole     string
-	IntegratorRunID RunID
-	// Lineage is read-only snapshot metadata too: ParentRunID is the run
-	// that started this child run, or a worker's current integrator, and
-	// RootRunID the top of its tree. Detached children keep both.
+	// Lineage is read-only snapshot metadata: ParentRunID is the run that
+	// started this child run and RootRunID the top of its tree. Detached
+	// children keep both.
 	ParentRunID  RunID
 	RootRunID    RunID
 	ChildPurpose string

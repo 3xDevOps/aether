@@ -245,8 +245,7 @@ function onStatus(runId, p) {
   if (p.status_seq > 0 && p.status_seq <= (seqs.get(runId) || 0)) return
   if (p.status_seq > 0) seqs.set(runId, p.status_seq)
   const seen = { status: p.to, reason: p.reason || '', state: p.state || '', outcome_unseen: p.outcome_unseen === true, review: p.review || '' }
-  // The event carries neither paused nor mission_role, so it is first read
-  // as a lead run, whose needs include a worker's, then checked on run.get.
+  // The event does not carry paused, so a need it shows is checked on run.get.
   if (!bodyOf(seen)) {
     resolve(runId)
     return
@@ -359,7 +358,6 @@ function resolve(runId, before = Infinity) {
 function needsAttention(run) {
   const live = run.status === 'running' || run.status === 'needs-attention'
   if (run.paused) return false
-  if (run.mission_role === 'worker') return live && run.state === 'needs-you' && (run.reason || '').startsWith('blocked: ')
   if (run.review === 'ready' && (live || run.status === 'completed')) return true
   if (!live) return false
   if (run.state === 'needs-you' || run.state === 'disconnected') return true
@@ -396,13 +394,12 @@ const disconnects = [
 
 function statusBody(run) {
   const reason = run.reason || ''
-  const worker = run.mission_role === 'worker'
   if (!needsAttention(run)) {
-    if (worker || !run.outcome_unseen || run.status !== 'failed') return ''
+    if (!run.outcome_unseen || run.status !== 'failed') return ''
     return 'Failed, review the result'
   }
   if (run.state === 'needs-you') {
-    if (reason.startsWith('blocked: ')) return (worker ? 'Worker blocked: ' : 'Blocked: ') + reason.slice('blocked: '.length)
+    if (reason.startsWith('blocked: ')) return 'Blocked: ' + reason.slice('blocked: '.length)
     if (reason.startsWith('needs input: ')) return reason.slice('needs input: '.length)
     if (reason.startsWith('Usage limit reached on ')) return reason
     if (reason === 'turn interrupted') return 'Turn interrupted, send a message to continue'

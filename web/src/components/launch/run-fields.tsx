@@ -163,8 +163,7 @@ export function RunFields({
   )
 }
 
-export function ModelField({ label = 'Model', harness, accountMemberID, value, onChange, disabled = false }: {
-  label?: string
+export function ModelField({ harness, accountMemberID, value, onChange, disabled = false }: {
   harness: string
   accountMemberID?: string
   value: string
@@ -172,21 +171,20 @@ export function ModelField({ label = 'Model', harness, accountMemberID, value, o
   disabled?: boolean
 }) {
   return (
-    <FormField label={label}>
+    <FormField label="Model">
       <ModelPicker harness={harness} accountMemberID={accountMemberID} value={value} onChange={onChange} disabled={disabled} />
     </FormField>
   )
 }
 
-export function EffortField({ label = 'Effort', levels, value, onChange, disabled = false }: {
-  label?: string
+export function EffortField({ levels, value, onChange, disabled = false }: {
   levels: string[]
   value: string
   onChange: (effort: string) => void
   disabled?: boolean
 }) {
   return (
-    <FormField label={label}>
+    <FormField label="Effort">
       <EffortPicker levels={levels} value={value} onChange={onChange} disabled={disabled} />
     </FormField>
   )

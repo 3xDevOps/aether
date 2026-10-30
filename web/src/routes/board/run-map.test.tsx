@@ -331,11 +331,11 @@ it('opens a map too large to read whole at 100% on its newest runs, while Home s
   expectAllCardsInView()
 })
 
-it('opens a wide swarm on a phone at 100% with its integrator in view', () => {
+it('opens a wide family on a phone at 100% with its parent in view', () => {
   width = 390
   render(<RunMap cards={[
-    card({ id: 'root', mission_id: 'mission', mission_role: 'integrator' }),
-    ...[1, 2, 3, 4, 5].map((n) => card({ id: `worker-${n}`, mission_id: 'mission', mission_role: 'worker', integrator_run_id: 'root', created_at: at(n) })),
+    card({ id: 'root' }),
+    ...[1, 2, 3, 4, 5].map((n) => card({ id: `child-${n}`, parent_run_id: 'root', created_at: at(n) })),
   ]} scope={workspace.id} agentNames={{}} />)
   expect(camera().zoom).toBe(1)
   const bounds = canvas().getBoundingClientRect()
@@ -353,31 +353,31 @@ it('shows the empty message with no runs, including after a filter removes every
   expect(screen.getByText('No runs in this view.')).toBeDefined()
 })
 
-function swarm() {
+function family() {
   return [
-    card({ id: 'root', task: 'coordinate checkout', mission_id: 'mission', mission_role: 'integrator' }),
-    { ...card({ id: 'asking', task: 'ask about tax', mission_id: 'mission', mission_role: 'worker', integrator_run_id: 'root', created_at: at(2) }), group: 'needs-you' as const, state: 'needs-you' as const, reason: 'Which tax table?' },
-    card({ id: 'building', task: 'build cart', mission_id: 'mission', mission_role: 'worker', integrator_run_id: 'root', created_at: at(3) }),
+    card({ id: 'root', task: 'coordinate checkout' }),
+    { ...card({ id: 'asking', task: 'ask about tax', parent_run_id: 'root', created_at: at(2) }), group: 'needs-you' as const, state: 'needs-you' as const, reason: 'Which tax table?' },
+    card({ id: 'building', task: 'build cart', parent_run_id: 'root', created_at: at(3) }),
   ]
 }
 const rootKey = JSON.stringify([workspace.id, 'root'])
 
-it('folds a swarm to its integrator, keeps the fold, and marks hidden workers that need you', async () => {
+it('folds a family to its parent, keeps the fold, and marks hidden child runs that need you', async () => {
   seedCamera({ x: 0, y: 0, zoom: 1 })
-  render(<RunMap cards={swarm()} scope={workspace.id} agentNames={{}} />)
+  render(<RunMap cards={family()} scope={workspace.id} agentNames={{}} />)
   expect(screen.getAllByRole('article')).toHaveLength(3)
   const rootBox = () => document.querySelector('[data-run-id="root"]')!.getBoundingClientRect()
   const before = rootBox()
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse the workers of coordinate checkout' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse the child runs of coordinate checkout' }))
   })
   expect(screen.getAllByRole('article').map((article) => article.dataset.runId)).toEqual(['root'])
-  // The repack re-centres the integrator in a narrower unit; the camera follows so it stays put.
+  // The repack re-centres the parent in a narrower unit; the camera follows so it stays put.
   expect(camera().x).not.toBe(0)
   expect(rootBox().left).toBeCloseTo(before.left, 6)
   expect(rootBox().top).toBeCloseTo(before.top, 6)
   expect(useStore.getState().boardMapFolded).toEqual({ [rootKey]: true })
-  const expand = screen.getByRole('button', { name: 'Expand the workers of coordinate checkout, 2 hidden' })
+  const expand = screen.getByRole('button', { name: 'Expand the child runs of coordinate checkout, 2 hidden' })
   expect(expand.textContent).toBe('+2 · 1 need you')
   expect(screen.getByRole('heading', { name: 'Runs 3' })).toBeDefined()
   fireEvent.click(expand)
@@ -385,10 +385,10 @@ it('folds a swarm to its integrator, keeps the fold, and marks hidden workers th
   expect(useStore.getState().boardMapFolded).toEqual({})
 })
 
-it('reveals a folded worker from the Needs you chip by unfolding its swarm and centring it', async () => {
+it('reveals a folded child run from the Needs you chip by unfolding its family and centring it', async () => {
   seedCamera({ x: -4000, y: -4000, zoom: 0.3 })
   useStore.setState({ boardMapFolded: { [rootKey]: true } })
-  render(<RunMap cards={swarm()} scope={workspace.id} agentNames={{}} />)
+  render(<RunMap cards={family()} scope={workspace.id} agentNames={{}} />)
   expect(screen.queryByRole('button', { name: 'ask about tax' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
   await act(async () => {
@@ -404,9 +404,9 @@ it('reveals a folded worker from the Needs you chip by unfolding its swarm and c
   expect(rect.top + rect.height / 2).toBeCloseTo(bounds.top + bounds.height / 2, 6)
 })
 
-it('reveals a visible worker from the Needs you chip through the unfold path without folding anything', async () => {
+it('reveals a visible child run from the Needs you chip through the unfold path without folding anything', async () => {
   seedCamera({ x: -4000, y: -4000, zoom: 0.3 })
-  render(<RunMap cards={swarm()} scope={workspace.id} agentNames={{}} />)
+  render(<RunMap cards={family()} scope={workspace.id} agentNames={{}} />)
   fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
   await act(async () => {
     fireEvent.click(within(await screen.findByLabelText('Runs that need you')).getByRole('button', { name: /ask about tax/ }))

@@ -2301,11 +2301,115 @@ WHERE conditions LIKE '%"delivered"%' AND state IN ('active', 'paused', 'error')
 UPDATE watches SET conditions = (SELECT json_group_array(value) FROM json_each(conditions) WHERE value <> 'delivered')
 WHERE conditions LIKE '%"delivered"%' AND EXISTS (SELECT 1 FROM json_each(conditions) WHERE value <> 'delivered');
 `,
+	// v99: swarms are gone. A swarm's current integrator becomes a run with
+	// children: every worker run and every earlier integrator of the swarm
+	// becomes a started child of it, with the purpose its task or role gave
+	// it. A swarm with no integrator run has nothing to attach to, and its
+	// runs stay ordinary runs. Runs that ended already told their parent, and
+	// children of an ended parent are detached so history is not settled
+	// again, as are children another member owns. Every current integrator
+	// may start child runs, as it could before. The mission tables and
+	// everything that pointed at a swarm go with it, watches on swarms
+	// included.
+	`
+INSERT INTO run_children (run_id, parent_run_id, root_run_id, tree_key, workspace_id, owner_member_id,
+	account_member_id, harness, mode, model, purpose, task, base_commit, base_branch, fallback_disabled,
+	fallback_order, idempotency_key, request_hash, state, end_notified, detached, created_at, started_at)
+WITH integrators AS (
+	SELECT id AS mission_id, current_integrator_run_id AS parent FROM missions
+	WHERE current_integrator_run_id IN (SELECT id FROM runs)
+), members AS (
+	SELECT a.run_id AS run_id, a.mission_id AS mission_id, 0 AS rank, COALESCE((SELECT t.title FROM mission_task_revisions t
+		WHERE t.task_id = a.task_id AND t.revision = a.task_revision), '') AS purpose
+	FROM mission_attempts a WHERE a.run_id IN (SELECT id FROM runs)
+	UNION ALL SELECT run_id, mission_id, 1, 'earlier swarm integrator' FROM mission_integrator_replacements
+		WHERE run_id IN (SELECT id FROM runs)
+	UNION ALL SELECT initial_run_id, mission_id, 1, 'earlier swarm integrator' FROM mission_create_receipts
+		WHERE initial_run_id IN (SELECT id FROM runs)
+), picked AS (
+	SELECT run_id, mission_id, purpose FROM (
+		SELECT *, ROW_NUMBER() OVER (PARTITION BY run_id ORDER BY rank, mission_id) AS n FROM members
+	) WHERE n = 1
+)
+SELECT r.id, i.parent, i.parent, i.parent, r.workspace_id, r.member_id, COALESCE(r.account_member_id, r.member_id), r.harness, r.mode,
+	r.model, COALESCE(NULLIF(trim(p.purpose), ''), replace(substr(r.task, 1, 80), char(10), ' ')), r.task,
+	r.base_commit, r.base_branch, r.fallback_disabled, r.fallback_order, 'swarm:' || r.id, 'swarm', 'started',
+	r.status IN ('completed', 'merged', 'abandoned', 'failed', 'interrupted'),
+	pr.status IN ('completed', 'merged', 'abandoned', 'failed', 'interrupted') OR r.member_id <> pr.member_id,
+	r.created_at, r.started_at
+FROM picked p JOIN integrators i ON i.mission_id = p.mission_id JOIN runs r ON r.id = p.run_id JOIN runs pr ON pr.id = i.parent
+WHERE p.run_id <> i.parent
+	AND p.run_id NOT IN (SELECT parent FROM integrators)
+	AND p.run_id NOT IN (SELECT run_id FROM run_children);
+UPDATE run_children SET tree_key = root_run_id WHERE mission_id <> '';
+UPDATE runs SET children = 'on', children_set_by = member_id
+WHERE id IN (SELECT current_integrator_run_id FROM missions);
+DELETE FROM watch_deliveries WHERE notification_id IN (SELECT n.id FROM watch_notifications n JOIN watches w ON w.id = n.watch_id WHERE w.target_kind = 'mission');
+DELETE FROM watch_notifications WHERE watch_id IN (SELECT id FROM watches WHERE target_kind = 'mission');
+DELETE FROM watches WHERE target_kind = 'mission';
+DELETE FROM events WHERE type = 'mission.changed';
+CREATE TABLE watches_v98 (
+	id              TEXT PRIMARY KEY,
+	member_id       TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	workspace_id    TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+	target_kind     TEXT NOT NULL CHECK (target_kind IN ('run', 'pr')),
+	run_id          TEXT REFERENCES runs(id) ON DELETE CASCADE,
+	repo            TEXT NOT NULL DEFAULT '',
+	pr_number       INTEGER NOT NULL DEFAULT 0,
+	target_title    TEXT NOT NULL DEFAULT '',
+	conditions      TEXT NOT NULL,
+	label           TEXT NOT NULL DEFAULT '',
+	source          TEXT NOT NULL,
+	state           TEXT NOT NULL CHECK (state IN ('active', 'paused', 'error', 'done', 'expired')),
+	error           TEXT NOT NULL DEFAULT '',
+	failures        INTEGER NOT NULL DEFAULT 0,
+	observed        TEXT NOT NULL DEFAULT '{}',
+	fired           TEXT NOT NULL DEFAULT '{}',
+	idempotency_key TEXT,
+	created_at      INTEGER NOT NULL,
+	updated_at      INTEGER NOT NULL,
+	expires_at      INTEGER NOT NULL,
+	last_check_at   INTEGER,
+	next_check_at   INTEGER,
+	ended_at        INTEGER,
+	version         INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO watches_v98 (id, member_id, workspace_id, target_kind, run_id, repo, pr_number, target_title, conditions,
+	label, source, state, error, failures, observed, fired, idempotency_key, created_at, updated_at, expires_at,
+	last_check_at, next_check_at, ended_at, version)
+SELECT id, member_id, workspace_id, target_kind, run_id, repo, pr_number, target_title, conditions,
+	label, source, state, error, failures, observed, fired, idempotency_key, created_at, updated_at, expires_at,
+	last_check_at, next_check_at, ended_at, version FROM watches;
+DROP TABLE watches;
+ALTER TABLE watches_v98 RENAME TO watches;
+CREATE INDEX idx_watches_member ON watches(member_id);
+CREATE INDEX idx_watches_workspace ON watches(workspace_id) WHERE workspace_id IS NOT NULL;
+CREATE INDEX idx_watches_run ON watches(run_id) WHERE run_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_watches_idempotency ON watches(member_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+DROP INDEX idx_run_messages_mission;
+ALTER TABLE run_messages DROP COLUMN mission_id;
+ALTER TABLE coord_audit_publications DROP COLUMN mission_id;
+ALTER TABLE run_children DROP COLUMN mission_id;
+ALTER TABLE runs DROP COLUMN swarm_run;
+DROP TABLE mission_acceptances;
+DROP TABLE mission_submissions;
+DROP TABLE mission_worker_takeovers;
+DROP TABLE mission_attempts;
+DROP TABLE mission_task_dependencies;
+DROP TABLE mission_task_revisions;
+DROP TABLE mission_tasks;
+DROP TABLE mission_questions;
+DROP TABLE mission_control_changes;
+DROP TABLE mission_integrator_replacements;
+DROP TABLE mission_create_receipts;
+DROP TABLE mission_mutation_receipts;
+DROP TABLE missions;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
 // reference with ON DELETE CASCADE. See applyMigration.
-var foreignKeysOffMigrations = map[int]bool{45: true, 47: true, 49: true}
+var foreignKeysOffMigrations = map[int]bool{45: true, 47: true, 49: true, 99: true}
 
 // SchemaVersion is the schema version this build migrates a database to.
 // A release manifest records it as store_schema.

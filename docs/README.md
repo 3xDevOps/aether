@@ -28,9 +28,9 @@ that runs coding agents for you and your team. If you are new, start with the
 | Agent | A coding CLI a run starts: Claude Code, Codex, OpenCode, pi, oh-my-pi (`omp`), GitHub Copilot CLI, Gemini CLI, Cursor CLI, Antigravity CLI, or one you add. Aether's code calls these harnesses. | [harnesses.md](harnesses.md) |
 | Permission tier | What a run's agent may change outside its checkout. Root access runs sudo without asking, Default asks you before each sudo, and Isolated works on a throwaway copy of your home with only the agents' own hosts reachable. In every tier the agent itself runs unprivileged. | [security.md](security.md#permission-tiers) |
 | Standard, Enhanced and Background mode | How a run shows its agent. Standard is the agent's own terminal, Enhanced shows its messages, tool calls and approvals as dashboard controls, and Background runs the task once with no interaction. | [enhanced-runs.md](enhanced-runs.md) |
-| Swarm | One objective handed to a group of runs: an integrator run splits it into tasks and launches a worker run for each. `aether-internal` calls a swarm a mission. | [teams.md](teams.md#swarms) |
+| Child run | A run an agent starts for part of its task, one level deep. It appears under its parent in the dashboard and reports back to it. | [teams.md](teams.md#child-runs) |
 | Team memory | Short notes per workspace that runs of any agent search and add to. Collaborators and admins pin the notes every new run starts with. | [memory.md](memory.md) |
-| Watch | A subscription you keep on a run or a swarm. The server tells you, in the dashboard and on your Web Push devices, when it needs you or finishes, even with the dashboard closed. | [watches.md](watches.md) |
+| Watch | A subscription you keep on a run. The server tells you, in the dashboard and on your Web Push devices, when it needs you or finishes, even with the dashboard closed. | [watches.md](watches.md) |
 | Assistant | A chat panel in the dashboard that answers questions and acts for you, such as launching a run. It is your own Claude Code or Codex, running in Enhanced mode in your environment. | [assistant.md](assistant.md) |
 
 ```mermaid
@@ -67,7 +67,7 @@ Daily use:
 6. [Enhanced runs](enhanced-runs.md): when you run agents in Enhanced mode and
    want to know about permissions, restarts and the session log.
 7. [Teams](teams.md): when you invite people, change roles, share agent
-   accounts, set budgets or launch swarms.
+   accounts, set budgets or launch child runs.
 8. [Networking](networking.md) and [edge](edge.md): when you choose how
    people reach the server, or host the dashboard for phones.
 9. [Assistant](assistant.md): when you want to ask Aether for things in plain
@@ -79,7 +79,7 @@ Daily use:
     in Slack, including on Android.
 13. [Insights](insights.md): when you want statistics on runs, time, cost and
     pull requests.
-14. [Watches](watches.md): when you want to be told that a run or swarm needs
+14. [Watches](watches.md): when you want to be told that a run needs
     you or finished, after you close the dashboard.
 
 Reference:
@@ -110,7 +110,7 @@ Reference:
 - [Styles](styles.md): the dashboard's visual language.
 - [Dashboard gateways](local-gateway.md): the HTTP and WebSocket surface that
   `aether gui` and the server's tailnet dashboard serve.
-- [Coordination](coordination.md): how overlapping runs and swarm runs warn
+- [Coordination](coordination.md): how overlapping runs and child runs warn
   and message each other.
 - [ChatGPT plugin listing](chatgpt-plugin.md): build the directory package,
   submit it to OpenAI and set up its review.

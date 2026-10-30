@@ -12,10 +12,6 @@ import type {
   InsightsRun,
   Member,
   MemoryItem,
-  Mission,
-  MissionQuestion,
-  MissionTask,
-  MissionTaskRevision,
   RoomMessage,
   RoomStatusResult,
   Run,
@@ -44,8 +40,6 @@ export function stateContext(over: Partial<StateContext> = {}): StateContext {
     workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
     roomMessages: {},
     roomStatus: {},
-    missions: {},
-    missionDetails: {},
     pausedRuns: {},
     now: Date.parse('2026-08-14T10:20:00Z'),
     ...over,
@@ -89,67 +83,6 @@ export const otherWorkspace: Workspace = {
   base_branch: 'main',
   created_at: '2026-08-14T07:00:00Z',
 }
-export function mission(over: Partial<Mission> = {}): Mission {
-  return {
-    id: 'mission_1',
-    workspace_id: workspace.id,
-    objective: 'coordinate checkout work',
-    accountable_human_id: alice.id,
-    integrator: { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
-    execution_choices: [
-      { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
-      { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
-    ],
-    current_integrator_run_id: 'run_integrator',
-    integrator_generation: 1,
-    accepted_set_version: 0,
-    phase: 'active',
-    open_questions: 0,
-    created_at: '2026-08-14T10:00:00Z',
-    updated_at: '2026-08-14T10:00:00Z',
-    ...over,
-  }
-}
-
-export function missionQuestion(over: Partial<MissionQuestion> = {}): MissionQuestion {
-  return {
-    id: 'question_1',
-    mission_id: 'mission_1',
-    seq: 1,
-    body: 'which checkout flow?',
-    asked_by_run_id: 'run_integrator',
-    asked_at: '2026-08-14T10:01:00Z',
-    ...over,
-  }
-}
-
-export function missionTaskRevision(over: Partial<MissionTaskRevision> = {}): MissionTaskRevision {
-  return {
-    task_id: 'task_1',
-    revision: 1,
-    title: 'rewrite the guest checkout flow',
-    objective: 'replace the legacy guest checkout controller',
-    scope: { expected_paths: ['web/checkout/'] },
-    evidence_requirements: [],
-    status: 'accepted',
-    created_at: '2026-08-14T10:02:00Z',
-    ...over,
-  }
-}
-
-export function missionTask(over: Partial<MissionTask> = {}): MissionTask {
-  return {
-    id: 'task_1',
-    mission_id: 'mission_1',
-    current_revision: 1,
-    revision: missionTaskRevision(),
-    status: 'ready',
-    created_at: '2026-08-14T10:02:00Z',
-    updated_at: '2026-08-14T10:02:00Z',
-    ...over,
-  }
-}
-
 export function run(over: Partial<Run> = {}): Run {
   return {
     id: 'run_1',
@@ -356,7 +289,6 @@ export function insightsRun(over: Partial<InsightsRun> = {}): InsightsRun {
     created_at: '2026-10-14T09:00:00Z',
     finished_at: '2026-10-14T09:21:00Z',
     duration_seconds: 1260,
-    mission_id: '',
     pr_url: '',
     pr_state: '',
     ...over,
@@ -369,7 +301,6 @@ const insightsTotals = { launched: 0, completed: 0, merged: 0, failed: 0, interr
 const outcomeSeries = Array.from({ length: 7 }, (_, i) => ({
   start: `2026-10-${String(9 + i).padStart(2, '0')}`,
   runs: { done: 0, failed: 0, abandoned: 0 },
-  swarms: { done: 0, failed: 0, abandoned: 0 },
 }))
 
 export function insights(over: Partial<InsightsResult> = {}): InsightsResult {
@@ -404,7 +335,6 @@ export function insights(over: Partial<InsightsResult> = {}): InsightsResult {
       { harness: 'claude', model: '', launched: 7, finished: 5, failed: 1 },
       { harness: 'codex', model: 'gpt-5.5', launched: 3, finished: 2, failed: 1 },
     ],
-    swarms: { launched: 1, completed: 1, cancelled: 0, agents: 5, tasks_accepted: 4 },
     durations: {
       runs_measured: 9,
       median_run_seconds: 1260,
@@ -427,11 +357,10 @@ export function insights(over: Partial<InsightsResult> = {}): InsightsResult {
       ],
     },
     pull_requests: { opened: 2, merged: 1 },
-    success: { runs: { succeeded: 3, finished: 9 }, swarms: { succeeded: 1, finished: 1 } },
+    success: { runs: { succeeded: 3, finished: 9 } },
     outcomes: {
       runs: { done: 7, failed: 1, abandoned: 1 },
-      swarms: { done: 1, failed: 0, abandoned: 0 },
-      series: outcomeSeries.map((day, i) => i === 5 ? { ...day, runs: { done: 5, failed: 1, abandoned: 0 } } : i === 6 ? { ...day, runs: { done: 2, failed: 0, abandoned: 1 }, swarms: { done: 1, failed: 0, abandoned: 0 } } : day),
+      series: outcomeSeries.map((day, i) => i === 5 ? { ...day, runs: { done: 5, failed: 1, abandoned: 0 } } : i === 6 ? { ...day, runs: { done: 2, failed: 0, abandoned: 1 } } : day),
       members: [],
     },
     recent: [
@@ -501,16 +430,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     accountRevoke: vi.fn(async () => ({})),
     runList: vi.fn(async () => [run()]),
     runGet: vi.fn(async () => run()),
-    missionCreate: vi.fn(async () => ({ mission: mission() })),
-    missionShow: vi.fn(async () => ({ mission: mission(), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })),
-    missionList: vi.fn(async () => ({ missions: [mission()], next_cursor: undefined })),
-    missionQuestionAnswer: vi.fn(async () => ({ question: missionQuestion({ answer: 'the guest flow', answered_by_member_id: alice.id, answered_at: '2026-08-14T10:03:00Z' }) })),
-    missionCancel: vi.fn(async () => ({ mission: mission({ phase: 'cancelled' }) })),
-    missionArchive: vi.fn(async () => mission({ phase: 'completed', archived_at: '2026-10-06T00:00:00Z' })),
-    missionUnarchive: vi.fn(async () => mission({ phase: 'completed' })),
-    missionDelete: vi.fn(async () => ({})),
-    missionWorkerRelease: vi.fn(async () => ({ run_id: 'run_worker', takeover_active: false, takeover_generation: 2 })),
-    missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
     childSettings: vi.fn<Api['childSettings']>(async () => ({ enabled: true })),
@@ -1004,21 +923,18 @@ export function teamInsights(): InsightsResult {
   const bobDay = (i: number) => ({
     start: base.outcomes.series[i].start,
     runs: i === 5 ? { done: 2, failed: 1, abandoned: 0 } : i === 6 ? { done: 1, failed: 0, abandoned: 0 } : none,
-    swarms: i === 6 ? { done: 0, failed: 0, abandoned: 1 } : none,
   })
   const bobSeries = base.outcomes.series.map((_, i) => bobDay(i))
   const sum = (a: typeof none, b: typeof none) => ({ done: a.done + b.done, failed: a.failed + b.failed, abandoned: a.abandoned + b.abandoned })
   return insights({
     totals: { ...base.totals, launched: 15, completed: 9, merged: 1, failed: 2, interrupted: 1, finished: 10 },
-    swarms: { ...base.swarms, launched: 2, completed: 1, cancelled: 1, agents: 8, tasks_accepted: 6 },
-    success: { runs: { succeeded: 5, finished: 13 }, swarms: { succeeded: 1, finished: 2 } },
+    success: { runs: { succeeded: 5, finished: 13 } },
     outcomes: {
       runs: { done: 10, failed: 2, abandoned: 1 },
-      swarms: { done: 1, failed: 0, abandoned: 1 },
-      series: base.outcomes.series.map((day, i) => ({ start: day.start, runs: sum(day.runs, bobSeries[i].runs), swarms: sum(day.swarms, bobSeries[i].swarms) })),
+      series: base.outcomes.series.map((day, i) => ({ start: day.start, runs: sum(day.runs, bobSeries[i].runs) })),
       members: [
-        { member_id: alice.id, display_name: alice.display_name, color: '#e6194b', runs: base.outcomes.runs, swarms: base.outcomes.swarms, series: base.outcomes.series },
-        { member_id: 'mem_bob', display_name: 'Bob', color: '#3cb44b', runs: { done: 3, failed: 1, abandoned: 0 }, swarms: { done: 0, failed: 0, abandoned: 1 }, series: bobSeries },
+        { member_id: alice.id, display_name: alice.display_name, color: '#e6194b', runs: base.outcomes.runs, series: base.outcomes.series },
+        { member_id: 'mem_bob', display_name: 'Bob', color: '#3cb44b', runs: { done: 3, failed: 1, abandoned: 0 }, series: bobSeries },
       ],
     },
   })

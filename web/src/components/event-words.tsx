@@ -44,11 +44,6 @@ function AccountOf({ id }: { id: unknown }) {
   return text(id) === self ? 'your account' : `${name ?? 'another member'}'s account`
 }
 
-function MissionName({ id }: { id: unknown }) {
-  const objective = useStore((s) => s.missions[text(id)]?.objective)
-  return objective ? `“${objective.split('\n')[0]}”` : 'a swarm'
-}
-
 const statusWords: Record<Exclude<RunStatus, 'running' | 'needs-attention'>, string> = {
   queued: 'Run queued',
   provisioning: 'Run starting',
@@ -233,7 +228,7 @@ function retentionLine(p: Payload): ReactNode {
 const memoryWords: Record<string, string> = {
   add: 'added a team memory note',
   rewrite: 'rewrote a team memory note',
-  answer: 'recorded a swarm answer in team memory',
+  answer: 'recorded an answer in team memory',
   supersede: 'replaced a team memory note',
   pin: 'pinned a team memory note',
   unpin: 'unpinned a team memory note',
@@ -305,7 +300,6 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     </span>
   ),
   'coord.message.acked': () => 'An agent read its message',
-  'mission.changed': (p) => (p.deleted ? 'A swarm was deleted' : <>Swarm <MissionName id={p.mission_id} /> updated</>),
   'member.changed': (p, e) => <MemberRenamed member={p.member_id} actor={e.actor_id} name={p.display_name} />,
   'member.merged': (p) => <>Merged a member into <Who id={p.survivor_id} object /></>,
   'member.device': (p) => deviceWords[text(p.status)] ?? 'A device changed',

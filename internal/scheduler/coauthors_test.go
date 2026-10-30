@@ -487,23 +487,3 @@ func TestRunInstructionsCarryTheReportRuleOnlyWithLifecycleReporting(t *testing.
 		}
 	}
 }
-
-func TestRunGuidePrefersTheMissionRole(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, nil)
-	run, _ := e.launchFake(t, "task")
-	for _, tc := range []struct {
-		run                        domain.RunID
-		assigned, background, wake bool
-		want                       coordhooks.Guide
-	}{
-		{run.ID, false, false, true, coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}},
-		{run.ID, false, true, true, coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleBackground, Background: true}},
-		{run.ID, true, false, false, coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleMission}},
-		{"", true, true, false, coordhooks.Guide{Role: coordhooks.RoleMission, Background: true}},
-	} {
-		if got := e.sched.runGuide(t.Context(), tc.run, tc.assigned, tc.background, tc.wake); got != tc.want {
-			t.Errorf("runGuide(%q, %v, %v, %v) = %+v, want %+v", tc.run, tc.assigned, tc.background, tc.wake, got, tc.want)
-		}
-	}
-}

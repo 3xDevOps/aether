@@ -2,11 +2,11 @@ import type { StateContext } from '@/lib/needs-you'
 import type { Event, Run } from '@/lib/types'
 import { agoLabel, tickStep, ticks, widerWindow, windowSpan } from '@/routes/board/lanes/axis'
 import { laneEdges, mailOf } from '@/routes/board/lanes/edges'
-import { buildLanes, layoutLanes, fineMetrics, type LanesInput, type RunLane, type SwarmLane } from '@/routes/board/lanes/model'
+import { buildLanes, layoutLanes, fineMetrics, type LanesInput, type FamilyLane, type RunLane } from '@/routes/board/lanes/model'
 import { runSegments, segmentTone, statusChanges, strongest } from '@/routes/board/lanes/segments'
 import { mapRuns } from '@/routes/board/selectors'
 import { toRecord } from '@/store/runs'
-import { alice, bob, mission, missionTask, run, workspace } from '@/test/fixtures'
+import { alice, bob, run, workspace } from '@/test/fixtures'
 
 const t0 = Date.parse('2026-08-14T10:00:00Z')
 const min = 60_000
@@ -23,8 +23,6 @@ function ctxOf(runs: Run[], over: Partial<StateContext> = {}): StateContext {
     workspaces: { [workspace.id]: workspace },
     roomMessages: {},
     roomStatus: {},
-    missions: {},
-    missionDetails: {},
     pausedRuns: {},
     now,
     ...over,
@@ -141,7 +139,7 @@ describe('buildLanes', () => {
     expect(drawn.get('done')).toBe('section:finished:summary')
   })
 
-  it('groups a run with its child runs like a swarm, open while live and folded on request', () => {
+  it('groups a run with its child runs as a family, open while live and folded on request', () => {
     const ctx = ctxOf([
       run({ id: 'parent', task: 'parent work', created_at: at(5), started_at: at(5) }),
       run({ id: 'c1', parent_run_id: 'parent', task: 'first', created_at: at(10), started_at: at(10) }),
@@ -150,10 +148,10 @@ describe('buildLanes', () => {
     ])
     const { lanes } = buildLanes(input(ctx))
     expect(lanes.map((l) => l.kind === 'section' ? l.label : l.kind === 'run' ? [l.card.run.id, l.level] : l.kind)).toEqual([
-      'Needs you', 'swarm', ['parent', 3], ['c1', 3], ['c2', 3], ['g1', 3],
+      'Needs you', 'family', ['parent', 3], ['c1', 3], ['c2', 3], ['g1', 3],
     ])
-    const header = lanes.find((l): l is SwarmLane => l.kind === 'swarm')!
-    expect(header).toMatchObject({ open: true, integratorID: 'parent', detail: '3 child runs · 1 needs you · 1 working · 1 done' })
+    const header = lanes.find((l): l is FamilyLane => l.kind === 'family')!
+    expect(header).toMatchObject({ open: true, parentID: 'parent', detail: '3 child runs · 1 needs you · 1 working · 1 done' })
     const folded = buildLanes(input(ctx, { open: new Map([[header.key, false]]) })).lanes
     expect(folded.filter((l) => l.kind === 'run').map((l) => (l as RunLane).card.run.id)).toEqual(['g1'])
   })
@@ -164,7 +162,7 @@ describe('buildLanes', () => {
       run({ id: 'c1', parent_run_id: 'parent', status: 'completed', state: undefined, created_at: at(10), finished_at: at(20) }),
     ])
     const { lanes } = buildLanes(input(ctx))
-    expect(lanes.find((l): l is SwarmLane => l.kind === 'swarm')).toMatchObject({ open: false })
+    expect(lanes.find((l): l is FamilyLane => l.kind === 'family')).toMatchObject({ open: false })
     expect(lanes.filter((l): l is RunLane => l.kind === 'run').map((l) => l.card.run.id)).toEqual(['parent'])
   })
 
@@ -194,73 +192,25 @@ describe('buildLanes', () => {
     expect(lanes.filter((l): l is RunLane => l.kind === 'run').map((l) => l.card.run.id)).toEqual(['bad', 'done'])
   })
 
-  it('groups a swarm with its integrator first and workers in task order', () => {
-    const ctx = ctxOf(
-      [
-        run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator', created_at: at(1) }),
-        run({ id: 'wb', task: 'second', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator', created_at: at(3) }),
-        run({ id: 'wa', task: 'first', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator', created_at: at(5) }),
-      ],
-      {
-        missions: { mission_1: mission() },
-        missionDetails: {
-          mission_1: {
-            mission: mission(),
-            tasks: [missionTask({ id: 't1' }), missionTask({ id: 't2' })],
-            attempts: [
-              { id: 'a1', task_id: 't1', run_id: 'wa', number: 1, reserved_at: at(4) },
-              { id: 'a2', task_id: 't2', run_id: 'wb', number: 1, reserved_at: at(2) },
-            ] as never,
-            submissions: [],
-            diagnostics: [],
-            questions: [],
-          },
-        },
-      },
-    )
-    const model = buildLanes(input(ctx))
-    const swarm = model.lanes.find((l): l is SwarmLane => l.kind === 'swarm')!
-    expect(swarm).toMatchObject({ open: true, title: 'coordinate checkout work' })
-    const members = model.lanes.filter((l): l is RunLane => l.kind === 'run')
-    expect(members.map((l) => [l.card.run.id, l.handle])).toEqual([['run_integrator', 'Integrator'], ['wa', 'Worker 1'], ['wb', 'Worker 2']])
-
-    const folded = buildLanes(input(ctx, { open: new Map([[swarm.key, false]]) }))
-    expect(folded.lanes.some((l) => l.kind === 'run')).toBe(false)
-    expect(folded.drawn.get('wa')).toBe(swarm.key)
-
-    const cards = new Map(input(ctx).cards.map((c) => [c.run.id, c]))
-    const edges = laneEdges({
-      cards, drawn: model.drawn, details: ctx.missionDetails, mail: mailOf([]), window: { start: now - 60 * min, end: now }, now, bucket: min, overlaps: {}, hidden: new Set(),
-    })
-    expect(edges.filter((e) => e.kind === 'orchestration').map((e) => [e.from.run, e.to.run, (e.from.t - t0) / min])).toEqual([
-      ['run_integrator', 'wb', 2],
-      ['run_integrator', 'wa', 4],
-    ])
-  })
-
-  it('folds a finished swarm onto its integrator\'s outcome, and opens the integrator even when only a worker is listed', () => {
-    const swarmRuns = [
-      run({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator', status: 'merged', state: undefined, created_at: at(1), started_at: at(1), finished_at: at(50) }),
-      run({ id: 'w', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator', status: 'merged', state: undefined, created_at: at(5), started_at: at(5), finished_at: at(30) }),
-    ]
-    const ctx = ctxOf(swarmRuns, { missions: { mission_1: mission({ phase: 'completed' }) } })
-    const open = new Map([['section:finished', true]])
-    const swarm = buildLanes(input(ctx, { open })).lanes.find((l): l is SwarmLane => l.kind === 'swarm')!
-    expect(swarm).toMatchObject({ open: false, outcome: 'merged', integratorID: 'run_integrator' })
-
-    const workerOnly = buildLanes(input(ctx, { open, cards: input(ctx).cards.filter((c) => c.run.id === 'w') })).lanes.find((l): l is SwarmLane => l.kind === 'swarm')!
-    expect(workerOnly.integratorID).toBe('run_integrator')
-  })
-
-  it('draws a folded swarm\'s integrator bar and a strip that shows waiting workers too', () => {
+  it('folds a finished family onto its parent\'s outcome', () => {
     const ctx = ctxOf([
-      run({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator', state: 'waiting-agents', created_at: at(1), started_at: at(1) }),
-      run({ id: 'w', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator', state: 'answered', created_at: at(5), started_at: at(5) }),
-    ], { missions: { mission_1: mission() } })
-    const swarm = buildLanes(input(ctx, { open: new Map([[`swarm:${workspace.id}:mission_1`, false]]) })).lanes.find((l): l is SwarmLane => l.kind === 'swarm')!
-    expect(swarm.open).toBe(false)
-    expect(swarm.segments.map((s) => s.state)).toEqual(['waiting-agents'])
-    expect(swarm.strip.map((s) => [s.tone, (s.start - t0) / min, (s.end - t0) / min])).toEqual([['ended', 5, 60]])
+      run({ id: 'parent', status: 'merged', state: undefined, created_at: at(1), started_at: at(1), finished_at: at(50) }),
+      run({ id: 'c', parent_run_id: 'parent', status: 'merged', state: undefined, created_at: at(5), started_at: at(5), finished_at: at(30) }),
+    ])
+    const family = buildLanes(input(ctx, { open: new Map([['section:finished', true]]) })).lanes.find((l): l is FamilyLane => l.kind === 'family')!
+    expect(family).toMatchObject({ open: false, outcome: 'merged', parentID: 'parent' })
+  })
+
+  it('draws a folded family\'s parent bar and a strip that shows waiting child runs too', () => {
+    const ctx = ctxOf([
+      run({ id: 'parent', state: 'waiting-agents', created_at: at(1), started_at: at(1) }),
+      run({ id: 'c', parent_run_id: 'parent', state: 'answered', created_at: at(5), started_at: at(5) }),
+    ])
+    const header = buildLanes(input(ctx)).lanes.find((l): l is FamilyLane => l.kind === 'family')!
+    const family = buildLanes(input(ctx, { open: new Map([[header.key, false]]) })).lanes.find((l): l is FamilyLane => l.kind === 'family')!
+    expect(family.open).toBe(false)
+    expect(family.segments.map((s) => s.state)).toEqual(['waiting-agents'])
+    expect(family.strip.map((s) => [s.tone, (s.start - t0) / min, (s.end - t0) / min])).toEqual([['ended', 5, 60]])
   })
 
   it('sections by owner with the viewer first', () => {
@@ -289,7 +239,7 @@ describe('laneEdges', () => {
       payload: { message_id: id, workspace_id: workspace.id, from_run_id: 'a', to_run_id: 'b', kind: 'question' },
     })
     const ack: Event = { id: 'k', seq: 9, time: at(31), workspace_id: workspace.id, run_id: 'b', actor_id: '', type: 'coord.message.acked', payload: { message_id: 'm1', to_run_id: 'b', acked_at: at(31) } }
-    const base = { cards: new Map(input(ctx).cards.map((c) => [c.run.id, c])), drawn: model.drawn, details: {}, window: { start: now - 60 * min, end: now }, now, bucket: 5 * min, overlaps: { a: [{ run_id: 'b', member_id: alice.id, files: ['x.go'] }] }, hidden: new Set<never>() }
+    const base = { drawn: model.drawn, window: { start: now - 60 * min, end: now }, now, bucket: 5 * min, overlaps: { a: [{ run_id: 'b', member_id: alice.id, files: ['x.go'] }] }, hidden: new Set<never>() }
     const edges = laneEdges({ ...base, mail: mailOf([mail('m1', 30, 1), mail('m2', 31, 2), ack, mail('m3', 50, 3)]) })
     expect(edges.map((e) => [e.messages?.ids, e.messages?.acked, e.messages?.kind])).toEqual([
       [['m1', 'm2'], false, 'question'],
@@ -307,7 +257,7 @@ describe('laneEdges', () => {
       payload: { message_id: id, workspace_id: workspace.id, from_run_id: from, to_run_id: 'c', kind: 'message' },
     })
     const [edge] = laneEdges({
-      cards: new Map(input(ctx).cards.map((c) => [c.run.id, c])), drawn, details: {}, mail: mailOf([mail('m1', 'a', 1), mail('m2', 'b', 2)]),
+      drawn, mail: mailOf([mail('m1', 'a', 1), mail('m2', 'b', 2)]),
       window: { start: now - 60 * min, end: now }, now, bucket: 5 * min, overlaps: {}, hidden: new Set(),
     })
     expect(edge.messages).toMatchObject({ ids: ['m1', 'm2'], senders: ['a', 'b'] })

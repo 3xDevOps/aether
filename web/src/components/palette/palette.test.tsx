@@ -519,22 +519,7 @@ describe('command palette', () => {
     await waitFor(() => expect(useStore.getState().route.name).toBe('run'))
   })
 
-  it('opens the launch dialog on Swarm from New swarm', async () => {
-    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
-    open()
-
-    fireEvent.click(await screen.findByText('New swarm…'))
-    expect(await screen.findByRole('dialog', { name: 'New swarm' })).toBeDefined()
-    expect(screen.getByLabelText('Objective')).toBeDefined()
-  })
-
-  it('offers New swarm only where the gateway carries mission.create', async () => {
-    open()
-    await screen.findByText('New run…')
-    expect(screen.queryByText('New swarm…')).toBeNull()
-  })
-
-  it('hides New swarm from a role that cannot launch', async () => {
+  it('hides New run from a role that cannot launch', async () => {
     useStore.setState({
       capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
       info: { ...serverInfo, member: vera },
@@ -544,7 +529,7 @@ describe('command palette', () => {
     })
     open()
     await screen.findByText('Open the board')
-    expect(screen.queryByText('New swarm…')).toBeNull()
+    expect(screen.queryByText('New run…')).toBeNull()
   })
 
   it('offers member-registered agents in the launch harness dropdown', async () => {

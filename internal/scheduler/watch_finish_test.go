@@ -38,9 +38,6 @@ func TestWatchAnnouncesAReportedSuccessOnceThroughItsReview(t *testing.T) {
 
 	svc, err := watch.New(watch.Config{
 		Store: e.db, Bus: bus, Runs: e.sched, Head: log.LastSeq, Debounce: 20 * time.Millisecond, Tick: 50 * time.Millisecond,
-		Swarm: func(context.Context, *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-			return nil, "", nil
-		},
 	})
 	if err != nil {
 		t.Fatal(err)

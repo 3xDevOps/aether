@@ -233,7 +233,7 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
   const ownSession = owner?.control_session_id === sessions.current[activeControlKey]
   const abandoned = owner !== null && !ownSession && !owner.connected && owner.kind === 'member' && owner.member_id === self.id
   const controlledByOther = owner !== null && !ownSession && !abandoned
-  const typeToControl = shells.implicitControl && processRunning && !controlledByOther && dock.refusedMessage === null
+  const typeToControl = processRunning && !controlledByOther && dock.refusedMessage === null
   // A shell tab is one session shared by everyone on that tab, so a phone
   // follows it for the same reason it follows the agent's terminal.
   const phone = useMediaQuery(phoneScreen)
@@ -617,11 +617,9 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
   const notice = dock.refusedMessage ?? error ?? captureMessage ??
     (activeProcess && !processRunning
       ? `This shell ${activeProcess.process.state}${activeProcess.process.exit_code == null ? '' : ` with code ${activeProcess.process.exit_code}`}. ${activeProcess.process.reason ?? ''} Nothing reruns it; close it or open a new shell.`
-      : !shells.implicitControl && !activeHasControl && !controlledByOther
-        ? 'Take control to type. This run is a swarm worker: taking control keeps the swarm from messaging its agent until you select Release control on the swarm page.'
-        : processRunning && !activeHasControl && controlledBy && mobile
-          ? `${controlledBy} controls this shell.`
-          : null)
+      : processRunning && !activeHasControl && controlledBy && mobile
+        ? `${controlledBy} controls this shell.`
+        : null)
 
   return (
     <>

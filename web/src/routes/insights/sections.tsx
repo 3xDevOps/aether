@@ -30,22 +30,17 @@ function fraction(count: InsightsSuccessCount, unit: string): string {
 }
 
 export function Tiles({ result, agentNames }: { result: InsightsResult; agentNames: Record<string, string> }) {
-  const { swarms, success, outcomes, cost } = result
-  const rate = percent(success.runs.succeeded + success.swarms.succeeded, success.runs.finished + success.swarms.finished)
+  const { success, outcomes, cost } = result
+  const rate = percent(success.runs.succeeded, success.runs.finished)
   const top = cost.by_agent[0]
   return (
     <div className="@container">
-      <div className="grid grid-cols-1 gap-3 @min-[30rem]:grid-cols-2 @min-[64rem]:grid-cols-4">
-        <StatTile label="Runs / swarms completed" value={`${plural(outcomes.runs.done, 'run')} / ${plural(outcomes.swarms.done, 'swarm')}`}>
+      <div className="grid grid-cols-1 gap-3 @min-[30rem]:grid-cols-2 @min-[64rem]:grid-cols-3">
+        <StatTile label="Runs completed" value={plural(outcomes.runs.done, 'run')}>
           <span>{plural(outcomes.runs.failed, 'run')} failed, {plural(outcomes.runs.abandoned, 'run')} abandoned</span>
-          <span>{plural(outcomes.swarms.failed, 'swarm')} failed, {plural(outcomes.swarms.abandoned, 'swarm')} abandoned</span>
         </StatTile>
         <StatTile label="Success rate" value={rate === null ? '—' : `${rate}%`}>
-          <span>Runs: {fraction(success.runs, 'run')}</span>
-          <span>Swarms: {fraction(success.swarms, 'swarm')}</span>
-        </StatTile>
-        <StatTile label="Swarm tasks accepted" value={swarms.tasks_accepted.toLocaleString()}>
-          <span>{plural(swarms.agents, 'agent')} in swarms started in the last 7 days</span>
+          <span>{fraction(success.runs, 'run')}</span>
         </StatTile>
         <StatTile label="Total tokens used" value={tokens(cost.total_tokens)}>
           {top && cost.total_tokens > 0 ? (
@@ -78,7 +73,7 @@ export function StatsSection({
     <Section title={title}>
       {load.kind === 'loading' && skeleton && (
         <div aria-hidden className="@container flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3 @min-[64rem]:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 @min-[64rem]:grid-cols-3">
             {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-28 rounded-panel" />)}
           </div>
           <Skeleton className="h-52" />

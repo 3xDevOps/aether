@@ -1,6 +1,5 @@
 import { memo, useState } from 'react'
 import { ArrowRight, CircleHelp, ClipboardCheck, type LucideIcon, MessageSquare, Reply } from '@/components/icons'
-import { useRunHandle } from '@/components/messages/handles'
 import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { plainReason } from '@/lib/reasons'
@@ -10,7 +9,7 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
-/** Overrides a participant's handle; undefined keeps it. */
+/** Overrides a participant's label; undefined keeps it. */
 export type ParticipantLabel = (runID: string, run: RunRecord | undefined) => string | undefined
 
 const kinds: Record<RunMessageKind, { icon: LucideIcon; word: string }> = {
@@ -36,9 +35,8 @@ function Participant({ runID, label }: { runID: string; label?: ParticipantLabel
   const run = useStore((s) => s.runs[runID])
   const navigate = useStore((s) => s.navigate)
   const open = useStore((s) => s.route.name === 'run' && s.route.params.runId === runID)
-  const handle = useRunHandle(runID, run)
-  const name = label?.(runID, run) ?? handle?.name ?? (run && runLabel(run))
-  const title = handle?.task ? `${handle.name}: ${handle.task}` : run ? runLabel(run) : name
+  const name = label?.(runID, run) ?? (run && runLabel(run))
+  const title = run ? runLabel(run) : name
   if (!name) return <span className="text-ui text-muted">Unknown run</span>
   if (open) return <span className="max-w-64 min-w-0 shrink truncate text-ui text-muted" title={title}>{name}</span>
   return (

@@ -11,7 +11,7 @@ describe('insights model', () => {
     expect(weekRange(new Date(2026, 9, 16, 23, 59, 59))).toEqual({ from: new Date(2026, 9, 10), to: new Date(2026, 9, 17) })
   })
 
-  test('100% means every finished run or swarm succeeded', () => {
+  test('100% means every finished run succeeded', () => {
     expect(percent(199, 200)).toBe(99)
     expect(percent(2, 2)).toBe(100)
     expect(percent(99_999, 100_000)).toBe(99)
@@ -27,14 +27,13 @@ describe('insights model', () => {
   })
 
   test('a team day splits each outcome by the members who have some', () => {
-    const days = chartDays(teamInsights(), 'runs')
+    const days = chartDays(teamInsights())
     expect(days).toHaveLength(7)
     expect(days[5].counts).toEqual({ done: 7, failed: 2, abandoned: 0 })
     expect(days[5].members.done.map((m) => [m.name, m.count])).toEqual([['Alice', 5], ['Bob', 2]])
     expect(days[5].members.abandoned).toEqual([])
     expect(chartMax(days)).toBe(7)
-    expect(dayWords(days[5], 'runs')).toBe('Wed, Oct 14: runs 7 done (Alice 5, Bob 2), 2 failed (Alice 1, Bob 1), 0 abandoned')
-    expect(chartDays(teamInsights(), 'swarms')[6].counts).toEqual({ done: 1, failed: 0, abandoned: 1 })
+    expect(dayWords(days[5])).toBe('Wed, Oct 14: runs 7 done (Alice 5, Bob 2), 2 failed (Alice 1, Bob 1), 0 abandoned')
   })
 
   test('members get two-letter tags, numbered when they collide', () => {

@@ -360,7 +360,7 @@ function lane(sources: TraceSources, start: number): LaneSegment[] | undefined {
 
 const workersFoldAbove = 8
 
-/** The span tree of an Enhanced run: the run, its turns, their tool calls, waits and subagents, and an integrator's workers. */
+/** The span tree of an Enhanced run: the run, its turns, their tool calls, waits and subagents, and its child runs. */
 export function deriveTrace(sources: TraceSources): Span {
   const { turns, agents, live } = sources
   const byTurn = new Map<number, Span[]>()

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 // These mirror the scheduler's reasons: acp*Reason in
@@ -38,7 +37,7 @@ const (
 // need is one reason a run waits on member. key identifies the standing
 // state, so the same one is announced once. since is when the run entered a
 // standing need, zero for a request. answer is the id of the request a
-// request need waits on. mission is the swarm of a swarm's need.
+// request need waits on.
 type need struct {
 	key     string
 	body    string
@@ -46,42 +45,36 @@ type need struct {
 	since   time.Time
 	answer  string
 	member  domain.MemberID
-	mission domain.MissionID
 }
 
 // needOf is the owner's rows of the dashboard's Needs you table
 // (web/src/lib/needs-you.ts), in its order, from what the server knows about
-// the run alone. A swarm worker's integrator answers for it, so a worker
-// counts only for a sudo request, which only its owner or an admin may
-// allow, or when it reports itself blocked (domain.Run.NeedsAttention).
+// the run alone.
 func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need {
 	if paused {
 		return nil
 	}
-	worker := run.MissionRole == "worker"
 	background := run.Mode == domain.LaunchHeadless
 	for i := range inputs {
 		if inputs[i].SessionID == domain.SudoSessionID {
 			return &need{key: inputKey(&inputs[i]), body: "Permission requested", urgency: urgencyHigh, answer: inputs[i].ID}
 		}
 	}
-	if !worker {
-		if request := firstInput(inputs, "permission"); request != nil {
-			body := "Permission: answer in the terminal"
-			if run.ACP {
-				body = "Permission requested"
-			}
-			return &need{key: inputKey(request), body: body, urgency: urgencyHigh, answer: request.ID}
+	if request := firstInput(inputs, "permission"); request != nil {
+		body := "Permission: answer in the terminal"
+		if run.ACP {
+			body = "Permission requested"
 		}
-		if request := firstInput(inputs, "question", "form", "extension_ui"); request != nil && !background {
-			body := "Question: answer in the terminal"
-			if run.ACP {
-				body = "Question from the agent"
-			}
-			return &need{key: inputKey(request), body: body, urgency: urgencyHigh, answer: request.ID}
-		}
+		return &need{key: inputKey(request), body: body, urgency: urgencyHigh, answer: request.ID}
 	}
-	body := statusBody(run, worker)
+	if request := firstInput(inputs, "question", "form", "extension_ui"); request != nil && !background {
+		body := "Question: answer in the terminal"
+		if run.ACP {
+			body = "Question from the agent"
+		}
+		return &need{key: inputKey(request), body: body, urgency: urgencyHigh, answer: request.ID}
+	}
+	body := statusBody(run)
 	if body == "" {
 		return nil
 	}
@@ -95,28 +88,16 @@ func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need
 	return n
 }
 
-// swarmNeed is a swarm row of the dashboard's Needs you table as a need of
-// human. Each question is a need of its own.
-func swarmNeed(item *protocol.AttentionItem, human domain.MemberID) *need {
-	key := item.Kind
-	if item.Message != nil {
-		key += ":" + item.Message.ID
-	}
-	since, _ := time.Parse(time.RFC3339Nano, item.Since)
-	return &need{key: key, body: clip(item.Reason, maxBodyRunes), urgency: urgencyHigh, since: since,
-		member: human, mission: domain.MissionID(item.MissionID)}
-}
-
 func AttentionBody(run *domain.Run) string {
-	return clip(statusBody(run, run.MissionRole == "worker"), maxBodyRunes)
+	return clip(statusBody(run), maxBodyRunes)
 }
 
 // statusBody announces a run only when it needs a member
 // (domain.Run.NeedsAttention) or failed with a result nobody has seen. A
 // success put off for later or accepted, waiting and working never do.
-func statusBody(run *domain.Run, worker bool) string {
+func statusBody(run *domain.Run) string {
 	if !run.NeedsAttention(false) {
-		if worker || !run.OutcomeUnseen || run.Status != domain.RunFailed {
+		if !run.OutcomeUnseen || run.Status != domain.RunFailed {
 			return ""
 		}
 		return "Failed, review the result"
@@ -124,9 +105,6 @@ func statusBody(run *domain.Run, worker bool) string {
 	switch run.Activity {
 	case domain.ActivityNeedsYou:
 		if rest, ok := strings.CutPrefix(run.Reason, domain.BlockedReasonPrefix); ok {
-			if worker {
-				return "Worker blocked: " + rest
-			}
 			return "Blocked: " + rest
 		}
 		if rest, ok := strings.CutPrefix(run.Reason, needsInputPrefix); ok {

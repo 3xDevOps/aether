@@ -24,9 +24,9 @@ const (
 func init() {
 	register(command{
 		name:    "changes",
-		short:   "show run and swarm changes since a cursor",
-		usage:   "aether changes [--since <cursor>] [--run <run-id> | --swarm <swarm-id> | --workspace <name>] [--kinds <kinds>] [--limit <n>] [--follow]",
-		example: "aether changes --swarm mis-gzy6wgdnky --kinds reports,swarm --follow",
+		short:   "show run changes since a cursor",
+		usage:   "aether changes [--since <cursor>] [--run <run-id> | --workspace <name>] [--kinds <kinds>] [--limit <n>] [--follow]",
+		example: "aether changes --run run-d6ay38tj8j --kinds reports --follow",
 		flags:   true,
 		run:     runChanges,
 	})
@@ -36,9 +36,8 @@ func runChanges(args []string) error {
 	fs := newFlagSet("changes")
 	since := fs.String("since", "", "cursor printed by an earlier call (default: the newest changes)")
 	run := fs.String("run", "", "only changes for this run")
-	swarm := fs.String("swarm", "", "only changes for this swarm's runs and the swarm itself")
 	workspace := fs.String("workspace", "", "only changes in this workspace (ID or name)")
-	kinds := fs.String("kinds", "", "comma-separated: status,reports,messages,pr,swarm,lifecycle")
+	kinds := fs.String("kinds", "", "comma-separated: status,reports,messages,pr,lifecycle")
 	limit := fs.Int("limit", changesDefaultLimit, "changes per request, at most 100; the command reads every page")
 	follow := fs.Bool("follow", false, "keep polling for new changes until interrupted")
 	if err := fs.Parse(args); err != nil {
@@ -48,7 +47,7 @@ func runChanges(args []string) error {
 		return errors.New("usage: aether changes [flags]; name the run with --run")
 	}
 	return withControl(func(c *protocol.Client) error {
-		params := protocol.ChangesListParams{Cursor: *since, RunID: *run, MissionID: *swarm, Kinds: splitTypes(*kinds), Limit: *limit}
+		params := protocol.ChangesListParams{Cursor: *since, RunID: *run, Kinds: splitTypes(*kinds), Limit: *limit}
 		if *workspace != "" {
 			var wl protocol.WorkspaceListResult
 			if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &wl); err != nil {
@@ -115,7 +114,7 @@ func runChanges(args []string) error {
 // workspace by ID so it still resolves after the workspace is deleted.
 func changesResume(p protocol.ChangesListParams) string {
 	resume := []string{"aether", "changes", "--since=" + p.Cursor}
-	for _, f := range [][2]string{{"run", p.RunID}, {"swarm", p.MissionID}, {"workspace", p.WorkspaceID}, {"kinds", strings.Join(p.Kinds, ",")}} {
+	for _, f := range [][2]string{{"run", p.RunID}, {"workspace", p.WorkspaceID}, {"kinds", strings.Join(p.Kinds, ",")}} {
 		if f[1] != "" {
 			resume = append(resume, "--"+f[0]+"="+shellquote.Quote(f[1]))
 		}
@@ -151,15 +150,10 @@ func changeDetail(ch protocol.Change) string {
 		detail = fmt.Sprintf("%s -> %s · %s", ch.Message.FromRunID, ch.Message.ToRunID, ch.Message.Kind)
 	case ch.PR != nil:
 		detail = fmt.Sprintf("#%d %s", ch.PR.Number, ch.PR.State)
-	case ch.Swarm != nil:
-		detail = fmt.Sprintf("%s %s %s", ch.MissionID, ch.Swarm.Change, ch.Swarm.TaskID)
 	case ch.Lifecycle != nil:
 		detail = ch.Lifecycle.Action
-		switch ch.Lifecycle.Action {
-		case "workspace-deleted":
+		if ch.Lifecycle.Action == "workspace-deleted" {
 			detail += " " + ch.WorkspaceID
-		case "swarm-deleted":
-			detail += " " + ch.MissionID
 		}
 		if ch.Lifecycle.ToMemberID != "" {
 			detail += " to " + ch.Lifecycle.ToMemberID

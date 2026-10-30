@@ -80,7 +80,7 @@ rm -rf "$adapter_dir"
 ```
 
 It calls `aether-internal hook generic context` and prints only Aether's own
-guidance: an instruction to read the inbox, plus any overlap or swarm notes. It
+guidance: an instruction to read the inbox, plus any overlap notes. It
 prints nothing when there is no mail. Peer message bodies are never in the output.
 They stay in the inbox as attributed data.
 
@@ -149,7 +149,7 @@ The receiver follows these rules:
 - A human Stop stops the receiver until the host's documented user-resume event.
 - Do not wake during an approval wait or a busy turn. Wait for successful
   settlement, then start the next check with `wait_seconds: 0`.
-- The server decides eligibility (protection, takeover, swarm state). A hold the
+- The server decides eligibility (protection, takeover). A hold the
   server applies later cannot revoke a wake it already accepted.
 - A restart can cause one duplicate hint. It must not lose mail or acknowledge it.
 

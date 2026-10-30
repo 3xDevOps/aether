@@ -1,6 +1,6 @@
 package protocol
 
-// MethodChangesList pages the meaningful run and swarm changes a member can
+// MethodChangesList pages the meaningful run changes a member can
 // see, from a cursor into the server's event log.
 const MethodChangesList = "changes.list"
 
@@ -11,19 +11,17 @@ const (
 	ChangeKindReports   = "reports"
 	ChangeKindMessages  = "messages"
 	ChangeKindPR        = "pr"
-	ChangeKindSwarm     = "swarm"
 	ChangeKindLifecycle = "lifecycle"
 )
 
 // ChangesListParams selects one page of changes. Cursor is the NextCursor
 // of an earlier page; without it the call returns the newest Limit
-// changes. WorkspaceID, RunID and MissionID narrow the feed and combine;
+// changes. WorkspaceID and RunID narrow the feed and combine;
 // Kinds empty means every kind. Limit zero means 20; at most 100.
 type ChangesListParams struct {
 	Cursor      string   `json:"cursor,omitempty"`
 	WorkspaceID string   `json:"workspace_id,omitempty"`
 	RunID       string   `json:"run_id,omitempty"`
-	MissionID   string   `json:"mission_id,omitempty"`
 	Kinds       []string `json:"kinds,omitempty"`
 	Limit       int      `json:"limit,omitempty"`
 }
@@ -58,14 +56,12 @@ type Change struct {
 	Type        string           `json:"type"`
 	WorkspaceID string           `json:"workspace_id"`
 	RunID       string           `json:"run_id,omitempty"`
-	MissionID   string           `json:"mission_id,omitempty"`
 	ActorID     string           `json:"actor,omitempty"`
 	Status      *ChangeStatus    `json:"status,omitempty"`
 	Input       *ChangeInput     `json:"input,omitempty"`
 	Report      *ChangeReport    `json:"report,omitempty"`
 	Message     *ChangeMessage   `json:"message,omitempty"`
 	PR          *ChangePR        `json:"pr,omitempty"`
-	Swarm       *ChangeSwarm     `json:"swarm,omitempty"`
 	Lifecycle   *ChangeLifecycle `json:"lifecycle,omitempty"`
 	Untrusted   *ChangeUntrusted `json:"untrusted,omitempty"`
 }
@@ -110,16 +106,8 @@ type ChangePR struct {
 	Merged bool   `json:"merged,omitempty"`
 }
 
-// ChangeSwarm is a swarm change: Change and TaskID for mission.changed. A
-// deleted swarm is a lifecycle change.
-type ChangeSwarm struct {
-	Change    string `json:"change,omitempty"`
-	TaskID    string `json:"task_id,omitempty"`
-	AttemptID string `json:"attempt_id,omitempty"`
-}
-
 // ChangeLifecycle is a run being archived, restored, deleted, or handed
-// off, or its swarm or workspace being deleted; ToMemberID names a
+// off, or its workspace being deleted; ToMemberID names a
 // handoff's new owner.
 type ChangeLifecycle struct {
 	Action     string `json:"action"`

@@ -132,7 +132,7 @@ type Config struct {
 	// Config provides authenticated access to the caller's persistent
 	// harness configuration roots. It never accepts a member selector.
 	Config ConfigBackend
-	// AuthorizationMu is shared with mission admission so account and role
+	// AuthorizationMu is shared with child run admission so account and role
 	// revocation cannot race a run launch. New allocates one when omitted.
 	AuthorizationMu *sync.Mutex
 	// Services carries the team-feature service seams; see services.go.
@@ -248,12 +248,6 @@ type Server struct {
 	// caps claimRunSSH applies.
 	runSSHMu    sync.Mutex
 	runSSHConns map[domain.RunID]map[domain.MemberID]int
-
-	// holds counts the live sessions behind each swarm worker's durable
-	// hold (see holdUntil); holdsStop ends their watchers on Close.
-	holdsMu   sync.Mutex
-	holds     map[domain.RunID]map[<-chan struct{}]struct{}
-	holdsStop chan struct{}
 }
 
 // New builds a server, loading (or generating) the host key.
@@ -313,8 +307,6 @@ func New(cfg Config) (*Server, error) {
 		controlFrames:    make(map[domain.MemberID]struct{}),
 		controlAttaches:  make(map[string]map[string]controlAttach),
 		runSSHConns:      make(map[domain.RunID]map[domain.MemberID]int),
-		holds:            make(map[domain.RunID]map[<-chan struct{}]struct{}),
-		holdsStop:        make(chan struct{}),
 		baseCtx:          context.Background(),
 	}
 	sc := &ssh.ServerConfig{PublicKeyCallback: s.authenticate}
@@ -555,7 +547,6 @@ func (s *Server) Close() error {
 	if !s.closed {
 		s.closed = true
 		cancel = s.baseCancel
-		close(s.holdsStop)
 		if s.ln != nil {
 			_ = s.ln.Close()
 		}

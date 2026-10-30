@@ -223,7 +223,7 @@ type validatingRuns struct {
 	*fakeRuns
 }
 
-func (validatingRuns) ValidateMissionLaunch(_ context.Context, _, _ domain.MemberID, harness string, _ domain.LaunchMode, model, effort string) error {
+func (validatingRuns) ValidateLaunch(_ context.Context, _, _ domain.MemberID, harness string, _ domain.LaunchMode, model, effort string) error {
 	if harness == "fake" && model != "" {
 		return fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harness)
 	}

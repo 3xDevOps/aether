@@ -159,8 +159,24 @@ func (e *supervised) asksMember() bool {
 	return false
 }
 
+// childWait is what a parked run's child runs still owe it: how many are
+// unfinished and how many unread messages they sent since its turn started.
+type childWait struct {
+	children, unread int
+}
+
+func (w childWait) live() bool { return w.children > 0 || w.unread > 0 }
+
+func (s *Scheduler) childWait(ctx context.Context, run domain.RunID, since time.Time) (childWait, error) {
+	children, unread, err := s.cfg.Store.UnfinishedChildren(ctx, run, since)
+	if err != nil {
+		return childWait{}, fmt.Errorf("scheduler: read the child runs of %s: %w", run, err)
+	}
+	return childWait{children, unread}, nil
+}
+
 // derived is a live run's activity, the public reason it shows, and what
-// chose the activity. workers marks reason as the workers reason Aether
+// chose the activity. workers marks reason as the child-runs reason Aether
 // wrote. wait is the evidence behind a reported wait the run shows.
 type derived struct {
 	activity domain.RunActivity
@@ -216,29 +232,25 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 	inferred, workers := false, false
 	if parked && entry != nil && !stalled && !f.disconnected && !f.human && !f.failed && !f.finished &&
 		!f.waitingAgents && !f.waitingCI && !f.waitingTools {
-		swarm, err := s.cfg.Store.IntegratorWaiting(ctx, run, entry.turnStartedAt)
+		waiting, err := s.childWait(ctx, run, entry.turnStartedAt)
 		if err != nil {
-			return derived{}, fmt.Errorf("scheduler: read the integrator's workers: %w", err)
+			return derived{}, err
 		}
-		inferred = swarm.Live()
+		inferred = waiting.live()
 		f.waitingAgents = inferred
 		ours := entry.workersReason != "" && written == entry.workersReason
 		switch {
 		case inferred && (written == turnEndedReason || ours):
 			workers = true
 			switch {
-			case swarm.Workers == 0 && swarm.Children == 1:
+			case waiting.children == 1:
 				public = "waiting for 1 child run"
-			case swarm.Workers == 0 && swarm.Children > 1:
-				public = fmt.Sprintf("waiting for %d child runs", swarm.Children)
-			case swarm.Workers == 1:
-				public = "waiting for 1 worker"
-			case swarm.Workers > 1:
-				public = fmt.Sprintf("waiting for %d workers", swarm.Workers)
-			case swarm.Unread == 1:
-				public = "1 unread worker message"
+			case waiting.children > 1:
+				public = fmt.Sprintf("waiting for %d child runs", waiting.children)
+			case waiting.unread == 1:
+				public = "1 unread child message"
 			default:
-				public = fmt.Sprintf("%d unread worker messages", swarm.Unread)
+				public = fmt.Sprintf("%d unread child messages", waiting.unread)
 			}
 		case !inferred && ours:
 			public = turnEndedReason
@@ -283,14 +295,14 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 	if entry != nil && !entry.paused && waiting != domain.ActivityAnswered && waiting == d.activity {
 		wait, stranded := s.runWaitLocked(ctx, entry)
 		d.wait = &wait
-		// A live swarm or background task can still wake the agent, so a
+		// A live child run or background task can still wake the agent, so a
 		// stranded wait stays quiet until it ends.
 		if stranded != "" && parked && !heldByTasks(entry.agentReport) {
-			swarm, err := s.cfg.Store.IntegratorWaiting(ctx, run, entry.turnStartedAt)
+			waiting, err := s.childWait(ctx, run, entry.turnStartedAt)
 			if err != nil {
-				return derived{}, fmt.Errorf("scheduler: read the integrator's workers: %w", err)
+				return derived{}, err
 			}
-			if !swarm.Live() {
+			if !waiting.live() {
 				d.activity, d.cause, d.reason = domain.ActivityNeedsYou, events.CauseWaitFault, waitBrokenReasonPrefix+stranded
 			}
 		}
@@ -323,8 +335,8 @@ func (s *Scheduler) refreshActivityLocked(ctx context.Context, entry *supervised
 }
 
 // refreshActivities recomputes every live run's activity: after recovery,
-// and on each poll for facts no report announces, such as an integrator's
-// last worker finishing.
+// and on each poll for facts no report announces, such as a parent's last child
+// run finishing.
 func (s *Scheduler) refreshActivities(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -337,7 +349,7 @@ func (s *Scheduler) refreshActivities(ctx context.Context) {
 
 // waitExpires reports whether a parked run shows a wait the agent reported
 // that goes stale after waitedFactor stall thresholds with no activity and
-// has not yet. A wait on its swarm or background tasks follows those
+// has not yet. A wait on its child runs or background tasks follows those
 // (refreshActivities). Caller holds s.mu.
 func (e *supervised) waitExpires() bool {
 	activity, stale, _ := cutWaiting(e.idleReason)
@@ -346,7 +358,7 @@ func (e *supervised) waitExpires() bool {
 
 // expireWaitLocked marks a run's wait stale (waitExpires) once nothing
 // happened for waitedFactor stall thresholds (checkStalls), unless its
-// background tasks or swarm are still live. The reason keeps the agent's
+// background tasks or child runs are still live. The reason keeps the agent's
 // summary; a CI or process wait keeps its state, any other shows waiting.
 // Caller holds s.mu.
 func (s *Scheduler) expireWaitLocked(ctx context.Context, entry *supervised, quiet time.Duration) error {
@@ -356,11 +368,11 @@ func (s *Scheduler) expireWaitLocked(ctx context.Context, entry *supervised, qui
 	if wait, _ := s.runWaitLocked(ctx, entry); wait.Kind != domain.WaitUnverified {
 		return nil
 	}
-	swarm, err := s.cfg.Store.IntegratorWaiting(ctx, entry.runID, entry.turnStartedAt)
+	waiting, err := s.childWait(ctx, entry.runID, entry.turnStartedAt)
 	if err != nil {
-		return fmt.Errorf("scheduler: read the integrator's workers: %w", err)
+		return err
 	}
-	if swarm.Live() {
+	if waiting.live() {
 		return nil
 	}
 	reason := waitedReasonPrefix + span(quiet)

@@ -378,19 +378,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				req.RunID, member, req.ControlSessionID, req.ControlGeneration,
 				func() error {
 					admissionErr = admit()
-					if admissionErr != nil {
-						return admissionErr
-					}
-					// Release the durable mission hold only after the
-					// replacement has been admitted. A failed replacement
-					// therefore leaves both the old lease and hold intact.
-					if mission := s.cfg.Services.MissionControl; mission != nil {
-						if err := mission.Release(ctx, run.ID, member); err != nil {
-							admissionErr = err
-							return err
-						}
-					}
-					return nil
+					return admissionErr
 				},
 			); err != nil {
 				if admissionErr == nil {
@@ -412,10 +400,6 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			return nil
 		}
 	} else if wantsControl && s.cfg.Control != nil {
-		// Install the durable mission hold only after the PTY host has
-		// admitted this writer. Both that admission and the hold mutation
-		// remain under the worker's control lock, so a failed attach cannot
-		// leave an orchestration fence behind.
 		commit = func(admit func() error) error {
 			leaseMu.Lock()
 			lease := controlLease
@@ -432,21 +416,11 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				return controlCommitErr
 			}
 			var admissionErr error
-			s.holdUntil(run, lease.Revoked)
 			err := s.cfg.Control.AdmitMember(
 				req.RunID, member, lease.SessionID, lease.Generation,
 				func() error {
 					admissionErr = admit()
-					if admissionErr != nil {
-						return admissionErr
-					}
-					if mission := s.cfg.Services.MissionControl; mission != nil {
-						if err := mission.Takeover(ctx, run.ID, member); err != nil {
-							controlCommitErr = err
-							return err
-						}
-					}
-					return nil
+					return admissionErr
 				},
 			)
 			if err != nil {
@@ -586,15 +560,6 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				if err := applyControlReady(false); err != nil {
 					return err
 				}
-				if mission := s.cfg.Services.MissionControl; mission != nil {
-					if err := mission.Takeover(ctx, run.ID, member); err != nil {
-						rollbackErr := applyControlReady(controlLease == nil)
-						if rollbackErr != nil {
-							revoke(rollbackErr)
-						}
-						return errors.Join(err, rollbackErr)
-					}
-				}
 				return nil
 			}
 			var acquired control.Snapshot
@@ -616,7 +581,6 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				leaseMu.Unlock()
 				return err
 			}
-			s.holdUntil(run, acquired.Revoked)
 			lease := &attachControlLease{Snapshot: acquired, unacknowledged: true}
 			fence := makeInteractiveFence(lease)
 			controlLease = lease
@@ -739,21 +703,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			}
 			leaseMu.Lock()
 			err := s.cfg.Control.ReleaseAdmitted(req.RunID, member, req.ControlSessionID, ctl.ControlGeneration, func() error {
-				if err := applyControlReady(true); err != nil {
-					return err
-				}
-				if mission := s.cfg.Services.MissionControl; mission != nil {
-					if err := mission.Release(ctx, run.ID, member); err != nil {
-						// ReleaseAdmitted keeps the lease on failure; keep
-						// its live writer ready too, or close it fail-closed.
-						rollbackErr := applyControlReady(false)
-						if rollbackErr != nil {
-							revoke(rollbackErr)
-						}
-						return errors.Join(err, rollbackErr)
-					}
-				}
-				return nil
+				return applyControlReady(true)
 			})
 			if err != nil {
 				record.Code, record.Error = attachControlError(err)
@@ -796,8 +746,6 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			return
 		}
 		if conn.okWritten() {
-			// Disconnect/expiry cleanup must never clear a durable mission
-			// takeover; only the explicit Release control commit does that.
 			s.cfg.Control.Disconnect(req.RunID, lease.SessionID, lease.Generation)
 			return
 		}

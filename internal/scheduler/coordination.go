@@ -42,7 +42,7 @@ type Coordinator interface {
 	WriteFiles(run domain.RunID, files map[string][]byte) error
 	Release(run domain.RunID) error
 	WakeIdle(run domain.RunID)
-	EnhancedSessionOpened(ctx context.Context, run domain.RunID)
+	EnhancedSessionOpened(run domain.RunID)
 	ProvisionalReport(ctx context.Context, run domain.RunID, since time.Time, message string) error
 	// RemindReport prompts an idle session the server drives as a mail
 	// wake would, under the same admission.
@@ -50,7 +50,7 @@ type Coordinator interface {
 }
 
 // coordination attaches the run transport and staged binaries. enabled controls
-// conflict/mission admission and lifecycle hooks, not run identity or discovery.
+// conflict admission and lifecycle hooks, not run identity or discovery.
 type coordination struct {
 	svc     Coordinator
 	binDir  string
@@ -95,7 +95,7 @@ func (s *Scheduler) UseCoordination(svc Coordinator, binDir string, enabled ...b
 	}
 }
 
-// RequireCoordination is mission admission, not a transport availability check.
+// RequireCoordination is conflict-coordination admission, not a transport availability check.
 // It never returns a disabled or unconfigured conflict coordinator.
 func (s *Scheduler) RequireCoordination() (Coordinator, error) {
 	c := s.coordinationSeam()
@@ -184,7 +184,7 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 }
 
 func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
-	instructions, err := s.launchInstructions(ctx, run, profile, entry.missionAssigned, native)
+	instructions, err := s.launchInstructions(ctx, run, profile, native)
 	if err != nil {
 		return nil, nil, nil, err
 	}

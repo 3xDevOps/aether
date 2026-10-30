@@ -124,9 +124,13 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		slog.Warn("children: fallback accounts left out of a child launch", "child", c.RunID, "error", excluded)
 	}
 	created := false
+	extras := make([]domain.WorkspaceID, len(p.parent.Extras))
+	for i, repo := range p.parent.Extras {
+		extras[i] = repo.WorkspaceID
+	}
 	_, err = s.cfg.Runs.LaunchWithOptions(ctx, c.WorkspaceID, c.OwnerID, account, c.Task, c.Harness, c.Mode, domain.LaunchOptions{
 		Model: c.Model, Permission: parent.Permission, RequestedAccount: requested, Fallback: c.Fallback, ReservedRunID: c.RunID,
-		FromCommit: c.BaseCommit, FromBranch: c.BaseBranch, Admitted: unlock,
+		FromCommit: c.BaseCommit, FromBranch: c.BaseBranch, ExtraWorkspaces: extras, Admitted: unlock,
 		Created: func(domain.RunID) {
 			created = true
 			if stateErr := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildStarted, "", domain.ChildLaunching); stateErr != nil {

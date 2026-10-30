@@ -5,13 +5,11 @@ import { cn } from '@/lib/utils'
 import { MapNodeCard } from '@/routes/board/map-card'
 import { MapConnectors } from '@/routes/board/map-connectors'
 import { captionHeight, sectionHeader, type MapNode, type MapSection, type MapUnit, type RunMapLayout } from '@/routes/board/map-layout'
-import { phaseWord } from '@/routes/board/run-card'
-import { useStore } from '@/store'
 
 type FoldHandler = (unitKey: string, folded: boolean) => void
 
 // Labels grow by `--map-label-scale` as the camera zooms out, so section and
-// swarm names stay readable over cards too small to read.
+// caption names stay readable over cards too small to read.
 const scaled = (width: number, scale = 'var(--map-label-scale)') => ({ width: `calc(${width}px / ${scale})`, scale })
 // A 20px caption over the 24px shelf gap has room to grow 2.2 times before it reaches the cards above.
 const captionScale = 'min(var(--map-label-scale), 2.2)'
@@ -68,15 +66,8 @@ function Unit({ unit, section, agentNames, onFold }: {
   agentNames: Record<string, string>
   onFold: FoldHandler
 }) {
-  const mission = useStore((s) => (unit.missionId ? s.missions[unit.missionId] : undefined))
-  const childRuns = `${unit.workers} ${unit.workers === 1 ? 'child run' : 'child runs'}`
-  const caption = unit.kind === 'orphan'
-    ? 'Integrator not visible'
-    : unit.kind === 'family' ? childRuns
-      : mission ? `${mission.objective} · ${phaseWord[mission.phase]}` : 'Swarm'
-  const workersId = `map-workers-${unit.key}`
-  const root = unit.kind === 'orphan' ? undefined : unit.nodes[0]
-  const workers = root ? unit.nodes.slice(1) : unit.nodes
+  const childRuns = `${unit.childRuns} ${unit.childRuns === 1 ? 'child run' : 'child runs'}`
+  const childrenId = `map-children-${unit.key}`
   const node = (entry: MapNode) => (
     <div
       key={entry.key}
@@ -90,13 +81,12 @@ function Unit({ unit, section, agentNames, onFold }: {
         card={entry.card}
         agentName={agentNames[entry.card.run.harness]}
         showOwner={entry.showOwner}
-        fold={entry.role === 'integrator' && unit.workers > 0 ? {
+        fold={entry.role === 'parent' && unit.childRuns > 0 ? {
           unitKey: unit.key,
-          workers: unit.workers,
+          childRuns: unit.childRuns,
           hidden: unit.hidden.length,
           hiddenNeedsYou: unit.hidden.filter((card) => card.group === 'needs-you').length,
-          controls: workersId,
-          noun: unit.kind === 'family' ? 'child runs' : 'workers',
+          controls: childrenId,
           onFold,
         } : undefined}
       />
@@ -107,24 +97,20 @@ function Unit({ unit, section, agentNames, onFold }: {
       data-map-unit
       data-glide-key={`u:${unit.key}`}
       role="group"
-      aria-label={unit.kind === 'standalone' ? 'Standalone run'
-        : unit.kind === 'orphan' ? `Workers, integrator not visible, ${unit.nodes.length} ${unit.nodes.length === 1 ? 'worker' : 'workers'}`
-          : unit.kind === 'family' ? `Run with child runs: ${runLabel(unit.nodes[0].card.run)}, ${childRuns}`
-          : `Swarm: ${mission?.objective ?? unit.missionId}, ${unit.workers} ${unit.workers === 1 ? 'worker' : 'workers'}`}
+      aria-label={unit.kind === 'standalone' ? 'Standalone run' : `Run with child runs: ${runLabel(unit.nodes[0].card.run)}, ${childRuns}`}
       className="absolute"
       style={{ left: unit.x - section.x, top: unit.y - section.y, width: unit.width, height: unit.height }}
     >
       {unit.kind !== 'standalone' && (
         <p
-          title={unit.missionId}
           className="absolute top-0 left-1/2 origin-bottom -translate-x-1/2 truncate rounded-chip bg-chrome px-1 text-center text-ui-sm leading-5 text-muted"
           style={{ height: captionHeight - 8, ...scaled(unit.width, captionScale) }}
         >
-          {caption}
+          {childRuns}
         </p>
       )}
-      {root && node(root)}
-      <div id={workersId}>{workers.map(node)}</div>
+      {node(unit.nodes[0])}
+      <div id={childrenId}>{unit.nodes.slice(1).map(node)}</div>
       <MapConnectors unit={unit} />
     </div>
   )

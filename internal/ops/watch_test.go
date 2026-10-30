@@ -56,12 +56,6 @@ func TestWatchCreate(t *testing.T) {
 			t.Errorf("pr %q sent %s, want target %s", in, got, want)
 		}
 	}
-	f.calls = nil
-	run(t, cs, "aether_watch", map[string]any{"swarm_id": "swarm:mis-1"})
-	if got := f.acted().params; !strings.Contains(got, `{"kind":"mission","mission_id":"mis-1"}`) {
-		t.Errorf("swarm watch sent %s", got)
-	}
-
 	for _, args := range []map[string]any{{}, {"pr": "acme#7"}, {"pr": "https://github.com/acme/shop/issues/7"}, {"run_id": "run-1", "paused": true},
 		{"watch_id": "w-1", "run_id": "run-2"}} {
 		if text, _, failed := try(t, cs, "aether_watch", args); !failed {
@@ -69,21 +63,8 @@ func TestWatchCreate(t *testing.T) {
 		}
 	}
 
-	// Two targets are refused by name rather than one silently winning;
 	// run_id with pr names the run that opened it.
 	f.calls = nil
-	for refusal, args := range map[string]map[string]any{
-		"pass one target, not run_id and swarm_id":        {"run_id": "run-1", "swarm_id": "mis-1"},
-		"pass one target, not pr and swarm_id":            {"pr": "acme/shop#7", "swarm_id": "mis-1"},
-		"pass one target, not pr and run_id and swarm_id": {"pr": "acme/shop#7", "run_id": "run-1", "swarm_id": "mis-1"},
-	} {
-		if text, _, failed := try(t, cs, "aether_watch", args); !failed || !strings.HasPrefix(text, refusal) {
-			t.Errorf("%v = %q, want %q", args, text, refusal)
-		}
-	}
-	if len(called(f, protocol.MethodWatchCreate)) != 0 {
-		t.Fatalf("an ambiguous target reached the server: %+v", f.calls)
-	}
 	run(t, cs, "aether_watch", map[string]any{"pr": "acme/shop#7", "run_id": "run-1"})
 	if got := f.acted().params; !strings.Contains(got, `{"kind":"pr","run_id":"run-1","repo":"acme/shop","number":7}`) {
 		t.Errorf("pr with its run sent %s", got)

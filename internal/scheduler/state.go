@@ -264,8 +264,8 @@ func (s *Scheduler) publishRetentionLocked(run domain.RunID) {
 type finishCause int
 
 const (
-	// causeUnattended is a change no member asked for: an exit, a failure, a
-	// restart, or a swarm completing or stopping its workers.
+	// causeUnattended is a change no member asked for: an exit, a failure or a
+	// restart.
 	causeUnattended finishCause = iota
 	// causeReported is an agent's success or failure report.
 	causeReported
@@ -274,8 +274,7 @@ const (
 )
 
 // memberCause is the cause of a close or kill asked for by actor. CloseRun
-// and Kill carry the member; CompleteMission and CancelMission, the swarm's
-// and its integrator's own endings, carry none.
+// and Kill carry the member.
 func memberCause(actor domain.MemberID) finishCause {
 	if actor == "" {
 		return causeUnattended
@@ -313,7 +312,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	}
 	public, activity := d.reason, d.activity
 	e := s.runs[run]
-	// The workers reason Aether wrote stays its own while the run shows it.
+	// The child-runs reason Aether wrote stays its own while the run shows it.
 	var workersReason string
 	if e != nil {
 		switch {
@@ -414,7 +413,6 @@ type sidecar struct {
 	Mode            domain.LaunchMode `json:"mode,omitempty"`
 	AppServer       bool              `json:"app_server,omitempty"`
 	ServerTurn      bool              `json:"server_turn,omitempty"`
-	MissionAssigned bool              `json:"mission_assigned,omitempty"`
 	Paused          bool              `json:"paused"`
 	KillRequested   bool              `json:"kill_requested"`
 	Retained        bool              `json:"retained,omitempty"`
@@ -502,7 +500,6 @@ func (e *supervised) sidecar() sidecar {
 		Mode:                e.launchMode,
 		AppServer:           e.appServer,
 		ServerTurn:          e.serverTurn,
-		MissionAssigned:     e.missionAssigned,
 		Paused:              e.paused,
 		KillRequested:       e.killRequested,
 		Retained:            e.retained,

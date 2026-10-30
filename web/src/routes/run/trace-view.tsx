@@ -306,11 +306,6 @@ export function TraceView({ run, nav }: { run: RunRecord; nav: RunNavigation }) 
           onErrors={nextError}
         />
         <HistoryNotice run={run} paged={data.paged} />
-        {data.workersError && (
-          <Callout tone="failed" title="Workers could not be read" className="m-2" actions={<Button size="sm" variant="secondary" onClick={data.retryWorkers}>Retry</Button>}>
-            {data.workersError}
-          </Callout>
-        )}
         <div className="relative flex min-h-0 flex-1 flex-col">
           <TraceAxisHeader
             marks={marks}

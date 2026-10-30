@@ -42,7 +42,7 @@ func TestCleanViewContextDropsMalformedFieldsAndTrimsToFit(t *testing.T) {
 	in.OpenFile = &protocol.AssistantViewFile{Kind: "workspace", Path: strings.Repeat("p", maxViewPath)}
 	in.Recent = nil
 	for range maxViewRecent {
-		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), MissionID: strings.Repeat("m", 128), Subagent: strings.Repeat("s", 128)})
+		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), WorkspaceID: strings.Repeat("w", 128), Subagent: strings.Repeat("s", 128)})
 	}
 	got, err = CleanViewContext(in)
 	b, _ := json.Marshal(got)
@@ -195,7 +195,6 @@ func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
 	in := &protocol.AssistantViewContext{Version: 1, Attachments: []protocol.AssistantViewAttachment{
 		{Kind: "check", RunID: "run-1", PR: 42, Repository: "acme/api", Check: "test (ubuntu-latest)"},
 		{Kind: "failure", RunID: "run-1", Failure: "adapter", Seq: 17},
-		{Kind: "task", MissionID: "mis-1", TaskID: "task-1", AttemptID: "att-1"},
 		{Kind: "secret", RunID: "run-1"},
 		{Kind: "run"},
 		{Kind: "pr", RunID: "run 1", PR: -3, Repository: "https://github.com/acme/api", Check: "a\nb", Failure: "Bad Word"},
@@ -210,7 +209,6 @@ func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
 	want := []protocol.AssistantViewAttachment{
 		{Kind: "check", RunID: "run-1", PR: 42, Repository: "acme/api", Check: "test (ubuntu-latest)"},
 		{Kind: "failure", RunID: "run-1", Failure: "adapter", Seq: 17},
-		{Kind: "task", MissionID: "mis-1", TaskID: "task-1", AttemptID: "att-1"},
 		{Kind: "run", RunID: "run-2"},
 		{Kind: "check", RunID: "run-3"},
 		{Kind: "check", RunID: "run-4"},
@@ -236,7 +234,7 @@ func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
 		in.Attachments = append(in.Attachments, protocol.AssistantViewAttachment{Kind: "check", RunID: strings.Repeat("r", 128), Check: strings.Repeat("c", maxViewCheck)})
 	}
 	for range maxViewRecent {
-		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), MissionID: strings.Repeat("m", 128)})
+		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), WorkspaceID: strings.Repeat("w", 128), Subagent: strings.Repeat("s", 128)})
 	}
 	got, err = CleanViewContext(in)
 	b, _ := json.Marshal(got)

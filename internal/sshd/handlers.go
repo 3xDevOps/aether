@@ -52,7 +52,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetDashboardError: dashboardErr,
 		DashboardURL:          dashboardURL,
 		MinClientVersion:      s.minClientVersion(),
-		Features:              []string{protocol.FeatureMultiRepo, protocol.FeatureSwarmRepos, protocol.FeaturePermission},
+		Features:              []string{protocol.FeatureMultiRepo, protocol.FeaturePermission},
 	}, nil
 }
 
@@ -855,7 +855,7 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	}, nil
 }
 
-// ValidateExtraWorkspaces checks the extra_workspace_ids of a run or swarm launch.
+// ValidateExtraWorkspaces checks the extra_workspace_ids of a run launch.
 func ValidateExtraWorkspaces(primary string, extras []string) error {
 	seen := map[string]bool{primary: true}
 	for _, id := range extras {

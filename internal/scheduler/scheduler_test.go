@@ -499,7 +499,7 @@ func TestHeadlessContainerKeepsTheAgentAsTheMainProcess(t *testing.T) {
 	e := newTestEnv(t, nil)
 	run := &domain.Run{ID: "run-headless", Mode: domain.LaunchHeadless}
 	plan := &EnvironmentPlan{Env: map[string]string{}}
-	spec := e.sched.containerSpec(run, e.member, []string{"agent", "--json"}, plan, domain.RunLimits{}, false)
+	spec := e.sched.containerSpec(run, e.member, []string{"agent", "--json"}, plan, domain.RunLimits{})
 	if want := []string{"agent", "--json"}; !slices.Equal(spec.Command, want) {
 		t.Fatalf("headless container command = %v, want %v", spec.Command, want)
 	}
@@ -511,7 +511,7 @@ func TestTUIContainerUsesSafePersistentSupervisor(t *testing.T) {
 	run := &domain.Run{ID: "run-tui", WorkspaceID: e.ws.ID, MemberID: e.member.ID, Mode: domain.LaunchTUI}
 	plan := &EnvironmentPlan{Env: map[string]string{}}
 	argv := []string{"agent", "--task", `$(touch compromised)`}
-	spec := e.sched.containerSpec(run, e.member, argv, plan, domain.RunLimits{}, false)
+	spec := e.sched.containerSpec(run, e.member, argv, plan, domain.RunLimits{})
 	if len(spec.Command) < 5 || spec.Command[0] != "/bin/sh" || spec.Command[1] != "-c" {
 		t.Fatalf("TUI command = %v, want POSIX supervisor", spec.Command)
 	}
@@ -527,31 +527,9 @@ func TestTUIContainerUsesSafePersistentSupervisor(t *testing.T) {
 	}
 	headless := *run
 	headless.Mode = domain.LaunchHeadless
-	headlessSpec := e.sched.containerSpec(&headless, e.member, argv, plan, domain.RunLimits{}, false)
+	headlessSpec := e.sched.containerSpec(&headless, e.member, argv, plan, domain.RunLimits{})
 	if !slices.Equal(headlessSpec.Command, argv) {
 		t.Fatalf("headless argv changed: %v", headlessSpec.Command)
-	}
-}
-
-func TestMissionAssignedHeadlessUsesPersistentSupervisor(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, nil)
-	run := &domain.Run{ID: "run-mission-headless", WorkspaceID: e.ws.ID, MemberID: e.member.ID, Mode: domain.LaunchHeadless}
-	plan := &EnvironmentPlan{Env: map[string]string{}}
-	argv := []string{"agent", "--task", `$(touch compromised)`}
-	spec := e.sched.containerSpec(run, e.member, argv, plan, domain.RunLimits{}, true)
-	if len(spec.Command) < 5 || spec.Command[0] != "/bin/sh" || spec.Command[1] != "-c" {
-		t.Fatalf("mission headless command = %v, want POSIX supervisor", spec.Command)
-	}
-	script := spec.Command[2]
-	if !strings.Contains(script, `"${@}"`) && !strings.Contains(script, `"$@"`) {
-		t.Fatalf("mission headless supervisor does not execute positional argv safely: %q", script)
-	}
-	if !strings.Contains(script, "while :") || !strings.Contains(script, "/bin/bash -l") {
-		t.Fatalf("mission headless supervisor does not keep login shells available: %q", script)
-	}
-	if !slices.Equal(spec.Command[4:], argv) {
-		t.Fatalf("mission headless supervisor argv = %v, want %v", spec.Command[4:], argv)
 	}
 }
 
@@ -1017,7 +995,7 @@ func TestReservedLaunchReplayDoesNotRequireUpstream(t *testing.T) {
 	e.base.err = &gitengine.MirrorError{Kind: gitengine.MirrorErrorOffline}
 	e.base.mu.Unlock()
 	replayed, err := e.sched.LaunchWithOptions(t.Context(), run.WorkspaceID, run.MemberID, run.AccountMember(),
-		run.Task, run.Harness, run.Mode, domain.LaunchOptions{AssignedRunID: run.ID})
+		run.Task, run.Harness, run.Mode, domain.LaunchOptions{ReservedRunID: run.ID})
 	if err != nil {
 		t.Fatalf("replay attempted fresh capture: %v", err)
 	}
@@ -1046,7 +1024,7 @@ func TestReservedLaunchReplayRejectsChangedIdentityOrBase(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := e.sched.LaunchWithOptions(t.Context(), run.WorkspaceID, run.MemberID, run.AccountMember(),
-				tc.task, run.Harness, run.Mode, domain.LaunchOptions{AssignedRunID: run.ID, CachedBase: tc.cached})
+				tc.task, run.Harness, run.Mode, domain.LaunchOptions{ReservedRunID: run.ID, CachedBase: tc.cached})
 			if err == nil || got != nil {
 				t.Fatalf("replay accepted changed %s: %+v, %v", tc.name, got, err)
 			}
@@ -1096,7 +1074,7 @@ func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
 func TestCommandTemplates(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	argv, profile, _, err := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, false, "do it", "", "")
+	argv, profile, _, err := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, "do it", "", "")
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
@@ -1107,7 +1085,7 @@ func TestCommandTemplates(t *testing.T) {
 	if profile.Name != "claude" || len(profile.CredentialPaths) == 0 {
 		t.Fatalf("claude profile = %+v, want registry profile with credential paths", profile)
 	}
-	if _, _, _, codexErr := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "codex", domain.LaunchTUI, false, "x", "", ""); codexErr != nil {
+	if _, _, _, codexErr := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "codex", domain.LaunchTUI, "x", "", ""); codexErr != nil {
 		t.Fatalf("codex tui: %v", codexErr)
 	}
 	// A Config.Harnesses argv override replaces the registry template but
@@ -1115,7 +1093,7 @@ func TestCommandTemplates(t *testing.T) {
 	e2 := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"my-claude", "{task}"}}}
 	})
-	argv, profile, _, err = e2.sched.command(t.Context(), e2.ws.ID, e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, false, "go", "", "")
+	argv, profile, _, err = e2.sched.command(t.Context(), e2.ws.ID, e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, "go", "", "")
 	if err != nil {
 		t.Fatalf("command with override: %v", err)
 	}
@@ -1126,7 +1104,7 @@ func TestCommandTemplates(t *testing.T) {
 		t.Fatalf("override lost registry profile: %+v", profile)
 	}
 	// "custom" ships with no command of its own: it requires an override.
-	if _, _, _, err := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "custom", domain.LaunchTUI, false, "x", "", ""); err == nil {
+	if _, _, _, err := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "custom", domain.LaunchTUI, "x", "", ""); err == nil {
 		t.Fatal("custom without an override accepted")
 	}
 }
@@ -1244,7 +1222,7 @@ func TestContainerSpecNonRootHome(t *testing.T) {
 	e := newTestEnv(t, nil)
 	run := &domain.Run{ID: "run-x", WorkspaceID: e.ws.ID, MemberID: e.member.ID}
 	plan := &EnvironmentPlan{Image: "busybox:1.36", Env: map[string]string{"HOME": "/home/aether"}, User: "1000:1000"}
-	spec := e.sched.containerSpec(run, e.member, []string{"agent"}, plan, domain.RunLimits{}, false)
+	spec := e.sched.containerSpec(run, e.member, []string{"agent"}, plan, domain.RunLimits{})
 	if spec.Env["HOME"] != "/home/aether" {
 		t.Errorf("HOME = %q, want /home/aether", spec.Env["HOME"])
 	}
@@ -1585,7 +1563,7 @@ func TestCustomHarnessDefinition(t *testing.T) {
 			},
 		}
 	})
-	argv, prof, _, err := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, false, "quoted; task", "", "")
+	argv, prof, _, err := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "quoted; task", "", "")
 	if err != nil {
 		t.Fatalf("custom command: %v", err)
 	}
@@ -1595,19 +1573,19 @@ func TestCustomHarnessDefinition(t *testing.T) {
 	if prof.LocalRoot != "/home/aether/.aider" || len(prof.CredentialPaths) != 1 {
 		t.Fatalf("profile = %+v", prof)
 	}
-	if _, _, _, err := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, false, "x", "opus", ""); err == nil || err.Error() != `scheduler: agent "aider" has no model flag; launch it without a model` {
+	if _, _, _, err := e.sched.command(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "x", "opus", ""); err == nil || err.Error() != `scheduler: agent "aider" has no model flag; launch it without a model` {
 		t.Fatalf("custom command with a model = %v", err)
 	}
 }
 
-func TestValidateMissionLaunchResolvesTheHarnessForTheAccount(t *testing.T) {
+func TestValidateLaunchResolvesTheHarnessForTheAccount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "legacy", domain.LaunchTUI, "", "")
+	err := e.sched.ValidateLaunch(t.Context(), e.member.ID, e.member.ID, "legacy", domain.LaunchTUI, "", "")
 	if want := `scheduler: unknown harness "legacy"; register it with: aether agent add legacy`; err == nil || err.Error() != want {
 		t.Fatalf("validate an unknown harness = %v, want %q", err, want)
 	}
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchTUI, "", ""); err != nil {
+	if err := e.sched.ValidateLaunch(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchTUI, "", ""); err != nil {
 		t.Fatalf("validate claude tui: %v", err)
 	}
 }
@@ -1632,7 +1610,7 @@ func TestFakeHarnessDefinitionUsesEnvironment(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	t.Setenv(fakeAgentEnv, "fake-agent {task}")
-	argv, _, _, err := s.command(t.Context(), "", "", "", "fake", domain.LaunchTUI, false, "integration task", "", "")
+	argv, _, _, err := s.command(t.Context(), "", "", "", "fake", domain.LaunchTUI, "integration task", "", "")
 	if err != nil {
 		t.Fatalf("fake command: %v", err)
 	}

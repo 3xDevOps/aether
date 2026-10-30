@@ -65,16 +65,6 @@ import type {
   MergeCode,
   MergePlan,
   MergeProposal,
-  Mission,
-  MissionCancelResult,
-  MissionCreateResult,
-  MissionExecutionChoice,
-  MissionIntegrator,
-  MissionListResult,
-  MissionQuestionResult,
-  MissionReplaceIntegratorResult,
-  MissionShowResult,
-  MissionWorkerReleaseResult,
   Overlap,
   PresenceEntry,
   PullResult,
@@ -657,41 +647,6 @@ export const api = {
     call<DevPortListResult>('dev.port.list', params),
   devArtifactDownload: (params: DevArtifactDownloadRequest, signal?: AbortSignal) =>
     downloadArtifact(params, signal),
-  missionCreate: (params: {
-    workspace_id: string
-    objective: string
-    accountable_human_id: string
-    integrator: MissionIntegrator
-    execution_choices: MissionExecutionChoice[]
-    fallback_account_member_ids?: string[]
-    no_fallback?: boolean
-    extra_workspace_ids?: string[]
-    idempotency_key: string
-  }) => call<MissionCreateResult>('mission.create', params),
-  missionShow: (missionID: string) =>
-    call<MissionShowResult>('mission.show', { mission_id: missionID }),
-  missionList: (params: { workspace_id: string; limit?: number; before?: string }) =>
-    call<MissionListResult>('mission.list', params),
-  missionReplaceIntegrator: (params: {
-    mission_id: string
-    expected_generation: number
-    integrator: MissionIntegrator
-    idempotency_key: string
-  }) => call<MissionReplaceIntegratorResult>('mission.replace-integrator', params),
-  missionQuestionAnswer: (params: {
-    question_id: string
-    answer: string
-    idempotency_key: string
-  }) => call<MissionQuestionResult>('mission.question.answer', params),
-  missionCancel: (params: { mission_id: string; idempotency_key: string }) =>
-    call<MissionCancelResult>('mission.cancel', params),
-  missionArchive: (missionID: string) =>
-    call<{ mission: Mission }>('mission.archive', { mission_id: missionID }).then((r) => r.mission),
-  missionUnarchive: (missionID: string) =>
-    call<{ mission: Mission }>('mission.unarchive', { mission_id: missionID }).then((r) => r.mission),
-  missionDelete: (missionID: string) => call<unknown>('mission.delete', { mission_id: missionID }),
-  missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>
-    call<MissionWorkerReleaseResult>('mission.worker.release', params),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
@@ -767,7 +722,6 @@ export const api = {
   }) => call<RoomMessageListResult>('run.room.list', params),
   coordMessagesList: (params: {
     workspace_id: string
-    mission_id?: string
     run_id?: string
     correlation_id?: string
     before?: string

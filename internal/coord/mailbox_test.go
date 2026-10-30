@@ -135,85 +135,6 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	}
 }
 
-// TestMissionPeerBeyondTheStatusBoundKeepsItsFiles proves a mission peer
-// that also overlaps is reported with its files and counted once even when
-// the radar's bounded status view leaves it out.
-func TestMissionPeerBeyondTheStatusBoundKeepsItsFiles(t *testing.T) {
-	stub := &missionTransportStub{}
-	total := protocol.CoordMaxStatusPeers + 2
-	h := newHarness(t, total+1, func(c *Config) { c.Mission = stub })
-	worker, integrator := h.run(0), h.run(total)
-	others := make([]domain.RunID, 0, total)
-	for i := 1; i <= total; i++ {
-		others = append(others, h.run(i))
-	}
-	stub.mission = []domain.RunID{worker, integrator}
-	h.peers.hub(worker, others, "src/auth.go")
-
-	st, err := h.svc.Status(context.Background(), worker)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if len(st.Peers) != protocol.CoordMaxStatusPeers || st.PeerTotal != total || !st.PeersTruncated {
-		t.Fatalf("status = %d peers, total %d, truncated %v; want %d, %d, true", len(st.Peers), st.PeerTotal, st.PeersTruncated, protocol.CoordMaxStatusPeers, total)
-	}
-	if p := st.Peers[0]; p.RunID != string(integrator) || p.State != protocol.CoordPeerMission || len(p.Files) != 1 || p.Files[0] != "src/auth.go" {
-		t.Fatalf("first peer = %+v, want the integrator in state mission with src/auth.go", p)
-	}
-}
-
-// TestMissionRunSeesAndMessagesRadarPeers follows the hook context a
-// mission worker reads about a run outside its mission: status lists that
-// run with the shared files after the assignment peers, and the worker can
-// message or ask it, while a run it shares nothing with stays refused.
-func TestMissionRunSeesAndMessagesRadarPeers(t *testing.T) {
-	stub := &missionTransportStub{}
-	h := newHarness(t, 4, func(c *Config) { c.Mission = stub })
-	ctx := context.Background()
-	worker, integrator, outsider, unrelated := h.run(0), h.run(1), h.run(2), h.run(3)
-	h.isolate(3)
-	stub.mission = []domain.RunID{worker, integrator}
-	h.peers.hub(worker, []domain.RunID{integrator, outsider}, "src/auth.go")
-
-	st, err := h.svc.Status(ctx, worker)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if st.Assignment == nil || len(st.Peers) != 2 || st.PeerTotal != 2 || st.PeersTruncated {
-		t.Fatalf("status = %+v, want an assignment and exactly two peers", st)
-	}
-	for i, want := range []struct {
-		run   domain.RunID
-		state string
-	}{{integrator, protocol.CoordPeerMission}, {outsider, protocol.CoordPeerActive}} {
-		p := st.Peers[i]
-		if p.RunID != string(want.run) || p.State != want.state || p.MemberID == "" ||
-			len(p.Files) != 1 || p.Files[0] != "src/auth.go" || p.FileTotal != 1 || p.FilesTruncated {
-			t.Fatalf("peer %d = %+v, want run %s in state %q with src/auth.go", i, p, want.run, want.state)
-		}
-	}
-
-	if _, err = h.svc.Send(ctx, worker, sendParams(integrator, "mission peer")); err != nil {
-		t.Fatalf("send to a mission peer: %v", err)
-	}
-	if _, err = h.svc.Send(ctx, worker, sendParams(outsider, "we both touch auth.go")); err != nil {
-		t.Fatalf("send to an overlapping run outside the mission: %v", err)
-	}
-	if _, err = h.svc.Ask(ctx, worker, protocol.CoordAskParams{
-		ToRunID: string(outsider), Body: "May I take auth.go?", IdempotencyKey: "ask-outsider",
-	}); err != nil {
-		t.Fatalf("ask an overlapping run outside the mission: %v", err)
-	}
-	_, err = h.svc.Send(ctx, worker, sendParams(unrelated, "ping"))
-	if err == nil || err.Code != protocol.CodeDenied ||
-		!strings.HasPrefix(err.Message, fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s: ", unrelated, worker)) {
-		t.Fatalf("send to an unrelated run = %v, want CodeDenied", err)
-	}
-	if st, err = h.svc.Status(ctx, outsider); err != nil || st.Unread != 2 {
-		t.Fatalf("outsider unread = %d (err %v), want 2", st.Unread, err)
-	}
-}
-
 // TestSendCaps covers the three guards that keep an agent bounded: body
 // size, inbox depth, and the send rate.
 func TestSendCaps(t *testing.T) {
@@ -931,43 +852,21 @@ func TestCoordOutboxQuarantinesEventIDConflict(t *testing.T) {
 	})
 }
 
-type blockedReportMission struct {
-	missionTransportStub
-	worker     domain.RunID
-	integrator domain.RunID
-}
-
-func (m blockedReportMission) ReportRecipient(_ context.Context, run domain.RunID) (domain.RunID, error) {
-	if run != m.worker {
-		return "", nil
-	}
-	return m.integrator, nil
-}
-
-func (m blockedReportMission) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
-	if run == m.worker {
-		return protocol.CoordMissionAssignment{
-			MissionID: "mission-1", Role: "worker", IntegratorRunID: string(m.integrator),
-		}, nil
-	}
-	return protocol.CoordMissionAssignment{MissionID: "mission-1", Role: "integrator"}, nil
-}
-
-func TestBlockedReportRetriesFullInboxAndPreservesWorkerReason(t *testing.T) {
+func TestBlockedReportRetriesFullInboxAndPreservesChildReason(t *testing.T) {
 	ctx := context.Background()
 	capture := &coordReportEvidenceCapture{id: "blocked-packet"}
 	h := newHarness(t, 2, func(c *Config) { c.Evidence = capture })
-	worker, integrator := h.run(0), h.run(1)
-	h.svc.cfg.Mission = blockedReportMission{worker: worker, integrator: integrator}
+	child, parent := h.run(0), h.run(1)
+	h.svc.cfg.Children = parentOf{child: child, parent: parent}
 	for range protocol.CoordMaxUnread {
 		if err := h.db.AppendRunMessage(ctx, &store.RunMessage{
-			WorkspaceID: h.workspace, FromRun: worker, ToRun: integrator, Body: "earlier message",
+			WorkspaceID: h.workspace, FromRun: child, ToRun: parent, Body: "earlier message",
 		}, protocol.CoordMaxUnread); err != nil {
 			t.Fatalf("fill inbox: %v", err)
 		}
 	}
 	summary := strings.Repeat("x", protocol.CoordMaxSummaryBytes)
-	result, rpcErr := h.svc.CoordReport(ctx, worker, protocol.CoordReportParams{
+	result, rpcErr := h.svc.CoordReport(ctx, child, protocol.CoordReportParams{
 		Outcome: protocol.CoordOutcomeBlocked, Summary: summary, IdempotencyKey: "blocked",
 	})
 	if rpcErr != nil {
@@ -977,58 +876,58 @@ func TestBlockedReportRetriesFullInboxAndPreservesWorkerReason(t *testing.T) {
 	if err != nil || report.State != store.CoordReportFinalized || report.PublishedAt != nil {
 		t.Fatalf("full-inbox report = %+v, %v; want finalized with publication pending", report, err)
 	}
-	batch, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+	batch, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
 	if rpcErr != nil {
 		t.Fatalf("read earlier messages: %v", rpcErr)
 	}
-	if _, ackErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{AckToken: batch.AckToken}); ackErr != nil {
+	if _, ackErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: batch.AckToken}); ackErr != nil {
 		t.Fatalf("ack earlier messages: %v", ackErr)
 	}
 	if _, _, drainErr := h.svc.drainOutboxPage(ctx); drainErr != nil {
 		t.Fatalf("retry blocked publication: %v", drainErr)
 	}
-	status, rpcErr := h.svc.Status(ctx, integrator)
+	status, rpcErr := h.svc.Status(ctx, parent)
 	if rpcErr != nil || status.Unread != 1 {
 		t.Fatalf("blocked context = %+v, %v; want one pending message", status, rpcErr)
 	}
-	key := "coord-report-blocked:" + result.ReportID + ":" + string(integrator)
-	message, err := h.db.GetRunMessageByIdempotency(ctx, worker, key)
-	if err != nil || message.FromRun != worker || message.Body != summary || message.CorrelationID != result.ReportID ||
+	key := "coord-report-blocked:" + result.ReportID + ":" + string(parent)
+	message, err := h.db.GetRunMessageByIdempotency(ctx, child, key)
+	if err != nil || message.FromRun != child || message.Body != summary || message.CorrelationID != result.ReportID ||
 		message.DeliveredAt != nil || message.AckedAt != nil {
 		t.Fatalf("undelivered blocked message = %+v, %v", message, err)
 	}
-	inbox, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+	inbox, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
 	if rpcErr != nil || len(inbox.Messages) != 1 || inbox.Messages[0].Body != summary ||
-		inbox.Messages[0].FromRunID != string(worker) || inbox.Messages[0].CorrelationID != result.ReportID {
+		inbox.Messages[0].FromRunID != string(child) || inbox.Messages[0].CorrelationID != result.ReportID {
 		t.Fatalf("blocked inbox = %+v, %v", inbox, rpcErr)
 	}
-	if _, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{AckToken: inbox.AckToken}); rpcErr != nil {
+	if _, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: inbox.AckToken}); rpcErr != nil {
 		t.Fatalf("ack blocked message: %v", rpcErr)
 	}
-	if err := h.svc.enqueueWorkerReport(ctx, report); err != nil {
+	if err := h.svc.enqueueChildReport(ctx, report); err != nil {
 		t.Fatalf("replay blocked message: %v", err)
 	}
-	if unread, err := h.db.CountUnackedRunMessages(ctx, integrator); err != nil || unread != 0 {
+	if unread, err := h.db.CountUnackedRunMessages(ctx, parent); err != nil || unread != 0 {
 		t.Fatalf("replayed blocked unread = %d, %v; want zero after explicit ack", unread, err)
 	}
 }
 
-func TestWorkerSuccessAndFailureReportsReachTheIntegrator(t *testing.T) {
+func TestChildSuccessAndFailureReportsReachTheParent(t *testing.T) {
 	ctx := context.Background()
 	for _, outcome := range []string{protocol.CoordOutcomeSuccess, protocol.CoordOutcomeFailure} {
 		t.Run(outcome, func(t *testing.T) {
 			h := newHarness(t, 2, func(c *Config) { c.Evidence = &coordReportEvidenceCapture{id: outcome + "-packet"} })
-			worker, integrator := h.run(0), h.run(1)
-			h.svc.cfg.Mission = blockedReportMission{worker: worker, integrator: integrator}
-			result, rpcErr := h.svc.CoordReport(ctx, worker, protocol.CoordReportParams{
+			child, parent := h.run(0), h.run(1)
+			h.svc.cfg.Children = parentOf{child: child, parent: parent}
+			result, rpcErr := h.svc.CoordReport(ctx, child, protocol.CoordReportParams{
 				Outcome: outcome, Summary: outcome + " summary", IdempotencyKey: outcome,
 			})
 			if rpcErr != nil {
 				t.Fatalf("report %s: %v", outcome, rpcErr)
 			}
-			inbox, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+			inbox, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
 			if rpcErr != nil || len(inbox.Messages) != 1 || inbox.Messages[0].Body != outcome+" summary" ||
-				inbox.Messages[0].FromRunID != string(worker) || inbox.Messages[0].CorrelationID != result.ReportID {
+				inbox.Messages[0].FromRunID != string(child) || inbox.Messages[0].CorrelationID != result.ReportID {
 				t.Fatalf("%s inbox = %+v, %v", outcome, inbox, rpcErr)
 			}
 		})

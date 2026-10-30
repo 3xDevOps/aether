@@ -13,7 +13,6 @@ import type {
   GatewayCapabilities,
   GitBranchPayload,
   LinkStatus,
-  MissionChangedPayload,
   OverlapPayload,
   RunAccountPayload,
   RunArchivedPayload,
@@ -223,7 +222,6 @@ export async function hydrate(
     noteServerTime(store, info.time)
     s.setInfo(info)
     s.setWorkspaces(workspaces)
-    const active = store.getState().activeWorkspace
     s.setMemberList(identityChanged ? members : keptMembers)
     s.setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
     // The snapshot is authoritative for the paused badge; runs without the
@@ -236,17 +234,6 @@ export async function hydrate(
       ),
     )
     s.setOverlaps(overlaps)
-    if (
-      active &&
-      (capabilities === null || capabilities.methods.includes('mission.list'))
-    ) {
-      await client
-        .missionList({ workspace_id: active, limit: 50 })
-        .then((result) => {
-          if (!signal?.aborted) s.setMissions(active, result.missions, result.next_cursor)
-        })
-        .catch(ignore)
-    }
     if (signal?.aborted) return false
     s.setCapabilities(capabilities)
     // Device cards are an extra; their failure must not fail hydration.
@@ -375,8 +362,6 @@ async function reconcileEvidenceHistory(
   }
 }
 
-const missionDeletions = new WeakMap<object, number>()
-
 /**
  * Await in sequence order: the cursor must never move past an event still
  * waiting on a fetch. False means only a fresh snapshot repairs the store.
@@ -420,80 +405,6 @@ export async function applyEvent(
   // A new teammate has no event of their own; without this they render as a raw ID.
   if (ev.actor_id && !store.getState().members[ev.actor_id] && !store.getState().mergedInto[ev.actor_id]) {
     await store.getState().readMembers(client.memberList()).then(store.getState().setMemberList).catch(ignore)
-  }
-
-  const missionChange = ev.type === 'mission.changed' ? (ev.payload as MissionChangedPayload | null) : null
-  if (missionChange?.mission_id) store.getState().bumpWorkflowSignal('missionSeq', missionChange.mission_id)
-  if (missionChange?.deleted) {
-    const missionID = missionChange.mission_id
-    const state = store.getState()
-    missionDeletions.set(store, (missionDeletions.get(store) ?? 0) + 1)
-    state.removeMission(missionID)
-    if (state.route.name === 'missions' && state.route.params.missionId === missionID) state.navigate('missions')
-    return true
-  }
-
-  // Mission events are scoped projection hints. Never let an event from a
-  // background workspace refresh the mission currently visible in this tab.
-  if (ev.type.startsWith('mission.') && ev.workspace_id) {
-    const state = store.getState()
-    if (state.activeWorkspace === ev.workspace_id) {
-      const current = state.route
-      const missionID =
-        current.name === 'missions' ? current.params.missionId : undefined
-      let changedMissionID: string | undefined
-      if (typeof ev.payload === 'object' && ev.payload !== null && 'mission_id' in ev.payload) {
-        const candidate = ev.payload.mission_id
-        if (typeof candidate === 'string') changedMissionID = candidate
-      }
-      const currentMission = missionID ? state.missions[missionID] : undefined
-      if (
-        missionID &&
-        changedMissionID === missionID &&
-        (!currentMission || currentMission.workspace_id === ev.workspace_id)
-      ) {
-        coalesce(store, `mission:${missionID}`, () => {
-          const generation = missionDeletions.get(store)
-          return client
-            .missionShow(missionID)
-            .then((result) => {
-              if (missionDeletions.get(store) !== generation) return false
-              if (result.mission.workspace_id !== ev.workspace_id) return
-              store.getState().setMissionDetail({
-                mission: result.mission,
-                tasks: result.tasks,
-                attempts: result.attempts ?? [],
-                submissions: result.submissions ?? [],
-                diagnostics: result.diagnostics ?? [],
-                questions: result.questions ?? [],
-              })
-            })
-            .catch(ignore)
-        })
-      } else {
-        coalesce(store, `missions:${ev.workspace_id}`, () => {
-          const generation = missionDeletions.get(store)
-          if (store.getState().activeWorkspace !== ev.workspace_id) return Promise.resolve()
-          return client
-            .missionList({ workspace_id: ev.workspace_id, limit: 50 })
-            .then((result) => {
-              if (missionDeletions.get(store) !== generation) return false
-              const state = store.getState()
-              if (state.activeWorkspace !== ev.workspace_id) return
-              // Merged, not replaced, so loaded older pages stay and the stored
-              // cursor still marks the next older page for this workspace.
-              const loaded = state.missionListWorkspace === ev.workspace_id
-              state.setMissions(
-                ev.workspace_id,
-                result.missions,
-                loaded ? state.missionNextCursor ?? undefined : result.next_cursor,
-                true,
-              )
-            })
-            .catch(ignore)
-        })
-      }
-    }
   }
 
   switch (ev.type) {
@@ -811,13 +722,11 @@ export async function applyEvent(
         .map((list) => list.scope)
         .filter((scope) => inMessageScope(scope, p))
       await Promise.all(scopes.map((scope) => loadMessagePage(store, client, scope)))
-      refreshUnacked(store, client, p.to_run_id)
       break
     }
     case 'coord.message.acked': {
       const p = ev.payload as CoordMessageAckedPayload
       store.getState().applyMessageAcked(p.message_id, p.acked_at)
-      refreshUnacked(store, client, p.to_run_id)
       break
     }
     case 'memory.change':
@@ -846,20 +755,6 @@ export async function applyEvent(
   store.getState().appendTraceEvent(ev)
   store.getState().noteSeq(ev.seq)
   return true
-}
-
-/**
- * Off the event queue, and only the unread fields: a full snapshot landing late
- * would undo run events applied after it was read. A failed read is dropped.
- */
-function refreshUnacked(store: RootStore, client: Api, runID: string): void {
-  if (!store.getState().runs[runID]) return
-  coalesce(store, `unacked:${runID}`, () =>
-    client
-      .runGet(runID)
-      .then((run) => store.getState().applyUnackedMessages(runID, run))
-      .catch(ignore),
-  )
 }
 
 /** Null means "nothing special: open the stream". */
@@ -938,67 +833,11 @@ export function connect(store: RootStore, client: Api = api): () => void {
   const stopOutcomeSeen = watchOutcomeSeen(store, client)
   const stopPush = watchPush(store, client)
 
-  const missionRefreshes = new Set<string>()
-  let refreshingMissions = false
-  let missionGeneration = 0
-
-  const refreshMissionRuns = () => {
-    if (refreshingMissions || hydrating || signal.aborted || missionRefreshes.size === 0) return
-    refreshingMissions = true
-    const generation = missionGeneration
-    void (async () => {
-      while (missionRefreshes.size > 0 && !hydrating && !signal.aborted && generation === missionGeneration) {
-        const workspaceID = missionRefreshes.values().next().value as string
-        missionRefreshes.delete(workspaceID)
-        try {
-          const listed = await client.runList({ workspace_id: workspaceID })
-          if (signal.aborted || generation !== missionGeneration) return
-          store.setState((state) => {
-            let runs = state.runs
-            for (const run of listed) {
-              const current = runs[run.id]
-              if (!current || current.workspace_id !== workspaceID) continue
-              if (
-                current.mission_id === run.mission_id &&
-                current.mission_role === run.mission_role &&
-                current.integrator_run_id === run.integrator_run_id
-              ) continue
-              if (runs === state.runs) runs = { ...runs }
-              // Status/title/delete events may have landed during this fetch.
-              runs[run.id] = {
-                ...current,
-                mission_id: run.mission_id,
-                mission_role: run.mission_role,
-                integrator_run_id: run.integrator_run_id,
-              }
-            }
-            return { runs }
-          })
-        } catch (err) {
-          if (signal.aborted || generation !== missionGeneration) return
-          noteUnreachable(store, client, err, signal)
-          void load()
-          return
-        }
-      }
-    })().finally(() => {
-      if (generation !== missionGeneration) return
-      refreshingMissions = false
-      refreshMissionRuns()
-    })
-  }
-
   // Listeners hear one change per drained burst rather than one per write.
   const drain = () => batchNotifications(store, async () => {
     while (!signal.aborted && !hydrating && queue.length > 0) {
       const ev = queue.shift() as Event
-      if (await applyEvent(store, ev, client, signal)) {
-        if (ev.type === 'mission.changed' && ev.workspace_id) {
-          missionRefreshes.add(ev.workspace_id)
-          refreshMissionRuns()
-        }
-        continue
-      }
+      if (await applyEvent(store, ev, client, signal)) continue
       // The event named something we could not fetch. A fresh snapshot is the
       // repair; the rest of the queue waits for it.
       void load()
@@ -1014,9 +853,6 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (signal.aborted || hydrating || store.getState().streamDead) return
     hydrating = true
     // Full hydration supersedes pending relationship snapshots, not vice versa.
-    missionGeneration++
-    refreshingMissions = false
-    missionRefreshes.clear()
     await chain // let an event that is mid-flight finish first
     const ok = await hydrate(store, client, signal)
     hydrating = false
@@ -1034,7 +870,6 @@ export function connect(store: RootStore, client: Api = api): () => void {
       return
     }
     attempts = 0
-    refreshMissionRuns()
     pump()
   }
 

@@ -22,7 +22,6 @@ type Watch struct {
 	WorkspaceID    domain.WorkspaceID
 	TargetKind     string
 	RunID          domain.RunID
-	MissionID      domain.MissionID
 	Repo           string
 	Number         int
 	TargetTitle    string
@@ -50,7 +49,6 @@ type WatchFilter struct {
 	State      string
 	TargetKind string
 	RunID      domain.RunID
-	MissionID  domain.MissionID
 }
 
 // WatchNotification is one notice a watch recorded. MemberID is the
@@ -125,9 +123,8 @@ type WatchStore interface {
 	// Version as it is.
 	TouchWatchCheck(ctx context.Context, id string, at time.Time) error
 	DeleteWatch(ctx context.Context, id string) error
-	// EvaluableWatchIDs lists the active and failing watches on run or on
-	// the swarm run integrates, or on mission when run is empty.
-	EvaluableWatchIDs(ctx context.Context, run domain.RunID, mission domain.MissionID) ([]string, error)
+	// EvaluableWatchIDs lists the active and failing watches on run.
+	EvaluableWatchIDs(ctx context.Context, run domain.RunID) ([]string, error)
 	// DueWatchIDs lists the active and failing watches whose next check is
 	// at or before now, or all of them when all is set.
 	DueWatchIDs(ctx context.Context, now time.Time, all bool) ([]string, error)
@@ -160,10 +157,6 @@ type WatchStore interface {
 	GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error)
 	PutNotifyPrefs(ctx context.Context, member domain.MemberID, p NotifyPrefs) error
 
-	// MissionFinishedAt is when mission last completed or was cancelled,
-	// nil while it never has.
-	MissionFinishedAt(ctx context.Context, mission domain.MissionID) (*time.Time, error)
-
 	// WatchCursor is the last event sequence the watch service applied;
 	// ok is false before it first saved one.
 	WatchCursor(ctx context.Context) (seq uint64, ok bool, err error)
@@ -171,7 +164,7 @@ type WatchStore interface {
 	SetWatchCursor(ctx context.Context, seq uint64) error
 }
 
-const watchColumns = `id, member_id, COALESCE(workspace_id, ''), target_kind, COALESCE(run_id, ''), COALESCE(mission_id, ''), repo,
+const watchColumns = `id, member_id, COALESCE(workspace_id, ''), target_kind, COALESCE(run_id, ''), repo,
 	pr_number, target_title, conditions, label, source, state, error, failures, observed, fired,
 	COALESCE(idempotency_key, ''), created_at, updated_at, expires_at, last_check_at, next_check_at, ended_at, version`
 
@@ -182,7 +175,7 @@ func scanWatch(row interface{ Scan(...any) error }) (*Watch, error) {
 		created, updated, expires  int64
 		last, next, ended          *int64
 	)
-	if err := row.Scan(&w.ID, &w.MemberID, &w.WorkspaceID, &w.TargetKind, &w.RunID, &w.MissionID, &w.Repo,
+	if err := row.Scan(&w.ID, &w.MemberID, &w.WorkspaceID, &w.TargetKind, &w.RunID, &w.Repo,
 		&w.Number, &w.TargetTitle, &conditions, &w.Label, &w.Source, &w.State, &w.Error, &w.Failures,
 		&observed, &fire, &w.IdempotencyKey, &created, &updated, &expires, &last, &next, &ended, &w.Version); err != nil {
 		return nil, err
@@ -265,11 +258,11 @@ func (d *DB) CreateWatch(ctx context.Context, w *Watch) error {
 		return fmt.Errorf("store: create watch: %w", err)
 	}
 	_, err = d.db.ExecContext(ctx,
-		`INSERT INTO watches (id, member_id, workspace_id, target_kind, run_id, mission_id, repo, pr_number,
+		`INSERT INTO watches (id, member_id, workspace_id, target_kind, run_id, repo, pr_number,
 		   idempotency_key, created_at, target_title, conditions, label, state, error, failures, observed, fired,
 		   updated_at, expires_at, last_check_at, next_check_at, ended_at, source)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		append([]any{id, w.MemberID, nullable(w.WorkspaceID), w.TargetKind, nullable(w.RunID), nullable(w.MissionID), w.Repo,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		append([]any{id, w.MemberID, nullable(w.WorkspaceID), w.TargetKind, nullable(w.RunID), w.Repo,
 			w.Number, nullable(w.IdempotencyKey), created}, args...)...)
 	if err != nil {
 		return fmt.Errorf("store: create watch: %w", mapConstraint(err, ErrNotFound))
@@ -311,7 +304,7 @@ func (d *DB) ListWatches(ctx context.Context, f WatchFilter) ([]*Watch, error) {
 		value  string
 	}{
 		{"member_id", string(f.MemberID)}, {"state", f.State}, {"target_kind", f.TargetKind},
-		{"run_id", string(f.RunID)}, {"mission_id", string(f.MissionID)},
+		{"run_id", string(f.RunID)},
 	} {
 		if c.value != "" {
 			where = append(where, c.column+" = ?")
@@ -444,15 +437,8 @@ func (d *DB) DeleteWatch(ctx context.Context, id string) error {
 
 const evaluable = `state IN ('active', 'error')`
 
-func (d *DB) EvaluableWatchIDs(ctx context.Context, run domain.RunID, mission domain.MissionID) ([]string, error) {
-	query := `SELECT id FROM watches WHERE ` + evaluable + ` AND mission_id = ?`
-	args := []any{mission}
-	if run != "" {
-		query = `SELECT id FROM watches WHERE ` + evaluable + ` AND (run_id = ?1
-			OR mission_id IN (SELECT id FROM missions WHERE current_integrator_run_id = ?1))`
-		args = []any{run}
-	}
-	return d.watchIDs(ctx, query+` ORDER BY id`, args...)
+func (d *DB) EvaluableWatchIDs(ctx context.Context, run domain.RunID) ([]string, error) {
+	return d.watchIDs(ctx, `SELECT id FROM watches WHERE `+evaluable+` AND run_id = ? ORDER BY id`, run)
 }
 
 func (d *DB) DueWatchIDs(ctx context.Context, now time.Time, all bool) ([]string, error) {
@@ -534,16 +520,4 @@ func (d *DB) PurgeWatches(ctx context.Context, cutoff time.Time) (int64, error) 
 		return 0, fmt.Errorf("store: purge watches: %w", err)
 	}
 	return res.RowsAffected()
-}
-
-func (d *DB) MissionFinishedAt(ctx context.Context, mission domain.MissionID) (*time.Time, error) {
-	var at *int64
-	err := d.db.QueryRowContext(ctx, `SELECT finished_at FROM missions WHERE id = ?`, mission).Scan(&at)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: mission %s: %w", mission, ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: read mission finish: %w", err)
-	}
-	return decodeTimePtr(at), nil
 }

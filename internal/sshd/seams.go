@@ -46,7 +46,7 @@ type RunLauncherWithOptions interface {
 // LaunchValidator is implemented by schedulers that can resolve a launch
 // without starting it.
 type LaunchValidator interface {
-	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model, effort string) error
+	ValidateLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model, effort string) error
 }
 
 var errLaunchOptionsUnsupported = errors.New("sshd: launch options (a cached base, a model or an effort) are not supported")
@@ -125,9 +125,9 @@ type RunController interface {
 	ACPHistory(run domain.RunID, beforeSeq int64, limit int) (acphost.HistoryPage, error)
 	ACPItem(run domain.RunID, seq int64) (acphost.Item, error)
 	AgentSwitchable(ctx context.Context, member, account domain.MemberID, harness string) (bool, error)
-	// SwarmRefusal is why a swarm integrator or worker of agent cannot run in
+	// WakeRefusal is why a run of agent that waits for mail cannot run in
 	// mode: Aether could not wake it when mail arrives.
-	SwarmRefusal(agent string, mode domain.LaunchMode) error
+	WakeRefusal(agent string, mode domain.LaunchMode) error
 	SwitchMode(ctx context.Context, run domain.RunID, actor domain.MemberID, mode domain.LaunchMode, admit func(begin func() error) error) error
 	Switching(run domain.RunID) domain.LaunchMode
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error

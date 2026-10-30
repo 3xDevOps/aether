@@ -26,7 +26,7 @@ const (
 // AuditEntry is one durable record of who changed what and how. Via is
 // how the call arrived (dashboard, cli, connector or assistant);
 // ConnectorID and Client name the connector of a connector call or of
-// an event that befell a connector. Target is the run, swarm, connector,
+// an event that befell a connector. Target is the run, connector,
 // member, device, Slack user or merge proposal the call acted on. Code
 // is 0 for a call that succeeded and its protocol error code otherwise.
 // Security marks a connector, account-share, member or Slack link change

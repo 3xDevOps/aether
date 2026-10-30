@@ -52,7 +52,7 @@ export interface MapPoint {
 export interface MapNode extends MapRect {
   key: string
   card: MapCard
-  role: 'standalone' | 'integrator' | 'worker'
+  role: 'standalone' | 'parent' | 'child'
   /** The owner differs from the section's, or several owners share an unframed map. */
   showOwner: boolean
 }
@@ -65,14 +65,13 @@ export interface MapLine {
 
 export interface MapUnit extends MapRect {
   key: string
-  /** A family is a run with child runs, laid out like a swarm. */
-  kind: 'standalone' | 'swarm' | 'family' | 'orphan'
-  missionId?: string
-  /** Every node, world coordinates, in tab order: the root, then workers by creation. */
+  /** A family is a run with child runs. */
+  kind: 'standalone' | 'family'
+  /** Every node, world coordinates, in tab order: the root, then child runs by creation. */
   nodes: MapNode[]
-  /** All workers in the input, shown or folded away. */
-  workers: number
-  /** Workers a fold hides, in creation order. */
+  /** All child runs in the input, shown or folded away. */
+  childRuns: number
+  /** Child runs a fold hides, in creation order. */
   hidden: MapCard[]
   lines: MapLine[]
   dots: MapPoint[]
@@ -112,20 +111,12 @@ const byCreated = (a: MapCard, b: MapCard) =>
   compare(a.run.created_at, b.run.created_at) || compare(runKey(a), runKey(b))
 
 /**
- * Each run's parent key. Only explicit IDs establish a relationship: a worker's
- * integrator in the same mission, or the parent that started a child run.
+ * Each run's parent key. Only an explicit parent ID establishes a relationship.
  */
 export function runParents<T extends { run: RunRecord }>(items: T[]): Map<string, string> {
   const byKey = new Map(items.map((item) => [runKey(item), item.run]))
   const parents = new Map<string, string>()
   for (const { run } of items) {
-    if (run.mission_role === 'worker') {
-      if (!run.mission_id || !run.integrator_run_id) continue
-      const parentKey = JSON.stringify([run.workspace_id, run.integrator_run_id])
-      const parent = byKey.get(parentKey)
-      if (parent?.mission_role === 'integrator' && parent.mission_id === run.mission_id) parents.set(runKey({ run }), parentKey)
-      continue
-    }
     // A detached child runs on its own, so it is a root of its own tree.
     if (!run.parent_run_id || run.detached) continue
     const parentKey = JSON.stringify([run.workspace_id, run.parent_run_id])
@@ -147,7 +138,7 @@ export function rootKey(key: string, parents: Map<string, string>): string {
 /** Everything that decides geometry; live state, titles and timestamps stay out of it. */
 function structureOf(cards: Map<string, MapCard>, input: MapLayoutInput): string {
   const runs = [...cards].sort(([a], [b]) => compare(a, b)).map(([key, { run, visiting }]) => [
-    key, run.member_id, run.mission_id, run.mission_role, run.integrator_run_id, run.parent_run_id, run.detached, visiting, input.folded[key] === true,
+    key, run.member_id, run.parent_run_id, run.detached, visiting, input.folded[key] === true,
   ])
   return JSON.stringify([input.viewerID, input.metrics, runs])
 }
@@ -156,12 +147,12 @@ interface Draft {
   key: string
   kind: MapUnit['kind']
   root: MapCard
-  workers: MapCard[]
+  childRuns: MapCard[]
 }
 
 function makeUnit(draft: Draft, folded: boolean, m: MapMetrics): MapUnit {
-  const { root, workers, kind } = draft
-  const shown = folded && kind !== 'orphan' ? [] : workers
+  const { root, childRuns, kind } = draft
+  const shown = folded ? [] : childRuns
   const nodes: MapNode[] = []
   const lines: MapLine[] = []
   const dots: MapPoint[] = []
@@ -171,17 +162,8 @@ function makeUnit(draft: Draft, folded: boolean, m: MapMetrics): MapUnit {
   }
   const top = captionHeight
   let width = m.width
-  if (kind === 'orphan') {
-    const count = Math.min(columns, workers.length)
-    width = count * m.width + (count - 1) * siblingGap
-    workers.forEach((card, index) => add(
-      card,
-      (index % columns) * (m.width + siblingGap),
-      top + Math.floor(index / columns) * (m.height + levelGap),
-      'worker',
-    ))
-  } else if (!shown.length) {
-    add(root, 0, top, kind === 'standalone' ? 'standalone' : 'integrator')
+  if (!shown.length) {
+    add(root, 0, top, kind === 'standalone' ? 'standalone' : 'parent')
   } else {
     const rail = shown.length > columns
     const count = Math.min(columns, shown.length)
@@ -193,13 +175,13 @@ function makeUnit(draft: Draft, folded: boolean, m: MapMetrics): MapUnit {
     const childTop = bottom + levelGap
     const busY = bottom + trunk
     const left = (width - rowWidth) / 2
-    add(root, center - m.width / 2, top, 'integrator')
+    add(root, center - m.width / 2, top, 'parent')
     dots.push({ x: center, y: bottom })
     shown.forEach((card, index) => add(
       card,
       left + (index % columns) * (columnWidth + siblingGap) + (rail ? railIndent : 0),
       childTop + Math.floor(index / columns) * (m.height + railGap),
-      'worker',
+      'child',
     ))
     const drops: { x: number; end: number }[] = []
     for (let column = 0; column < count; column++) {
@@ -225,9 +207,9 @@ function makeUnit(draft: Draft, folded: boolean, m: MapMetrics): MapUnit {
     }
   }
   return {
-    key: draft.key, kind, missionId: root.run.mission_id || undefined,
+    key: draft.key, kind,
     x: 0, y: 0, width, height: Math.max(...nodes.map((node) => node.y + node.height)),
-    nodes, workers: kind === 'orphan' ? 0 : workers.length, hidden: shown === workers ? [] : workers, lines, dots,
+    nodes, childRuns: childRuns.length, hidden: shown === childRuns ? [] : childRuns, lines, dots,
   }
 }
 
@@ -324,7 +306,7 @@ let revisions = 0
 
 /**
  * Places the viewer's runs first, then other owners by their newest unit, then
- * Needs you runs from outside the scope. Units read newest first; workers in
+ * Needs you runs from outside the scope. Units read newest first; child runs in
  * spawn order. With the same structure the previous geometry is reused exactly.
  */
 export function layoutRunMap(cards: MapCard[], input: MapLayoutInput, previous?: RunMapLayout): RunMapLayout {
@@ -357,26 +339,18 @@ export function layoutRunMap(cards: MapCard[], input: MapLayoutInput, previous?:
 
   const ordered = [...byKey.values()].sort(byCreated)
   const parents = runParents(ordered)
-  const unitOf = ({ run }: MapCard) => run.mission_role === 'worker'
-    ? JSON.stringify([run.workspace_id, 'missing', run.mission_id, run.integrator_run_id || run.id])
-    : runKey({ run })
   const drafts = new Map<string, Draft>()
   for (const card of ordered) {
     if (parents.has(runKey(card))) continue
-    const unitKey = unitOf(card)
-    const draft = drafts.get(unitKey)
-    if (draft) draft.workers.push(card)
-    else {
-      const kind = card.run.mission_role === 'integrator' ? 'swarm' : card.run.mission_role === 'worker' ? 'orphan' : 'standalone'
-      drafts.set(unitKey, { key: unitKey, kind, root: card, workers: kind === 'orphan' ? [card] : [] })
-    }
+    const key = runKey(card)
+    drafts.set(key, { key, kind: 'standalone', root: card, childRuns: [] })
   }
   for (const card of ordered) {
     const key = runKey(card)
     if (!parents.has(key)) continue
-    const draft = drafts.get(unitOf(byKey.get(rootKey(key, parents))!))!
-    if (draft.kind === 'standalone') draft.kind = 'family'
-    draft.workers.push(card)
+    const draft = drafts.get(rootKey(key, parents))!
+    draft.kind = 'family'
+    draft.childRuns.push(card)
   }
 
   const grouped = new Map<string, { kind: MapSection['kind']; units: MapUnit[]; drafts: Draft[] }>()

@@ -4,7 +4,6 @@ import { isSudo } from '@/lib/run-requests'
 import type {
   Device,
   Member,
-  Mission,
   RoomMessage,
   RoomStatusResult,
   Run,
@@ -12,7 +11,6 @@ import type {
   Workspace,
 } from '@/lib/types'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
-import type { MissionDetail } from '@/store/missions'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
 export interface StateContext {
@@ -24,13 +22,11 @@ export interface StateContext {
   workspaces: Record<string, Workspace>
   roomMessages: Record<string, RoomMessage[]>
   roomStatus: Record<string, RoomStatusResult | undefined>
-  missions: Record<string, Mission>
-  missionDetails: Record<string, MissionDetail>
   pausedRuns: Record<string, boolean>
   now: number
 }
 
-export type NeedsYouTarget = 'request' | 'run' | 'terminal' | 'changes' | 'notes' | 'swarm'
+export type NeedsYouTarget = 'request' | 'run' | 'terminal' | 'changes' | 'notes'
 
 export type NeedsYouID =
   | 'sudo'
@@ -38,9 +34,6 @@ export type NeedsYouID =
   | 'question'
   | 'queued-message'
   | 'room-question'
-  | 'swarm-question'
-  | 'integrator-down'
-  | 'control-hold'
   | 'disconnected'
   | 'blocked'
   | 'needs-input'
@@ -75,10 +68,6 @@ interface Spec {
   resolvers: (run: RunRecord, ctx: StateContext) => (string | undefined)[]
   admins?: boolean
   background?: boolean
-  /** Holds for a swarm worker too; any other row leaves a worker to its integrator. */
-  workers?: boolean
-  /** A swarm's row, which holds whatever the run's own status. */
-  swarm?: boolean
   /** Holds for a completed run too. */
   completed?: boolean
   reason: (run: RunRecord, ctx: StateContext) => string
@@ -91,9 +80,8 @@ const isLive = (run: Pick<Run, 'status'>) => run.status === 'running' || run.sta
 
 function condition(spec: Spec): NeedsYouCondition {
   const holds = (run: RunRecord, ctx: StateContext) =>
-    (spec.swarm || (isLive(run) && !isPaused(run, ctx)) || (spec.completed && run.status === 'completed')) &&
+    ((isLive(run) && !isPaused(run, ctx)) || (spec.completed && run.status === 'completed')) &&
     (spec.background || run.mode !== 'headless') &&
-    (spec.workers || run.mission_role !== 'worker') &&
     spec.holds(run, ctx)
   return {
     id: spec.id,
@@ -137,20 +125,6 @@ export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>):
   return !isTerminal(run.status) && (ctx.pausedRuns[run.id] ?? run.paused) === true
 }
 
-function missionOf(run: RunRecord, ctx: StateContext): Mission | undefined {
-  return run.mission_id ? ctx.missions[run.mission_id] : undefined
-}
-
-const swarmRunning = (mission: Mission | undefined) =>
-  !mission || mission.phase === 'planning' || mission.phase === 'active'
-
-function attemptHold(run: RunRecord, ctx: StateContext) {
-  if (run.mission_role !== 'worker' || !run.mission_id) return undefined
-  return ctx.missionDetails[run.mission_id]?.attempts.find(
-    (attempt) => attempt.run_id === run.id && attempt.takeover_active,
-  )
-}
-
 // Room status loads only while the run is open; an older gateway's snapshot has no controller.
 function controller(run: RunRecord, ctx: StateContext): string | undefined {
   if (run.controller_member_id !== undefined) return run.controller_member_id || undefined
@@ -159,26 +133,6 @@ function controller(run: RunRecord, ctx: StateContext): string | undefined {
 
 export function memberName(memberID: string, ctx: Pick<StateContext, 'members' | 'mergedInto'>): string {
   return storeMemberName(ctx, memberID)
-}
-
-function waited(iso: string, now: number): string {
-  const minutes = Math.floor((now - Date.parse(iso)) / 60_000)
-  if (!Number.isFinite(minutes) || minutes < 1) return 'less than a minute'
-  if (minutes < 60) return `${minutes} min`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} h`
-  return `${Math.floor(hours / 24)} d`
-}
-
-const unreadAfterMs = 2 * 60_000
-
-export function unreadMail(run: Pick<Run, 'mission_role' | 'unacked_messages' | 'oldest_unacked_at'>, now: number): number {
-  if (run.mission_role !== 'integrator' || !run.unacked_messages || !run.oldest_unacked_at) return 0
-  return now - Date.parse(run.oldest_unacked_at) >= unreadAfterMs ? run.unacked_messages : 0
-}
-
-export function unreadReason(count: number, since: string, now: number): string {
-  return `Integrator has not read ${count === 1 ? '1 message' : `${count} messages`} (${waited(since, now)})`
 }
 
 const nativeRequests = (run: RunRecord, kinds: string[]) =>
@@ -196,27 +150,6 @@ function queuedMessages(run: RunRecord, ctx: StateContext): RoomMessage[] {
   const holder = controller(run, ctx)
   return queuedSteers(ctx.roomMessages[run.id] ?? []).filter(
     (message) => message.actor_id !== holder,
-  )
-}
-
-function currentIntegrator(run: RunRecord, ctx: StateContext): Mission | undefined {
-  const mission = missionOf(run, ctx)
-  if (run.mission_role !== 'integrator' || !mission) return undefined
-  if (mission.current_integrator_run_id !== run.id || !swarmRunning(mission)) return undefined
-  return mission
-}
-
-function openSwarmQuestions(run: RunRecord, ctx: StateContext) {
-  const mission = currentIntegrator(run, ctx)
-  if (!mission) return []
-  return (ctx.missionDetails[mission.id]?.questions ?? []).filter((q) => !q.answered_at)
-}
-
-function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
-  return (
-    missionOf(run, ctx)?.accountable_human_id ??
-    (run.integrator_run_id ? ctx.runs[run.integrator_run_id]?.member_id : undefined) ??
-    run.member_id
   )
 }
 
@@ -238,7 +171,6 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'sudo',
     target: 'request',
     background: true,
-    workers: true,
     admins: true,
     holds: (run) => (run.pending_inputs ?? []).some(isSudo),
     resolvers: (run) => [run.member_id],
@@ -298,51 +230,6 @@ export const needsYouConditions: NeedsYouCondition[] = [
     since: (run, ctx) => openRoomQuestions(run, ctx)[0]?.created_at,
   }),
   condition({
-    id: 'swarm-question',
-    target: 'swarm',
-    background: true,
-    swarm: true,
-    holds: (run, ctx) =>
-      openSwarmQuestions(run, ctx).length > 0 || (currentIntegrator(run, ctx)?.open_questions ?? 0) > 0,
-    resolvers: (run, ctx) => [currentIntegrator(run, ctx)?.accountable_human_id],
-    admins: true,
-    action: () => ({ kind: 'open', label: 'Answer' }),
-    reason: (run, ctx) => {
-      const question = openSwarmQuestions(run, ctx)[0]
-      return question ? `The integrator asks: ${question.body}` : 'The integrator has a question'
-    },
-    since: (run, ctx) => openSwarmQuestions(run, ctx)[0]?.asked_at,
-  }),
-  condition({
-    id: 'integrator-down',
-    target: 'swarm',
-    background: true,
-    swarm: true,
-    holds: (run, ctx) => {
-      const mission = currentIntegrator(run, ctx)
-      return mission !== undefined && (Boolean(mission.integrator_launch_error) || isTerminal(run.status))
-    },
-    resolvers: (run, ctx) => [swarmHuman(run, ctx)],
-    admins: true,
-    reason: (run, ctx) =>
-      missionOf(run, ctx)?.integrator_launch_error
-        ? 'Integrator failed to launch, replace it to continue'
-        : 'Integrator stopped, replace it to continue',
-    action: () => ({ kind: 'open', label: 'Open swarm' }),
-    since: (run, ctx) => missionOf(run, ctx)?.integrator_launch_error_at,
-  }),
-  condition({
-    id: 'control-hold',
-    target: 'terminal',
-    background: true,
-    workers: true,
-    holds: (run, ctx) => attemptHold(run, ctx)?.takeover_member_id !== undefined,
-    resolvers: (run, ctx) => [attemptHold(run, ctx)?.takeover_member_id],
-    reason: (run, ctx) => `You hold control of worker ${attemptHold(run, ctx)?.number ?? ''}`.trimEnd(),
-    action: () => terminalAction,
-    since: (run, ctx) => attemptHold(run, ctx)?.takeover_since,
-  }),
-  condition({
     id: 'disconnected',
     state: 'disconnected',
     target: 'terminal',
@@ -356,11 +243,9 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'blocked',
     target: 'terminal',
     background: true,
-    workers: true,
     holds: (run) => run.state === 'needs-you' && run.reason?.startsWith(blockedPrefix) === true,
-    resolvers: (run, ctx) => [run.mission_role === 'worker' ? swarmHuman(run, ctx) : run.member_id],
-    reason: (run) =>
-      `${run.mission_role === 'worker' ? 'Worker blocked' : 'Blocked'}: ${run.reason?.slice(blockedPrefix.length)}`,
+    resolvers: (run) => [run.member_id],
+    reason: (run) => `Blocked: ${run.reason?.slice(blockedPrefix.length)}`,
     action: () => terminalAction,
   }),
   condition({

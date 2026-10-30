@@ -252,7 +252,7 @@ func runShow(runID string, asJSON bool) error {
 func needsYou(r protocol.Run) bool {
 	run := domain.Run{
 		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
-		OutcomeUnseen: r.OutcomeUnseen, MissionRole: r.MissionRole, Review: domain.RunReview(r.Review),
+		OutcomeUnseen: r.OutcomeUnseen, Review: domain.RunReview(r.Review),
 	}
 	return run.NeedsAttention(r.Paused)
 }
@@ -299,17 +299,13 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 
 // displayStatus is the dashboard's label for a live run's state, else for
 // its status. A reported success awaiting review is Ready for review, live or
-// completed. A swarm worker's request waits for its integrator unless the
-// worker reports itself blocked.
+// completed.
 func displayStatus(r protocol.Run) string {
 	review := domain.RunReview(r.Review)
 	if review == domain.ReviewReady || review == domain.ReviewLater {
 		if r.Activity == string(domain.ActivityFinished) || r.Status == string(domain.RunCompleted) {
 			return "Ready for review"
 		}
-	}
-	if r.MissionRole == "worker" && r.Activity == string(domain.ActivityNeedsYou) && !strings.HasPrefix(r.Reason, domain.BlockedReasonPrefix) {
-		return "Waiting for the integrator"
 	}
 	if label, ok := activityLabels[domain.RunActivity(r.Activity)]; ok {
 		if r.Wait != nil && waitLabels[r.Wait.Kind] != "" {
@@ -357,7 +353,7 @@ var statusLabels = map[domain.RunStatus]string{
 
 func runRuns(args []string) error {
 	fs := newFlagSet("runs")
-	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (state needs-you or disconnected, an unseen failure, or a reported success ready for review; never paused, and a swarm worker only when blocked)")
+	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (state needs-you or disconnected, an unseen failure, or a reported success ready for review; never paused)")
 	archived := fs.Bool("archived", false, "list only archived runs")
 	asJSON := fs.Bool("json", false, "print a JSON array, or with a run id one JSON object: id, workspace_id, workspace, status, state, reason, pending_inputs, branch, report")
 	runID := ""

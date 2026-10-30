@@ -95,7 +95,7 @@ func (s *Service) options(ctx context.Context, run domain.RunID, req protocol.Ch
 		return protocol.ChildOptionsResult{}, rpcErr(protocol.MethodChildOptions, err)
 	}
 	out := protocol.ChildOptionsResult{
-		Allowed: p.refusal == "", Reason: p.refusal, Scope: p.scope, OwnerID: string(p.owner),
+		Allowed: p.refusal == "", Reason: p.refusal, OwnerID: string(p.owner),
 		Limits: limitsWire(p.limits), Busy: counts.Busy, Queued: counts.Queued,
 		Choices: []protocol.ChildChoice{},
 	}
@@ -163,9 +163,6 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 		OwnerID: p.owner, AccountID: spec.account, Harness: spec.harness, Mode: spec.mode, Model: spec.model,
 		Purpose: req.Purpose, Task: req.Task, BaseCommit: base, BaseBranch: p.parent.Branch,
 		Fallback: spec.fallback, IdempotencyKey: req.IdempotencyKey, RequestHash: requestHash(req),
-	}
-	if p.mission != nil {
-		c.MissionID = p.mission.ID
 	}
 	reserved, replay, err := s.cfg.Store.ReserveChild(ctx, c)
 	if err != nil {

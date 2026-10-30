@@ -338,7 +338,7 @@ func TestIntegrationRunInputReports(t *testing.T) {
 	sub := srv.subscribe(ctx, t)
 	var seen []events.Event
 	run := e.launch(t, ctrl, task, "fake")
-	socket := waitMissionSocket(t, e.coordDir(run.ID))
+	socket := waitCoordSocket(t, e.coordDir(run.ID))
 
 	question := domain.RunInputRequest{ID: "request-1", SessionID: "session-a", Kind: "question"}
 	permission := domain.RunInputRequest{ID: question.ID, SessionID: question.SessionID, Kind: "permission"}

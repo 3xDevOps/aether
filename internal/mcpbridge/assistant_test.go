@@ -103,7 +103,6 @@ func TestAssistantTools(t *testing.T) {
 	run := protocol.Run{ID: "run-1", WorkspaceID: "ws-1", MemberID: "m2", Title: "Fix login " + injection, Task: "fix the login test", Harness: "claude",
 		Mode: "tui", Status: "running", CreatedAt: "2026-10-22T10:00:00Z"}
 	items := []protocol.AttentionItem{
-		{Kind: protocol.AttentionKindSwarmQuestion, RunID: "run-1", MissionID: "mis-1", WorkspaceID: "ws-1", Message: &protocol.AttentionMessage{ID: "q-1", Body: "Which branch? " + injection}},
 		{Kind: protocol.AttentionKindPermission, RunID: "run-1", WorkspaceID: "ws-1", Request: &protocol.AttentionRequest{ID: "req-1", Title: "Run git push",
 			Options: []protocol.AttentionOption{{ID: "once", Label: "Allow once", Kind: "allow_once"}, {ID: "no", Label: "Reject", Kind: "reject_once"}}}},
 	}
@@ -117,22 +116,18 @@ func TestAssistantTools(t *testing.T) {
 		protocol.MethodAttentionList:     protocol.AttentionListResult{Items: items},
 		protocol.MethodRunPRStatus:       protocol.RunPRStatusResult{},
 		protocol.MethodTerminalHistory:   protocol.TerminalHistoryResult{Lines: []protocol.TerminalHistoryLine{{Text: "$ go test " + injection}}},
-		protocol.MethodMissionList:       protocol.MissionListResult{Missions: []protocol.Mission{{ID: "mis-1", WorkspaceID: "ws-1", Objective: "Ship billing", Phase: "running"}}},
-		protocol.MethodMissionShow: protocol.MissionShowResult{Mission: protocol.Mission{ID: "mis-1", WorkspaceID: "ws-1", Objective: "Ship billing", Phase: "running", AccountableHumanID: "m2"},
-			Questions: []protocol.MissionQuestion{{ID: "q-1", MissionID: "mis-1", Body: "Which branch? " + injection}}},
-		protocol.MethodCoordMessagesList:     protocol.CoordMessagesListResult{},
-		protocol.MethodRunGitLog:             protocol.RunGitLogResult{Ahead: 2},
-		protocol.MethodRunEvidenceList:       protocol.EvidencePacketListResult{},
-		protocol.MethodRunPRFeedback:         protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 42, State: "OPEN", Title: injection}},
-		protocol.MethodRunOverlaps:           protocol.RunOverlapsResult{},
-		protocol.MethodInsightsGet:           protocol.InsightsResult{},
-		protocol.MethodRunInject:             protocol.RunRoomPostResult{Message: protocol.RoomMessage{State: protocol.RoomMessageSent}},
-		protocol.MethodMissionQuestionAnswer: protocol.MissionQuestionResult{},
-		protocol.MethodRunInputRespond:       protocol.RunInputRespondResult{Status: protocol.RunInputRespondAnswered},
-		protocol.MethodAccountList:           protocol.AccountListResult{Accounts: []protocol.Member{{ID: "m1", DisplayName: "Ada"}}},
-		protocol.MethodAgentList:             protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "claude", Installed: true, Enhanced: "adapter", DefaultMode: "tui"}}},
-		protocol.MethodAccountUsage:          protocol.AccountUsageResult{Providers: []protocol.UsageProvider{}},
-		protocol.MethodTemplateList:          protocol.TemplateListResult{Templates: []protocol.Template{{Name: "triage", Harness: "claude", Mode: "acp", Task: injection}}},
+		protocol.MethodCoordMessagesList: protocol.CoordMessagesListResult{},
+		protocol.MethodRunGitLog:         protocol.RunGitLogResult{Ahead: 2},
+		protocol.MethodRunEvidenceList:   protocol.EvidencePacketListResult{},
+		protocol.MethodRunPRFeedback:     protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 42, State: "OPEN", Title: injection}},
+		protocol.MethodRunOverlaps:       protocol.RunOverlapsResult{},
+		protocol.MethodInsightsGet:       protocol.InsightsResult{},
+		protocol.MethodRunInject:         protocol.RunRoomPostResult{Message: protocol.RoomMessage{State: protocol.RoomMessageSent}},
+		protocol.MethodRunInputRespond:   protocol.RunInputRespondResult{Status: protocol.RunInputRespondAnswered},
+		protocol.MethodAccountList:       protocol.AccountListResult{Accounts: []protocol.Member{{ID: "m1", DisplayName: "Ada"}}},
+		protocol.MethodAgentList:         protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "claude", Installed: true, Enhanced: "adapter", DefaultMode: "tui"}}},
+		protocol.MethodAccountUsage:      protocol.AccountUsageResult{Providers: []protocol.UsageProvider{}},
+		protocol.MethodTemplateList:      protocol.TemplateListResult{Templates: []protocol.Template{{Name: "triage", Harness: "claude", Mode: "acp", Task: injection}}},
 		protocol.MethodChangesList: protocol.ChangesListResult{Changes: []protocol.Change{{Seq: 9, Kind: protocol.ChangeKindReports, RunID: "run-1",
 			Report: &protocol.ChangeReport{Outcome: "success"}, Untrusted: &protocol.ChangeUntrusted{Summary: injection}}}, NextCursor: "9"},
 	}}
@@ -152,7 +147,7 @@ func TestAssistantTools(t *testing.T) {
 		}
 		names = append(names, tool.Name)
 	}
-	for _, name := range []string{"aether_needs_attention", "aether_answer", "aether_decide_approval", "aether_get_swarm",
+	for _, name := range []string{"aether_needs_attention", "aether_answer", "aether_decide_approval",
 		"aether_run_changes", "aether_pr_status", "aether_overlaps", "aether_activity_summary", "aether_run_history", "aether_docs", "aether_view_context",
 		"aether_usage", "aether_environment_status", "aether_save_environment", "aether_stop_run"} {
 		if !slices.Contains(names, name) {
@@ -175,7 +170,6 @@ func TestAssistantTools(t *testing.T) {
 		args map[string]any
 	}{
 		{"aether_needs_attention", nil},
-		{"aether_get_swarm", map[string]any{"swarm_id": "mis-1"}},
 		{"aether_run_changes", map[string]any{"run_id": "run-1"}},
 		{"aether_pr_status", map[string]any{"run_id": "run-1"}},
 		{"aether_overlaps", nil},
@@ -197,13 +191,11 @@ func TestAssistantTools(t *testing.T) {
 	}
 
 	// Confirmed ops ask once per action, naming the target and its owner.
-	callOK(t, cs, "aether_answer", map[string]any{"run_id": "run-1", "answer_id": "q-1", "answer": "main"})
 	callOK(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-1", "answer_id": "req-1", "decision": "allow", "action": "Run git push"})
 	want := []string{
-		`Answer swarm mis-1 ("Ship billing"), owned by Grace, which asked "Which branch? ` + injection + `": "main"`,
 		`Allow once run run-1's request ("Fix login ` + injection + `"), owned by Grace: "Run git push", choosing "Allow once"`,
 	}
-	if len(confirmed) != 2 || confirmed[0].Summary != want[0] || confirmed[1].Summary != want[1] || !confirmed[0].OtherMember {
+	if len(confirmed) != 1 || confirmed[0].Summary != want[0] || !confirmed[0].OtherMember {
 		t.Fatalf("confirmations = %+v, want %q", confirmed, want)
 	}
 

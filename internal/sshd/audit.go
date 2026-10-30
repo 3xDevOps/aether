@@ -77,7 +77,7 @@ func noteChange(ctx context.Context) {
 // auditCall records every write call by a connector or the assistant, and
 // every call of auditedMethods; changed is whether the call noted a
 // change. The entry holds the ids the params and result name, never the
-// params themselves, and the workspace of the run or swarm it acted on.
+// params themselves, and the workspace of the run it acted on.
 // Recording happens after the call took effect, so a store failure is
 // logged rather than turned into the call's error.
 func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method string, params, result json.RawMessage, perr *protocol.Error, changed bool) {
@@ -99,8 +99,6 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 	}
 	var ids struct {
 		RunID       string `json:"run_id"`
-		MissionID   string `json:"mission_id"`
-		QuestionID  string `json:"question_id"`
 		ID          string `json:"id"`
 		ConnectorID string `json:"connector_id"`
 		MemberID    string `json:"member_id"`
@@ -114,10 +112,9 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		WorkspaceID string `json:"workspace_id"`
 	}
 	var res struct {
-		Run     made `json:"run"`
-		Mission made `json:"mission"`
-		Item    made `json:"item"`
-		Merge   struct {
+		Run   made `json:"run"`
+		Item  made `json:"item"`
+		Merge struct {
 			AbsorbedID string `json:"absorbed_id"`
 		} `json:"merge"`
 		Link struct {
@@ -125,8 +122,8 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		} `json:"link"`
 	}
 	_ = json.Unmarshal(result, &res)
-	target := cmp.Or(res.Run.ID, res.Mission.ID, res.Item.ID, ids.RunID, ids.MissionID, ids.QuestionID, ids.ID)
-	workspace := cmp.Or(res.Run.WorkspaceID, res.Mission.WorkspaceID, res.Item.WorkspaceID, ids.WorkspaceID)
+	target := cmp.Or(res.Run.ID, res.Item.ID, ids.RunID, ids.ID)
+	workspace := cmp.Or(res.Run.WorkspaceID, res.Item.WorkspaceID, ids.WorkspaceID)
 	switch method {
 	case protocol.MethodConnectorRevoke:
 		target = ids.ConnectorID
@@ -143,11 +140,6 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 	if workspace == "" && ids.RunID != "" {
 		if r, err := s.cfg.Store.GetRun(ctx, domain.RunID(ids.RunID)); err == nil {
 			workspace = string(r.WorkspaceID)
-		}
-	}
-	if ms, ok := s.cfg.Store.(store.MissionStore); ok && workspace == "" && ids.MissionID != "" {
-		if m, err := ms.GetMission(ctx, domain.MissionID(ids.MissionID)); err == nil {
-			workspace = string(m.WorkspaceID)
 		}
 	}
 	e := &store.AuditEntry{At: time.Now(), Member: member, Via: via, ConnectorID: connector, Client: client, Method: method,

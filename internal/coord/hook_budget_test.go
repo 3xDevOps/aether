@@ -307,11 +307,10 @@ func TestHookStatusPreservesReadOnlyStatusAuthorization(t *testing.T) {
 	ctx := context.Background()
 	a, b := h.run(0), h.run(1)
 	h.peers.pair(a, b, "shared.go")
-	h.svc.cfg.Mission = missionTransportStub{mission: []domain.RunID{a, b}}
 	request := func(run domain.RunID, method string) protocol.Response {
 		return h.svc.handle(ctx, run, []byte(`{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`))
 	}
-	if _, err := h.svc.Send(ctx, b, sendParams(a, "pending mission message")); err != nil {
+	if _, err := h.svc.Send(ctx, b, sendParams(a, "pending message")); err != nil {
 		t.Fatal(err)
 	}
 	hook := request(a, protocol.MethodCoordHookStatus)
@@ -322,9 +321,9 @@ func TestHookStatusPreservesReadOnlyStatusAuthorization(t *testing.T) {
 	if err := json.Unmarshal(hook.Result, &status); err != nil {
 		t.Fatal(err)
 	}
-	if status.RunID != string(a) || status.Assignment == nil || status.Assignment.MissionID != "mission-1" ||
+	if status.RunID != string(a) ||
 		len(status.Peers) != 1 || status.Peers[0].RunID != string(b) || status.Unread != 1 {
-		t.Fatalf("hook lost authenticated mission context: %+v", status)
+		t.Fatalf("hook lost authenticated context: %+v", status)
 	}
 	for _, tc := range []struct {
 		name string
@@ -354,8 +353,8 @@ func TestHookStatusPreservesReadOnlyStatusAuthorization(t *testing.T) {
 		if err := json.Unmarshal(response.Result, &discovery); err != nil {
 			t.Fatal(err)
 		}
-		if discovery.RunID != string(b) || discovery.Assignment != nil || len(discovery.Peers) != 0 || discovery.Unread != 0 {
-			t.Fatalf("disabled coordination leaked mailbox or mission state: %+v", discovery)
+		if discovery.RunID != string(b) || len(discovery.Peers) != 0 || discovery.Unread != 0 {
+			t.Fatalf("disabled coordination leaked mailbox state: %+v", discovery)
 		}
 		for _, capability := range discovery.Capabilities {
 			if capability != protocol.MethodCoordStatus {

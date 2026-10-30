@@ -480,7 +480,7 @@ describe('scoped Board preferences', () => {
     expect(restored.boardMapViewports).toEqual({})
   })
 
-  it('keeps folded swarms across reloads and prunes folds of runs that are gone', () => {
+  it('keeps folded groups across reloads and prunes folds of runs that are gone', () => {
     const keyOf = (id: string) => JSON.stringify(['wsp_1', id])
     const store = createRootStore()
     store.setState({ runs: { kept: { id: 'kept', workspace_id: 'wsp_1' }, other: { id: 'other', workspace_id: 'wsp_1' } } as never })

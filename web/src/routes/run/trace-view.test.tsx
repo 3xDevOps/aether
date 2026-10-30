@@ -2,13 +2,13 @@ import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@te
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { SessionItem } from '@/lib/session-types'
-import type { Event, MissionAttempt, MissionShowResult, Run, TimelinePage, TimelineQuery } from '@/lib/types'
+import type { Event, Run, TimelinePage, TimelineQuery } from '@/lib/types'
 import { useTraceAnnouncement } from '@/routes/run/trace-announce'
 import { TraceView } from '@/routes/run/trace-view'
 import { useStore } from '@/store'
 import type { Span, SpanKind, SpanStatus } from '@/store/trace'
 import { item, resetItems, say, state, tool } from '@/test/acp-stream'
-import { mission, missionTask, run } from '@/test/fixtures'
+import { run } from '@/test/fixtures'
 import { sizedViewport } from '@/test/virtual'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -49,17 +49,10 @@ const costEvent = (seq: number, tokens: number): Event => ({
   payload: { metered: true, increment: true, input_tokens: tokens, output_tokens: 0, cost_usd: 0.01 * tokens },
 })
 
-const attempt = (over: Partial<MissionAttempt> = {}): MissionAttempt => ({
-  id: 'att_1', mission_id: 'mission_1', task_id: 'task_1', task_revision: 1, number: 1, dispatch_key: 'k', harness: 'claude', mode: 'acp',
-  state: 'running', run_id: 'run_w1', authority_generation: 1, integrator_generation: 1,
-  created_at: '2026-10-06T10:00:01Z', reserved_at: '2026-10-06T10:00:01Z', started_at: '2026-10-06T10:00:01Z', ...over,
-})
-
-const swarm = (...attempts: MissionAttempt[]) => ({ mission: mission(), tasks: [missionTask()], attempts, submissions: [], diagnostics: [], questions: [] })
 
 beforeEach(() => {
   resetItems()
-  useStore.setState({ runs: {}, acpSessions: {}, traceLogs: {}, traceViews: {}, missionDetails: {}, missionSeq: {}, connection: 'live' })
+  useStore.setState({ runs: {}, acpSessions: {}, traceLogs: {}, traceViews: {}, connection: 'live' })
   vi.mocked(api.workspaceTimeline).mockResolvedValue({ events: [], next_seq: 0, more: false })
 })
 
@@ -156,36 +149,6 @@ describe('TraceView', () => {
     show(twoTurns())
     await waitFor(() => expect(screen.getByText('Tokens').nextElementSibling?.textContent).toBe('1.1K'))
     expect(api.workspaceTimeline).not.toHaveBeenCalledWith(expect.objectContaining({ after_seq: expect.anything() }))
-  })
-
-  it('re-reads an integrator’s workers on each swarm change', async () => {
-    vi.mocked(api.missionShow).mockResolvedValueOnce(swarm(attempt()))
-    show(twoTurns(), { mission_role: 'integrator', mission_id: 'mission_1' })
-    expect(await screen.findByRole('treeitem', { name: /^Worker 1.*, Worker, Running/ })).toBeDefined()
-    vi.mocked(api.missionShow).mockResolvedValueOnce(swarm(attempt({ state: 'completed', finished_at: '2026-10-06T10:00:05Z' })))
-    act(() => useStore.getState().bumpWorkflowSignal('missionSeq', 'mission_1'))
-    expect(await screen.findByRole('treeitem', { name: /^Worker 1.*, Worker, Done/ })).toBeDefined()
-  })
-
-  it('keeps a newer workers read when an older one answers last', async () => {
-    const first = Promise.withResolvers<MissionShowResult>()
-    vi.mocked(api.missionShow).mockReturnValueOnce(first.promise)
-    show(twoTurns(), { mission_role: 'integrator', mission_id: 'mission_1' })
-    vi.mocked(api.missionShow).mockResolvedValueOnce(swarm(attempt({ state: 'completed', finished_at: '2026-10-06T10:00:05Z' })))
-    act(() => useStore.getState().bumpWorkflowSignal('missionSeq', 'mission_1'))
-    expect(await screen.findByRole('treeitem', { name: /^Worker 1.*, Worker, Done/ })).toBeDefined()
-    await act(async () => first.resolve(swarm(attempt())))
-    expect(screen.getByRole('treeitem', { name: /^Worker 1.*, Worker, Done/ })).toBeDefined()
-  })
-
-  it('shows a failed workers read with its error and Retry', async () => {
-    vi.mocked(api.missionShow).mockRejectedValueOnce(new Error('mission.show: permission denied'))
-    show(twoTurns(), { mission_role: 'integrator', mission_id: 'mission_1' })
-    expect(await screen.findByText('mission.show: permission denied')).toBeDefined()
-    vi.mocked(api.missionShow).mockResolvedValueOnce(swarm(attempt()))
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(await screen.findByRole('treeitem', { name: /^Worker 1/ })).toBeDefined()
-    expect(screen.queryByText('mission.show: permission denied')).toBeNull()
   })
 
   it('says when history is not held: paging, expired, or failed', () => {

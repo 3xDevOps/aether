@@ -4,7 +4,7 @@ Aether does not install or bundle coding agents. You install the agent CLI in
 your [environment](environments.md) (your own persistent container shell) and
 sign in with the vendor's own login. Runs then launch that CLI inside a
 container. This guide lists which agents work, how to sign in to each, and what
-does not work. Terms such as run, swarm and workspace are in the
+does not work. Terms such as run, child run and workspace are in the
 [glossary](README.md#concepts).
 
 ## Supported agents
@@ -414,7 +414,7 @@ row.
 Removal leaves the package files, the login, the agent's settings and your runs'
 history. Runs already going keep going. A mode switch, resume, reattach or usage
 fallback that needs the removed agent fails until you set it up again, as do
-swarm choices and templates that name it. Removal only touches your own home. It
+templates that name it. Removal only touches your own home. It
 is refused while an install or an update runs in the home. A launch of a removed
 agent you defined answers `unknown harness "x"; register it with: aether agent add x`.
 
@@ -635,7 +635,7 @@ in.
 | `--standard <argv>` | The Standard-mode command |
 | `--background <argv>` | The Background-mode command |
 | `--acp <argv>` | The command that serves ACP. Without it the agent has no Enhanced mode |
-| `--acp-mode <id>` | The session mode a new Enhanced run starts in. Pick one that acts without asking, or a swarm worker waits on the prompt. Needs `--acp`, no whitespace |
+| `--acp-mode <id>` | The session mode a new Enhanced run starts in. Pick one that acts without asking, or the run waits on the prompt. Needs `--acp`, no whitespace |
 | `--login <path>` | A login file, such as `--login ~/.cursor/auth.json`. With it the Agents page shows **Login found**. Without it setup never shows the agent as logged in |
 
 The name is what you choose at launch, and it need not match the executable.
@@ -670,7 +670,7 @@ uses it to prove the whole lifecycle without a vendor account.
 
 ## Incoming coordination hooks
 
-When agents work as a swarm or share files, other runs and people send them
+When agents run child runs or share files, other runs and people send them
 messages. Aether keeps those in a durable mailbox and tells the agent to read it.
 The reading itself is a command, `aether-internal inbox`. The agent learns mail
 is waiting in one of two ways. A **hook** runs at a boundary such as a prompt or
@@ -738,8 +738,8 @@ mounts.
   and Enhanced ([Switching a running agent](enhanced-runs.md#switching-a-running-agent)).
 - Codex subagents do not nest in the Enhanced timeline.
 - No idle wake exists for Copilot, Gemini or Cursor, and Antigravity has no
-  hooks at all. A [swarm](teams.md#swarms) refuses them Standard, so they run
-  Enhanced there, or Background as workers.
+  hooks at all. A [child run](teams.md#child-runs) refuses them Standard, so they run
+  Enhanced there.
 - Standard Codex needs Codex 0.131.0 or newer. Its app-server ends with its
   terminal, so a `codex resume` in the shell runs without Aether's status and
   message delivery.

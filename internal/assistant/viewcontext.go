@@ -32,7 +32,7 @@ var (
 	viewID         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 	viewWord       = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,39}$`)
 	viewRepository = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
-	attachmentKind = map[string]bool{"workspace": true, "run": true, "mission": true, "pr": true, "check": true, "failure": true, "task": true}
+	attachmentKind = map[string]bool{"workspace": true, "run": true, "pr": true, "check": true, "failure": true}
 )
 
 // CleanViewContext checks a view context from the dashboard: an id, word or
@@ -80,7 +80,7 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 
 func cleanEntry(e protocol.AssistantViewEntry) protocol.AssistantViewEntry {
 	return protocol.AssistantViewEntry{
-		Name: cleanWord(e.Name), WorkspaceID: cleanID(e.WorkspaceID), RunID: cleanID(e.RunID), MissionID: cleanID(e.MissionID),
+		Name: cleanWord(e.Name), WorkspaceID: cleanID(e.WorkspaceID), RunID: cleanID(e.RunID),
 		Subagent: cleanID(e.Subagent), View: cleanWord(e.View), At: cleanTime(e.At),
 	}
 }
@@ -89,8 +89,7 @@ func cleanEntry(e protocol.AssistantViewEntry) protocol.AssistantViewEntry {
 // is unknown or it names nothing.
 func cleanAttachment(a protocol.AssistantViewAttachment) (protocol.AssistantViewAttachment, bool) {
 	out := protocol.AssistantViewAttachment{
-		Kind: a.Kind, WorkspaceID: cleanID(a.WorkspaceID), RunID: cleanID(a.RunID), MissionID: cleanID(a.MissionID),
-		TaskID: cleanID(a.TaskID), AttemptID: cleanID(a.AttemptID), Failure: cleanWord(a.Failure),
+		Kind: a.Kind, WorkspaceID: cleanID(a.WorkspaceID), RunID: cleanID(a.RunID), Failure: cleanWord(a.Failure),
 	}
 	if a.PR > 0 {
 		out.PR = a.PR
@@ -104,7 +103,7 @@ func cleanAttachment(a protocol.AssistantViewAttachment) (protocol.AssistantView
 	if a.Seq > 0 {
 		out.Seq = a.Seq
 	}
-	named := out.WorkspaceID != "" || out.RunID != "" || out.MissionID != "" || out.TaskID != "" || out.PR != 0
+	named := out.WorkspaceID != "" || out.RunID != "" || out.PR != 0
 	return out, attachmentKind[a.Kind] && named
 }
 

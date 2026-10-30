@@ -14,14 +14,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// integratorStore stands in for a swarm's live workers.
-type integratorStore struct {
+// childStore stands in for a run's unfinished child runs.
+type childStore struct {
 	store.Store
 	workers atomic.Int64
 }
 
-func (s *integratorStore) IntegratorWaiting(context.Context, domain.RunID, time.Time) (store.IntegratorWait, error) {
-	return store.IntegratorWait{Workers: int(s.workers.Load())}, nil
+func (s *childStore) UnfinishedChildren(context.Context, domain.RunID, time.Time) (int, int, error) {
+	return int(s.workers.Load()), 0, nil
 }
 
 // quietFor makes checkStalls see run as quiet for six stall thresholds: the
@@ -69,10 +69,10 @@ func nextActivity(t *testing.T, sub events.Subscription, run domain.RunID, seq *
 // continue, is needs-you.
 func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 	t.Parallel()
-	var integrator *integratorStore
+	var children *childStore
 	e := newReportingEnv(t, func(cfg *Config) {
-		integrator = &integratorStore{Store: cfg.Store}
-		cfg.Store = integrator
+		children = &childStore{Store: cfg.Store}
+		cfg.Store = children
 		cfg.StallThreshold = time.Hour
 	})
 	ctx := t.Context()
@@ -108,12 +108,12 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		{"next turn", func() { report(working) }, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
 		{"permission mid-turn", func() { report(permissionInput("open")) }, domain.RunRunning, domain.ActivityNeedsYou, agentstatus.ReasonResumed},
 		{"permission answered", func() { report(permissionInput("close")) }, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
-		{"integrator turn end with a live worker", func() {
-			integrator.workers.Store(1)
+		{"turn end with a live child run", func() {
+			children.workers.Store(1)
 			report(idle)
-		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 worker"},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 child run"},
 		{"the last worker finished", func() {
-			integrator.workers.Store(0)
+			children.workers.Store(0)
 			quietFor(t, e)
 			e.sched.refreshActivities(ctx)
 		}, domain.RunNeedsAttention, domain.ActivityWaiting, turnEndedReason},
@@ -138,11 +138,11 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			quietFor(t, e)
 		}, domain.RunNeedsAttention, domain.ActivityWaiting, waitedReasonPrefix},
 		{"a worker started after the wait went stale", func() {
-			integrator.workers.Store(1)
+			children.workers.Store(1)
 			e.sched.refreshActivities(ctx)
 		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, waitedReasonPrefix},
 		{"waiting for CI reported", func() {
-			integrator.workers.Store(0)
+			children.workers.Store(0)
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
 			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on PR 12", time.Now()); err != nil {
@@ -171,11 +171,11 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		}, domain.RunNeedsAttention, domain.ActivityAnswered, "blocked: explained the retry policy"},
 		{"an answer never goes stale, but a live worker outranks it", func() {
 			quietFor(t, e)
-			integrator.workers.Store(1)
+			children.workers.Store(1)
 			e.sched.refreshActivities(ctx)
 		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "blocked: explained the retry policy"},
 		{"the answer shows again once the worker finished", func() {
-			integrator.workers.Store(0)
+			children.workers.Store(0)
 			e.sched.refreshActivities(ctx)
 		}, domain.RunNeedsAttention, domain.ActivityAnswered, "blocked: explained the retry policy"},
 		{"a waiting outcome shown without a turn end", func() {
@@ -271,7 +271,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 	}
 }
 
-// TestEveryTurnStartIsRecorded: worker mail is new to an integrator when it
+// TestEveryTurnStartIsRecorded: worker mail is new to an children when it
 // arrived after its last turn started, so a prompt that starts a turn while
 // the agent still works counts as a start too.
 func TestEveryTurnStartIsRecorded(t *testing.T) {
@@ -327,10 +327,10 @@ func TestAStallIsWaitingNotNeedsYou(t *testing.T) {
 // goes stale once, keeping the agent's summary; a CI wait stays a CI wait.
 func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	t.Parallel()
-	var integrator *integratorStore
+	var children *childStore
 	e := newReportingEnv(t, func(cfg *Config) {
-		integrator = &integratorStore{Store: cfg.Store}
-		cfg.Store = integrator
+		children = &childStore{Store: cfg.Store}
+		cfg.Store = children
 		cfg.StallThreshold = time.Hour
 	})
 	ctx := t.Context()
@@ -358,14 +358,14 @@ func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 
 	// A hook's reason that reads like the workers reason is the hook's.
-	report(agentstatus.Report{State: agentstatus.Idle, Reason: "waiting for 2 workers"})
-	expect("a hook's reason", domain.ActivityWaiting, events.CauseTurnEnd, "waiting for 2 workers", "")
+	report(agentstatus.Report{State: agentstatus.Idle, Reason: "waiting for 2 child runs"})
+	expect("a hook's reason", domain.ActivityWaiting, events.CauseTurnEnd, "waiting for 2 child runs", "")
 	e.sched.refreshActivities(ctx)
 	expectNoStatusEvent(t, sub, run.ID, "refreshing a hook's reason")
 	report(agentstatus.Report{State: agentstatus.Working})
 	expect("the first turn", domain.ActivityWorking, events.CauseTurn, "", "")
 
-	integrator.workers.Store(1)
+	children.workers.Store(1)
 	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-1", "", "two workers on the parser", time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -374,14 +374,14 @@ func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	quietFor(t, e)
 	expectNoStatusEvent(t, sub, run.ID, "a wait past three stall thresholds with a live worker")
 
-	integrator.workers.Store(0)
+	children.workers.Store(0)
 	quietFor(t, e)
 	expect("the last worker gone", domain.ActivityWaiting, events.CauseWaitExpired, waitedReasonPrefix, ": two workers on the parser")
-	integrator.workers.Store(1)
+	children.workers.Store(1)
 	e.sched.refreshActivities(ctx)
 	expect("a worker live again", domain.ActivityWaitingAgents, events.CauseWorkers, waitedReasonPrefix, ": two workers on the parser")
 	// The poll checks stalls before it refreshes activities.
-	integrator.workers.Store(0)
+	children.workers.Store(0)
 	quietFor(t, e)
 	e.sched.refreshActivities(ctx)
 	expect("that worker gone", domain.ActivityWaiting, events.CauseWaitExpired, waitedReasonPrefix, ": two workers on the parser")
@@ -410,15 +410,15 @@ func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	expectNoStatusEvent(t, sub, run.ID, "a CI wait that already went stale")
 }
 
-// TestAnIntegratorsWorkersReasonFollowsItsSwarm: the workers reason Aether
-// wrote keeps tracking the swarm across a question the member answers, and
-// the sidecar carries it over a restart.
-func TestAnIntegratorsWorkersReasonFollowsItsSwarm(t *testing.T) {
+// TestTheChildRunsReasonFollowsTheChildren: the workers reason Aether
+// wrote keeps tracking the child runs across a question the member answers,
+// and the sidecar carries it over a restart.
+func TestTheChildRunsReasonFollowsTheChildren(t *testing.T) {
 	t.Parallel()
-	var integrator *integratorStore
+	var children *childStore
 	e := newReportingEnv(t, func(cfg *Config) {
-		integrator = &integratorStore{Store: cfg.Store}
-		cfg.Store = integrator
+		children = &childStore{Store: cfg.Store}
+		cfg.Store = children
 		cfg.StallThreshold = time.Hour
 	})
 	ctx := t.Context()
@@ -444,23 +444,23 @@ func TestAnIntegratorsWorkersReasonFollowsItsSwarm(t *testing.T) {
 		}
 	}
 
-	integrator.workers.Store(1)
+	children.workers.Store(1)
 	report(agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
-	expect("turn end with a live worker", domain.ActivityWaitingAgents, "waiting for 1 worker")
+	expect("turn end with a live worker", domain.ActivityWaitingAgents, "waiting for 1 child run")
 	report(permissionInput("open"))
-	expect("a permission request", domain.ActivityNeedsYou, "waiting for 1 worker")
+	expect("a permission request", domain.ActivityNeedsYou, "waiting for 1 child run")
 	report(permissionInput("close"))
-	expect("the request answered", domain.ActivityWaitingAgents, "waiting for 1 worker")
-	integrator.workers.Store(2)
+	expect("the request answered", domain.ActivityWaitingAgents, "waiting for 1 child run")
+	children.workers.Store(2)
 	e.sched.refreshActivities(ctx)
-	expect("a second worker", domain.ActivityWaitingAgents, "waiting for 2 workers")
+	expect("a second worker", domain.ActivityWaitingAgents, "waiting for 2 child runs")
 	sc, err := e.sched.readSidecar(run.ID)
-	if err != nil || sc.WorkersReason != "waiting for 2 workers" {
+	if err != nil || sc.WorkersReason != "waiting for 2 child runs" {
 		t.Fatalf("sidecar workers reason = %q, %v", sc.WorkersReason, err)
 	}
-	integrator.workers.Store(0)
+	children.workers.Store(0)
 	e.sched.refreshActivities(ctx)
-	expect("the swarm done", domain.ActivityWaiting, turnEndedReason)
+	expect("the child runs done", domain.ActivityWaiting, turnEndedReason)
 }
 
 func TestCauseOnlyExplainsTheActivityAsked(t *testing.T) {

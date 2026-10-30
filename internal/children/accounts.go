@@ -34,20 +34,6 @@ func modeName(m domain.LaunchMode) string {
 
 // choices lists what the policy lets a child run, each with its state.
 func (s *Service) choices(ctx context.Context, p *policy) ([]protocol.ChildChoice, error) {
-	if p.mission != nil {
-		out := make([]protocol.ChildChoice, 0, len(p.mission.ExecutionChoices))
-		for _, c := range p.mission.ExecutionChoices {
-			name, err := s.memberName(ctx, c.AccountMemberID)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, protocol.ChildChoice{
-				AccountMemberID: string(c.AccountMemberID), AccountName: name, Harness: c.Harness,
-				Modes: []string{modeName(c.Mode)}, DefaultMode: modeName(c.Mode), Model: c.Model, Status: choiceReady,
-			})
-		}
-		return out, nil
-	}
 	if s.cfg.Agents == nil || s.cfg.Agents() == nil {
 		return nil, fmt.Errorf("agent listing is unavailable")
 	}
@@ -129,23 +115,6 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 	}
 	if err := domain.ValidModel(req.Model); err != nil {
 		return launchSpec{}, invalid("%s", err.Error())
-	}
-	if p.mission != nil {
-		var match []domain.MissionExecutionChoice
-		for _, c := range p.mission.ExecutionChoices {
-			if c.Harness == req.Harness && (req.Model == "" || c.Model == req.Model) &&
-				(mode == "" || c.Mode == mode) && (req.AccountMemberID == "" || string(c.AccountMemberID) == req.AccountMemberID) {
-				match = append(match, c)
-			}
-		}
-		switch len(match) {
-		case 0:
-			return launchSpec{}, denied("swarm %s allows no %s choice matching that request; aether-internal child options lists its choices", p.mission.ID, req.Harness)
-		case 1:
-			c := match[0]
-			return launchSpec{harness: c.Harness, account: c.AccountMemberID, mode: c.Mode, model: c.Model, fallback: p.mission.Fallback}, nil
-		}
-		return launchSpec{}, invalid("swarm %s has %d %s choices; name --model, --mode or --account to pick one", p.mission.ID, len(match), req.Harness)
 	}
 	if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) != p.owner {
 		return launchSpec{}, denied("child runs use the owner's own %s account", req.Harness)

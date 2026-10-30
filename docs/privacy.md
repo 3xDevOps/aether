@@ -212,7 +212,7 @@ Off until an admin runs `sudo aether-server slack setup`
 ([slack.md](slack.md)) and a member links a Slack account. For each linked
 member the server sends Slack the titles of the runs that need them, the
 need lines (which can quote an agent's reason), the text and options of
-pending requests, run and swarm IDs and the dashboard's address, and, in the
+pending requests, run IDs and the dashboard's address, and, in the
 link confirmation, the member's Aether display name and the server's host name.
 Replies and button presses pass through Slack to the server. Nothing is sent
 to Slack for members who never linked.
@@ -278,7 +278,7 @@ permission requests and their answers. Whatever the agent or a tool prints,
 a secret included, can land there. Anyone with **View** on the run can read
 it through the dashboard; answering or messaging the agent needs the `steer`
 permission and the run's control lease. The log and terminal recordings persist
-until the run is explicitly deleted, including through workspace or swarm
+until the run is explicitly deleted, including through workspace
 deletion. Checkout cleanup and archiving do not remove them. Standard runs
 keep their terminal recording; older servers may already have trimmed history.
 
@@ -434,8 +434,6 @@ it and when. Notes reach the store three ways:
   outcome note for that run: the report's summary and next action, with the
   files and HEAD commit of the run's latest snapshot. A later report
   rewrites it and clears its pin.
-- When a member answers a swarm's question, the server writes the question
-  and answer as one decision note.
 
 Every member of the server, viewers included, can read every note, and
 every run in the workspace can search them. The first line of each pinned
@@ -457,9 +455,7 @@ report or answer with a secret is still recorded, with its text replaced by
 secrets it has rules for, so keep credentials out of reports and answers.
 
 Notes do not expire. A collaborator or admin deletes one with
-`aether memory rm <id>`, or every note attributed to a run, its swarm
-answers included, with `aether memory rm --run <run>`. Deleting a run or a
-swarm deletes the unpinned notes of its runs; pinned notes stay until
+`aether memory rm <id>`, or every note attributed to a run with `aether memory rm --run <run>`. Deleting a run deletes its unpinned notes; pinned notes stay until
 removed. Deleting the workspace deletes all of its notes. A replaced note stays, hidden from
 search unless asked for with `--all`, until it is removed. Removing a member
 keeps the notes attributed to them.

@@ -17,7 +17,6 @@ import (
 
 const (
 	nextRuns       = "call aether_list_runs for run ids"
-	nextSwarms     = "call aether_get_swarm for swarm ids"
 	nextWorkspaces = "call aether_list_workspaces for workspace ids"
 	nextAttention  = "call aether_needs_attention for what is pending"
 	defaultRows    = 20
@@ -26,7 +25,6 @@ const (
 	maxText        = 600
 	maxReport      = 200
 	maxFeedback    = 300
-	maxSwarmPages  = 5
 )
 
 type connectorListRunsInput struct {
@@ -61,17 +59,6 @@ type activityInput struct {
 	Period      string `json:"period,omitempty" jsonschema:"default today"`
 	TimeZone    string `json:"time_zone,omitempty" jsonschema:"IANA zone; default UTC"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
-}
-
-type swarmsInput struct {
-	SwarmID     string `json:"swarm_id,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	Limit       int    `json:"limit,omitempty" jsonschema:"default 20"`
-	Evidence    bool   `json:"evidence,omitempty" jsonschema:"with swarm_id: asked, done, reviewed, merged"`
-}
-
-type swarmInput struct {
-	SwarmID string `json:"swarm_id"`
 }
 
 type changesInput struct {
@@ -118,10 +105,6 @@ var readOps = []Op{
 		"Use this when the user asks what their agents did in a period."+untrustedRule, activitySummary).
 		enum("period", "today", "yesterday", "week").
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodInsightsGet, protocol.MethodWorkspaceTimeline),
-	opOf("aether_get_swarm", "Get swarms", ScopeRead, true, nextSwarms,
-		"Use this when the user asks about their swarms, or one by swarm_id."+untrustedRule, getSwarm).
-		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList,
-		protocol.MethodRunGet, protocol.MethodRunChildren, protocol.MethodRunPRStatus, protocol.MethodRunPRFeedback, protocol.MethodWorkspaceTimeline),
 	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, its diff."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
@@ -135,12 +118,12 @@ var readOps = []Op{
 		"Use this when the user asks what the team decided or learned in a workspace."+untrustedRule, memorySearch).
 		enum("kind", "decision", "convention", "gotcha", "preference", "outcome").
 		offer(TierRead).calling(protocol.MethodMemorySearch, protocol.MethodMemoryShow),
-	opOf("search", "Search runs and swarms", ScopeRead, true, "",
-		"Use this when ChatGPT deep research needs runs or swarms by words; in chat use aether_list_runs."+searchRule, search).
-		calling(protocol.MethodServerInfo, protocol.MethodRunList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
-	opOf("fetch", "Fetch run or swarm", ScopeRead, true, "call search for ids",
+	opOf("search", "Search runs", ScopeRead, true, "",
+		"Use this when ChatGPT deep research needs runs by words; in chat use aether_list_runs."+searchRule, search).
+		calling(protocol.MethodServerInfo, protocol.MethodRunList),
+	opOf("fetch", "Fetch run", ScopeRead, true, "call search for ids",
 		"Use this when deep research needs the full text of a search result."+searchRule, fetch).
-		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodMissionShow),
+		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodWorkspaceTimeline),
 }
 
 func listWorkspaces(ctx context.Context, c calls, _ struct{}) (string, any, error) {
@@ -190,7 +173,6 @@ type runRow struct {
 	WorkspaceID string   `json:"workspace_id"`
 	Workspace   string   `json:"workspace,omitempty"`
 	Harness     string   `json:"harness"`
-	MissionID   string   `json:"mission_id,omitempty"`
 	CreatedAt   string   `json:"created_at"`
 	URL         string   `json:"url,omitempty"`
 	Untrusted   *runText `json:"untrusted,omitempty"`
@@ -209,7 +191,7 @@ func runTitle(r protocol.Run) string {
 
 func rowOf(r protocol.Run, l links, workspaces map[string]string) runRow {
 	return runRow{ID: r.ID, State: r.Status, Activity: r.Activity, WorkspaceID: r.WorkspaceID, Workspace: workspaces[r.WorkspaceID],
-		Harness: r.Harness, MissionID: r.MissionID, CreatedAt: r.CreatedAt, URL: l.run(r.ID),
+		Harness: r.Harness, CreatedAt: r.CreatedAt, URL: l.run(r.ID),
 		Untrusted: &runText{Title: runTitle(r), Reason: clip(r.Reason, maxReport), Wait: clip(r.Wait.Text(time.Now()), maxReport)}}
 }
 
@@ -632,181 +614,10 @@ func activitySummary(ctx context.Context, c calls, in activityInput) (string, an
 	t := res.Totals
 	out := map[string]any{"from": res.From, "to": res.To, "time_zone": res.TimeZone,
 		"totals":        map[string]int{"launched": t.Launched, "completed": t.Completed, "merged": t.Merged, "failed": t.Failed, "active": t.Active},
-		"pull_requests": res.PullRequests, "swarms": map[string]int{"launched": res.Swarms.Launched, "completed": res.Swarms.Completed},
-		"needs_you": res.NeedsYou, "finished_runs": recent, "untrusted": map[string]any{"finished_runs": texts, "reports": latest}}
+		"pull_requests": res.PullRequests,
+		"needs_you":     res.NeedsYou, "finished_runs": recent, "untrusted": map[string]any{"finished_runs": texts, "reports": latest}}
 	return fmt.Sprintf("%d launched, %d completed, %d merged, %d failed, %d active; %d pull requests merged.",
 		t.Launched, t.Completed, t.Merged, t.Failed, t.Active, res.PullRequests.Merged), out, nil
-}
-
-type swarmRow struct {
-	ID              string `json:"id"`
-	WorkspaceID     string `json:"workspace_id"`
-	Phase           string `json:"phase"`
-	OpenQuestions   int    `json:"open_questions"`
-	IntegratorRunID string `json:"integrator_run_id,omitempty"`
-	CreatedAt       string `json:"created_at"`
-	URL             string `json:"url,omitempty"`
-	Untrusted       struct {
-		Objective string `json:"objective"`
-	} `json:"untrusted"`
-}
-
-func swarmRowOf(m protocol.Mission, l links, objective int) swarmRow {
-	row := swarmRow{ID: m.ID, WorkspaceID: m.WorkspaceID, Phase: m.Phase, OpenQuestions: m.OpenQuestions,
-		IntegratorRunID: m.CurrentIntegratorRunID, CreatedAt: m.CreatedAt, URL: l.swarm(m.ID)}
-	row.Untrusted.Objective = clip(m.Objective, objective)
-	return row
-}
-
-// allSwarms lists the swarms of one workspace, or of every workspace when
-// workspaceID is empty, newest first, up to maxSwarmPages pages of
-// maxRows per workspace.
-func allSwarms(ctx context.Context, read Call, workspaceID string) ([]protocol.Mission, error) {
-	ids := []string{workspaceID}
-	if workspaceID == "" {
-		var res protocol.WorkspaceListResult
-		if err := read(ctx, protocol.MethodWorkspaceList, nil, &res); err != nil {
-			return nil, err
-		}
-		ids = ids[:0]
-		for _, w := range res.Workspaces {
-			ids = append(ids, w.ID)
-		}
-	}
-	var out []protocol.Mission
-	for _, id := range ids {
-		cursor := ""
-		for range maxSwarmPages {
-			var res protocol.MissionListResult
-			if err := read(ctx, protocol.MethodMissionList, protocol.MissionListParams{WorkspaceID: id, Limit: maxRows, Before: cursor}, &res); err != nil {
-				return nil, err
-			}
-			out = append(out, res.Missions...)
-			if cursor = res.NextCursor; cursor == "" {
-				break
-			}
-		}
-	}
-	slices.SortStableFunc(out, func(a, b protocol.Mission) int { return strings.Compare(b.CreatedAt, a.CreatedAt) })
-	return out, nil
-}
-
-func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error) {
-	l, err := dashboardLinks(ctx, c.read)
-	if err != nil {
-		return "", nil, err
-	}
-	if in.SwarmID == "" {
-		missions, listErr := allSwarms(ctx, c.read, in.WorkspaceID)
-		if listErr != nil {
-			return "", nil, listErr
-		}
-		rows := []swarmRow{}
-		for _, m := range missions[:min(len(missions), rowLimit(in.Limit))] {
-			rows = append(rows, swarmRowOf(m, l, maxReport))
-		}
-		out := map[string]any{"swarms": rows}
-		if len(missions) > len(rows) {
-			out["total"], out["truncated"] = len(missions), true
-			return fmt.Sprintf("%d of %d swarms.", len(rows), len(missions)), out, nil
-		}
-		return fmt.Sprintf("%d swarms.", len(rows)), out, nil
-	}
-	var res protocol.MissionShowResult
-	if err = c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &res); err != nil {
-		return "", nil, err
-	}
-	book, err := accounts(ctx, c.read)
-	if err != nil {
-		return "", nil, err
-	}
-	m := res.Mission
-	var msgs protocol.CoordMessagesListResult
-	if err := c.read(ctx, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: m.WorkspaceID, MissionID: m.ID, Limit: 10}, &msgs); err != nil {
-		return "", nil, err
-	}
-	type task struct {
-		ID       string   `json:"id"`
-		Status   string   `json:"status"`
-		Title    string   `json:"title,omitempty"`
-		Blockers []string `json:"blockers,omitempty"`
-	}
-	type worker struct {
-		AttemptID string `json:"attempt_id"`
-		RunID     string `json:"run_id,omitempty"`
-		TaskID    string `json:"task_id"`
-		State     string `json:"state"`
-		choice
-		RequestedAccount *accountRef `json:"requested_account,omitempty"`
-		HeldBy           string      `json:"control_held_by,omitempty"`
-		URL              string      `json:"url,omitempty"`
-	}
-	type question struct {
-		ID       string `json:"id"`
-		Body     string `json:"body"`
-		Answer   string `json:"answer,omitempty"`
-		Answered bool   `json:"answered"`
-	}
-	type message struct {
-		FromRunID string `json:"from_run_id"`
-		ToRunID   string `json:"to_run_id"`
-		Kind      string `json:"kind"`
-		Body      string `json:"body"`
-		At        string `json:"at"`
-	}
-	tasks := make([]task, 0, len(res.Tasks))
-	for _, t := range res.Tasks {
-		row := task{ID: t.ID, Status: t.Status}
-		if t.Revision != nil {
-			row.Title = clip(t.Revision.Title, maxReport)
-		}
-		for _, b := range t.Blockers {
-			row.Blockers = append(row.Blockers, clip(b.Action, maxReport))
-		}
-		tasks = append(tasks, row)
-	}
-	type workerError struct {
-		AttemptID string `json:"attempt_id"`
-		LastError string `json:"last_error"`
-	}
-	workers := make([]worker, 0, len(res.Attempts))
-	var errs []workerError
-	for _, a := range res.Attempts {
-		w := worker{AttemptID: a.ID, RunID: a.RunID, TaskID: a.TaskID, State: a.State,
-			choice: choiceOf(a.Harness, a.Mode, a.Model, cmp.Or(a.LaunchAccountID, a.AccountOwnerID), book), URL: l.run(a.RunID)}
-		if a.LaunchAccountID != "" && a.LaunchAccountID != a.AccountOwnerID {
-			w.RequestedAccount = book.ref(a.AccountOwnerID)
-		}
-		if a.LastError != "" {
-			errs = append(errs, workerError{AttemptID: a.ID, LastError: clip(a.LastError, maxText)})
-		}
-		if a.TakeoverActive {
-			w.HeldBy = a.TakeoverMemberID
-		}
-		workers = append(workers, w)
-	}
-	questions := make([]question, 0, len(res.Questions))
-	for _, q := range res.Questions {
-		questions = append(questions, question{ID: q.ID, Body: clip(q.Body, maxText), Answer: clip(q.Answer, maxText), Answered: q.AnsweredAt != nil})
-	}
-	messages := make([]message, 0, len(msgs.Messages))
-	for _, msg := range msgs.Messages {
-		messages = append(messages, message{FromRunID: msg.FromRunID, ToRunID: msg.ToRunID, Kind: msg.Kind,
-			Body: clip(cmp.Or(msg.Summary, msg.Body), maxText), At: msg.CreatedAt})
-	}
-	untrusted := map[string]any{"tasks": tasks, "questions": questions, "messages": messages, "worker_errors": errs}
-	out := map[string]any{"swarm": swarmRowOf(m, l, maxText), "launch": swarmReceipt(m, l, book), "integrator_generation": m.IntegratorGeneration,
-		"workers": workers, "untrusted": untrusted}
-	if m.IntegratorLaunchError != "" {
-		out["integrator_launch_error"] = m.IntegratorLaunchError
-	}
-	summary := fmt.Sprintf("Swarm %s is %s: %d tasks, %d workers, %d open questions.", m.ID, m.Phase, len(tasks), len(workers), m.OpenQuestions)
-	if in.Evidence {
-		progress, said := swarmProgress(ctx, c.read, res, untrusted)
-		out["progress"], out["released"], out["deployed"] = progress, untracked, untracked
-		summary += said
-	}
-	return summary, out, nil
 }
 
 const (

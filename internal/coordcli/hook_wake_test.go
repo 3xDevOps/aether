@@ -83,7 +83,7 @@ func TestHookWakeUnsupportedStopsReceiver(t *testing.T) {
 func TestHookWakeSuppressedContext(t *testing.T) {
 	outsideEnhancedRun(t)
 	peer := newCLISocket(t, func(protocol.Request) protocol.Response {
-		return protocol.Response{Result: json.RawMessage(`{"wait_supported":true,"wake_admitted":false,"unread_message_ids":["msg-1"],"unread":1,"task":"UNTRUSTED","assignment":{"role":"integrator","mission_id":"UNTRUSTED"},"peers":[{"files":["UNTRUSTED"]}]}`)}
+		return protocol.Response{Result: json.RawMessage(`{"wait_supported":true,"wake_admitted":false,"unread_message_ids":["msg-1"],"unread":1,"task":"UNTRUSTED","peers":[{"files":["UNTRUSTED"]}]}`)}
 	})
 	var out bytes.Buffer
 	code, err := Run(t.Context(), []string{"hook", "generic", "wake"}, Config{Socket: peer.path, In: strings.NewReader(`{}`), Out: &out})
@@ -154,7 +154,7 @@ func TestHookWakeLeavesMailboxUnconsumed(t *testing.T) {
 }
 
 func TestHookWakeWaitOutlivesContextHookDeadline(t *testing.T) {
-	_, _, socket, _ := hookRun(t, nil, nil, false)
+	_, _, socket, _ := hookRun(t, nil, false)
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	var out bytes.Buffer

@@ -17,7 +17,7 @@ import { LanesView } from '@/routes/board/lanes/lanes'
 import { Legend } from '@/routes/board/lanes/legend'
 import { buildLanes, coarseMetrics, fineMetrics, reuseLanes, type LanesModel, type RunLane } from '@/routes/board/lanes/model'
 import { statusChanges } from '@/routes/board/lanes/segments'
-import { useLaneAgents, useLaneHistory, useLaneMissions } from '@/routes/board/lanes/use-lane-data'
+import { useLaneAgents, useLaneHistory } from '@/routes/board/lanes/use-lane-data'
 import { useMapRuns, type BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
@@ -27,9 +27,6 @@ const phone = '(max-width: 767px)'
 const minute = 60_000
 
 const edgeWords: Record<LaneEdgeKind, string> = {
-  orchestration: 'Orchestration',
-  dependency: 'Dependencies',
-  submission: 'Submissions',
   message: 'Agent messages',
   overlap: 'Overlaps',
 }
@@ -129,11 +126,6 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
 
   const workspaces = useMemo(() => [...new Set(visible.map((card) => card.run.workspace_id))].sort(), [visible])
   const history = useLaneHistory(workspaces, Math.floor(timeWindow.start / minute) * minute)
-  const missionIDs = useMemo(
-    () => [...new Set(visible.filter((card) => card.run.mission_id && (!card.run.finished_at || Date.parse(card.run.finished_at) >= timeWindow.start)).map((card) => card.run.mission_id!))].sort(),
-    [visible, timeWindow.start],
-  )
-  const missions = useLaneMissions(missionIDs)
   const { agents, toggle: toggleAgents, retry: retryAgents } = useLaneAgents()
   const [open, setOpen] = useState<ReadonlyMap<string, boolean>>(() => new Map())
 
@@ -164,15 +156,13 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
   const hidden = useMemo(() => new Set<LaneEdgeKind>(prefs.hidden), [prefs.hidden])
   const mail = useMemo(() => mailOf(history.events), [history.events])
   const edgeInput = useMemo(() => ({
-    cards: new Map(visible.map((card) => [card.run.id, card])),
     drawn: model.drawn,
-    details: ctx.missionDetails,
     mail,
     window: timeWindow,
     now,
     bucket: (24 * span) / width,
     overlaps,
-  }), [visible, model.drawn, ctx.missionDetails, mail, timeWindow, now, span, width, overlaps])
+  }), [model.drawn, mail, timeWindow, now, span, width, overlaps])
   const edges = useMemo(() => laneEdges({ ...edgeInput, hidden }), [edgeInput, hidden])
 
   const announceItems = useMemo(
@@ -300,13 +290,6 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
         <div className="shrink-0 px-4 pt-3">
           <Callout role="alert" tone="failed" title="Run history" actions={<Button variant="secondary" size="sm" onClick={history.retry}>Retry</Button>}>
             {history.error}
-          </Callout>
-        </div>
-      )}
-      {missions.error && (
-        <div className="shrink-0 px-4 pt-3">
-          <Callout role="alert" tone="failed" title="Swarm details" actions={<Button variant="secondary" size="sm" onClick={missions.retry}>Retry</Button>}>
-            {missions.error}
           </Callout>
         </div>
       )}

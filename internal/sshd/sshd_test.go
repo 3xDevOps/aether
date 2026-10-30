@@ -484,8 +484,8 @@ func (f *fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID
 	return domain.LaunchACP, nil
 }
 
-func (f *fakeRuns) SwarmRefusal(agent string, mode domain.LaunchMode) error {
-	return harness.SwarmRefusal(agent, mode)
+func (f *fakeRuns) WakeRefusal(agent string, mode domain.LaunchMode) error {
+	return harness.WakeRefusal(agent, mode)
 }
 
 func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harness string) (bool, error) {

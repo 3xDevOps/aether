@@ -31,15 +31,12 @@ type ChildLimits struct {
 var MaxChildLimits = ChildLimits{MaxLive: 64}
 
 // ChildReservation is one child run a run asked for. RunID is minted at
-// reservation, before the run row exists. TreeKey groups the runs that
-// share one allowance: the swarm's ID for swarm runs and their
-// descendants, otherwise the root run's ID.
+// reservation, before the run row exists. TreeKey is the root run's ID.
 type ChildReservation struct {
 	RunID          RunID
 	ParentRunID    RunID
 	RootRunID      RunID
 	TreeKey        string
-	MissionID      MissionID
 	WorkspaceID    WorkspaceID
 	OwnerID        MemberID
 	AccountID      MemberID

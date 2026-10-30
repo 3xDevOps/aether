@@ -28,9 +28,6 @@ func (d *workspaceDeletion) Delete(ctx context.Context, workspace domain.Workspa
 		if err := d.store.CheckWorkspaceDeletion(ctx, workspace); err != nil {
 			return err
 		}
-		if err := d.store.DeleteWorkspaceMissions(ctx, workspace); err != nil {
-			return err
-		}
 		for _, run := range runs {
 			if err := d.runs.DeleteRun(ctx, run.ID, actor); err != nil && !errors.Is(err, store.ErrNotFound) {
 				return fmt.Errorf("workspace.delete: delete run %s: %w", run.ID, err)

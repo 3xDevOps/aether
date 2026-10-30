@@ -28,7 +28,7 @@ func init() {
 }
 
 const answerUsage = "usage: aether answer <run-id> <request-id> <option-id> [--values '<json object>']\n" +
-	"   or: aether answer <run-id> <question-id> \"<answer>\"|-   (a swarm or teammate question)"
+	"   or: aether answer <run-id> <question-id> \"<answer>\"|-   (a teammate's question)"
 
 func runAnswer(args []string) error {
 	if len(args) < 3 || strings.HasPrefix(args[0], "-") || strings.HasPrefix(args[1], "-") {
@@ -117,7 +117,7 @@ func needLines(it protocol.AttentionItem) []string {
 				add("an option that accepts takes --values '<json object>' for the form %s", printable(string(it.Request.Schema)))
 			}
 		}
-	case protocol.AttentionKindSwarmQuestion, protocol.AttentionKindRoomQuestion:
+	case protocol.AttentionKindRoomQuestion:
 		if it.Message == nil {
 			add("open the run in the Aether dashboard")
 			break
@@ -132,8 +132,6 @@ func needLines(it protocol.AttentionItem) []string {
 		add("aether logs %s", run)
 		add("aether message %s \"<reply>\"", run)
 		add("aether close %s --outcome abandoned", run)
-	case protocol.AttentionKindIntegratorDown:
-		add("aether swarm replace-integrator %s --agent <agent>", it.MissionID)
 	default:
 		add("open the run in the Aether dashboard")
 	}
@@ -204,16 +202,13 @@ func answer(c *protocol.Client, w io.Writer, stdin io.Reader, runID, id, reply s
 	}
 	key := "cli-answer-" + id
 	switch it.Kind {
-	case protocol.AttentionKindSwarmQuestion, protocol.AttentionKindRoomQuestion:
+	case protocol.AttentionKindRoomQuestion:
 		if it.Message == nil {
 			break
 		}
 		text, readErr := stdinText(reply, "answer", stdin)
 		if readErr != nil {
 			return readErr
-		}
-		if it.Kind == protocol.AttentionKindSwarmQuestion {
-			return answerSwarmQuestion(c, w, it.MissionID, id, text, key)
 		}
 		var res protocol.RunRoomPostResult
 		if err = c.Call(protocol.MethodRunRoomPost, protocol.RunRoomPostParams{WorkspaceID: it.WorkspaceID, RunID: r.ID,

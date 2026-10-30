@@ -209,7 +209,7 @@ in the address bar (see [URL state](#url-state)).
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
 one file each (`server`, `agent-models`, `workspaces`, `runs`, `members`, `env-terminal`,
 `terminal`, `board`, `palette`, `presence`, `cost`, `timeline`,
-`diff`, `files`, `collaboration`, `local`, `missions`, `messages`,
+`diff`, `files`, `collaboration`, `local`, `messages`,
 `sessions`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences and local progress (theme,
@@ -244,8 +244,8 @@ accessible name carries the age. A per-second countdown, such as a queued
 message's delivery (`DeliveryCountdown`), is its own small component and
 re-renders only its text.
 
-The `messages` slice holds agent mail (`coord.messages.list`) per workspace,
-swarm, or run scope, merged by message ID. A scope's list is held only while
+The `messages` slice holds agent mail (`coord.messages.list`) per workspace
+or run scope, merged by message ID. A scope's list is held only while
 a view that shows it is mounted (`useMessageList`); the last one to unmount
 drops it and the messages no other list holds. Messages list oldest first;
 those created at the same instant keep the order the server inserted them,
@@ -296,8 +296,7 @@ The slots that exist:
 | `card:meta` | `{ run }` | the run card's footer, after the owner avatar and diff counts |
 
 Its contributors are the file-overlap chips (`routes/diff/conflict-chips.tsx`),
-the sync badge (`routes/run-sync`) and a swarm's scope diagnostics
-(`routes/missions/conflicts.tsx`). `card:meta` content renders inside
+the sync badge (`routes/run-sync`). `card:meta` content renders inside
 `CardControls`, above the card's open target, so its links and buttons stay
 interactive. Keep it to one short item per contributor: a count or a word,
 with details behind a popover.
@@ -397,10 +396,10 @@ members' working rows recede: their title is in the muted colour.
 attached to it, the viewer included: the `watching` lists of
 `presence.roster`, which covers every workspace (`runWatchers` and
 `runPeople` in `src/store/presence.ts`). Their avatars stack at the row's
-right edge and the age, the glyph and a swarm's button move left to make
+right edge and the age and the glyph move left to make
 room; a run nobody is on reserves none. A root with child runs shows a
 `Network` glyph and their count before the agent glyph, and its name adds
-"2 child runs · 1 working"; every child lists under it, as swarm workers do. The first avatar sits whole at the
+"2 child runs · 1 working"; every child lists under it. The first avatar sits whole at the
 edge and each one after shows from behind it, to its left. First is the
 run's controller. While nobody holds control it is the last controller, if
 they are still on the run. The rest follow by name. A row draws three
@@ -410,8 +409,7 @@ title keeps its room.
 
 **Run details.** Resting a mouse on a row for 400ms opens a box docked to
 the row's right edge (`run-details.tsx`): the whole title, the state's
-reason, the workspace, the agent and mode, the branch, a swarm parent's
-worker counts or a root's child-run counts, when the run started, when it last changed if that is later,
+reason, the workspace, the agent and mode, the branch, a root's child-run counts, when the run started, when it last changed if that is later,
 its owner, and the people on it with the controller marked **Controlling**.
 A live run nobody controls says so above them and names who had control
 last, when the server knows. Moving to another row swaps the box without
@@ -440,50 +438,37 @@ you watching"). Its description is the exact time the age counts from.
 A Needs you row offers the condition's primary action on hover, focus and a
 coarse pointer, the same one its board card shows (see [Board](#board)):
 **Reply** opens the run's Session view with the composer focused, and every
-other action and non-swarm rows go to the view the condition names. Run rows share one tab stop (roving `tabindex`);
-Arrow keys, Home and End move within them. Swarm-control buttons are
-separate tab stops. `j` and `k` move from anywhere (starting at the open
+other action goes to the view the condition names. Run rows share one tab stop (roving `tabindex`);
+Arrow keys, Home and End move within them. `j` and `k` move from anywhere (starting at the open
 run), and `u` opens the next run that needs you, oldest first.
 
 A Finished or Failed row does not recede while no member has opened its run
 since it finished (`finish_unopened`, see [Run state](#run-state)): its title
 keeps the text colour and its accessible name says "Not opened yet" before
-the age. A finished worker nested under a swarm follows the same rule. Once
+the age. A finished child run nested under its parent follows the same rule. Once
 any member opens the run, the row recedes in every member's dashboard.
 
-A swarm's integrator row uses the agent's title, not the swarm objective.
-Every unarchived worker and previous integrator is indented beneath the current
-integrator and joined to it by tree connectors: a vertical trunk under the
-integrator's status dot and a horizontal wire into each child row
+Every unarchived child run is indented beneath its parent and joined to it
+by tree connectors: a vertical trunk under the parent's status dot and a
+horizontal wire into each child row
 ([Styles](styles.md#shell-palette-and-focus)). **Mine** also filters
 these children under Working and Finished; Needs you keeps the whole tree
 visible. Selecting a run row opens that run, from anywhere on the row
-outside its buttons. The graph-node button to the right of the title, before
-the age and the agent glyph, opens the swarm control page; its tooltip
-includes the workers' counts. The same `Waypoints` icon marks Swarms in
-navigation and New swarm in the command palette. Unread integrator mail
-still appears in the row's name and its details. The whole tree sits in
+outside its buttons. The whole tree sits in
 Needs you while any member needs the viewer, but only those waiting runs
-contribute to that group's count.
-A swarm whose integrator is missing or archived is rooted at its oldest
-worker (`swarmRoot` in `src/store/selectors.ts`). The Board still aggregates a
-swarm into one card. Relationships come from the run snapshot's `mission_id`,
-`mission_role` and `integrator_run_id`,
-not task text. `mission.changed` coalesces background refreshes of those
-fields without blocking run-status events or overwriting newer run state;
-reconnect hydration supersedes pending relationship requests. Older servers
-that omit the fields get a flat list.
+contribute to that group's count. Relationships come from the run snapshot's
+`parent_run_id`, not task text.
 
 ### App header
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
 Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
-**Swarms**, **Activity**, **Insights**, **Memory**, **Files**, **Environment**, **Agents** and
+**Activity**, **Insights**, **Memory**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
 its buttons, including font and text-size changes. Destinations that do not
-fit move into **More navigation**, a click-to-open menu; Board and Swarms
-never move into it. The current page's selection is one `SlidingIndicator`
+fit move into **More navigation**, a click-to-open menu; Board
+never moves into it. The current page's selection is one `SlidingIndicator`
 that glides between buttons; it sits beside the list, not in it, so the
 overflow measuring still counts only buttons, and it hides while the current
 page is in **More navigation**. Gateway capability gates still apply. Hidden buttons
@@ -502,8 +487,7 @@ A phone screen has one filled button. A page whose own action is filled calls
 `ui` slice counts the holders in `headerPrimaries`, and while the count is
 above zero the top bar draws **New run** as an icon button with the same
 accessible name. A run page always gets the icon, with or without a primary
-action. The holders are a run header with a primary action, a swarm with an
-open question the viewer may answer, Environment's **Open** or **Save
+action. The holders are a run header with a primary action, Environment's **Open** or **Save
 environment**, onboarding, Files with a file open and the Changes view's
 **Publish…**. The board, lists and settings keep the filled **New run**.
 
@@ -562,17 +546,17 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   composer, led by the page's own: a failed run offers **Fix this**, one that
   needs you or waits **Why is this stuck?**, one with an open pull request
   (`useOpenPullRequest`) **Review and merge when checks pass**; the board
-  **What needs me?**, a swarm **Summarize progress**. A run, pull request or
-  swarm prompt attaches its target through `askAssistant`, so it reaches the
+  **What needs me?**. A run or pull request
+  prompt attaches its target through `askAssistant`, so it reaches the
   agent with page sharing off. Harness permission and question prompts render as the Session
   view's request cards, answered with `assistant.answer`; each pending
   confirmation renders as a card titled with the summary, the method as its
   source line, a **Details** section with the exact params (three, then
-  **N more**), or for `run.launch` and `mission.create` a **What starts**
+  **N more**), or for `run.launch` a **What starts**
   list (`components/assistant/launch-summary.tsx`; the title then stops
   before the quoted task) of kind, workspace,
   agent with model and mode, account (`Yours` or `<name>'s, shared with
-  you`), fallback, task or objective, and how the member hears back, a
+  you`), fallback, task, and how the member hears back, a
   relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a
@@ -591,7 +575,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   have been. The card names the verb and target from the inputs and the
   store's names ("Launched run on api with Claude Code", "Messaged run
   fix-login", "Merged PR #42"; a run is named by `runLabel`; a tool with
-  several actions, such as `aether_run_lifecycle` or `aether_swarm_manage`,
+  several actions, such as `aether_run_lifecycle`,
   takes its verb and the method its card waits on from its `action` input),
   a state
   (`Running`, `Done`, `Failed`, `You declined`, `No answer in 10 minutes`,
@@ -603,24 +587,19 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
   error for **Details**. A launch receipt, when the result has one (`result.launch`: the account by
-  `access` own, shared or other, the integrator's for a swarm, `fell back
+  `access` own, shared or other, `fell back
   from` its `requested_account`, `no fallback` for policy `off` or the
   `ordered` accounts) or a watch result gets one more line; a done launch without a receipt gets the same line from
   the returned run and its inputs (kind, workspace, agent and model, the
   account only when the call named one, `no fallback`). A done launch whose
-  run or swarm is still active reads **Working in the background** and says
+  run is still active reads **Working in the background** and says
   how the member hears back; `useBackground`, shared with the **Actions**
-  list, reads a launched swarm with `mission.show` and again on each
-  `mission.changed` for it (`missionSeq`), since the store refreshes swarms
-  only for the active workspace. The swarm counts as working until read, and
-  a read that fails shows its error; the phase read is kept, so another
-  workspace's swarm list replacing the store's cannot turn a finished swarm
-  back to working. The header calls the assistant's own turn
+  list, reads the launched run from the store. The header calls the assistant's own turn
   **Generating…**. The target comes from the result's `link` or
-  `url`: a dashboard link (`?run=<id>`, `?page=missions&id=<id>`, a watch's
+  `url`: a dashboard link (`?run=<id>`, a watch's
   settings link) opens in the app whatever its host, and any other `http(s)`
   address, such as a pull request, opens in a new tab. Without one it comes
-  from the created ids, then from `run_id`, `mission_id` or `workspace_id` in
+  from the created ids, then from `run_id` or `workspace_id` in
   the inputs. A run or workspace the hydrated store no longer holds reads
   "This run no longer exists" and has no link; a launch's own run never does,
   since the transcript can show it before the store hears of it. Failed,
@@ -736,7 +715,7 @@ what an entry point pointed the draft at; navigation never changes them,
 and sharing does not gate them. Past the cap the oldest go and
 `assistantError` names them. The chips above the composer are built from
 `nextViewContext`, so they show exactly what is sent: the page (unless
-removed or unshared, and folded into a run or swarm attachment that names
+removed or unshared, and folded into a run attachment that names
 the same page, whose remove button then removes both) and each attachment,
 labelled from the store
 (`components/assistant/labels.ts`); each chip's remove button is its tab stop
@@ -778,7 +757,7 @@ sets `assistantFocus` so the composer takes focus once, and never sends. `AskAss
 who cannot use the assistant. It backs **Fix this** and **Ask the
 assistant** on the session failure callout, the button beside each failing
 check pill, the button beside an open pull request's number in the run
-header, and **Ask the assistant** beside a swarm task's error. The run menu
+header; the run menu
 and palette offer **Ask the assistant to fix this run** for a failed run and
 **Ask the assistant why this is stuck** for one that needs you or waits;
 the palette's **Ask about this page** pins the current page.
@@ -904,7 +883,7 @@ its end, exposing the shell or the raw connection error and window controls.
 `?run=<id>`, with `&view=session|trace|terminal|changes|files|browser` (an old
 `&view=diff` reads as `changes`; `changes` also takes `&repo=<workspace id>|all` on a
 [multi-repo run](#multi-repo-runs)); any other
-view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page, a
+view is `?page=<name>`, plus `&id=<id>` for a workspace page, a
 Settings section or the selected template (`?page=templates&id=<name>`);
 the name is the route's, so Activity is `?page=timeline`, and Devices is
 `?page=devices`, a tab of the Members view (`pageOf` in
@@ -929,8 +908,7 @@ onboarding for a member who has not finished it. A `?page=` name with no
 view, or a page the gates in `src/lib/surfaces.ts` do not offer this gateway
 or member, opens the board once the first hydration has the capabilities.
 These redirects replace the history entry (`redirectRoute`), so back does not
-return to the dead link. A `?page=missions&id=` link to a swarm the server
-does not know stays on the Swarms page and shows the server's error.
+return to the dead link.
 
 ### Window size and overflow
 
@@ -1098,9 +1076,8 @@ Removal also repairs the selection and open route before any refresh awaits.
 - **Server-gateway reconnects also refresh the snapshot** when replay is
   possible: Tailscale may identify the new connection as a different member.
   Only a local gateway's fixed identity can reuse replay without that refresh.
-- **Branch, pull request and swarm hints are counters.** `git.branch` and
-  `run.pr` bump a per-run `gitSeq` and `prSeq`, and `mission.changed`
-  a per-swarm `missionSeq`
+- **Branch and pull request hints are counters.** `git.branch` and
+  `run.pr` bump a per-run `gitSeq` and `prSeq`
   (`src/store/workflow-signals.ts`). A view that shows that state keys its
   `run.git.log` or `run.pr.feedback` re-read when the counter changes (a
   store subscription on `gitSeq[runID]`) instead of polling.
@@ -1357,7 +1334,7 @@ where a resend is deduped or refused and the eventual result still shows:
 | Composer **Send** and the Enhanced pill's Send, Steer and Queue | Sending… | Yes: the draft keeps its idempotency key, so a resend delivers once |
 | Enhanced pill's **Interrupt** and **Resume**, and a session option | Sending… | No: these carry no key, so a late interrupt could stop the turn sent after it |
 | **Create workspace** | Creating… | No: `workspace.add` carries no idempotency key |
-| **Launch** / **Create swarm** (launch dialog) | Launching… / Creating swarm… | The dialog's **Cancel** closes it at any time; the request keeps going, a success still opens the run or swarm, and a refusal shows as a toast |
+| **Launch** (launch dialog) | Launching… | The dialog's **Cancel** closes it at any time; the request keeps going, a success still opens the run, and a refusal shows as a toast |
 | Close dialog **Merged** / **Abandoned**, over another verb's pending prediction | Closing… | The dialog's **Cancel** closes it at any time; the answer shows as a toast |
 | Workspace settings **Save**, budget **Set** / **Clear budget** | Saving… / Clearing… | The dialog's own **Cancel** closes it at any time; the call sets values, so a repeat is harmless |
 | **Save identity** | Saving… | No: a second save could reach the server before the first and be overwritten by it |
@@ -1389,9 +1366,9 @@ columns do not fit, **Board** renders the list layout and the **List** tab
 is hidden. A group of more than 60 cards renders only the cards its scroll
 shows (`card-list.tsx`, virtua).
 
-In a flat run list (`run-list.tsx`) a root lists its workers and child runs
-at any depth under it with a toggle naming the count (**Show 2 child
-runs**). Workers and child runs both start shown, and a folded one that needs you still shows. Nested rows add the model to the
+In a flat run list (`run-list.tsx`) a root lists its child runs
+under it with a toggle naming the count (**Show 2 child
+runs**). Child runs start shown, and a folded one that needs you still shows. Nested rows add the model to the
 agent.
 
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
@@ -1408,33 +1385,26 @@ A card (`run-card.tsx`, on the `Card` primitive) has three parts:
    (`agent.list` `display_name`, else the run's `harness` value), owner
    avatar, `+added −deleted` from the newest `run.diff` snapshot (`N files`
    when that snapshot is `truncated`, because its counts are only a floor),
-   the `card:meta` slot (file overlaps, sync, and on a swarm card the
-   swarm's conflict count) and the Needs you action.
+   the `card:meta` slot (file overlaps, sync) and the Needs you action.
 
 The agent name shows once the card is 365px wide, where the description and
 footer also indent under the title; a narrower card keeps it for screen
 readers only. Device and merge-proposal cards use the same frame.
 
-A click anywhere on the card opens the run. In **Board**, a swarm is one
-card: the objective, a phase word ("Swarm active") or the reason a worker
-needs you, and a named `StatusDot` count per worker state ("2 working"); it opens
-the swarm page, or acts for the root run when the root itself needs you, and
-renders `card:meta` for its root run. Workers never appear as separate
-**Board** cards, archived ones included; a swarm whose integrator is not
-listed is rooted at its oldest worker. `useBoard` reuses a
+A click anywhere on the card opens the run. `useBoard` reuses a
 card's previous object while it is unchanged (`dequal`), so the memoized
 `RunCard` skips it.
 
 A **child run** is a run that another run's agent started with
 `aether-internal child start` ([child runs](plans/2026-10-26-child-runs.md));
 its parent is that run and its root the top of the tree. Every surface reads
-one hierarchy: `runParents` in `map-layout.ts` takes a swarm worker's parent
-from `integrator_run_id` and every other run's from `parent_run_id`, and
+one hierarchy: `runParents` in `map-layout.ts` takes a run's parent
+from `parent_run_id`, and
 `runTrees` in `src/store/selectors.ts` folds each tree under its root. Child
-runs of a swarm's runs fold into the swarm; other child runs fold into their
+runs fold into their
 root's card, which adds "N child runs" and a `StatusDot` count per state.
 Children never appear as separate cards. One that needs you puts its root
-in Needs you, as a swarm worker does, and the card's description names it:
+in Needs you, and the card's description names it:
 "`<purpose>`: `<reason>`". A child whose parent is not loaded is its own
 card. A child's label (`runLabel`) is its `child_purpose`, so the palette,
 which searches every run, finds it by purpose.
@@ -1448,16 +1418,15 @@ both show:
 | --- | --- |
 | Enhanced turn interrupted or stopped short, or a `needs input:` question | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
 | Native permission or question on a Standard run; blocked, held, or an Enhanced failure | **Open terminal** |
-| Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
+| Native permission or question on an Enhanced run, or teammate question | **Answer** |
 | Usage limit with no account to move to | **Open** |
 | Teammate's message waiting for the controller | **Review message** |
-| Integrator down | **Open swarm** |
 | Unreviewed finish | **Review** |
 
 Every action but Approve and the card's Reply goes where the condition's
 `target` points: the run (requests and questions), its Terminal view
-(blocked, held, Enhanced failure), its Changes view for an unreviewed
-finish, or the swarm page.
+(blocked, held, Enhanced failure), or its Changes view for an unreviewed
+finish.
 
 While a card has focus, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so
@@ -1516,9 +1485,8 @@ Needs you count changes.
 
 ### Map
 
-**Map** exposes every individual run, including each swarm integrator and
-worker. `mapRuns()` reads the unaggregated `runRows()` presentation rather
-than Board's swarm cards, and `useMapRuns` reuses unchanged card objects
+**Map** exposes every individual run, child runs included. `mapRuns()` reads
+the unaggregated `runRows()` presentation rather than Board's folded cards, and `useMapRuns` reuses unchanged card objects
 (`dequal`), so a `run.agent` event re-renders one card. A map card opens that
 individual run; its primary action still targets the condition that needs
 the viewer.
@@ -1530,7 +1498,7 @@ for a run outside the active one) and a state pill (`Badge` with the
 needs you and muted otherwise; and a meta row with the owner avatar when
 it differs from the section's, `+added −deleted`, the compact age, the
 `card:meta` slot, the card's action on hover, focus or a touch screen and, on
-an integrator, the fold button. The action and fold button keep their full
+a parent run, the fold button. The action and fold button keep their full
 width; when the row runs out of room, the rest is clipped from the
 `card:meta` end.
 
@@ -1544,48 +1512,43 @@ runs while keeping Needs you and Working visible; **Back to Finished**
 returns. Archived runs obey workspace and Mine, and an all-archived scope
 keeps the toggle available.
 
-The Runs strip counts every run in scope, folded workers included: **Runs
+The Runs strip counts every run in scope, folded child runs included: **Runs
 N**, **N working**, and the **N needs you** and **N failed** chips. Each chip
 opens a list (oldest wait first; newest failure first) whose rows bring the
-run into view: its swarm unfolds if folded, the camera centres it at a
+run into view: its family unfolds if folded, the camera centres it at a
 readable zoom, and its title takes focus.
 
-`map-layout.ts` lays out units: a standalone run, or a swarm tree with the
-integrator above all its visible workers, whoever owns them. Relationships
-require an explicit worker role, matching `workspace_id` and `mission_id`,
-and an `integrator_run_id` identifying a visible integrator; task text never
-establishes one. Up to four workers hang in one row from a bus; five or more
-fill four fixed columns row by row, each on a rail, so a new worker is
-appended without moving the others. Workers whose integrator is filtered,
-archived or not listed share one unit captioned "Integrator not visible". A
-swarm's caption is its objective and phase. A run with child runs is a
-`family` unit laid out the same way: every descendant hangs under the root,
-captioned "N child runs", with the same fold button.
+`map-layout.ts` lays out units: a standalone run, or, for a run with child
+runs, a `family` unit with every descendant hanging under the root, captioned
+"N child runs", whoever owns them. Relationships come from `parent_run_id`
+(a detached child is its own unit). Up to four children hang in one row from
+a bus; five or more fill four fixed columns row by row, each on a rail, so a
+new child is appended without moving the others.
 
 Units are placed newest first by the root run's `created_at`: each takes the
 highest free spot in a band of one common width, leftmost on a tie, so the
 newest sit top left and older units fill the room under short neighbours.
-Workers keep spawn order. Sections stack the
+Children keep spawn order. Sections stack the
 viewer's runs, then other owners by their newest unit, then **Needs you
 elsewhere**: Needs you runs present only because Needs you ignores scope and
 Mine, last so their churn never reflows the rest: the band width and framing
 come from owner sections alone. With two or more owner sections each is
 framed and headed by its owner and count; Needs you elsewhere is always
-framed. A teammate's worker inside your swarm shows its owner's avatar.
-Section headers and swarm captions grow as the camera zooms out so a distant
+framed. A teammate's child run under your run shows its owner's avatar.
+Section headers and family captions grow as the camera zooms out so a distant
 map still reads; a caption grows only into the gap above its unit.
 
 Geometry is fixed per text size and pointer. State, reasons, titles,
 timestamps and profile edits never move a node. A repack happens only when
-runs are added or removed, ownership or relationships change, a swarm folds,
+runs are added or removed, ownership or relationships change, a family folds,
 or the text size or pointer changes; moved units and cards glide from their
 old place, new cards fade in, removed ones fade out, and the camera stays.
 
-An integrator's fold button shows its worker count; folded, `+N`. Folding
-fades the workers out and repacks, and the camera follows so the integrator
-stays where it was on screen; a folded swarm never unfolds by itself.
-When hidden workers need you the button turns amber, as `+N · k need you`.
-Unlike the sidebar, whose fold keeps Needs you workers visible, the Map
+A parent's fold button shows its child count; folded, `+N`. Folding
+fades the children out and repacks, and the camera follows so the parent
+stays where it was on screen; a folded family never unfolds by itself.
+When hidden children need you the button turns amber, as `+N · k need you`.
+Unlike the sidebar, whose fold keeps Needs you children visible, the Map
 never moves cards on a state change. Folds persist in `aether.ui`
 (`boardMapFolded`), pruned to runs that still exist.
 
@@ -1606,8 +1569,8 @@ workspace/all-workspaces, Mine and archive scope. These origin-local
 preferences survive view switches, navigation and reloads. A new camera
 fits all runs once, unless that would zoom below 50%: then it opens at 100%
 on the top left, where the newest runs are, panned just enough to show the
-first unit's top card whole, so a wide swarm on a phone opens on its
-integrator. Live metadata, added or removed
+first unit's top card whole, so a wide family on a phone opens on its
+parent. Live metadata, added or removed
 runs and viewport resizing never reset a chosen camera. Use **Fit** to frame
 the changed set. Cameras saved before this layout (persist version 9) are
 dropped once.
@@ -1622,8 +1585,7 @@ Map's scope picker (labelled **Lanes workspace scope**), **Mine** and
 - **Time window**: 1h, 6h, 24h or 7d. Without a choice it opens on 1h while
   any run is working, else 6h. Ctrl/Cmd-scroll zooms around the pointer and
   the control then reads **Custom**.
-- **Show**: which links to draw (Orchestration, Dependencies, Submissions,
-  Agent messages, Overlaps).
+- **Show**: which links to draw (Agent messages, Overlaps).
 - **Group lanes by**: status or owner.
 - **Legend**: every bar fill and link style with its meaning.
 - **Now**, shown only after panning into the past. While the window ends at
@@ -1640,15 +1602,12 @@ finished · 3 failed") whose strip shows each moment's outcome. By owner, there
 is one section per owner, yours first. A section header counts the runs that
 ended before the window and offers the next wider window. When no run reaches
 the window, a line above the lanes says so; the axis stays, so panning and
-zooming still reach older runs. A swarm lists as one header lane (objective,
-phase, worker counts) in the section of its most urgent member, followed by
-its integrator, then its workers in task order ("Worker 2"), retries after the
-first attempt. A run with child runs lists the same way: a header lane
+zooming still reach older runs. A run with child runs lists as a header lane
 (the run's title, "N child runs" and their counts, with the Network glyph)
-followed by the run and its child runs at any depth, oldest first, in the
-section of its most urgent member. Either group starts open while live with eight tasks or fewer, or when a
-worker needs you; folded, it draws its integrator's bar and a strip of its
-workers' most urgent state over time, and still lists any worker that needs
+followed by the run and its child runs, oldest first, in the
+section of its most urgent member. A family starts open while live with eight children or fewer, or when a
+child needs you; folded, it draws its parent's bar and a strip of its
+children's most urgent state over time, and still lists any child that needs
 you. Disclosure choices last until the view unmounts.
 
 **Bars.** A bar runs from the run's creation to its end or now. A dashed
@@ -1664,12 +1623,11 @@ callout shows the server's error with **Retry**. A working bar has a 2px end
 cap and its activity text shimmers; a Needs you bar ends in a **Needs you**
 tag. Finished bars add "took 18m" after their end when there is room.
 
-**Links.** Integrator to worker (launch), mail between runs
+**Links.** Mail between runs
 (`coord.message`, bundled per lane pair within 24px, its glyph naming a
 question, reply or report, the arrowhead hollow until every message is
-acknowledged), submissions (worker to integrator, by decision), task
-dependencies, and, for the hovered or selected run only, file overlaps at the
-now line. A link into a folded swarm or Finished attaches to its header.
+acknowledged) and, for the hovered or selected run only, file overlaps at the
+now line. A link into a folded family or Finished attaches to its header.
 Hovering or selecting a lane keeps its links in colour and greys the rest.
 Clicking a link opens its facts; a mail link reads the bodies through
 `coord.messages.list` (the thread, else each sender's newest page, since a
@@ -1680,10 +1638,8 @@ link into a folded lane can bundle several senders) and shows them with
 "agent · state · elapsed", the title, the reason, next step, branch and diff,
 unread mail, pending inputs, overlaps and the state span under the pointer,
 then the card's primary action (Reply opens the same composer as a card),
-**Open run**, **Open swarm** and, for Enhanced runs, **Show agents**, then the
-lane's **Links**, each opening the same facts as clicking that link. A swarm's
-popover offers **Open integrator** whenever the integrator is known, even when
-Mine hides it. A popover whose lane leaves the view, as when its run folds
+**Open run** and, for Enhanced runs, **Show agents**, then the
+lane's **Links**, each opening the same facts as clicking that link. A popover whose lane leaves the view, as when its run folds
 into Finished, closes and puts focus on the lane that now draws the run. Show
 agents inserts the run's subagents as sub-lanes: from the live session when
 the run is open elsewhere in this tab, else from one `run.acp.history` page of
@@ -1691,7 +1647,7 @@ the run is open elsewhere in this tab, else from one `run.acp.history` page of
 subagent. Escape closes and returns focus to the lane.
 
 **Keyboard.** The lanes are one `tree` named "Run lanes" with one tab stop: Up
-and Down move, Home and End jump, Right opens a section, swarm or a run's
+and Down move, Home and End jump, Right opens a section, a family or a run's
 agents (or moves into it), Left closes it or moves to its parent, Enter or
 Space opens the popover or toggles a header, and `o` and `r` open and reply as
 on a card; links open from a lane's popover. The axis is a separate tab stop,
@@ -1708,9 +1664,7 @@ workspace; "Older history not loaded" marks the last case. `sync.ts` appends
 live events of those types to held history, which keeps a workspace's newest
 5000 and moves its loaded boundary past what it drops; the last view to leave
 drops it, and a server switch or a new signed-in member clears it for a fresh
-read. Each swarm in the window is read once with `mission.show` and again on
-its `mission.changed`; a failed read shows a **Swarm details** callout with
-the server's error and **Retry**. Lane geometry comes from the model
+read. Lane geometry comes from the model
 (`model.ts`, `segments.ts`, `edges.ts`, `axis.ts`), never from DOM
 measurement; above 60 lanes only those near the viewport render. Live bars
 move on a timer of window width per pixel, between 1s and 30s. Lanes move with
@@ -1719,7 +1673,7 @@ fade in; reduced motion turns both off.
 
 `aether.ui` stores the window choice, the grouping and hidden link kinds.
 Below 768px the label column shrinks to the state dot and agent glyph, and
-each lane's title moves into its bar; swarm members keep their tree elbow and
+each lane's title moves into its bar; family members keep their tree elbow and
 section headers keep the ended-before count.
 
 ### Run state
@@ -1739,7 +1693,7 @@ Details lists the raw `reason` as **Last reason**.
 
 `stateLabel` and `stateTone` in `src/lib/status.ts` are the one mapping from
 state to label, dot colour and dot shape; the sidebar, board, run header,
-run lists, swarm page, activity feed and palette all use it. Each state has
+run lists, activity feed and palette all use it. Each state has
 its own dot shape and a text or `aria-label` label, so no state is told by
 colour alone. Only Working pulses, breathing in opacity and size, except in
 the sidebar, board, palette and All workspaces, and not under
@@ -1748,8 +1702,8 @@ Waiting states are a neutral, static glyph; Needs you is the only amber
 state.
 
 `stateWords` gives a state's words: the reason in place of the label when
-the reason names what the run waits on ("Waiting for 2 workers", "Waiting
-for Ada", "Waiting for the integrator"), else the label and the reason after
+the reason names what the run waits on ("Waiting for 2 child runs", "Waiting
+for Ada"), else the label and the reason after
 it. `stateDetail` drops a reason that only restates the label or is the
 state's default, so an unreported turn end reads a quiet "Turn ended" and an
 answer "Answered" or "Answered · *summary*". Outside Needs you, where the
@@ -1760,14 +1714,13 @@ row puts the label in its status chip and the detail in its meta line.
 
 `stateTitle` builds the tooltip each surface puts on a state, and the
 sidebar's run details box shows it: "*Words* since *relative* — *reason*.
-*What happens next*. Why: *cause*.", for example "Waiting for 2 workers
-since 3 minutes ago. Mail from its agents can wake it. Why: its swarm workers
-are live or have unread mail for it." *What happens next* is said only where it is a fact or a request
+*What happens next*. Why: *cause*.", for example "Waiting for 2 child runs
+since 3 minutes ago. Mail from its agents can wake it. Why: its child runs
+are live." *What happens next* is said only where it is a fact or a request
 of the viewer; no state that asks nothing tells the viewer to send a
 message. *Cause* is the run's `cause` in words; it is shown only while the
-run is live and shows the state the server chose, so not for a paused run,
-a swarm worker's question shown as "Waiting for the integrator", or a
-request shown as "Waiting for *name*".
+run is live and shows the state the server chose, so not for a paused run
+or a request shown as "Waiting for *name*".
 
 A run that shows a reported wait carries `wait`, what Aether verified about
 the conditions the agent named ([Waits Aether can
@@ -1788,8 +1741,7 @@ reads "Waiting for ...", which moves to the tooltip as "The agent reported:
 read. Only the server's `needs-you` state lists a broken wait in Needs you;
 a wait's kind never does. A phone's run header adds the wait's line, wrapped,
 under the header, since its state line truncates; for a broken wait that
-line is the Needs you reason with the error. A swarm card, which shows the
-swarm's progress instead, keeps the state tooltip while it shows a wait.
+line is the Needs you reason with the error.
 Rereads (`reread: true` events) update `wait` in the run store but never
 count as a state change in the lanes or trace bars. A reported wait that went
 stale (`cause` `wait-expired`) reads "Reported waiting on *summary*, no
@@ -1809,7 +1761,7 @@ running".
 | State | Dot | Comes from | Group |
 | --- | --- | --- | --- |
 | Working | filled circle, pulses | `state` `working` (a turn is in progress), or `queued` / `provisioning` ("Queued", "Starting") | Working |
-| Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, an integrator with live workers or unread worker mail, or a `waiting --for agents` report | Working |
+| Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, a run with live child runs, or a `waiting --for agents` report | Working |
 | Waiting for CI | clock | `waiting-ci`: a `waiting --for ci` report | Working |
 | Waiting for process | clock | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
 | Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason. Asks nothing | Working |
@@ -1848,24 +1800,22 @@ a `run.review` event under the same `status_seq` rule.
 `action` `complete` closes a live run as `completed` (or records it on a
 `completed` run) and sets `review` to `accepted`; `later` sets it to `later`
 and leaves the run where it is. Both return `{"run": Run}` and need the same
-permission as `run.close`; a live swarm worker is refused.
+permission as `run.close`.
 
 The Needs you group, its counts and badges follow the run-state attention
 rule push notifications, watches and `aether runs --needs-you`
 share ([failure-handling.md](failure-handling.md)): a live run (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
 `disconnected`, or `failed` while `outcome_unseen`, and a reported success,
-live or `completed` and not a swarm worker's, whose `review` is `ready`. Waiting, every Waiting for
+live or `completed`, whose `review` is `ready`. Waiting, every Waiting for
 state, Working, a `review` of `later` or `accepted`, and a finished run
 never count. The sidebar's Needs you count, the workspace badges and the
 list's Needs you rows come from the same `runRows`, so they always agree. The request rows below need a live, unpaused run
-too; only the two swarm rows, an open swarm question and a stopped
-integrator, hold whatever the integrator run's status, paused included.
+too.
 Needs you means the viewer can resolve it.
 
-The queued message, teammate question, swarm question, stopped integrator
-and control hold rows are the dashboard's own: they come from the room and
-the swarm, which the run's `state` does not cover, so push and
+The queued message and teammate question rows are the dashboard's own:
+they come from the room, which the run's `state` does not cover, so push and
 `aether runs --needs-you` do not announce them.
 `src/lib/needs-you.ts` holds the conditions as one table, checked in order;
 `needsYou(run, ctx)` returns the first that applies:
@@ -1877,11 +1827,8 @@ the swarm, which the run's `state` does not cover, so push and
 | Pending native question | owner or terminal controller | Question: answer in the terminal (enhanced: Question from the agent) |
 | Queued message from another member | terminal controller | Bob sent a message, approve to deliver |
 | Teammate question to the owner | owner | Bob asked you: … |
-| Open swarm question | accountable human or an admin | The integrator asks: … |
-| Integrator exited or failed to launch | accountable human or an admin | Integrator stopped, replace it to continue / Integrator failed to launch, replace it to continue |
-| Worker under a control hold | the member holding it | You hold control of worker 3 |
 | `state` `disconnected` (labelled Disconnected) | owner | the reason: Agent disconnected: … / Enhanced could not start: … |
-| `state` `needs-you` with a `blocked: <summary>` reason | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
+| `state` `needs-you` with a `blocked: <summary>` reason | owner | Blocked: … |
 | `state` `needs-you` with a `needs input: <question>` reason | owner | Agent asks: …, with **Reply** |
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
@@ -1920,12 +1867,7 @@ counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
 
 A condition that applies to someone else leaves the run in Working with
-"Waiting for Alice", labelled Waiting when the run needs its owner. A swarm
-worker counts only for a blocked report, as in push, or a control hold: its
-integrator handles its other requests, so a worker in `needs-you` reads
-Waiting for agents, "Waiting for the integrator". A stopped integrator counts only while the swarm record names it as
-current; the dashboard loads the selected workspace's swarms, so another
-workspace's stopped integrator appears once you select that workspace. A
+"Waiting for Alice", labelled Waiting when the run needs its owner. A
 Background (`headless`) run follows its `state` like any run; the server
 does not count its native questions, and neither does the dashboard. It takes
 no input, so its row offers **Open**, not **Reply**. A Working run's reason is what its agent is
@@ -2016,13 +1958,9 @@ to Working. Archive eligibility and input gates use the wire status, not
 the presentation state: a reported interactive outcome is not a closed run.
 Use **Close** to end that session and start its container retention grace.
 
-Overdue worker mail on an open integrator takes precedence over a reviewed
-outcome. Its warning and unread count replace the reason line until the
-mail is acknowledged.
-
 **Unopened finish** marks a Finished or Failed run that no member has opened
 since it finished, with or without a report: an exit, a failure, an
-interruption and a swarm ending its workers count as much as a reported
+interruption and a parent closing its child runs count as much as a reported
 outcome. A run a member closed or stopped is not one: ending it is dealing
 with it. The server owns `finish_unopened`, so one member opening the run
 settles it for every member and device. `watchOutcomeSeen` makes the same `run.seen` call for any member
@@ -2069,7 +2007,7 @@ Hydration is authoritative and queues live events until its snapshot lands.
 Ordinary run upserts preserve a known input set, including an empty one, so
 an older route, room or launch response cannot resurrect a closed request.
 A terminal run upsert clears native requests instead.
-Swarm relationship refreshes replace only relationship fields. Input events
+Input events
 for unknown runs follow the existing fetch-first and ordered-cursor rules.
 
 **An unreviewed finish is server state.** `Run.outcome_unseen` on `run.get`
@@ -2100,12 +2038,12 @@ verb rather than offering the one the server would refuse.
 The global `overview` route (`src/routes/overview.tsx`) is **All workspaces**:
 every run in every workspace in one `RunList`, in the board's group order
 (Needs you, Working, Finished) with a `StatusDot` and the state word per row.
-A swarm worker whose integrator run is also listed is indented under it,
-by the board map's rule (`swarmParents` in `src/routes/board/map-layout.ts`);
-other workers stay in place. The tree sits where its earliest member falls, so
-a worker that needs you lifts its integrator into Needs you. The integrator's
-chevron, **Hide <n> workers**, folds the workers that do not need you and
-is absent when all of them do.
+A child run whose parent is also listed is indented under it, by the board
+map's rule (`runParents` in `src/routes/board/map-layout.ts`); a detached
+child stays in place. The tree sits where its earliest member falls, so a
+child that needs you lifts its parent into Needs you. The parent's chevron,
+**Hide <n> child runs**, folds the children that do not need you and is
+absent when all of them do.
 It is reached from the workspace switcher, `g` then `l` and the palette's
 **Open all workspaces**.
 
@@ -2123,7 +2061,7 @@ to it** (`pull.switch`, which refuses a dirty checkout with git's own
 reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommands`): **Open the board**, **Open
 all workspaces**, **Connect ChatGPT or Claude** (these three in the Navigate
 group), **Ask Aether** (opens the assistant; offered when the server
-serves `assistant.status`), **New run…**, **New swarm…**, **Launch from a template…**,
+serves `assistant.status`), **New run…**, **Launch from a template…**,
 **Archive closed runs…**, **Free retained containers…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
@@ -2218,8 +2156,7 @@ the server's events with an RPC response.
   as the primary button in the composer slot of a finished run, which calls
   `run.relaunch` and swaps the finished record for the live one the server
   returns. A run is eligible while the server reports `container_retained_until`
-  (or, before that arrives, a retained-container reason), except a finished
-  swarm worker. Relaunch clears the deadline, the status event drops
+  (or, before that arrives, a retained-container reason). Relaunch clears the deadline, the status event drops
   `finished_at` and `started_at` restarts, and the next close sets a fresh
   deadline. Reported interactive completion needs no relaunching. Older
   agent-finished retained runs remain eligible.
@@ -2286,7 +2223,7 @@ does not include it. Its body is the composer's template library (see
 run with `template.launch`, sending the name and the filled-in parameters,
 then reveals it. A refusal shows the server's error and any setup output.
 
-The launch form lives in `components/launch/`. Its **Run** tab asks for a
+The launch form lives in `components/launch/`. It asks for a
 task, an agent, a mode and a model; an account appears only when one is shared with the
 caller. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Login found" or "No login found" for a
@@ -2314,7 +2251,7 @@ one the control shows, and a refusal from `run.launch` appears in the dialog
 verbatim under "Launch failed" while the dialog stays open, until another
 agent or mode is chosen. `run.launch` answers only once the run is
 provisioned, which can take seconds, so the dialog navigates only then: until
-the answer the button reads "Launching…" ("Creating swarm…") with a spinner,
+the answer the button reads "Launching…" with a spinner,
 and past the deadline "Still waiting for the server…". A refusal that
 arrives after the dialog was closed shows as a toast. The task is
 optional in Standard and Enhanced - a taskless launch opens the agent with
@@ -2365,7 +2302,7 @@ assistant may have saved since. The first pick waits for that read and for
 the saved account to be applied, then
 preselects the saved agent if it can launch, else the agent of the newest
 run, else the first launchable one, in that agent's saved mode, else
-Enhanced, with its saved model. A successful launch or swarm saves only the
+Enhanced, with its saved model. A successful launch saves only the
 agent, mode and model through `launch.defaults.set` with the revision it
 read; when another device saved since, the refusal carries the current
 choices, and the form applies its change to those and saves once more. A
@@ -2374,7 +2311,7 @@ saved account is preselected when `account.list` still lists it and `get`
 does not mark it invalid, and the saved fallback policy fills the fallback
 list, keeping only listed accounts. A launch never saves the account or the
 fallback; **Save as my default** under **Options** does, and says "Saved
-for every device." until the account or fallback changes again. On the Run tab it saves the fallback list as the run sends
+for every device." until the account or fallback changes again. It saves the fallback list as the run sends
 it, without the selected account. **Run**, **Default mode** and **Set up** on
 Agents, and the onboarding wizard, save their agent and mode the same way
 (`rememberChoice`); **Default mode** leaves the preselected agent alone.
@@ -2424,7 +2361,7 @@ heading reads "Neither you nor <owner> has an agent installed." and the note
 says the run uses the owner's login and the caller's installation, or the
 owner's when the caller has none.
 
-Where the server offers `run.children.allow`, the Run tab has a **Child
+Where the server offers `run.children.allow`, the form has a **Child
 runs** select: **Use my setting** (naming it, "(off)"), **Allow for this
 run** and **Off for this run**, sent as `run.launch` `children: "on"` or
 `"off"`; the first sends nothing.
@@ -2443,13 +2380,10 @@ form sends neither field and the server orders by usage left. After a
 reorder or untick it sends the ticked accounts in order as
 `fallback_account_member_ids`; with the checkbox off, or every account
 unticked, it sends `no_fallback: true` and the summary adds "· Fallback
-off". On the Run tab the list leaves out the selected account. On the Swarm
-tab it includes the integrator's account, because the list is also every
-worker's policy; the server skips whichever account a run is already on.
-The Swarm tab sends the same fields on `mission.create`.
+off". The list leaves out the selected account.
 
-Neither launch form asks which workspace to launch into: both take
-`activeWorkspace` and say where the run will land, naming the workspace and its
+The launch form does not ask which workspace to launch into: it takes
+`activeWorkspace` and says where the run will land, naming the workspace and its
 base branch. The switcher is the picker, so a second one inside the dialog
 would be a place for the two to disagree.
 
@@ -2560,8 +2494,7 @@ The actions, in order:
    Session composer, **Open terminal** switches to Terminal and asks for the
    lease, **Answer** focuses the docked request on Session or reveals the
    question's card in Details, **Review message** reveals the queued message's
-   card in Details, **Review** opens Changes for a finish, and **Open swarm**
-   opens the swarm page. On the Terminal view there is no terminal action in
+   card in Details, and **Review** opens Changes for a finish. On the Terminal view there is no terminal action in
    the header; the toolbar has **Take control**. Session rows and Details cards
    that send the member elsewhere use secondary buttons.
 2. **Show details** / **Hide details** (`Mod+.`).
@@ -2571,7 +2504,7 @@ The actions, in order:
    **Open in editor…**, **Captures…** and **Raw events…**, then **Close
    run…**, **Kill run** and **Delete run** after a separator. Kill, Delete
    and **Free container…** confirm first. Where the server offers
-   `run.children.allow`, the owner of a live run outside a swarm also gets
+   `run.children.allow`, the owner of a live run also gets
    **Allow child runs** (`run.children.allow` `on`), and the owner or an
    admin **Turn off child runs** on a run that allowed them.
 
@@ -2586,11 +2519,7 @@ run to. A paused run shows it disabled with **Resume the run first**. Its
 dialog has a **VS Code**, a **Cursor** and a **Zed** button, each navigating
 to that editor's deep link for the ssh host `<run-id>.aether` and the
 checkout `/workspace`, then `ssh <run-id>.aether` and `aether ssh-config` as
-copyable commands for whoever has not set the host up. For a swarm worker
-(`mission_role === 'worker'`) a `needs-you` callout above the buttons,
-**Connecting takes control of this swarm worker**, says that a shell,
-command or file transfer over SSH stops the integrator from steering it
-until you disconnect or control is released on the swarm page. The item is
+copyable commands for whoever has not set the host up. The item is
 not offered for a run whose id is not one lowercase host label (`runHost`),
 the only kind the links and the command are built from. The dashboard calls
 nothing: the server authorizes when the editor connects
@@ -2662,9 +2591,7 @@ over polled controller metadata; the controller's name remains visible
 beside **You control** or **You control in another session since <time>**.
 That text appears when `run.room.status` names your member with a
 `control_session_id` other than this tab's: another tab, device or
-`aether attach`, held since the lease's `acquired_at`. On a swarm worker the
-strip then adds **Release**, which calls `mission.worker.release` with the
-attempt's `takeover_generation`, so you can free a hold from any tab.
+`aether attach`, held since the lease's `acquired_at`.
 **Multiplayer** still opens Details for shared notes and run facts.
 The strip is one row whenever the controls fit beside a 6rem roster, which
 covers desktop windows. Only when they cannot, as on a phone with
@@ -2790,13 +2717,12 @@ resume, an immediate resubscribe on close 1012, a final stop on 1008 or a
 `-32602` refusal) and the control session id, so the lease and timed takeover
 frames work as on an attach and switching views keeps the stream. The tab asks
 for the lease once it has shown Session and the stream has acked, when the
-terminal would (the owner, not a phone, not a swarm worker). A refused
+terminal would (the owner, not a phone). A refused
 automatic request shows no error: it retries with backoff while the holder is
 the viewer or nobody, and again when `run.controller` reports the lease free.
 Leaving the run page, by navigating elsewhere in the dashboard or by closing
 or reloading the tab, releases a held lease before the stream closes, so a
-reload takes it straight back and a swarm worker's hold does not outlive the
-page. Navigating away waits up to 2 s for the release's answer, because the
+reload takes it straight back. Navigating away waits up to 2 s for the release's answer, because the
 server commits it on the stream's context. Closing the stream resets the
 run's stream and lease state. Frames go through `batchNotifications`, so a
 burst re-renders once per frame.
@@ -3144,10 +3070,7 @@ controller approval. `useImplicitControl`
 (`agent-terminal.ts`) lets the owner of a run nobody controls act in one step
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10
-seconds). On a swarm worker it never takes the lease: Send goes without it,
-which the server delivers at once while nobody controls the run, and a
-request's options wait for **Take control to answer**, so no action sets the
-worker's hold. Pending requests dock above it
+seconds). Pending requests dock above it
 one at a time, oldest first, with "1 of N" and **Previous request** / **Next
 request** in the card header (`routes/run/request-dock.tsx`). The dock holds
 the card on screen by request id, so arrivals and other answers never swap
@@ -3192,7 +3115,7 @@ agent's auth methods.
 The Trace view (`src/routes/run/trace-view.tsx`) shows when each part of an
 Enhanced run ran, as a span tree beside a time waterfall. A span is one
 timed piece of the run: the run itself, a turn, a tool call, a subagent, a
-wait for a person, an error notice, or, on an integrator, one swarm worker.
+wait for a person, an error notice, or a child run.
 `deriveTrace` in `src/store/trace.ts` builds the tree from data the Session
 view already holds; nothing new is read from the agent:
 
@@ -3203,14 +3126,11 @@ view already holds; nothing new is read from the agent:
 | Tool call | the call's first snapshot | the snapshot that settles it (a background task's own status) |
 | Subagent | `startedAt` from the subagent index | `settledAt`, or its last activity for a Workflow or background agent |
 | Wait | the `request` item opening it | the item answering or cancelling it |
-| Worker | the attempt's `started_at`, else `reserved_at` | `finished_at` |
+| Child run | its `started_at`, else `created_at` | `finished_at`, else now |
 
 A subagent whose launch is not held starts at its first held item and sits
-in that item's turn, or under the run when that turn is not held either. An
-integrator's workers are read with `mission.show` when Trace opens and again
-on each `mission.changed`; an answer to an earlier read never replaces a
-later one, and a failed read shows its error with **Retry**. A run's child
-runs at any depth join the same Workers group as spans from their creation
+in that item's turn, or under the run when that turn is not held either. A run's child
+runs join the Workers group as spans from their creation
 (or start) to their end, drawn failed or stopped by their status; they come
 from the runs the dashboard already holds, so a new child appears at once.
 
@@ -3293,7 +3213,7 @@ Refusals, lost steering and presence errors are one line under the strip. A
 run with no agent terminal, such as an Enhanced run, shows "No agent
 terminal" and the shell controls. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
-the interrupted focus. Worker runs never ask for the lease on open.
+the interrupted focus.
 
 **Shells.** A shell is a shared development terminal in the run's container
 ([terminal.md](terminal.md#run-shells)). **+ Shell** (named "New shell")
@@ -3334,8 +3254,7 @@ mid-word.
 The toolbar reads "You control" with an accent-filled **Release**, or "<name> controls"
 / "The agent controls" with **Take control**, which confirms; with nobody
 controlling it shows neither. Under 768px the controller's name moves to the
-line under the toolbar. Leaving the Terminal view releases the lease, and a
-swarm worker's shell never takes it without **Take control**. **Shell
+line under the toolbar. Leaving the Terminal view releases the lease. **Shell
 actions** holds **Take a screenshot** and the close items. `shells.stop` uses
 the lease the page holds, or acquires one with `dev.control.acquire` and
 releases it afterwards; `StopShellDialog` asks first when someone else holds
@@ -3544,9 +3463,9 @@ and the Environment keep native xterm scrollback.
   normalized output through `terminal.history`, independently of the attach.
   The dashboard does not download the raw archive.
 - **Controller lease and compact bootstrap.** A desktop owner's attach asks
-  for write for ordinary and integrator runs, not swarm workers, once the
-  Terminal view has been shown; until then it is a mirror. Swarm-worker
-  terminals and other members start as mirrors. The server grants write only
+  for write once the
+  Terminal view has been shown; until then it is a mirror. Other members
+  start as mirrors. The server grants write only
   when no controller exists; a second tab cannot become a second writer. A
   mirror shows who controls ("Nobody controls", "<name> controls", "You
   control in another session since <time>", with "(last known)" while the
@@ -3904,8 +3823,7 @@ both what it renders and the overlap set the conflict chips read.
   sent again is delivered once, whatever went to the run in between.
   `useAgentSend` (`agent-send.ts`) wraps it for the review bar and the pull
   request panel: it passes the lease and, for the owner of a run nobody
-  controls, takes it first (`useImplicitControl`), except on a swarm worker,
-  where it sends without the lease; anyone else's message
+  controls, takes it first (`useImplicitControl`); anyone else's message
   waits 45 seconds for the controller, and both surfaces say so. **Send to
   agent** is disabled, with the composer's own sentence beside it, for a
   finished, starting or switching run, a Background run, a protected run and
@@ -4044,16 +3962,11 @@ has none and shows none of what follows. The dashboard offers it only when the
 gateway lists the `run.repos` method.
 
 - **Launch.** With another workspace to add, the launch dialog shows **Add
-  repos** (`launch/extra-repos.tsx`) below either tab, a checklist of the
+  repos** (`launch/extra-repos.tsx`) in the launch form, a checklist of the
   member's other workspaces. Each pick becomes a chip and goes out as
-  `extra_workspace_ids` on `run.launch`, or on `mission.create` from the Swarm
-  tab; the repo
-  is checked out at `/repos/<name>`. The picks are kept across tabs. The Swarm
-  tab offers it only when `server.info` also lists the `swarm-repos` feature,
-  since an older server drops the field; a pick made on Run is then not sent.
-- **Swarm page.** A swarm with extra repos says `Extra repos: <names>, at
-  /repos/<name> in every run.` under its phase line, naming a workspace that
-  no longer exists by its id.
+  `extra_workspace_ids` on `run.launch`; the repo
+  is checked out at `/repos/<name>`. A child run inherits its parent's
+  extra repositories.
 - **Changes.** The view gains a **Repos** tab strip above it: one tab per repo
   with its changed-file count, then **All repos**. The choice is the `repo`
   query parameter of `?run=<id>&view=changes` (a workspace id, or `all`; none
@@ -4536,8 +4449,7 @@ that launched it (one whose launch the loaded history lacks sits under the
 run, `Not checked yet`), with its label, state and a summary of its tool calls
 ("Read 3 files and ran 2 commands"), never its prose. Child runs follow the
 agents, each under the run that started it, at any depth; selecting one
-opens it. On the swarm page a worker's child runs nest under its attempt
-and the integrator's under the root. Node ids are server
+opens it. Node ids are server
 ids (`run:<id>`, `agent:<tool call id>`), and a re-derivation keeps every
 unchanged subtree's object, so only rows that changed re-render.
 
@@ -4603,260 +4515,6 @@ once the store has hydrated does it say the run is not on the server, and
 offer **Back to board**. The launch paths seed the run they just started -
 both template launches and the onboarding first-run form, the way
 `launch-dialog.tsx` does - so a launch never lands on the deleted claim.
-
-## Swarms
-
-A **swarm** is a group of runs working on one objective: an **integrator**
-run plans the work, starts one **worker** run per task and combines their
-results. On the wire and in code a swarm is a mission (`mission.*` RPCs,
-`routes/missions`, the `missions` route name). In the sidebar and on the
-board a swarm is one row or card (see [Sidebar](#sidebar) and
-[Board](#board)).
-
-### Creating a swarm
-
-The launch dialog opens on **Run**. When the gateway advertises
-`mission.create` and the member's role may launch, it also has a **Swarm**
-tab, titled **New swarm**, with the help line "The integrator plans the
-work, starts a worker run per task, and combines the results." It asks for
-an objective, the **Integrator agent** (the same picker as Run, on the
-account under Options), **Integrator mode** (the integrator agent's
-remembered mode, shared with Run and saved when the swarm is created, else
-Enhanced when the agent can use it and Standard otherwise; Background disabled with the reason
-`mission.create` gives: it exits after one turn; Standard disabled with
-`agent.list`'s `swarm_standard_refusal` for an agent Aether cannot wake; with no
-mode left, **Create swarm** is disabled), **Integrator model** and
-**Integrator effort** (the same fields as Run), **Agents for workers** (a checkbox row per
-installed agent and account, defaulting to the integrator account's first
-launchable agent; a ticked row has the same model picker and, for an agent
-with levels, the effort select, both Agent default until changed) and **Worker mode**, which defaults to Enhanced and disables a
-mode no ticked worker can use. Each worker choice is sent in the worker mode
-when its agent can use it and otherwise in the first of Enhanced, Standard and
-Background it can; the row says so ("Runs Background: no idle wake in
-Standard"). A disabled mode shows its reason in a tooltip and below the
-control. Rows a shared account cannot launch are disabled with
-the same reasons as the Run picker, and a ticked worker whose agent stops
-being launchable when the lists are read again is dropped.
-
-`mission.create` refuses an integrator whose exact account, `harness`, mode
-, `model` and `effort` are not one of `execution_choices`, so the
-integrator's own choice is always sent; a worker choice with the same tuple
-is not sent twice, two choices that differ only in model or effort are both
-sent, and the list is sorted by account, harness, mode, model and effort, so the same set is always the same
-request. **Create swarm** starts the integrator, not the workers, toasts
-`Swarm created` and navigates to `missions/<server-issued-id>`; a refusal,
-such as `mission: coordination is unavailable`, appears in the dialog verbatim
-under "Swarm not created".
-
-The dialog opens on Swarm from the Swarms view's **New swarm** button or the
-palette's **New swarm…** entry (`openPaletteDialog('swarm')`, listed under the
-same two conditions) when both hold, and on Run otherwise. If either stops
-holding while the dialog is open on Swarm - a re-hydration that could not read
-the capabilities, or a role change - the dialog stays on Swarm with **Create
-swarm** disabled and says why, naming missing capabilities before the role:
-
-- `Swarm launch is unavailable: the server did not report its capabilities.
-  Switch to Run to launch a run.`
-- `Swarm launch is unavailable: your role cannot launch.`
-- `Swarm launch is unavailable: the gateway does not offer mission.create.
-  Switch to Run to launch a run.`
-
-The key belongs to the submitted contents, not to the dialog: the tab keeps
-one key per distinct set of contents in memory until a create with them
-succeeds. A failed create may already have stored the swarm, so resending
-the same contents - after edits and back, or after closing and reopening the
-dialog - sends the same key and the server replays that mission. Changed
-contents get their own key, because the server refuses changed contents
-under a used key as `store: mission idempotency conflict`. After a success
-the same contents start a new swarm. Client-generated IDs are never used as
-swarm authority.
-
-`routes/missions` (`index.tsx` loads, `list.tsx`, `detail.tsx`, and one
-file per section) is registered through `routes/index.ts`; the route name
-stays `missions` and links are `?page=missions&id=<mission>`. The
-`MissionsSlice` is composed into the root store. Hydration reads
-`mission.list` for the active workspace; mission events refetch either the
-open `mission.show` projection or the first list page, merged so older pages
-loaded with **Show more** stay. A `mission.changed` with `deleted` removes
-the swarm from the store without a read, and leaves its page for the list.
-The slice records which workspace the list
-and cursor were read for (`missionListWorkspace`), so **Show more** only
-follows a cursor read for the active workspace.
-
-### Swarms list
-
-A `PaneHeader` "Swarms" with **New swarm**, then one card per swarm: a state
-line, the objective's first line as the title, the integrator's agent glyph,
-display name and mode ("Claude Code · Enhanced"), and worker counts ("3
-working · 1 needs you · 2 done", or "No workers yet"). The state line is the
-phase word (`Planning`, `Planning · N questions for you`, `Active`,
-`Completed`, `Cancelled`), the Needs you reason when a swarm run needs the
-viewer, the unread reason when the integrator has left mail unread for over
-two minutes, or `Integrator did not launch: <error>` while
-`integrator_launch_error` is set. When a Needs you reason leads, the unread
-sentence follows the counts in muted text. Swarms that need you sort first,
-then by last update; completed and cancelled swarms fold behind **Finished
-(n)**, listed openly when no swarm is open. Archived swarms (`archived_at`
-set) leave both and fold behind a second, always collapsed **Archived
-(n)**. With no swarms the page shows one sentence and **New swarm**. On a
-phone **New swarm** is a secondary button under the cards, since the top bar
-already has **New run**. Counts come from one pass over the run store
-(`swarmLines` in `routes/missions/swarm.ts`), not a request per card.
-
-### Swarm detail
-
-The header's title is the objective's first line cut to 80 characters; its
-state line reads the phase or reason, the integrator ("Claude Code ·
-Standard") and the creation time. On a phone the top bar keeps `Swarms`, so
-the body repeats the title and state line, with the actions beside the
-title. One primary action: **Answer** (focuses the first open question's
-field) while a question waits on the viewer, else **Open integrator**, which
-sits directly under the Integration heading (visible while it is collapsed),
-not in the header or beside the phone title. On a phone the header
-**Answer** is left out: the open question's own **Answer** is the screen's
-filled button, and the top bar's **New run** shrinks to an icon. **More swarm actions** holds
-**Replace integrator…**, **Archive swarm…** (completed or cancelled, not
-archived), **Unarchive swarm** (archived), **Cancel swarm…**, and **Delete
-swarm…** (cancelled or archived). An archived swarm's state line adds
-`archived <time ago>`.
-
-The body is one column, in this order:
-
-1. The rest of the objective (clamped to three lines with **Show more**) and
-   the phase sentence, verbatim: planning "The integrator asks you
-   clarifying questions only if it needs answers, then proposes tasks and
-   starts the swarm.", active "Workers run. The integrator accepts their
-   work, verifies and delivers the result, then reports success.", completed
-   "The integrator reported success. Leftover workers were stopped.",
-   cancelled "The swarm was cancelled. Its workers and integrator run are
-   stopped." A stopped or missing integrator adds a callout with
-   **Replace integrator…** (see below). An integrator that needs you for its
-   own reason, such as `Enhanced could not start: <error>`, adds a callout `The
-   integrator needs you` with that reason, and the reason leads the state
-   line ahead of any `N questions for you`.
-2. **Questions for you**, only when the integrator asked any. An open
-   question is a Needs you callout with an `Answer question <n>` field and
-   **Answer**, which sends `mission.question.answer` with the key
-   `question-answer-<question_id>`, so a retry replays. A question answered
-   elsewhere while a draft is typed keeps the draft and says `Answered by
-   <name> while you were typing: <answer>`. Answered questions fold to one
-   line with `Answered by <name>`; expanding shows the answer. With none
-   left open the section is titled **Questions from the integrator**. A
-   member who may not answer sees `Only <accountable human> or an admin can
-   answer.`
-   Answering needs `mission.question.answer`, launch permission and the
-   accountable human or an admin.
-3. **Tasks**, the [workflow tree](#workflow-panel) of the swarm, derived by
-   `deriveSwarmWorkflow` in `src/store/workflow.ts` from `mission.show`,
-   the store's runs. The root is the current
-   integrator run, labelled `Integrator · <agent> · <mode>`, with
-   `<n> of <m> tasks done`, where a task is done only when the server
-   accepted a submission for its current revision. Under it each task shows
-   its state: Not started (`No worker yet`, or `Proposed, not accepted yet`),
-   Waiting (`Waiting on <task>` for an unfinished dependency, or `Blocked on
-   <kind>: <action>`), the state of its newest worker for the current
-   revision while that worker runs,
-   Waiting for agents once the worker finished or submitted, and Completed.
-   Under each task every worker is listed newest first (`Worker <n>` and
-   `attempt <m>` from `workerName`, agent and mode) with the attempt state
-   ahead of the run's reason, `from a replaced integrator` when an earlier
-   integrator generation dispatched it, and a line with its branch and, when
-   this tab has read it, the pull request's number and state. A run the
-   store does not hold shows the attempt state alone. Under each worker are
-   its submissions: Accepted, Rejected, `Submitted, waiting for the
-   integrator`, Superseded or Abandoned, with `for revision <n>` when it was
-   for an earlier revision and any scope violations. Selecting a worker, submission or the
-   integrator opens that run. An open task, or one with no worker yet,
-   offers **Task details**, closed by default, with the task's objective, scope, blockers other than
-   `proposal` in planning, scope diagnostics with a link to the other run,
-   and attempt errors. A worker under a human control hold shows `<name>
-   holds control of this worker` above the tree with **Release control**,
-   which sends `mission.worker.release` with the observed
-   `expected_takeover_generation`; it stays visible however the tree is
-   folded.
-4. **Agent messages**, described below.
-
-Each `mission.changed` for the open swarm re-reads `mission.show`, and one
-for any other swarm re-reads `mission.list`, without holding up the events
-behind it. A burst coalesces to one read in flight and one queued per swarm
-(or workspace list), so the page settles on the last state.
-
-When `current_integrator_run_id` names a run the hydrated store does not
-hold, the page asks `run.get` once; a create's response can reach the
-dashboard before the run's first event. Only a not-found answer marks it
-missing: the callout then says `The integrator run has not started. The
-server retries the launch periodically and logs each failure as "mission:
-recover integrator".`, or `The integrator run was deleted; replace the
-integrator or cancel the swarm.` when `integrator_run_launched` is true. An
-integrator whose run ended says `The integrator run has exited; replace the
-integrator to continue.` Either adds `Last launch failure <time ago>:
-<error>` while `integrator_launch_error` is set. Another `run.get` failure
-shows its error and is asked again on the next swarm refetch. Finished
-swarms show none of this; the server refuses a replacement there.
-
-**Replace integrator…** opens a dialog with the distinct accounts and
-agent, model and effort choices from `execution_choices` (each listed as
-"<agent> · <model> · <effort>", leaving out an empty model or effort), sends
-the choice's model and effort,
-sends the **Mode** control's mode (Enhanced where the agent can use it, with the
-integrator's refusals, judged from the selected account's `agent.list`; a failed
-list shows its error with **Retry** and no mode), pins
-`expected_generation`, and reuses one idempotency key across retries.
-**Cancel swarm…** confirms, then sends `mission.cancel` with a key minted
-when the confirmation opened. **Archive swarm…** and **Delete swarm…** use
-the `Confirm` primitive and send `mission.archive` and `mission.delete`;
-**Unarchive swarm** sends `mission.unarchive` at once and toasts the result
-or the error. A delete removes the swarm from the store and returns to the
-list, unless the dialog was closed past the deadline. Each item needs its capability; cancel, archive, unarchive and delete
-also need the accountable human or an admin. Failures stay in the dialog,
-verbatim, such as `run <id> is running; cancel the swarm and wait for its
-runs to stop`.
-
-The board's **Archive closed runs…** archives closed swarm runs one by one
-like any other run and says so: their swarms stay in **Swarms** until
-archived from the swarm page.
-
-### Agent messages on a swarm
-
-The section reads `coord.messages.list` with `mission_id` into the messages
-slice and subscribes only to that swarm's list; a `coord.message` event
-re-reads its newest page. A failed read shows the error with **Retry**.
-`groupMessages` (`store/messages.ts`) groups the loaded rows by structure,
-never by content: a reply sits under its question when the question is loaded,
-reports and questions stand alone, and adjacent plain messages between the
-same sender and recipient fold into one line ("Worker 1 → Integrator · 3
-messages", expandable). Each row is the Activity message row
-(`components/messages/message-row.tsx`). Every swarm participant is named by
-a short handle (`useRunHandle` in `components/messages/handles.ts`):
-**Integrator**, or **Worker N** numbered by the swarm's task order, with
-", attempt M" for a retried task and the task title as the tooltip. The
-handle comes from the swarm's `mission.show`, read once when a row needs one
-the store does not hold; a caller's label overrides it, so a run's own
-Details and Session name it "This run". Outside a swarm a participant is its
-run title. The task table's Worker column leads with the same handle. A
-participant is a muted link (the `quiet` Button
-variant) that opens that run; the run already open is plain text. Groups order
-by their latest message, so a fresh reply brings its thread forward. The
-newest six groups show first; **Show all** shows every loaded group and then
-**Show earlier messages** pages older history. Rows use `content-visibility:
-auto` rather than a virtualizer: history arrives only as the viewer pages it.
-
-### Unread mail
-
-An integrator whose oldest unacknowledged message (`oldest_unacked_at` on
-the run) is over two minutes old reads `Integrator has not read 3 messages
-(12 min)`. It is muted text, never amber: the swarm card shows it beside the
-counts, or as the card's state line and the swarm page's when nothing else
-needs the viewer, and the sidebar row carries it in its name and tooltip.
-`presentRun` (`lib/status.ts`)
-computes it once, through `unreadMail` in `lib/needs-you.ts`; it is a
-reason, not a Needs you state. A `coord.message` or `coord.message.acked`
-event re-reads the recipient's count and age.
-
-`mission.show` also carries bounded server-derived scope diagnostics. They
-show under their task and register into the run card's `card:meta` slot as
-a conflict count, so overlap warnings stay in the conflict experience
-rather than creating a second board or lock surface.
 
 ## Activity and budgets
 
@@ -4925,7 +4583,7 @@ in **Needs you**.
   is mounted (`useLiveFeed`), `applyEvent` appends each event the filters
   select by the server reader's own rule (workspace, run or mail to it, actor,
   type; `run.diff`, `run.title`, `run.agent`, `coord.message.acked`,
-  `mission.changed`, `run.pr` and `workspace.presence`
+  `run.pr` and `workspace.presence`
   only when asked for by type),
   skipping a sequence already held. The cursor follows only while the window
   is whole - no read in flight, failed or cut short - and a view reads from
@@ -4983,7 +4641,7 @@ in **Needs you**.
   message kind glyph, the sentence, and the run as a quiet link. On a phone
   the sentence shares the first line with the time and the run link takes
   the full width under it. `coord.message` and `coord.message.acked` rows
-  name sender and recipient by their handles (`Worker 1 → Integrator`), never
+  name sender and recipient by their run titles, never
   the payload's ids, and a delivery word only
   once the message is in the messages slice; the event alone does not say
   whether it was delivered.
@@ -5062,26 +4720,20 @@ section loads, fails and retries on its own.
   above the content instead of sitting in the header. Runs in **Needs you**
   follow as a link to the Board.
 - **My statistics** and **Team statistics.** Two sections with the same
-  layout, mine first. Each has four `StatTile`s and one chart; until they load, four tile skeletons
+  layout, mine first. Each has three `StatTile`s and one chart; until they load, four tile skeletons
   and a chart skeleton stand in:
-  - *Runs / swarms completed*: `outcomes.runs.done` and
-    `outcomes.swarms.done` as "7 runs / 1 swarm", with the failed and
-    abandoned counts of each below. Every number is from `outcomes`, work
+  - *Runs completed*: `outcomes.runs.done`, with the failed and
+    abandoned counts below. Every number is from `outcomes`, work
     that finished in the window, so the box and the chart agree.
-  - *Success rate*: runs and swarms that ended with a merged pull request
-    over all that finished, `success.runs` plus `success.swarms`, rounded
+  - *Success rate*: runs that ended with a merged pull request
+    over all that finished, `success.runs`, rounded
     down in integers so 100% means exactly all succeeded; a dash when none finished. Each
     fraction is written out below.
-  - *Swarm tasks accepted*: `swarms.tasks_accepted`, with the agents in
-    those swarms. Unlike the other boxes, `swarms.*` counts swarms started
-    in the window, which the box says; the page never shows swarms launched
-    beside swarms completed.
   - *Total tokens used*: `cost.total_tokens` as "100K tokens", with the
     harness at the head of `cost.by_agent` and its share, rounded down
     ("Claude Code used 56% of the 100K tokens") and how many runs reported no tokens.
 - **Outcome chart.** One chart per section: seven day groups, each three
-  bars side by side, Done, Failed and Abandoned, from `outcomes.series`. A
-  **Runs** / **Swarms** toggle switches the unit. Every bar carries its
+  bars side by side, Done, Failed and Abandoned, from `outcomes.series`. Every bar carries its
   count; the letters D, F and A under each group name its bars, and Failed is
   striped and Abandoned dotted, so no outcome is told by color alone, not
   even when a member's color is red. Hovering or focusing a day highlights
@@ -5173,7 +4825,7 @@ Top to bottom:
   newest 100 still leads; **Pinned** and **Newest** (**Best matches** while
   searching) head the groups when both have notes. A row is the title, at
   most two lines, and one line of kind, source (Agent note, Member note, Run
-  report, Swarm answer), the author with the agent's display name, the pull
+  report), the author with the agent's display name, the pull
   request or else the run as a link (not on a phone, where the detail lists
   them), the age, the pin badge ("Pinned by
   Dana", or "Pinned for you" or "Pinned for Dana" on a pin for one member's
@@ -5239,8 +4891,7 @@ this note needs 120; unpin one first`. A pin refused after an add
 because the note was stored. A viewer sees no write controls. A server
 without `memory.search` gets a neutral line asking for an update. Activity
 words `memory.change` as "Dana pinned a team memory note", "The agent
-added a team memory note" for a run's write or outcome, and "Dana recorded
-a swarm answer in team memory" for an answer.
+added a team memory note" for a run's write or outcome.
 
 ## Files
 
@@ -6009,7 +5660,7 @@ archive path.
 
 `member.list`'s `merged_into` is kept as `mergedInto`. `memberName` and
 `resolveMember` in `lib/member-name.ts` follow it, so an id history names
-(events, runs, costs, comments, swarms, devices) shows the survivor's name
+(events, runs, costs, comments, devices) shows the survivor's name
 with `(merged)`. A `member.merged` event (workspace id `server`) takes a
 fresh snapshot: a merge moves runs and roles without their own events, and
 a session absorbed by the merge then shows the survivor, with its role,
@@ -6342,8 +5993,7 @@ Categories:
   their own choices in **Child runs**.
 - **Child runs**, where the server offers `child.settings`: **Let my runs
   start child runs** (`enabled`, on by default), with a **What child runs
-  cover** list (what it allows, that swarms use their own choices, that
-  budgets and limits apply, how to override it for one run). The switch saves
+  cover** list (what it allows, that budgets and limits apply, how to override it for one run). The switch saves
   on change; a refused change rereads the setting and keeps the error under
   the row. Where the server offers `workspace.child_limits`, a read-only row
   gives the active workspace's limit.
@@ -6382,7 +6032,7 @@ Categories:
 - **Run limits**, a row in **Server › Admin**, for admins when the server
   answers `server.run_limits`: CPUs, memory in GiB and processes, empty
   meaning the flag or automatic value shown in grey, and **Save**. The launch
-  dialog's **Run** tab reads the same method for the grey values and sends a
+  dialog reads the same method for the grey values and sends a
   run's own `limits` under **Resource limits**.
 - **Docker inside runs**, a row in **Server › Admin**, for admins when the
   server answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States:
@@ -6429,7 +6079,7 @@ Repository settings, base freshness and the source mirror live on the
 ### Watches
 
 A **watch** is a member's standing request that the server tell them when a
-run, a swarm or a pull request needs them or finishes; the server evaluates
+run or a pull request needs them or finishes; the server evaluates
 it, so it keeps checking with every page closed. Notices appear in the
 dashboard and go to the member's push devices when push is on. The server side and the
 conditions are in [watches.md](watches.md). The dashboard's parts:
@@ -6447,7 +6097,7 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   a watch is and where to add one.
 - **Detail** (`src/routes/settings/watch-detail.tsx`): a row opens
   `?page=settings&id=watches&watch=<id>`, a dialog that is a full-screen
-  sheet under 768px. Its **Open run**, **Open swarm** or **Open pull
+  sheet under 768px. Its **Open run** or **Open pull
   request** link is built from `watch.target`, since `watch.link` is the
   watch's own page. It reads `watch.get` and shows what the server sees
   (`observed`), the conditions, label and end date to change
@@ -6465,8 +6115,7 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   the assistant also wrote into its chat. Opening or closing it keeps focus in
   the dialog's hands rather than the category heading.
 - **Creating**: **Watch…** in a live run's menu and the palette
-  (`runCommands`, when the server has `watch.create`), **Watch…** in a live
-  swarm's menu, and **Watch PR** beside a run's pull request status open
+  (`runCommands`, when the server has `watch.create`), and **Watch PR** beside a run's pull request status open
   `WatchDialog` (`src/components/palette/watch-dialog.tsx`). It pre-checks
   the target's default conditions, describes each (Finished means the agent
   reported done; Merged means GitHub merged the PR), and sends one
@@ -6555,7 +6204,7 @@ again.
 The desktop shell does not use Web Push. `desktop/notify.js` applies push's
 rule to each `run.status` event (see
 [failure-handling.md](failure-handling.md#run-activity)): it reads the run
-with `run.get` for its title, `paused`, `mission_role` and `member_id`, and
+with `run.get` for its title, `paused` and `member_id`, and
 announces only runs the signed-in member owns, as push does. When `run.get`
 fails it announces nothing. It notifies once per need, keyed on the run's status, state, reason and `status_changed_at`, and
 words it as `internal/push/need.go` does. An event whose `status_seq` is not
@@ -7226,7 +6875,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `n` | global | New run |
 | `u` | global | Open the next run that needs you |
 | `j` / `k` | global | Focus the next or previous run in the sidebar |
-| `g` then `b`, `l`, `s`, `a`, `f`, `g`, `e`, `,` | global | Go to the board, all workspaces, swarms, activity, files, agents, environment, settings |
+| `g` then `b`, `l`, `a`, `f`, `g`, `e`, `,` | global | Go to the board, all workspaces, activity, files, agents, environment, settings |
 | `[` / `]` | run | Show the previous or next run view, Trace included on an Enhanced run |
 | `⌘.` / `Ctrl+.` | run | Show or hide run details |
 | `c` | run | Message the agent (focuses the Session composer) |
@@ -7403,7 +7052,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   Completed, ring with a bar Closed, cross Failed, ring with an exclamation
   mark Interrupted, broken ring Disconnected, bars Paused), named by the state
   word where it stands alone.
-  `StateLine` pairs it with the reason, as on swarm cards. The states are
+  `StateLine` pairs it with the reason. The states are
   described under [Run state](#run-state).
 - **Lists stay still.** Sidebar rows, board cards, the palette and All
   workspaces draw a static dot. Only the run header's dot and the Session
@@ -7506,20 +7155,20 @@ notification frame and fallback timer.
 
 Run actions cover the retained-run contract: Close chooses merged or abandoned,
 while Reopen run appears only for eligible retained Standard runs. Free
-container is also offered for finished retained swarm workers; its
+container is also offered for finished retained child runs; its
 confirmation and error path do not hide or delete history. Expired or
 unavailable runs offer no Free container. Sidebar tests cover group
 disclosure: every group starts expanded and closes when its header is pressed.
-They also cover an unopened finish: the row and a nested worker keep the text
+They also cover an unopened finish: the row and a nested child run keep the text
 colour and say so in their names until `finish_unopened` clears. They also
 cover a run row's age, owner mark, people stack and details box.
 `src/lib/needs-you.test.ts` has one case per Needs you condition, and the
 device cards an admin and a member see.
 `src/routes/board/lanes/model.test.ts` covers lane segments from status
-history, section order and folding, swarm order, axis ticks and link
+history, section order and folding, axis ticks and link
 bundling; the board test's `lanes view` cases cover the tree keyboard, the
-run popover and its links, a popover whose lane folds away, a swarm, an empty
-window, bundled mail bodies and failed history and swarm reads.
+run popover and its links, a popover whose lane folds away, an empty
+window, bundled mail bodies and failed history reads.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,
@@ -7530,8 +7179,7 @@ names and stop reasons, the status lane), stats, folding, bar segments, idle
 breaks and a 5,000-span derive and flatten budget;
 `src/routes/run/trace-view.test.tsx` covers the Trace tree's keyboard,
 details, zoom and Escape order, the Errors stat, metered-only and capped
-cost, a history read retried after a partial failure, workers re-read in
-order and their read error, history notices, virtualization and which
+cost, a history read retried after a partial failure, history notices, virtualization and which
 failures are announced.
 `src/components/shell/nav-shortcuts.test.tsx` covers the shell shortcut
 precedence across fields, dialogs, menus, lists and selects, and the
@@ -7572,8 +7220,7 @@ its footer on screen on a viewport as short as a keyboard leaves;
 `toast-clearance.mobile.spec.ts` checks that a toast comes to rest 8px clear
 of the bottom edge; `home-screen.mobile.spec.ts` checks the manifest, icons
 and that the top bar clears a phone status bar; `run-views.mobile.spec.ts`
-protects a run from More and reads its changes; `swarm.mobile.spec.ts` reads
-and answers a swarm; and `files-browser.mobile.spec.ts` opens a second file
+protects a run from More and reads its changes; and `files-browser.mobile.spec.ts` opens a second file
 from the tree sheet. `sidebar-drawer.spec.ts` stays on the desktop project
 because its keyboard contract - `Mod+B` closing the drawer and the palette
 coming back once it is gone - needs a narrow window with a keyboard rather

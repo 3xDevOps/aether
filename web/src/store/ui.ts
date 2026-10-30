@@ -152,7 +152,7 @@ export interface UiSlice {
   boardViews: Record<string, BoardView>
   boardMapAllWorkspaces: boolean
   boardMapViewports: Record<string, BoardMapViewport>
-  /** Folded swarms on the Map, keyed by the integrator's map key. */
+  /** Folded families on the Map, keyed by the parent run's map key. */
   boardMapFolded: Record<string, true>
   /** The signed-in member's, keyed by agent name; the newest `at` is the agent a launch preselects. */
   launchDefaults: LaunchDefaults

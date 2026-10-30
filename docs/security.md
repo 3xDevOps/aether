@@ -243,9 +243,8 @@ their own entries.
 - [Usage fallback](teams.md#usage-fallback) can move their run onto your
   account when theirs runs out, without them picking it: your share is the
   consent. It never picks an account not shared with the launcher.
-- A swarm checks every account it names, for the integrator, the workers and
-  fallback, when it is created, so a member cannot queue a swarm on an account
-  nobody shared with them:
+- A launch checks every account it names, fallback included, when it is
+  created, so a member cannot queue a run on an account nobody shared with them:
   `permission denied: member <member-id> has not shared their account with you`.
 - Sharing and revoking are recorded in the
   [audit history](connectors.md#audit-history), readable by the sharing member
@@ -565,9 +564,6 @@ a shell, file transfer and port forwarding inside a run's container.
 - The container has no SSH daemon, port or key; the server speaks SSH itself
   and picks the container. `-L`, `-D` and `-W` forwards reach only loopback
   inside the run. Remote, agent and X11 forwarding are refused.
-- A shell, command or file transfer in a swarm worker holds back the
-  integrator's input to it until a person releases the hold
-  ([terminal.md](terminal.md#swarm-workers-over-ssh)).
 - Sessions are not recorded: teammates see that you connected, not what you
   did. A run takes 16 connections (8 per member), each with 10 sessions and
   64 forwards.
@@ -652,10 +648,9 @@ there is no terminal, file, settings or git-writing tool.
   records name the connector, such as `ChatGPT connector con-7k2m9q4xbd`.
 - Scopes: the member picks them on the consent page, not the client. `read` is
   always granted, and every member can read every run on the server, so a
-  connector can read all of them. `write` (launch runs and swarms, message,
+  connector can read all of them. `write` (launch runs, message,
   pause and resume runs, answer questions, mark runs reviewed) is checked by
-  default; `control` (decide permission requests, stop and close runs, cancel
-  swarms) is not, because text an agent wrote could talk the assistant into
+  default; `control` (decide permission requests, stop and close runs) is not, because text an agent wrote could talk the assistant into
   approving or ending work. A connector serves only its scopes' tools, and the
   server checks every call's method against its scopes, a permission decision
   against `control`, and refuses every method outside its table
@@ -730,7 +725,7 @@ there is no terminal, file, settings or git-writing tool.
 - Refresh tokens rotate on every use and lapse after 30 days unused. A rotated
   refresh token used again a minute or more later deletes the connector.
 - Results contain text agents and other people wrote: run titles, reasons,
-  reports, history, questions, swarm goals, PR titles, comments and failing
+  reports, history, questions, PR titles, comments and failing
   check names, memory notes. Tools put it under an `untrusted` field, and the
   server's instructions tell the assistant never to follow it. Outside that
   field are only fixed labels, ids, states, counts, times, links, workspace
@@ -741,8 +736,7 @@ there is no terminal, file, settings or git-writing tool.
   decision whose `action` text differs from the pending request's, and
   refuses any request too long to show whole, so the confirmation shows
   everything that is decided.
-- No tool takes a member id. A swarm's accountable human is the connector's
-  member, and every agent starts on that member's account, falling back to
+- No tool takes a member id. Every agent starts on that member's account, falling back to
   accounts the member may launch on exactly as the member's own launches do.
 - `write` cannot end a live run: `aether_mark_reviewed` completes only a run
   whose agent reported success and awaits review.
@@ -779,16 +773,16 @@ Each run gets its own socket for messaging other runs
 ([coordination.md](coordination.md)). The socket is the run's identity, so no
 token enters the container.
 
-- A run can message its swarm peers, runs editing the same files, and live
+- A run can message its parent and child runs, runs editing the same files, and live
   runs in its workspace that its owner may message. Never across workspaces. A
   viewer's runs message nobody.
 - A message is an attributed inbox item. It gives the sender no steer, kill,
   terminal, git, transcript or secret access to the recipient.
 - Messages are capped at 4 KiB, 100 unread per inbox and 8 new correspondents
-  per run outside its swarm. Runs in one workspace share a repository, so they
+  per run outside its parent and children. Runs in one workspace share a repository, so they
   can still steer each other through file contents.
 - `aether-server config set conflict-coordination false` turns off messages
-  between runs, swarms and outcome reports; overlap warnings stay.
+  between runs and outcome reports; overlap warnings stay.
 - Each container holds a read-only copy of the server binary for the optional
   MCP bridge. It carries no credentials.
 

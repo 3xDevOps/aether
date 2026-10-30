@@ -100,7 +100,6 @@ import {
   Monitor as LucideMonitor,
   MonitorCog as LucideMonitorCog,
   Moon as LucideMoon,
-  Waypoints as LucideWaypoints,
   ZoomIn as LucideZoomIn,
   PackageX as LucidePackageX,
   Rocket as LucideRocket,
@@ -268,7 +267,6 @@ export const MessageSquarePlus = icon(LucideMessageSquarePlus)
 export const Monitor = icon(LucideMonitor)
 export const MonitorCog = icon(LucideMonitorCog)
 export const Moon = icon(LucideMoon)
-export const Waypoints = icon(LucideWaypoints)
 export const ZoomIn = icon(LucideZoomIn)
 export const PackageX = icon(LucidePackageX)
 export const Rocket = icon(LucideRocket)

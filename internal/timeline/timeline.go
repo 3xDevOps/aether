@@ -35,38 +35,30 @@ const (
 )
 
 // detailTypes are the firehoses the feed leaves out by default: diff
-// snapshots, adapter activity, mail acknowledgements, swarm and pull request refresh
+// snapshots, adapter activity, mail acknowledgements, pull request refresh
 // hints and presence are detail, not workspace history. Asking for one by type still returns it.
 var detailTypes = map[events.Type]bool{
 	events.TypeRunDiff:           true,
 	events.TypeRunTitle:          true,
 	events.TypeAgentEvent:        true,
 	events.TypeCoordMessageAcked: true,
-	events.TypeMissionChanged:    true,
 	events.TypeRunPR:             true,
 	events.TypePresence:          true,
 }
 
 // Filter narrows a timeline page. Member matches an event's actor - who
 // did it - not the owner of the run it concerns. Run matches agent messages
-// on either side; MissionID matches every run that has served the mission
-// and, without Run, the mission's own swarm events when Types asks for
-// them. TimelineKinds, when set, keeps only workspace.timeline entries of
-// those kinds.
+// on either side. TimelineKinds, when set, keeps only workspace.timeline
+// entries of those kinds.
 type Filter struct {
 	Workspace     domain.WorkspaceID
 	Run           domain.RunID
-	MissionID     domain.MissionID
 	Member        domain.MemberID
 	Types         []events.Type
 	TimelineKinds []events.TimelineKind
 	// NoRereads leaves out run.status rereads even when Types asks for
 	// run.status.
 	NoRereads bool
-}
-
-type MissionRuns interface {
-	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)
 }
 
 // Page is one slice of history, oldest first. NextSeq is the cursor to
@@ -84,14 +76,11 @@ type Page struct {
 
 // Reader pages a workspace's history out of the event log.
 type Reader struct {
-	log      events.EventLog
-	missions MissionRuns
+	log events.EventLog
 }
 
-// NewReader returns a Reader over log that resolves mission filters through
-// missions, which must not be nil.
-func NewReader(log events.EventLog, missions MissionRuns) *Reader {
-	return &Reader{log: log, missions: missions}
+func NewReader(log events.EventLog) *Reader {
+	return &Reader{log: log}
 }
 
 // Page returns up to limit events matching f with Seq > afterSeq, oldest
@@ -216,21 +205,6 @@ func (r *Reader) prepare(ctx context.Context, f Filter) (uint64, events.Filter, 
 	logFilter := events.Filter{Workspace: f.Workspace, Types: f.Types}
 	if f.Run != "" {
 		logFilter.Runs = []domain.RunID{f.Run}
-	}
-	if f.MissionID != "" {
-		runs, merr := r.missions.ListMissionRunIDs(ctx, f.MissionID)
-		if merr != nil {
-			return 0, events.Filter{}, false, fmt.Errorf("timeline: resolve mission %s: %w", f.MissionID, merr)
-		}
-		if f.Run != "" {
-			runs = slices.DeleteFunc(runs, func(run domain.RunID) bool { return run != f.Run })
-		} else if slices.Contains(f.Types, events.TypeMissionChanged) {
-			logFilter.Mission = f.MissionID
-		}
-		if len(runs) == 0 && logFilter.Mission == "" {
-			return head, logFilter, false, nil
-		}
-		logFilter.Runs = runs
 	}
 	return head, logFilter, true, nil
 }

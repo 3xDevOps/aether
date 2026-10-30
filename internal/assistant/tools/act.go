@@ -3,7 +3,6 @@ package tools
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -41,19 +40,15 @@ var actSummaries = map[string]summarizer{
 		}
 		return "Restore %s from the archive"
 	}),
-	protocol.MethodMissionWorkerRelease:     (*Server).summarizeWorkerRelease,
-	protocol.MethodRunHandoff:               (*Server).summarizeHandoff,
-	protocol.MethodMissionArchive:           swarmSummary("Archive, closing its completed runs,"),
-	protocol.MethodMissionUnarchive:         swarmSummary("Unarchive"),
-	protocol.MethodMissionReplaceIntegrator: (*Server).summarizeReplaceIntegrator,
-	protocol.MethodRunPRCreate:              (*Server).summarizePRCreate,
-	protocol.MethodRunPRMerge:               (*Server).summarizePRMerge,
-	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
-	protocol.MethodMemoryPin:                (*Server).summarizeMemoryPin,
-	protocol.MethodMemoryUnpin:              (*Server).summarizeMemoryUnpin,
-	protocol.MethodAssistantForget:          (*Server).summarizeForget,
-	protocol.MethodWatchDelete:              (*Server).summarizeWatchDelete,
-	protocol.MethodLaunchDefaultsSet:        (*Server).summarizeLaunchDefaults,
+	protocol.MethodRunHandoff:        (*Server).summarizeHandoff,
+	protocol.MethodRunPRCreate:       (*Server).summarizePRCreate,
+	protocol.MethodRunPRMerge:        (*Server).summarizePRMerge,
+	protocol.MethodMemoryAdd:         (*Server).summarizeMemoryAdd,
+	protocol.MethodMemoryPin:         (*Server).summarizeMemoryPin,
+	protocol.MethodMemoryUnpin:       (*Server).summarizeMemoryUnpin,
+	protocol.MethodAssistantForget:   (*Server).summarizeForget,
+	protocol.MethodWatchDelete:       (*Server).summarizeWatchDelete,
+	protocol.MethodLaunchDefaultsSet: (*Server).summarizeLaunchDefaults,
 }
 
 type runParams interface {
@@ -98,41 +93,6 @@ func (s *Server) summarizeHandoff(ctx context.Context, req protocol.Request, c *
 	return nil
 }
 
-// summarizeWorkerRelease names the member whose control of the worker the
-// release ends, which need not be the caller's.
-func (s *Server) summarizeWorkerRelease(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-	p, err := protocol.DecodeParams[protocol.MissionWorkerReleaseParams](req.Params)
-	if err != nil || p.RunID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
-	}
-	params, _ := json.Marshal(protocol.RunIDParams{RunID: p.RunID})
-	run, rpcErr := s.getRun(ctx, params)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	if run.MissionID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf("%s: run %s is not a swarm worker", req.Method, p.RunID)}
-	}
-	var shown protocol.MissionShowResult
-	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: run.MissionID}, &shown); rpcErr != nil {
-		return rpcErr
-	}
-	i := slices.IndexFunc(shown.Attempts, func(a protocol.Attempt) bool { return a.RunID == p.RunID })
-	if i < 0 || !shown.Attempts[i].TakeoverActive {
-		return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("%s: nobody holds control of worker run %s; its integrator steers it", req.Method, p.RunID)}
-	}
-	worker := fmt.Sprintf("worker run %s (%q) of swarm %s (%q)", p.RunID, runLabel(run), shown.Mission.ID, truncate(shown.Mission.Objective))
-	if holder := shown.Attempts[i].TakeoverMemberID; holder != s.Member {
-		if rpcErr := s.owner(ctx, holder, c); rpcErr != nil {
-			return rpcErr
-		}
-		c.Summary = fmt.Sprintf("Release control of %s, held by %s, so its integrator steers it again", worker, truncate(c.OtherOwner))
-		return nil
-	}
-	c.Summary = fmt.Sprintf("Release your control of %s, so its integrator steers it again", worker)
-	return nil
-}
-
 func (s *Server) memberName(ctx context.Context, member string) (string, *protocol.Error) {
 	var members protocol.MemberListResult
 	if rpcErr := s.call(ctx, protocol.MethodMemberList, nil, &members); rpcErr != nil {
@@ -144,51 +104,6 @@ func (s *Server) memberName(ctx context.Context, member string) (string, *protoc
 		}
 	}
 	return member, nil
-}
-
-func (s *Server) swarm(ctx context.Context, id string, c *protocol.AssistantConfirmation) (protocol.Mission, *protocol.Error) {
-	var shown protocol.MissionShowResult
-	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: id}, &shown); rpcErr != nil {
-		return protocol.Mission{}, rpcErr
-	}
-	return shown.Mission, s.owner(ctx, shown.Mission.AccountableHumanID, c)
-}
-
-func swarmSummary(verb string) summarizer {
-	return func(s *Server, ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-		p, err := protocol.DecodeParams[protocol.MissionIDParams](req.Params)
-		if err != nil || p.MissionID == "" {
-			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": mission_id is required"}
-		}
-		m, rpcErr := s.swarm(ctx, p.MissionID, c)
-		if rpcErr != nil {
-			return rpcErr
-		}
-		c.Summary = fmt.Sprintf("%s swarm %s (%q)%s", verb, m.ID, truncate(m.Objective), ownedBy(c))
-		return nil
-	}
-}
-
-func (s *Server) summarizeReplaceIntegrator(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-	p, err := protocol.DecodeParams[protocol.MissionReplaceIntegratorParams](req.Params)
-	if err != nil || p.MissionID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": mission_id is required"}
-	}
-	m, rpcErr := s.swarm(ctx, p.MissionID, c)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	account, rpcErr := s.memberName(ctx, p.Integrator.AccountMemberID)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	agent := p.Integrator.Harness
-	if p.Integrator.Model != "" {
-		agent += " " + p.Integrator.Model
-	}
-	c.Summary = fmt.Sprintf("Replace integrator run %s of swarm %s (%q)%s with %s (%s) on %s's (%s) account", cmp.Or(m.CurrentIntegratorRunID, "(none)"),
-		m.ID, truncate(m.Objective), commaAfter(ownedBy(c)), truncate(agent), p.Integrator.Mode, account, truncate(p.Integrator.AccountMemberID))
-	return nil
 }
 
 func (s *Server) summarizePRCreate(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
@@ -329,9 +244,6 @@ func (s *Server) summarizeWatchDelete(ctx context.Context, req protocol.Request,
 	}
 	w := got.Watch
 	kind := w.Target.Kind
-	if kind == protocol.WatchTargetMission {
-		kind = "swarm"
-	}
 	notices := "its " + strconv.Itoa(len(got.Notifications))
 	// watch.get returns only the newest WatchNotificationsMax notices.
 	if len(got.Notifications) >= protocol.WatchNotificationsMax {

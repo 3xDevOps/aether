@@ -42,7 +42,7 @@ func runChildren(args []string) error {
 		}
 		fmt.Printf("child runs  %s\n", onOffWord(out.Enabled))
 		if !out.Enabled {
-			fmt.Println("Your runs' agents cannot start child runs; swarms use their own agent choices. aether run --children on allows one run.")
+			fmt.Println("Your runs' agents cannot start child runs. aether run --children on allows one run.")
 		}
 		return nil
 	})

@@ -51,7 +51,6 @@ export const keybindings = [
   { id: 'row-previous', keys: 'k', scope: 'global', label: 'Focus the previous run in the sidebar' },
   { id: 'go-board', keys: 'g b', scope: 'global', label: 'Go to the board' },
   { id: 'go-overview', keys: 'g l', scope: 'global', label: 'Go to all workspaces' },
-  { id: 'go-missions', keys: 'g s', scope: 'global', label: 'Go to swarms' },
   { id: 'go-activity', keys: 'g a', scope: 'global', label: 'Go to activity' },
   { id: 'go-files', keys: 'g f', scope: 'global', label: 'Go to files' },
   { id: 'go-agents', keys: 'g g', scope: 'global', label: 'Go to agents' },

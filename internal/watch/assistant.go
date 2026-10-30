@@ -144,7 +144,7 @@ func (s *Service) baseline(ctx context.Context, w *store.Watch) error {
 }
 
 // ownerPushed reports whether internal/push already pushes n to w's owner
-// as the run's own notification. The owner of a run outside a swarm is
+// as the run's own notification. The owner of a run is
 // pushed what push.needOf finds: every need of it, a reported success
 // while it waits for review and a failure nobody has seen, so only its
 // other ends are news to their devices. A success the owner already put
@@ -152,7 +152,7 @@ func (s *Service) baseline(ctx context.Context, w *store.Watch) error {
 // service, does not announce a standing entered before it started, which
 // a watch evaluated on recovery then pushes itself.
 func ownerPushed(w *store.Watch, run *domain.Run, n Notice, started time.Time) bool {
-	if run == nil || run.MemberID != w.MemberID || run.MissionID != "" {
+	if run == nil || run.MemberID != w.MemberID {
 		return false
 	}
 	if strings.HasPrefix(n.Key, "input:") {

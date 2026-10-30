@@ -172,26 +172,8 @@ func TestListRunMessagesFiltersAndJoinsReports(t *testing.T) {
 	db := openTestDB(t)
 	w := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, w.ID, member.ID)
-	task := mustCreateMissionTask(t, db, mission.ID, "bounded worker")
-	integrator := &domain.Run{
-		ID: mission.CurrentIntegratorRunID, WorkspaceID: w.ID, MemberID: member.ID,
-		Task: "integrate", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
-	}
-	if err := db.CreateRunWithID(ctx, integrator); err != nil {
-		t.Fatalf("create integrator: %v", err)
-	}
-	attempt, _, reserveErr := reserveMissionAttempt(t, db, mission, task, "worker")
-	if reserveErr != nil {
-		t.Fatalf("reserve worker: %v", reserveErr)
-	}
-	worker := &domain.Run{
-		ID: attempt.RunID, WorkspaceID: w.ID, MemberID: member.ID,
-		Task: "work", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
-	}
-	if err := db.CreateRunWithID(ctx, worker); err != nil {
-		t.Fatalf("create worker: %v", err)
-	}
+	integrator := mustCreateRun(t, db, w.ID, member.ID, domain.RunRunning)
+	worker := mustCreateRun(t, db, w.ID, member.ID, domain.RunRunning)
 	ordinary := mustCreateRun(t, db, w.ID, member.ID, domain.RunRunning)
 	other := mustCreateRun(t, db, w.ID, member.ID, domain.RunRunning)
 
@@ -214,11 +196,6 @@ func TestListRunMessagesFiltersAndJoinsReports(t *testing.T) {
 	}
 	forwarded := send(worker.ID, integrator.ID, RunMessageKindMessage, report.ID, "done")
 	overlap := send(ordinary.ID, other.ID, RunMessageKindMessage, "", "same file")
-
-	if question.MissionID != mission.ID || reply.MissionID != mission.ID || overlap.MissionID != "" {
-		t.Fatalf("mission stamps = %q, %q, %q; want %q, %q, none",
-			question.MissionID, reply.MissionID, overlap.MissionID, mission.ID, mission.ID)
-	}
 
 	list := func(f RunMessageFilter) []*ListedRunMessage {
 		t.Helper()
@@ -248,12 +225,12 @@ func TestListRunMessagesFiltersAndJoinsReports(t *testing.T) {
 		}
 	}
 	assertIDs("workspace", list(RunMessageFilter{}), overlap, forwarded, reply, question)
-	assertIDs("mission", list(RunMessageFilter{MissionID: mission.ID}), forwarded, reply, question)
+	assertIDs("a run", list(RunMessageFilter{RunID: worker.ID}), forwarded, reply, question)
 	assertIDs("recipient side", list(RunMessageFilter{RunID: other.ID}), overlap)
 	assertIDs("sender side", list(RunMessageFilter{RunID: ordinary.ID}), overlap)
 	assertIDs("thread", list(RunMessageFilter{CorrelationID: question.ID}), reply, question)
 
-	items := list(RunMessageFilter{MissionID: mission.ID})
+	items := list(RunMessageFilter{RunID: worker.ID})
 	if items[0].Report == nil || items[0].Report.Outcome != CoordOutcomeSuccess ||
 		items[0].Report.Summary != "done" || items[0].Report.NextAction != "merge" {
 		t.Fatalf("forwarded report join = %+v, want the worker's report", items[0].Report)
@@ -278,13 +255,6 @@ func TestListRunMessagesFiltersAndJoinsReports(t *testing.T) {
 		t.Fatal("an invalid cursor must be refused")
 	}
 
-	runs, err := db.ListMissionRunIDs(ctx, mission.ID)
-	if err != nil {
-		t.Fatalf("ListMissionRunIDs: %v", err)
-	}
-	if len(runs) != 2 {
-		t.Fatalf("mission runs = %v, want the integrator and the worker", runs)
-	}
 }
 
 func TestMessageHistoryMigrationKeepsMailAndTypesTheOutbox(t *testing.T) {
@@ -331,7 +301,7 @@ func TestMessageHistoryMigrationKeepsMailAndTypesTheOutbox(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 	msg, err := db.GetRunMessage(ctx, "msg1")
-	if err != nil || msg.MissionID != "" || msg.RetiredAt != nil || msg.Body != "which file?" {
+	if err != nil || msg.RetiredAt != nil || msg.Body != "which file?" {
 		t.Fatalf("migrated message = %+v, %v; want the unchanged question", msg, err)
 	}
 	pub, err := db.GetCoordAuditPublication(ctx, CoordAuditEventID("msg1"))

@@ -41,7 +41,7 @@ type Scenario struct {
 		Name string `json:"name"`
 	} `json:"member"`
 	// Answers are the fake control surface's results by RPC method, or by
-	// "method:id" for one run or swarm; the scenario's own override the shared
+	// "method:id" for one run; the scenario's own override the shared
 	// base.
 	Answers map[string]json.RawMessage `json:"answers"`
 	// Stubs are tools the registry does not offer yet, modeled from the
@@ -63,7 +63,7 @@ type Stub struct {
 // case-insensitive whole words or phrases, with an optional plural "s"; each
 // group in a list is satisfied by any one of its alternatives.
 type Checks struct {
-	// Launches is the number of aether_launch_run and aether_launch_swarm
+	// Launches is the number of aether_launch_run
 	// calls expected; nil does not check it.
 	Launches *int `json:"launches,omitempty"`
 	// Saves is the number of successful calls to SaveTool.
@@ -160,7 +160,7 @@ func (l launch) brief() string {
 func launches(calls []ToolCall, rejected bool) []launch {
 	var out []launch
 	for _, c := range calls {
-		if c.Tool != "aether_launch_run" && c.Tool != "aether_launch_swarm" || c.Error && !rejected {
+		if c.Tool != "aether_launch_run" || c.Error && !rejected {
 			continue
 		}
 		var a map[string]any

@@ -19,7 +19,6 @@ import {
   MessageSquarePlus,
   Monitor,
   Moon,
-  Waypoints,
   PackageX,
   Pause,
   Play,
@@ -139,8 +138,6 @@ export function isRetainedRun(run: RunRecord): boolean {
   switch (run.reason) {
     case 'closed; retained container':
       return run.status === 'merged' || run.status === 'abandoned'
-    case 'worker finished; retained container':
-      return true
     case 'agent reported success; retained container':
       return run.status === 'completed'
     case 'agent reported failure; retained container':
@@ -153,12 +150,10 @@ export function isRetainedRun(run: RunRecord): boolean {
 /**
  * Relaunch needs an interactive run whose container is still kept. The server
  * reports the grace deadline only while it keeps the container, so its presence
- * is the evidence; the reason strings cover a snapshot read before it arrived. A finished swarm worker's
- * container is kept but never relaunchable.
+ * is the evidence; the reason strings cover a snapshot read before it arrived.
  */
 export function canReopenRun(run: Pick<Run, 'mode' | 'acp' | 'status' | 'reason' | 'container_retained_until' | 'cleanup_pending'>): boolean {
   if (!(run.mode === 'tui' || run.mode === 'acp' || run.acp) || !isTerminal(run.status) || run.cleanup_pending) return false
-  if (run.reason === 'worker finished; retained container') return false
   if (run.container_retained_until) return true
   return run.reason === 'closed; retained container'
     ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'
@@ -679,14 +674,6 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       label: 'New run…',
       Icon: Rocket,
       perform: (d) => d.openDialog('launch'),
-    })
-  }
-  if (ctx.cap.hasMethod('mission.create') && allowed('launch', { id: null, role })) {
-    list.push({
-      id: 'swarm',
-      label: 'New swarm…',
-      Icon: Waypoints,
-      perform: (d) => d.openDialog('swarm'),
     })
   }
   if (ctx.cap.hasMethod('template.launch') && allowed('launch', { id: null, role })) {

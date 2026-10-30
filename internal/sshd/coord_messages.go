@@ -38,7 +38,6 @@ func (s *Server) coordMessagesList(ctx context.Context, _ domain.MemberID, raw j
 	}
 	page, err := s.cfg.Store.ListRunMessages(ctx, store.RunMessageFilter{
 		WorkspaceID:   domain.WorkspaceID(p.WorkspaceID),
-		MissionID:     domain.MissionID(p.MissionID),
 		RunID:         domain.RunID(p.RunID),
 		CorrelationID: p.CorrelationID,
 		Before:        p.Before,

@@ -119,7 +119,7 @@ test('waiting and working never notify', async () => {
   await status(run, { status: 'needs-attention', state: 'idle', reason: 'agent idle' })
   await status(run, { state: 'waiting', reason: 'turn ended without a report' })
   await status(run, { state: 'waiting', reason: 'no update for 30m' })
-  await status(run, { state: 'waiting-agents', reason: 'waiting on 3 workers' })
+  await status(run, { state: 'waiting-agents', reason: 'waiting on 3 child runs' })
   await status(run, { state: 'waiting-ci', reason: 'CI on PR 12' })
   await status(run, { status: 'running', state: 'waiting-tools', reason: '' })
   await status(run, { state: 'working' })
@@ -143,19 +143,11 @@ test('a need notifies once with the server reason, and clears when it ends', asy
   assert.equal(badge, 0)
 })
 
-test('a paused run and a worker that is not blocked never notify', async () => {
+test('a paused run never notifies', async () => {
   const paused = lead('r3')
   paused.paused = true
   await status(paused, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
-
-  const worker = lead('r4')
-  worker.mission_role = 'worker'
-  await status(worker, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
   assert.equal(shown.length, 0)
-
-  await status(worker, { reason: 'blocked: tests need Docker', status_changed_at: '2026-10-16T00:01:00Z' })
-  assert.equal(shown.length, 1)
-  assert.equal(shown[0].options.body, 'Worker blocked: tests need Docker')
 })
 
 test('an interrupted or stopped turn asks for a message; a cancelled one stays quiet', async () => {

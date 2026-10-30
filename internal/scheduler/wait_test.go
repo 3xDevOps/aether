@@ -351,17 +351,17 @@ func TestAStrandedReasonIgnoresTheStoresOrder(t *testing.T) {
 func TestALiveSwarmKeepsAStrandedWaitQuiet(t *testing.T) {
 	t.Parallel()
 	waits := &fakeWaits{}
-	var integrator *integratorStore
+	var children *childStore
 	e := newReportingEnv(t, func(cfg *Config) {
-		integrator = &integratorStore{Store: cfg.Store}
-		cfg.Store = integrator
+		children = &childStore{Store: cfg.Store}
+		cfg.Store = children
 		cfg.WaitConditions = waits
 		cfg.StallThreshold = time.Hour
 	})
 	ctx := t.Context()
 	run, _ := e.launchReporting(t)
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
-	integrator.workers.Store(1)
+	children.workers.Store(1)
 	stuck := checking(time.Now().Add(-time.Hour))
 	stuck.State, stuck.ResolvedAt = waitResolved, time.Now().Add(-time.Hour)
 	waits.set(nil, stuck)
@@ -380,7 +380,7 @@ func TestALiveSwarmKeepsAStrandedWaitQuiet(t *testing.T) {
 		t.Fatalf("a stranded wait with a live swarm shows %s %q", row.Activity, row.Reason)
 	}
 
-	integrator.workers.Store(0)
+	children.workers.Store(0)
 	e.sched.refreshActivities(ctx)
 	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
 }

@@ -157,8 +157,6 @@ describe('ending commands by stage', () => {
     expect(commandsFor({ status: 'abandoned', reason: 'retained container expired' })).not.toContain('relaunch')
     expect(commandsFor({ mode: 'headless', status: 'completed', reason: 'agent reported success; retained container' }))
       .not.toContain('relaunch')
-    expect(commandsFor({ mission_role: 'worker', status: 'completed', reason: 'worker finished; retained container' }))
-      .not.toContain('relaunch')
   })
 
   it('hides completed-run actions when the Kill policy denies them', () => {

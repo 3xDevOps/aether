@@ -211,8 +211,6 @@ func (s *Service) read(ctx context.Context, w *store.Watch, prev protocol.WatchO
 	switch w.TargetKind {
 	case protocol.WatchTargetRun:
 		return s.readRun(ctx, w, prev)
-	case protocol.WatchTargetMission:
-		return s.readMission(ctx, w)
 	case protocol.WatchTargetPR:
 		if s.pr == nil {
 			return reading{}, errors.New("pull request watches are not supported yet")
@@ -302,18 +300,16 @@ func (s *Service) runNeeds(run *domain.Run) []need {
 		return nil
 	}
 	var out []need
-	if run.MissionRole != "worker" {
-		inputs := s.runs.PendingInputs(run.ID)
-		for i := range inputs {
-			if inputs[i].Kind == "permission" {
-				out = append(out, need{key: inputKey(&inputs[i]), body: s.requestLine(run, &inputs[i], "Permission requested")})
-			}
+	inputs := s.runs.PendingInputs(run.ID)
+	for i := range inputs {
+		if inputs[i].Kind == "permission" {
+			out = append(out, need{key: inputKey(&inputs[i]), body: s.requestLine(run, &inputs[i], "Permission requested")})
 		}
-		if run.Mode != domain.LaunchHeadless {
-			for i := range inputs {
-				if slices.Contains(questionKinds, inputs[i].Kind) {
-					out = append(out, need{key: inputKey(&inputs[i]), body: s.requestLine(run, &inputs[i], "Question")})
-				}
+	}
+	if run.Mode != domain.LaunchHeadless {
+		for i := range inputs {
+			if slices.Contains(questionKinds, inputs[i].Kind) {
+				out = append(out, need{key: inputKey(&inputs[i]), body: s.requestLine(run, &inputs[i], "Question")})
 			}
 		}
 	}
@@ -387,105 +383,6 @@ func changedAt(run *domain.Run) string {
 		return ""
 	}
 	return strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
-}
-
-func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, error) {
-	m, err := s.store.GetMission(ctx, w.MissionID)
-	if err != nil {
-		return reading{}, fmt.Errorf("read swarm %s: %w", w.MissionID, err)
-	}
-	// A completed swarm can be reopened or still deliver; only a cancelled
-	// one is over.
-	r := reading{ok: true, title: MissionTitle(m), final: m.Phase == domain.MissionPhaseCancelled}
-	r.observed = protocol.WatchObserved{Phase: string(m.Phase)}
-	link := MissionLink(m.ID)
-	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
-		needs, err := s.missionNeeds(ctx, m)
-		if err != nil {
-			return reading{}, err
-		}
-		for i, n := range needs {
-			if i == 0 {
-				r.observed.Need = n.body
-			}
-			r.notices = append(r.notices, Notice{Condition: protocol.WatchNeedsYou, Key: n.key, Title: r.title, Body: n.body, Link: link})
-		}
-	}
-	var finished string
-	if m.Phase.Terminal() {
-		finished = "Swarm " + string(m.Phase)
-		if slices.Contains(w.Conditions, protocol.WatchFinished) {
-			key, err := s.missionFinish(ctx, m)
-			if err != nil {
-				return reading{}, err
-			}
-			r.notices = append(r.notices, Notice{Condition: protocol.WatchFinished, Key: key, Title: r.title, Body: finished, Link: link})
-		}
-	}
-	r.observed.Summary = cmp.Or(r.observed.Need, finished, "Swarm "+string(m.Phase))
-	return r, nil
-}
-
-// missionFinish keys the swarm's finish by when it happened, so a swarm
-// that is reopened and completes again is announced again.
-func (s *Service) missionFinish(ctx context.Context, m *domain.Mission) (string, error) {
-	at, err := s.store.MissionFinishedAt(ctx, m.ID)
-	if err != nil {
-		return "", fmt.Errorf("read swarm %s finish: %w", m.ID, err)
-	}
-	if at == nil {
-		return string(m.Phase), nil
-	}
-	return string(m.Phase) + "|" + strconv.FormatInt(at.UnixNano(), 10), nil
-}
-
-// missionNeeds is what the swarm waits on a member for: each question
-// its integrator asked that is still open, and the swarm row of the Needs
-// you table its current integrator carries otherwise, such as the
-// integrator down. An integrator that failed to launch before its run row
-// existed carries none, so its launch error is read from the swarm. Each
-// is a need of its own. A swarm that ended needs nothing: whatever it
-// still asked is moot.
-func (s *Service) missionNeeds(ctx context.Context, m *domain.Mission) ([]need, error) {
-	if m.Phase.Terminal() {
-		return nil, nil
-	}
-	var out []need
-	if m.OpenQuestions > 0 {
-		questions, err := s.store.ListMissionQuestions(ctx, m.ID)
-		if err != nil {
-			return nil, fmt.Errorf("read swarm %s questions: %w", m.ID, err)
-		}
-		for _, q := range questions {
-			if q.AnsweredAt == nil {
-				out = append(out, need{key: protocol.AttentionKindSwarmQuestion + ":" + string(q.ID), body: "The integrator asks: " + q.Body})
-			}
-		}
-	}
-	if m.CurrentIntegratorRunID == "" {
-		return out, nil
-	}
-	run, err := s.store.GetRun(ctx, m.CurrentIntegratorRunID)
-	if errors.Is(err, store.ErrNotFound) {
-		if m.IntegratorLaunchError != "" && m.IntegratorLaunchErrorAt != nil {
-			out = append(out, need{
-				key:  protocol.AttentionKindIntegratorDown + ":" + m.IntegratorLaunchErrorAt.UTC().Format(time.RFC3339Nano),
-				body: "Integrator failed to launch, replace it to continue: " + m.IntegratorLaunchError,
-			})
-		}
-		return out, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read swarm %s integrator: %w", m.ID, err)
-	}
-	item, _, err := s.swarm(ctx, run)
-	if err != nil {
-		return nil, fmt.Errorf("read swarm %s attention: %w", m.ID, err)
-	}
-	if item == nil || item.Kind == protocol.AttentionKindSwarmQuestion {
-		return out, nil
-	}
-	return append(out, need{key: item.Kind + ":" + item.Since, body: item.Reason}), nil
 }
 
 func prConditionsOf(conditions []string) []string {

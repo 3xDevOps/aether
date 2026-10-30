@@ -119,7 +119,7 @@ func (f *fakeCoordinator) WakeIdle(run domain.RunID) {
 	}
 }
 
-func (f *fakeCoordinator) EnhancedSessionOpened(_ context.Context, run domain.RunID) {
+func (f *fakeCoordinator) EnhancedSessionOpened(run domain.RunID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.opened = append(f.opened, run)
@@ -401,7 +401,7 @@ func TestArgvOverrideRespectsHarnessCommand(t *testing.T) {
 			s := &Scheduler{harnesses: map[string]HarnessSpec{
 				name: {TUIArgs: []string{shim, harness.TaskPlaceholder}},
 			}}
-			argv, profile, _, err := s.command(t.Context(), "", "", "", name, domain.LaunchTUI, false, "add OAuth login", "", "")
+			argv, profile, _, err := s.command(t.Context(), "", "", "", name, domain.LaunchTUI, "add OAuth login", "", "")
 			if err != nil {
 				t.Fatalf("command: %v", err)
 			}
@@ -439,8 +439,8 @@ func TestStagingIsFailClosed(t *testing.T) {
 	}
 }
 
-// Disabling peer coordination retains authenticated transport, while mission
-// admission and lifecycle reporting stay disabled.
+// Disabling peer coordination retains authenticated transport, while
+// lifecycle reporting stays disabled.
 func TestCoordinationOffRetainsRunTransport(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "current build")))

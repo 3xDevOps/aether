@@ -151,9 +151,6 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		if !stopping && !hasNewMail(notices, seen.Mail) {
 			notices.Unread = 0
 		}
-		if notices.Mission == seen.Mission {
-			notices.Mission = ""
-		}
 		if stopping || notices.Overlap == seen.Overlap {
 			notices.Overlap = ""
 		}
@@ -162,7 +159,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		}
 		defer writeHookNotices(path, announced)
 	}
-	text := hookContext(status, notices, stopping)
+	text := hookContext(notices, stopping)
 	if starting && os.Getenv(coordtransport.RoleCardEnv) != "1" {
 		card := coordhooks.RoleCard(coordhooks.StatusGuide(status))
 		if brief := sessionMemoryBrief(ctx, cfg.Socket, status); brief != "" {
@@ -179,20 +176,16 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	return ExitOK, nil
 }
 
-// hookNotices is the state a hook announced last: unread count, mission
-// phase/questions/generation for an integrator, and overlapping peer files.
+// hookNotices is the state a hook announced last: unread count and
+// overlapping peer files.
 type hookNotices struct {
 	Unread  int      `json:"-"`
 	Mail    []string `json:"mail"`
-	Mission string   `json:"mission"`
 	Overlap string   `json:"overlap"`
 }
 
 func currentHookNotices(status protocol.CoordStatusResult) hookNotices {
 	n := hookNotices{Unread: status.Unread, Mail: status.UnreadMessageIDs}
-	if a := status.Assignment; a != nil {
-		n.Mission = a.IntegratorNotice()
-	}
 	var overlap []string
 	for _, peer := range status.Overlaps {
 		for _, file := range peer.Files {
@@ -269,13 +262,10 @@ func validHookEvent(harness, event string) bool {
 	}
 }
 
-func hookContext(status protocol.CoordStatusResult, notices hookNotices, stopping bool) string {
+func hookContext(notices hookNotices, stopping bool) string {
 	var text strings.Builder
 	if notices.Unread > 0 {
 		text.WriteString(protocol.CoordInboxContext(notices.Unread))
-	}
-	if notices.Mission != "" {
-		text.WriteString(protocol.CoordMissionUpdateContext(status.Assignment.MissionID, nil))
 	}
 	if notices.Overlap != "" && !stopping {
 		text.WriteString(protocol.CoordOverlapContext)

@@ -13,13 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-type fixedMission map[domain.MissionID][]domain.RunID
-
-func (f fixedMission) ListMissionRunIDs(_ context.Context, id domain.MissionID) ([]domain.RunID, error) {
-	return slices.Clone(f[id]), nil
-}
-
-func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
+func TestRunFilterMatchesBothSidesOfAgentMail(t *testing.T) {
 	ctx := context.Background()
 	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "events.db"))
 	if err != nil {
@@ -43,7 +37,7 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	publish("worker-up", "run-worker", events.RunStatusPayload{To: domain.RunRunning})
 	publish("bystander-up", "run-bystander", events.RunStatusPayload{To: domain.RunRunning})
 	publish("report", "run-worker", events.CoordMessagePayload{
-		MessageID: "msg-1", WorkspaceID: ws, MissionID: "mission-1",
+		MessageID: "msg-1", WorkspaceID: ws,
 		FromRunID: "run-worker", ToRunID: "run-integrator", Kind: "report",
 	})
 	publish("overlap", "run-bystander", events.CoordMessagePayload{
@@ -51,7 +45,7 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	})
 	publish("ack", "run-integrator", events.CoordMessageAckedPayload{MessageID: "msg-1", ToRunID: "run-integrator", AckedAt: "2026-10-05T12:00:00Z"})
 
-	reader := NewReader(log, fixedMission{"mission-1": {"run-integrator", "run-worker"}})
+	reader := NewReader(log)
 	ids := func(f Filter) []string {
 		t.Helper()
 		f.Workspace = ws
@@ -71,11 +65,7 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	}{
 		"recipient run":    {Filter{Run: "run-integrator"}, []string{"integrator-up", "report", "overlap"}},
 		"sender run":       {Filter{Run: "run-bystander"}, []string{"bystander-up", "overlap"}},
-		"mission":          {Filter{MissionID: "mission-1"}, []string{"integrator-up", "worker-up", "report", "overlap"}},
-		"run in mission":   {Filter{MissionID: "mission-1", Run: "run-worker"}, []string{"worker-up", "report"}},
-		"run outside":      {Filter{MissionID: "mission-1", Run: "run-bystander"}, nil},
-		"unknown mission":  {Filter{MissionID: "mission-2"}, nil},
-		"typed agent mail": {Filter{MissionID: "mission-1", Types: []events.Type{events.TypeCoordMessage}}, []string{"report", "overlap"}},
+		"typed agent mail": {Filter{Types: []events.Type{events.TypeCoordMessage}}, []string{"report", "overlap"}},
 		"typed acks":       {Filter{Run: "run-integrator", Types: []events.Type{events.TypeCoordMessageAcked}}, []string{"ack"}},
 	} {
 		if got := ids(tc.filter); !slices.Equal(got, tc.want) {
@@ -85,11 +75,6 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	matcher := events.Filter{Runs: []domain.RunID{"run-integrator"}}
 	if !matcher.Matches(events.Event{RunID: "run-worker", Payload: events.CoordMessagePayload{ToRunID: "run-integrator"}}) {
 		t.Error("a live subscription filtered by run must see mail addressed to it")
-	}
-	swarm := events.Filter{Runs: []domain.RunID{"run-integrator"}, Mission: "mission-1"}
-	if !swarm.Matches(events.Event{Payload: events.MissionChangedPayload{MissionID: "mission-1"}}) ||
-		swarm.Matches(events.Event{Payload: events.MissionChangedPayload{MissionID: "mission-2"}}) {
-		t.Error("a live subscription filtered by mission must see that mission's swarm events only")
 	}
 }
 
@@ -112,7 +97,7 @@ func TestBeforeReadsTheNewestHistoryFirst(t *testing.T) {
 			t.Fatalf("append %d: %v", seq, aerr)
 		}
 	}
-	reader := NewReader(log, fixedMission{})
+	reader := NewReader(log)
 	f := Filter{Workspace: ws, Run: "run-1"}
 	var pages [][]uint64
 	before := uint64(0)
@@ -140,7 +125,7 @@ func TestBeforeReadsTheNewestHistoryFirst(t *testing.T) {
 }
 
 func TestDetailEventsAreExcludedFromDefaultFeed(t *testing.T) {
-	for _, typ := range []events.Type{events.TypeRunTitle, events.TypeMissionChanged, events.TypeRunPR, events.TypePresence} {
+	for _, typ := range []events.Type{events.TypeRunTitle, events.TypeRunPR, events.TypePresence} {
 		if !detailTypes[typ] {
 			t.Fatalf("%s should be a detail event in the default feed", typ)
 		}
@@ -181,7 +166,7 @@ func TestMemberWidePagesStepThroughSparseHistory(t *testing.T) {
 			t.Fatalf("append %d: %v", seq, aerr)
 		}
 	}
-	reader := NewReader(log, fixedMission{})
+	reader := NewReader(log)
 	f := Filter{Types: []events.Type{events.TypeRunStatus}}
 
 	var found []uint64

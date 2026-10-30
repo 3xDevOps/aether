@@ -196,9 +196,6 @@ func render(run *domain.Run, n *push.Need, it *protocol.AttentionItem, dashboard
 	var notes []string
 	if dashboard != "" {
 		page := "/?run=" + url.QueryEscape(string(run.ID))
-		if n != nil && n.Mission != "" {
-			page = "/?page=missions&id=" + url.QueryEscape(string(n.Mission))
-		}
 		notes = append(notes, "<"+dashboard+page+"|Open in Aether>")
 	}
 	switch {

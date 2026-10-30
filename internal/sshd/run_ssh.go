@@ -64,10 +64,6 @@ const (
 	runSSHCommand = `if command -v bash >/dev/null 2>&1; then exec bash -c "$0"; fi; exec sh -c "$0"`
 )
 
-// runSSHWorkerNotice tells a member connecting to a swarm worker what a
-// session there does. A terminal shows no dialog that could.
-const runSSHWorkerNotice = "this run is a swarm worker: a shell, command or file transfer here takes control of it, and its integrator cannot steer it until you disconnect or control is released on the swarm page"
-
 var (
 	// What a stock sshd accepts from SendEnv.
 	runSSHEnvName = regexp.MustCompile(`^(LANG|LC_[A-Z_]{1,32})$`)
@@ -139,9 +135,6 @@ func (s *Server) serveRunSSH(ctx context.Context, member domain.MemberID, ch sub
 	}
 	defer release()
 	ack := protocol.RunSSHResponse{OK: true, HostKey: string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(s.hostKey.PublicKey())))}
-	if run.MissionRole == "worker" {
-		ack.Notice = runSSHWorkerNotice
-	}
 	if err = writeJSONLine(ch, ack); err != nil {
 		return
 	}
@@ -346,10 +339,8 @@ func (c *runSSHConn) session(ctx context.Context, nc ssh.NewChannel) {
 		for _, name := range slices.Sorted(maps.Keys(env)) {
 			spec.Env = append(spec.Env, name+"="+env[name])
 		}
-		startErr := c.takeover(ctx)
-		if startErr == nil {
-			exec, startErr = c.svc.StartRunExec(ctx, c.run, c.principal, spec, c.authorize)
-		}
+		var startErr error
+		exec, startErr = c.svc.StartRunExec(ctx, c.run, c.principal, spec, c.authorize)
 		if startErr != nil {
 			eol := "\n"
 			if spec.TTY {
@@ -445,23 +436,6 @@ func (c *runSSHConn) session(ctx context.Context, nc ssh.NewChannel) {
 			}
 		}
 	}
-}
-
-// takeover puts a swarm worker under the member's hold before a session
-// starts in it, as a writable shell tab does: the integrator sends the worker
-// nothing while a person works in its checkout. The connection counts as a
-// live holder until it closes. Any other run has none to take. The member is admitted first, so
-// one who has just lost the run cannot leave a hold on it.
-func (c *runSSHConn) takeover(ctx context.Context) error {
-	mission := c.s.cfg.Services.MissionControl
-	if mission == nil {
-		return nil
-	}
-	if err := c.svc.CheckRunExec(ctx, c.run, c.principal, c.authorize); err != nil {
-		return err
-	}
-	c.s.holdUntil(c.record, c.done)
-	return mission.Takeover(ctx, c.run, c.principal.MemberID)
 }
 
 func runSSHDimension(n, fallback uint32) uint {

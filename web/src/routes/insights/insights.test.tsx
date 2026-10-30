@@ -50,31 +50,25 @@ describe('insights page', () => {
     expect(headings.slice(0, 2)).toEqual(['My statistics', 'Team statistics'])
   })
 
-  it('shows the four boxes for me and for the team from the server numbers', async () => {
+  it('shows the three boxes for me and for the team from the server numbers', async () => {
     renderPage()
     const mine = await screen.findByRole('region', { name: sections.mine })
-    const completed = within(mine).getByRole('article', { name: 'Runs / swarms completed' })
-    expect(within(completed).getByText('7 runs / 1 swarm')).toBeDefined()
-    expect(completed.textContent).toBe('Runs / swarms completed7 runs / 1 swarm1 run failed, 1 run abandoned0 swarms failed, 0 swarms abandoned')
+    const completed = within(mine).getByRole('article', { name: 'Runs completed' })
+    expect(completed.textContent).toBe('Runs completed7 runs1 run failed, 1 run abandoned')
     expect(completed.textContent).not.toContain('launched')
     const rate = within(mine).getByRole('article', { name: 'Success rate' })
-    expect(rate.textContent).toBe('Success rate40%Runs: 3 of 9 runs merged a pull requestSwarms: 1 of 1 swarm merged a pull request')
-    expect(within(rate).getByText('Runs: 3 of 9 runs merged a pull request')).toBeDefined()
-    expect(within(rate).getByText('Swarms: 1 of 1 swarm merged a pull request')).toBeDefined()
-    const tasks = within(mine).getByRole('article', { name: 'Swarm tasks accepted' })
-    expect(tasks.textContent).toBe('Swarm tasks accepted45 agents in swarms started in the last 7 days')
+    expect(rate.textContent).toBe('Success rate33%3 of 9 runs merged a pull request')
     const used = within(mine).getByRole('article', { name: 'Total tokens used' })
     expect(within(used).getByText('129K tokens')).toBeDefined()
     expect(within(used).getByText('Claude Code used 77% of the 129K tokens')).toBeDefined()
     expect(within(used).getByText('6 runs did not report tokens')).toBeDefined()
 
     const team = screen.getByRole('region', { name: sections.everyone })
-    expect(within(within(team).getByRole('article', { name: 'Runs / swarms completed' })).getByText('10 runs / 1 swarm')).toBeDefined()
-    expect(within(within(team).getByRole('article', { name: 'Success rate' })).getByText('40%')).toBeDefined()
-    expect(within(within(team).getByRole('article', { name: 'Swarm tasks accepted' })).getByText('6')).toBeDefined()
+    expect(within(within(team).getByRole('article', { name: 'Runs completed' })).getByText('10 runs')).toBeDefined()
+    expect(within(within(team).getByRole('article', { name: 'Success rate' })).getByText('38%')).toBeDefined()
   })
 
-  it('draws seven days, dims the others on hover and switches to swarms', async () => {
+  it('draws seven days, and dims the others on hover', async () => {
     renderPage()
     const mine = await screen.findByRole('region', { name: sections.mine })
     const days = within(mine).getAllByRole('img')
@@ -88,10 +82,6 @@ describe('insights page', () => {
     fireEvent.mouseLeave(wed.parentElement!.parentElement!)
     expect(days.some((d) => d.hasAttribute('data-dimmed') || d.hasAttribute('data-active'))).toBe(false)
     expect(within(mine).queryByRole('tooltip')).toBeNull()
-
-    fireEvent.click(within(mine).getByRole('button', { name: 'Swarms' }))
-    expect(within(mine).getByRole('img', { name: 'Thu, Oct 15: swarms 1 done, 0 failed, 0 abandoned' })).toBeDefined()
-    expect(within(mine).getByText('1 swarm ended in the last 7 days')).toBeDefined()
   })
 
   it('stacks the team chart by member and names them in the legend and tooltip', async () => {
@@ -190,14 +180,13 @@ describe('insights page', () => {
       recent: [],
       needs_you: 0,
       heatmap: [],
-      swarms: { launched: 0, completed: 0, cancelled: 0, agents: 0, tasks_accepted: 0 },
       cost: { metered_runs: 0, unmetered_runs: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, by_agent: [] },
-      success: { runs: { succeeded: 0, finished: 0 }, swarms: { succeeded: 0, finished: 0 } },
-      outcomes: { runs: zero, swarms: zero, members: [], series: insights().outcomes.series.map((d) => ({ ...d, runs: zero, swarms: zero })) },
+      success: { runs: { succeeded: 0, finished: 0 } },
+      outcomes: { runs: zero, members: [], series: insights().outcomes.series.map((d) => ({ ...d, runs: zero })) },
     })
     renderPage({ insightsGet: vi.fn(async () => quiet) })
     const mine = await screen.findByRole('region', { name: sections.mine })
-    expect(within(within(mine).getByRole('article', { name: 'Runs / swarms completed' })).getByText('0 runs / 0 swarms')).toBeDefined()
+    expect(within(within(mine).getByRole('article', { name: 'Runs completed' })).getByText('0 runs')).toBeDefined()
     expect(within(within(mine).getByRole('article', { name: 'Success rate' })).getByText('—')).toBeDefined()
     expect(within(within(mine).getByRole('article', { name: 'Total tokens used' })).getByText('0 tokens')).toBeDefined()
     expect(within(mine).getByText('No runs ended in the last 7 days.')).toBeDefined()
@@ -280,7 +269,7 @@ describe('insights page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(await within(screen.getByRole('region', { name: sections.everyone })).findByRole('list', { name: 'Members' })).toBeDefined()
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(within(screen.getByRole('region', { name: sections.mine })).getAllByRole('article')).toHaveLength(4)
+    expect(within(screen.getByRole('region', { name: sections.mine })).getAllByRole('article')).toHaveLength(3)
   })
 
   it('says so neutrally when the server predates insights', async () => {

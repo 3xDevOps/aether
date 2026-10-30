@@ -95,14 +95,13 @@ type Config struct {
 	Memory TeamMemory
 	// RemoveAll deletes a directory container processes wrote into; nil
 	// uses os.RemoveAll.
-	RemoveAll                   func(ctx context.Context, path string) error
-	Profiles                    profileService
-	ReposDir                    string
-	WorktreeMount               string
-	StandardImage               string
-	BrowserImage                string
-	Control                     *control.Service
-	DevelopmentTerminalTakeover func(context.Context, domain.RunID, domain.MemberID) error
+	RemoveAll     func(ctx context.Context, path string) error
+	Profiles      profileService
+	ReposDir      string
+	WorktreeMount string
+	StandardImage string
+	BrowserImage  string
+	Control       *control.Service
 	// Secrets holds workspace secret variables; nil runs without any.
 	Secrets *secretstore.Store
 	// Egress points a run of a workspace with egress control on at the egress
@@ -358,7 +357,6 @@ type supervised struct {
 	postParkActivity time.Time
 	launchMode       domain.LaunchMode
 	acp              bool
-	missionAssigned  bool
 	retained         bool
 	retainedUntil    *time.Time
 	destroyPending   bool
@@ -434,14 +432,14 @@ type supervised struct {
 	idleShown    bool
 	idleReportID string
 	idleReportAt time.Time
-	// workersReason is the reason Aether wrote for an integrator waiting on
-	// its swarm, so a hook's reason that reads the same is never rewritten.
+	// workersReason is the reason Aether wrote for a parent waiting on its
+	// child runs, so a hook's reason that reads the same is never rewritten.
 	workersReason string
 	// betweenTurns says an Enhanced agent works only on background tasks
 	// with no turn running, which settles a needs-input outcome's turn.
 	betweenTurns bool
-	// turnStartedAt is when the agent's last turn started; worker mail an
-	// integrator got before it is mail that turn could handle.
+	// turnStartedAt is when the agent's last turn started; child mail a
+	// parent got before it is mail that turn could handle.
 	turnStartedAt time.Time
 	// reportAsked is the turnStartedAt of the last turn whose end was held
 	// for a missing report (HoldTurnEnd), and stopHeld marks a Standard run
@@ -462,11 +460,9 @@ type supervised struct {
 	failReason string
 	// moving is set while a move holds the run's finalizing claim, and
 	// moveFrom is the container it replaces: once the entry has another, it
-	// is the replacement's. noRetain is set by a move that failed: a swarm
-	// keeps no container of it.
+	// is the replacement's.
 	moving   bool
 	moveFrom runtime.ID
-	noRetain bool
 	// reclaimed is set once disk reclaim picks the retained container, and
 	// stays through a failed removal so the retry says why.
 	reclaimed bool
@@ -948,7 +944,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 
 // containerSpec converts one fully assembled environment plan into a runtime
 // spec. Callers must not assemble workspace mounts or environment fields here.
-func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, limits domain.RunLimits, persistSupervisor bool) runtime.Spec {
+func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, limits domain.RunLimits) runtime.Spec {
 	env := make(map[string]string, len(plan.Env)+8)
 	maps.Copy(env, plan.Env)
 	env[coordtransport.RunIDEnv] = string(run.ID)
@@ -971,7 +967,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	if run.Mode == domain.LaunchHeadless {
 		env[coordtransport.BackgroundEnv] = "1"
 	}
-	if run.Mode.Interactive() || persistSupervisor || run.ACP {
+	if run.Mode.Interactive() || run.ACP {
 		argv = wrapTUICommand(argv)
 	}
 	return runtime.Spec{

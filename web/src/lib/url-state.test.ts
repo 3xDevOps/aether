@@ -17,7 +17,6 @@ describe('route in the query string', () => {
     [{ name: 'run', params: { runId: 'run_1', view: 'session', agent: 'toolu_1' } }, 'run=run_1&view=session&agent=toolu_1'],
     [{ name: 'settings', params: {} }, 'page=settings'],
     [{ name: 'settings', params: { section: 'connectors' } }, 'page=settings&id=connectors'],
-    [{ name: 'missions', params: { missionId: 'mis_1' } }, 'page=missions&id=mis_1'],
     [{ name: 'workspace', params: { workspaceId: 'wsp_1' } }, 'page=workspace&id=wsp_1'],
     [{ name: 'templates', params: { template: 'dep-audit' } }, 'page=templates&id=dep-audit'],
   ])('writes %o as "%s" and reads it back', (route, text) => {

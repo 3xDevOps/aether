@@ -153,8 +153,8 @@ func surfaceSnapshot(run string, surface Surface, state *surfaceState) SurfaceSn
 // admission lock before reconnect or installation. Connected transports never
 // share a generation. Only a human may explicitly displace another session.
 // Callbacks must be bounded and must not call back into Service. Authorization
-// and mission holds remain the caller's responsibility; this API never changes
-// a primary lease or a durable worker hold.
+// remains the caller's responsibility; this API never changes a primary
+// lease.
 func (s *Service) AcquireSurface(run string, surface Surface, principal Principal, session string, force bool, expectedGeneration uint64, authorize func() error) (SurfaceSnapshot, *SurfaceSnapshot, error) {
 	if err := s.validateSurface(run, surface); err != nil {
 		return SurfaceSnapshot{}, nil, err
@@ -384,7 +384,7 @@ func (s *Service) fenceSurfacesLocked(run domain.RunID) []SurfaceSnapshot {
 }
 
 // RevokeRunSurfaces revokes every development controller without releasing the
-// primary lease or touching mission holds. Use AdmitRevoke for run protection.
+// primary lease. Use AdmitRevoke for run protection.
 // Returned snapshots let the broker notify each displaced live stream.
 func (s *Service) RevokeRunSurfaces(run string, revoke func() error) ([]SurfaceSnapshot, error) {
 	if s.validateRun(run) != nil || revoke == nil {

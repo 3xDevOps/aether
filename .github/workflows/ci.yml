@@ -281,7 +281,7 @@ jobs:
             "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
             "INTEGRATION_NORACE=$INTEGRATION_NORACE" \
             make test-integration INTEGRATION_PKGS=./internal/server \
-              INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'
+              INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|EndToEnd|MultiMember|ServerUpdate)'
       - name: Exercise the real browser runtime
         if: ${{ !cancelled() }}
         run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
@@ -323,7 +323,7 @@ jobs:
           GOFLAGS: -v
           INTEGRATION_NORACE: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: |
-          for run in '^TestIntegration(Chaos|Coordination|Mission)' '^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'; do
+          for run in '^TestIntegration(Chaos|Coordination)' '^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'; do
             sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" "INTEGRATION_NORACE=$INTEGRATION_NORACE" \
               make test-integration INTEGRATION_PKGS=./internal/server INTEGRATION_RUN="$run" || status=1
           done

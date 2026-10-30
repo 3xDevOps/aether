@@ -103,7 +103,7 @@ export function AgentPicker({
   )
 }
 
-export function RefusalNotes({ agents, accountName, accountField }: { agents: AgentInfo[]; accountName: string; accountField: string }) {
+export function RefusalNotes({ agents, accountName }: { agents: AgentInfo[]; accountName: string }) {
   const loggedOut = agents.filter((agent) => agent.installed && agent.login_missing)
   const ownOnly = agents.filter((agent) => agent.installed && agent.own_account_only)
   const unavailable = agents.filter((agent) => agent.installed && agent.unavailable)
@@ -118,7 +118,7 @@ export function RefusalNotes({ agents, accountName, accountField }: { agents: Ag
       )}
       {ownOnly.length > 0 && (
         <p>
-          Your own agent definitions run only on your own account: {names(ownOnly)}. To launch one, choose your own account, marked (you), under {accountField}.
+          Your own agent definitions run only on your own account: {names(ownOnly)}. To launch one, choose your own account, marked (you), under Account.
         </p>
       )}
       {unavailable.map((agent) => (

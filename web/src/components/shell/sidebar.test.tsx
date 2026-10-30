@@ -4,7 +4,7 @@ import { AppShell } from '@/components/shell/app-shell'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
-import { alice, bob, fakeApi, mission, otherWorkspace, run, updateStatus, vera, workspace } from '@/test/fixtures'
+import { alice, bob, fakeApi, otherWorkspace, run, updateStatus, vera, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 
 Element.prototype.scrollIntoView = vi.fn()
@@ -145,12 +145,10 @@ describe('run rows', () => {
       useStore.setState((s) => ({
         runs: {
           ...s.runs,
-          run_integrator: toRecord(run({
-            id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
-            started_at: '2026-08-14T09:00:00Z',
+          run_parent: toRecord(run({
+            id: 'run_parent', task: 'coordinate', started_at: '2026-08-14T09:00:00Z',
           })),
         },
-        missions: { mission_1: mission() },
       }))
       render(<AppShell />)
 
@@ -175,20 +173,16 @@ describe('run rows', () => {
     }
   })
 
-  it('keeps a finish nobody has opened at full strength, nested workers too, and says so in its name', () => {
+  it('keeps a finish nobody has opened at full strength, nested child runs too, and says so in its name', () => {
     useStore.setState((s) => ({
       runs: {
         ...s.runs,
         run_5: toRecord(run({ id: 'run_5', task: 'bump the linter', status: 'failed', finish_unopened: true })),
-        run_integrator: toRecord(run({
-          id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
-        })),
-        run_worker: toRecord(run({
-          id: 'run_worker', task: 'port the parser', status: 'completed', mission_id: 'mission_1',
-          mission_role: 'worker', finish_unopened: true,
+        run_parent: toRecord(run({ id: 'run_parent', task: 'coordinate' })),
+        run_child: toRecord(run({
+          id: 'run_child', task: 'port the parser', status: 'completed', parent_run_id: 'run_parent', finish_unopened: true,
         })),
       },
-      missions: { mission_1: mission() },
     }))
     render(<AppShell />)
     const shown = (state: string, task: string) => {
@@ -440,32 +434,6 @@ describe('run rows', () => {
 
     expect(new Set([first.params.runId, second.params.runId])).toEqual(new Set(['run_2', 'run_3']))
     expect(useStore.getState().route).toEqual(first)
-  })
-
-  it('moves on from a swarm that needs you on u', () => {
-    act(() => {
-      useStore.setState((s) => ({
-        runs: {
-          ...s.runs,
-          run_integrator: toRecord(run({
-            id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
-            started_at: '2026-08-14T09:00:00Z',
-          })),
-        },
-        missions: { mission_1: mission({ open_questions: 1 }) },
-      }))
-    })
-    render(<AppShell />)
-
-    const seen = []
-    for (let i = 0; i < 4; i++) {
-      fireEvent.keyDown(document.body, { key: 'u' })
-      const { route } = useStore.getState()
-      seen.push(route.params.runId ?? route.params.missionId)
-    }
-
-    expect(new Set(seen.slice(0, 3))).toEqual(new Set(['run_2', 'run_3', 'mission_1']))
-    expect(seen[3]).toBe(seen[0])
   })
 
   it('narrows Working and Finished to my runs, never Needs you', () => {

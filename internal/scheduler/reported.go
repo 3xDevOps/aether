@@ -40,9 +40,6 @@ type closeSpec struct {
 	// reason is used when no container is retained, retained when one is.
 	reason   string
 	retained string
-	// mission marks a mission worker's completion, which retains the
-	// container but never makes it relaunchable.
-	mission bool
 	// reported marks the close an agent's report causes, which leaves the
 	// outcome unseen by the run's owner.
 	reported bool
@@ -60,10 +57,6 @@ func (c closeSpec) cause() finishCause {
 
 func humanClose(outcome domain.RunStatus, actor domain.MemberID) closeSpec {
 	return closeSpec{outcome: outcome, actor: actor, reason: "closed", retained: retainedCloseReason}
-}
-
-func missionClose(outcome domain.RunStatus) closeSpec {
-	return closeSpec{outcome: outcome, reason: "closed", retained: retainedCompletionReason, mission: true}
 }
 
 func reportedClose(outcome domain.RunStatus) closeSpec {
@@ -89,9 +82,8 @@ func retainedReason(status domain.RunStatus, reason string) bool {
 
 // retentionValid reports whether a terminal row's reason matches the
 // retained container its sidecar records.
-func retentionValid(mode domain.LaunchMode, missionAssigned bool, status domain.RunStatus, reason string) bool {
-	return (mode.Interactive() && retainedReason(status, reason)) ||
-		(missionAssigned && reason == retainedCompletionReason)
+func retentionValid(mode domain.LaunchMode, status domain.RunStatus, reason string) bool {
+	return mode.Interactive() && retainedReason(status, reason)
 }
 
 // releasedReason is the reason a retained run keeps once its container is
@@ -102,8 +94,6 @@ func releasedReason(status domain.RunStatus, reason, closed string) (string, boo
 		return reportedSuccessReason, true
 	case status == domain.RunFailed && reason == reportedFailureRetainedReason:
 		return reportedFailureReason, true
-	case (status == domain.RunCompleted || status == domain.RunFailed) && reason == retainedCompletionReason:
-		return "worker finished", true
 	case status == domain.RunMerged || status == domain.RunAbandoned ||
 		(status == domain.RunCompleted && reason == retainedCloseReason):
 		return closed, true
@@ -205,8 +195,8 @@ func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.Mem
 }
 
 // FinishReported settles an interactive run at its turn boundary without
-// ending its execution lifetime. Background runs retain automatic completion;
-// assigned workers are left to CompleteMission. The report watermark survives
+// ending its execution lifetime. Background runs retain automatic completion.
+// The report watermark survives
 // follow-up work so outbox retries cannot resurrect a cleared outcome.
 func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error {
 	if outcome != domain.RunCompleted && outcome != domain.RunFailed {
@@ -220,15 +210,6 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, report
 	}
 	if reportedAt.Before(entry.relaunchedAt) {
 		return nil
-	}
-	if entry.missionAssigned {
-		r, err := s.cfg.Store.GetRun(ctx, run)
-		if err != nil {
-			return fmt.Errorf("scheduler: finish reported run %s: %w", run, err)
-		}
-		if r.MissionRole != "integrator" {
-			return nil
-		}
 	}
 	if superseded, err := s.reportSuperseded(ctx, reportID); err != nil || superseded {
 		return err
@@ -372,7 +353,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 	}
 	exited := (r.Status == domain.RunCompleted && r.Reason == exitedCompletedReason) ||
 		(r.Status == domain.RunFailed && strings.HasPrefix(r.Reason, exitedFailedReasonPrefix))
-	if !exited || r.MissionID != "" {
+	if !exited {
 		return nil
 	}
 	if reports, ok := s.cfg.Store.(store.CoordTerminalReportStore); ok {
@@ -622,10 +603,10 @@ func (s *Scheduler) finishReportedLocked(ctx context.Context, entry *supervised)
 		return err
 	}
 	status, workspace, cid := entry.status, entry.workspaceID, entry.containerID
-	mode, paused, assigned := entry.launchMode, entry.paused, entry.missionAssigned
+	mode, paused := entry.launchMode, entry.paused
 	s.mu.Unlock()
 
-	if err := s.closeLiveLocked(ctx, entry, status, workspace, cid, mode, paused, assigned, reportedClose(outcome)); err != nil {
+	if err := s.closeLiveLocked(ctx, entry, status, workspace, cid, mode, paused, reportedClose(outcome)); err != nil {
 		s.mu.Lock()
 		entry.reportedAt = time.Now().UTC()
 		s.mu.Unlock()

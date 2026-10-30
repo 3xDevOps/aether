@@ -1,5 +1,5 @@
-// Package watch keeps a member's watches: durable subscriptions to a run, a
-// swarm or a pull request that the server evaluates and announces on its
+// Package watch keeps a member's watches: durable subscriptions to a run or a
+// pull request that the server evaluates and announces on its
 // own, whether or not a dashboard is open. It is a bus consumer that
 // resumes from the last event it applied, reads each affected target as it
 // stands now, records each notice once, and delivers it in-app and to the
@@ -49,8 +49,6 @@ type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
-	GetMission(ctx context.Context, id domain.MissionID) (*domain.Mission, error)
-	ListMissionQuestions(ctx context.Context, id domain.MissionID) ([]*domain.MissionQuestion, error)
 	RunResumedSince(ctx context.Context, id domain.RunID, at time.Time) (bool, error)
 }
 
@@ -69,15 +67,12 @@ type Pusher interface {
 	HeldUntil(member domain.MemberID) time.Time
 }
 
-// Config wires the service. Store, Bus, Runs and Swarm are required. Push
+// Config wires the service. Store, Bus, Runs are required. Push
 // nil records every push as no_destination.
 type Config struct {
 	Store Store
 	Bus   events.Bus
 	Runs  Runs
-	// Swarm is the swarm row of the Needs you table, the same function
-	// push.Config.Swarm is.
-	Swarm push.Swarm
 	Push  Pusher
 	// Head is the event log's last sequence, where a service that never
 	// saved a cursor starts.
@@ -98,7 +93,6 @@ type Service struct {
 	store    Store
 	bus      events.Bus
 	runs     Runs
-	swarm    push.Swarm
 	push     Pusher
 	head     func(ctx context.Context) (uint64, error)
 	debounce time.Duration
@@ -134,8 +128,8 @@ type Service struct {
 
 // New builds the service; call Start to begin.
 func New(cfg Config) (*Service, error) {
-	if cfg.Store == nil || cfg.Bus == nil || cfg.Runs == nil || cfg.Swarm == nil {
-		return nil, errors.New("watch: Store, Bus, Runs and Swarm are required")
+	if cfg.Store == nil || cfg.Bus == nil || cfg.Runs == nil {
+		return nil, errors.New("watch: Store, Bus and Runs are required")
 	}
 	if cfg.Debounce <= 0 {
 		cfg.Debounce = DefaultDebounce
@@ -147,7 +141,7 @@ func New(cfg Config) (*Service, error) {
 		cfg.Now = time.Now
 	}
 	return &Service{
-		store: cfg.Store, bus: cfg.Bus, runs: cfg.Runs, swarm: cfg.Swarm, push: cfg.Push, head: cfg.Head, recovered: cfg.Recovered,
+		store: cfg.Store, bus: cfg.Bus, runs: cfg.Runs, push: cfg.Push, head: cfg.Head, recovered: cfg.Recovered,
 		debounce: cfg.Debounce, tick: cfg.Tick, now: cfg.Now, kick: make(chan struct{}, 1),
 		transcribing: map[domain.MemberID]bool{},
 	}, nil
@@ -322,7 +316,7 @@ func (s *Service) retryLater(ctx context.Context, id string, failure error) erro
 
 var watchedTypes = []events.Type{
 	events.TypeRunStatus, events.TypeRunInput, events.TypeRunOutcomeSeen, events.TypeRunReview,
-	events.TypeRunArchived, events.TypeRunPR, events.TypeTimeline, events.TypeMissionChanged,
+	events.TypeRunArchived, events.TypeRunPR, events.TypeTimeline,
 }
 
 // consume follows the bus from the cursor, and from it again whenever the
@@ -428,14 +422,10 @@ func (s *Service) advance(ctx context.Context, seq uint64) error {
 }
 
 func (s *Service) affected(ctx context.Context, e events.Event) ([]string, error) {
-	switch p := e.Payload.(type) {
-	case events.MissionChangedPayload:
-		return s.store.EvaluableWatchIDs(ctx, "", p.MissionID)
-	}
 	if e.RunID == "" {
 		return nil, nil
 	}
-	return s.store.EvaluableWatchIDs(ctx, e.RunID, "")
+	return s.store.EvaluableWatchIDs(ctx, e.RunID)
 }
 
 // background expires watches, retries failing ones and polls pull

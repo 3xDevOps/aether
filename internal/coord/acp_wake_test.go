@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -115,7 +113,7 @@ func TestEnhancedWakeOncePerUnreadSet(t *testing.T) {
 	if n := waker.count(); n != 1 {
 		t.Fatalf("an unchanged unread set woke the run again: %d wakes", n)
 	}
-	h.svc.EnhancedSessionOpened(ctx, b)
+	h.svc.EnhancedSessionOpened(b)
 	h.svc.wakeEnhanced(b)
 	if n := waker.count(); n != 1 {
 		t.Fatalf("a reconnect woke the run again for mail it took: %d wakes", n)
@@ -152,7 +150,7 @@ func TestEnhancedWakeRefusedOncePerSession(t *testing.T) {
 		t.Fatalf("a refused wake was retried for the same mail: %d wakes", n)
 	}
 
-	h.svc.EnhancedSessionOpened(ctx, b)
+	h.svc.EnhancedSessionOpened(b)
 	h.svc.wakeEnhanced(b)
 	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("a new session must be woken for the mail: prompt %q, want %q", got, want)
@@ -288,7 +286,7 @@ func TestEnhancedWakePromptKeepsItsBudgetAfterASlowAdmission(t *testing.T) {
 	h := newHarness(t, 2, func(c *Config) {
 		c.Waker = waker
 		c.WakeAdmission = func(_ context.Context, _ domain.RunID, dispatch func() error) error {
-			time.Sleep(time.Second) // A mission lock held by integration prepare.
+			time.Sleep(time.Second) // A slow admission, as when the run is busy being prepared.
 			return dispatch()
 		}
 	})
@@ -435,162 +433,5 @@ func TestEnhancedWakeRetriesWhenProtectionIsLifted(t *testing.T) {
 	}
 	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("wake after unprotect: prompt %q, want %q", got, want)
-	}
-}
-
-type changeMissionStub struct {
-	missionTransportStub
-	mu      sync.Mutex
-	seq     uint64
-	changes map[domain.MissionChange]uint64
-}
-
-func (m *changeMissionStub) Assignment(ctx context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
-	a, err := m.missionTransportStub.Assignment(ctx, run)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	a.ChangeSeq, a.Changes = m.seq, maps.Clone(m.changes)
-	return a, err
-}
-
-// change counts one swarm change; one the integrator made itself is
-// counted but not listed, as the store does.
-func (m *changeMissionStub) change(kind domain.MissionChange, byIntegrator bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.seq++
-	if byIntegrator {
-		return
-	}
-	if m.changes == nil {
-		m.changes = make(map[domain.MissionChange]uint64)
-	}
-	m.changes[kind] = m.seq
-}
-
-func newMissionWakeHarness(t *testing.T) (*coordHarness, *fakeWaker, *changeMissionStub, domain.RunID) {
-	t.Helper()
-	waker := newFakeWaker()
-	stub := &changeMissionStub{}
-	h := newHarness(t, 2, func(c *Config) {
-		c.WakeAdmission = allowHookWake
-		c.Waker = waker
-		c.Mission = stub
-	})
-	worker, integrator := h.run(0), h.run(1)
-	stub.mission, stub.integrator = []domain.RunID{worker, integrator}, integrator
-	h.start()
-	return h, waker, stub, integrator
-}
-
-func (h *coordHarness) publishMissionChanged(t *testing.T) {
-	t.Helper()
-	if _, err := h.bus.Publish(context.Background(), events.Event{
-		WorkspaceID: h.workspace, Payload: events.MissionChangedPayload{MissionID: "mission-1"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
-	h, waker, stub, integrator := newMissionWakeHarness(t)
-	stub.change(domain.MissionTaskProposed, false)
-
-	waker.endTurn(integrator)
-	h.svc.wakeEnhanced(integrator)
-	if n := waker.count(); n != 0 {
-		t.Fatalf("the first mission state seen woke the integrator %d times", n)
-	}
-
-	stub.change(domain.MissionWorkerEnded, false)
-	h.publishMissionChanged(t)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded}) + protocol.CoordReportReminder
-	if got := waker.next(t); got != want {
-		t.Fatalf("mission wake prompt %q, want %q", got, want)
-	}
-
-	waker.endTurn(integrator)
-	h.publishMissionChanged(t)
-	h.svc.wakeEnhanced(integrator)
-	if n := waker.count(); n != 1 {
-		t.Fatalf("an unchanged mission woke the integrator again: %d wakes", n)
-	}
-}
-
-func TestEnhancedWakeOffersARefusedMissionUpdateToTheNextSession(t *testing.T) {
-	h, waker, stub, integrator := newMissionWakeHarness(t)
-	ctx := context.Background()
-	h.svc.EnhancedSessionOpened(ctx, integrator)
-	waker.mu.Lock()
-	waker.refuse = true
-	waker.mu.Unlock()
-
-	stub.change(domain.MissionWorkerEnded, false)
-	waker.endTurn(integrator)
-	h.svc.wakeEnhanced(integrator)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded}) + protocol.CoordReportReminder
-	if got := waker.next(t); got != want {
-		t.Fatalf("mission wake prompt %q, want %q", got, want)
-	}
-	h.svc.wakeEnhanced(integrator)
-	if n := waker.count(); n != 1 {
-		t.Fatalf("a refused mission update was retried: %d wakes", n)
-	}
-
-	waker.mu.Lock()
-	waker.refuse = false
-	waker.mu.Unlock()
-	if _, err := h.svc.Send(ctx, h.run(0), sendParams(integrator, "status")); err != nil {
-		t.Fatal(err)
-	}
-	if got, mail := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != mail {
-		t.Fatalf("mail wake prompt %q, want %q", got, mail)
-	}
-
-	h.svc.EnhancedSessionOpened(ctx, integrator)
-	waker.endTurn(integrator)
-	h.svc.wakeEnhanced(integrator)
-	if got := waker.next(t); !strings.Contains(got, protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded})) {
-		t.Fatalf("the next session's wake prompt %q lacks the refused mission update", got)
-	}
-}
-
-func TestEnhancedWakeAnnouncesAnAskAndAnswerWithinOneTurn(t *testing.T) {
-	h, waker, stub, integrator := newMissionWakeHarness(t)
-	h.svc.EnhancedSessionOpened(context.Background(), integrator)
-
-	stub.change(domain.MissionQuestionAsked, true)
-	h.publishMissionChanged(t)
-	stub.change(domain.MissionQuestionAnswered, false)
-	h.publishMissionChanged(t)
-	waker.endTurn(integrator)
-	h.svc.WakeIdle(integrator)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionQuestionAnswered}) + protocol.CoordReportReminder
-	if got := waker.next(t); got != want {
-		t.Fatalf("mission wake prompt %q, want %q", got, want)
-	}
-	if !strings.HasPrefix(want, "Mission update (question answered): ") {
-		t.Fatalf("prompt %q does not name the change", want)
-	}
-}
-
-func TestEnhancedWakeSkipsTheIntegratorsOwnChanges(t *testing.T) {
-	h, waker, stub, integrator := newMissionWakeHarness(t)
-	h.svc.EnhancedSessionOpened(context.Background(), integrator)
-
-	stub.change(domain.MissionTaskProposed, true)
-	stub.change(domain.MissionPhaseChanged, true)
-	waker.endTurn(integrator)
-	h.svc.wakeEnhanced(integrator)
-	if n := waker.count(); n != 0 {
-		t.Fatalf("the integrator's own changes woke it %d times", n)
-	}
-
-	stub.change(domain.MissionWorkerEnded, false)
-	stub.change(domain.MissionTaskProposed, false)
-	h.svc.wakeEnhanced(integrator)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded, domain.MissionTaskProposed}) + protocol.CoordReportReminder
-	if got := waker.next(t); got != want {
-		t.Fatalf("mission wake prompt %q, want %q", got, want)
 	}
 }

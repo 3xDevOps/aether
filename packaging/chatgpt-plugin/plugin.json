@@ -17,19 +17,19 @@
       "interface": {
         "displayName": "Aether Coding Agents",
         "shortDescription": "Run and steer coding agents",
-        "longDescription": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Aether server you signed in to through the Aether edge.\n\nAsk what needs you, what your agents did today, or what a run changed, and read a run's conversation, pull request checks and review comments. With the write scope, launch a run or a swarm of agents on a task, message a run, answer an agent's question, and pause, resume or accept a run. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a run, and cancel a swarm.\n\nWho it is for: developers whose team already runs an Aether server. It needs an Aether account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before tools that are not read-only unless you chose to always allow them. No plugin tool installs Aether, changes server settings, merges pull requests or deletes repositories; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
+        "longDescription": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Aether server you signed in to through the Aether edge.\n\nAsk what needs you, what your agents did today, or what a run changed, and read a run's conversation, pull request checks and review comments. With the write scope, launch a run on a task, message a run, answer an agent's question, and pause, resume or accept a run. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a run.\n\nWho it is for: developers whose team already runs an Aether server. It needs an Aether account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before tools that are not read-only unless you chose to always allow them. No plugin tool installs Aether, changes server settings, merges pull requests or deletes repositories; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
         "developerName": "3xDevOps",
         "category": "Developer Tools",
         "capabilities": [
-          "List workspaces, installed agents, runs and swarms on your Aether server",
+          "List workspaces, installed agents, runs on your Aether server",
           "Show what needs you: agent questions, permission requests and runs awaiting review",
           "Summarize what your agents did today, yesterday or this week",
           "Read a run's conversation or terminal, its reports, changed files and diff",
           "Show a run's pull request checks, reviews and comments",
-          "Search runs and swarms, and the team memory of a workspace",
-          "Launch a run or a swarm of agents on a task",
+          "Search runs and the team memory of a workspace",
+          "Launch a run on a task",
           "Message a run, answer an agent's question, and pause or resume a run",
-          "Allow or deny a permission request once, stop or close a run, and cancel a swarm"
+          "Allow or deny a permission request once, stop or close a run"
         ],
         "websiteURL": "https://onaether.dev",
         "supportURL": "https://github.com/3xDevOps/aether/issues",

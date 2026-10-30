@@ -42,7 +42,7 @@ func (s *Service) handleChild(ctx context.Context, run domain.RunID, method stri
 		defer lock.Unlock()
 	}
 	result, err := s.cfg.Children.HandleAgent(ctx, run, method, params)
-	return result, missionRPCError(method, err)
+	return result, rpcError(method, err)
 }
 
 // Notify appends a server-written message from one run to another, which

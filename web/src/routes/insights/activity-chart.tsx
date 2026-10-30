@@ -1,8 +1,7 @@
 import { useState, type CSSProperties } from 'react'
-import { Button } from '@/components/ui/button'
 import type { InsightsResult } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { chartDays, chartMax, dayLabel, dayWords, memberTags, outcomeKeys, plural, type Day, type OutcomeKey, type Unit } from '@/routes/insights/model'
+import { chartDays, chartMax, dayLabel, dayWords, memberTags, outcomeKeys, plural, type Day, type OutcomeKey } from '@/routes/insights/model'
 
 const stripes = 'repeating-linear-gradient(45deg, color-mix(in srgb, var(--canvas) 55%, transparent) 0 2px, transparent 2px 5px)'
 const dots = 'radial-gradient(color-mix(in srgb, var(--canvas) 70%, transparent) 1px, transparent 1.6px)'
@@ -13,11 +12,6 @@ const outcomes: Record<OutcomeKey, { label: string; letter: string; fill: string
   failed: { label: 'Failed', letter: 'F', fill: 'bg-state-failed', texture: { backgroundImage: stripes } },
   abandoned: { label: 'Abandoned', letter: 'A', fill: 'bg-state-paused', texture: { backgroundImage: dots, backgroundSize: '4px 4px' } },
 }
-
-const units: { value: Unit; label: string }[] = [
-  { value: 'runs', label: 'Runs' },
-  { value: 'swarms', label: 'Swarms' },
-]
 
 export function Swatch({ fill }: { fill: string }) {
   return (
@@ -100,11 +94,10 @@ function Tooltip({ day, index, count, tags, team }: { day: Day; index: number; c
 }
 
 export function ActivityChart({ result, team }: { result: InsightsResult; team: boolean }) {
-  const [unit, setUnit] = useState<Unit>('runs')
   const [hovered, setHovered] = useState<number | null>(null)
   const [focused, setFocused] = useState<number | null>(null)
   const active = hovered ?? focused
-  const days = chartDays(result, unit)
+  const days = chartDays(result)
   const max = chartMax(days)
   const total = days.reduce((sum, d) => sum + outcomeKeys.reduce((n, key) => n + d.counts[key], 0), 0)
   const members = result.outcomes.members
@@ -113,14 +106,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-ui-sm text-muted">{plural(total, unit === 'runs' ? 'run' : 'swarm')} ended in the last 7 days</p>
-        <div role="group" aria-label="Chart shows" className="flex items-center gap-0.5">
-          {units.map((u) => (
-            <Button key={u.value} size="sm" variant={unit === u.value ? 'secondary' : 'ghost'} aria-pressed={unit === u.value} onClick={() => setUnit(u.value)}>
-              {u.label}
-            </Button>
-          ))}
-        </div>
+        <p className="text-ui-sm text-muted">{plural(total, 'run')} ended in the last 7 days</p>
       </div>
       <div className="flex min-w-0 gap-2">
         <div aria-hidden className="flex h-40 w-6 shrink-0 flex-col justify-between pt-5 text-right text-ui-xs tabular-nums text-muted">
@@ -131,7 +117,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
           {active !== null && <Tooltip day={days[active]} index={active} count={days.length} tags={tags} team={team} />}
           <div
             role="group"
-            aria-label={`${unit === 'runs' ? 'Runs' : 'Swarms'} per day, ${team ? 'everyone' : 'yours'}, by how they ended`}
+            aria-label={`Runs per day, ${team ? 'everyone' : 'yours'}, by how they ended`}
             className="flex h-40 items-stretch gap-1 border-b border-seam pt-5 sm:gap-2"
           >
             {days.map((day, i) => (
@@ -139,7 +125,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
                 key={day.start}
                 role="img"
                 tabIndex={0}
-                aria-label={dayWords(day, unit)}
+                aria-label={dayWords(day)}
                 onMouseEnter={() => setHovered(i)}
                 onFocus={() => setFocused(i)}
                 onBlur={() => setFocused(null)}
@@ -163,7 +149,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
             ))}
           </div>
           {total === 0 && (
-            <p className="absolute inset-x-0 top-1/3 text-center text-ui text-muted">No {unit} ended in the last 7 days.</p>
+            <p className="absolute inset-x-0 top-1/3 text-center text-ui text-muted">No runs ended in the last 7 days.</p>
           )}
         </div>
       </div>

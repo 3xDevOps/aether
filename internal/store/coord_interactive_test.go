@@ -14,20 +14,14 @@ func TestCoordReportSupersessionFollowsRunLifecycle(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mode   domain.LaunchMode
-		role   string
 		status domain.RunStatus
 		live   bool
 	}{
-		{"standard", domain.LaunchTUI, "", domain.RunRunning, true},
-		{"enhanced", domain.LaunchACP, "", domain.RunNeedsAttention, true},
-		{"standard integrator", domain.LaunchTUI, "integrator", domain.RunRunning, true},
-		{"enhanced integrator", domain.LaunchACP, "integrator", domain.RunNeedsAttention, true},
-		{"background", domain.LaunchHeadless, "", domain.RunRunning, false},
-		{"background integrator", domain.LaunchHeadless, "integrator", domain.RunRunning, false},
-		{"standard worker", domain.LaunchTUI, "worker", domain.RunRunning, false},
-		{"enhanced worker", domain.LaunchACP, "worker", domain.RunRunning, false},
-		{"closed standard", domain.LaunchTUI, "", domain.RunAbandoned, false},
-		{"closed enhanced", domain.LaunchACP, "", domain.RunCompleted, false},
+		{"standard", domain.LaunchTUI, domain.RunRunning, true},
+		{"enhanced", domain.LaunchACP, domain.RunNeedsAttention, true},
+		{"background", domain.LaunchHeadless, domain.RunRunning, false},
+		{"closed standard", domain.LaunchTUI, domain.RunAbandoned, false},
+		{"closed enhanced", domain.LaunchACP, domain.RunCompleted, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -38,21 +32,7 @@ func TestCoordReportSupersessionFollowsRunLifecycle(t *testing.T) {
 				WorkspaceID: workspace.ID, MemberID: member.ID, Task: "report tasks",
 				Harness: "claude", Mode: tc.mode, Status: tc.status,
 			}
-			if tc.role != "" {
-				mission := mustCreateMission(t, db, workspace.ID, member.ID)
-				run.ID = mission.CurrentIntegratorRunID
-				if tc.role == "worker" {
-					task := mustCreateMissionTask(t, db, mission.ID, "assigned task")
-					attempt, _, err := reserveMissionAttempt(t, db, mission, task, "worker")
-					if err != nil {
-						t.Fatalf("reserve worker: %v", err)
-					}
-					run.ID = attempt.RunID
-				}
-				if err := db.CreateRunWithID(ctx, run); err != nil {
-					t.Fatalf("create assigned run: %v", err)
-				}
-			} else if err := db.CreateRun(ctx, run); err != nil {
+			if err := db.CreateRun(ctx, run); err != nil {
 				t.Fatalf("create run: %v", err)
 			}
 			report := func(outcome CoordOutcome, key string) *CoordReport {
