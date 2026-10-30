@@ -41,14 +41,15 @@ func heldByTasks(report agentstatus.Report) bool {
 }
 
 func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
-	// A swarm worker's ended turn hands its last message to its integrator.
+	// A swarm worker's or child run's ended turn hands its last message to
+	// its integrator or parent.
 	forward, message := false, ""
 	switch acp.StopReason(st.Reason) {
 	case acp.StopReasonEndTurn, acp.StopReasonMaxTokens, acp.StopReasonMaxTurnRequests, acp.StopReasonRefusal, "error":
 		d.s.mu.Lock()
 		assigned := entry.missionAssigned
 		d.s.mu.Unlock()
-		if sess := d.session(entry.runID); assigned && sess != nil {
+		if sess := d.session(entry.runID); sess != nil && (assigned || d.s.hasParent(entry.runID)) {
 			forward, message = true, acphost.LastMessage(sess.Log())
 		}
 	}

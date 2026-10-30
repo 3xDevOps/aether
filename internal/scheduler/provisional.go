@@ -27,13 +27,8 @@ func (s *Scheduler) TurnEnded(run domain.RunID, message string) {
 	}
 	assigned, started := entry.missionAssigned, entry.turnStartedAt
 	s.mu.Unlock()
-	if !assigned {
-		// A child run's parent hears from it as an integrator hears from a
-		// worker.
-		r, err := s.cfg.Store.GetRun(s.superCtx, run)
-		if err != nil || r.ParentRunID == "" {
-			return
-		}
+	if !assigned && !s.hasParent(run) {
+		return
 	}
 	time.AfterFunc(provisionalGrace, func() {
 		s.mu.Lock()
@@ -49,4 +44,11 @@ func (s *Scheduler) TurnEnded(run domain.RunID, message string) {
 			slog.Warn("scheduler: forward the worker's last message to its integrator", "run", run, "error", err)
 		}
 	})
+}
+
+// hasParent reports whether run is a child run, whose parent hears from it as
+// an integrator hears from a worker.
+func (s *Scheduler) hasParent(run domain.RunID) bool {
+	r, err := s.cfg.Store.GetRun(s.superCtx, run)
+	return err == nil && r.ParentRunID != ""
 }

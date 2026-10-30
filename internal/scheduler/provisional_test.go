@@ -70,3 +70,31 @@ func TestEnhancedWorkerWokenWithinTheGraceForwardsOnlyItsLastTurn(t *testing.T) 
 		t.Fatalf("provisional report for the turn started %v, want only the last turn's (%v)", calls[0].since, last)
 	}
 }
+
+func TestEnhancedChildRunForwardsItsLastMessageToItsParent(t *testing.T) {
+	shortProvisionalGrace(t)
+	e, _ := newACPEnv(t)
+	c, _ := withCoordination(t, e)
+	parent := e.launchACP(t, "parent")
+	reserved, _, err := e.db.ReserveChild(t.Context(), &domain.ChildReservation{
+		ParentRunID: parent.ID, RootRunID: parent.ID, TreeKey: string(parent.ID), WorkspaceID: e.ws.ID,
+		OwnerID: e.member.ID, AccountID: e.member.ID, Harness: "fake", Mode: domain.LaunchACP,
+		Purpose: "say pong", Task: "say pong", Depth: 1, IdempotencyKey: "k", RequestHash: "h",
+	}, domain.ChildLimits{MaxLive: 8, MaxDepth: 3, MaxTotal: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "fake", domain.LaunchACP,
+		domain.LaunchOptions{ReservedRunID: reserved.RunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the child's last message", func() bool {
+		for _, call := range c.provisionalReports() {
+			if call.run == child.ID && strings.Contains(call.message, "pong") {
+				return true
+			}
+		}
+		return false
+	})
+}
