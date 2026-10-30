@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -54,12 +55,20 @@ type fakeGitHub struct {
 	t      *testing.T
 	server *httptest.Server
 
-	mu          sync.Mutex
-	state       string
-	mergedAt    string
-	head        string
-	checks      map[string][]fakeCheck
-	reviews     []fakeReview
+	mu       sync.Mutex
+	state    string
+	mergedAt string
+	closedAt string
+	head     string
+	checks   map[string][]fakeCheck
+	reviews  []fakeReview
+	required []string
+	suites   []map[string]any
+	gone     bool
+	// refuse answers paths with these prefixes with the status, and with
+	// X-GitHub-SSO when sso is set.
+	refuse      map[string]int
+	sso         bool
 	limitUntil  time.Time
 	requests    []string
 	conditional int
@@ -102,17 +111,32 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
 		return
 	}
+	for prefix, status := range f.refuse {
+		if strings.HasPrefix(path, prefix) {
+			if f.sso {
+				w.Header().Set("X-GitHub-SSO", "required; url=https://github.com/orgs/acme/sso?authorization_request=test")
+			}
+			http.Error(w, `{"message":"Resource not accessible by personal access token"}`, status)
+			return
+		}
+	}
 	var body any
 	switch {
+	case f.gone && path != "/user":
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		return
 	case path == "/user":
 		body = map[string]any{"id": 42, "login": "octocat"}
 	case path == "/repos/acme/app/pulls/7":
-		var merged any
+		var merged, closed any
 		if f.mergedAt != "" {
 			merged = f.mergedAt
 		}
+		if f.closedAt != "" {
+			closed = f.closedAt
+		}
 		body = map[string]any{"number": 7, "title": "Fix login", "html_url": "https://github.com/acme/app/pull/7",
-			"state": f.state, "merged_at": merged, "head": map[string]string{"sha": f.head}, "base": map[string]string{"ref": "main"}}
+			"state": f.state, "merged_at": merged, "closed_at": closed, "head": map[string]string{"sha": f.head}, "base": map[string]string{"ref": "main"}}
 	case strings.HasPrefix(path, "/repos/acme/app/commits/"+f.head+"/check-runs?"):
 		runs := []map[string]any{}
 		for _, c := range f.checks[f.head] {
@@ -129,9 +153,18 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		body = map[string]any{"total_count": len(runs), "check_runs": runs}
 	case strings.HasPrefix(path, "/repos/acme/app/commits/"+f.head+"/check-suites?"):
-		body = map[string]any{"total_count": 0, "check_suites": []any{}}
+		body = map[string]any{"total_count": len(f.suites), "check_suites": append([]map[string]any{}, f.suites...)}
 	case strings.HasPrefix(path, "/repos/acme/app/commits/"+f.head+"/status?"):
 		body = map[string]any{"state": "success", "statuses": []any{}}
+	case path == "/repos/acme/app/branches/main":
+		checks := []map[string]any{}
+		for _, name := range f.required {
+			checks = append(checks, map[string]any{"context": name, "app_id": nil})
+		}
+		body = map[string]any{"name": "main", "protected": len(checks) > 0, "protection": map[string]any{
+			"enabled": len(checks) > 0, "required_status_checks": map[string]any{"enforcement_level": "non_admins", "checks": checks}}}
+	case strings.HasPrefix(path, "/repos/acme/app/rules/branches/main?"):
+		body = []any{}
 	case strings.HasPrefix(path, "/repos/acme/app/pulls/7/reviews?"):
 		reviews := []map[string]any{}
 		for _, rv := range f.reviews {
@@ -161,6 +194,19 @@ func (f *fakeGitHub) set(change func(f *fakeGitHub)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	change(f)
+}
+
+// asked counts requests whose path starts with prefix.
+func (f *fakeGitHub) asked(prefix string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, r := range f.requests {
+		if strings.HasPrefix(r, prefix) {
+			n++
+		}
+	}
+	return n
 }
 
 // reads counts requests for the pull request itself, one per snapshot,
@@ -233,15 +279,33 @@ func (p *prHarness) login(m *domain.Member) {
 }
 
 // poll moves past the longest poll interval, so the next pass reads
-// GitHub again, and waits for it.
+// GitHub again, and waits for it. An evaluation that began before the move
+// may still commit a check stamped before it, scheduling its next check
+// from after the move; the clock then moves to that check, so only a check
+// from after the move counts and no extra one is asked for.
 func (p *prHarness) poll(id string) {
 	p.t.Helper()
-	before := p.watchState(id).LastCheckAt
+	moved := p.clock.now().Add(PRPollIdle + PRPollIdle/5)
 	p.clock.advance(PRPollIdle + PRPollIdle/5)
-	p.eventually("a poll", func() bool {
-		after := p.watchState(id).LastCheckAt
-		return after != nil && (before == nil || after.After(*before))
-	})
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		w := p.watchState(id)
+		if w.LastCheckAt != nil && !w.LastCheckAt.Before(moved) {
+			break
+		}
+		now := p.clock.now()
+		if w.NextCheckAt != nil && w.NextCheckAt.After(now) {
+			p.clock.advance(w.NextCheckAt.Sub(now) + time.Second)
+		}
+		if time.Now().After(deadline) {
+			p.gh.mu.Lock()
+			asked := slices.Clone(p.gh.requests[max(0, len(p.gh.requests)-10):])
+			p.gh.mu.Unlock()
+			p.t.Fatalf("timed out waiting for a poll after %s: now %s, state %s %q, failures %d, last_check_at %v, next_check_at %v; last requests %q",
+				moved.Format(time.RFC3339Nano), p.clock.now().Format(time.RFC3339Nano), w.State, w.Error, w.Failures, w.LastCheckAt, w.NextCheckAt, asked)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	p.settle()
 }
 
@@ -251,6 +315,7 @@ func (p *prHarness) watchOn(member *domain.Member, target protocol.WatchTarget, 
 	if err != nil {
 		p.t.Fatalf("Create: %v", err)
 	}
+	p.settle()
 	return res
 }
 
@@ -431,11 +496,11 @@ func TestPRActionsRunsUnreadableCountsCancelledCheck(t *testing.T) {
 	}
 	var observed protocol.WatchObserved
 	_ = json.Unmarshal(got.Observed, &observed)
-	if !strings.Contains(observed.Summary, "can't read Actions runs, so a cancelled check counts as failed") || !strings.Contains(observed.Summary, "HTTP 404") {
+	if !strings.Contains(observed.Summary, "can't read Actions runs, so a cancelled check still counts") || !strings.Contains(observed.Summary, "HTTP 404") {
 		t.Fatalf("summary = %q, want it to say the cancelled check counts and why", observed.Summary)
 	}
-	if observed.Checks == nil || observed.Checks.Failed != 1 || observed.Checks.Passed != 1 {
-		t.Fatalf("checks = %+v, want the cancelled run counted as failed", observed.Checks)
+	if observed.Checks == nil || observed.Checks.Cancelled != 1 || observed.Checks.Failed != 0 || observed.Checks.Passed != 1 {
+		t.Fatalf("checks = %+v, want the cancelled run counted", observed.Checks)
 	}
 }
 
@@ -511,7 +576,8 @@ func TestPRClosedWithoutMergingEndsTheWatch(t *testing.T) {
 	p := newPRHarness(t)
 	w := p.watchOn(p.ada, prTarget7(), protocol.WatchMerged, protocol.WatchClosed).Watch
 	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
-	p.gh.set(func(f *fakeGitHub) { f.state = "closed" })
+	closed := p.stamp()
+	p.gh.set(func(f *fakeGitHub) { f.state, f.closedAt = "closed", closed })
 	p.poll(w.ID)
 	if got := bodies(p.notices(w.ID)); !slices.Equal(got, []string{"closed: PR #7 closed without merging on GitHub"}) {
 		t.Fatalf("notices = %q", got)
@@ -543,5 +609,370 @@ func TestRunPRUnreadableDoesNotHideAnotherPRsMerge(t *testing.T) {
 	}
 	if got := p.watchState(w.ID); got.State != protocol.WatchError || !strings.Contains(got.Error, "acme/gone#1 is not reachable") {
 		t.Fatalf("state = %s %q, want the unreadable pull request's error", got.State, got.Error)
+	}
+}
+
+func TestPRCancelledChecksHaveTheirOwnNotice(t *testing.T) {
+	p := newPRHarness(t)
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	done := p.stamp()
+	p.gh.set(func(f *fakeGitHub) {
+		f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "build", Status: "completed", Conclusion: "success", Completed: done},
+			{ID: 2, Name: "deploy", Status: "completed", Conclusion: "cancelled", Completed: done}}
+	})
+	p.poll(w.ID)
+	if got := bodies(p.notices(w.ID)); !slices.Equal(got, []string{"ci: 1 check cancelled on #7: deploy"}) {
+		t.Fatalf("notices = %q", got)
+	}
+	var observed protocol.WatchObserved
+	_ = json.Unmarshal(p.watchState(w.ID).Observed, &observed)
+	if c := observed.Checks; c == nil || c.Cancelled != 1 || c.Failed != 0 || c.Passed != 1 || c.RequiredOnly {
+		t.Fatalf("checks = %+v", c)
+	}
+}
+
+func TestPRWithoutChecksSaysSoAfterTenMinutes(t *testing.T) {
+	p := newPRHarness(t)
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	var observed protocol.WatchObserved
+	_ = json.Unmarshal(p.watchState(w.ID).Observed, &observed)
+	if !strings.Contains(observed.Summary, "no checks reported on the head commit") || observed.Checks == nil || !reflect.DeepEqual(*observed.Checks, protocol.WatchChecks{}) {
+		t.Fatalf("observed = %+v", observed)
+	}
+	p.poll(w.ID)
+	if got := p.notices(w.ID); len(got) != 0 {
+		t.Fatalf("notices before ten minutes = %q", bodies(got))
+	}
+	p.poll(w.ID)
+	p.poll(w.ID)
+	if got := bodies(p.notices(w.ID)); !slices.Equal(got, []string{"ci: No checks reported on #7 in 10 minutes"}) {
+		t.Fatalf("notices = %q", got)
+	}
+}
+
+func TestPRCountsOnlyRequiredChecks(t *testing.T) {
+	p := newPRHarness(t)
+	done := p.stamp()
+	p.gh.set(func(f *fakeGitHub) {
+		f.required = []string{"build", "test"}
+		f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "build", Status: "completed", Conclusion: "success", Completed: done},
+			{ID: 2, Name: "lint", Status: "completed", Conclusion: "failure", Completed: done}}
+	})
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	var observed protocol.WatchObserved
+	_ = json.Unmarshal(p.watchState(w.ID).Observed, &observed)
+	if c := observed.Checks; c == nil || !c.RequiredOnly || c.Passed != 1 || c.Failed != 1 || c.Required == nil ||
+		*c.Required != (protocol.WatchCheckCounts{Passed: 1}) || !slices.Equal(c.Missing, []string{"test"}) ||
+		!strings.Contains(observed.Summary, "waiting for required test to be reported") {
+		t.Fatalf("observed = %+v %+v", observed, c)
+	}
+	p.gh.set(func(f *fakeGitHub) {
+		f.checks[shaOne] = append(f.checks[shaOne], fakeCheck{ID: 3, Name: "test", Status: "completed", Conclusion: "success", Completed: p.stamp()})
+	})
+	p.poll(w.ID)
+	if got := bodies(p.notices(w.ID)); !slices.Equal(got, []string{"ci: Required checks passed on #7 (lint, non-required, failed)"}) {
+		t.Fatalf("notices with only an unrequired check failing = %q", got)
+	}
+}
+
+func TestPRLostAccessStopsTheWatch(t *testing.T) {
+	p := newPRHarness(t)
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(w.ID)
+	if got := p.watchState(w.ID); got.State != protocol.WatchError || got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
+		t.Fatalf("after one 404: state = %s %q, next_check_at = %v; want a retry", got.State, got.Error, got.NextCheckAt)
+	}
+	p.clock.advance(maxBackoff)
+	p.eventually("the second read", func() bool { return p.watchState(w.ID).NextCheckAt == nil })
+	got := p.watchState(w.ID)
+	if got.State != protocol.WatchError || got.NextCheckAt != nil || !strings.Contains(got.Error, "acme/app#7 is not reachable with your GitHub login") ||
+		!strings.Contains(got.Error, "GitHub answers 404, so the pull request or repository is gone or your login lost access to it") ||
+		!strings.Contains(got.Error, "HTTP 404") || !strings.Contains(got.Error, "aether github connect") {
+		t.Fatalf("state = %s %q, next_check_at = %v; want a final error with the fix", got.State, got.Error, got.NextCheckAt)
+	}
+	_, before, _ := p.gh.reads()
+	p.clock.advance(time.Hour)
+	p.settle()
+	if _, after, _ := p.gh.reads(); after != before {
+		t.Fatalf("%d requests after access was lost", after-before)
+	}
+}
+
+func TestPROne404ThenAnAnswerKeepsWatching(t *testing.T) {
+	p := newPRHarness(t)
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(w.ID)
+	p.gh.set(func(f *fakeGitHub) { f.gone = false })
+	p.clock.advance(maxBackoff)
+	p.eventually("recovery", func() bool { return p.watchState(w.ID).State == protocol.WatchActive })
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(w.ID)
+	if got := p.watchState(w.ID); got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
+		t.Fatalf("a 404 after an answer = %s %q, want it counted from one again", got.State, got.Error)
+	}
+}
+
+func TestPROne404ReadByTwoWatchesStopsNeither(t *testing.T) {
+	p := newPRHarness(t)
+	ci := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	review := p.watchOn(p.ada, prTarget7(), protocol.WatchReview).Watch
+	p.eventually("the first reads", func() bool {
+		return p.watchState(ci.ID).LastCheckAt != nil && p.watchState(review.ID).LastCheckAt != nil
+	})
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(ci.ID)
+	p.eventually("the second watch's poll", func() bool { return p.watchState(review.ID).State == protocol.WatchError })
+	for _, id := range []string{ci.ID, review.ID} {
+		if got := p.watchState(id); got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
+			t.Fatalf("watch %s after one 404 = %s %q, want a retry", id, got.State, got.Error)
+		}
+	}
+}
+
+func TestPRConfirmedRefusalStopsEveryWatchOnIt(t *testing.T) {
+	p := newPRHarness(t)
+	ci := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	review := p.watchOn(p.ada, prTarget7(), protocol.WatchReview).Watch
+	p.eventually("the first reads", func() bool {
+		return p.watchState(ci.ID).LastCheckAt != nil && p.watchState(review.ID).LastCheckAt != nil
+	})
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(ci.ID)
+	p.eventually("the second watch's poll", func() bool { return p.watchState(review.ID).State == protocol.WatchError })
+	p.clock.advance(maxBackoff)
+	p.eventually("both watches stopped", func() bool {
+		return p.watchState(ci.ID).NextCheckAt == nil && p.watchState(review.ID).NextCheckAt == nil
+	})
+}
+
+func TestPRSSORefusalBreaksTheRefusalCount(t *testing.T) {
+	p := newPRHarness(t)
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(w.ID)
+	p.gh.set(func(f *fakeGitHub) {
+		f.gone, f.refuse, f.sso = false, map[string]int{"/repos/acme/app/pulls/7": http.StatusForbidden}, true
+	})
+	p.poll(w.ID)
+	if got := p.watchState(w.ID); !strings.Contains(got.Error, "single sign-on") {
+		t.Fatalf("after an SSO refusal = %s %q, want the SSO error", got.State, got.Error)
+	}
+	p.gh.set(func(f *fakeGitHub) { f.gone, f.refuse, f.sso = true, nil, false })
+	p.poll(w.ID)
+	if got := p.watchState(w.ID); got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
+		t.Fatalf("a 404 after an SSO refusal = %s %q, next_check_at = %v; want it counted from one again", got.State, got.Error, got.NextCheckAt)
+	}
+}
+
+func TestPRMovedRepositoryStopsTheWatchAtOnce(t *testing.T) {
+	p := newPRHarness(t)
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	p.gh.set(func(f *fakeGitHub) { f.refuse = map[string]int{"/repos/acme/app/pulls/7": http.StatusMovedPermanently} })
+	p.poll(w.ID)
+	if got := p.watchState(w.ID); got.State != protocol.WatchError || got.NextCheckAt != nil || !strings.Contains(got.Error, "GitHub answers 301") {
+		t.Fatalf("state = %s %q, next_check_at = %v; want a final error", got.State, got.Error, got.NextCheckAt)
+	}
+}
+
+func TestPRRefusedChecksKeepRetryingWithGitHubsAnswer(t *testing.T) {
+	for _, sso := range []bool{false, true} {
+		p := newPRHarness(t)
+		w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+		p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+		p.gh.set(func(f *fakeGitHub) {
+			f.refuse, f.sso = map[string]int{"/repos/acme/app/commits/": http.StatusForbidden}, sso
+		})
+		for range 3 {
+			p.poll(w.ID)
+		}
+		got := p.watchState(w.ID)
+		want := "a fine-grained token needs Checks, Commit statuses and Pull requests read"
+		if sso {
+			want = "needs SAML single sign-on authorization"
+		}
+		if got.State != protocol.WatchError || got.NextCheckAt == nil || !strings.Contains(got.Error, want) ||
+			!strings.Contains(got.Error, "HTTP 403") || strings.Contains(got.Error, "not reachable") {
+			t.Fatalf("sso %v: state = %s %q, next_check_at = %v; want a retried error with GitHub's answer", sso, got.State, got.Error, got.NextCheckAt)
+		}
+		p.gh.set(func(f *fakeGitHub) { f.refuse = nil })
+		p.clock.advance(maxBackoff)
+		p.eventually("recovery", func() bool { return p.watchState(w.ID).State == protocol.WatchActive })
+	}
+}
+
+func TestPRQueuedSuiteWithoutRunsDoesNotHideNoChecks(t *testing.T) {
+	p := newPRHarness(t)
+	p.gh.set(func(f *fakeGitHub) {
+		f.suites = []map[string]any{{"id": 9, "status": "queued", "conclusion": nil, "latest_check_runs_count": 0,
+			"app": map[string]string{"name": "GitHub Actions", "slug": "github-actions"}}}
+	})
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	for range 3 {
+		p.poll(w.ID)
+	}
+	if got := bodies(p.notices(w.ID)); !slices.Equal(got, []string{"ci: No checks reported on #7 in 10 minutes"}) {
+		t.Fatalf("notices = %q", got)
+	}
+	var observed protocol.WatchObserved
+	_ = json.Unmarshal(p.watchState(w.ID).Observed, &observed)
+	if observed.Checks == nil || observed.Checks.Pending != 1 {
+		t.Fatalf("checks before an hour = %+v, want the suite pending", observed.Checks)
+	}
+	p.clock.advance(time.Hour)
+	p.poll(w.ID)
+	_ = json.Unmarshal(p.watchState(w.ID).Observed, &observed)
+	if observed.Checks.Pending != 0 || len(p.notices(w.ID)) != 1 {
+		t.Fatalf("after an hour: checks = %+v, notices = %q", observed.Checks, bodies(p.notices(w.ID)))
+	}
+}
+
+func TestPRWatchWithoutCIReadsNoRequirements(t *testing.T) {
+	p := newPRHarness(t)
+	p.gh.set(func(f *fakeGitHub) { f.required = []string{"build"} })
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchMerged, protocol.WatchReview).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	p.poll(w.ID)
+	if n := p.gh.asked("/repos/acme/app/branches/") + p.gh.asked("/repos/acme/app/rules/"); n != 0 {
+		t.Fatalf("%d requirement reads for a watch without ci", n)
+	}
+	ci := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the ci watch's read", func() bool { return p.watchState(ci.ID).LastCheckAt != nil })
+	var observed protocol.WatchObserved
+	_ = json.Unmarshal(p.watchState(ci.ID).Observed, &observed)
+	if observed.Checks == nil || !observed.Checks.RequiredOnly || !slices.Equal(observed.Checks.Missing, []string{"build"}) {
+		t.Fatalf("ci watch checks = %+v, want build required", observed.Checks)
+	}
+}
+
+func TestPRClosedBeforeTheWatchIsNotAnnounced(t *testing.T) {
+	p := newPRHarness(t)
+	res := p.watchOn(p.bob, prTarget7(), protocol.WatchClosed)
+	if res.Watch.State != protocol.WatchError {
+		t.Fatalf("state = %s, want error without a login", res.Watch.State)
+	}
+	closed := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	p.gh.set(func(f *fakeGitHub) { f.state, f.closedAt = "closed", closed })
+	p.login(p.bob)
+	p.clock.advance(time.Minute)
+	p.eventually("the read after login", func() bool { return p.watchState(res.Watch.ID).State != protocol.WatchError })
+	if got := p.notices(res.Watch.ID); len(got) != 0 {
+		t.Fatalf("notices = %q, want none for a close before the watch", bodies(got))
+	}
+}
+
+func TestPRRequiredNoticeKeysFollowOnlyRequiredChecks(t *testing.T) {
+	now := time.Now()
+	done := now.Add(-time.Minute)
+	snap := github.Snapshot{Repo: "acme/app", Number: 7, State: "open", HeadSHA: shaOne, HeadSince: now.Add(-20 * time.Minute),
+		Required: []github.RequiredCheck{{Context: "build", Source: "branch"}},
+		CheckRuns: []github.CheckRun{
+			{ID: 1, Name: "build", Status: "completed", Conclusion: "success", CompletedAt: &done},
+			{ID: 2, Name: "lint", Status: "in_progress"},
+		}}
+	since := now.Add(-time.Hour)
+	running := evaluatePR(snap, []string{protocol.WatchCI}, since, now)
+	snap.CheckRuns[1].Status, snap.CheckRuns[1].Conclusion, snap.CheckRuns[1].CompletedAt = "completed", "failure", &done
+	finished := evaluatePR(snap, []string{protocol.WatchCI}, since, now)
+	if len(running.notices) != 1 || len(finished.notices) != 1 || running.notices[0].Key != finished.notices[0].Key {
+		t.Fatalf("an unrequired check finishing changed the required pass: %+v, then %+v", running.notices, finished.notices)
+	}
+	var keys []string
+	for _, other := range []string{"test", "deploy"} {
+		snap.Required = []github.RequiredCheck{{Context: "build", Source: "branch"}, {Context: other, Source: "rules"}}
+		r := evaluatePR(snap, []string{protocol.WatchCI}, since, now)
+		if len(r.notices) != 1 || r.notices[0].Body != "Required check not reported on #7: "+other {
+			t.Fatalf("%s missing: %+v", other, r.notices)
+		}
+		keys = append(keys, r.notices[0].Key)
+	}
+	if keys[0] == keys[1] {
+		t.Fatalf("another missing check kept the key %s", keys[0])
+	}
+}
+
+func TestPRFailureDoesNotHideAMissingRequiredCheck(t *testing.T) {
+	now := time.Now()
+	done := now.Add(-15 * time.Minute)
+	snap := github.Snapshot{Repo: "acme/app", Number: 7, State: "open", HeadSHA: shaOne, HeadSince: now.Add(-20 * time.Minute),
+		Required:  []github.RequiredCheck{{Context: "build", Source: "branch"}, {Context: "test", Source: "branch"}},
+		CheckRuns: []github.CheckRun{{ID: 1, Name: "build", Status: "completed", Conclusion: "failure", CompletedAt: &done}}}
+	var got []string
+	for _, n := range evaluatePR(snap, []string{protocol.WatchCI}, now.Add(-time.Hour), now).notices {
+		got = append(got, n.Body)
+	}
+	if want := []string{"1 required check failed on #7: build. Required check not reported on #7: test"}; !slices.Equal(got, want) {
+		t.Fatalf("notices = %q, want %q", got, want)
+	}
+}
+
+func TestPRNewSuiteHoldsCIPastAnHourOnOneHead(t *testing.T) {
+	p := newPRHarness(t)
+	done := p.stamp()
+	p.gh.set(func(f *fakeGitHub) {
+		f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "build", Status: "completed", Conclusion: "success", Completed: done}}
+	})
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	p.clock.advance(2 * time.Hour)
+	p.gh.set(func(f *fakeGitHub) {
+		f.suites = []map[string]any{{"id": 10, "status": "queued", "conclusion": nil, "latest_check_runs_count": 0, "updated_at": p.stamp(),
+			"app": map[string]string{"name": "GitHub Actions", "slug": "github-actions"}}}
+	})
+	p.poll(w.ID)
+	if got := bodies(p.notices(w.ID)); !slices.Equal(got, []string{"ci: Checks passed on #7"}) {
+		t.Fatalf("notices = %q, want one pass before the new suite reports", got)
+	}
+	var observed protocol.WatchObserved
+	_ = json.Unmarshal(p.watchState(w.ID).Observed, &observed)
+	if observed.Checks == nil || observed.Checks.Pending != 1 {
+		t.Fatalf("checks = %+v, want the new suite pending", observed.Checks)
+	}
+}
+
+func TestPRCIReadAfterAnotherWatchsReadsRequirements(t *testing.T) {
+	p := newPRHarness(t)
+	prs, err := NewPRs(PRConfig{GitHub: github.New(p.homes), Store: p.db, Now: p.clock.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(ci bool) github.Snapshot {
+		t.Helper()
+		snap, _, err := prs.snapshot(p.ctx, p.ada.ID, "acme/app", 7, ci, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return snap
+	}
+	read(true)
+	p.clock.advance(PRPollIdle)
+	p.gh.set(func(f *fakeGitHub) { f.required = []string{"build"} })
+	read(false)
+	if c := read(true).Checks(); !slices.Equal(c.Missing, []string{"build"}) {
+		t.Fatalf("ci read right after a review read: %+v, want build required", c)
+	}
+}
+
+func TestPROne404BeforeAnyReadKeepsWatching(t *testing.T) {
+	p := newPRHarness(t)
+	res := p.watchOn(p.bob, prTarget7(), protocol.WatchCI)
+	if res.Watch.State != protocol.WatchError {
+		t.Fatalf("state = %s, want error without a login", res.Watch.State)
+	}
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.login(p.bob)
+	p.clock.advance(time.Minute)
+	p.eventually("the read after login", func() bool { return strings.Contains(p.watchState(res.Watch.ID).Error, "not reachable") })
+	if got := p.watchState(res.Watch.ID); got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
+		t.Fatalf("first 404 of a watch with no read yet = %s %q, next_check_at = %v; want a retry", got.State, got.Error, got.NextCheckAt)
 	}
 }
