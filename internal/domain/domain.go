@@ -126,6 +126,24 @@ const (
 	ActivityIdle RunActivity = "idle"
 )
 
+// NeedsInputReasonPrefix starts the reason of a run that asked its owner a
+// question.
+const NeedsInputReasonPrefix = "needs input: "
+
+// Quiet reports whether a live run in this activity and reason is doing
+// nothing: it waits for anything, replied with nothing pending, or asked its
+// owner a question. Working, failed, finished, disconnected and every other
+// request for a human are not quiet.
+func (a RunActivity) Quiet(reason string) bool {
+	switch a {
+	case ActivityWaiting, ActivityWaitingAgents, ActivityWaitingCI, ActivityWaitingTools, ActivityAnswered, ActivityIdle:
+		return true
+	case ActivityNeedsYou:
+		return strings.HasPrefix(reason, NeedsInputReasonPrefix)
+	}
+	return false
+}
+
 // RunReview is whether the run's owner has dealt with the success its agent
 // reported: empty when no success awaits them.
 type RunReview string

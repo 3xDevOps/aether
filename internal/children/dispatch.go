@@ -67,7 +67,7 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		s.publish(ctx, c.ParentRunID, "")
 		// A child that never started has no run to send from.
 		_ = s.notify(ctx, c.ParentRunID, c.ParentRunID,
-			fmt.Sprintf("Child run %s (%s) did not start: %s", c.RunID, c.Purpose, reason), "", "child-refused:"+string(c.RunID))
+			fmt.Sprintf("Child run %s (%s) did not start: %s", c.RunID, c.Purpose, reason), "child-refused:"+string(c.RunID))
 	}
 	p, err := s.resolve(ctx, c.ParentRunID)
 	switch {
@@ -245,16 +245,12 @@ func (s *Service) settle(ctx context.Context) error {
 				msg += ": " + child.Reason
 			}
 			if latest, err := s.cfg.Store.LatestReportOfAnyOutcome(ctx, c.RunID); err == nil {
-				summary := latest.Summary
-				if len(summary) > maxNoticeSummary {
-					summary = strings.ToValidUTF8(summary[:maxNoticeSummary], "") + "…"
-				}
-				msg += fmt.Sprintf("\nIts latest report, %s at %s: %s", latest.Outcome, latest.CreatedAt.UTC().Format(time.RFC3339), summary)
+				msg += fmt.Sprintf("\nIts latest report, %s at %s: %s", latest.Outcome, latest.CreatedAt.UTC().Format(time.RFC3339), truncateSummary(latest.Summary))
 			}
 			if child.Branch != "" {
 				msg += "\nIts branch: " + child.Branch
 			}
-			if err := s.notify(ctx, c.RunID, c.ParentRunID, msg, "", "child-ended:"+string(c.RunID)); err != nil {
+			if err := s.notify(ctx, c.RunID, c.ParentRunID, msg, "child-ended:"+string(c.RunID)); err != nil {
 				continue
 			}
 		}
@@ -271,4 +267,53 @@ func finished(r *domain.Run) bool {
 		return true
 	}
 	return false
+}
+
+// idleNoticeAfter is how long a child may sit quiet before its parent is
+// told.
+const idleNoticeAfter = time.Hour
+
+// noticeIdle tells each parent once per quiet spell about an attached child
+// that has waited, answered or asked its owner for over idleNoticeAfter. The
+// notice's key holds the spell's start, so new work starts a new spell. A run
+// a person paused is left alone.
+func (s *Service) noticeIdle(ctx context.Context) error {
+	now := s.cfg.Now()
+	idle, err := s.cfg.Store.IdleChildren(ctx, now.Add(-idleNoticeAfter))
+	if err != nil {
+		return err
+	}
+	for _, c := range idle {
+		if s.cfg.Runs.Paused(c.Child.RunID) {
+			continue
+		}
+		// The body names a growing duration, so a resend under the same key
+		// would be refused as a different message.
+		key := "child-idle:" + string(c.Child.RunID) + ":" + c.Since.UTC().Format(time.RFC3339Nano)
+		if _, err := s.cfg.Store.GetRunMessageByIdempotency(ctx, c.Child.RunID, key); err == nil {
+			continue
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		msg := fmt.Sprintf("Child run %s (%s) has been %s for %s", c.Child.RunID, c.Child.Purpose, c.Run.Activity, now.Sub(c.Since).Round(time.Minute))
+		if c.Run.Reason != "" {
+			msg += ": " + c.Run.Reason
+		}
+		if latest, err := s.cfg.Store.LatestReportOfAnyOutcome(ctx, c.Child.RunID); err == nil {
+			msg += fmt.Sprintf("\nIts latest report, %s at %s: %s", latest.Outcome, latest.CreatedAt.UTC().Format(time.RFC3339), truncateSummary(latest.Summary))
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		msg += "\nCheck what it is doing, then wake it with an instruction: aether-internal send --to " + string(c.Child.RunID) +
+			" --body <text>, or stop it: aether-internal child cancel --run-id " + string(c.Child.RunID)
+		_ = s.notify(ctx, c.Child.RunID, c.Child.ParentRunID, msg, key)
+	}
+	return nil
+}
+
+func truncateSummary(summary string) string {
+	if len(summary) > maxNoticeSummary {
+		return strings.ToValidUTF8(summary[:maxNoticeSummary], "") + "…"
+	}
+	return summary
 }

@@ -206,7 +206,7 @@ func RoleCard(g Guide) string {
 	}
 	if g.Parent != "" {
 		fmt.Fprintf(&b, "Run %s started you as its child run: do the task yourself; child runs go one level deep, so you cannot start child runs. "+
-			"Ask it with `aether-internal ask --to %s` before asking the user; your final report reaches it.\n", g.Parent, g.Parent)
+			"Ask it with `aether-internal ask --to %s` before asking the user; your final report reaches it. If you sit idle or waiting for over an hour, it is told and may wake you or stop you.\n", g.Parent, g.Parent)
 	}
 	if g.Parent == "" && !g.Background {
 		b.WriteString("For a very complex task that splits into parallel parts, `aether-internal child start` dispatches a fresh-context session on any installed agent; `aether-internal skill` says when to use one instead of your own subagents.\n")

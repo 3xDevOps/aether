@@ -31,6 +31,7 @@ type fakeRuns struct {
 	accounts []domain.MemberID
 	killed   []domain.RunID
 	closed   []domain.RunID
+	paused   map[domain.RunID]bool
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
@@ -59,6 +60,8 @@ func (f *fakeRuns) StopForParent(ctx context.Context, run, parent domain.RunID) 
 	_, err := f.db.UpdateRunStatus(ctx, run, domain.RunCompleted, "stopped by parent run "+string(parent), "", nil, &now)
 	return err
 }
+
+func (f *fakeRuns) Paused(run domain.RunID) bool { return f.paused[run] }
 
 func (f *fakeRuns) WakeRefusal(agent string, mode domain.LaunchMode) error {
 	return agentharness.WakeRefusal(agent, mode)
@@ -123,18 +126,38 @@ type mail struct {
 	body     string
 }
 
+// fakeMail dedupes by key, or, with db set, appends to the real mailbox and
+// keeps the errors it returns.
 type fakeMail struct {
 	mu   sync.Mutex
 	sent []mail
 	keys map[string]bool
 	fail bool
+	db   *store.DB
+	errs []error
 }
 
-func (m *fakeMail) Notify(_ context.Context, from, to domain.RunID, body, _, key string) error {
+func (m *fakeMail) Notify(ctx context.Context, from, to domain.RunID, body, _, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.fail {
 		return errors.New("inbox full")
+	}
+	if m.db != nil {
+		target, err := m.db.GetRun(ctx, to)
+		if err != nil {
+			return err
+		}
+		created, err := m.db.AppendRunMessageCreated(ctx, &store.RunMessage{WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to,
+			Kind: store.RunMessageKindMessage, Body: body, IdempotencyKey: key}, protocol.CoordMaxUnread)
+		if err != nil {
+			m.errs = append(m.errs, err)
+			return err
+		}
+		if created {
+			m.sent = append(m.sent, mail{from, to, body})
+		}
+		return nil
 	}
 	if m.keys[key] {
 		return nil
@@ -151,6 +174,7 @@ type harness struct {
 	svc    *Service
 	runs   *fakeRuns
 	mail   *fakeMail
+	now    time.Time
 	agents *fakeAgents
 	ws     *domain.Workspace
 	ada    *domain.Member
@@ -165,7 +189,8 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
+	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db, paused: map[domain.RunID]bool{}}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
+	h.now = time.Now()
 	h.ws = &domain.Workspace{Name: "app"}
 	if err = db.CreateWorkspace(ctx, h.ws); err != nil {
 		t.Fatal(err)
@@ -179,6 +204,7 @@ func newHarness(t *testing.T) *harness {
 			return fallback.ResolveLaunchAccount(ctx, st, actor, account)
 		},
 		AuthorizationMu: &mu,
+		Now:             func() time.Time { return h.now },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -679,5 +705,75 @@ func TestChildChecksOutItsParentsExtraRepositories(t *testing.T) {
 	defer h.runs.mu.Unlock()
 	if len(h.runs.launched) != 1 || !slices.Equal(h.runs.launched[0].ExtraWorkspaces, extra) {
 		t.Fatalf("child launch = %+v, want the parent's extra repositories %v", h.runs.launched, extra)
+	}
+}
+
+func TestParentIsToldOncePerIdleSpell(t *testing.T) {
+	h := newHarness(t)
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	waiter := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "watch ci", Task: "w"})
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "x"})
+	paused := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "y"})
+	h.settle()
+	h.mail.db = h.db
+	park := func(id string, reason string, activity domain.RunActivity) {
+		t.Helper()
+		if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(id), domain.RunNeedsAttention, reason, activity, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idle := func() (n int) {
+		for _, m := range h.mail.sent {
+			if m.from == domain.RunID(waiter.RunID) && strings.Contains(m.body, "has been") {
+				n++
+			}
+		}
+		return n
+	}
+	park(waiter.RunID, "checks pending", domain.ActivityWaitingCI)
+	park(paused.RunID, "checks pending", domain.ActivityWaitingCI)
+	h.runs.paused[domain.RunID(paused.RunID)] = true
+	h.now = h.now.Add(59 * time.Minute)
+	h.settle()
+	if len(h.mail.sent) != 0 {
+		t.Fatalf("notices before an hour = %+v, want none", h.mail.sent)
+	}
+	h.now = h.now.Add(2 * time.Minute)
+	h.settle()
+	h.settle()
+	if idle() != 1 || len(h.mail.sent) != 1 {
+		t.Fatalf("notices = %+v, want one for the waiting child only (not the working or paused one)", h.mail.sent)
+	}
+	body := h.mail.sent[0].body
+	for _, want := range []string{waiter.RunID, "watch ci", "waiting-ci", "checks pending", "aether-internal send --to " + waiter.RunID, "child cancel --run-id " + waiter.RunID} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("notice %q lacks %q", body, want)
+		}
+	}
+	if h.mail.sent[0].to != parent.ID {
+		t.Fatalf("notice went to %s, want the parent", h.mail.sent[0].to)
+	}
+
+	// A reason change and more time inside the spell are the same spell.
+	park(waiter.RunID, "still pending", domain.ActivityWaitingCI)
+	h.now = h.now.Add(5 * time.Minute)
+	h.settle()
+	if idle() != 1 || len(h.mail.errs) != 0 {
+		t.Fatalf("later passes in the spell sent %+v, errors %v; want the one notice", h.mail.sent, h.mail.errs)
+	}
+
+	// Work resets the spell; a second hour of quiet is told again.
+	park(waiter.RunID, "", domain.ActivityWorking)
+	h.settle()
+	park(waiter.RunID, "turn ended without a report", domain.ActivityWaiting)
+	h.now = time.Now().Add(30 * time.Minute)
+	h.settle()
+	if idle() != 1 {
+		t.Fatalf("a fresh spell was told before an hour: %+v", h.mail.sent)
+	}
+	h.now = time.Now().Add(61 * time.Minute)
+	h.settle()
+	if idle() != 2 || len(h.mail.errs) != 0 {
+		t.Fatalf("notices after a second spell = %+v, errors %v; want 2", h.mail.sent, h.mail.errs)
 	}
 }

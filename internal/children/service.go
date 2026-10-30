@@ -27,6 +27,7 @@ type Runs interface {
 	DefaultMode(ctx context.Context, member, account domain.MemberID, harnessName string) (domain.LaunchMode, error)
 	FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error)
 	AgentModels(ctx context.Context, member, account domain.MemberID, name string, refresh bool) (protocol.AgentModelsResult, error)
+	Paused(run domain.RunID) bool
 }
 
 // Git publishes run branches and copies a child's into its parent.
@@ -55,6 +56,7 @@ type Admitter interface {
 type Store interface {
 	store.Store
 	store.ChildStore
+	GetRunMessageByIdempotency(ctx context.Context, from domain.RunID, key string) (*store.RunMessage, error)
 }
 
 type Config struct {
@@ -72,6 +74,9 @@ type Config struct {
 	// hold across it and the launch's durable boundary.
 	Authorize       func(ctx context.Context, st store.Store, actor domain.MemberID, account string) (domain.MemberID, error)
 	AuthorizationMu *sync.Mutex
+	// Now is the clock the idle notice measures a quiet spell against;
+	// time.Now when unset.
+	Now func() time.Time
 	// Interval is how often queued and ended children are reconciled.
 	Interval time.Duration
 	// Recovered closes once the scheduler recovered the runs a restart left,
@@ -95,6 +100,9 @@ type Service struct {
 func New(cfg Config) (*Service, error) {
 	if cfg.Store == nil || cfg.Runs == nil || cfg.Git == nil || cfg.Authorize == nil || cfg.AuthorizationMu == nil {
 		return nil, errors.New("children: store, runs, git and launch authorization are required")
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 3 * time.Second
@@ -224,16 +232,19 @@ func (s *Service) reconcile(ctx context.Context) {
 	if err := s.settle(ctx); err != nil && ctx.Err() == nil {
 		slog.Warn("children: settle failed", "error", err)
 	}
+	if err := s.noticeIdle(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("children: idle notices failed", "error", err)
+	}
 }
 
-func (s *Service) notify(ctx context.Context, from, to domain.RunID, body, correlation, key string) error {
+func (s *Service) notify(ctx context.Context, from, to domain.RunID, body, key string) error {
 	s.mu.Lock()
 	mail := s.mail
 	s.mu.Unlock()
 	if mail == nil {
 		return errors.New("children: the coordination mailbox is not connected")
 	}
-	if err := mail.Notify(ctx, from, to, body, correlation, key); err != nil {
+	if err := mail.Notify(ctx, from, to, body, "", key); err != nil {
 		slog.Warn("children: notify parent", "child", from, "parent", to, "error", err)
 		return err
 	}
