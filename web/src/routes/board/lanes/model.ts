@@ -388,8 +388,8 @@ export function buildLanes(input: LanesInput): LanesModel {
           continue
         }
         const familyKey = `family:${unit.key}`
-        const needs = children.filter((lane) => lane.card.group === 'needs-you')
-        const familyOpen = open.get(familyKey) ?? ((!parent.outcome && children.length <= swarmTasksOpen) || needs.length > 0)
+        const needs = unit.members.filter((lane) => lane.card.group === 'needs-you')
+        const familyOpen = open.get(familyKey) ?? ((!parent.outcome && children.length <= swarmTasksOpen) || needs.some((lane) => lane !== parent))
         lanes.push({
           kind: 'swarm',
           key: familyKey,

@@ -158,6 +158,16 @@ describe('buildLanes', () => {
     expect(folded.filter((l) => l.kind === 'run').map((l) => (l as RunLane).card.run.id)).toEqual(['g1'])
   })
 
+  it('keeps a folded family\'s parent visible while it awaits review', () => {
+    const ctx = ctxOf([
+      run({ id: 'parent', status: 'completed', state: undefined, review: 'ready', created_at: at(5), started_at: at(5), finished_at: at(40) }),
+      run({ id: 'c1', parent_run_id: 'parent', status: 'completed', state: undefined, created_at: at(10), finished_at: at(20) }),
+    ])
+    const { lanes } = buildLanes(input(ctx))
+    expect(lanes.find((l): l is SwarmLane => l.kind === 'swarm')).toMatchObject({ open: false })
+    expect(lanes.filter((l): l is RunLane => l.kind === 'run').map((l) => l.card.run.id)).toEqual(['parent'])
+  })
+
   it('keeps a failure that ended as it started visible on the Finished strip', () => {
     const ctx = ctxOf([
       run({ id: 'done', status: 'merged', state: undefined, created_at: at(10), finished_at: at(40) }),
