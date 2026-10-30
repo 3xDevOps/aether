@@ -17,7 +17,7 @@ func init() {
 			"aether workspace import <path|url> [--name <name>]\n" +
 			"aether workspace delete <name> --yes\n" +
 			"aether workspace list\n" +
-			"aether workspace settings [--workspace <name>] [--message-others everyone|admins-only] [--child-max-live <n>] [--child-max-depth <n>] [--child-max-total <n>]\n" +
+			"aether workspace settings [--workspace <name>] [--message-others everyone|admins-only] [--child-max-live <n>]\n" +
 			"aether workspace origin [--workspace <name>] [<url>|--clear]\n" +
 			"aether workspace env list [--workspace <name>]\n" +
 			"aether workspace env set [--workspace <name>] <NAME>=<value>...\n" +
