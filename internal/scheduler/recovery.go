@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
@@ -27,9 +26,6 @@ const (
 	recoveryPTYRetryInitial   = 10 * time.Millisecond
 	recoveryPTYRetryMax       = 250 * time.Millisecond
 	defaultExitProbeTimeout   = 2 * time.Second
-	// recoveryParallelism bounds how many live runs reattach at once, so one
-	// slow attach does not delay every run behind it.
-	recoveryParallelism = 4
 )
 
 func retainedTransitionError() error {
@@ -603,8 +599,6 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("scheduler: recovery: %w", err)
 	}
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, recoveryParallelism)
 	for _, r := range active {
 		s.mu.Lock()
 		_, alreadySupervised := s.runs[r.ID]
@@ -616,15 +610,9 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 		case domain.RunQueued, domain.RunProvisioning:
 			s.recoverUnstarted(ctx, r)
 		case domain.RunRunning, domain.RunNeedsAttention:
-			slots <- struct{}{}
-			wg.Add(1)
-			go func() {
-				defer func() { <-slots; wg.Done() }()
-				s.recoverSupervised(ctx, r)
-			}()
+			s.recoverSupervised(ctx, r)
 		}
 	}
-	wg.Wait()
 	s.refreshActivities(ctx)
 	s.cleanupTerminalSidecars(ctx)
 	s.cleanupTerminalCreationKeyContainers(ctx)
