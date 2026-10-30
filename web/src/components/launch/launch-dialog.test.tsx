@@ -54,6 +54,17 @@ function setTask(task: string) {
   fireEvent.change(screen.getByLabelText('Task'), { target: { value: task } })
 }
 
+describe('reopening', () => {
+  it('starts a fresh form when New run opens again while the last panel is still leaving', async () => {
+    render(<PaletteDialogs />)
+    fireEvent.change(await screen.findByLabelText('Task'), { target: { value: 'first task' } })
+    act(() => useStore.setState({ paletteDialog: null }))
+    act(() => useStore.setState({ paletteDialog: 'launch' }))
+    expect(((await screen.findAllByLabelText('Task')).at(-1) as HTMLTextAreaElement).value).toBe('')
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  })
+})
+
 describe('child runs switch', () => {
   const childSwitch = () => screen.getByRole('switch', { name: 'Child runs' })
   beforeEach(() => {
