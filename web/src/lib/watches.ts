@@ -22,7 +22,6 @@ export const conditionChoices: Record<WatchTargetKind, ConditionChoice[]> = {
   mission: [
     { value: 'needs_you', label: 'Needs you', description: 'The integrator asks you something, is blocked or stops. Never for each worker.', default: true },
     { value: 'finished', label: 'Finished', description: 'The swarm completes or is cancelled.', default: true },
-    { value: 'delivered', label: 'Delivered', description: 'The integrated result lands on its target branch, or is proposed as a pull request.', default: false },
   ],
   pr: [
     { value: 'ci', label: 'CI finished', description: 'Every check on the newest commit finishes, pass or fail. Again after a rerun.', default: true },
