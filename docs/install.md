@@ -75,8 +75,9 @@ asks `What is this machine?`:
 | `client` | `aether` | `~/.local/bin` | `aether gui build` ([Desktop app](#desktop-app)) |
 | `none` | The same as `server` | `/usr/local/bin` | Nothing |
 
-macOS gets only `aether`. Enter takes `server` on Linux and `client` on
-macOS; with no terminal, as in CI, the script acts like `--role none`. A
+macOS gets only `aether`. Enter takes `server` on Linux without a desktop
+session (no `DISPLAY` or `WAYLAND_DISPLAY`), and `client` on a Linux desktop
+and on macOS; with no terminal, as in CI, the script acts like `--role none`. A
 client goes in `~/.local/bin` so the dashboard's **Update now** can replace it.
 If the directory is not on your `PATH`, the script prints the line to add (it
 never edits a profile), and it prints the `sudo rm -f` for an older `aether`
@@ -312,23 +313,29 @@ sudo aether-server setup
 
 It asks these questions in order, and shows `/etc/aether/server.conf` for you
 to confirm before the last one. Enter takes the default, or on a rerun the
-current value.
+current value. Input that ends at a prompt, such as Ctrl-D, stops setup with
+nothing written.
 
 | Question | Default | What it decides |
 | --- | --- | --- |
 | `Continue without Docker` | no | Asked only when Docker does not answer. No stops with `nothing written; install or start Docker, then run setup again`. |
-| `SSH listen address` | `:2222` | The address and port clients connect to. |
+| `SSH listen address for Aether, not the system sshd` | `:2222` | The address and port clients connect to. |
 | `Data directory` | `/var/lib/aether` | Where the server keeps everything ([data directory](#what-lives-in-the-data-directory)). |
-| `Will people reach this server over <tailnet>` | no | Asked only when Tailscale runs on the host. Yes signs people in by their tailnet login, then asks whether to auto-approve tailnet logins, whether to also require an SSH key, and the dashboard's HTTPS port on the tailnet ([networking.md](networking.md#the-dashboard)). No turns tailnet sign-in off. |
-| `Reach this server through the edge too` | no | Asked after a tailnet yes. Without a tailnet, setup turns the edge on without asking. |
+| `Use Tailscale to reach this server` | yes, when tailscaled names its tailnet | Asked only when Tailscale runs on the host. Yes signs people in by their tailnet login. No turns tailnet sign-in off and the edge on. |
+| `Let anyone on the tailnet join without an admin approving them` | no | Asked after a tailnet yes ([networking.md](networking.md#who-is-let-in)). |
+| `Also require a registered SSH key, for tailnet devices more than one person uses` | no | Asked after a tailnet yes. |
+| `Dashboard HTTPS port (0 = off)` | 443 | Asked after a tailnet yes without a key requirement ([networking.md](networking.md#the-dashboard)). |
+| `Turn on the edge too` | no | Asked after a tailnet yes. Without a tailnet, setup turns the edge on without asking. |
 | `Who may reach this server through the edge?` | no default | `1`, account access: a GitHub sign-in is enough. `2`, approved devices: each new device waits for approval ([edge.md](edge.md#access-policies)). |
 | `Let agents use Docker inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)` | yes | Skipped when Docker already has Sysbox or does not answer. |
 
 With the edge on and no owner yet, setup prints a claim link holding a code
 valid for 30 minutes (`sudo aether-server edge claim-code` prints a new one).
 Setup starts nothing; it ends on `next:`: start the service, then on your
-machine run `aether login` and `aether link --claim <code>` (or open the claim
-link), or `aether link <this-host>:2222` without the edge. When the edge is not
+machine link it. On a tailnet that is `aether link <MagicDNS name>`, or
+**Tailscale** in the app's Connect step; through the edge, `aether login` and
+`aether link --claim <code>`, or **Aether relay** with the claim link; with
+neither, `aether link <this-host>:2222`. When the edge is not
 `https://edge.onaether.dev`, both client commands carry `--edge <url>`, because
 a claim code names no edge.
 

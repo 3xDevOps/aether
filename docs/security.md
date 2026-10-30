@@ -531,7 +531,9 @@ is a member.
   Everyone else claims it with `sudo aether-server edge claim-code`, so a scan
   that finds port 2222 open cannot take admin first. A forwarder on the host
   that connects outside clients to `127.0.0.1:2222`, such as `socat`, defeats
-  this. Without an edge, the first key from any address becomes admin.
+  this. Without an edge, a server with tailnet sign-in takes that first key
+  only over the tailnet or from loopback, and one with neither takes it from
+  any address.
 - SSH is encrypted end to end. The edge cannot read it or pose as your server.
 - The server pins the edge's signing key. A different key is refused until you
   compare fingerprints and run `sudo aether-server edge trust`.

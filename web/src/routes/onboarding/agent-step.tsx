@@ -4,7 +4,6 @@ import { defaultMode } from '@/components/agents/agent-copy'
 import { AgentExtras } from '@/components/agents/agent-extras'
 import { AgentList } from '@/components/agents/agent-list'
 import { AgentSetup } from '@/components/agents/agent-setup'
-import { ModeOverview } from '@/components/agents/mode-comparison'
 import { GitHubConnection } from '@/components/github-connection'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -73,7 +72,7 @@ export function AgentStep({
     <Step
       label="Agent"
       title="Set up an agent"
-      lead="An agent is the coding CLI a run starts, such as Claude Code or Codex. Set one up once and every workspace can use it. A run shows the agent in one of two modes:"
+      lead="An agent is the coding CLI a run starts, such as Claude Code or Codex. Set one up once and every workspace can use it."
       actions={
         <>
           {installed ? <Button onClick={() => onNext(false)}>Continue</Button> : <Button variant="secondary" onClick={() => onNext(true)}>Skip for now</Button>}
@@ -81,7 +80,6 @@ export function AgentStep({
         </>
       }
     >
-      <ModeOverview />
       {loading && <div className="h-28"><Skeleton className="size-full" /></div>}
       {error && (
         <Callout tone="failed" role="alert" actions={<Button size="sm" variant="secondary" onClick={reload}>Retry agents</Button>}>
@@ -96,7 +94,7 @@ export function AgentStep({
                 agents={agents}
                 onSetUp={canSetUp ? (agent) => openSetup(agent.name) : undefined}
                 returnFocusTo={returnFocusTo}
-                primary={installed ? undefined : agents[0].name}
+                primary={installed ? undefined : (agents.find((agent) => agent.name === 'claude') ?? agents.find((agent) => agent.name === 'codex') ?? agents[0]).name}
                 onRun={(agent) => {
                   rememberChoice(agent.name, defaultMode(agent, useStore.getState().launchDefaults[agent.name]?.mode))
                   onNext(false)

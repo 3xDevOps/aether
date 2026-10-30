@@ -6799,38 +6799,57 @@ or draft, and a reconnect must not redirect navigation.
 Authorized run deep links take precedence. Completing the final step or
 navigating elsewhere marks the UI onboarded and clears wizard state.
 
-Connect first offers signing in to an edge
-(`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
-through the local gateway, which keeps the device token, shows the code
-while it polls `edge.status`, then lists the servers the account reaches,
-each with one **Link**. Signed in to more than one edge, it lists them and
+Connect asks **How does this computer reach your server?** with three
+radio cards (`src/routes/onboarding/connect-step.tsx`): **Tailscale**,
+marked Recommended and chosen by default, **Aether relay**, and **SSH
+address**. On a phone the three share one row and the chosen card's
+one-line description shows below it, so the field below stays above the
+keyboard. A handed link, or **Link
+another server** while an edge link is the default, chooses the relay
+instead. Tailscale shows one **Server's
+tailnet name** field and **Link**, with a line for people without a tailnet;
+SSH address shows **Server address**, **Invite code** and **Your name**,
+which `link.apply` takes as the invite's display name or the saved link's
+profile name. Both send `link.apply`; only SSH address sends the invite and
+name.
+
+Aether relay signs in to an edge (`src/routes/onboarding/edge-link.tsx`):
+**Sign in with GitHub** runs the edge's device flow through the local
+gateway, which keeps the device token, shows the code while it polls
+`edge.status`, then lists the servers the account reaches, each with one
+**Link**. Signed in to more than one edge, it lists them and
 shows nothing to link until one is chosen; the server list, link by id and
 claim then pass that edge to the gateway, as `--edge` does on the command
 line. A server picked from the list opens a **Confirm server** panel with its
 id and the host key fingerprint `edge.hostkey` read, and links only on **Link
 and pin**, because that id comes from the edge. Opened from Settings > This computer > **Link another server**, the step
 starts on this picker with a server already linked; linking an edge server makes it the default and keeps the
-previous edge default as a saved server named by its server id. **Other ways to
-link** holds
-**Server id from your admin**, which the edge cannot substitute, and
-**Claim code or link**, which takes the claim link or code `aether-server
-setup` printed and refuses a claim link naming another edge than the one
-signed in; a join link pasted there opens the Join panel below. **Link by
-address** is a second
-disclosure below the sign-in, for a tailnet or SSH server. While no edge is
-signed in, below **Link by address**, **Have an invitation or claim link?**
-takes either link and **Open link** opens it as a handed-over link, so a
-join or claim link can be given before signing in; anything else answers
-`That is not an invitation or claim link.` Connect
+previous edge default as a saved server named by its server id. **Claim
+or invite link** takes the claim link or code `aether-server setup` printed
+and refuses a claim link naming another edge than the one signed in; a join
+link pasted there opens the Join panel below. It shows below the server
+list; **Other ways to link** holds **Server id from your admin**, which the
+edge cannot substitute. While no edge is signed in, below the
+sign-in, **Have an invitation or claim link?** takes either link or a bare claim
+code, and **Open link** opens it as a handed-over link, so a join or claim
+link can be given before signing in; anything else answers
+`That is not an invitation or claim link.` A join or claim link entered in
+the Tailscale or SSH address field opens the same way. A link whose member
+is pending says **Waiting for an admin to approve you** with the `aether
+member approve` command instead of **Connected**, and reconnects only on
+**Continue**, because a pending member's hydration fails. The relay panel
+stays mounted, hidden, while another card is shown, so a link in flight
+keeps its busy state. Connect
 distinguishes no configured server from a linked one, shows **Continue** only
 once a server is configured, and refreshes on Retry and when the window
 regains focus, so a separate `aether link` command appears without
 restarting the GUI.
 
 A link a shell hands over ([URL state](#url-state)) opens
-Connect at any step. A claim link fills **Claim code or link** and opens
-its disclosure. A join link replaces the sign-in with a **Join** panel:
-`Join <server id> as the invited account?` with the account `edge.status`
+Connect at any step, on the relay card. A claim link says **Claim link
+received** and fills **Claim or invite link**. A join link replaces the
+sign-in with a **Join** panel:
+`You are invited to the server <server id>.` with the account `edge.status`
 reports for the link's edge, signing in to that edge first if needed, and
 **Join** sends the link to `edge.join`. On a `device-pending` refusal it
 shows `Waiting for an admin of <server> to approve this device` with the
@@ -6848,11 +6867,11 @@ gateway without `edge.join` or `edge.claim`, such as the Android app's
 Tailscale-mode dashboard, shows the link and the `aether link` command to copy
 instead, with **Continue**.
 
-The Agent step opens with the two Standard and Enhanced cards
-(`ModeOverview`), then the agent list, **Add agent…** and the extras
-described under [Agents](#agents). Its primary action is **Continue** once
-any agent is installed; before that the first agent's **Set up** is the
-filled button, with **Skip for now** beside Back. A skipped Agent step shows
+The Agent step opens with the agent list, **Add agent…** and the extras
+described under [Agents](#agents); each agent's setup starts with the
+Standard and Enhanced choice. Its primary action is **Continue** once any
+agent is installed; before that the **Set up** of Claude Code, else Codex,
+else the first agent is the filled button, with **Skip for now** beside Back. A skipped Agent step shows
 a dash in the step list instead of a check. On a phone the setup
 sub-screen's Back row scrolls with the page rather than sticking over the
 cards. A gateway that cannot

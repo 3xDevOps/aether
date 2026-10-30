@@ -15,11 +15,11 @@ function label(waiting: number, updates: number): string {
   return ['Assistant', ...parts].join(', ')
 }
 
-/** assistant.prompt needs the Launch capability, so anyone who cannot start a run is not offered the assistant. */
+/** The assistant runs on the server and assistant.prompt needs the Launch capability, so a computer linked to no server, or anyone who cannot start a run, is not offered the assistant. */
 export function useAssistantAvailable(): boolean {
   const cap = useCapability()
   const role = useSelfRole()
-  return cap.hasMethod('assistant.status') && canLaunch({ cap, role })
+  return role !== null && cap.hasMethod('assistant.status') && canLaunch({ cap, role })
 }
 
 /** Mounted in exactly one place at a time: the phone toolbar, the sidebar header, or the top bar when the sidebar is hidden. */
