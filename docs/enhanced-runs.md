@@ -276,15 +276,54 @@ retries a waiting prompt at least every 30 seconds.
 
 ## Restarts and failures
 
-A server restart, **Reopen** after Close, or a failed Close stops the old ACP
-server and starts a fresh one. Aether then restores the agent's session. A turn
-cut off by the restart ends with a **Turn interrupted** notice, its pending
-permission requests are dropped, and the run parks with `turn interrupted`. Queued
-messages read **Not sent**: send them again. Background tasks end with the old
-adapter, including commands the agent's own shell tool left running, and the log
-notes **Background work interrupted**. Commands in a terminal started with
-`aether-internal terminal` keep running. A session that cannot be restored
-starts a new one and says `Started a new agent session`.
+The agent's ACP server runs under a keeper: a process in the run container,
+started from the staged server binary as `aether-internal acp-keeper`, that
+owns the adapter's stdin and stdout and serves them on a socket in
+`/run/aether-acp/`. The server attaches to the keeper with a short-lived
+`aether-internal acp-keeper attach` exec and a token only the server holds.
+The keeper and that exec run as root, out of the agent's reach; the adapter
+runs as the run's user, as before ([security](security.md#permission-tiers)).
+
+A server restart or update (`systemctl restart aether-server`,
+`aether server update`, a boot trial or a rollback) leaves the keeper and the
+agent running. The next server process reattaches and adopts the session: the
+turn in flight keeps streaming, an open permission request or question stays
+open under the same id, background tasks and commands the agent's shell tool
+started keep running, and nothing is sent to the agent twice. A message queued
+behind the turn is sent again once the server is back, unless it already
+reached the agent; one queued for a paused run waits until the run resumes.
+An answer, cancel or message sent while the new server is still recovering
+runs waits for recovery, up to 30 seconds, instead of failing with `the
+enhanced session is not running`. The log records no notice for an adoption.
+A stopped server detaches cleanly. A killed one can, rarely, record twice the
+agent output it logged in the instant before it died. A server killed
+after it recorded a new turn but before the turn's prompt reached the keeper
+ends that turn with **Turn interrupted**: `Aether's server restarted before
+this turn's prompt reached the agent. Send it again.`
+
+The server cannot reattach when the keeper or the agent exited, when the agent
+wrote more than 32 MiB while no server read it, when the keeper speaks another
+protocol version, or when the server stopped before the agent's session
+opened. It then logs **Agent restarted** with the reason, stops the keeper and
+the agent, and restores the session in a fresh one, as **Reopen** after Close,
+a failed Close and **Retry Enhanced** always do. A turn cut off that way ends
+with a **Turn interrupted** notice, its pending permission requests are
+dropped, and the run parks with `turn interrupted`.
+Queued messages read **Not sent**: send them again. Background tasks end with
+the old adapter, including commands the agent's own shell tool left running,
+and the log notes **Background work interrupted**. Commands in a terminal
+started with `aether-internal terminal` keep running. A session that cannot be
+restored starts a new one and says `Started a new agent session`. When another
+process attaches to the keeper, which only a second server on the same data
+directory or root in the container can do, the server logs **Agent connection
+taken over** and restores the session the same way.
+
+A run container keeps the server binary it was created with. A run whose
+container a server without keepers created runs its adapter without one, and
+every restart restores its session as above until the container is recreated.
+**Reopen**, **Retry Enhanced**, Pause and resume reuse the container; a new
+run, or an account switch at a usage limit, gets a new container with a
+keeper.
 
 Restoration depends on the agent's own saved session and login. Check the
 checkout before you retry interrupted work.

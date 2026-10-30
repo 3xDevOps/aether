@@ -12,7 +12,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -86,6 +88,9 @@ const (
 	// subagents the way Claude's adapter reports them: nested, concurrent,
 	// and with later updates that omit the parent link.
 	PromptSubagents = "subagents"
+	// PromptSpawn starts `sleep 600` as a child of the agent, as a shell
+	// tool leaves a command running, and replies "spawned <pid>".
+	PromptSpawn = "spawn a sleeper"
 	// PromptWorkflow launches a dynamic workflow and a background Agent
 	// the way Claude's adapter reports them: calls that complete once their
 	// work runs in the background, and the Agent's work after that.
@@ -446,6 +451,13 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWorkflow:
 		a.workflow(ctx)
+		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptSpawn:
+		sleeper := exec.Command("sleep", "600")
+		if err := sleeper.Start(); err != nil {
+			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+		}
+		a.text(ctx, "spawned "+strconv.Itoa(sleeper.Process.Pid))
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWait:
 		select {

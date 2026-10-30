@@ -1822,6 +1822,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		agentSessionID:      sc.AgentSessionID,
 		agentCost:           sc.AgentCost,
 		agentExec:           sc.AgentExec,
+		agentKeeper:         sc.AgentKeeper,
 		switchIntent:        sc.Switch,
 		accountSwap:         sc.AccountSwap,
 		usageLimit:          sc.UsageLimit,

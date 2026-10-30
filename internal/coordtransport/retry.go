@@ -71,8 +71,6 @@ var repeatableMethods = map[string]bool{
 	protocol.MethodCoordStatus: true, protocol.MethodCoordHookStatus: true, protocol.MethodCoordInbox: true,
 	protocol.MethodMemorySearch: true, protocol.MethodMemoryShow: true, protocol.MethodMemoryBrief: true,
 	protocol.MethodChildOptions: true, protocol.MethodChildList: true, protocol.MethodChildFetch: true,
-	protocol.MethodTaskShow: true, protocol.MethodTaskList: true, protocol.MethodWorkerList: true, protocol.MethodWorkerInspect: true,
-	protocol.MethodMissionPlanShow: true, protocol.MethodIntegrationShow: true,
 	protocol.MethodDevTerminalList: true, protocol.MethodDevTerminalOutput: true, protocol.MethodDevTerminalScreen: true,
 	protocol.MethodDevTerminalWait:  true,
 	protocol.MethodDevBrowserStatus: true, protocol.MethodDevBrowserPages: true, protocol.MethodDevBrowserSnapshot: true,

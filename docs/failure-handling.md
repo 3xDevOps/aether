@@ -14,7 +14,7 @@ shown beside the status says why it is there.
 
 | When | What you see | What Aether does | What you do |
 | --- | --- | --- | --- |
-| The server restarts or is killed, and run containers survive | Runs keep their status. | Reattaches to every live container. An Enhanced agent's session is restored in a fresh process. A kill accepted before the crash is issued again. | Nothing. An Enhanced turn that was cut off parks with `turn interrupted`: send a message to continue. |
+| The server restarts or is killed, and run containers survive | Runs keep their status. | Reattaches to every live container. An Enhanced agent keeps running under its keeper, and the new server adopts its session, turn and open requests ([Restarts and failures](enhanced-runs.md#restarts-and-failures)). A kill accepted before the crash is issued again. | Nothing. When the keeper is gone, the session is restored in a fresh process and a turn that was cut off parks with `turn interrupted`: send a message to continue. |
 | The host reboots, or Docker restarts without `live-restore` | Live runs read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the run branch and keeps the checkout. | Pull the branch (`aether pull <run-id>`) or start a new run. An interrupted run cannot be reopened. |
 | A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
@@ -352,15 +352,17 @@ login shell stay up.
 | The session cannot start, for example because the agent is not signed in | **Disconnected**, `enhanced session failed: <error>`. Messages are refused with `scheduler: the enhanced session is not running: <error>`. | Fix the cause, then press **Retry Enhanced** in the Session view. |
 | The agent's process exits | The turn in flight shows **Turn interrupted**; **Disconnected**, `enhanced session ended: the agent's ACP server exited with code <n>`, with `; stderr: <tail>` when it printed any. | **Retry Enhanced**. |
 | The agent drops its session but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent session lost** while Aether restores the session. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its session again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
-| The server restarts mid-turn | **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
+| The server restarts mid-turn | The turn keeps running in the adopted session; a message queued behind it is sent again unless the agent already had it. | Nothing. |
+| The server restarts and cannot reattach to the agent's keeper, or the run's container predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
 | You cancel a turn or press Stop | **Waiting**, `turn cancelled`. | Send a message when you want it to go on. |
 | A Claude background task never ends | `running`, `working in background: <n> tasks`. | Press Stop. |
 | The old session cannot be restored | A new session starts; the item log says why. | Repeat context the agent lost. |
 
 A Background Enhanced run has no one to retry it: any of these failures ends
 it as `failed` with `agent exited 1: <cause>`, for example `agent exited 1:
-the agent's turn ended: cancelled`. A server restart mid-turn resumes its
-session and asks the agent to continue.
+the agent's turn ended: cancelled`. A server restart mid-turn leaves its turn
+running; when the server cannot reattach, it restores the session and asks the
+agent to continue.
 
 ## Usage limit mid-run
 

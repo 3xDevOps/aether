@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -195,6 +196,8 @@ type Scheduler struct {
 	// for it so overdue steers cannot claim before recovered PTYs are injectable.
 	recoveryReady     chan struct{}
 	recoveryReadyOnce sync.Once
+	// recovering is set while Start recovers runs.
+	recovering atomic.Bool
 	// superCtx bounds every supervision goroutine; cancelling it never stops a
 	// container.
 	superCtx    context.Context
@@ -403,6 +406,13 @@ type supervised struct {
 	agentCost      float64
 	sessionMu      sync.Mutex
 	agentExec      *runtime.ExecIdentity
+	// agentKeeper is how to reattach to the keeper agentExec runs, nil for
+	// an adapter an older server ran without one.
+	agentKeeper *keeperRecord
+	// keeperDelivered are the tags of requests a server process before this
+	// one left with the agent, once this one reattached to its keeper.
+	keeperDelivered []string
+	keeperAdopted   bool
 	// spendMu orders charge calls; uncharged holds the tokens of a spend
 	// whose publish failed.
 	spendMu   sync.Mutex
@@ -664,6 +674,8 @@ func (s *Scheduler) RecoveryReady() <-chan struct{} {
 }
 
 func (s *Scheduler) Start(ctx context.Context) error {
+	s.recovering.Store(true)
+	defer s.recovering.Store(false)
 	// Subscribed before recovery, so a usage limit published meanwhile
 	// waits for the run recovery brings back.
 	var (
@@ -696,6 +708,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return recoveryError(err)
 	}
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
+	s.recovering.Store(false)
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	watched := make(chan struct{})
 	go func() {

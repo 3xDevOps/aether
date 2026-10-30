@@ -61,7 +61,9 @@ func TestEnhancedRunRoomMessageStaysQueuedUntilTheAgentTakesIt(t *testing.T) {
 	}
 }
 
-func TestEnhancedRunShutdownRecordsAQueuedRoomMessageAsNotSent(t *testing.T) {
+// The agent keeps running under its keeper, so a message queued behind its
+// turn stays queued for the next server process to settle.
+func TestEnhancedRunShutdownLeavesAQueuedRoomMessageQueued(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)
 	run := e.launchACP(t, acpmock.PromptWait)
@@ -74,8 +76,8 @@ func TestEnhancedRunShutdownRecordsAQueuedRoomMessageAsNotSent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.State != store.RoomMessageNotSent || m.Failure == nil || m.Failure.Code != "agent_disconnected" {
-		t.Fatalf("queued message after shutdown = %q, %+v; want not_sent agent_disconnected", m.State, m.Failure)
+	if m.State != store.RoomMessageSent || m.AgentDelivery != store.AgentQueued {
+		t.Fatalf("queued message after shutdown = %q %q, %+v; want sent and still queued", m.State, m.AgentDelivery, m.Failure)
 	}
 }
 

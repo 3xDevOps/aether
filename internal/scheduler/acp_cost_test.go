@@ -78,6 +78,7 @@ func TestEnhancedRunChargesWhatTheRunningCostAdds(t *testing.T) {
 	if err := e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
+	rt.dropAdapters(t)
 
 	updates := slices.Clone(rt.fixture.Prompt.Updates)
 	for i, u := range updates {

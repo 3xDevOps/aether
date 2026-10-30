@@ -103,6 +103,13 @@ func TestDropAgentQueuedRoomMessagesSettlesOnlyQueuedSteers(t *testing.T) {
 		t.Fatalf("settle delivered = (%v, %v)", ok, err)
 	}
 
+	if listed, err := db.ListAgentQueuedRoomMessages(ctx, time.Now().Add(time.Second)); err != nil || len(listed) != 1 || listed[0].ID != queued {
+		t.Fatalf("listed = (%v, %v), want [%s]", listed, err, queued)
+	}
+	if listed, err := db.ListAgentQueuedRoomMessages(ctx, time.Now().Add(-time.Hour)); err != nil || len(listed) != 0 {
+		t.Fatalf("listed before the queueing = (%v, %v), want none", listed, err)
+	}
+
 	failure := &RoomMessageFailure{Code: "agent_disconnected", Message: "acphost: agent connection closed"}
 	ids, err := db.DropAgentQueuedRoomMessages(ctx, failure)
 	if err != nil || len(ids) != 1 || ids[0] != queued {
