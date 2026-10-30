@@ -54,7 +54,7 @@ function useWorkers(run: RunRecord): { workers: WorkerSource[] | undefined; erro
       live = false
     }
   }, [missionID, changed, tries])
-  const childKey = useStore((s) => JSON.stringify(descendantRuns(s.runs, [run.id]).map((child) => [
+  const childKey = useStore((s) => JSON.stringify(descendantRuns(s.runs, [run.id]).filter((child) => !child.detached).map((child) => [
     child.id, runLabel(child), child.started_at ?? child.created_at, child.finished_at, child.status,
   ])))
   const children = useMemo(() => (JSON.parse(childKey) as [string, string, string, string | null, RunRecord['status']][]).map(([runID, label, start, finished, status]): WorkerSource => ({

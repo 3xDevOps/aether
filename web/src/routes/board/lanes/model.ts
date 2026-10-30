@@ -381,8 +381,9 @@ export function buildLanes(input: LanesInput): LanesModel {
     for (const unit of section.units) {
       if (!unit.missionID) {
         const [parent, ...children] = unit.members
+        const headed = parent.card === unit.root
         lanes.push(...withAgents({ ...parent, parentKey: key }))
-        for (const lane of children) lanes.push(...withAgents({ ...lane, level: 3, parentKey: parent.key }))
+        for (const lane of children) lanes.push(...withAgents(headed ? { ...lane, level: 3, parentKey: parent.key } : { ...lane, parentKey: key }))
         continue
       }
       const mission = ctx.missions[unit.missionID]
