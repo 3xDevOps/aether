@@ -28,12 +28,23 @@ const (
 	// session/prompt an earlier attacher left unanswered. The keeper answers
 	// it with that prompt's answer and forwards nothing to the agent.
 	AdoptMethod = "_aether/keeper/adopt_prompt"
+	// HandledMethod is a notification a Client inserts into the stream it
+	// hands acphost, never sent on the wire. acphost reports it handled once
+	// every notification before it is, and the Client acks only that far.
+	HandledMethod = "_aether/keeper/handled"
+	// SocketRoot holds each keeper's socket directory. Only root may enter
+	// it: the agent's user must not reach the socket.
+	SocketRoot = "/run/aether-acp"
 
 	// maxLine bounds one frame. The SDK reads agent messages of up to 10
 	// MiB; a prompt with several images can be larger.
 	maxLine = 64 << 20
 	// stderrTail is how much of the adapter's stderr the keeper keeps.
 	stderrTail = 4 << 10
+	// maxGenStep bounds how far a hello's generation may run ahead of the
+	// newest the keeper saw. A server persists each generation before its
+	// hello, so only a failed hello skips one.
+	maxGenStep = 1 << 16
 )
 
 // Frame types.
@@ -56,7 +67,8 @@ const (
 	RefusedToken = "token"
 	// RefusedVersion: the keeper speaks another protocol version.
 	RefusedVersion = "version"
-	// RefusedStale: a server generation at least as new already attached.
+	// RefusedStale: a server generation at least as new already attached,
+	// or the hello's generation is implausibly far ahead.
 	RefusedStale = "stale"
 	// RefusedOverflow: the keeper dropped agent output it could not retain
 	// while no server read it, so attaching would lose some.
@@ -73,6 +85,8 @@ type frame struct {
 	// message id; the keeper reports the tags of requests it forwarded for
 	// an attacher that is gone.
 	Tag string `json:"tag,omitempty"`
+	// Turn is the item log's turn a session/prompt starts.
+	Turn int64 `json:"turn,omitempty"`
 
 	V     int    `json:"v,omitempty"`
 	Gen   uint64 `json:"gen,omitempty"`
@@ -101,11 +115,11 @@ type State struct {
 	Stderr    string   `json:"stderr,omitempty"`
 }
 
-// Prompt is a session/prompt in flight when its attacher went away.
+// Prompt is a session/prompt in flight when its attacher went away. Turn is
+// the item log turn it started: an attacher whose log shows another turn
+// open must not adopt it.
 type Prompt struct {
-	Tag string `json:"tag,omitempty"`
-	// Answered says the agent already answered it.
-	Answered bool `json:"answered,omitempty"`
+	Turn int64 `json:"turn"`
 }
 
 // Exit is how the adapter ended.
@@ -158,9 +172,14 @@ func withID(line []byte, id json.RawMessage) ([]byte, error) {
 }
 
 // ServeArgv is the command that runs bin, the staged binary, as the keeper
-// of adapter listening on socket.
-func ServeArgv(bin, socket string, adapter []string) []string {
-	return append([]string{bin, Command, "serve", socket, "--"}, adapter...)
+// of adapter listening on socket. With user, a "uid:gid", the keeper starts
+// adapter as that user.
+func ServeArgv(bin, socket, user string, adapter []string) []string {
+	argv := []string{bin, Command, "serve", socket}
+	if user != "" {
+		argv = append(argv, "--user", user)
+	}
+	return append(append(argv, "--"), adapter...)
 }
 
 // AttachArgv is the command that bridges its stdio to the keeper at socket.

@@ -121,12 +121,12 @@ type Config struct {
 	// persisted runs and their PTY sessions. The overdue worker waits for it
 	// before claiming any steer, leaving messages durably queued during boot.
 	Ready <-chan struct{}
-	// Reattached reports the tags of what reached the agent of a run whose
-	// session this server process adopted from the agent's keeper, and
-	// false for a run whose session it restored or started anew. With it,
-	// steers an earlier server process left queued behind an agent turn are
-	// settled once Ready closes: delivered, sent again, or not sent.
-	Reattached       func(domain.RunID) (delivered []string, ok bool)
+	// Reattached reports whether this server process adopted a run's
+	// session from the agent's keeper, and the tags of what reached the
+	// agent if so. With it, steers an earlier server process left queued
+	// behind an agent turn are settled once Ready closes and each run's
+	// reattach is decided: delivered, sent again, or not sent.
+	Reattached       func(domain.RunID) (delivered []string, state Reattach)
 	BodyLimit        int
 	AttachmentLimit  int
 	AttachmentBytes  int
@@ -171,6 +171,21 @@ type Status struct {
 
 // Service is restart-safe because all queued state is in CollaborationStore;
 // only the overdue worker goroutine is ephemeral.
+// Reattach is what became of the agent session an earlier server process
+// left with a run.
+type Reattach int
+
+const (
+	// Restored: this server process restored the session or started a new
+	// one, or the run is gone.
+	Restored Reattach = iota
+	// Adopted: this server process took the session over from the agent's
+	// keeper.
+	Adopted
+	// Undecided: the run is paused, and reattaches once it resumes.
+	Undecided
+)
+
 type Service struct {
 	cfg        Config
 	now        func() time.Time
@@ -283,8 +298,10 @@ func (s *Service) Start(ctx context.Context) error {
 				return
 			}
 		}
+		undecided, settled := false, map[string]bool{}
 		if s.cfg.Reattached != nil {
-			if err := s.settleAgentQueued(workerCtx); err != nil {
+			var err error
+			if undecided, err = s.settleAgentQueued(workerCtx, settled); err != nil {
 				s.recordOverdueError(err)
 			}
 		}
@@ -302,6 +319,12 @@ func (s *Service) Start(ctx context.Context) error {
 			case <-workerCtx.Done():
 				return
 			case <-t.C:
+				if undecided {
+					var err error
+					if undecided, err = s.settleAgentQueued(workerCtx, settled); err != nil {
+						s.recordOverdueError(err)
+					}
+				}
 				if _, err := s.DeliverDue(workerCtx, store.MaxCollaborationPageSize); err != nil {
 					s.recordOverdueError(fmt.Errorf("periodic overdue delivery: %w", err))
 				}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -145,6 +146,17 @@ func (a *agent) attachWith(h Hello) (*peer, error) {
 	go func() {
 		sc := bufio.NewScanner(c.Reader())
 		for sc.Scan() {
+			// Handled at once, as acphost handles it after what precedes it.
+			var m struct {
+				Method string `json:"method"`
+				Params struct {
+					Seq uint64 `json:"seq"`
+				} `json:"params"`
+			}
+			if json.Unmarshal(sc.Bytes(), &m) == nil && m.Method == HandledMethod {
+				c.Writer().(interface{ Handled(uint64) }).Handled(m.Params.Seq)
+				continue
+			}
 			p.lines <- sc.Text()
 		}
 		close(p.lines)
@@ -209,12 +221,12 @@ func (p *peer) write(line string) {
 	}
 }
 
-func (p *peer) writeTagged(line, tag string) {
+func (p *peer) writeTagged(line, tag string, turn int64) {
 	p.t.Helper()
 	w := p.Writer().(interface {
-		WriteTagged([]byte, string) (int, error)
+		WriteTagged([]byte, string, int64) (int, error)
 	})
-	if _, err := w.WriteTagged([]byte(line+"\n"), tag); err != nil {
+	if _, err := w.WriteTagged([]byte(line+"\n"), tag, turn); err != nil {
 		p.t.Fatal(err)
 	}
 }
@@ -368,14 +380,14 @@ func TestAdoptPromptAnsweredWhileDetached(t *testing.T) {
 	t.Parallel()
 	a := newAgent(t, 0)
 	first := a.attach(1)
-	first.writeTagged(req("1", "session/prompt"), "m1")
+	first.writeTagged(req("1", "session/prompt"), "m1", 3)
 	kid := a.recvReq("session/prompt")
 	_ = first.Close()
 	a.send(resp(kid, promptDone))
 
 	second := a.attach(2)
 	st := second.State()
-	if want := (&Prompt{Tag: "m1", Answered: true}); st.Prompt == nil || *st.Prompt != *want {
+	if want := (&Prompt{Turn: 3}); st.Prompt == nil || *st.Prompt != *want {
 		t.Fatalf("State.Prompt = %+v, want %+v", st.Prompt, want)
 	}
 	second.write(req("7", AdoptMethod))
@@ -395,8 +407,8 @@ func TestAdoptPromptAnsweredAfterAdoption(t *testing.T) {
 	_ = first.Close()
 
 	second := a.attach(2)
-	if p := second.State().Prompt; p == nil || p.Answered {
-		t.Fatalf("State.Prompt = %+v, want unanswered", p)
+	if p := second.State().Prompt; p == nil {
+		t.Fatal("State.Prompt = nil, want the prompt in flight")
 	}
 	second.write(req("7", AdoptMethod))
 	a.send(resp(kid, promptDone))
@@ -428,8 +440,8 @@ func TestDroppedPromptReachesAgentOnce(t *testing.T) {
 	a.recvReq("session/prompt")
 
 	second := a.attach(2)
-	if p := second.State().Prompt; p == nil || p.Answered {
-		t.Fatalf("State.Prompt = %+v, want unanswered", p)
+	if p := second.State().Prompt; p == nil {
+		t.Fatal("State.Prompt = nil, want the prompt in flight")
 	}
 	a.barrier(second)
 }
@@ -549,7 +561,9 @@ func TestDetachKeepsAdapter(t *testing.T) {
 	if err := first.Detach(ctx); err != nil {
 		t.Fatal(err)
 	}
-	first.write(req("1", "dropped"))
+	if _, err := first.Writer().Write([]byte(req("1", "dropped") + "\n")); !errors.Is(err, ErrDetached) {
+		t.Fatalf("write after detach: %v, want ErrDetached", err)
+	}
 	_ = first.Writer().Close()
 	_ = first.Close()
 	waitAcked(t, a.k, 1)
@@ -657,4 +671,96 @@ func TestAttachedServerThatFallsBehindSlowsTheAgent(t *testing.T) {
 			t.Fatal("acks did not let the agent go on")
 		}
 	}
+}
+
+func TestRefusesAGenerationFarAhead(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	if re := a.refusal(Hello{Gen: math.MaxUint64, Token: token}); re.Code != RefusedStale {
+		t.Fatalf("code %q, want %q", re.Code, RefusedStale)
+	}
+	a.attach(maxGenStep)
+	if re := a.refusal(Hello{Gen: 2*maxGenStep + 1, Token: token}); re.Code != RefusedStale {
+		t.Fatalf("code %q, want %q", re.Code, RefusedStale)
+	}
+	a.attach(2 * maxGenStep)
+}
+
+func TestAnsweredRequestIsNotSentAgain(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	first := a.rawAttach()
+	a.send(req("5", "session/request_permission"))
+	asked := first.next()
+	first.send(frame{T: frameRPC, M: json.RawMessage(resp("5", `{"outcome":"allow"}`))})
+	if h := head(t, a.recv()); string(h.ID) != "5" {
+		t.Fatalf("the agent got %+v, want the answer to 5", h)
+	}
+	// Killed before it acked the request it answered.
+	_ = first.conn.Close()
+	if asked.Seq == 0 {
+		t.Fatal("the request had no seq")
+	}
+
+	a.send(note(1))
+	second := a.attach(2)
+	second.wantNext(note(1))
+}
+
+func TestStalledAgentStillTakesAcks(t *testing.T) {
+	t.Parallel()
+	stdinR, stdinW := io.Pipe()
+	t.Cleanup(func() { _ = stdinR.Close() })
+	outR, outW := io.Pipe()
+	t.Cleanup(func() { _ = outW.Close() })
+	k := New(Config{Token: token, AgentIn: stdinW, Retain: 4 << 10, Logger: slog.New(slog.DiscardHandler)})
+	go func() { _ = k.Pump(outR) }()
+	a := &agent{t: t, k: k}
+	p := a.attach(1)
+	// The agent never reads this, as an adapter blocked on its own output.
+	p.write(req("1", "session/prompt"))
+	wrote := make(chan struct{})
+	go func() {
+		defer close(wrote)
+		for n := range 200 {
+			if _, err := io.WriteString(outW, note(n)+"\n"); err != nil {
+				return
+			}
+		}
+	}()
+	for n := range 200 {
+		p.wantNext(note(n))
+	}
+	select {
+	case <-wrote:
+	case <-time.After(timeout):
+		t.Fatal("the agent's output stalled")
+	}
+}
+
+func TestAcksOnlyWhatWasHandled(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	c, err := Attach(ctx, a.conn(), Hello{Gen: 1, Token: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.send(note(1))
+	sc := bufio.NewScanner(c.Reader())
+	for _, want := range []string{note(1), fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"seq":1}}`, HandledMethod)} {
+		if !sc.Scan() || sc.Text() != want {
+			t.Fatalf("read %q, want %q", sc.Text(), want)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+	a.k.mu.Lock()
+	acked := a.k.acked
+	a.k.mu.Unlock()
+	if acked != 0 {
+		t.Fatalf("acked %d before acphost handled it", acked)
+	}
+	c.Writer().(interface{ Handled(uint64) }).Handled(1)
+	waitAcked(t, a.k, 1)
 }

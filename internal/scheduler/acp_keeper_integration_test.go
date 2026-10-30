@@ -14,6 +14,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -101,6 +102,40 @@ func TestIntegrationEnhancedRunSurvivesServerRestarts(t *testing.T) {
 	adapter, sleeper := pid(listing, "/root/.local/bin/acp-mock"), pid(listing, "sleep 600")
 	if !strings.Contains(listing, "acp-keeper serve") {
 		t.Fatalf("the adapter runs without a keeper:\n%s", listing)
+	}
+	// The keeper is root; the adapter is the container's user, as a plain
+	// exec is, and that user cannot reach the keeper's socket.
+	asAgent := func(args ...string) (string, error) {
+		out, err := exec.CommandContext(ctx, "docker", append([]string{"exec", container}, args...)...).CombinedOutput()
+		return string(out), err
+	}
+	ids := func(status string) string {
+		var keep []string
+		for line := range strings.Lines(status) {
+			if strings.HasPrefix(line, "Uid:") || strings.HasPrefix(line, "Gid:") || strings.HasPrefix(line, "Groups:") {
+				keep = append(keep, strings.Join(strings.Fields(line), " "))
+			}
+		}
+		return strings.Join(keep, "; ")
+	}
+	plain, err := asAgent("cat", "/proc/self/status")
+	if err != nil {
+		t.Fatalf("plain exec: %v\n%s", err, plain)
+	}
+	kept, err := asAgent("cat", "/proc/"+adapter+"/status")
+	if err != nil {
+		t.Fatalf("adapter status: %v\n%s", err, kept)
+	}
+	if ids(kept) != ids(plain) {
+		t.Fatalf("the adapter runs as %q, a plain exec as %q", ids(kept), ids(plain))
+	}
+	if mode, err := asAgent("stat", "-c", "%u %a", acpkeeper.SocketRoot); err != nil || strings.TrimSpace(mode) != "0 700" {
+		t.Fatalf("%s is %q, %v; want root's alone", acpkeeper.SocketRoot, mode, err)
+	}
+	if !strings.Contains(ids(plain), "Uid: 0 ") {
+		if out, err := asAgent("ls", acpkeeper.SocketRoot); err == nil {
+			t.Fatalf("the agent's user can list %s:\n%s", acpkeeper.SocketRoot, out)
+		}
 	}
 
 	s := e.sched

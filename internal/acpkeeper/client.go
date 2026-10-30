@@ -9,12 +9,11 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 )
 
-// ackInterval paces acks of agent output the attacher handed on. A crash
-// replays at most this much output twice; a detach acks it all.
-const ackInterval = 100 * time.Millisecond
+// markEvery bounds how many frames a Client hands acphost between handled
+// markers while the keeper keeps sending.
+const markEvery = 64
 
 // ErrLost ends a client whose keeper connection closed without the
 // adapter's exit or a detach: the keeper may still run.
@@ -22,6 +21,10 @@ var ErrLost = errors.New("acpkeeper: the keeper connection closed")
 
 // ErrPreempted ends a client a newer attacher replaced.
 var ErrPreempted = errors.New("acpkeeper: a newer server attached to the keeper")
+
+// ErrDetached refuses a write once Detach began: it would not reach the
+// agent.
+var ErrDetached = errors.New("acpkeeper: detached from the keeper")
 
 // Hello is what an attacher announces.
 type Hello struct {
@@ -44,13 +47,16 @@ type Client struct {
 
 	wmu sync.Mutex
 
-	mu        sync.Mutex
-	seq       uint64
-	acked     uint64
-	detaching bool
-	partial   []byte
-	exit      *Exit
-	err       error
+	mu sync.Mutex
+	// handed is the last frame handed acphost, marked the last one a
+	// handled marker followed, and seq the last one acphost handled.
+	handed, marked uint64
+	seq            uint64
+	acked          uint64
+	detaching      bool
+	partial        []byte
+	exit           *Exit
+	err            error
 }
 
 // Attach sends hello over conn and returns the attachment once the keeper
@@ -128,7 +134,7 @@ func (c *Client) Err() error {
 
 type writer struct{ c *Client }
 
-func (w writer) Write(p []byte) (int, error) { return w.c.write(p, "") }
+func (w writer) Write(p []byte) (int, error) { return w.c.write(p, "", 0) }
 
 func (w writer) Close() error {
 	w.c.mu.Lock()
@@ -140,14 +146,29 @@ func (w writer) Close() error {
 	return w.c.send(frame{T: frameClose})
 }
 
-// WriteTagged writes p, whose requests deliver what tag names.
-func (w writer) WriteTagged(p []byte, tag string) (int, error) { return w.c.write(p, tag) }
+// WriteTagged writes p, whose requests deliver what tag names; a
+// session/prompt starts the item log's turn.
+func (w writer) WriteTagged(p []byte, tag string, turn int64) (int, error) {
+	return w.c.write(p, tag, turn)
+}
 
-func (c *Client) write(p []byte, tag string) (int, error) {
+// Handled reports that acphost handled the frames up to the handled marker
+// for seq.
+func (w writer) Handled(seq uint64) {
+	w.c.mu.Lock()
+	w.c.seq = max(w.c.seq, min(seq, w.c.handed))
+	w.c.mu.Unlock()
+	select {
+	case w.c.kick <- struct{}{}:
+	default:
+	}
+}
+
+func (c *Client) write(p []byte, tag string, turn int64) (int, error) {
 	c.mu.Lock()
 	if c.detaching {
 		c.mu.Unlock()
-		return len(p), nil
+		return 0, ErrDetached
 	}
 	buf := append(c.partial, p...)
 	var lines [][]byte
@@ -164,7 +185,7 @@ func (c *Client) write(p []byte, tag string) (int, error) {
 	c.partial = append([]byte(nil), buf...)
 	c.mu.Unlock()
 	for _, line := range lines {
-		if err := c.send(frame{T: frameRPC, M: line, Tag: tag}); err != nil {
+		if err := c.send(frame{T: frameRPC, M: line, Tag: tag, Turn: turn}); err != nil {
 			return 0, err
 		}
 	}
@@ -182,10 +203,7 @@ func (c *Client) send(f frame) error {
 
 func (c *Client) read() {
 	err := ErrLost
-	// After a bye the pipe stays open until Close, so acphost handles all
-	// the keeper sent before it sees the stream end.
-	bye := false
-	defer func() { c.finish(err, !bye) }()
+	defer func() { c.finish(err) }()
 	for {
 		line, readErr := readLine(c.br)
 		if readErr != nil {
@@ -201,17 +219,27 @@ func (c *Client) read() {
 				err = nil
 				return
 			}
-			c.handed(f.Seq)
+			c.mu.Lock()
+			c.handed = max(c.handed, f.Seq)
+			c.mu.Unlock()
+			if c.br.Buffered() == 0 || f.Seq-c.marked >= markEvery {
+				if c.mark() != nil {
+					err = nil
+					return
+				}
+			}
 		case frameExit:
 			c.mu.Lock()
 			c.exit = f.Exit
+			c.handed = max(c.handed, f.Seq)
+			c.seq = c.handed
 			c.mu.Unlock()
-			c.handed(f.Seq)
 			c.flushAck()
 			err = nil
 			return
 		case frameBye:
-			err, bye = nil, true
+			_ = c.mark()
+			err = nil
 			return
 		case framePreempted:
 			err = ErrPreempted
@@ -220,29 +248,29 @@ func (c *Client) read() {
 	}
 }
 
-func (c *Client) handed(seq uint64) {
+// mark hands acphost a handled marker for the frames it was handed.
+func (c *Client) mark() error {
 	c.mu.Lock()
-	c.seq = max(c.seq, seq)
+	seq := c.handed
 	c.mu.Unlock()
-	select {
-	case c.kick <- struct{}{}:
-	default:
+	if seq <= c.marked {
+		return nil
 	}
+	c.marked = seq
+	_, err := fmt.Fprintf(c.in, `{"jsonrpc":"2.0","method":%q,"params":{"seq":%d}}`+"\n", HandledMethod, seq)
+	return err
 }
 
+// ackLoop acks what acphost handled as soon as it did, apart from acphost's
+// goroutine: a server killed between the two writes leaves that output for
+// the next attacher, which records it again.
 func (c *Client) ackLoop() {
-	tick := time.NewTicker(ackInterval)
-	defer tick.Stop()
 	for {
 		select {
 		case <-c.done:
 			return
-		case <-tick.C:
-		}
-		select {
 		case <-c.kick:
 			c.flushAck()
-		default:
 		}
 	}
 }
@@ -258,20 +286,18 @@ func (c *Client) flushAck() {
 	}
 }
 
-func (c *Client) finish(err error, end bool) {
+func (c *Client) finish(err error) {
 	c.mu.Lock()
 	c.err = err
 	c.mu.Unlock()
-	if end {
-		_ = c.in.Close()
-	}
+	_ = c.in.Close()
 	close(c.done)
 }
 
 // Detach asks the keeper to keep the adapter running without this
 // attachment and returns once the keeper confirmed and acphost was handed all
-// it sent before. What acphost writes from then on is dropped. Close ends
-// the stream acphost reads.
+// it sent before, and the stream acphost reads ended. Writes fail with
+// ErrDetached from then on. Close, once acphost handled the stream, acks it.
 func (c *Client) Detach(ctx context.Context) error {
 	c.mu.Lock()
 	c.detaching = true
@@ -294,7 +320,7 @@ func (c *Client) Detach(ctx context.Context) error {
 	}
 }
 
-// Close acks the output acphost was handed, unless a write to the keeper is
+// Close acks the output acphost handled, unless a write to the keeper is
 // stuck, and ends the attachment without waiting for the keeper.
 func (c *Client) Close() error {
 	if c.wmu.TryLock() {

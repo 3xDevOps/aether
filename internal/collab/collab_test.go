@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1452,11 +1453,11 @@ func TestSteersQueuedBeforeTheRestartSettleByTheAgentsKeeper(t *testing.T) {
 			sent <- prompt.Text
 			return acphost.OutcomeQueued, nil
 		},
-		Reattached: func(id domain.RunID) ([]string, bool) {
+		Reattached: func(id domain.RunID) ([]string, Reattach) {
 			if id == run.ID {
-				return []string{"reached"}, true
+				return []string{"reached"}, Adopted
 			}
-			return nil, false
+			return nil, Restored
 		},
 	})
 	if err != nil {
@@ -1499,6 +1500,66 @@ func TestSteersQueuedBeforeTheRestartSettleByTheAgentsKeeper(t *testing.T) {
 			t.Fatalf("%s after recovery: %+v", id, got)
 		}
 	}
+	select {
+	case body := <-sent:
+		t.Fatalf("sent %q again", body)
+	default:
+	}
+}
+
+func TestSteersQueuedForAPausedRunWaitForItsReattach(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	st.messages["paused"] = &store.RoomMessage{
+		ID: "paused", WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "paused",
+		State: store.RoomMessageSent, AgentDelivery: store.AgentQueued, CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
+	}
+	clock.Add(time.Second)
+	ready := make(chan struct{})
+	close(ready)
+	sent := make(chan string, 2)
+	var resumed atomic.Bool
+	service, err := New(Config{
+		Store: st, Runs: st, Workspaces: st, Now: clock.Now, Ready: ready, WorkerInterval: 10 * time.Millisecond,
+		Inject: func(_ context.Context, _ domain.RunID, _ domain.MemberID, prompt domain.AgentPrompt, _ bool, _ func(error)) (string, error) {
+			sent <- prompt.Text
+			return acphost.OutcomeQueued, nil
+		},
+		Reattached: func(domain.RunID) ([]string, Reattach) {
+			if resumed.Load() {
+				return nil, Adopted
+			}
+			return nil, Undecided
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	time.Sleep(100 * time.Millisecond)
+	if got, _ := st.GetRoomMessage(ctx, "paused"); got.State != store.RoomMessageSent || got.AgentDelivery != store.AgentQueued {
+		t.Fatalf("settled while the run was paused: %+v", got)
+	}
+	select {
+	case body := <-sent:
+		t.Fatalf("sent %q while the run was paused", body)
+	default:
+	}
+	resumed.Store(true)
+	select {
+	case body := <-sent:
+		if body != "paused" {
+			t.Fatalf("sent %q", body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the steer was not sent once the run reattached")
+	}
+	time.Sleep(100 * time.Millisecond)
 	select {
 	case body := <-sent:
 		t.Fatalf("sent %q again", body)

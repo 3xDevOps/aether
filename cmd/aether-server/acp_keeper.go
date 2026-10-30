@@ -13,7 +13,9 @@ import (
 func acpKeeper(args []string) int {
 	switch {
 	case len(args) >= 4 && args[0] == "serve" && args[2] == "--":
-		return acpkeeper.Serve(args[1], args[3:])
+		return acpkeeper.Serve(args[1], "", args[3:])
+	case len(args) >= 6 && args[0] == "serve" && args[2] == "--user" && args[4] == "--":
+		return acpkeeper.Serve(args[1], args[3], args[5:])
 	case len(args) == 2 && args[0] == "attach":
 		if err := acpkeeper.Bridge(args[1], os.Stdin, os.Stdout); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, "acp-keeper:", err)
@@ -21,6 +23,6 @@ func acpKeeper(args []string) int {
 		}
 		return 0
 	}
-	_, _ = fmt.Fprintln(os.Stderr, "acp-keeper: expected serve <socket> -- <argv...> or attach <socket>")
+	_, _ = fmt.Fprintln(os.Stderr, "acp-keeper: expected serve <socket> [--user <uid:gid>] -- <argv...> or attach <socket>")
 	return 125
 }

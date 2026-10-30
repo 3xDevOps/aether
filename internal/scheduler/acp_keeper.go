@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acpkeeper"
+	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -27,13 +28,23 @@ type keeperRecord struct {
 	Gen    uint64 `json:"gen"`
 }
 
+// keeperUser runs the keeper and its bridge as root, so the agent's user
+// cannot reach the keeper's socket, its token or its memory.
+const keeperUser = "0"
+
 // startKeeper starts adapter under a keeper and returns the keeper's exec
-// once it listens. The run records the exec and how to reattach before the
-// adapter can do anything.
+// once it listens. The keeper starts adapter as the container's user, as an
+// exec without a user would run. The run records the exec and how to
+// reattach before the adapter can do anything.
 func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, adapter []string) (runtime.ManagedExec, error) {
-	socket := path.Join("/tmp", ".aether-acp-"+strings.ToLower(rand.Text()), "keeper.sock")
+	info, err := d.s.cfg.Runtime.Inspect(ctx, cid)
+	if err != nil {
+		return nil, fmt.Errorf("inspect the container's user: %w", err)
+	}
+	socket := path.Join(acpkeeper.SocketRoot, strings.ToLower(rand.Text()), "keeper.sock")
 	exec, err := managed.StartExecPipe(ctx, cid, runtime.ExecSpec{
-		Argv:        acpkeeper.ServeArgv(coordtransport.CLIPath, socket, adapter),
+		Argv:        acpkeeper.ServeArgv(coordtransport.CLIPath, socket, normalizeRecoveryRunUser(info.User), adapter),
+		User:        keeperUser,
 		WorkingDir:  d.s.cfg.WorktreeMount,
 		CreationKey: "acp-" + rand.Text(),
 		// A container started for a Standard run lacks both.
@@ -44,7 +55,12 @@ func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed 
 	}
 	record := &keeperRecord{Socket: socket, Token: rand.Text()}
 	identity := exec.Identity()
-	d.record(entry, func() { entry.agentExec, entry.agentKeeper = &identity, record })
+	if err = d.persist(entry, func() { entry.agentExec, entry.agentKeeper = &identity, record }); err != nil {
+		if stopErr := d.stopExec(exec); stopErr != nil {
+			slog.Warn("scheduler: stop the unrecorded ACP keeper", "run", entry.runID, "error", stopErr)
+		}
+		return nil, fmt.Errorf("record the keeper: %w", err)
+	}
 	att := exec.Attachment()
 	stderr := &tailBuffer{max: acpStderrTail}
 	copied := make(chan struct{})
@@ -153,9 +169,12 @@ func (d *acpDriver) attachKeeper(ctx context.Context, entry *supervised, managed
 	next := *record
 	next.Gen++
 	// Before the hello, so a later server never reuses the generation.
-	d.record(entry, func() { entry.agentKeeper = &next })
+	if err := d.persist(entry, func() { entry.agentKeeper = &next }); err != nil {
+		return nil, nil, fmt.Errorf("record the keeper generation: %w", err)
+	}
 	bridge, err := managed.StartExecPipe(ctx, cid, runtime.ExecSpec{
 		Argv:        acpkeeper.AttachArgv(coordtransport.CLIPath, next.Socket),
+		User:        keeperUser,
 		CreationKey: "acp-attach-" + rand.Text(),
 	})
 	if err != nil {
@@ -188,19 +207,30 @@ func (d *acpDriver) reattach(ctx context.Context, entry *supervised, managed run
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if state := client.State(); len(state.Initialize) == 0 || len(state.Session) == 0 || state.SessionID == "" {
+		_ = client.Close()
+		d.stopBridge(entry.runID, bridge)
+		return nil, nil, nil, errors.New("the server stopped before the agent's session opened")
+	}
 	return exec, client, bridge, nil
 }
 
-// Reattached reports the tags of the requests an earlier server process
-// left with the agent of run, once this server process adopted the run's
-// session from the agent's keeper; false when it did not.
-func (s *Scheduler) Reattached(run domain.RunID) (delivered []string, ok bool) {
+// Reattached reports whether this server process adopted run's session from
+// the agent's keeper, with the tags of the requests an earlier server process
+// left with the agent. A paused run with a keeper is undecided until it
+// resumes.
+func (s *Scheduler) Reattached(run domain.RunID) (delivered []string, state collab.Reattach) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if entry := s.runs[run]; entry != nil && entry.keeperAdopted {
-		return entry.keeperDelivered, true
+	switch entry := s.runs[run]; {
+	case entry == nil:
+		return nil, collab.Restored
+	case entry.keeperAdopted:
+		return entry.keeperDelivered, collab.Adopted
+	case entry.paused && entry.agentKeeper != nil:
+		return nil, collab.Undecided
 	}
-	return nil, false
+	return nil, collab.Restored
 }
 
 func (d *acpDriver) stopExec(exec runtime.ManagedExec) error {

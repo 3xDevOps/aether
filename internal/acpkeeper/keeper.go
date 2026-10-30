@@ -19,6 +19,10 @@ import (
 // has not acked it, such as while no server is attached.
 const DefaultRetain = 32 << 20
 
+// agentQueueLimit bounds what attachers queued for an adapter that does not
+// read its stdin.
+const agentQueueLimit = 2 * maxLine
+
 // Config describes the adapter a keeper relays.
 type Config struct {
 	// Token authenticates attachers. Only the server that started the
@@ -34,9 +38,6 @@ type Config struct {
 // Keeper relays one adapter's stdio to at most one attacher at a time.
 type Keeper struct {
 	cfg Config
-
-	// agentMu orders writes to the adapter's stdin.
-	agentMu sync.Mutex
 
 	mu   sync.Mutex
 	cond *sync.Cond
@@ -58,6 +59,13 @@ type Keeper struct {
 	stderr     []byte
 	ended      chan struct{}
 	endOnce    sync.Once
+	stopped    bool
+	// toAgent is what goes to the adapter's stdin, written apart from the
+	// attacher's reads so an adapter that stops reading cannot block acks;
+	// closeAgent closes the stdin once toAgent is written.
+	toAgent     [][]byte
+	toAgentSize int
+	closeAgent  bool
 }
 
 // retained is one agent-to-client frame: an ACP message, or the adapter's
@@ -82,6 +90,7 @@ type outgoing struct {
 	id        json.RawMessage
 	method    string
 	tag       string
+	turn      int64
 	sessionID string
 	answer    []byte
 }
@@ -115,7 +124,37 @@ func New(cfg Config) *Keeper {
 		ended:      make(chan struct{}),
 	}
 	k.cond = sync.NewCond(&k.mu)
+	go k.writeAgent()
 	return k
+}
+
+// writeAgent writes what attachers queued to the adapter's stdin, in order.
+func (k *Keeper) writeAgent() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for {
+		for len(k.toAgent) == 0 && !k.closeAgent && !k.stopped {
+			k.cond.Wait()
+		}
+		switch {
+		case k.stopped:
+			return
+		case len(k.toAgent) == 0:
+			k.mu.Unlock()
+			_ = k.cfg.AgentIn.Close()
+			k.mu.Lock()
+			return
+		}
+		line := k.toAgent[0]
+		k.toAgent[0] = nil
+		k.toAgent = k.toAgent[1:]
+		k.toAgentSize -= len(line)
+		k.mu.Unlock()
+		if _, err := k.cfg.AgentIn.Write(line); err != nil {
+			k.cfg.Logger.Warn("acpkeeper: write to the agent", "error", err)
+		}
+		k.mu.Lock()
+	}
 }
 
 // Ended is closed once the adapter exited and the attacher, if any, acked
@@ -170,7 +209,14 @@ func (k *Keeper) Exited(code int) {
 	k.appendLocked(&retained{exit: k.exit})
 }
 
-func (k *Keeper) end() { k.endOnce.Do(func() { close(k.ended) }) }
+// end runs under k.mu.
+func (k *Keeper) end() {
+	k.endOnce.Do(func() {
+		k.stopped = true
+		close(k.ended)
+		k.cond.Broadcast()
+	})
+}
 
 func (k *Keeper) fromAgent(line []byte) {
 	var h rpcHead
@@ -347,13 +393,11 @@ func (k *Keeper) ServeConn(conn io.ReadWriteCloser) {
 			k.mu.Unlock()
 		case frameClose:
 			k.mu.Lock()
-			current := k.att == a && !a.detaching
-			k.mu.Unlock()
-			if current {
-				k.agentMu.Lock()
-				_ = k.cfg.AgentIn.Close()
-				k.agentMu.Unlock()
+			if k.att == a && !a.detaching {
+				k.closeAgent = true
+				k.cond.Broadcast()
 			}
+			k.mu.Unlock()
 		}
 	}
 	k.mu.Lock()
@@ -374,6 +418,8 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 		return nil, refuse(RefusedVersion, "the keeper speaks protocol version "+strconv.Itoa(Version))
 	case h.Gen <= k.gen:
 		return nil, refuse(RefusedStale, "generation "+strconv.FormatUint(k.gen, 10)+" already attached")
+	case h.Gen-k.gen > maxGenStep:
+		return nil, refuse(RefusedStale, "generation "+strconv.FormatUint(h.Gen, 10)+" is too far ahead of "+strconv.FormatUint(k.gen, 10))
 	case k.overflow:
 		return nil, refuse(RefusedOverflow, "")
 	case k.exit != nil:
@@ -416,8 +462,7 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 		prompt = id
 	}
 	if prompt != 0 {
-		e := k.out[prompt]
-		state.Prompt = &Prompt{Tag: e.tag, Answered: e.answer != nil}
+		state.Prompt = &Prompt{Turn: k.out[prompt].turn}
 	}
 	a := &attacher{gen: h.Gen, conn: conn, cursor: k.acked}
 	for _, r := range k.frames {
@@ -436,40 +481,61 @@ func (k *Keeper) fromAttacher(a *attacher, f frame) {
 	if json.Unmarshal(f.M, &h) != nil {
 		return
 	}
-	k.agentMu.Lock()
-	defer k.agentMu.Unlock()
 	k.mu.Lock()
+	defer k.mu.Unlock()
 	if k.att != a || a.detaching {
-		k.mu.Unlock()
 		return
 	}
 	line := []byte(f.M)
 	switch {
 	case h.request() && h.Method == AdoptMethod:
 		k.adoptLocked(a, h.ID)
-		k.mu.Unlock()
 		return
 	case h.request():
-		k.nextID++
-		id := k.nextID
-		k.out[id] = &outgoing{gen: a.gen, id: h.ID, method: h.Method, tag: f.Tag, sessionID: h.Params.SessionID}
+		id := k.nextID + 1
 		var err error
-		if line, err = withID(line, json.RawMessage(strconv.FormatInt(id, 10))); err != nil {
-			delete(k.out, id)
-			k.mu.Unlock()
+		if line, err = withID(line, json.RawMessage(strconv.FormatInt(id, 10))); err != nil || !k.queueLocked(a, line) {
 			return
 		}
+		k.nextID = id
+		k.out[id] = &outgoing{gen: a.gen, id: h.ID, method: h.Method, tag: f.Tag, turn: f.Turn, sessionID: h.Params.SessionID}
 	case h.response():
-		if !k.unanswered[string(h.ID)] {
-			k.mu.Unlock()
+		if !k.unanswered[string(h.ID)] || !k.queueLocked(a, line) {
 			return
 		}
 		delete(k.unanswered, string(h.ID))
+		k.pruneLocked(string(h.ID))
+	default:
+		k.queueLocked(a, line)
 	}
-	k.mu.Unlock()
-	if _, err := k.cfg.AgentIn.Write(append(line, '\n')); err != nil {
-		k.cfg.Logger.Warn("acpkeeper: write to the agent", "error", err)
+}
+
+// queueLocked queues line for the adapter's stdin. An adapter that stopped
+// reading it while a stuck queue grows past its limit costs a its
+// attachment.
+func (k *Keeper) queueLocked(a *attacher, line []byte) bool {
+	if k.toAgentSize+len(line)+1 > agentQueueLimit {
+		k.cfg.Logger.Warn("acpkeeper: the agent does not read its input; dropping the attacher", "queued", k.toAgentSize)
+		k.dropLocked(a)
+		return false
 	}
+	b := make([]byte, 0, len(line)+1)
+	k.toAgent = append(k.toAgent, append(append(b, line...), '\n'))
+	k.toAgentSize += len(line) + 1
+	k.cond.Broadcast()
+	return true
+}
+
+// pruneLocked drops the agent's request id once it is answered, so no later
+// attacher sees it again.
+func (k *Keeper) pruneLocked(id string) {
+	i := slices.IndexFunc(k.frames, func(r *retained) bool { return r.request == id })
+	if i < 0 {
+		return
+	}
+	k.size -= len(k.frames[i].line)
+	k.frames = slices.Delete(k.frames, i, i+1)
+	k.cond.Broadcast()
 }
 
 // adoptLocked hands the prompt an earlier attacher left in flight to a,
@@ -524,7 +590,8 @@ func (k *Keeper) send(a *attacher) {
 			err = w.Flush()
 		}
 		k.mu.Lock()
-		if err != nil || a.preempted {
+		// A preemption during the write leaves its frame in a.ctrl.
+		if err != nil || (a.preempted && len(a.ctrl) == 0) {
 			k.dropLocked(a)
 			k.mu.Unlock()
 			return

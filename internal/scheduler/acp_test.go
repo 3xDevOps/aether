@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,11 +42,27 @@ type acpRuntime struct {
 	mu       sync.Mutex
 	execs    []*acpExec
 	specs    []runtime.ExecSpec
+	bridges  []runtime.ExecSpec
 	keepers  map[string]*acpkeeper.Keeper
 	startErr error
 	// noKeeper fails keeper execs, as a container staged before keepers
 	// existed does.
 	noKeeper bool
+	// stuckStdin keeps adapters' stdin open when their keeper closes it, as
+	// an adapter that stopped reading it would.
+	stuckStdin atomic.Bool
+}
+
+type stdinCloser struct {
+	io.WriteCloser
+	stuck *atomic.Bool
+}
+
+func (c stdinCloser) Close() error {
+	if c.stuck.Load() {
+		return nil
+	}
+	return c.WriteCloser.Close()
 }
 
 func newACPRuntime(t *testing.T) *acpRuntime {
@@ -88,7 +105,7 @@ func (r *acpRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec runtim
 	readyIn, readyOut := io.Pipe()
 	e := &acpExec{
 		identity: runtime.ExecIdentity{ContainerID: id, ExecID: rand.Text(), CreationKey: spec.CreationKey, ClaimToken: "claim"},
-		argv:     spec.Argv[5:],
+		argv:     spec.Argv[slices.Index(spec.Argv, "--")+1:],
 		agent:    acpmock.New(r.fixture),
 		stdin:    tokenOut,
 		stdout:   readyIn,
@@ -106,7 +123,7 @@ func (r *acpRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec runtim
 	r.mu.Unlock()
 	go func() {
 		token, _ := bufio.NewReader(tokenIn).ReadString('\n')
-		k := acpkeeper.New(acpkeeper.Config{Token: strings.TrimSpace(token), AgentIn: hostOut})
+		k := acpkeeper.New(acpkeeper.Config{Token: strings.TrimSpace(token), AgentIn: stdinCloser{hostOut, &r.stuckStdin}})
 		r.mu.Lock()
 		r.keepers[spec.Argv[3]] = k
 		r.mu.Unlock()
@@ -146,6 +163,7 @@ func (r *acpRuntime) startDirect(id runtime.ID, spec runtime.ExecSpec) *acpExec 
 func (r *acpRuntime) attach(id runtime.ID, spec runtime.ExecSpec) (runtime.ManagedExec, error) {
 	r.mu.Lock()
 	k := r.keepers[spec.Argv[3]]
+	r.bridges = append(r.bridges, spec)
 	r.mu.Unlock()
 	if k == nil {
 		return nil, fmt.Errorf("acpRuntime: no keeper at %s", spec.Argv[3])

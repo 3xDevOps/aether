@@ -11,6 +11,9 @@ import (
 // connection or out fails; in ending closes the connection's write side, so
 // the keeper sees its attacher go.
 func Bridge(socket string, in io.Reader, out io.Writer) error {
+	if err := undumpable(); err != nil {
+		return err
+	}
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
 		return fmt.Errorf("acpkeeper: dial the keeper: %w", err)

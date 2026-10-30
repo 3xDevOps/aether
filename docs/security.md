@@ -126,6 +126,14 @@ workers. A child run gets its parent's tier.
 - Docker inside a Default run puts the agent in the daemon's group, so it can
   reach root inside the container through Docker without asking. With Sysbox
   that root maps to an unprivileged host user.
+- An Enhanced run's adapter runs under a
+  [keeper](enhanced-runs.md#restarts-and-failures) that outlives server
+  restarts. The keeper and the server's bridge to it run as root and cannot
+  be traced, and their socket sits in a root-only directory under
+  `/run/aether-acp`, so the agent's user cannot read the session's stream,
+  inject into it or take it over. The adapter itself runs as the agent's
+  user. Root in the container can reach the keeper: in a Root access run, or
+  a Default run with Docker, that boundary is the tier's.
 - In every tier the run's checkout and run branch are its result. Runs
   launched before tiers existed show as Root access.
 

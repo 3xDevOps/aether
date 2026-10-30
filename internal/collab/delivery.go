@@ -195,16 +195,26 @@ func (s *Service) dropAgentQueued(ctx context.Context) error {
 // settleAgentQueued settles the steers an earlier server process left queued
 // behind an agent turn: delivered when the agent's keeper reported they
 // reached the agent, sent again when the session was adopted and they did
-// not, and not sent when the session was restored.
-func (s *Service) settleAgentQueued(ctx context.Context) error {
+// not, and not sent when the session was restored. It leaves those of a
+// paused run queued and reports whether there are any. settled holds the
+// steers earlier calls settled, which a redelivery can leave queued.
+func (s *Service) settleAgentQueued(ctx context.Context, settled map[string]bool) (undecided bool, err error) {
 	queued, err := s.cfg.Store.ListAgentQueuedRoomMessages(ctx, s.bootAt)
 	if err != nil {
-		return fmt.Errorf("collab: list messages queued before the restart: %w", err)
+		return true, fmt.Errorf("collab: list messages queued before the restart: %w", err)
 	}
 	for _, msg := range queued {
-		delivered, adopted := s.cfg.Reattached(msg.RunID)
+		if settled[msg.ID] {
+			continue
+		}
+		delivered, state := s.cfg.Reattached(msg.RunID)
+		if state == Undecided {
+			undecided = true
+			continue
+		}
+		settled[msg.ID] = true
 		switch {
-		case !adopted:
+		case state == Restored:
 			s.agentDelivered(ctx, msg.ID, acphost.ErrClosed)
 		case slices.Contains(delivered, msg.ID):
 			s.agentDelivered(ctx, msg.ID, nil)
@@ -212,7 +222,7 @@ func (s *Service) settleAgentQueued(ctx context.Context) error {
 			s.redeliver(ctx, msg)
 		}
 	}
-	return nil
+	return undecided, nil
 }
 
 // redeliver sends a steer that never reached the agent to its adopted
