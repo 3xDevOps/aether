@@ -43,11 +43,27 @@ import (
 // the same container.
 
 const (
-	soakDuration = 105 * time.Second
-	soakLongRun  = 120
 	soakVersionB = "v0.0.0-soak-b"
 	soakImage    = "busybox:1.36"
+	// soakFullEnv gates the full matrix, which takes about four minutes.
+	soakFullEnv = "AETHER_RESTART_FULL"
 )
+
+// soakProfile is one scenario: which runs probe the server, for how long, and
+// how the server is restarted.
+type soakProfile struct {
+	// probes are the agent names; "b" and the mail checks exist only when
+	// mail is set, and without it "a" sends to the permission run.
+	probes   []string
+	mail     bool
+	duration time.Duration
+	long     int
+	steps    func(e *soakEnv) []soakStep
+}
+
+func (e *soakEnv) swapTo(bin string) func(t *testing.T) {
+	return func(t *testing.T) { copyExecutable(t, bin, e.installed) }
+}
 
 type soakStep struct {
 	name string
@@ -510,7 +526,61 @@ func (w *soakWatcher) follow(ctx context.Context, e *soakEnv, runID string) {
 	}
 }
 
+// TestIntegrationRestartSmoke is the CI variant: one probing run and a pending
+// permission request through two SIGTERM restarts and one SIGKILL, with a
+// keyed send in flight.
+func TestIntegrationRestartSmoke(t *testing.T) {
+	runRestartScenario(t, soakProfile{
+		probes: []string{"a"}, duration: 60 * time.Second, long: 70,
+		steps: func(e *soakEnv) []soakStep {
+			return []soakStep{
+				{"SIGTERM + restart", 8 * time.Second, e.restart("sigterm-1", e.term, nil)},
+				{"SIGTERM + restart", 24 * time.Second, e.restart("sigterm-2", e.term, nil)},
+				{"SIGKILL mid-request", 40 * time.Second, e.restart("sigkill", e.sigkill, nil)},
+			}
+		},
+	})
+}
+
+// TestIntegrationRestartAcceptance is the pre-release matrix: two mailing runs
+// and a pending permission request through repeated restarts, an update to a
+// second build, a rollback and a SIGKILL. It runs only with AETHER_RESTART_FULL=1.
 func TestIntegrationRestartAcceptance(t *testing.T) {
+	if os.Getenv(soakFullEnv) == "" {
+		t.Skipf("the full restart matrix takes four minutes; set %s=1", soakFullEnv)
+	}
+	runRestartScenario(t, soakProfile{
+		probes: []string{"a", "b"}, mail: true, duration: 105 * time.Second, long: 120,
+		steps: func(e *soakEnv) []soakStep {
+			return []soakStep{
+				{"SIGTERM + restart", 8 * time.Second, e.restart("sigterm-1", e.term, nil)},
+				{"SIGTERM + restart", 28 * time.Second, e.restart("sigterm-2", e.term, nil)},
+				{"update to second build", 48 * time.Second, e.restart("update", e.term, e.swapTo(e.binB))},
+				{"forced rollback to first build", 68 * time.Second, e.restart("rollback", e.term, e.swapTo(e.binA))},
+				{"SIGKILL mid-request", 88 * time.Second, e.restart("sigkill", e.sigkill, nil)},
+			}
+		},
+	})
+}
+
+func (e *soakEnv) term(t *testing.T)    { e.signal(t, syscall.SIGTERM) }
+func (e *soakEnv) sigkill(t *testing.T) { e.signal(t, syscall.SIGKILL) }
+
+func (e *soakEnv) restart(name string, stop func(t *testing.T), prep func(t *testing.T)) func(*testing.T, *soakEnv) {
+	return func(t *testing.T, _ *soakEnv) {
+		t.Helper()
+		o := soakOutage{name: name, down: time.Now()}
+		stop(t)
+		if prep != nil {
+			prep(t)
+		}
+		e.start(t)
+		o.up = time.Now()
+		e.outages = append(e.outages, o)
+	}
+}
+
+func runRestartScenario(t *testing.T, prof soakProfile) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	e := newSoakEnv(ctx, t)
@@ -518,25 +588,33 @@ func TestIntegrationRestartAcceptance(t *testing.T) {
 	e.seedRepo(t)
 	e.register(t)
 
-	taskFor := func(name string) string {
-		return fmt.Sprintf("%s/workspace/soakagent -name %s -duration %s -long %d",
-			acpmock.PromptRunPrefix, name, soakDuration, soakLongRun)
-	}
-	runA := e.launch(t, taskFor("a"))
-	runB := e.launch(t, taskFor("b"))
 	runC := e.launch(t, "say pong")
-	runs := []protocol.Run{runA, runB, runC}
+	ids := map[string]string{"c": runC.ID}
+	runs := []protocol.Run{runC}
 	t.Cleanup(func() {
 		for _, r := range runs {
 			_, _ = dockerOut("rm", "-f", containerName(r.ID))
 		}
 	})
-	ids := map[string]string{"a": runA.ID, "b": runB.ID, "c": runC.ID}
-
-	waitFor(t, 3*time.Minute, "both agents exchanging mail", func() bool {
-		a, b := readEvents(runA.ID, "a"), readEvents(runB.ID, "b")
-		return countKind(a, "recv") > 0 && countKind(b, "recv") > 0
-	})
+	for _, name := range prof.probes {
+		task := fmt.Sprintf("%s/workspace/soakagent -name %s -duration %s -long %d",
+			acpmock.PromptRunPrefix, name, prof.duration, prof.long)
+		if !prof.mail {
+			task += " -peer " + runC.ID
+		}
+		r := e.launch(t, task)
+		ids[name] = r.ID
+		runs = append(runs, r)
+	}
+	if prof.mail {
+		waitFor(t, 3*time.Minute, "both agents exchanging mail", func() bool {
+			return countKind(readEvents(ids["a"], "a"), "recv") > 0 && countKind(readEvents(ids["b"], "b"), "recv") > 0
+		})
+	} else {
+		waitFor(t, 3*time.Minute, "the agent's first sends", func() bool {
+			return countKind(readEvents(ids["a"], "a"), "send") > 0
+		})
+	}
 	waitFor(t, time.Minute, "run C's first turn", func() bool {
 		items, _ := e.history(runC.ID)
 		for _, it := range items {
@@ -566,7 +644,7 @@ func TestIntegrationRestartAcceptance(t *testing.T) {
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	watchers := map[string]*soakWatcher{}
 	var watchWG sync.WaitGroup
-	for _, name := range []string{"a", "b"} {
+	for _, name := range prof.probes {
 		w := &soakWatcher{}
 		watchers[name] = w
 		watchWG.Add(1)
@@ -575,27 +653,7 @@ func TestIntegrationRestartAcceptance(t *testing.T) {
 		go func() { defer watchWG.Done(); w.follow(watchCtx, e, ids[name]) }()
 	}
 
-	restart := func(name string, stop func(t *testing.T), prep func(t *testing.T)) func(*testing.T, *soakEnv) {
-		return func(t *testing.T, e *soakEnv) {
-			t.Helper()
-			o := soakOutage{name: name, down: time.Now()}
-			stop(t)
-			if prep != nil {
-				prep(t)
-			}
-			e.start(t)
-			o.up = time.Now()
-			e.outages = append(e.outages, o)
-		}
-	}
-	term := func(t *testing.T) { e.signal(t, syscall.SIGTERM) }
-	steps := []soakStep{
-		{"SIGTERM + restart", 8 * time.Second, restart("sigterm-1", term, nil)},
-		{"SIGTERM + restart", 28 * time.Second, restart("sigterm-2", term, nil)},
-		{"update to second build", 48 * time.Second, restart("update", term, func(t *testing.T) { copyExecutable(t, e.binB, e.installed) })},
-		{"forced rollback to first build", 68 * time.Second, restart("rollback", term, func(t *testing.T) { copyExecutable(t, e.binA, e.installed) })},
-		{"SIGKILL mid-request", 88 * time.Second, restart("sigkill", func(t *testing.T) { e.signal(t, syscall.SIGKILL) }, nil)},
-	}
+	steps := prof.steps(e)
 	begin := time.Now()
 	for _, s := range steps {
 		time.Sleep(time.Until(begin.Add(s.at)))
@@ -620,8 +678,8 @@ func TestIntegrationRestartAcceptance(t *testing.T) {
 	}
 
 	finished := waitUntil(time.Minute, func() bool {
-		for name, id := range map[string]string{"a": runA.ID, "b": runB.ID} {
-			if countKind(readEvents(id, name), "end") == 0 {
+		for _, name := range prof.probes {
+			if countKind(readEvents(ids[name], name), "end") == 0 {
 				return false
 			}
 		}
@@ -631,8 +689,8 @@ func TestIntegrationRestartAcceptance(t *testing.T) {
 		t.Errorf("an agent's turn never ended normally: its probe did not record its end")
 	}
 	waitUntil(time.Minute, func() bool {
-		for name, id := range map[string]string{"a": runA.ID, "b": runB.ID} {
-			if _, err := containerFile(id, "/workspace/soak/long.done."+name); err != nil {
+		for _, name := range prof.probes {
+			if _, err := containerFile(ids[name], "/workspace/soak/long.done."+name); err != nil {
 				return false
 			}
 		}
@@ -642,7 +700,7 @@ func TestIntegrationRestartAcceptance(t *testing.T) {
 	stopWatch()
 	watchWG.Wait()
 
-	assertSoak(t, e, ids, identity, watchers)
+	assertSoak(t, e, prof, ids, identity, watchers)
 }
 
 func countKind(events []soakEvent, kind string) int {
@@ -694,9 +752,12 @@ func pendingRequest(e *soakEnv, runID string) string {
 	return ""
 }
 
-func assertSoak(t *testing.T, e *soakEnv, ids map[string]string, identity map[string]soakContainer, watchers map[string]*soakWatcher) {
+func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]string, identity map[string]soakContainer, watchers map[string]*soakWatcher) {
 	t.Helper()
-	logs := map[string][]soakEvent{"a": readEvents(ids["a"], "a"), "b": readEvents(ids["b"], "b")}
+	logs := map[string][]soakEvent{}
+	for _, name := range prof.probes {
+		logs[name] = readEvents(ids[name], name)
+	}
 
 	var report bytes.Buffer
 	fmt.Fprintf(&report, "\nrestart availability (ms between the last success before and the first success after the signal)\n")
@@ -763,7 +824,10 @@ func assertSoak(t *testing.T, e *soakEnv, ids map[string]string, identity map[st
 		t.Errorf("%d agent-visible call failures", total)
 	}
 
-	for _, name := range []string{"a", "b"} {
+	for _, name := range prof.probes {
+		if !prof.mail {
+			break
+		}
 		other := map[string]string{"a": "b", "b": "a"}[name]
 		recv := map[string]int{}
 		for _, ev := range logs[other] {
@@ -790,24 +854,25 @@ func assertSoak(t *testing.T, e *soakEnv, ids map[string]string, identity map[st
 		}
 	}
 
-	for name, id := range map[string]string{"a": ids["a"], "b": ids["b"]} {
+	for _, name := range prof.probes {
+		id := ids[name]
 		marker, err := containerFile(id, "/workspace/soak/marker."+name)
-		want := make([]string, soakLongRun)
+		want := make([]string, prof.long)
 		for i := range want {
 			want[i] = strconv.Itoa(i + 1)
 		}
 		got := strings.Fields(marker)
 		if err != nil || strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Errorf("run %s: the long command's marker has %d lines, want %d contiguous (err %v)", name, len(got), soakLongRun, err)
+			t.Errorf("run %s: the long command's marker has %d lines, want %d contiguous (err %v)", name, len(got), prof.long, err)
 		}
 		now := containerIdentity(t, id)
 		if now != identity[id] {
 			t.Errorf("run %s: the container changed: %+v -> %+v", name, identity[id], now)
 		}
-		fmt.Fprintf(&report, "long command %s: %d/%d lines, container %.12s started %s\n", name, len(got), soakLongRun, now.id, now.started)
+		fmt.Fprintf(&report, "long command %s: %d/%d lines, container %.12s started %s\n", name, len(got), prof.long, now.id, now.started)
 	}
 
-	for _, name := range []string{"a", "b", "c"} {
+	for _, name := range append(append([]string{}, prof.probes...), "c") {
 		id := ids[name]
 		items, err := e.history(id)
 		if err != nil {

@@ -149,7 +149,7 @@ script committed to the test repository).
 | `TestIntegrationChaos*` | The server killed mid-run, disk pressure, a stalled agent |
 | `TestIntegrationCoordination*` | Messages between runs |
 | `TestIntegrationServerUpdate*` | `aether-server update`: preflight, rollback, downgrade guards |
-| `TestIntegrationRestartAcceptance` | Enhanced runs through five server restarts ([Restart acceptance](#restart-acceptance)) |
+| `TestIntegrationRestart*` | Enhanced runs through server restarts and updates ([Restart acceptance](#restart-acceptance)) |
 | `TestIntegrationServerGateway` | The dashboard the server hosts on the tailnet |
 | `TestIntegrationConnectorFlows` | A ChatGPT connector, over OAuth and MCP, launching, messaging, answering and stopping enhanced runs |
 
@@ -160,16 +160,20 @@ sudo env "PATH=$PATH" "HOME=$HOME" make test-integration \
 
 ## Restart acceptance
 
-`TestIntegrationRestartAcceptance` (`internal/server/restart_integration_test.go`)
-checks that Enhanced runs keep working through a server restart or update. It
-builds `aether-server` twice (the second reports `v0.0.0-soak-b`), runs one as a
+`internal/server/restart_integration_test.go` checks that Enhanced runs keep
+working through a server restart or update, in two sizes. `TestIntegrationRestartSmoke`
+runs in CI: one probing run (below) that sends to a second, idle run holding a
+permission request, through `SIGTERM` twice and `SIGKILL` once, in about a
+minute and a half. `TestIntegrationRestartAcceptance` is the full matrix for
+a release or an owner check, described next; it skips unless `AETHER_RESTART_FULL=1`.
+The full matrix builds `aether-server` twice (the second reports `v0.0.0-soak-b`), runs one as a
 child process against real Docker with a temporary data directory, and launches
 three Enhanced runs of a scripted agent (`internal/acphost/acpmock`):
 
 - Runs A and B each start a 120-second shell command that appends a line a
   second to a marker file, then for 105 seconds call the server through the
   staged `aether-internal` CLI and the staged `aether-server mcp` bridge
-  (`internal/server/testdata/soakagent`). A sends mail to B with the CLI and
+  (`internal/server/testdata/soakagent`), about one request a second in all. A sends mail to B with the CLI and
   reads with the bridge; B does the reverse. Half of A's CLI sends omit the
   idempotency key; the bridge requires one. Each side keeps one `inbox` long poll in flight. The agent
   streams a numbered line every 100 ms as its answer.
@@ -194,17 +198,16 @@ It fails on any of:
 
 It prints, per restart, the milliseconds between the last success before the
 signal and the first success after it for each channel (CLI and bridge calls
-on both runs, the inbox poll, and the `aether-acp` stream). Calls run every
-3 seconds, because the coordination socket allows one request a second per
-run, so a gap under about 3000 ms is the probe interval and means no outage.
+on both runs, the inbox poll, and the `aether-acp` stream). Status calls run every
+2 seconds, because the coordination socket allows one request a second per
+run, so a gap under about 2000 ms is the probe interval and means no outage.
 
 ```sh
-sudo env "PATH=$PATH" "HOME=$HOME" make test-integration \
-  INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegrationRestartAcceptance$'
+sudo env "PATH=$PATH" "HOME=$HOME" AETHER_RESTART_FULL=1 make test-integration \
+  INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegrationRestart'
 ```
 
-The test takes about four minutes and uses `busybox:1.36`, which it needs
-pulled.
+Both use `busybox:1.36`, which must be pulled; the full matrix takes about four minutes.
 
 ## Real-agent smoke tests
 

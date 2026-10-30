@@ -55,6 +55,7 @@ func main() {
 	name := flag.String("name", "a", "this agent's name, a or b")
 	dir := flag.String("dir", "/workspace/soak", "directory for logs and markers")
 	duration := flag.Duration("duration", 100*time.Second, "how long the agent keeps working")
+	fixedPeer := flag.String("peer", "", "run to send to; without it the peer is discovered through the conflict radar")
 	long := flag.Int("long", 120, "seconds the long shell command runs")
 	flag.Parse()
 
@@ -74,7 +75,10 @@ func main() {
 	startLong(*dir, *name, *long, rec)
 	bridge := &mcpConn{}
 	defer bridge.close()
-	peer := waitPeer(ctx, bridge, rec, *dir)
+	peer := *fixedPeer
+	if peer == "" {
+		peer = waitPeer(ctx, bridge, rec, *dir)
+	}
 	fmt.Println("peer:" + peer)
 
 	end := time.Now().Add(*duration)
@@ -89,13 +93,20 @@ func main() {
 			}
 		}()
 	}
-	loop(3*time.Second, func(int) { cliStatus(ctx, rec) })
-	loop(3*time.Second, func(int) { bridge.status(ctx, rec) })
+	loop(2*time.Second, func(int) { cliStatus(ctx, rec) })
+	loop(2*time.Second, func(n int) {
+		if n == 0 {
+			time.Sleep(time.Second)
+		}
+		bridge.status(ctx, rec)
+	})
 	if *name == "a" {
-		loop(5*time.Second, func(n int) { cliSend(ctx, rec, peer, fmt.Sprintf("a-msg-%04d", n), n%2 == 0) })
-		loop(0, func(int) { bridge.recv(ctx, rec) })
+		loop(6*time.Second, func(n int) { cliSend(ctx, rec, peer, fmt.Sprintf("a-msg-%04d", n), n%2 == 0) })
+		if *fixedPeer == "" {
+			loop(0, func(int) { bridge.recv(ctx, rec) })
+		}
 	} else {
-		loop(5*time.Second, func(n int) { bridge.send(ctx, rec, peer, fmt.Sprintf("b-msg-%04d", n)) })
+		loop(6*time.Second, func(n int) { bridge.send(ctx, rec, peer, fmt.Sprintf("b-msg-%04d", n)) })
 		loop(0, func(int) { cliRecv(ctx, rec) })
 	}
 	var ticks atomic.Int64
@@ -162,7 +173,7 @@ func cliSend(ctx context.Context, rec *recorder, peer, body string, keyed bool) 
 
 func cliRecv(ctx context.Context, rec *recorder) {
 	start := time.Now()
-	out, err := cli(ctx, "inbox", "--wait", "10")
+	out, err := cli(ctx, "inbox", "--wait", "20")
 	var env struct {
 		Result protocol.CoordInboxResult `json:"result"`
 	}
@@ -263,7 +274,7 @@ func (m *mcpConn) recv(ctx context.Context, rec *recorder) {
 	defer m.rcvMu.Unlock()
 	start := time.Now()
 	var inbox protocol.CoordInboxResult
-	err := m.call(ctx, "aether_inbox", protocol.CoordInboxParams{AckToken: m.ack, WaitSeconds: 10}, &inbox)
+	err := m.call(ctx, "aether_inbox", protocol.CoordInboxParams{AckToken: m.ack, WaitSeconds: 20}, &inbox)
 	if err != nil {
 		rec.add("recv-call", start, "", err)
 		time.Sleep(100 * time.Millisecond)
