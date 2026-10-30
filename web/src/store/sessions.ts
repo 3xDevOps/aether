@@ -575,7 +575,7 @@ export function rowsForRun({ run, events, room, memberName, paused }: SessionSou
       id: `input:${request.id}`,
       at: run.stateChangedAt,
       answer: 'input',
-      title: inputTitle[request.kind],
+      title: request.title ?? inputTitle[request.kind],
     })
   }
   return [...rows, ...liveRows(run, paused)]

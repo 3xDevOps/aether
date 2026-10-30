@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -64,6 +65,9 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	t.Cleanup(func() { _ = sched.Close() })
 	environment := integrationEnvironment(Deps{Store: db, Runs: sched})
 	checkout := filepath.Join(dir, "checkout")
+	if err = os.Mkdir(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	wantHomeAndCache := func(stage string, member domain.MemberID) {
 		t.Helper()

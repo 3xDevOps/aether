@@ -77,6 +77,8 @@ export interface RunInputRequest {
   id: string
   session_id: string
   kind: 'question' | 'permission' | 'form' | 'extension_ui'
+  /** Set only on a sudo request (isSudo in lib/run-requests.ts). */
+  title?: string
 }
 
 export interface Run {
@@ -109,6 +111,8 @@ export interface Run {
   mode: string
   model?: string
   effort?: string
+  /** Omitted by servers from before permission tiers, whose runs ran as root. */
+  permission?: Permission
   /** The connector client, such as ChatGPT, the run was launched through. */
   via?: string
   /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
@@ -1377,6 +1381,9 @@ export interface WorkspaceSelector {
 
 /** The wire names of Standard, Enhanced and Background. */
 export type LaunchMode = 'tui' | 'acp' | 'headless'
+
+/** What a run's agent may change outside its checkout: Root access, Default and Isolated. */
+export type Permission = 'root' | 'default' | 'isolated'
 
 /** One entry of agent.list; source is who supplied the harness. */
 export interface AgentInfo {

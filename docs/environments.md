@@ -32,6 +32,10 @@ build-essential, curl, Docker, Git, the GitHub CLI (`gh`), `ssh-keygen`, jq,
 Python 3, ripgrep, sudo, Go, Node and npm (via fnm), uv and Rust (via rustup).
 It does not include `rsync`.
 
+Your environment and your runs run as uid `1000`, with your home at `/root`.
+In your environment `sudo` needs no password; in a run it depends on the run's
+[permission tier](security.md#permission-tiers).
+
 The server uses the image tagged for its own release, from
 `ghcr.io/3xdevops/aether-standard:<tag>`. An admin can point it elsewhere with
 `--standard-image`. A team image should keep `gh` 2.81.0 or newer, `ssh-keygen`,
@@ -117,6 +121,9 @@ pushed to a registry.
   changes the environment's mounts (it no longer mounts the assistant's tool
   socket), so each environment is recreated once at its next open after it
   stops. Save first to keep unsaved changes.
+- Upgrading to the release with [permission tiers](security.md#permission-tiers)
+  changes the environment's user from root to uid `1000`, so each environment
+  is recreated once at its next open. Save first to keep unsaved changes.
 
 ## Reset to standard
 
@@ -149,10 +156,10 @@ Aether does not fall back to the standard image silently. Run `aether env reset`
 
 The standard image has the `docker` CLI, `dockerd`, `docker compose` and
 `docker buildx`. When the server host has the
-[Sysbox](https://github.com/nestybox/sysbox) container runtime, each run and
-each environment terminal starts its own `dockerd`. It needs no `--privileged`
-and no host Docker socket, so `docker run`, `docker build` and `docker compose
-up` work as on a laptop.
+[Sysbox](https://github.com/nestybox/sysbox) container runtime, each run except
+an Isolated one, and each environment terminal, starts its own `dockerd`. It
+needs no `--privileged` and no host Docker socket, so `docker run`,
+`docker build` and `docker compose up` work as on a laptop.
 
 An admin turns it on with the **Install** button under **Settings → Server**
 (admins only), by accepting the Docker-inside-runs question in `aether-server
@@ -276,11 +283,17 @@ aether workspace env script --clear
 The script (for a Node project, one line: `npm ci`) runs once in each new
 run's container, after it starts and before the agent. It runs as `/bin/sh -ec`
 (POSIX `sh`, stops at the first failing command, stderr merged into stdout) in
-`/workspace` as the container's user (root in the standard image). A run with
+`/workspace` as the run's user, which is never root. A run with
 extra repos (`aether run --repo`) runs it in the primary one; the others are at
 `/repos/<workspace name>`. It sees the
 workspace variables, your `$HOME` and tool caches, `AETHER_RUN_ID` and
 `AETHER_WORKSPACE_ID`.
+
+Install system packages with `sudo`, for example `sudo apt-get install -y
+libpq-dev`. In a Default run that `sudo` runs without asking anyone, since no
+agent has started yet; a Root run's is the image's own. An Isolated run's
+fails with `sudo: an isolated run cannot run commands as root`, and so does
+its launch.
 
 There is no time limit. The launch waits for it, and so does another launch by
 the same member or on the same agent account; other launches do not. Install
@@ -371,6 +384,10 @@ applies at once to runs started with egress control on, and their open
 connections to a removed host close within 10 seconds. Agent runs are the only
 containers it limits: environment terminals, candidate verification and agent
 installs connect directly.
+
+An [Isolated run](security.md#permission-tiers) goes through the proxy whether
+egress control is on or off, and reaches only the agent rows of the table
+below (Claude Code through OpenCode), whatever the workspace's list says.
 
 Such a run starts on `aether-egress`, a Docker network with no route out. Its
 one way out is a proxy inside `aether-server` on that network's gateway, port

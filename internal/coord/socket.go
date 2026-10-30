@@ -478,6 +478,10 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 				}
 				continue
 			}
+			if req.Method == protocol.MethodRunSudo {
+				s.serveSudo(connCtx, conn, r, capped, run, req, resp)
+				return
+			}
 			resp = s.handleParsed(connCtx, run, req, resp)
 		}
 		if connCtx.Err() != nil {
@@ -515,6 +519,11 @@ func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protoc
 		result any
 		rpcErr *protocol.Error
 	)
+	if leavesRun(req.Method) {
+		if resp.Error = s.refuseIsolated(ctx, run, req.Method); resp.Error != nil {
+			return resp
+		}
+	}
 	switch req.Method {
 	case protocol.MethodCoordStatus:
 		result, rpcErr = s.Status(ctx, run)
@@ -675,6 +684,26 @@ func isDevelopmentMethod(method string) bool {
 	default:
 		return false
 	}
+}
+
+// leavesRun reports whether method writes somewhere other runs read.
+func leavesRun(method string) bool {
+	switch method {
+	case protocol.MethodCoordSend, protocol.MethodCoordAsk, protocol.MethodCoordReply, protocol.MethodMemoryAdd:
+		return true
+	}
+	return false
+}
+
+func (s *Service) refuseIsolated(ctx context.Context, run domain.RunID, method string) *protocol.Error {
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return &protocol.Error{Code: protocol.CodeInternal, Message: fmt.Sprintf("%s: read run %s: %v", method, run, err)}
+	}
+	if r.Permission == domain.PermissionIsolated {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": an isolated run cannot message other runs or write team memory"}
+	}
+	return nil
 }
 
 func isMissionMethod(method string) bool {

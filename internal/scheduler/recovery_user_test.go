@@ -43,6 +43,15 @@ func TestRecoveryResolvesUnknownRunUserBeforeTerminalAdoption(t *testing.T) {
 			if closeErr := e.sched.Close(); closeErr != nil {
 				t.Fatal(closeErr)
 			}
+			// A sidecar from before run users were recorded.
+			legacy, err := e.sched.readSidecar(run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy.RunUser = ""
+			if writeErr := e.sched.writeSidecar(legacy); writeErr != nil {
+				t.Fatal(writeErr)
+			}
 			container.spec.User = tc.runUser
 			terminalContainer, err := e.rt.get(runtime.ID(terminal.ContainerID))
 			if err != nil {

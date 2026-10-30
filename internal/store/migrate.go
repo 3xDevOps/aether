@@ -2285,6 +2285,11 @@ ALTER TABLE run_children DROP COLUMN depth;
 ALTER TABLE runs DROP COLUMN child_refused;
 DROP TABLE coord_peers;
 `,
+	// v97: each run's permission tier. Runs from before tiers ran as root.
+	`
+ALTER TABLE runs ADD COLUMN permission TEXT NOT NULL DEFAULT 'root';
+ALTER TABLE launch_defaults ADD COLUMN permission TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

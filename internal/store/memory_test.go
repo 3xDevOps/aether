@@ -593,6 +593,25 @@ func TestMemoryCapturesReportOutcome(t *testing.T) {
 	}
 }
 
+func TestMemoryKeepsNoOutcomeOfAnIsolatedRun(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := &domain.Run{WorkspaceID: w.ID, MemberID: member.ID, Task: "t", Harness: "claude", Mode: domain.LaunchTUI,
+		Status: domain.RunRunning, Permission: domain.PermissionIsolated}
+	if err := db.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AppendCoordReport(ctx, &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess,
+		Summary: "A note for every other run", IdempotencyKey: "success-1"}); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	if notes := outcomeNotes(t, db, run.ID); len(notes) != 0 {
+		t.Fatalf("an isolated run's report wrote %d outcome notes", len(notes))
+	}
+}
+
 // A later report rewrites the outcome note a member pinned, so the pin is
 // cleared until a member reads the new text; a member's replacement of the
 // note stays as it was.

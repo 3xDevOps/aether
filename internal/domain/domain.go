@@ -218,6 +218,31 @@ func ValidModel(model string) error {
 	return fmt.Errorf("model %q must be a single argument: no whitespace or control characters, not starting with \"-\", at most 128 bytes", model)
 }
 
+// Permission is how much a run's agent may change beyond its own checkout.
+// Every tier runs the agent as an unprivileged user.
+type Permission string
+
+const (
+	// PermissionRoot lets sudo run as root without asking.
+	PermissionRoot Permission = "root"
+	// PermissionDefault asks a person before each sudo command.
+	PermissionDefault Permission = "default"
+	// PermissionIsolated keeps every write outside the checkout to the run:
+	// no sudo, a throwaway copy of the home, egress to the agent's own hosts.
+	PermissionIsolated Permission = "isolated"
+)
+
+// ParsePermission accepts the three tiers; empty is PermissionDefault.
+func ParsePermission(s string) (Permission, error) {
+	switch p := Permission(s); p {
+	case "":
+		return PermissionDefault, nil
+	case PermissionRoot, PermissionDefault, PermissionIsolated:
+		return p, nil
+	}
+	return "", fmt.Errorf("permission %q is not root, default or isolated", s)
+}
+
 // ValidEffort reports whether effort can reach an agent CLI as one argument.
 // Empty is valid and keeps the agent's default.
 func ValidEffort(effort string) error {
@@ -239,6 +264,7 @@ type LaunchOptions struct {
 	Limits        RunLimits
 	Model         string
 	Effort        string
+	Permission    Permission
 	CachedBase    string
 	AssignedRunID RunID
 	// RequestedAccount is the account the launcher asked for, recorded on the
@@ -731,8 +757,9 @@ type Run struct {
 	Mode    LaunchMode
 	// Model is the agent's model for this run and Effort its effort or
 	// thinking level; empty keeps the agent's default.
-	Model  string
-	Effort string
+	Model      string
+	Effort     string
+	Permission Permission
 	// ACP is true when the server drives the agent over the Agent Client
 	// Protocol: every LaunchACP run, and a LaunchHeadless run whose agent
 	// serves ACP. Such a run has a session item log.

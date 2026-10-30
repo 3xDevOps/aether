@@ -105,7 +105,8 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	defer unlock()
 	// A handoff takes this lock, so the parent read here is the one the
 	// launch runs under.
-	if parent, getErr := s.cfg.Store.GetRun(ctx, c.ParentRunID); getErr != nil || parent.MemberID != c.OwnerID || parent.Status.Terminal() {
+	parent, getErr := s.cfg.Store.GetRun(ctx, c.ParentRunID)
+	if getErr != nil || parent.MemberID != c.OwnerID || parent.Status.Terminal() {
 		unlock()
 		refuse("the parent run ended or changed owner before this child started")
 		return
@@ -124,7 +125,7 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	}
 	created := false
 	_, err = s.cfg.Runs.LaunchWithOptions(ctx, c.WorkspaceID, c.OwnerID, account, c.Task, c.Harness, c.Mode, domain.LaunchOptions{
-		Model: c.Model, RequestedAccount: requested, Fallback: c.Fallback, ReservedRunID: c.RunID,
+		Model: c.Model, Permission: parent.Permission, RequestedAccount: requested, Fallback: c.Fallback, ReservedRunID: c.RunID,
 		FromCommit: c.BaseCommit, FromBranch: c.BaseBranch, Admitted: unlock,
 		Created: func(domain.RunID) {
 			created = true

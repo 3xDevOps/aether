@@ -66,3 +66,57 @@ func TestRunInputRespondAnswersWithoutALease(t *testing.T) {
 		t.Fatalf("respond to an unknown request = %v, want CodeNotFound", perr)
 	}
 }
+
+func TestSudoRequestIsTheOwnersOrAnAdminsToAllow(t *testing.T) {
+	e := newTestEnv(t, nil)
+	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	_, admin := addMember(t, e, "Root", domain.RoleAdmin, false)
+	run := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "install jq", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := e.store.CreateRun(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	sudo := func(id string) domain.RunInputRequest {
+		return domain.RunInputRequest{ID: id, SessionID: domain.SudoSessionID, Kind: "permission", Title: "Run as root: apt-get install -y jq"}
+	}
+	e.runs.mu.Lock()
+	e.runs.sudo = map[domain.RunID][]domain.RunInputRequest{run.ID: {sudo("sudo-a"), sudo("sudo-b")}}
+	e.runs.mu.Unlock()
+
+	options := []protocol.AttentionOption{{ID: domain.SudoAllow, Label: "Allow once", Kind: "allow_once"}, {ID: domain.SudoDeny, Label: "Deny", Kind: "reject_once"}}
+	for _, member := range []domain.MemberID{e.member.ID, admin.ID} {
+		item, ok := attentionItems(t, e, member, protocol.AttentionListParams{})[run.ID]
+		if !ok || item.Kind != protocol.AttentionKindPermission || item.Reason != "Permission requested" || item.Request == nil ||
+			item.Request.ID != "sudo-a" || item.Request.Title != "Run as root: apt-get install -y jq" || !slices.Equal(item.Request.Options, options) {
+			t.Fatalf("%s's attention item = %+v (listed %v)", member, item, ok)
+		}
+	}
+	if item, ok := attentionItems(t, e, bob.ID, protocol.AttentionListParams{})[run.ID]; ok {
+		t.Fatalf("Bob, who may not allow it, sees %+v", item)
+	}
+
+	respond := func(member domain.MemberID, request, option string) *protocol.Error {
+		t.Helper()
+		_, perr := callJSON(t, e, member, protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: string(run.ID), RequestID: request, OptionID: option})
+		return perr
+	}
+	if perr := respond(bob.ID, "sudo-a", domain.SudoAllow); perr == nil || perr.Code != protocol.CodeDenied ||
+		perr.Message != "run.input.respond: permission denied: allowing a command to run as root requires the run's owner or an admin" {
+		t.Fatalf("Bob allows = %+v", perr)
+	}
+	if perr := respond(bob.ID, "sudo-a", "allow"); perr == nil || perr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("an unknown option = %+v", perr)
+	}
+	if perr := respond(bob.ID, "sudo-a", domain.SudoDeny); perr != nil {
+		t.Fatalf("Bob denies = %v", perr)
+	}
+	if perr := respond(admin.ID, "sudo-b", domain.SudoAllow); perr != nil {
+		t.Fatalf("an admin allows = %v", perr)
+	}
+	want := []string{"sudo:" + string(run.ID) + ":sudo-a:false:" + string(bob.ID), "sudo:" + string(run.ID) + ":sudo-b:true:" + string(admin.ID)}
+	if calls := e.runs.Calls(); !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+	if perr := respond(e.member.ID, "sudo-a", domain.SudoAllow); perr == nil || perr.Code != protocol.CodeNotFound {
+		t.Fatalf("a decided request = %+v, want CodeNotFound", perr)
+	}
+}

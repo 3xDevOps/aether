@@ -134,7 +134,9 @@ The bot answers in the thread with what happened, or the server's error.
 - an Enhanced run's permission request: its allow-once and reject-once
   options. There is no "always" option, so Slack cannot change what the agent
   may do next time;
-- an Enhanced run's question with options: one button per option.
+- an Enhanced run's question with options: one button per option;
+- a Default run's `sudo` command, in either mode: **Allow once** and **Deny**
+  ([security.md](security.md#sudo-in-a-default-run)).
 
 The bot answers in the thread, for example `Answered: Reject.` or
 `Already answered, or no longer pending.`
@@ -145,7 +147,7 @@ The message links to the dashboard instead of showing buttons for:
   decide text you did not see);
 - a question that is a form or asks you to open a link;
 - more than 25 options, or an option label longer than 75 characters;
-- a Standard run's request, which is answered in its terminal.
+- a Standard run's own request, which is answered in its terminal.
 
 Your role still decides: a viewer cannot answer. You cannot launch runs or run
 other commands, and the bot posts in no channel. A top-level direct message

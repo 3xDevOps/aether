@@ -171,6 +171,18 @@ func answer(c *protocol.Client, w io.Writer, stdin io.Reader, runID, id, reply s
 	if err != nil {
 		return err
 	}
+	// attention.list shows a sudo request only to those who may allow it,
+	// while anyone who can steer may deny it; the server says which.
+	if strings.HasPrefix(id, domain.SudoRequestPrefix) {
+		if values != nil {
+			return fmt.Errorf("--values is for an agent's question; %s is a sudo request", id)
+		}
+		if err = c.Call(protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: r.ID, RequestID: id, OptionID: reply}, nil); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(w, "run %s sudo request %s: answered %s\n", r.ID, id, reply)
+		return err
+	}
 	items, err := attentionItems(c, r.WorkspaceID)
 	if err != nil {
 		return err

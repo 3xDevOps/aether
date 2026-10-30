@@ -10,7 +10,7 @@ import (
 func TestChildRunsOnByDefaultMigrationKeepsAnExplicitOff(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw := openLegacy(t, path, len(migrations)-1)
+	raw := openLegacy(t, path, 95)
 	if _, err := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, color, role, created_at)
 			VALUES ('snoozed', 'Ada', ?, '#e6194b', 'admin', 1),

@@ -37,6 +37,13 @@ afterEach(cleanup)
 
 const quick = () => screen.findByRole('button', { name: /Launch again/ })
 
+it('relaunches on the saved permission tier', async () => {
+  vi.mocked(api.launchDefaultsGet).mockResolvedValue(saved('acp', { permission: 'isolated' }))
+  render(<SplitNewRun blocked={null} shortcut="n" onOpen={() => {}} />)
+  fireEvent.click(await quick())
+  await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', model: 'opus', permission: 'isolated' }))
+})
+
 it('is one plain New run button until a launch has been saved', async () => {
   vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 0, defaults: {} })
   render(<SplitNewRun blocked={null} shortcut="n" onOpen={() => {}} />)

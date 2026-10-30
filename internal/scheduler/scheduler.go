@@ -262,6 +262,8 @@ type Scheduler struct {
 	appServer         *appServerDriver
 	itemLogs          acphost.ReadOnlyLogCache
 	usageFallback     *UsageFallback
+	// sudoWait is sudoTimeout outside tests.
+	sudoWait time.Duration
 }
 
 // credentialUserReservation stops ownership changes to the member home and
@@ -346,6 +348,10 @@ type supervised struct {
 	// inputPublishPending keeps the current snapshot owed to the event log,
 	// including an empty set after the last request closes.
 	inputPublishPending bool
+	// sudo are the run's sudo commands waiting for a person, oldest first.
+	// They are published with pendingInputs but never saved: each waits on
+	// a shim connection, which a restart ends.
+	sudo []*sudoRequest
 	// lastWorking is when the agent last said it was working. The hook leaves
 	// no other trace, so the stall detector counts it as activity.
 	lastWorking time.Time
@@ -642,6 +648,7 @@ func New(cfg Config) (*Scheduler, error) {
 		superCtx:             ctx,
 		superCancel:          cancel,
 		recoveryReady:        make(chan struct{}),
+		sudoWait:             sudoTimeout,
 		runs:                 make(map[domain.RunID]*supervised),
 		runShellLocks:        make(map[domain.RunID]*sync.Mutex),
 		runShellReservations: make(map[string]*shellTabState),
@@ -992,7 +999,8 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		MemoryLimitBytes:  limits.MemoryBytes,
 		PidsLimit:         limits.Pids,
 		CreationKey:       string(run.ID),
-		NestedDocker:      true,
+		NestedDocker:      run.Permission != domain.PermissionIsolated,
 		Egress:            plan.Egress,
+		Sudo:              plan.Sudo,
 	}
 }

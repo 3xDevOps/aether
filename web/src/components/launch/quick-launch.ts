@@ -52,6 +52,7 @@ export async function quickLaunch(last: LastLaunch, saved: LaunchDefaultsResult 
       harness: last.harness,
       mode: last.mode,
       ...(last.model ? { model: last.model } : {}),
+      ...(saved?.defaults.permission ? { permission: saved.defaults.permission } : {}),
       ...(account ? { account_member_id: account } : {}),
       ...(accounts.length ? fallbackParams(fallback, accounts, account || own) : {}),
     })

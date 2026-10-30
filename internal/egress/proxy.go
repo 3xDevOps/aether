@@ -195,8 +195,12 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		refuse(w, r, status, "aether: "+err.Error())
 		return
 	}
-	if !allowed(Hosts(ws.Environment.Egress), host) {
-		p.deny(w, r, run, host, fmt.Sprintf("aether: egress to %s denied; allow it with aether workspace env egress allow --workspace %s %s", host, ws.ID, host))
+	if !allowed(runHosts(run, ws), host) {
+		msg := fmt.Sprintf("aether: egress to %s denied; allow it with aether workspace env egress allow --workspace %s %s", host, ws.ID, host)
+		if run.Permission == domain.PermissionIsolated {
+			msg = fmt.Sprintf("aether: egress to %s denied; an isolated run reaches only the agents' own hosts", host)
+		}
+		p.deny(w, r, run, host, msg)
 		return
 	}
 	resolved, addrs, err := p.lookup(ctx, host)
@@ -209,7 +213,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodConnect {
-		p.tunnel(w, r.WithContext(context.WithValue(ctx, addrsKey{}, addrs)), ws.ID, host, port)
+		p.tunnel(w, r.WithContext(context.WithValue(ctx, addrsKey{}, addrs)), run, host, port)
 		return
 	}
 	// A forwarded request still ends when its client goes away.
@@ -217,7 +221,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	done := make(chan struct{})
 	defer close(done)
-	go p.closeWhenDenied(done, ws.ID, host, cancel)
+	go p.closeWhenDenied(done, run, host, cancel)
 	p.forwarder.ServeHTTP(w, r.WithContext(forward))
 }
 
@@ -274,7 +278,7 @@ func (p *Proxy) deny(w http.ResponseWriter, r *http.Request, run *domain.Run, ho
 	refuse(w, r, http.StatusForbidden, msg)
 }
 
-func (p *Proxy) tunnel(w http.ResponseWriter, r *http.Request, workspace domain.WorkspaceID, host, port string) {
+func (p *Proxy) tunnel(w http.ResponseWriter, r *http.Request, run *domain.Run, host, port string) {
 	upstream, err := dialChecked(r.Context(), "tcp", net.JoinHostPort(r.URL.Hostname(), port))
 	if err != nil {
 		refuse(w, r, http.StatusBadGateway, fmt.Sprintf("aether: connect to %s: %v", r.URL.Host, err))
@@ -299,7 +303,7 @@ func (p *Proxy) tunnel(w http.ResponseWriter, r *http.Request, workspace domain.
 	}
 	done := make(chan struct{})
 	defer close(done)
-	go p.closeWhenDenied(done, workspace, host, closeBoth)
+	go p.closeWhenDenied(done, run, host, closeBoth)
 	go func() {
 		_, copyErr := io.Copy(upstream, buffered.Reader)
 		if copyErr == nil {
@@ -314,9 +318,9 @@ func (p *Proxy) tunnel(w http.ResponseWriter, r *http.Request, workspace domain.
 	_, _ = io.Copy(conn, upstream)
 }
 
-// closeWhenDenied ends a connection once its host leaves the workspace's
-// list, or once the list cannot be read.
-func (p *Proxy) closeWhenDenied(done <-chan struct{}, workspace domain.WorkspaceID, host string, end func()) {
+// closeWhenDenied ends a connection once its host leaves the run's list, or
+// once the list cannot be read.
+func (p *Proxy) closeWhenDenied(done <-chan struct{}, run *domain.Run, host string, end func()) {
 	ticker := time.NewTicker(p.recheck)
 	defer ticker.Stop()
 	for {
@@ -324,8 +328,8 @@ func (p *Proxy) closeWhenDenied(done <-chan struct{}, workspace domain.Workspace
 		case <-done:
 			return
 		case <-ticker.C:
-			ws, err := p.store.GetWorkspace(context.Background(), workspace)
-			if err != nil || !allowed(Hosts(ws.Environment.Egress), host) {
+			ws, err := p.store.GetWorkspace(context.Background(), run.WorkspaceID)
+			if err != nil || !allowed(runHosts(run, ws), host) {
 				end()
 				return
 			}

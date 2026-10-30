@@ -1872,6 +1872,7 @@ the swarm, which the run's `state` does not cover, so push and
 
 | Condition | Who it needs | Reason line |
 | --- | --- | --- |
+| Pending sudo command of a Default run, swarm workers included | owner or an admin | Permission requested |
 | Pending native permission | owner or terminal controller | Permission: … (enhanced: Permission requested) |
 | Pending native question | owner or terminal controller | Question: answer in the terminal (enhanced: Question from the agent) |
 | Queued message from another member | terminal controller | Bob sent a message, approve to deliver |
@@ -2346,6 +2347,16 @@ no `effort`, then those levels in the agent's order
 default and is not remembered; switching to an agent without the chosen level
 resets it.
 
+**Permission** (`PermissionControl` in
+`src/components/launch/permission-control.tsx`) is the run tab's first field
+when `server.info` lists the `permission` feature. Its three segments are
+**Root access**, **Default** (marked Recommended) and **Isolated**
+([permission tiers](security.md#permission-tiers)); Root access is ringed in
+the needs-you color when chosen, and a line under the segments says what the
+chosen tier allows. It starts on the saved `permission`, else Default, saves
+each change through `launch.defaults.set` at once, and goes on the wire as
+`permission`. A server without the feature gets no field and no `permission`.
+
 Where the gateway offers `launch.defaults.get`, the form starts from the
 member's [saved launch choices](teams.md#saved-launch-choices) on the
 server (`store/launch-defaults.ts`), so every browser and device opens on
@@ -2528,7 +2539,9 @@ line, else the task's first line cut at 120 characters, with a lock for a
 protected run), then a one-line state line: the run branch with a copy
 icon (click copies the name), the agent's glyph and mode ("Standard"; the
 tooltip adds the `agent.list` display name, `run.model` and `run.effort`,
-"Claude Code · Standard · opus · high"), "On `<name>`'s account (fallback)" when the run carries
+"Claude Code · Standard · opus · high"), a **Root access** (needs-you tone) or
+**Isolated** badge for a run not at Default, whose tooltip says what the tier
+allows, "On `<name>`'s account (fallback)" when the run carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
 a `run.account` event updates it live when the run moves), the reason, and
 the owner. The state's dot and label are the Workflow chip's, on the row

@@ -1,5 +1,6 @@
 import { memberName as storeMemberName } from '@/lib/member-name'
 import { needsInputPrefix, plainReason } from '@/lib/reasons'
+import { isSudo } from '@/lib/run-requests'
 import type {
   Device,
   Member,
@@ -32,6 +33,7 @@ export interface StateContext {
 export type NeedsYouTarget = 'request' | 'run' | 'terminal' | 'changes' | 'notes' | 'swarm'
 
 export type NeedsYouID =
+  | 'sudo'
   | 'permission'
   | 'question'
   | 'queued-message'
@@ -180,7 +182,7 @@ export function unreadReason(count: number, since: string, now: number): string 
 }
 
 const nativeRequests = (run: RunRecord, kinds: string[]) =>
-  (run.pending_inputs ?? []).filter((request) => kinds.includes(request.kind))
+  (run.pending_inputs ?? []).filter((request) => !isSudo(request) && kinds.includes(request.kind))
 
 const questionKinds = ['question', 'form', 'extension_ui']
 
@@ -232,6 +234,17 @@ const waitBroken = (run: RunRecord) => run.reason?.startsWith(waitBrokenPrefix) 
 
 // Checked in order; the specific requests precede the agent's own `needs-you`.
 export const needsYouConditions: NeedsYouCondition[] = [
+  condition({
+    id: 'sudo',
+    target: 'request',
+    background: true,
+    workers: true,
+    admins: true,
+    holds: (run) => (run.pending_inputs ?? []).some(isSudo),
+    resolvers: (run) => [run.member_id],
+    reason: () => 'Permission requested',
+    action: () => ({ kind: 'open', label: 'Answer' }),
+  }),
   condition({
     id: 'permission',
     target: 'request',

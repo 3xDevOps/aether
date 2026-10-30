@@ -225,6 +225,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		MemoryLimitBytes: limits.MemoryBytes,
 		PidsLimit:        limits.Pids,
 		NestedDocker:     true,
+		Sudo:             plan.Sudo,
 	}
 	spec.Fingerprint = terminalFingerprint(spec, s.cfg.StandardImage)
 	cid, image, err := s.startOrCreateTerminal(ctx, kept, spec)

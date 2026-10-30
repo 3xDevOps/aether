@@ -317,6 +317,19 @@ func TestProxyDeniesOtherHosts(t *testing.T) {
 	}
 }
 
+func TestProxyLimitsAnIsolatedRunToAgentHosts(t *testing.T) {
+	tp := newTestProxy(t, fakeNetwork{netip.MustParseAddr("127.0.0.1"): "run-1"})
+	tp.store.run.Permission = domain.PermissionIsolated
+
+	const denied = "aether: egress to allowed.test denied; an isolated run reaches only the agents' own hosts"
+	if resp, body, _, _ := tp.connect(t, "allowed.test:"+tp.port); resp.StatusCode != http.StatusForbidden || body != denied+"\n" {
+		t.Fatalf("CONNECT allowed.test from an isolated run = %s %q, want 403 %q", resp.Status, body, denied)
+	}
+	if resp, body, _, _ := tp.connect(t, "api.anthropic.com:"+tp.port); resp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT api.anthropic.com from an isolated run = %s %q, want 200", resp.Status, body)
+	}
+}
+
 func TestProxyRefusesUnknownSources(t *testing.T) {
 	tp := newTestProxy(t, fakeNetwork{})
 	resp, body, _, _ := tp.connect(t, "allowed.test:"+tp.port)

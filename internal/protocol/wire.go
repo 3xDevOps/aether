@@ -24,6 +24,7 @@ type Run struct {
 	Mode            string `json:"mode"`
 	Model           string `json:"model,omitempty"`
 	Effort          string `json:"effort,omitempty"`
+	Permission      string `json:"permission"`
 	// Via is the connector client, such as ChatGPT, the run was launched
 	// through.
 	Via    string `json:"via,omitempty"`
@@ -232,6 +233,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Mode:                string(r.Mode),
 		Model:               r.Model,
 		Effort:              r.Effort,
+		Permission:          string(r.Permission),
 		Via:                 r.Via,
 		ACP:                 r.ACP,
 		Status:              string(r.Status),
@@ -333,6 +335,10 @@ const FeatureMultiRepo = "multi-repo"
 
 // FeatureSwarmRepos marks a server whose mission.create takes extra_workspace_ids; an older one drops them.
 const FeatureSwarmRepos = "swarm-repos"
+
+// FeaturePermission marks a server whose run.launch takes permission; an
+// older one drops it and runs the agent as root.
+const FeaturePermission = "permission"
 
 // CapabilityRunRepos is listed in a gateway's capability methods but is not an RPC method.
 const CapabilityRunRepos = "run.repos"
@@ -452,6 +458,8 @@ type RunLaunchParams struct {
 	// Effort is one of the agent's effort_levels; empty keeps the agent's
 	// default.
 	Effort string `json:"effort,omitempty"`
+	// Permission is "root", "default" or "isolated"; empty is "default".
+	Permission string `json:"permission,omitempty"`
 	// Empty means the caller's own account.
 	AccountMemberID string `json:"account_member_id,omitempty"`
 	// CachedBase retries a transient base-capture failure with the accepted

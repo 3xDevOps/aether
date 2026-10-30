@@ -58,6 +58,9 @@ const (
 	Handoff Capability = "handoff"
 	// Protect toggles a run's protected flag; owner or admin only.
 	Protect Capability = "protect"
+	// Sudo allows a run's command to run as root in its container, where it
+	// acts on the owner's home and credentials; owner or admin only.
+	Sudo Capability = "sudo"
 	// WorkspaceAdmin is workspace administration (membership, settings);
 	// admin only.
 	WorkspaceAdmin Capability = "workspace_admin"
@@ -129,6 +132,11 @@ func Check(cap Capability, actor Actor, target Target) error {
 			return nil
 		}
 		return deny("changing run protection requires the run's owner or an admin")
+	case Sudo:
+		if owner {
+			return nil
+		}
+		return deny("allowing a command to run as root requires the run's owner or an admin")
 	case Steer, Kill:
 		if actor.Role != domain.RoleCollaborator {
 			return deny(string(cap) + " requires the collaborator role")

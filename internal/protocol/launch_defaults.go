@@ -40,6 +40,9 @@ type LaunchDefaults struct {
 	// own.
 	AccountMemberID string                 `json:"account_member_id,omitempty"`
 	Fallback        *LaunchFallbackDefault `json:"fallback,omitempty"`
+	// Permission is the tier the dashboard preselects: "root", "default" or
+	// "isolated".
+	Permission string `json:"permission,omitempty"`
 }
 
 // AgentLaunchDefault.Mode is "tui", "headless", "acp" or empty.

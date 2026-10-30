@@ -264,6 +264,25 @@ describe('new run', () => {
     expect(useStore.getState().launchDefaults.claude).not.toHaveProperty('effort')
   })
 
+  it('starts on the saved permission, saves a change at once, and launches with it', async () => {
+    useStore.setState({ info: { ...serverInfo, features: ['permission'] }, capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 3, defaults: { permission: 'isolated' } })
+    await open()
+    const tier = (name: RegExp) => within(screen.getByRole('radiogroup', { name: 'Permission' })).getByRole('radio', { name })
+    await waitFor(() => expect(tier(/^Isolated/).getAttribute('aria-checked')).toBe('true'))
+    await userEvent.click(tier(/^Root access/))
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({ defaults: { permission: 'root' }, revision: 3 }))
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', permission: 'root' }))
+  })
+
+  it('offers no permission on a server without tiers, and sends none', async () => {
+    await open()
+    expect(screen.queryByRole('radiogroup', { name: 'Permission' })).toBeNull()
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp' }))
+  })
+
   it('preselects the most recently launched agent in its remembered mode', async () => {
     vi.mocked(api.agentList).mockResolvedValue([claude(), agentInfo({ name: 'codex', display_name: 'Codex' })])
     useStore.setState({ launchDefaults: { claude: { mode: 'tui', at: 1 }, codex: { mode: 'headless', at: 2 } } })

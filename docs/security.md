@@ -21,7 +21,8 @@ credentials out of the report.
 
 | Surface | What it protects | What it does not protect |
 | --- | --- | --- |
-| [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Runs and environments cannot connect to each other. | It is not a VM. Agents run as root and can read and change everything mounted into the run: your home, the checkout and the workspace secrets. |
+| [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Runs and environments cannot connect to each other. Agents run unprivileged. | It is not a VM. A run can read and change everything mounted into it: your home, the checkout and the workspace secrets. |
+| [Permission tiers](#permission-tiers) | A Default run's `sudo` waits for its owner or an admin. Isolated keeps every change outside the checkout inside the run. | Root access runs sudo without asking. Docker inside a Default run gives root in the container without asking. |
 | [Egress control](environments.md#egress-control) | Off by default. When on, a workspace's runs reach only its listed hosts, through the server's proxy, and never a private, loopback or metadata address. | An allowed host receives whatever the agent sends: with `github.com` allowed, the launcher's gh token can push anywhere it can write. Runs still reach the server host. |
 | [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own runs. | Every run you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
 | [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
@@ -51,8 +52,8 @@ credentials out of the report.
 The container is the only isolation boundary. It is not a VM: every run
 shares the host's kernel, and Aether builds no second sandbox inside it.
 
-- The standard image runs agents as root with Docker's default capabilities
-  and a writable filesystem, so they can install packages and use `sudo`.
+- Agents run as uid `1000`, or as an image's own non-root user. What they may
+  do as root depends on the run's [permission tier](#permission-tiers).
   Treat root in a run as able to do anything the container can reach.
 - A run is never `--privileged` and never gets the host Docker socket. With
   [Sysbox](environments.md#docker-inside-runs) installed, runs and
@@ -68,14 +69,15 @@ shares the host's kernel, and Aether builds no second sandbox inside it.
   on starts on `aether-egress` instead: the same, but `--internal`, so its one
   way out is the server's egress proxy on the network's gateway.
 - The packaged systemd unit runs `aether-server` as root. Docker socket access
-  is root-equivalent anyway, and root lets the server hand checkouts to an
-  image's non-root user. An unprivileged server can serve only root images.
+  is root-equivalent anyway, and root lets the server hand homes and
+  checkouts to the agent's user. An unprivileged server runs every container
+  as its own uid and gid, the only owner it can hand files to.
 
 What a run container is given decides what it can do:
 
 ```mermaid
 flowchart LR
-  home["Launcher's home on the server"] -- "read-write as $HOME" --> run["Run container (agent is root)"]
+  home["Launcher's home on the server"] -- "read-write as $HOME" --> run["Run container (agent is uid 1000)"]
   checkout["Run checkout"] -- "mounted at /workspace" --> run
   secrets["Workspace variables and secrets"] -- "environment variables" --> run
   coord["Run's coordination socket"] -- "mounted" --> run
@@ -91,8 +93,103 @@ for each other member who messaged or typed into the run.
 > [!WARNING]
 > If you run agents you do not trust, put the server's `--data-dir` on a
 > filesystem mounted `nosuid,nodev`. Docker has no per-mount switch for this,
-> so otherwise a root agent can plant a setuid binary through a writable
-> mount and have it survive on the host.
+> so otherwise root in a run or environment can plant a setuid binary through
+> a writable mount and have it survive on the host.
+
+## Permission tiers
+
+Every run has a permission tier. Pick it under **Permission** at the top of
+the launch form, which remembers your last choice, or with
+`aether run --permission root|default|isolated`. Everything else launches at
+Default: the CLI without the flag, the assistant, connectors, Slack and swarm
+workers. A child run gets its parent's tier.
+
+| | Root access | Default | Isolated |
+| --- | --- | --- | --- |
+| `sudo` | Runs without asking | [Asks you first](#sudo-in-a-default-run) | Refused |
+| Your home and tool caches | Read-write | Read-write | A throwaway copy |
+| Network | As the workspace allows | As the workspace allows | The agents' own hosts |
+| Docker inside the run | With Sysbox | With Sysbox | None |
+| Messages to other runs, team memory notes | Yes | Yes | Refused |
+
+- In every tier the agent runs as uid `1000`, or as the image's own user when
+  that is not root. An image whose user is root, such as an environment you
+  saved, still runs as `1000:1000`, with your home at `/root` so paths saved
+  in it keep working. The server hands your home and the checkout to that uid
+  before each container starts, and gives the uid a passwd entry whose home
+  is `/root`: git, `ssh` and `ssh-keygen` refuse to run without one, and
+  `ssh` reads `~/.ssh` from it rather than `$HOME`.
+- Default and Isolated runs get Docker's `no-new-privileges`, so no setuid
+  binary raises the agent.
+- A Root access run and your environment terminal get a sudoers entry for
+  their uid before anything else starts in them.
+- Docker inside a Default run puts the agent in the daemon's group, so it can
+  reach root inside the container through Docker without asking. With Sysbox
+  that root maps to an unprivileged host user.
+- In every tier the run's checkout and run branch are its result. Runs
+  launched before tiers existed show as Root access.
+
+An Isolated run mounts your home and `/aether-cache` as overlays: the agent
+reads them as they are, and its writes land in the run's scratch directory,
+which is deleted with the container. Changes made to your home elsewhere while
+it runs may not show inside it. Its network reaches only the agent hosts in the
+[egress list](environments.md#egress-control), through the egress proxy, and
+everything else is refused with
+`aether: egress to <host> denied; an isolated run reaches only the agents' own hosts`.
+`sudo` fails with `sudo: an isolated run cannot run commands as root`, in the
+workspace setup script too, which then fails the launch. `aether-internal
+send`, `ask`, `reply` and `memory add` fail with
+`<method>: an isolated run cannot message other runs or write team memory`.
+
+Two things in an Isolated run still reach outside it:
+
+- Your agent's login file stays mounted read-write from your home. Claude
+  Code and Codex replace the refresh token whenever they refresh, so a
+  refresh kept only in the copy would leave your real login revoked. A login
+  that is a whole directory, such as oh-my-pi's `~/.omp/agent`, stays in the
+  copy, so its refreshes are lost with the run.
+- The run can read your gh token and sign with your commit signing key. With
+  GitHub unreachable it cannot use the token, and a signature only covers
+  commits in its own checkout.
+
+### Sudo in a Default run
+
+A Default run's `sudo` is Aether's shim at `/usr/local/bin/sudo`, ahead of
+the image's on `PATH`. Docker's `no-new-privileges` stops the image's own:
+`/usr/bin/sudo` fails with `sudo: The "no new privileges" flag is set, which
+prevents sudo from running as root.`
+
+The shim sends the command to the server and waits. The run shows **Needs
+you** with `Run as root in <directory>: <command>` wherever permission requests show: the
+run's **Needs you** panel, the Needs you list, push and Slack notifications,
+`aether answer` and the connectors' `aether_decide_approval`. The command text
+is the agent's: read it before you allow it.
+
+- Only the run's owner or a server admin may allow it, because root in the
+  container acts on the owner's home and credentials. Anyone who can steer the
+  run may deny it. Anyone else gets `run.input.respond: permission denied:
+  allowing a command to run as root requires the run's owner or an admin`.
+- Allowed, the command runs once as root (with `-u <user>`, as that user) in
+  the run's container, with the same arguments, the shim's working directory,
+  the container's environment with sudo's fixed `PATH`
+  (`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`, never the
+  agent-writable `~/.local/bin`) and up to 1 MiB of piped standard input. A
+  terminal's input is not sent, so a command that prompts reads end of input:
+  pass `-y`. The shim prints the output and exits with the command's status.
+- Denied, the shim prints `sudo: <member> denied this command` and exits 1.
+  Unanswered after 10 minutes, it prints `sudo: nobody allowed this command
+  within 10 minutes` and exits 1. Each decision is a timeline note naming who
+  decided and the command.
+- When the shim goes away (the agent's tool timed out, Ctrl-C), a waiting
+  request is withdrawn and a running command's process group is killed.
+  Processes a command leaves behind when it ends by itself keep running.
+- The shim accepts `sudo [-u user] [-E] [-H] [-n] [--] command [args...]`.
+  `-E` and `-H` change nothing. `-n` fails instead of asking, with `sudo: a
+  person must allow this command; -n cannot wait for one`. Any other flag
+  fails, for example `sudo: -i is not supported in an Aether Default run`.
+- While the workspace [setup script](environments.md#setup-script) runs,
+  before the agent starts, `sudo` runs without asking: an admin wrote the
+  script.
 
 ## Who can see and act on a run
 
@@ -388,6 +485,8 @@ a human or a swarm integrator to verify and deliver
   allowed to push.
 - Verification runs with the home of whoever asked (the run's launcher when an
   agent asked), so that home's gh login and signing key are available to it.
+  It runs as uid `1000` with sudo that needs no password, as a Root access run
+  does.
 - A proposal delivery creates `refs/heads/aether/proposal-<request-id>` and
   never pushes upstream. A mirrored target accepts only proposals and refuses
   a direct update with `gitengine: mirrored workspace target is not directly

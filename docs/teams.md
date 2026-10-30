@@ -542,16 +542,19 @@ move parks or fails with a reason that says why
 The server keeps one set of saved launch choices per member, so every device
 and the built-in assistant can start from the same ones. They hold the agent
 to preselect, each agent's mode and model (at most 32 agents, names up to 64
-bytes with no control characters), the account to launch on, and the
+bytes with no control characters), the account to launch on, the
 fallback policy: `automatic` (every account you may launch on), `ordered` (at
-most 8 member IDs, your own allowed), or `off`. They hold no credentials and
+most 8 member IDs, your own allowed), or `off`, and the
+[permission tier](security.md#permission-tiers) the launch form preselects. They hold no credentials and
 grant nothing. `run.launch` does not read them: a client fills a launch from
 them, and the launch is authorized as if nothing were saved. The built-in
 assistant's and the connectors' launch tools fill each field a launch leaves
 out from them ([Launch options](connectors.md#launch-options)).
 
-The dashboard's launch panel opens on them, the right half of **New run** launches the last agent, mode and model at once, and the panel saves the agent, mode and
-model of each launch. It saves the account and fallback only when you select
+The dashboard's launch panel opens on them, the right half of **New run**
+launches the last agent, mode, model and permission tier at once, and the
+panel saves the agent, mode and model of each launch, and the permission tier
+as soon as you change it. It saves the account and fallback only when you select
 **Save as my default** under **Options**. **Settings → Launch** shows them,
 with each invalid choice and its reason, and changes or clears them.
 

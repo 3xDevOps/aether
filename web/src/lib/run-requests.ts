@@ -10,3 +10,7 @@ export const inputTitle: Record<RunInputRequest['kind'], string> = {
 export function inputHint(hasAgentTerminal: boolean): string {
   return hasAgentTerminal ? 'Answer in the terminal.' : 'Answer it from the agent’s session.'
 }
+
+// Mirror domain.SudoSessionID, SudoAllow and SudoDeny in internal/domain/input.go.
+export const isSudo = (request: RunInputRequest) => request.session_id === 'aether-sudo'
+export const sudoOption = { allow: 'allow-once', deny: 'deny-once' } as const

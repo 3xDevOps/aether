@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -125,6 +126,17 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 	// Install something outside the home in the terminal. Runs do not see
 	// it until the environment is saved.
 	term := openTerminal(t, clientA, "main")
+	// The terminal runs unprivileged and busybox has no sudo, so /opt is
+	// made writable as root the way sudo would.
+	if _, docker := rt.(*runtime.Docker); docker {
+		row, rowErr := srv.Store().GetTerminal(ctx, memberA.ID)
+		if rowErr != nil {
+			t.Fatalf("read the terminal: %v", rowErr)
+		}
+		if out, execErr := exec.Command("docker", "exec", "-u", "0", row.ContainerID, "sh", "-c", "mkdir -p /opt && chmod 0777 /opt").CombinedOutput(); execErr != nil {
+			t.Fatalf("make /opt writable: %v: %s", execErr, out)
+		}
+	}
 	term.stdin.Write([]byte("mkdir -p /opt && printf 'installed\\n' > /opt/aether-marker.txt && echo step-$((1+1))\n"))
 	term.waitOutput(t, "step-2")
 	if got := markerSeen(ctrlA, launchRun(t, ctrlA, string(ws.ID), "before save", "claude")); got != "absent\n" {

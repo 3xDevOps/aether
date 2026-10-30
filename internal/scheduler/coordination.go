@@ -542,6 +542,9 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		cliMount,
 		{HostPath: dir, ContainerPath: coordtransport.MountDir, ReadOnly: true},
 	}
+	if run.Permission != domain.PermissionRoot {
+		mounts = append(mounts, runtime.Mount{HostPath: bin, ContainerPath: coordtransport.SudoPath, ReadOnly: true})
+	}
 	for _, id := range slices.Sorted(maps.Keys(native.DiscoveryFiles)) {
 		mounts = append(mounts, runtime.Mount{
 			HostPath:      filepath.Join(dir, native.DiscoveryFiles[id]),

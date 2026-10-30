@@ -52,13 +52,19 @@ type need struct {
 // needOf is the owner's rows of the dashboard's Needs you table
 // (web/src/lib/needs-you.ts), in its order, from what the server knows about
 // the run alone. A swarm worker's integrator answers for it, so a worker
-// counts only when it reports itself blocked (domain.Run.NeedsAttention).
+// counts only for a sudo request, which only its owner or an admin may
+// allow, or when it reports itself blocked (domain.Run.NeedsAttention).
 func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need {
 	if paused {
 		return nil
 	}
 	worker := run.MissionRole == "worker"
 	background := run.Mode == domain.LaunchHeadless
+	for i := range inputs {
+		if inputs[i].SessionID == domain.SudoSessionID {
+			return &need{key: inputKey(&inputs[i]), body: "Permission requested", urgency: urgencyHigh, answer: inputs[i].ID}
+		}
+	}
 	if !worker {
 		if request := firstInput(inputs, "permission"); request != nil {
 			body := "Permission: answer in the terminal"

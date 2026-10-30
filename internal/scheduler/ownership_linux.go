@@ -79,6 +79,11 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, hom
 		if err := chownTree(m.HostPath, uid, gid, nil); err != nil {
 			return err
 		}
+		if m.Overlay != "" {
+			if err := chownTree(filepath.Join(m.Overlay, "upper"), uid, gid, nil); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -217,6 +222,9 @@ func protectedInodes(repoDir string) (map[inodeKey]struct{}, error) {
 			return nil
 		}
 		info, err := d.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -248,23 +256,36 @@ func chownTree(dir string, uid, gid int, protected map[inodeKey]struct{}) error 
 	return nil
 }
 
+// chownRoot leaves entries uid:gid already owns alone: every launch walks the
+// whole home, and a chown rewrites the inode even when nothing changes.
+// Live containers and git write while it walks, so an entry may vanish.
 func chownRoot(root *os.Root, uid, gid int, protected map[inodeKey]struct{}) error {
 	return fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) && name != "." {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if d.Type().IsRegular() {
-			info, ierr := root.Lstat(name)
-			if ierr != nil {
-				return ierr
-			}
-			st := info.Sys().(*syscall.Stat_t)
-			// Writable caches and homes may contain links to files outside
-			// the mount. Never mutate another link's ownership.
-			if _, ok := protected[inodeKey{st.Dev, st.Ino}]; ok || st.Nlink > 1 {
-				return nil
-			}
+		info, err := root.Lstat(name)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
 		}
-		return root.Lchown(name, uid, gid)
+		if err != nil {
+			return err
+		}
+		st := info.Sys().(*syscall.Stat_t)
+		if int(st.Uid) == uid && int(st.Gid) == gid {
+			return nil
+		}
+		// Writable caches and homes may contain links to files outside
+		// the mount. Never mutate another link's ownership.
+		if _, ok := protected[inodeKey{st.Dev, st.Ino}]; d.Type().IsRegular() && (ok || st.Nlink > 1) {
+			return nil
+		}
+		if err := root.Lchown(name, uid, gid); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
 	})
 }

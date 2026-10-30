@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,6 +35,7 @@ const (
 	labelSetupScript   = "aether.setup-script"
 	labelSetupSentinel = "aether.setup-sentinel"
 	labelNestedDocker  = "aether.nested-docker"
+	labelSudo          = "aether.sudo"
 	// labelSecretEnv holds Spec.SecretEnv, the names only, as a JSON array.
 	labelSecretEnv = "aether.secret-env"
 	// labelCreationKey persists Spec.CreationKey so FindByCreationKey can
@@ -84,6 +86,7 @@ type Docker struct {
 	sysboxVeto       func() bool
 
 	cpuLimits sync.Map // container ID to float64 CPU limit in cores
+	settingUp sync.Map // IDs of containers whose setup script runs
 }
 
 // sysboxRecheck is how long a daemon without Sysbox is trusted to stay
@@ -294,14 +297,14 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 	// A saved image carries these labels from the container it was committed
 	// from, and Docker merges image labels into new containers; empty values
 	// keep them from reaching a container that has no gate or dockerd.
-	for _, key := range []string{labelSetupScript, labelSetupSentinel, labelNestedDocker, labelSecretEnv} {
+	for _, key := range []string{labelSetupScript, labelSetupSentinel, labelNestedDocker, labelSudo, labelSecretEnv} {
 		cfg.Labels[key] = ""
 	}
 	cfg.Labels[labelFingerprint] = spec.Fingerprint
 	nestedDockerd := spec.NestedDocker && containerRuntime == runtimeSysbox
 	// Gated so the agent starts only once Start has checked every subpath mount.
 	subpaths := slices.ContainsFunc(spec.Mounts, func(m Mount) bool { return m.Subpath != "" })
-	if spec.SetupScript != "" || nestedDockerd || subpaths {
+	if spec.SetupScript != "" || nestedDockerd || subpaths || unprivileged(spec.User) {
 		sentinel := newSetupSentinel()
 		cfg.Entrypoint = gateEntrypoint(sentinel)
 		cfg.Cmd = spec.Command
@@ -309,6 +312,9 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 	}
 	if nestedDockerd {
 		cfg.Labels[labelNestedDocker] = "1"
+	}
+	if spec.Sudo {
+		cfg.Labels[labelSudo] = "1"
 	}
 	if spec.SetupScript != "" {
 		cfg.Labels[labelSetupScript] = spec.SetupScript
@@ -339,6 +345,9 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 	if spec.NestedDocker {
 		hostCfg.Runtime = containerRuntime
 	}
+	if !spec.Sudo {
+		hostCfg.SecurityOpt = []string{"no-new-privileges=true"}
+	}
 	if spec.PidsLimit > 0 {
 		pids := spec.PidsLimit
 		hostCfg.PidsLimit = &pids
@@ -353,11 +362,14 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 		hostCfg.Mounts = append(hostCfg.Mounts, bindMount(m))
 	}
 	for _, m := range spec.Mounts {
-		if m.Subpath != "" {
+		switch {
+		case m.Subpath != "":
 			hostCfg.Mounts = append(hostCfg.Mounts, subpathMount(m))
-			continue
+		case m.Overlay != "":
+			hostCfg.Mounts = append(hostCfg.Mounts, overlayMount(m))
+		default:
+			hostCfg.Mounts = append(hostCfg.Mounts, bindMount(m))
 		}
-		hostCfg.Mounts = append(hostCfg.Mounts, bindMount(m))
 	}
 	return cfg, hostCfg
 }
@@ -412,6 +424,27 @@ func subpathMount(m Mount) mount.Mount {
 			DriverConfig: &mount.Driver{
 				Name:    "local",
 				Options: map[string]string{"type": "none", "o": "bind", "device": m.HostPath},
+			},
+		},
+	}
+}
+
+// overlayMount is an anonymous local volume, so Docker mounts the overlay
+// itself at every start and removes the volume with the container.
+func overlayMount(m Mount) mount.Mount {
+	return mount.Mount{
+		Type:   mount.TypeVolume,
+		Target: m.ContainerPath,
+		VolumeOptions: &mount.VolumeOptions{
+			NoCopy: true,
+			Labels: map[string]string{labelManaged: "true"},
+			DriverConfig: &mount.Driver{
+				Name: "local",
+				Options: map[string]string{
+					"type":   "overlay",
+					"device": "overlay",
+					"o":      "lowerdir=" + m.HostPath + ",upperdir=" + filepath.Join(m.Overlay, "upper") + ",workdir=" + filepath.Join(m.Overlay, "work"),
+				},
 			},
 		},
 	}
@@ -522,7 +555,7 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 		return nil
 	}
 	secrets := secretEnvValues(labels[labelSecretEnv], info.Container.Config.Env)
-	if err := d.prepare(ctx, id, labels, sentinel, info.Container.Config.WorkingDir, info.Container.Config.User, secrets); err != nil {
+	if err := d.prepare(ctx, id, labels, sentinel, info.Container.Config.WorkingDir, info.Container.Config.User, envValue(info.Container.Config.Env, "HOME"), secrets); err != nil {
 		// Never kill a run that was already live before this Start call: a
 		// redundant Start must not take down a healthy container.
 		if !wasRunning {
@@ -537,7 +570,12 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 	return nil
 }
 
-func (d *Docker) prepare(ctx context.Context, id ID, labels map[string]string, sentinel, workDir, user string, secrets []string) error {
+func (d *Docker) prepare(ctx context.Context, id ID, labels map[string]string, sentinel, workDir, user, home string, secrets []string) error {
+	if unprivileged(user) {
+		if err := d.prepareUser(ctx, id, user, home, labels[labelSudo] != ""); err != nil {
+			return err
+		}
+	}
 	if labels[labelNestedDocker] != "" {
 		if err := d.startDockerd(ctx, id, user); err != nil {
 			return err
@@ -617,8 +655,11 @@ func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir 
 	}
 	// Docker delivers stdout and stderr without keeping their order, so the
 	// script's stderr joins its stdout inside the container: the end of the
-	// transcript is then where the script failed.
+	// transcript is then where the script failed. SettingUp holds only until
+	// the script ends, before the gate lets the main command start.
+	d.settingUp.Store(id, struct{}{})
 	code, output, cut, err := d.execCombined(ctx, id, []string{"/bin/sh", "-ec", "exec 2>&1; " + script}, workDir, "")
+	d.settingUp.Delete(id)
 	output = setupOutput(output, cut, secrets)
 	if err != nil {
 		slog.Error("runtime: setup script execution failed", "container", id, "working_dir", workDir, "script", script, "output", output, "error", err)
@@ -717,7 +758,7 @@ func (w *tailWriter) tail() (kept string, cut bool) {
 // one transcript, of which the last execOutputLimit bytes are kept.
 func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir, user string) (code int, output string, cut bool, err error) {
 	kept := &tailWriter{limit: execOutputLimit}
-	code, err = d.exec(ctx, id, cmd, workDir, user, func(r io.Reader) error {
+	code, err = d.exec(ctx, id, cmd, workDir, user, nil, func(r io.Reader) error {
 		_, copyErr := stdcopy.StdCopy(kept, kept, r)
 		return copyErr
 	})
@@ -727,21 +768,32 @@ func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir,
 
 func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) (int, string, string, error) {
 	var stdout, stderr string
-	code, err := d.exec(ctx, id, cmd, workDir, "", func(r io.Reader) (copyErr error) {
+	code, err := d.exec(ctx, id, cmd, workDir, "", nil, func(r io.Reader) (copyErr error) {
 		stdout, stderr, copyErr = readExecOutput(r)
 		return copyErr
 	})
 	return code, stdout, stderr, err
 }
 
-func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir, user string, read func(io.Reader) error) (int, error) {
-	created, err := d.cli.ExecCreate(ctx, string(id), client.ExecCreateOptions{
+// exec writes a non-nil stdin to the command's input, which stays open until
+// exec returns.
+// rootPath is sudo's secure_path. A root exec never searches the
+// container's PATH, which puts the agent-writable ~/.local/bin first.
+const rootPath = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir, user string, stdin []byte, read func(io.Reader) error) (int, error) {
+	opts := client.ExecCreateOptions{
 		Cmd:          cmd,
 		User:         user,
 		WorkingDir:   workDir,
+		AttachStdin:  stdin != nil,
 		AttachStdout: true,
 		AttachStderr: true,
-	})
+	}
+	if uid, _, _ := strings.Cut(user, ":"); uid == "0" || uid == "root" {
+		opts.Env = []string{rootPath}
+	}
+	created, err := d.cli.ExecCreate(ctx, string(id), opts)
 	if err != nil {
 		return 0, fmt.Errorf("exec create: %w", err)
 	}
@@ -761,6 +813,11 @@ func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir, user st
 		case <-watchDone:
 		}
 	}()
+	if stdin != nil {
+		if _, werr := att.Conn.Write(stdin); werr != nil {
+			return 0, fmt.Errorf("exec input: %w", werr)
+		}
+	}
 	copyErr := read(att.Reader)
 	if err := ctx.Err(); err != nil {
 		return 0, err

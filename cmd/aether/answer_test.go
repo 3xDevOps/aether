@@ -47,6 +47,18 @@ func TestAnswerAllowsAPermissionOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestAnswerShowsTheServersSudoRefusal(t *testing.T) {
+	refusal := "run.input.respond: permission denied: allowing a command to run as root requires the run's owner or an admin"
+	respond := &fakeReply{err: &protocol.Error{Code: protocol.CodeDenied, Message: refusal}}
+	c, _ := answerControl(t, nil, respond)
+	if err := answer(c, &bytes.Buffer{}, nil, "r1", "sudo-abc", domain.SudoAllow, nil); err == nil || !strings.Contains(err.Error(), refusal) {
+		t.Fatalf("answer to a sudo request listed for someone else = %v", err)
+	}
+	if got, want := string(respond.params()), `{"run_id":"r1","request_id":"sudo-abc","option_id":"allow-once"}`; got != want {
+		t.Fatalf("run.input.respond params = %s, want %s", got, want)
+	}
+}
+
 func TestAnswerNamesAQueuedRequest(t *testing.T) {
 	c := fakeControlMethods(t, map[string]*fakeReply{
 		protocol.MethodRunGet: {result: protocol.RunResult{Run: protocol.Run{ID: "r1", WorkspaceID: "ws1", Status: "needs-attention",
