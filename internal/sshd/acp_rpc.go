@@ -136,7 +136,7 @@ func (s *Server) acpRun(ctx context.Context, id string) (domain.RunID, *protocol
 		return "", rpcError(err)
 	}
 	if !run.ACP {
-		return "", invalidParams(fmt.Sprintf("run %s does not run its agent over ACP", id))
+		return "", invalidParams(fmt.Sprintf("session %s does not run its agent over ACP", id))
 	}
 	return run.ID, nil
 }
@@ -154,7 +154,7 @@ func (s *Server) admitACP(ctx context.Context, member domain.MemberID, run domai
 		return acpError(admitted())
 	}
 	if lease.ControlSessionID == "" || lease.ControlGeneration == 0 {
-		return invalidParams("control_session_id and control_generation are required: take the run's control first")
+		return invalidParams("control_session_id and control_generation are required: take the session's control first")
 	}
 	return acpError(s.cfg.Control.AdmitMember(string(run), member, lease.ControlSessionID, lease.ControlGeneration, admitted))
 }
@@ -167,7 +167,7 @@ func acpError(err error) *protocol.Error {
 		data, _ := json.Marshal(map[string]string{"reason": protocol.ErrorReasonAlreadyAnswered})
 		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error(), Data: data}
 	case errors.Is(err, acphost.ErrHistoryExpired):
-		return &protocol.Error{Code: protocol.CodeUnavailable, Message: "earlier agent session history has expired"}
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: "earlier agent conversation history has expired"}
 	case errors.Is(err, acphost.ErrUnknownRequest), errors.Is(err, scheduler.ErrACPItemNotFound):
 		return &protocol.Error{Code: protocol.CodeNotFound, Message: err.Error()}
 	case errors.Is(err, acphost.ErrUnknownOption):

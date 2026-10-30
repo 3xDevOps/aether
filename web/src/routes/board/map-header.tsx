@@ -27,7 +27,7 @@ export function MapHeader({ cards, actions, camera, onReveal }: {
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-seam px-4 py-2">
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-        <h2 className="text-ui-sm font-medium">Runs <span className="text-muted tabular-nums">{cards.length}</span></h2>
+        <h2 className="text-ui-sm font-medium">Sessions <span className="text-muted tabular-nums">{cards.length}</span></h2>
         {working > 0 && <span className="text-ui-sm text-state-working tabular-nums">{working} working</span>}
         <Chip kind="needs-you" cards={cards.filter((card) => card.group === 'needs-you').sort(byWait)} onReveal={onReveal} />
         <Chip kind="failed" cards={cards.filter((card) => endedBadly(card.state)).sort(byChange)} onReveal={onReveal} />
@@ -54,7 +54,7 @@ function Chip({ kind, cards, onReveal }: { kind: keyof typeof chips; cards: MapC
           <ChevronDown aria-hidden className={cn('size-3 transition-transform duration-100 motion-reduce:transition-none', open && 'rotate-180')} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent aria-label={`Runs that ${kind === 'failed' ? 'failed' : 'need you'}`} align="start" className="w-[min(360px,calc(100vw-16px))] p-1"
+      <PopoverContent aria-label={`Sessions that ${kind === 'failed' ? 'failed' : 'need you'}`} align="start" className="w-[min(360px,calc(100vw-16px))] p-1"
         onCloseAutoFocus={(event) => {
           // A revealed card takes focus; only Escape or an outside click returns it to the chip.
           if (revealing.current) event.preventDefault()

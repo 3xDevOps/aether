@@ -203,7 +203,7 @@ type tokenAnswer struct {
 // edge relays; the client registers by a metadata document served over
 // HTTPS; a member mints a pairing code over their relayed SSH connection
 // and pastes a wrong code, then it, on the sandboxed consent page; the
-// token exchange, the tool list, aether_list_runs and aether_launch_run,
+// token exchange, the tool list, aether_list_sessions and aether_launch_session,
 // a refresh rotation and aether mcp revoke work through the edge, and the
 // revoked connector's next call is refused. Under approved-devices a
 // device waiting for approval mints no code.
@@ -284,16 +284,16 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 				t.Fatalf("tools = %v, want all 32", names)
 			}
 			const task = "fix the flaky login test"
-			if out := callTool(t, session, "aether_list_runs", map[string]any{"mine": true}); strings.Contains(out, task) {
-				t.Fatalf("aether_list_runs before the launch = %s", out)
+			if out := callTool(t, session, "aether_list_sessions", map[string]any{"mine": true}); strings.Contains(out, task) {
+				t.Fatalf("aether_list_sessions before the launch = %s", out)
 			}
-			callTool(t, session, "aether_launch_run", map[string]any{"workspace_id": ws.ID, "harness": "claude", "task": task})
-			if out := callTool(t, session, "aether_list_runs", map[string]any{"mine": true}); !strings.Contains(out, task) {
-				t.Fatalf("aether_list_runs after the launch = %s", out)
+			callTool(t, session, "aether_launch_session", map[string]any{"workspace_id": ws.ID, "harness": "claude", "task": task})
+			if out := callTool(t, session, "aether_list_sessions", map[string]any{"mine": true}); !strings.Contains(out, task) {
+				t.Fatalf("aether_list_sessions after the launch = %s", out)
 			}
 			runs, err := s.db.ListRunsByMember(t.Context(), s.memberOf(t, bob).ID)
 			if err != nil || len(runs) != 1 || runs[0].Task != task || runs[0].WorkspaceID != ws.ID {
-				t.Fatalf("bob's runs = %+v %v, want the one launched through the connector", runs, err)
+				t.Fatalf("bob's sessions = %+v %v, want the one launched through the connector", runs, err)
 			}
 			list := call[protocol.ConnectorListResult](t, bctl, protocol.MethodConnectorList, struct{}{})
 			if len(list.Connectors) != 1 || list.Connectors[0].DeviceID != string(s.deviceIDOf(t, bo)) || list.Connectors[0].RedirectHost != client.host ||

@@ -212,7 +212,7 @@ func TestFinalizeKeepsOwnerAfterCleanupPersistenceFailure(t *testing.T) {
 		return info.CleanupPending && info.RetainedUntil != nil && info.CleanupError == cleanupRuntimeError
 	})
 	if e.rt.byName(string(run.ID)) != container {
-		t.Fatal("failed cleanup released the run's exact container ownership")
+		t.Fatal("failed cleanup released the session's exact container ownership")
 	}
 }
 
@@ -248,7 +248,7 @@ func TestReleaseFreesRunWhoseCheckoutExceedsEvidenceLimit(t *testing.T) {
 		t.Fatalf("Release: %v", err)
 	}
 	if e.rt.byName(string(run.ID)) != nil || e.sched.RetainsContainer(t.Context(), run.ID) {
-		t.Fatal("a refused evidence capture kept the run's container")
+		t.Fatal("a refused evidence capture kept the session's container")
 	}
 }
 
@@ -465,7 +465,7 @@ func TestReleaseRejectsTerminalRunWhileFinishEvidenceIsPending(t *testing.T) {
 			t.Fatalf("Release during finish evidence = %v, want ErrInvalidTransition", err)
 		}
 		if e.rt.byName(string(run.ID)) == nil || !e.sched.RetainsContainer(t.Context(), run.ID) {
-			t.Fatal("Release discarded the run's container ownership during finish evidence")
+			t.Fatal("Release discarded the session's container ownership during finish evidence")
 		}
 	}()
 

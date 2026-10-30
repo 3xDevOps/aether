@@ -102,10 +102,10 @@ export function SplitNewRun({ blocked, shortcut, onOpen }: {
 
   const ModeIcon = last ? modeIcon[last.mode] : null
   return (
-    <div role="group" aria-label="New run" className="flex min-w-0 flex-1 items-center">
-      <Half first label="New run" hint={blocked ?? `New run · ${shortcut}`} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && onOpen()} className="pl-1 pr-3">
+    <div role="group" aria-label="New session" className="flex min-w-0 flex-1 items-center">
+      <Half first label="New session" hint={blocked ?? `New session · ${shortcut}`} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && onOpen()} className="pl-1 pr-3">
         <Plus />
-        New run
+        New session
       </Half>
       {last && ModeIcon && (
         <>
@@ -143,7 +143,7 @@ function LaunchPreview({ id, open, top, last, needsTask }: { id: string; open: b
   return (
     <SlideOut open={open} top={top} width="16rem">
       <div id={id} role="tooltip" className="rounded-panel rounded-l-none border border-l-0 border-seam bg-raised p-3 text-ui shadow-overlay">
-        <p className="text-ui-sm text-muted">{needsTask ? 'Opens New run with your last launch' : 'Launches again with no task'}</p>
+        <p className="text-ui-sm text-muted">{needsTask ? 'Opens New session with your last launch' : 'Launches again with no task'}</p>
         <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
           <dt className="text-muted">Agent</dt>
           <dd className="flex min-w-0 items-center gap-1.5"><AgentGlyph agent={last.harness} colored /><span className="truncate">{last.harness}</span></dd>
@@ -152,7 +152,7 @@ function LaunchPreview({ id, open, top, last, needsTask }: { id: string; open: b
           <dt className="text-muted">Model</dt>
           <dd className="min-w-0 truncate">{last.model ?? 'Agent default'}</dd>
         </dl>
-        {needsTask && <p className="mt-2 text-ui-sm text-muted">Background runs need a task.</p>}
+        {needsTask && <p className="mt-2 text-ui-sm text-muted">Background sessions need a task.</p>}
       </div>
     </SlideOut>
   )

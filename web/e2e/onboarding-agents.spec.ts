@@ -42,7 +42,7 @@ test('setting an agent up installs it, opens its login, and checks it', async ({
   await agent.mode('Standard').click()
   await expect(agent.mode('Standard')).toHaveAttribute('aria-checked', 'true')
   await expect(agent.section).toContainText('Codex: supported through an adapter')
-  await expect(agent.section).toContainText('Chosen when the run starts')
+  await expect(agent.section).toContainText('Chosen when the session starts')
 
   await agent.install('Codex').click()
   // The terminal opens for the login once the agent is there, with the
@@ -66,7 +66,7 @@ test('setting an agent up installs it, opens its login, and checks it', async ({
   await expect(agent.row('Codex')).toContainText('Installed · Login found')
   await expect(agent.section.getByRole('button', { name: 'Run Codex', exact: true })).toBeVisible()
   await agent.continue().click()
-  await wizard.expectStep('First run')
+  await wizard.expectStep('First session')
   await expect(wizard.firstRun.section.getByRole('radio', { name: /^Codex/ })).toHaveAttribute('aria-checked', 'true')
 })
 
@@ -89,7 +89,7 @@ test('choosing Enhanced installs the adapter with the agent and seeds the first 
   await agent.done().click()
 
   await agent.continue().click()
-  await wizard.expectStep('First run')
+  await wizard.expectStep('First session')
   const modes = wizard.firstRun.section.getByRole('radiogroup', { name: 'Mode' })
   await expect(modes.getByRole('radio', { name: /^Enhanced/ })).toHaveAttribute('aria-checked', 'true')
 })

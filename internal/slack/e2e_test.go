@@ -188,7 +188,7 @@ func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 	}
 	reply := h.slack.waitPosts(3)[2]
 	if reply.ThreadTS != ts || reply.Text != "Answered: Reject." {
-		t.Fatalf("press reply = %+v, want Answered: Reject. in the run's thread", reply)
+		t.Fatalf("press reply = %+v, want Answered: Reject. in the session's thread", reply)
 	}
 	publish()
 	eventually(t, "the message to clear", func() bool {
@@ -197,11 +197,11 @@ func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 	})
 
 	h.slack.send(eventEnvelope("env-reply", "Ev2", threadReply("U1", "use eu-west", ts)))
-	eventually(t, "the reply to reach the run", func() bool { return len(rooms.posted()) == 1 })
+	eventually(t, "the reply to reach the session", func() bool { return len(rooms.posted()) == 1 })
 	if got, want := rooms.posted()[0], fmt.Sprintf("%s via Slack: use eu-west", h.ada.ID); got != want {
-		t.Fatalf("run got %q, want %q", got, want)
+		t.Fatalf("session got %q, want %q", got, want)
 	}
-	if got := h.slack.waitPosts(4)[3]; got.ThreadTS != ts || got.Text != "Sent to the run." {
+	if got := h.slack.waitPosts(4)[3]; got.ThreadTS != ts || got.Text != "Sent to the session." {
 		t.Fatalf("reply answer = %+v", got)
 	}
 	if !h.slack.acked("env-link") || !h.slack.acked("env-press") || !h.slack.acked("env-reply") {

@@ -217,7 +217,7 @@ describe('memory page', () => {
 
   it('lists agent notes, answers and superseded notes older than the newest 100 notes', async () => {
     seed()
-    const outcomes = Array.from({ length: 100 }, (_, i) => memoryItem({ id: `note-out${String(i).padStart(7, '0')}`, kind: 'outcome', source: 'report', title: `success: run ${i}` }))
+    const outcomes = Array.from({ length: 100 }, (_, i) => memoryItem({ id: `note-out${String(i).padStart(7, '0')}`, kind: 'outcome', source: 'report', title: `success: session ${i}` }))
     const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? [] : params.source || params.replaced ? search(params).items : outcomes }))
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
     await screen.findByRole('list', { name: 'Notes' })
@@ -232,11 +232,11 @@ describe('memory page', () => {
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })} />)
     await screen.findByRole('list', { name: 'Notes' })
     fireEvent.pointerEnter(rowOf(workspacePin.title), { pointerType: 'mouse' })
-    await waitFor(() => expect(footer()).toBe("Pinned by Bob · in every new run's brief"))
+    await waitFor(() => expect(footer()).toBe("Pinned by Bob · in every new session's brief"))
     fireEvent.pointerEnter(rowOf(myPin.title), { pointerType: 'mouse' })
-    await waitFor(() => expect(footer()).toBe("Pinned for you · in your new runs' briefs"))
+    await waitFor(() => expect(footer()).toBe("Pinned for you · in your new sessions' briefs"))
     fireEvent.focus(screen.getByRole('button', { name: agentNote.title }))
-    await waitFor(() => expect(footer()).toBe('Not pinned · runs find it by searching'))
+    await waitFor(() => expect(footer()).toBe('Not pinned · sessions find it by searching'))
     fireEvent.pointerLeave(rowOf(agentNote.title))
     await waitFor(() => expect(footer()).toBe('5 notes · 2 pinned'))
   })

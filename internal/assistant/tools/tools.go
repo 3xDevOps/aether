@@ -320,7 +320,7 @@ func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 	case protocol.MethodRunLaunch, protocol.MethodTemplateLaunch, protocol.MethodRunRelaunch:
 		launched, err := protocol.DecodeParams[protocol.RunResult](result)
 		if err != nil {
-			slog.Warn("assistant tools: read the launched run", "error", err)
+			slog.Warn("assistant tools: read the launched session", "error", err)
 			return ""
 		}
 		return launched.Run.ID
@@ -337,7 +337,7 @@ func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
 	switch req.Method {
 	case protocol.MethodEnvSave:
-		c.Summary = "Save your environment as a new image; new runs and terminals start from it"
+		c.Summary = "Save your environment as a new image; new sessions and terminals start from it"
 		return nil
 	case protocol.MethodRunLaunch:
 		return s.summarizeLaunch(ctx, req, c)
@@ -354,7 +354,7 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		if rpcErr != nil {
 			return rpcErr
 		}
-		c.Summary = fmt.Sprintf("Stop run %s (%q)%s", p.RunID, runLabel(run), ownedBy(c))
+		c.Summary = fmt.Sprintf("Stop session %s (%q)%s", p.RunID, runLabel(run), ownedBy(c))
 		return nil
 	case protocol.MethodRunInputRespond:
 		return s.summarizeRespond(ctx, req, c)
@@ -371,7 +371,7 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		if p.Kind != protocol.RoomMessageReply {
 			verb = fmt.Sprintf("Post a %q message on", truncate(string(p.Kind)))
 		}
-		c.Summary = fmt.Sprintf("%s run %s (%q)%s: %q%s", verb, p.RunID, runLabel(run), ownedBy(c), truncate(p.Body), attached(p.Attachments, p.Anchor))
+		c.Summary = fmt.Sprintf("%s session %s (%q)%s: %q%s", verb, p.RunID, runLabel(run), ownedBy(c), truncate(p.Body), attached(p.Attachments, p.Anchor))
 		return nil
 	}
 	if summary, ok := actSummaries[req.Method]; ok {
@@ -417,14 +417,14 @@ func (s *Server) summarizeRespond(ctx context.Context, req protocol.Request, c *
 				}
 			}
 		}
-		c.Summary = fmt.Sprintf("%s run %s's request (%q)%s: %q, choosing %q", verb, p.RunID, runLabel(run), ownedBy(c), truncate(it.Request.Title), option)
+		c.Summary = fmt.Sprintf("%s session %s's request (%q)%s: %q, choosing %q", verb, p.RunID, runLabel(run), ownedBy(c), truncate(it.Request.Title), option)
 		if len(p.Values) > 0 {
 			values, _ := json.Marshal(p.Values)
 			c.Summary += fmt.Sprintf(" with %q", truncate(string(values)))
 		}
 		return nil
 	}
-	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: run %s has no pending request %s", req.Method, p.RunID, p.RequestID)}
+	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: session %s has no pending request %s", req.Method, p.RunID, p.RequestID)}
 }
 
 func (s *Server) attention(ctx context.Context, workspaceID string) ([]protocol.AttentionItem, *protocol.Error) {
@@ -586,7 +586,7 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	}
 	summary += n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c)
 	if p.Children != "" {
-		summary += ", child runs " + p.Children
+		summary += ", subsessions " + p.Children
 	}
 	c.Summary = fmt.Sprintf("%s: \"%s\"", summary, firstLine(p.Task))
 	return nil
@@ -759,7 +759,7 @@ func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *p
 	if rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary = fmt.Sprintf("Send to run %s (%q)%s: %q%s", p.RunID, runLabel(run), ownedBy(c), truncate(p.Message), attached(p.Attachments, nil))
+	c.Summary = fmt.Sprintf("Send to session %s (%q)%s: %q%s", p.RunID, runLabel(run), ownedBy(c), truncate(p.Message), attached(p.Attachments, nil))
 	return nil
 }
 

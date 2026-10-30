@@ -82,7 +82,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		return nil, errors.New("scheduler: member is required")
 	}
 	if purpose == EnvironmentPurposeRun && ws == nil {
-		return nil, errors.New("scheduler: workspace is required for run environment")
+		return nil, errors.New("scheduler: workspace is required for session environment")
 	}
 	image := member.Image
 	if image == "" {
@@ -127,7 +127,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	}
 	if run != nil {
 		if err := harness.MergeEnv(env, profile.ModelLaunchEnv(run.Model)); err != nil {
-			return nil, fmt.Errorf("scheduler: apply the run's model over the workspace variables: %w", err)
+			return nil, fmt.Errorf("scheduler: apply the session's model over the workspace variables: %w", err)
 		}
 	}
 	env["HOME"] = home
@@ -178,7 +178,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				}
 				for _, login := range shared {
 					if login.dir {
-						return nil, fmt.Errorf("scheduler: an isolated run cannot use another member's %s login: ~/%s is a whole directory the run could change for their later sessions; launch it at Default, or on your own account", profile.Name, login.rel)
+						return nil, fmt.Errorf("scheduler: an isolated session cannot use another member's %s login: ~/%s is a whole directory the session could change for their later sessions; launch it at Default, or on your own account", profile.Name, login.rel)
 					}
 				}
 			}
@@ -365,7 +365,7 @@ func (s *Scheduler) harnessEnvironment(ctx context.Context, run *domain.Run, pro
 		return nil, err
 	}
 	if err := harness.MergeEnv(env, profile.ModelLaunchEnv(model)); err != nil {
-		return nil, fmt.Errorf("scheduler: apply the run's model over the workspace variables: %w", err)
+		return nil, fmt.Errorf("scheduler: apply the session's model over the workspace variables: %w", err)
 	}
 	return env, nil
 }

@@ -140,7 +140,7 @@ func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if title := storedTitle(withTask.ID); title != "" {
-		t.Fatalf("a follow-up titled a run launched with a task %q", title)
+		t.Fatalf("a follow-up titled a session launched with a task %q", title)
 	}
 	cfg := e.cfg
 	cfg.PTY = newFakePTY()
@@ -187,7 +187,7 @@ func TestRunIsTitledByTheFirstMessageItsAgentAccepts(t *testing.T) {
 		t.Fatalf("second Inject = %q, %v", outcome, err)
 	}
 	if title := storedTitle(); title != "" {
-		t.Fatalf("a queued message titled the run before the agent took it: %q", title)
+		t.Fatalf("a queued message titled the session before the agent took it: %q", title)
 	}
 
 	if err = e.sched.ACPCancel(t.Context(), run.ID); err != nil {
@@ -302,7 +302,7 @@ func TestSetRunTitleDebouncesAndKeepsLatest(t *testing.T) {
 		t.Fatal("timed out waiting for debounced title event")
 	}
 
-	waitFor(t, "latest run title", func() bool {
+	waitFor(t, "latest session title", func() bool {
 		fresh, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && fresh.Title == "Latest title"
 	})
@@ -345,7 +345,7 @@ func TestSetRunTitleDeletedRunStopsRetrying(t *testing.T) {
 	e.sched.titleMu.Lock()
 	defer e.sched.titleMu.Unlock()
 	if _, ok := e.sched.titleUpdates[run.ID]; ok {
-		t.Fatal("deleted run title was retried")
+		t.Fatal("deleted session title was retried")
 	}
 }
 

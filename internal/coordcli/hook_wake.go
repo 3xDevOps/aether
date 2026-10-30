@@ -69,7 +69,7 @@ func requestHookWake(ctx context.Context, socket string, params protocol.CoordHo
 	return status, ExitOK, nil
 }
 
-const unsupportedHookWake = "server does not support native inbox waits; stop this receiver, upgrade Aether and relaunch the run; use aether-internal inbox meanwhile"
+const unsupportedHookWake = "server does not support native inbox waits; stop this receiver, upgrade Aether and relaunch the session; use aether-internal inbox meanwhile"
 
 func readHookWakeParams(in io.Reader) (protocol.CoordHookStatusParams, error) {
 	params := protocol.CoordHookStatusParams{WaitSeconds: protocol.CoordMaxInboxWaitSeconds}

@@ -104,7 +104,7 @@ func newCoordStack(t *testing.T) *coordStack {
 			Status:      domain.RunRunning,
 		}
 		if rerr := db.CreateRun(ctx, r); rerr != nil {
-			t.Fatalf("create run %d: %v", i, rerr)
+			t.Fatalf("create session %d: %v", i, rerr)
 		}
 		runs[i] = r.ID
 	}
@@ -164,7 +164,7 @@ func TestBridgeAgainstRealCoordination(t *testing.T) {
 	}
 	if len(statusB.Peers) != 1 || statusB.Peers[0].RunID != string(stack.runA) ||
 		statusB.Peers[0].State != protocol.CoordPeerActive {
-		t.Fatalf("peers = %+v, want run A active", statusB.Peers)
+		t.Fatalf("peers = %+v, want session A active", statusB.Peers)
 	}
 
 	const body = "only adding an import - going ahead"
@@ -316,8 +316,8 @@ func TestBridgeGuidesAgentsBeforeAnyCall(t *testing.T) {
 	stack := newCoordStack(t)
 	cs := session(t, stack.sockB, nil)
 	instructions := cs.InitializeResult().Instructions
-	if !strings.HasPrefix(instructions, "You are Aether run "+string(stack.runB)) || strings.Contains(instructions, "Aether hosts this run") {
-		t.Fatalf("instructions must be the run's role card alone: %q", instructions)
+	if !strings.HasPrefix(instructions, "You are Aether session "+string(stack.runB)) || strings.Contains(instructions, "Aether hosts this session") {
+		t.Fatalf("instructions must be the session's role card alone: %q", instructions)
 	}
 	tools, err := cs.ListTools(t.Context(), nil)
 	if err != nil {
@@ -342,7 +342,7 @@ func TestBridgeGuidesAgentsBeforeAnyCall(t *testing.T) {
 				t.Errorf("%s.%s has no description", tool.Name, name)
 			}
 		}
-		for name, want := range map[string]string{toolSend: coordhooks.ReceiptRule, toolAsk: "any live run_id", toolInbox: coordhooks.UntrustedRule, toolReply: "reaches only the run that asked"} {
+		for name, want := range map[string]string{toolSend: coordhooks.ReceiptRule, toolAsk: "any live run_id", toolInbox: coordhooks.UntrustedRule, toolReply: "reaches only the session that asked"} {
 			if tool.Name == name && !strings.Contains(tool.Description, want) {
 				t.Errorf("%s description lacks %q: %q", name, want, tool.Description)
 			}
@@ -375,7 +375,7 @@ func TestBridgeInstructionsFollowTheRun(t *testing.T) {
 		{name: "standard", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
 			want: []string{"- needs-input: only", "never report waiting"}, refuse: []string{"- waiting"}},
 		{name: "card in system prompt", enhanced: "1", card: "1", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
-			want: []string{coordhooks.Brief(coordhooks.Guide{Role: coordhooks.RoleInteractive, Wake: true})}, refuse: []string{"You are Aether run"}},
+			want: []string{coordhooks.Brief(coordhooks.Guide{Role: coordhooks.RoleInteractive, Wake: true})}, refuse: []string{"You are Aether session"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(coordtransport.BackgroundEnv, tc.background)

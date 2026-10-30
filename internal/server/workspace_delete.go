@@ -30,7 +30,7 @@ func (d *workspaceDeletion) Delete(ctx context.Context, workspace domain.Workspa
 		}
 		for _, run := range runs {
 			if err := d.runs.DeleteRun(ctx, run.ID, actor); err != nil && !errors.Is(err, store.ErrNotFound) {
-				return fmt.Errorf("workspace.delete: delete run %s: %w", run.ID, err)
+				return fmt.Errorf("workspace.delete: delete session %s: %w", run.ID, err)
 			}
 		}
 		if err := d.mirrors.PurgeWorkspace(ctx, workspace); err != nil {

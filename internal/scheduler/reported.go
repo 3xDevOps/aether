@@ -346,10 +346,10 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("scheduler: finish reported run %s: %w", run, err)
+		return fmt.Errorf("scheduler: finish reported session %s: %w", run, err)
 	}
 	if !r.Status.Terminal() {
-		return fmt.Errorf("scheduler: finish reported run %s: the run is %s and has no live container yet", run, r.Status)
+		return fmt.Errorf("scheduler: finish reported session %s: the session is %s and has no live container yet", run, r.Status)
 	}
 	exited := (r.Status == domain.RunCompleted && r.Reason == exitedCompletedReason) ||
 		(r.Status == domain.RunFailed && strings.HasPrefix(r.Reason, exitedFailedReasonPrefix))
@@ -362,7 +362,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("scheduler: finish reported run %s: read report %s: %w", run, reportID, err)
+			return fmt.Errorf("scheduler: finish reported session %s: read report %s: %w", run, reportID, err)
 		}
 		if report.SupersededAt != nil {
 			return nil
@@ -371,7 +371,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 	reason := publicRunStatusReason(reportedClose(outcome).reason)
 	stamp, writeErr := s.cfg.Store.FinishRunReported(ctx, run, outcome, reason, "", nil, nil)
 	if writeErr != nil {
-		return fmt.Errorf("scheduler: finish reported run %s over its exit: %w", run, writeErr)
+		return fmt.Errorf("scheduler: finish reported session %s over its exit: %w", run, writeErr)
 	}
 	if e := s.runs[run]; e != nil {
 		e.status, e.reason, e.activity, e.cause = outcome, reason, "", ""
@@ -457,7 +457,7 @@ func (s *Scheduler) requireFinished(ctx context.Context, run domain.RunID, what 
 	if r.Status.Terminal() {
 		return finished
 	}
-	return fmt.Errorf("scheduler: %s %s: the run is %s and has no live container yet", what, run, r.Status)
+	return fmt.Errorf("scheduler: %s %s: the session is %s and has no live container yet", what, run, r.Status)
 }
 
 // startReportedFinishLocked finishes an armed run off the caller's path so
@@ -550,7 +550,7 @@ func (s *Scheduler) answerReached(run domain.RunID, sent time.Time) error {
 		reason = entry.agentReport.Reason
 	}
 	if err := s.transitionLocked(s.superCtx, run, entry.workspaceID, entry.status, domain.RunRunning, reason, ""); err != nil {
-		return fmt.Errorf("scheduler: resume the answered run %s: %w", run, err)
+		return fmt.Errorf("scheduler: resume the answered session %s: %w", run, err)
 	}
 	entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
 	return nil

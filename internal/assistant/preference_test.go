@@ -776,7 +776,7 @@ func TestNotesOfAPromptRefusedLaterGoToTheNext(t *testing.T) {
 	left, cancel := context.WithCancel(t.Context())
 	cancel()
 	// The caller's leaving races the agent's refusal; either ends the prompt, and the notes must come back both ways.
-	if err := s.Prompt(left, m.id, "show my runs", "k1", nil); !errors.Is(err, context.Canceled) && !errors.Is(err, domain.ErrPromptRefused) {
+	if err := s.Prompt(left, m.id, "show my sessions", "k1", nil); !errors.Is(err, context.Canceled) && !errors.Is(err, domain.ErrPromptRefused) {
 		t.Fatalf("Prompt of a caller that left = %v; want it cancelled or refused", err)
 	}
 	forgotten := "preference " + saved.Preference.ID + " was forgotten"
@@ -803,7 +803,7 @@ func TestNextPromptWaitsForTheLastPromptsNotes(t *testing.T) {
 	m.notesSettled = settled
 	m.mu.Unlock()
 	done := make(chan error, 1)
-	go func() { done <- s.Prompt(t.Context(), m.id, "show my runs", "k2", nil) }()
+	go func() { done <- s.Prompt(t.Context(), m.id, "show my sessions", "k2", nil) }()
 	select {
 	case err := <-done:
 		t.Fatalf("Prompt returned %v while the last prompt's answer was outstanding", err)
@@ -856,7 +856,7 @@ func TestPromptThatWaitedThroughAResetIsRefused(t *testing.T) {
 	m.notesSettled = make(chan struct{})
 	m.mu.Unlock()
 	waiting := make(chan error, 1)
-	go func() { waiting <- s.Prompt(t.Context(), m.id, "show my runs", "k4", nil) }()
+	go func() { waiting <- s.Prompt(t.Context(), m.id, "show my sessions", "k4", nil) }()
 	time.Sleep(50 * time.Millisecond)
 	m.op.Lock()
 	err := s.resetLocked(t.Context(), m)

@@ -64,8 +64,8 @@ func registerMemoryTools(srv *mcp.Server, socket string) error {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolMemorySearch,
-		Description: "Search team memory: short notes that teammates and earlier runs in this workspace wrote, decisions, conventions, gotchas, preferences and run outcomes. " +
-			"Search before debugging a failure or re-deciding a convention. Returns up to 10 notes, best first, each with its author, run, harness, commit, cited files and pull request; pass id for one note and its supersede chain. " +
+		Description: "Search team memory: short notes that teammates and earlier sessions in this workspace wrote, decisions, conventions, gotchas, preferences and session outcomes. " +
+			"Search before debugging a failure or re-deciding a convention. Returns up to 10 notes, best first, each with its author, session, harness, commit, cited files and pull request; pass id for one note and its supersede chain. " +
 			coordhooks.MemoryRule,
 		InputSchema: search,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in memorySearchInput) (*mcp.CallToolResult, memorySearchOutput, error) {
@@ -91,9 +91,9 @@ func registerMemoryTools(srv *mcp.Server, socket string) error {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolMemoryAdd,
-		Description: "Record a team memory note that every run in this workspace can search: a gotcha after solving a non-obvious failure, or a decision when choosing between approaches, citing the files it concerns. " +
-			"The server records your member, run, harness and commit, and refuses text holding a secret. Adding the same text again returns the existing note; the result lists up to 3 similar notes. " +
-			"A note reaches new runs only after a member pins it (aether memory pin <id>); agents cannot pin or remove notes. " +
+		Description: "Record a team memory note that every session in this workspace can search: a gotcha after solving a non-obvious failure, or a decision when choosing between approaches, citing the files it concerns. " +
+			"The server records your member, session, harness and commit, and refuses text holding a secret. Adding the same text again returns the existing note; the result lists up to 3 similar notes. " +
+			"A note reaches new sessions only after a member pins it (aether memory pin <id>); agents cannot pin or remove notes. " +
 			coordhooks.MemoryRule,
 		InputSchema: add,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in memoryAddInput) (*mcp.CallToolResult, protocol.MemoryAddResult, error) {

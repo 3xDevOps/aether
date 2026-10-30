@@ -112,7 +112,7 @@ func (s *Scheduler) reconcileActiveDestroyPending(ctx context.Context, id domain
 	}
 	if sc.RunID != "" && sc.RunID != string(id) {
 		s.mu.Unlock()
-		return false, fmt.Errorf("scheduler: destroy-pending sidecar run ID mismatch")
+		return false, fmt.Errorf("scheduler: destroy-pending sidecar session ID mismatch")
 	}
 	if !sc.DestroyPending {
 		s.mu.Unlock()
@@ -391,13 +391,13 @@ func (s *Scheduler) teardownRun(ctx context.Context, run domain.RunID, actor dom
 			return err
 		}
 		if err := s.cfg.Git.RemoveRunHistory(cleanupCtx, run); err != nil {
-			return fmt.Errorf("scheduler: delete run history: %w", err)
+			return fmt.Errorf("scheduler: delete session history: %w", err)
 		}
 		if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, run); err != nil {
-			return fmt.Errorf("scheduler: delete run transcripts: %w", err)
+			return fmt.Errorf("scheduler: delete session transcripts: %w", err)
 		}
 		if err := os.Remove(s.sidecarPath(run)); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("scheduler: delete run sidecar: %w", err)
+			return fmt.Errorf("scheduler: delete session sidecar: %w", err)
 		}
 		if deleteRows == nil {
 			return nil
@@ -409,7 +409,7 @@ func (s *Scheduler) teardownRun(ctx context.Context, run domain.RunID, actor dom
 	s.mu.Unlock()
 	if purger, ok := service.(EvidencePurger); ok {
 		if err := purger.PurgeRun(ctx, workspace, run, removeSources); err != nil {
-			return "", fmt.Errorf("scheduler: purge run evidence: %w", err)
+			return "", fmt.Errorf("scheduler: purge session evidence: %w", err)
 		}
 	} else if err := removeSources(ctx); err != nil {
 		return "", err
@@ -493,7 +493,7 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 	entry := s.runs[run]
 	s.mu.Unlock()
 	if entry == nil {
-		return fmt.Errorf("%w: run has no live container", ErrInvalidTransition)
+		return fmt.Errorf("%w: session has no live container", ErrInvalidTransition)
 	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
@@ -501,11 +501,11 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 	if s.runs[run] != entry || entry.containerID == "" ||
 		entry.status.Terminal() || entry.retained || entry.destroyPending || entry.finalizing {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: run cannot be paused in its current state", ErrInvalidTransition)
+		return fmt.Errorf("%w: session cannot be paused in its current state", ErrInvalidTransition)
 	}
 	if entry.paused {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: run is already paused", ErrInvalidTransition)
+		return fmt.Errorf("%w: session is already paused", ErrInvalidTransition)
 	}
 	workspace, cid := entry.workspaceID, entry.containerID
 	s.mu.Unlock()
@@ -536,7 +536,7 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 	entry := s.runs[run]
 	s.mu.Unlock()
 	if entry == nil {
-		return fmt.Errorf("%w: run has no live container", ErrInvalidTransition)
+		return fmt.Errorf("%w: session has no live container", ErrInvalidTransition)
 	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
@@ -544,11 +544,11 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 	if s.runs[run] != entry || entry.containerID == "" ||
 		entry.status.Terminal() || entry.retained || entry.destroyPending || entry.finalizing {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: retained or terminal runs must use Relaunch", ErrInvalidTransition)
+		return fmt.Errorf("%w: retained or terminal sessions must use Relaunch", ErrInvalidTransition)
 	}
 	if !entry.paused {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: run is not paused", ErrInvalidTransition)
+		return fmt.Errorf("%w: session is not paused", ErrInvalidTransition)
 	}
 	workspace, cid, acp, appServer := entry.workspaceID, entry.containerID, entry.acp, entry.appServer
 	s.mu.Unlock()
@@ -624,7 +624,7 @@ func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.M
 	if err != nil {
 		return "", err
 	}
-	return "", fmt.Errorf("%w: inject requires a running or needs-attention run", ptyhost.ErrNoSession)
+	return "", fmt.Errorf("%w: inject requires a running or needs-attention session", ptyhost.ErrNoSession)
 }
 
 const steerRecordTimeout = 10 * time.Second
@@ -695,7 +695,7 @@ func (s *Scheduler) reportedOnlyRefusalLocked(ctx context.Context, run domain.Ru
 		return nil
 	}
 	if !current.Status.Live() || current.Review != domain.ReviewReady {
-		return fmt.Errorf("%w: run %s", ErrReviewNotReported, run)
+		return fmt.Errorf("%w: session %s", ErrReviewNotReported, run)
 	}
 	return nil
 }
@@ -708,7 +708,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 	s.mu.Lock()
 	if pending := s.pending[run]; pending != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
+		return fmt.Errorf("%w: session %s is still provisioning", ErrInvalidTransition, run)
 	}
 	entry := s.runs[run]
 	s.mu.Unlock()
@@ -722,7 +722,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 			return err
 		}
 		if r.Status == domain.RunQueued {
-			return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
+			return fmt.Errorf("%w: session %s is still provisioning", ErrInvalidTransition, run)
 		}
 		sc, serr := s.readSidecar(run)
 		if serr != nil && !os.IsNotExist(serr) {
@@ -738,7 +738,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 		}
 		if serr == nil && sc.ContainerID != "" {
 			if sc.RunID != "" && sc.RunID != string(run) {
-				return fmt.Errorf("scheduler: reconcile close sidecar: run ID mismatch")
+				return fmt.Errorf("scheduler: reconcile close sidecar: session ID mismatch")
 			}
 			s.mu.Lock()
 			if r.Status.Terminal() {
@@ -815,13 +815,13 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 	}
 	if live && entry.destroyPending {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: run cleanup is pending", ErrInvalidTransition)
+		return fmt.Errorf("%w: session cleanup is pending", ErrInvalidTransition)
 	}
 	if !live || (entry.finalizing && !entry.retained) {
 		identity := entry.evidenceIdentity
 		if !status.Terminal() {
 			s.mu.Unlock()
-			return fmt.Errorf("%w: run finalization is in progress", ErrInvalidTransition)
+			return fmt.Errorf("%w: session finalization is in progress", ErrInvalidTransition)
 		}
 		if status == outcome {
 			pending := entry.evidencePending
@@ -1055,7 +1055,7 @@ func (s *Scheduler) settleRetainedCompletion(ctx context.Context, entry *supervi
 	}()
 	if !paused && !exited {
 		if err := s.cfg.Runtime.Pause(ctx, entry.containerID); err != nil {
-			return fmt.Errorf("scheduler: quiesce retained run: %w", err)
+			return fmt.Errorf("scheduler: quiesce retained session: %w", err)
 		}
 		s.setPaused(entry, true)
 	}
@@ -1106,7 +1106,7 @@ func (s *Scheduler) restoreAfterCloseFailure(ctx context.Context, entry *supervi
 	resumed := false
 	if !alreadyPaused {
 		if err := s.cfg.Runtime.Resume(ctx, entry.containerID); err != nil {
-			return fmt.Errorf("scheduler: restore closed run: resume: %w", err)
+			return fmt.Errorf("scheduler: restore closed session: resume: %w", err)
 		}
 		resumed = true
 		s.setPaused(entry, false)
@@ -1115,20 +1115,20 @@ func (s *Scheduler) restoreAfterCloseFailure(ctx context.Context, entry *supervi
 	att, err := s.cfg.Runtime.Attach(ctx, entry.containerID)
 	if err != nil {
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
-			fmt.Errorf("scheduler: restore closed run: attach: %w", err))
+			fmt.Errorf("scheduler: restore closed session: attach: %w", err))
 	}
 	driver := s.entryDriver(entry)
 	if err := driver.Resume(ctx, entry, att); err != nil {
 		_ = att.Close()
 		_ = driver.Stop(context.WithoutCancel(ctx), entry.runID)
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
-			fmt.Errorf("scheduler: restore closed run: pty: %w", err))
+			fmt.Errorf("scheduler: restore closed session: pty: %w", err))
 	}
 	if err := s.cfg.Git.StartDiffWatch(ctx, entry.workspaceID, entry.runID); err != nil {
 		s.cfg.Git.StopDiffWatch(entry.runID)
 		_ = driver.Stop(context.WithoutCancel(ctx), entry.runID)
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
-			fmt.Errorf("scheduler: restore closed run: diff watch: %w", err))
+			fmt.Errorf("scheduler: restore closed session: diff watch: %w", err))
 	}
 	if err := s.reopenDevelopment(ctx, entry.runID); err != nil {
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed, err)
@@ -1156,7 +1156,7 @@ func (s *Scheduler) closeRollbackFailure(ctx context.Context, entry *supervised,
 	}
 	if err := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), entry.containerID); err != nil {
 		s.setPaused(entry, false)
-		return errors.Join(cause, fmt.Errorf("scheduler: restore closed run: pause: %w", err))
+		return errors.Join(cause, fmt.Errorf("scheduler: restore closed session: pause: %w", err))
 	}
 	s.setPaused(entry, true)
 	return cause

@@ -20,14 +20,14 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'the environment terminal and the run need a reachable Docker daemon')
+test.skip(!dockerReachable(), 'the environment terminal and the session need a reachable Docker daemon')
 
 /** What the owner's `claude` shim runs: the seed repository's script, then
  * the login at the harness's login path. */
 const agentShim = `sh /workspace/agent.sh
 printf 'login-seen:%s\\n' "$(cat "$HOME/.claude/.credentials.json")"`
 const ownerLogin = '{"claudeAiOauth":{"owner":"alice-e2e"}}'
-const task = 'a run on a shared account'
+const task = 'a session on a shared account'
 
 test('a member shares their agent account and a teammate launches on it', async ({
   page,
@@ -55,8 +55,8 @@ test('a member shares their agent account and a teammate launches on it', async 
   const bobPage = await bobContext.newPage()
   try {
     const openLaunch = async () => {
-      await bobPage.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New run' }).click()
-      const dialog = bobPage.getByRole('dialog', { name: 'New run' })
+      await bobPage.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New session' }).click()
+      const dialog = bobPage.getByRole('dialog', { name: 'New session' })
       await expect(dialog).toBeVisible()
       return dialog
     }
@@ -99,7 +99,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     await expect(sharing.getByRole('button', { name: 'Revoke access' })).toBeVisible()
     const notice = sharing.getByRole('status')
     await expect(notice).toContainText(
-      `Your Environment was started before you shared, so a Claude Code login written there will not reach ${bobName}'s runs`,
+      `Your Environment was started before you shared, so a Claude Code login written there will not reach ${bobName}'s sessions`,
     )
     await notice.getByRole('button', { name: 'Stop environment' }).click()
     const confirm = page.getByRole('alertdialog', { name: 'Stop your environment?' })
@@ -141,7 +141,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     await expect(terminal).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
     await expect(terminal).toContainText(`login-seen:${ownerLogin}`)
 
-    const facts = bobPage.getByRole('complementary', { name: 'Run details' }).getByRole('region', { name: 'Details' })
+    const facts = bobPage.getByRole('complementary', { name: 'Session details' }).getByRole('region', { name: 'Details' })
     const row = (term: string) =>
       facts
         .getByRole('term')

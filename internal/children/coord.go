@@ -82,7 +82,7 @@ func (s *Service) ValidateReport(ctx context.Context, run domain.RunID, outcome 
 		return nil
 	}
 	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-		"coord.report: %d child runs are unfinished (aether-internal child list); wait for their reports and report waiting --for agents, or stop them with child cancel", unfinished)}
+		"coord.report: %d subsessions are unfinished (aether-internal subsession list); wait for their reports and report waiting --for agents, or stop them with subsession cancel", unfinished)}
 }
 
 // NeedsInput tells an attached child's parent what the child asked its
@@ -92,7 +92,7 @@ func (s *Service) NeedsInput(ctx context.Context, run domain.RunID, question str
 	if err != nil || parent == "" {
 		return
 	}
-	_ = s.notify(ctx, run, parent, "Child run "+string(run)+" asks its owner: "+question+
+	_ = s.notify(ctx, run, parent, "Subsession "+string(run)+" asks its owner: "+question+
 		"\nIf you can answer within its task, reply with aether-internal send --to "+string(run)+".", "child-needs-input:"+string(run)+":"+digest(question))
 }
 

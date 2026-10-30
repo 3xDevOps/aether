@@ -17,19 +17,19 @@
       "interface": {
         "displayName": "Aether Coding Agents",
         "shortDescription": "Run and steer coding agents",
-        "longDescription": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Aether server you signed in to through the Aether edge.\n\nAsk what needs you, what your agents did today, or what a run changed, and read a run's conversation, pull request checks and review comments. With the write scope, launch a run on a task, message a run, answer an agent's question, and pause, resume or accept a run. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a run.\n\nWho it is for: developers whose team already runs an Aether server. It needs an Aether account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before tools that are not read-only unless you chose to always allow them. No plugin tool installs Aether, changes server settings, merges pull requests or deletes repositories; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
+        "longDescription": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Aether server you signed in to through the Aether edge.\n\nAsk what needs you, what your agents did today, or what a session changed, and read a session's conversation, pull request checks and review comments. With the write scope, launch a session on a task, message a session, answer an agent's question, and pause, resume or accept a session. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a session.\n\nWho it is for: developers whose team already runs an Aether server. It needs an Aether account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before tools that are not read-only unless you chose to always allow them. No plugin tool installs Aether, changes server settings, merges pull requests or deletes repositories; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
         "developerName": "3xDevOps",
         "category": "Developer Tools",
         "capabilities": [
-          "List workspaces, installed agents, runs on your Aether server",
-          "Show what needs you: agent questions, permission requests and runs awaiting review",
+          "List workspaces, installed agents, sessions on your Aether server",
+          "Show what needs you: agent questions, permission requests and sessions awaiting review",
           "Summarize what your agents did today, yesterday or this week",
-          "Read a run's conversation or terminal, its reports, changed files and diff",
-          "Show a run's pull request checks, reviews and comments",
-          "Search runs and the team memory of a workspace",
-          "Launch a run on a task",
-          "Message a run, answer an agent's question, and pause or resume a run",
-          "Allow or deny a permission request once, stop or close a run"
+          "Read a session's conversation or terminal, its reports, changed files and diff",
+          "Show a session's pull request checks, reviews and comments",
+          "Search sessions and the team memory of a workspace",
+          "Launch a session on a task",
+          "Message a session, answer an agent's question, and pause or resume a session",
+          "Allow or deny a permission request once, stop or close a session"
         ],
         "websiteURL": "https://onaether.dev",
         "supportURL": "https://github.com/3xDevOps/aether/issues",
@@ -38,7 +38,7 @@
         "defaultPrompt": [
           "What needs me in Aether?",
           "What did my Aether agents do today?",
-          "Launch a Claude Code run in my api workspace to fix the flaky login test."
+          "Launch a Claude Code session in my api workspace to fix the flaky login test."
         ],
         "brandColor": "#367F77",
         "brandColorDark": "#5FB3A8",
@@ -50,33 +50,33 @@
           "positive": [
             {
               "description": "Launch: start an agent on a small task in the demo workspace. ChatGPT asks for confirmation first.",
-              "prompt": "Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md.",
-              "tools_triggered": "aether_launch_options, aether_launch_run",
-              "expected_behavior": "After the reviewer confirms, starts one run in aether-demo with Claude Code and returns its run id, state and dashboard link."
+              "prompt": "Launch a Claude Code session in the aether-demo workspace to add a Contributing section to README.md.",
+              "tools_triggered": "aether_launch_options, aether_launch_session",
+              "expected_behavior": "After the reviewer confirms, starts one session in aether-demo with Claude Code and returns its session id, state and dashboard link."
             },
             {
-              "description": "Track: report what changed across the reviewer's runs since the last check, without re-reading every run.",
-              "prompt": "What changed in my Aether runs since we last checked?",
+              "description": "Track: report what changed across the reviewer's sessions since the last check, without re-reading every session.",
+              "prompt": "What changed in my Aether sessions since we last checked?",
               "tools_triggered": "aether_changes",
-              "expected_behavior": "Lists runs that changed state, new reports and messages, and pull request changes since the previous cursor, each with its run title and dashboard link."
+              "expected_behavior": "Lists sessions that changed state, new reports and messages, and pull request changes since the previous cursor, each with its session title and dashboard link."
             },
             {
-              "description": "Coordinate: two active runs in aether-demo both edit README.md; find the overlap.",
-              "prompt": "Which runs touch the same files as the Contributing section run?",
-              "tools_triggered": "aether_list_runs, aether_overlaps",
-              "expected_behavior": "Names the other run that edits README.md, with both run titles and the shared file."
+              "description": "Coordinate: two active sessions in aether-demo both edit README.md; find the overlap.",
+              "prompt": "Which sessions touch the same files as the Contributing section session?",
+              "tools_triggered": "aether_list_sessions, aether_overlaps",
+              "expected_behavior": "Names the other session that edits README.md, with both session titles and the shared file."
             },
             {
-              "description": "Review and CI: a demo run has an open pull request with finished checks and one review comment.",
-              "prompt": "Is CI green on the README run's pull request, and what did reviewers say?",
-              "tools_triggered": "aether_list_runs, aether_pr_status",
+              "description": "Review and CI: a demo session has an open pull request with finished checks and one review comment.",
+              "prompt": "Is CI green on the README session's pull request, and what did reviewers say?",
+              "tools_triggered": "aether_list_sessions, aether_pr_status",
               "expected_behavior": "Reports how many checks passed, are pending and are failing, names any failing check with its result, gives the review state and the reviewer's comment, and links to the pull request."
             },
             {
-              "description": "Act: a demo run's agent asks which licence to use. ChatGPT asks for confirmation before answering.",
+              "description": "Act: a demo session's agent asks which licence to use. ChatGPT asks for confirmation before answering.",
               "prompt": "What needs me in Aether? Answer the licence question with MIT.",
               "tools_triggered": "aether_needs_attention, aether_answer",
-              "expected_behavior": "Lists the open question and the run awaiting review; after the reviewer confirms, answers the question with MIT and reports it as delivered."
+              "expected_behavior": "Lists the open question and the session awaiting review; after the reviewer confirms, answers the question with MIT and reports it as delivered."
             }
           ],
           "negative": [
@@ -90,7 +90,7 @@
             },
             {
               "description": "The connector reaches only the Aether server it was connected to; it should not claim access to another team's server.",
-              "prompt": "Show me the runs on Acme Corp's Aether server."
+              "prompt": "Show me the sessions on Acme Corp's Aether server."
             }
           ]
         },

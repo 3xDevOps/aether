@@ -7,7 +7,7 @@ import { dockerReachable } from './harness/server'
 import { runCoordCLI } from './harness/coord'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('an Enhanced run streams, answers a permission, takes a message and stops on Interrupt', async ({ page, aether }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -24,7 +24,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   })
 
   await page.goto(`${alice.url}&run=${run.id}`)
-  const log = page.getByRole('log', { name: 'Session' })
+  const log = page.getByRole('log', { name: 'Chat' })
   await expect(log.getByText('pong').first()).toBeVisible({ timeout: 60_000 })
   const box = page.getByRole('combobox', { name: 'Message the agent' })
 
@@ -33,12 +33,12 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   const card = page.locator('#session-request-docked')
   await expect(card.getByText('rm -rf build')).toBeVisible()
   await expect(page.getByText('Answer the request above to continue.')).toBeVisible()
-  await page.getByRole('toolbar', { name: 'Run actions' }).getByRole('button', { name: 'Answer' }).click()
+  await page.getByRole('toolbar', { name: 'Session actions' }).getByRole('button', { name: 'Answer' }).click()
   await expect(card).toBeFocused()
   await expect(card.getByRole('radio')).toHaveText(['Just once', 'Always'])
   await expect(card.getByRole('button', { name: 'Reject', exact: true })).toHaveAttribute('aria-keyshortcuts', '2')
   await expect(card.getByRole('button', { name: 'Allow', exact: true })).toHaveAttribute('aria-keyshortcuts', '1')
-  await expect(page.getByRole('log', { name: 'Session' }).getByText('Waiting for your approval: rm -rf build')).toBeVisible()
+  await expect(page.getByRole('log', { name: 'Chat' }).getByText('Waiting for your approval: rm -rf build')).toBeVisible()
   await page.keyboard.press('1')
   await expect(log.getByText('permission: allow')).toBeVisible()
   // The command and its answer are steps; once the turn ends their block shuts behind the header.
@@ -81,7 +81,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await changes.getByRole('button', { name: /billing\.js/ }).click()
   await expect(page.getByRole('tab', { name: 'Changes', selected: true })).toBeVisible()
   await expect(page.getByRole('tabpanel', { name: 'Changes' }).getByText('Math.round((a + b) * 100) / 100')).toBeVisible()
-  await page.getByRole('tab', { name: 'Session' }).click()
+  await page.getByRole('tab', { name: 'Chat' }).click()
   await expect(changed).toHaveAttribute('aria-expanded', 'true')
 
   await box.fill('wait')
@@ -115,8 +115,8 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(call).toBeVisible()
   await call.focus()
   await page.keyboard.press('Enter')
-  await page.getByRole('dialog', { name: 'Edited src/billing.js details' }).getByRole('button', { name: 'Show in Session' }).click()
-  await expect(page.getByRole('tab', { name: 'Session', selected: true })).toBeVisible()
+  await page.getByRole('dialog', { name: 'Edited src/billing.js details' }).getByRole('button', { name: 'Show in Chat' }).click()
+  await expect(page.getByRole('tab', { name: 'Chat', selected: true })).toBeVisible()
   await expect(log.getByRole('button', { name: /Edited src\/billing\.js/ })).toBeVisible()
 
   await page.reload()
@@ -138,8 +138,8 @@ test('an Enhanced run holding background work stays working, asks while it waits
     'workspace.timeline', { workspace_id: workspace, run_id: run.id, types: ['run.status'], newest: true, limit: 1000 })).events
 
   await page.goto(`${alice.url}&run=${run.id}`)
-  const log = page.getByRole('log', { name: 'Session' })
-  const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+  const log = page.getByRole('log', { name: 'Chat' })
+  const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
   const header = page.locator('[data-slot="pane-header"]')
   const box = page.getByRole('combobox', { name: 'Message the agent' })
   await expect(log.getByText(/^Finished/).first()).toBeVisible({ timeout: 60_000 })
@@ -198,7 +198,7 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   })
 
   await page.goto(`${alice.url}&run=${run.id}`)
-  const log = page.getByRole('log', { name: 'Session' })
+  const log = page.getByRole('log', { name: 'Chat' })
   await expect(log.getByText('pong').first()).toBeVisible({ timeout: 60_000 })
   const box = page.getByRole('combobox', { name: 'Message the agent' })
 
@@ -223,7 +223,7 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   await chip.click()
   await expect(chip).toHaveAttribute('aria-expanded', 'true')
   const panel = page.getByRole('complementary', { name: 'Workflow' })
-  const tree = panel.getByRole('tree', { name: 'Run workflow' })
+  const tree = panel.getByRole('tree', { name: 'Session workflow' })
   await expect(tree.getByRole('treeitem', { name: /^Map the billing module, Completed, Read 1 file/ })).toHaveAttribute('aria-level', '2')
   await expect(tree.getByRole('treeitem', { name: /^Run the tests, Completed/ })).toHaveAttribute('aria-posinset', '2')
   await expect(tree.getByRole('treeitem', { name: /^Round totals to cents, Completed/ })).toHaveAttribute('aria-setsize', '3')
@@ -241,7 +241,7 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   const inspector = page.getByRole('complementary', { name: 'Subagent' })
   const transcript = inspector.getByRole('log', { name: 'Subagent transcript' })
   const path = inspector.getByRole('navigation', { name: 'Subagent path' })
-  await expect(path).toContainText('Session')
+  await expect(path).toContainText('Chat')
   await expect(path).toContainText('Map the billing module')
   await expect(transcript.getByText('Reading the billing module.')).toBeVisible()
   await expect(transcript.getByRole('button', { name: /Read 1 file/ })).toBeVisible()
@@ -277,7 +277,7 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   // goBack loaded a new page. A lease the reloaded page was granted as it
   // unloaded stays held for the 15 s reconnect window, and until this page
   // holds control a message waits 45 s for moderation.
-  await expect(page.getByRole('group', { name: 'Run controller' })).toHaveText(/· You control$/, { timeout: 30_000 })
+  await expect(page.getByRole('group', { name: 'Session controller' })).toHaveText(/· You control$/, { timeout: 30_000 })
   await box.fill('workflow')
   await box.press('Enter')
   await expect(log.getByText('The workflow is running.')).toBeVisible({ timeout: 30_000 })
@@ -308,7 +308,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
   const bobPage = await bobContext.newPage()
   try {
     await page.goto(`${alice.url}&run=${run.id}`)
-    await expect(page.getByRole('log', { name: 'Session' }).getByText('pong').first()).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong').first()).toBeVisible({ timeout: 60_000 })
     const aliceControls = page.getByRole('group', { name: 'Multiplayer controls' })
     await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     const aliceMatrix = aliceControls.locator('[data-control-appearance]')
@@ -320,10 +320,10 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     await expect(takeControl).toHaveAttribute('aria-disabled', 'false')
     const bobMatrix = bobControls.locator('[data-control-appearance]')
     await expect(bobMatrix).toHaveAttribute('data-control-appearance', 'hidden')
-    await expect(aliceControls.getByRole('group', { name: 'Run controller' }).getByRole('img', { name: aliceMember.display_name })).toBeVisible()
-    await expect(aliceControls.getByRole('group', { name: 'Run controller' })).toContainText(aliceMember.display_name)
-    await expect(bobControls.getByRole('group', { name: 'Run controller' }).getByRole('img', { name: aliceMember.display_name })).toBeVisible()
-    const watchers = bobControls.getByRole('group', { name: 'Run watchers' })
+    await expect(aliceControls.getByRole('group', { name: 'Session controller' }).getByRole('img', { name: aliceMember.display_name })).toBeVisible()
+    await expect(aliceControls.getByRole('group', { name: 'Session controller' })).toContainText(aliceMember.display_name)
+    await expect(bobControls.getByRole('group', { name: 'Session controller' }).getByRole('img', { name: aliceMember.display_name })).toBeVisible()
+    const watchers = bobControls.getByRole('group', { name: 'Session watchers' })
     for (const name of [aliceMember.display_name, bobMember.display_name]) {
       await expect(watchers.getByText(name, { exact: true })).toBeVisible()
       await expect(watchers.getByRole('img', { name, exact: true })).toBeVisible()
@@ -332,8 +332,8 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     for (const controls of [aliceControls, bobControls]) {
       await controls.getByRole('button', { name: 'Multiplayer', exact: true }).click()
     }
-    const aliceDetails = page.getByRole('complementary', { name: 'Run details' })
-    const bobDetails = bobPage.getByRole('complementary', { name: 'Run details' })
+    const aliceDetails = page.getByRole('complementary', { name: 'Session details' })
+    const bobDetails = bobPage.getByRole('complementary', { name: 'Session details' })
     const note = 'I will check the migration while you work.'
     await bobDetails.getByRole('textbox', { name: 'Add a note' }).fill(note)
     await bobDetails.getByRole('button', { name: 'Add note', exact: true }).click()
@@ -355,7 +355,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
       })
       return messages.find((message) => message.body === instruction)?.state
     }).toBe('sent')
-    await expect(page.getByRole('log', { name: 'Session' }).getByText('pong', { exact: true })).toHaveCount(2)
+    await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong', { exact: true })).toHaveCount(2)
 
     const ownerComposer = page.getByRole('combobox', { name: 'Message the agent' })
     await ownerComposer.fill('ask permission')
@@ -384,9 +384,9 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     }).toBe('delivered')
 
     await takeControl.click()
-    await expect(bobControls.getByRole('alert')).toContainText('run control is held by another session')
+    await expect(bobControls.getByRole('alert')).toContainText('session control is held by another client')
     await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
-    const takeover = page.getByRole('alertdialog', { name: 'Run control requested' })
+    const takeover = page.getByRole('alertdialog', { name: 'Session control requested' })
     await takeControl.focus()
     await bobPage.keyboard.down('Space')
     await expect(takeControl).toContainText(/Take control · [1-5]s/)
@@ -419,8 +419,8 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     await expect(takeover.getByRole('status')).toContainText('Control transfers automatically')
     await page.screenshot({ path: testInfo.outputPath('enhanced-takeover-review.png') })
     await expect(bobControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(bobControls.getByRole('group', { name: 'Run controller' }).getByRole('img', { name: bobMember.display_name })).toBeVisible()
-    await expect(bobControls.getByRole('group', { name: 'Run controller' })).toContainText(bobMember.display_name)
+    await expect(bobControls.getByRole('group', { name: 'Session controller' }).getByRole('img', { name: bobMember.display_name })).toBeVisible()
+    await expect(bobControls.getByRole('group', { name: 'Session controller' })).toContainText(bobMember.display_name)
     await expect(aliceControls).toContainText(`${bobMember.display_name} controls`)
     await expect(aliceControls.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
     await expect(aliceMatrix).toHaveAttribute('data-control-appearance', 'takeover')
@@ -436,7 +436,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     await aliceControls.getByRole('button', { name: 'Release', exact: true }).click()
     await expect(aliceControls).toContainText('Nobody controls')
-    await page.getByRole('tab', { name: 'Session', exact: true }).click()
+    await page.getByRole('tab', { name: 'Chat', exact: true }).click()
     await expect(aliceControls.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
 
     await bobPage.setViewportSize({ width: 390, height: 844 })

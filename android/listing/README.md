@@ -21,8 +21,8 @@ So before the first submission there must be:
    at the machine's MagicDNS name
    ([docs/install.md](../../docs/install.md#first-boot)).
 3. A member on that server for the review account, approved, with a role that
-   can see runs ([docs/teams.md](../../docs/teams.md)).
-4. A workspace with a few runs in different states, including one with a diff
+   can see sessions ([docs/teams.md](../../docs/teams.md)).
+4. A workspace with a few sessions in different states, including one with a diff
    and one waiting on a permission request, so the reviewer sees the app
    working.
 
@@ -67,10 +67,10 @@ twice the other. For the listing to be promoted, at least four at 1080x1920
 or larger. Take them on a phone signed in to a tailnet with a running server,
 in this order, so the listing reads as a tour:
 
-1. The board, with a few runs in different buckets.
-2. A run's terminal with the key bar showing.
-3. An Enhanced run's Session view with a pending permission request.
-4. A run's diff.
+1. The board, with a few sessions in different buckets.
+2. A session's terminal with the key bar showing.
+3. An Enhanced session's Chat view with a pending permission request.
+4. A session's diff.
 5. The first screen, **Connect to Aether**, with its two choices.
 
 Tablet screenshots are optional and the app declares no tablet-specific
@@ -85,10 +85,10 @@ beside each upload, in the same order as the lists above.
 | Asset | Alt text |
 | --- | --- |
 | Feature graphic | The Aether mark and wordmark on a blue gradient, above the line "Your coding agents, on your own server" |
-| Screenshot 1 | The Aether board on a phone, runs in columns by what needs attention |
-| Screenshot 2 | A run's terminal filling the phone screen, with the key bar above the keyboard |
-| Screenshot 3 | An Enhanced run's Session view on a phone, with a pending permission request from the agent |
-| Screenshot 4 | A run's diff on the phone, added lines green and removed lines red |
+| Screenshot 1 | The Aether board on a phone, sessions in columns by what needs attention |
+| Screenshot 2 | A session's terminal filling the phone screen, with the key bar above the keyboard |
+| Screenshot 3 | An Enhanced session's Chat view on a phone, with a pending permission request from the agent |
+| Screenshot 4 | A session's diff on the phone, added lines green and removed lines red |
 | Screenshot 5 | The app's first screen, "Connect to Aether", with the Aether Edge and Tailscale choices |
 
 Check the feature graphic's alt text against the file before uploading: if the
@@ -152,7 +152,7 @@ visible to or accessible by at least a subset of the app's users" and asks for
 an "in-app system for reporting and blocking objectionable UGC and users". It
 names private-group apps explicitly; invite-only is not an exemption. Position:
 content in Aether is visible only to members an administrator invited to that
-one server, administrators remove members and delete runs from the dashboard,
+one server, administrators remove members and delete sessions from the dashboard,
 and nothing is public or discoverable. Build a reporting flow only if Play
 asks for one.
 

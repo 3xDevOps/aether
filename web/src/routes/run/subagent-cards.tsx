@@ -79,7 +79,7 @@ function Progress({ runID, agent, state }: { runID: string; agent: Subagent; sta
     case 'launched':
       return <>Launched in the background</>
     case 'unknown': {
-      const why = more ? 'Its launch is in history not loaded yet' : 'Its launch is not in the session history'
+      const why = more ? 'Its launch is in history not loaded yet' : 'Its launch is not in the conversation history'
       return <>{activity ? `${why} · ${activity}` : why}</>
     }
   }

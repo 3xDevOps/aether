@@ -323,9 +323,9 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		return s.withTemporary(ctx, id, settingsOf(st))
 	}
 	slog.Info("assistant auto-approval changed", "member", id, "auto", st.AutoApprove)
-	severity, title, body := "info", "Auto-approval turned off", "Launching, messaging and stopping runs and saving the environment wait for your approval again."
+	severity, title, body := "info", "Auto-approval turned off", "Launching, messaging and stopping sessions and saving the environment wait for your approval again."
 	if st.AutoApprove {
-		severity, title, body = "warning", "Auto-approval turned on", "The assistant launches, messages and stops your runs and saves the environment without asking. Messaging or stopping another member's run still asks."
+		severity, title, body = "warning", "Auto-approval turned on", "The assistant launches, messages and stops your sessions and saves the environment without asking. Messaging or stopping another member's session still asks."
 	}
 	if err = s.note(ctx, m, acphost.Notice{Severity: severity, Title: title, Description: body}); err != nil && !errors.Is(err, ErrRemoving) {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %s, but noting it in the transcript failed: %w", strings.ToLower(title), err)
@@ -480,7 +480,7 @@ func (c actionCaller) Call(ctx context.Context, method string, params json.RawMe
 		a.OtherOwner = owner
 		a.Summary = reversibleSummary(method, params, a.Target.RunID, owner)
 		if rpcErr != nil {
-			rpcErr = &protocol.Error{Code: rpcErr.Code, Message: "look up the owner of run " + a.Target.RunID + ": " + rpcErr.Message}
+			rpcErr = &protocol.Error{Code: rpcErr.Code, Message: "look up the owner of session " + a.Target.RunID + ": " + rpcErr.Message}
 			c.record(conv, method, a, nil, rpcErr)
 			return nil, rpcErr
 		}
@@ -499,7 +499,7 @@ func (c actionCaller) record(conv context.Context, method string, a protocol.Ass
 	} else {
 		a.Outcome, a.Result = protocol.AssistantActionSucceeded, created(result, a.Target)
 		if a.Result != nil {
-			body = "Run " + a.Result.RunID
+			body = "Session " + a.Result.RunID
 		}
 	}
 	// A record that cannot be written must not change the call's result.
@@ -533,7 +533,7 @@ func reversibleSummary(method string, params json.RawMessage, run, owner string)
 		var target string
 		switch {
 		case t.Kind == protocol.WatchTargetRun && t.RunID != "":
-			target = "run " + t.RunID
+			target = "session " + t.RunID
 		case t.Kind == protocol.WatchTargetPR && t.Repo != "":
 			target = fmt.Sprintf("pull request %s#%d", t.Repo, t.Number)
 		default:
@@ -563,7 +563,7 @@ func reversibleSummary(method string, params json.RawMessage, run, owner string)
 		verb = "Resume"
 	}
 	if owner != "" {
-		return fmt.Sprintf("%s run %s, owned by %s", verb, run, owner)
+		return fmt.Sprintf("%s session %s, owned by %s", verb, run, owner)
 	}
-	return verb + " run " + run
+	return verb + " session " + run
 }

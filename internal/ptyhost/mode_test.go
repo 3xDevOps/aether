@@ -369,7 +369,7 @@ func TestTapNeverSizesTheSession(t *testing.T) {
 // Resuming changes what a client is sent, never what it is allowed to do:
 // a resumed write attach passes the steer gate like any other.
 func TestResumeStillFacesTheSteerGate(t *testing.T) {
-	denied := errors.New("not your run")
+	denied := errors.New("not your session")
 	h, _ := newTestHost(t, func(c *Config) {
 		c.Gate = func(context.Context, domain.MemberID, SessionKey) error { return denied }
 	})

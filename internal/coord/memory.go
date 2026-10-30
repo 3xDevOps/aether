@@ -50,7 +50,7 @@ func (s *Service) handleMemory(ctx context.Context, run domain.RunID, method str
 		return nil, rpcErr
 	}
 	if self.Status.Terminal() {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": run has finished"}
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": session has finished"}
 	}
 	// encoding/json matches field names case-insensitively, so every
 	// spelling of an identity field is refused before the service decodes.

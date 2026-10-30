@@ -30,7 +30,7 @@ function Line({ className, dash, cap, head, tail }: { className: string; dash?: 
 const lines = [
   { label: 'Agent message, acknowledged', line: <Line className={edgeTone.message} dash="0.5 3" cap="round" tail="dot" head="filled" /> },
   { label: 'Agent message, not acknowledged', line: <Line className={edgeTone.message} dash="0.5 3" cap="round" tail="dot" head="hollow" /> },
-  { label: 'Edits the same files (selected run)', line: <Line className={edgeTone.overlap} dash="4 2" /> },
+  { label: 'Edits the same files (selected session)', line: <Line className={edgeTone.overlap} dash="4 2" /> },
 ]
 
 const strips: { label: string; tone: Tone }[] = [
@@ -60,7 +60,7 @@ export function Legend() {
             </li>
           ))}
         </ul>
-        <p className="mt-1.5 text-ui-sm text-muted">A finished run&apos;s working time takes its outcome&apos;s colour. Folded child-run groups and Finished show a strip of the most urgent state at each moment, in this order:</p>
+        <p className="mt-1.5 text-ui-sm text-muted">A finished session&apos;s working time takes its outcome&apos;s colour. Folded subsession groups and Finished show a strip of the most urgent state at each moment, in this order:</p>
         <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-ui-sm">
           {strips.map((strip) => (
             <li key={strip.label} className="flex items-center gap-1.5">

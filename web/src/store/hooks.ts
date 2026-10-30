@@ -129,7 +129,7 @@ export function useRunInput(run: Run) {
     const count = requests.filter((request) => !isSudo(request) && request.kind === kind).length
     if (count > 0) parts.push(`${count} ${label}${count === 1 ? '' : 's'} in Terminal`)
   }
-  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in the run's notes`)
+  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in the session's notes`)
   return {
     count: native + questions,
     questions,

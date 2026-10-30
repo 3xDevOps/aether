@@ -38,7 +38,7 @@ const tokens = new Intl.NumberFormat(undefined, { notation: 'compact' })
 export function costText(usage: Pick<ChildUsage, 'cost_usd' | 'metered_runs' | 'unmetered_runs'>): string {
   if (usage.metered_runs === 0) return 'Cost not reported'
   if (usage.unmetered_runs === 0) return money.format(usage.cost_usd)
-  return `At least ${money.format(usage.cost_usd)}: ${usage.unmetered_runs} ${usage.unmetered_runs === 1 ? 'run reports' : 'runs report'} no cost`
+  return `At least ${money.format(usage.cost_usd)}: ${usage.unmetered_runs} ${usage.unmetered_runs === 1 ? 'session reports' : 'sessions report'} no cost`
 }
 
 export function tokensText(usage: Pick<ChildUsage, 'input_tokens' | 'output_tokens'>): string | null {
@@ -111,7 +111,7 @@ function Usage({ result, root }: { result: RunChildrenResult; root: boolean }) {
   return (
     <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-ui-sm">
       <dt className="text-muted">Cost</dt>
-      <dd>{costText(usage)} <span className="text-muted">over {usage.runs} {usage.runs === 1 ? 'run' : 'runs'}, this one included</span></dd>
+      <dd>{costText(usage)} <span className="text-muted">over {usage.runs} {usage.runs === 1 ? 'session' : 'sessions'}, this one included</span></dd>
       {usage.by_account.length > 1 && (
         <>
           <dt className="text-muted">By account</dt>
@@ -145,7 +145,7 @@ export function RunLineage({ run }: { run: RunRecord }) {
   if (!run.parent_run_id) return null
   const root = run.root_run_id && run.root_run_id !== run.parent_run_id ? run.root_run_id : undefined
   return (
-    <nav aria-label="Run lineage" className="flex min-w-0 items-center gap-1.5 border-b border-seam px-4 py-1 text-ui-sm text-muted">
+    <nav aria-label="Session lineage" className="flex min-w-0 items-center gap-1.5 border-b border-seam px-4 py-1 text-ui-sm text-muted">
       {root && (
         <>
           <RunLink runID={root} />
@@ -154,7 +154,7 @@ export function RunLineage({ run }: { run: RunRecord }) {
       )}
       <RunLink runID={run.parent_run_id} />
       <span aria-hidden>▸</span>
-      <span className="shrink-0 text-text">This child run</span>
+      <span className="shrink-0 text-text">This subsession</span>
       {run.detached && <Badge>Detached</Badge>}
     </nav>
   )
@@ -168,13 +168,13 @@ export function useChildRunsItems(run: RunRecord, client: Api = api): ExtraItem[
   const owner = self.id === run.member_id
   const item = (next: 'on' | 'off'): ExtraItem => ({
     id: `child-runs-${next}`,
-    label: next === 'on' ? 'Allow child runs' : 'Turn off child runs',
-    description: next === 'on' ? 'The agent may start other agents as child runs.' : 'New child runs are refused; running ones continue.',
+    label: next === 'on' ? 'Allow subsessions' : 'Turn off subsessions',
+    description: next === 'on' ? 'The agent may start other agents as subsessions.' : 'New subsessions are refused; running ones continue.',
     Icon: Network,
     onSelect: () => {
       client.runChildrenAllow(run.id, next).then(
-        () => toast.success(next === 'on' ? 'Child runs allowed' : 'Child runs turned off'),
-        (err: unknown) => toast.error(`${next === 'on' ? 'Allow child runs' : 'Turn off child runs'} failed: ${message(err)}`),
+        () => toast.success(next === 'on' ? 'Subsessions allowed' : 'Subsessions turned off'),
+        (err: unknown) => toast.error(`${next === 'on' ? 'Allow subsessions' : 'Turn off subsessions'} failed: ${message(err)}`),
       )
     },
   })
@@ -188,15 +188,15 @@ export function ChildRuns({ run, inset, client = api }: { run: RunRecord; inset:
   const { result, error } = useChildren(run, client)
   if (!result?.children.length && !error) return null
   return (
-    <section aria-label="Child runs" className={cn('flex flex-col gap-2 border-b border-seam py-3 last:border-b-0', inset && 'px-4')}>
+    <section aria-label="Subsessions" className={cn('flex flex-col gap-2 border-b border-seam py-3 last:border-b-0', inset && 'px-4')}>
       <SectionLabel as="h2" className="flex items-center gap-1.5">
-        Child runs
+        Subsessions
         {result && <span className="text-text tabular-nums">{result.children.length}</span>}
       </SectionLabel>
       {error && <p role="alert" className="text-ui-sm text-state-failed">{error}</p>}
       {result && (
         <>
-          <ul aria-label={`Child runs of ${runLabel(run)}`} className="flex flex-col divide-y divide-seam">
+          <ul aria-label={`Subsessions of ${runLabel(run)}`} className="flex flex-col divide-y divide-seam">
             {result.children.map((child) => (
               <ChildRow key={child.run_id} child={child} />
             ))}

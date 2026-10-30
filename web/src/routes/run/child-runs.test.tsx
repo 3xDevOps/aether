@@ -31,7 +31,7 @@ describe('child run usage', () => {
   it('never shows $0 for unmetered runs', () => {
     expect(costText({ cost_usd: 0, metered_runs: 0, unmetered_runs: 3 })).toBe('Cost not reported')
     expect(costText({ cost_usd: 1.5, metered_runs: 2, unmetered_runs: 0 })).toBe('$1.50')
-    expect(costText({ cost_usd: 1.5, metered_runs: 2, unmetered_runs: 1 })).toBe('At least $1.50: 1 run reports no cost')
+    expect(costText({ cost_usd: 1.5, metered_runs: 2, unmetered_runs: 1 })).toBe('At least $1.50: 1 session reports no cost')
   })
 
   it('lists descendants with their account and cost', async () => {
@@ -52,7 +52,7 @@ describe('child run usage', () => {
       })),
     })
     render(<ChildRuns run={toRecord(parent)} inset={false} client={client} />)
-    const list = await screen.findByRole('list', { name: /Child runs of/ })
+    const list = await screen.findByRole('list', { name: /Subsessions of/ })
     const [first, second] = within(list).getAllByRole('listitem')
     expect(first.textContent).toContain("On Bob's account (fallback from Alice)")
     expect(first.textContent).toContain('$0.42')
@@ -65,7 +65,7 @@ describe('child run usage', () => {
 })
 
 describe('kill confirmation', () => {
-  const confirmation = { title: 'Kill this run?', body: 'The agent stops immediately.', action: 'Kill run', stopsChildren: true }
+  const confirmation = { title: 'Kill this session?', body: 'The agent stops immediately.', action: 'Kill session', stopsChildren: true }
 
   it('says unfinished child runs stop too', () => {
     const parent = run()
@@ -77,6 +77,6 @@ describe('kill confirmation', () => {
     ])
     render(<RunCommandConfirmation run={toRecord(parent)} confirmation={confirmation} onConfirm={vi.fn()} onClose={() => {}} />)
     const dialog = screen.getByRole('alertdialog')
-    expect(within(dialog).getByText('Its unfinished child run stops too, with any runs it started.')).toBeDefined()
+    expect(within(dialog).getByText('Its unfinished subsession stops too, with any sessions it started.')).toBeDefined()
   })
 })

@@ -181,7 +181,7 @@ describe('session rows from the item log', () => {
     expect(rows).toMatchObject([
       { kind: 'event', text: 'Woken by new agent messages' },
       { kind: 'event', text: 'Turn interrupted', detail: 'The agent connection ended.', tone: 'failed' },
-      { kind: 'event', text: 'New agent session' },
+      { kind: 'event', text: 'New agent conversation' },
       { kind: 'finished', text: 'Cancelled', tone: 'paused' },
     ])
   })

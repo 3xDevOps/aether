@@ -126,7 +126,7 @@ func (s *Scheduler) GitHubOAuthStatus(ctx context.Context, member domain.MemberI
 	a := s.githubOAuth[member]
 	if sessionID != "" && (a == nil || a.result.SessionID != sessionID) {
 		s.githubOAuthMu.Unlock()
-		return protocol.GitHubOAuthResult{}, errors.New("github: OAuth session is not the current attempt for this member")
+		return protocol.GitHubOAuthResult{}, errors.New("github: OAuth sign-in is not the current attempt for this member")
 	}
 	if a != nil && (!a.finished || (sessionID != "" && a.result.State != "connected")) {
 		result := a.result
@@ -147,7 +147,7 @@ func (s *Scheduler) GitHubOAuthStatus(ctx context.Context, member domain.MemberI
 	a = s.githubOAuth[member]
 	if sessionID != "" && (a == nil || a.result.SessionID != sessionID) {
 		s.githubOAuthMu.Unlock()
-		return protocol.GitHubOAuthResult{}, errors.New("github: OAuth session is not the current attempt for this member")
+		return protocol.GitHubOAuthResult{}, errors.New("github: OAuth sign-in is not the current attempt for this member")
 	}
 	if a != nil && !a.finished {
 		result := a.result
@@ -191,7 +191,7 @@ func (s *Scheduler) CancelGitHubOAuth(ctx context.Context, member domain.MemberI
 	a := s.githubOAuth[member]
 	if sessionID == "" || a == nil || a.result.SessionID != sessionID {
 		s.githubOAuthMu.Unlock()
-		return protocol.GitHubOAuthResult{}, errors.New("github: OAuth session is not the current attempt for this member")
+		return protocol.GitHubOAuthResult{}, errors.New("github: OAuth sign-in is not the current attempt for this member")
 	}
 	if !a.finished {
 		a.cancelReason = "github: authorization cancelled"

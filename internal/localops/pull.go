@@ -28,7 +28,7 @@ type PullResult struct {
 // aether edge-ssh.
 func PullCommand(repo, user, addr string, coords protocol.RunPullResult) (string, *exec.Cmd, error) {
 	if coords.Branch == "" {
-		return "", nil, errors.New("run has no branch")
+		return "", nil, errors.New("session has no branch")
 	}
 	url := cli.GitURL(user, addr, coords.WorkspaceID)
 	cmd, err := fetchCommand(repo, url, coords.Branch)
@@ -42,7 +42,7 @@ func PullCommand(repo, user, addr string, coords protocol.RunPullResult) (string
 // whether that branch is current and whether the worktree is dirty.
 func Pull(repo, user, addr string, coords protocol.RunPullResult) (PullResult, error) {
 	if coords.Branch == "" {
-		return PullResult{}, errors.New("run has no branch")
+		return PullResult{}, errors.New("session has no branch")
 	}
 	url := cli.GitURL(user, addr, coords.WorkspaceID)
 	return pull(repo, url, coords.Branch)
@@ -207,7 +207,7 @@ func remoteExists(repo, remote string) bool {
 // discarding local edits: a dirty worktree must be committed or stashed first.
 func SwitchPull(repo, branch string) error {
 	if branch == "" {
-		return errors.New("run has no branch")
+		return errors.New("session has no branch")
 	}
 	dirty, err := worktreeDirty(repo)
 	if err != nil {

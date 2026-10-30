@@ -8,7 +8,7 @@ export const inputTitle: Record<RunInputRequest['kind'], string> = {
 }
 
 export function inputHint(hasAgentTerminal: boolean): string {
-  return hasAgentTerminal ? 'Answer in the terminal.' : 'Answer it from the agent’s session.'
+  return hasAgentTerminal ? 'Answer in the terminal.' : 'Answer it from the agent’s conversation.'
 }
 
 // Mirror domain.SudoSessionID, SudoAllow and SudoDeny in internal/domain/input.go.

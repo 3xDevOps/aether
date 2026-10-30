@@ -30,7 +30,7 @@ type Watches interface {
 func (s *Service) UseWatches(w Watches) { s.watches = w }
 
 var targetWords = map[string]string{
-	protocol.WatchTargetRun: "Run", protocol.WatchTargetPR: "Pull request",
+	protocol.WatchTargetRun: "Session", protocol.WatchTargetPR: "Pull request",
 }
 
 // Transcribe writes a notice of one of member's assistant watches into

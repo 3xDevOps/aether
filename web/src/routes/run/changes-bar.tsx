@@ -45,7 +45,7 @@ export function ChangesBar({ run }: { run: RunRecord }) {
   return (
     <section
       aria-label="Changes"
-      title="Files changed in this run's worktree since its fork point"
+      title="Files changed in this session's worktree since its fork point"
       data-slot="changes-bar"
       className={cn(sessionColumn, 'flex shrink-0 flex-col pb-1')}
     >

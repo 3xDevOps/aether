@@ -58,7 +58,7 @@ func (f savedFill) stamp(r *launchReceipt) {
 func (f *savedFill) startedOn(account string) {
 	if f.modelCheckedOn != "" && account != "" && account != f.modelCheckedOn {
 		f.Unchecked = append(f.Unchecked, defaultSkip{Field: "model",
-			Reason: fmt.Sprintf("it was saved and checked for account %s, and usage fallback started the run on %s", f.modelCheckedOn, account)})
+			Reason: fmt.Sprintf("it was saved and checked for account %s, and usage fallback started the session on %s", f.modelCheckedOn, account)})
 	}
 }
 

@@ -55,7 +55,7 @@ const v7OnboardingSteps: Record<string, OnboardingStep> = {
   Workspace: 'Repository',
   Repository: 'Repository',
   Agents: 'Agent',
-  'First run': 'First run',
+  'First run': 'First session',
 }
 
 export type RootState = ServerSlice &
@@ -166,7 +166,7 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 10,
+        version: 11,
         // Before 2 the Repository step record is unusable and is dropped, so
         // the step asks the gateway again. Before 3 the resume point is an
         // index. Before 4 there is no furthest step, so the resume point
@@ -209,6 +209,11 @@ export function createRootStore() {
           }
           if (version < 9) delete state.boardMapViewports
           if (version < 10) delete (state as { launchDefaults?: unknown }).launchDefaults
+          if (version < 11) {
+            const walk = state as { onboardingStep?: string; onboardingFurthest?: string }
+            if (walk.onboardingStep === 'First run') walk.onboardingStep = 'First session'
+            if (walk.onboardingFurthest === 'First run') walk.onboardingFurthest = 'First session'
+          }
           return state
         },
         // `migrate` only runs on a version change, and xterm does not validate

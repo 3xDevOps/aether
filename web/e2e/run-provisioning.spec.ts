@@ -8,7 +8,7 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('a run opened while its container starts says so', async ({ page, aether }) => {
   // The store takes a new run's status from the event, not from the fetch it
@@ -61,7 +61,7 @@ test('a run opened while its container starts says so', async ({ page, aether })
   // The page must be subscribed before the launch, or the run's frames are
   // never sent to it and there is nothing to hold. Hydration runs behind the
   // subscription (store/sync.ts), so a settled empty run list proves it.
-  await expect(sidebar.getByText('No runs yet.')).toBeVisible()
+  await expect(sidebar.getByText('No sessions yet.')).toBeVisible()
 
   holding = true
   // Not awaited: the call only returns once the run is running, and the
@@ -72,26 +72,26 @@ test('a run opened while its container starts says so', async ({ page, aether })
   const launched = alice.api.rpc<{ run: { id: string } }>('run.launch', {
     workspace_id: workspaces[0].id,
     harness: 'fake',
-    task: 'the provisioning run',
+    task: 'the provisioning session',
   })
   launched.catch(() => {})
 
-  await sidebar.getByRole('button', { name: /the provisioning run/ }).click()
+  await sidebar.getByRole('button', { name: /the provisioning session/ }).click()
   await expect(
-    page.getByRole('heading', { name: 'the provisioning run', exact: true }),
+    page.getByRole('heading', { name: 'the provisioning session', exact: true }),
   ).toBeVisible()
 
   // The container is still being built, so the tab says that rather than
   // attaching to a session that cannot exist yet and painting the gateway's
   // refusal as a dead terminal.
-  await expect(page.getByText("Starting the run's container")).toBeVisible()
+  await expect(page.getByText("Starting the session's container")).toBeVisible()
   // And it is the only thing said: a connection state, the gateway's "no
   // session for run" refusal with its Retry, and "This run is not running"
   // all render in the same row, and each would be a second sentence pulling
   // against the spinner.
   await expect(page.getByText('Offline')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0)
-  await expect(page.getByText('This run is not running')).toHaveCount(0)
+  await expect(page.getByText('This session is not running')).toHaveCount(0)
 
   // And the wait ends by itself: the run turning running attaches the tab,
   // with nothing pressed.
@@ -99,7 +99,7 @@ test('a run opened while its container starts says so', async ({ page, aether })
   holding = false
   for (const message of held.splice(0)) gateway.toPage?.(message)
 
-  await expect(page.getByText("Starting the run's container")).toBeHidden()
+  await expect(page.getByText("Starting the session's container")).toBeHidden()
   await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent-ready', {
     timeout: 3 * 60 * 1000,
   })

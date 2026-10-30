@@ -31,7 +31,7 @@ export function ConflictChips({ run }: CardSlotProps) {
             onClick={() => {
               navigate('run', { runId: peer.run_id })
             }}
-            aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
+            aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their session`}
             className={cn(
               focusRing,
               'inline-flex min-h-[22px] coarse:min-h-11 min-w-0 max-w-full items-center gap-1.5 border border-state-needs-you/40 bg-state-needs-you/10 px-1.5 text-ui-sm hover:bg-state-needs-you/20',
@@ -64,7 +64,7 @@ function basename(path: string): string {
 function ConflictWarning({ run }: CardSlotProps) {
   const peers = useStore((s) => s.overlaps[run.id])
   if (!peers?.length) return null
-  const label = `Files also changed by ${peers.length} other run${peers.length === 1 ? '' : 's'}`
+  const label = `Files also changed by ${peers.length} other session${peers.length === 1 ? '' : 's'}`
   return (
     <Popover>
       <PopoverTrigger asChild>

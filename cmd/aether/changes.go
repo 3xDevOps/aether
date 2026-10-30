@@ -24,8 +24,8 @@ const (
 func init() {
 	register(command{
 		name:    "changes",
-		short:   "show run changes since a cursor",
-		usage:   "aether changes [--since <cursor>] [--run <run-id> | --workspace <name>] [--kinds <kinds>] [--limit <n>] [--follow]",
+		short:   "show session changes since a cursor",
+		usage:   "aether changes [--since <cursor>] [--run <session-id> | --workspace <name>] [--kinds <kinds>] [--limit <n>] [--follow]",
 		example: "aether changes --run run-d6ay38tj8j --kinds reports --follow",
 		flags:   true,
 		run:     runChanges,
@@ -35,7 +35,7 @@ func init() {
 func runChanges(args []string) error {
 	fs := newFlagSet("changes")
 	since := fs.String("since", "", "cursor printed by an earlier call (default: the newest changes)")
-	run := fs.String("run", "", "only changes for this run")
+	run := fs.String("run", "", "only changes for this session")
 	workspace := fs.String("workspace", "", "only changes in this workspace (ID or name)")
 	kinds := fs.String("kinds", "", "comma-separated: status,reports,messages,pr,lifecycle")
 	limit := fs.Int("limit", changesDefaultLimit, "changes per request, at most 100; the command reads every page")
@@ -44,7 +44,7 @@ func runChanges(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return errors.New("usage: aether changes [flags]; name the run with --run")
+		return errors.New("usage: aether changes [flags]; name the session with --run")
 	}
 	return withControl(func(c *protocol.Client) error {
 		params := protocol.ChangesListParams{Cursor: *since, RunID: *run, Kinds: splitTypes(*kinds), Limit: *limit}

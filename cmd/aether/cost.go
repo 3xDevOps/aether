@@ -11,7 +11,7 @@ import (
 func init() {
 	register(command{
 		name:    "cost",
-		short:   "report token usage and cost per member and per run",
+		short:   "report token usage and cost per member and per session",
 		usage:   "aether cost [--workspace <name>] [--runs]",
 		example: "aether cost --workspace app --runs",
 		flags:   true,
@@ -22,7 +22,7 @@ func init() {
 func runCost(args []string) error {
 	fs := newFlagSet("cost")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	runs := fs.Bool("runs", false, "list every run's usage, not just the per-member split")
+	runs := fs.Bool("runs", false, "list every session's usage, not just the per-member split")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -75,8 +75,8 @@ func unmeteredNote(total protocol.CostRollup) string {
 		if total.Runs == 0 {
 			return "no usage recorded for this workspace yet"
 		}
-		return fmt.Sprintf("all %d runs metered", total.Runs)
+		return fmt.Sprintf("all %d sessions metered", total.Runs)
 	}
-	return fmt.Sprintf("%d of %d runs are unmetered (their agent reports no usage): the totals above are a floor, not the real spend",
+	return fmt.Sprintf("%d of %d sessions are unmetered (their agent reports no usage): the totals above are a floor, not the real spend",
 		total.Unmetered, total.Runs)
 }

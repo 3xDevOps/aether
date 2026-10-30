@@ -14,8 +14,8 @@ import (
 func init() {
 	register(command{
 		name:    "logs",
-		short:   "print what a run's agent did as plain text: terminal lines, or an Enhanced run's messages and tool calls",
-		usage:   "aether logs <run-id> [--limit <n>]",
+		short:   "print what a session's agent did as plain text: terminal lines, or an Enhanced session's messages and tool calls",
+		usage:   "aether logs <session-id> [--limit <n>]",
 		example: "aether logs run-d6ay38tj8j --limit 50",
 		flags:   true,
 		run:     runLogs,
@@ -24,13 +24,13 @@ func init() {
 
 func runLogs(args []string) error {
 	fs := newFlagSet("logs")
-	limit := fs.Int("limit", 200, "print the newest N terminal lines, or an Enhanced run's newest N messages and tool calls")
+	limit := fs.Int("limit", 200, "print the newest N terminal lines, or an Enhanced session's newest N messages and tool calls")
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether logs <run-id> [--limit N]", err)
+		return fmt.Errorf("%w\nusage: aether logs <session-id> [--limit N]", err)
 	}
 	if runID == "" || *limit < 1 {
-		return fmt.Errorf("usage: aether logs <run-id> [--limit N]")
+		return fmt.Errorf("usage: aether logs <session-id> [--limit N]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		r, err := getRun(c, runID)

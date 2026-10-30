@@ -74,7 +74,7 @@ describe('command palette', () => {
   it.each([
     ['a terminal', '<div class="xterm"><span></span></div>', true],
     ['a dialog', '<div role="dialog"><button type="button">ok</button></div>', false],
-    ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>', false],
+    ['a menu', '<div role="menu"><div role="menuitem">Kill session</div></div>', false],
     ['a confirm', '<div role="alertdialog"><button type="button">ok</button></div>', false],
     // A select list is portalled out of its dialog; data-state="open" tells it
     // apart from cmdk's own list.
@@ -128,7 +128,7 @@ describe('command palette', () => {
   // a focusout, and Radix's focus scope does not watch attributes to take it back.
   it.each([
     ['a dialog', '<div role="dialog"><button type="button" disabled>ok</button></div>'],
-    ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>'],
+    ['a menu', '<div role="menu"><div role="menuitem">Kill session</div></div>'],
   ])('stays shut under an open %s when focus has fallen to the body', (_, markup) => {
     render(<CommandPalette />)
     overlay(markup)
@@ -228,7 +228,7 @@ describe('command palette', () => {
     expect(document.activeElement).toBe(destination)
   })
 
-  it.each(['Kill run', 'Delete run'])('requires explicit confirmation before %s calls the gateway', async (label) => {
+  it.each(['Kill session', 'Delete session'])('requires explicit confirmation before %s calls the gateway', async (label) => {
     useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     open()
     fireEvent.click(await screen.findByRole('option', { name: label }))
@@ -239,8 +239,8 @@ describe('command palette', () => {
     expect(api.runDelete).not.toHaveBeenCalled()
     expect(document.activeElement).toBe(within(confirmation).getByRole('button', { name: 'Cancel' }))
     fireEvent.click(within(confirmation).getByRole('button', { name: label }))
-    await waitFor(() => expect(label === 'Kill run' ? api.runKill : api.runDelete).toHaveBeenCalledWith(active.id))
-    expect(label === 'Kill run' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
+    await waitFor(() => expect(label === 'Kill session' ? api.runKill : api.runDelete).toHaveBeenCalledWith(active.id))
+    expect(label === 'Kill session' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
   })
 
   it.each(['Cancel', 'Escape'])('cancels a destructive command with %s and returns to the terminal', async (dismiss) => {
@@ -250,7 +250,7 @@ describe('command palette', () => {
     const terminal = screen.getByRole('textbox', { name: 'Terminal input' })
     terminal.focus()
     fireEvent.keyDown(terminal, { key: 'k', ctrlKey: true })
-    fireEvent.click(await screen.findByRole('option', { name: 'Kill run' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Kill session' }))
     const confirmation = await screen.findByRole('alertdialog')
     fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
     expect(useStore.getState().paletteOpen).toBe(false)
@@ -263,7 +263,7 @@ describe('command palette', () => {
     expect(api.runDelete).not.toHaveBeenCalled()
   })
 
-  it.each(['Kill run', 'Delete run'])(
+  it.each(['Kill session', 'Delete session'])(
     'discards a pending %s handoff when the identity changes',
     async (label) => {
       useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
@@ -298,17 +298,17 @@ describe('command palette', () => {
       const fresh = await screen.findByRole('alertdialog')
       expect(within(fresh).getByText(/Fresh scope task/)).toBeTruthy()
       fireEvent.click(within(fresh).getByRole('button', { name: label }))
-      await waitFor(() => expect(label === 'Kill run' ? api.runKill : api.runDelete).toHaveBeenCalledExactlyOnceWith(active.id))
-      expect(label === 'Kill run' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
+      await waitFor(() => expect(label === 'Kill session' ? api.runKill : api.runDelete).toHaveBeenCalledExactlyOnceWith(active.id))
+      expect(label === 'Kill session' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
       await waitFor(() => expect(document.activeElement).toBe(newTerminal))
     },
   )
 
   it.each([
-    ['Kill run', false],
-    ['Delete run', false],
-    ['Kill run', true],
-    ['Delete run', true],
+    ['Kill session', false],
+    ['Delete session', false],
+    ['Kill session', true],
+    ['Delete session', true],
   ] as const)(
     'invalidates a visible %s confirmation on identity change (confirm before render: %s)',
     async (label, confirmBeforeRender) => {
@@ -348,8 +348,8 @@ describe('command palette', () => {
       const fresh = await screen.findByRole('alertdialog')
       expect(within(fresh).getByText(/Fresh scope task/)).toBeTruthy()
       fireEvent.click(within(fresh).getByRole('button', { name: label }))
-      await waitFor(() => expect(label === 'Kill run' ? api.runKill : api.runDelete).toHaveBeenCalledExactlyOnceWith(active.id))
-      expect(label === 'Kill run' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
+      await waitFor(() => expect(label === 'Kill session' ? api.runKill : api.runDelete).toHaveBeenCalledExactlyOnceWith(active.id))
+      expect(label === 'Kill session' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
       await waitFor(() => expect(document.activeElement).toBe(newTerminal))
     },
   )
@@ -477,7 +477,7 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Pause run'))
+    fireEvent.click(await screen.findByText('Pause session'))
 
     await waitFor(() => expect(api.runPause).toHaveBeenCalledWith('run_1'))
   })
@@ -488,21 +488,21 @@ describe('command palette', () => {
     useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     open()
 
-    await screen.findByText('Kill run')
-    expect(screen.queryByText('Pause run')).toBeNull()
-    expect(screen.queryByText('Resume run')).toBeNull()
+    await screen.findByText('Kill session')
+    expect(screen.queryByText('Pause session')).toBeNull()
+    expect(screen.queryByText('Resume session')).toBeNull()
   })
 
   it('offers no steering verbs without a run in view', async () => {
     open()
     await screen.findByText('rewrite the checkout flow')
-    expect(screen.queryByText('Pause run')).toBeNull()
+    expect(screen.queryByText('Pause session')).toBeNull()
   })
 
   it('launches a run into the active workspace', async () => {
     open()
 
-    fireEvent.click(await screen.findByText('New run…'))
+    fireEvent.click(await screen.findByText('New session…'))
     const target = await screen.findByLabelText('Target workspace')
     expect(target.textContent).toContain(workspace.name)
     expect(target.textContent).toContain(workspace.base_branch)
@@ -529,13 +529,13 @@ describe('command palette', () => {
     })
     open()
     await screen.findByText('Open the board')
-    expect(screen.queryByText('New run…')).toBeNull()
+    expect(screen.queryByText('New session…')).toBeNull()
   })
 
   it('offers member-registered agents in the launch harness dropdown', async () => {
     open()
 
-    fireEvent.click(await screen.findByText('New run…'))
+    fireEvent.click(await screen.findByText('New session…'))
     // agent.list is the source of truth, not the shipped names.
     expect(await screen.findByRole('radio', { name: /^myagent/ })).toBeDefined()
     expect(api.agentList).toHaveBeenCalled()
@@ -554,7 +554,7 @@ describe('command palette', () => {
     )
     open()
 
-    fireEvent.click(await screen.findByText('New run…'))
+    fireEvent.click(await screen.findByText('New session…'))
     const options = await screen.findByRole('button', { name: /^Options/ })
     if (options.getAttribute('aria-expanded') === 'false') await userEvent.click(options)
     await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
@@ -759,7 +759,7 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Restore run'))
+    fireEvent.click(await screen.findByText('Restore session'))
 
     await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith('run_1', false))
   })
@@ -776,7 +776,7 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Archive closed runs…'))
+    fireEvent.click(await screen.findByText('Archive closed sessions…'))
 
     expect(api.runArchive).not.toHaveBeenCalled()
 

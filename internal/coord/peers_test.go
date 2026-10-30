@@ -36,12 +36,12 @@ func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
 	h.ownBy(3, h.member(domain.RoleAdmin).ID, false)
 
 	if _, err := h.svc.Send(ctx, mine, sendParams(sibling, "same owner")); err != nil {
-		t.Fatalf("send to the owner's own protected run: %v", err)
+		t.Fatalf("send to the owner's own protected session: %v", err)
 	}
 	_, err := h.svc.Send(ctx, mine, sendParams(theirs, "other member"))
-	wantDenied(t, err, "run is protected: only its owner or an admin may message it")
+	wantDenied(t, err, "session is protected: only its owner or an admin may message it")
 	if _, err = h.svc.Send(ctx, adminRun, sendParams(theirs, "admin")); err != nil {
-		t.Fatalf("send from an admin-owned run to a protected run: %v", err)
+		t.Fatalf("send from an admin-owned run to a protected session: %v", err)
 	}
 	st, err := h.svc.Status(ctx, mine)
 	if err != nil {
@@ -49,7 +49,7 @@ func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
 	}
 	for _, p := range st.Peers {
 		if p.RunID == string(theirs) {
-			t.Fatalf("status lists the protected run of another member: %+v", st.Peers)
+			t.Fatalf("status lists the protected session of another member: %+v", st.Peers)
 		}
 	}
 	if len(st.Peers) != 2 || st.PeerTotal != 2 {
@@ -66,7 +66,7 @@ func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
 	}
 	// A viewer-owned run reaches nobody, not even over an overlap.
 	h.peers.pair(mine, theirs, "src/auth.go")
-	viewer := fmt.Sprintf("member %s (viewer) may not message it: messaging another run requires the collaborator role", owner.ID)
+	viewer := fmt.Sprintf("member %s (viewer) may not message it: messaging another session requires the collaborator role", owner.ID)
 	for _, target := range []domain.RunID{sibling, theirs, adminRun} {
 		h.advance(sendRefill)
 		_, err = h.svc.Send(ctx, mine, sendParams(target, "after demotion"))
@@ -159,7 +159,7 @@ func TestReceiptsAndStatusShowMailHeldForAPerson(t *testing.T) {
 	}
 	i := slices.IndexFunc(st.Peers, func(p protocol.CoordPeer) bool { return p.RunID == string(b) })
 	if i < 0 || st.Peers[i].LastSent == nil || st.Peers[i].LastSent.State != protocol.CoordSentStateHeld {
-		t.Fatalf("status peers = %+v, want last_sent to the held child held", st.Peers)
+		t.Fatalf("status peers = %+v, want last_sent to the held subsession held", st.Peers)
 	}
 }
 
@@ -285,7 +285,7 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 		p.TaskBytes != 2*protocol.CoordMaxStatusTaskBytes || !p.TaskTruncated ||
 		len(p.Task) > protocol.CoordMaxStatusTaskBytes || !utf8.ValidString(p.Task) ||
 		p.Activity != string(domain.ActivityNeedsYou) || !p.ReasonTruncated || len(p.Reason) > protocol.CoordMaxStatusTaskBytes || !utf8.ValidString(p.Reason) {
-		t.Fatalf("first workspace peer = %+v, want the most recently active run %s with its task and reason bounded", p, h.run(recent))
+		t.Fatalf("first workspace peer = %+v, want the most recently active session %s with its task and reason bounded", p, h.run(recent))
 	}
 }
 
@@ -308,7 +308,7 @@ func TestAdminsOnlyLimitsTheWorkspaceRoute(t *testing.T) {
 	h.peers.pair(mine, overlap, "src/auth.go")
 
 	_, err := h.svc.Send(ctx, mine, sendParams(other, "other member"))
-	wantDenied(t, err, "workspace restricts messaging others' runs to their owner and admins")
+	wantDenied(t, err, "workspace restricts messaging others' sessions to their owner and admins")
 	for _, target := range []domain.RunID{sibling, child, overlap} {
 		h.advance(sendRefill)
 		if _, err = h.svc.Send(ctx, mine, sendParams(target, "allowed")); err != nil {
@@ -327,7 +327,7 @@ func TestAdminsOnlyLimitsTheWorkspaceRoute(t *testing.T) {
 		listed[p.RunID] = true
 	}
 	if len(listed) != 3 || st.PeerTotal != 3 || !listed[string(sibling)] || !listed[string(child)] || !listed[string(overlap)] {
-		t.Fatalf("status peers = %+v (total %d), want the sibling, child and overlap runs", st.Peers, st.PeerTotal)
+		t.Fatalf("status peers = %+v (total %d), want the sibling, subsession and overlap runs", st.Peers, st.PeerTotal)
 	}
 }
 

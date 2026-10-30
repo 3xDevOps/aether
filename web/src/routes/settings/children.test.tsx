@@ -37,7 +37,7 @@ describe('child run settings', () => {
     const user = userEvent.setup()
     const client = show(['*'], { childSettings: vi.fn(async () => ({ enabled: true })) })
     await waitFor(() => expect(box(childRunsLabel)).toHaveProperty('disabled', false))
-    expect(await screen.findByText(/8 child runs busy at once per parent run \(more queue\)/)).toBeDefined()
+    expect(await screen.findByText(/8 subsessions busy at once per parent session \(more queue\)/)).toBeDefined()
     expect(box(childRunsLabel).getAttribute('aria-checked')).toBe('true')
 
     vi.mocked(client.childSettings).mockResolvedValueOnce(off)
@@ -45,10 +45,10 @@ describe('child run settings', () => {
     expect(client.childSettings).toHaveBeenLastCalledWith({ enabled: false })
     await waitFor(() => expect(box(childRunsLabel).getAttribute('aria-checked')).toBe('false'))
 
-    vi.mocked(client.childSettings).mockRejectedValueOnce(new ApiError(403, 'child runs are disabled on this server'))
+    vi.mocked(client.childSettings).mockRejectedValueOnce(new ApiError(403, 'subsessions are disabled on this server'))
     await user.click(box(childRunsLabel))
     expect(client.childSettings).toHaveBeenCalledWith({ enabled: true })
-    expect((await screen.findByRole('alert')).textContent).toContain('child runs are disabled on this server')
+    expect((await screen.findByRole('alert')).textContent).toContain('subsessions are disabled on this server')
     expect(client.childSettings).toHaveBeenLastCalledWith({})
   })
 })

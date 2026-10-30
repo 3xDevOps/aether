@@ -169,7 +169,7 @@ func RunTitle(run *domain.Run) string {
 			return clip(line, fallbackTitleRunes)
 		}
 	}
-	return "Untitled run"
+	return "Untitled session"
 }
 
 func clip(s string, limit int) string {

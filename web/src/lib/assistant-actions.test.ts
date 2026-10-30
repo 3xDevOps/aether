@@ -18,9 +18,12 @@ function blockOf(id: string, ...entries: Partial<WorkItem>[]): SessionRow {
 
 describe('aetherTool', () => {
   it.each([
-    ['mcp__aether__aether_launch_run', 'aether_launch_run'],
+    ['mcp__aether__aether_launch_session', 'aether_launch_session'],
     ['aether.aether_pr_merge', 'aether_pr_merge'],
-    ['aether_get_run', 'aether_get_run'],
+    ['aether_get_session', 'aether_get_session'],
+    ['mcp__aether__aether_message_run', 'aether_message_session'],
+    ['aether_list_runs', 'aether_list_sessions'],
+    ['aether_child_start', 'aether_subsession_start'],
     ['mcp__tracker__get', undefined],
     ['Bash', undefined],
   ])('reads %s as %s', (name, tool) => expect(aetherTool(name)).toBe(tool))
@@ -28,8 +31,8 @@ describe('aetherTool', () => {
 
 describe('assistantView', () => {
   it("prefers the server's action record, matched by method and run, over the tool call's status", () => {
-    const stop = { id: '1:t0', name: 'mcp__aether__aether_stop_run', status: 'failed' as const, input: { run_id: 'r1' }, result: 'run.kill was not approved: the turn or session ended before the member answered' }
-    const message = { id: '1:t1', name: 'mcp__aether__aether_message_run', status: 'running' as const, input: { run_id: 'r2' } }
+    const stop = { id: '1:t0', name: 'mcp__aether__aether_stop_session', status: 'failed' as const, input: { run_id: 'r1' }, result: 'run.kill was not approved: the turn or session ended before the member answered' }
+    const message = { id: '1:t1', name: 'mcp__aether__aether_message_session', status: 'running' as const, input: { run_id: 'r2' } }
     const waiting = [{ id: 'c', method: 'run.inject', summary: '', params: {}, created_at: at, expires_at: at }]
     expect(assistantView([block(stop, message)], waiting).actions.map((a) => [a.state, a.approval])).toEqual([['withdrawn', undefined], ['approval', undefined]])
 
@@ -52,7 +55,7 @@ describe('assistantView', () => {
   it('keeps a block that holds no Aether call as it was, and drops one that held only calls', () => {
     const plain = block({ name: 'Bash', tool: 'execute' })
     expect(assistantView([plain], []).rows).toEqual([plain])
-    const view = assistantView([{ kind: 'user', id: 'u1', at, body: 'go' }, block({ name: 'aether_get_run' })], [])
+    const view = assistantView([{ kind: 'user', id: 'u1', at, body: 'go' }, block({ name: 'aether_get_session' })], [])
     expect(view.rows.map((row) => row.id)).toEqual(['u1'])
     expect([...view.groups.keys()]).toEqual(['u1'])
     expect(view.actions).toEqual([])
@@ -64,7 +67,7 @@ describe('assistantView', () => {
   })
 
   it('keeps each card where its call ran in the block', () => {
-    const read: WorkItem = { id: '1:r', tool: 'other', label: '', status: 'done', at, name: 'aether_get_run' }
+    const read: WorkItem = { id: '1:r', tool: 'other', label: '', status: 'done', at, name: 'aether_get_session' }
     const bash: WorkItem = { id: '1:x', tool: 'execute', label: 'Ran npm test', status: 'done', at, name: 'Bash' }
     const b = stepsBlock('b1', [
       { kind: 'tool', id: read.id, at, entry: read },
@@ -77,10 +80,10 @@ describe('assistantView', () => {
   })
 
   it("gives an older server's approval note only to the call its words name", () => {
-    const message = (id: string, run: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status: 'running', input: { run_id: run } })
+    const message = (id: string, run: string): Partial<WorkItem> => ({ id, name: 'aether_message_session', status: 'running', input: { run_id: run } })
     const note = (seq: number, title: string): SessionRow => ({ kind: 'event', id: `ev:${seq}`, at, text: title, detail: 'run.inject passed after you approved its card.' })
     const waiting = [{ id: 'c', method: 'run.inject', summary: '', params: {}, created_at: at, expires_at: at }]
-    const view = assistantView([block(message('1:a', 'run-a'), message('1:b', 'run-b')), note(1, 'Approved: Message a run'), note(2, 'Approved: Message run run-a')], waiting)
+    const view = assistantView([block(message('1:a', 'run-a'), message('1:b', 'run-b')), note(1, 'Approved: Message a session'), note(2, 'Approved: Message session run-a')], waiting)
     expect(view.actions.map((a) => [a.input.run_id, a.state, a.approval])).toEqual([['run-a', 'running', 'approved'], ['run-b', 'approval', undefined]])
     expect(view.rows.map((row) => row.id)).toEqual(['ev:1'])
   })
@@ -106,11 +109,11 @@ describe('assistantView', () => {
     it("matches a watch call naming a search result's run: id to its record", () => {
       const watch = (id: string, run: string): Partial<WorkItem> => ({ id, name: 'aether_watch', status: 'done', input: { run_id: run } })
       const { records, rows } = notices(1,
-        record({ id: 'a1', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r2' } }, outcome: 'failed', approval: undefined, error: 'run r2 not found' }),
+        record({ id: 'a1', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r2' } }, outcome: 'failed', approval: undefined, error: 'session r2 not found' }),
         record({ id: 'a2', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r1' } }, outcome: 'succeeded', approval: undefined }),
       )
       const view = assistantView([block(watch('1:t0', 'run:r1'), watch('1:t1', 'run:r2')), ...rows], [], { records, calls: new Map() })
-      expect(view.actions.map((a) => [a.id, a.state, a.error])).toEqual([['1:t0', 'done', undefined], ['1:t1', 'failed', 'run r2 not found']])
+      expect(view.actions.map((a) => [a.id, a.state, a.error])).toEqual([['1:t0', 'done', undefined], ['1:t1', 'failed', 'session r2 not found']])
       expect(view.rows).toEqual([])
     })
 
@@ -137,23 +140,23 @@ describe('assistantView', () => {
     })
 
     it('gives identical calls of one block their records in the order they ran', () => {
-      const message = (id: string, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status, input: { run_id: 'r1', message: 'go' }, result })
+      const message = (id: string, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_message_session', status, input: { run_id: 'r1', message: 'go' }, result })
       const { records, rows } = notices(1,
         record({ id: 'a1', target: { run_id: 'r1' } }),
         record({ id: 'a2', target: { run_id: 'r1' } }),
-        record({ id: 'a1', target: { run_id: 'r1' }, outcome: 'failed', error: 'run.inject: run r1 is not running' }),
+        record({ id: 'a1', target: { run_id: 'r1' }, outcome: 'failed', error: 'run.inject: session r1 is not running' }),
         record({ id: 'a2', target: { run_id: 'r1' }, outcome: 'succeeded' }),
       )
-      const view = assistantView([block(message('1:t0', 'failed', 'run.inject: run r1 is not running'), message('1:t1', 'done')), ...rows], [], { records, calls: new Map() })
+      const view = assistantView([block(message('1:t0', 'failed', 'run.inject: session r1 is not running'), message('1:t1', 'done')), ...rows], [], { records, calls: new Map() })
       expect(view.actions.map((a) => [a.id, a.state, a.error])).toEqual([
-        ['1:t0', 'failed', 'run.inject: run r1 is not running'],
+        ['1:t0', 'failed', 'run.inject: session r1 is not running'],
         ['1:t1', 'done', undefined],
       ])
       expect(view.rows).toEqual([])
     })
 
     it('gives a decision to the call its idempotency key names, whatever the order', () => {
-      const message = (id: string, key: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status: 'running', input: { run_id: 'r1', message: key, idempotency_key: key } })
+      const message = (id: string, key: string): Partial<WorkItem> => ({ id, name: 'aether_message_session', status: 'running', input: { run_id: 'r1', message: key, idempotency_key: key } })
       const { records, rows } = notices(1, record({ id: 'a2', target: { run_id: 'r1' }, outcome: 'declined', idempotency_key: 'second' }))
       const waiting = [{ id: 'c', method: 'run.inject', summary: '', params: {}, created_at: at, expires_at: at }]
       const view = assistantView([block(message('1:t0', 'first'), message('1:t1', 'second')), ...rows], waiting, { records, calls: new Map() })
@@ -171,12 +174,12 @@ describe('assistantView', () => {
     })
 
     it('links a relaunch to the new run the result names, not the old one', () => {
-      const [relaunch] = assistantView([block({ id: '1:t0', name: 'aether_run_lifecycle', input: { run_id: 'r1', action: 'relaunch' }, result: { run_id: 'r2', state: 'starting' } })], []).actions
+      const [relaunch] = assistantView([block({ id: '1:t0', name: 'aether_session_lifecycle', input: { run_id: 'r1', action: 'relaunch' }, result: { run_id: 'r2', state: 'starting' } })], []).actions
       expect(relaunch!.target?.id).toBe('r2')
     })
 
     it('gives a launch record, which names no run, to the newest launch on its workspace past an unrecorded older one', () => {
-      const launch = (id: string, workspace: string): Partial<WorkItem> => ({ id, name: 'aether_launch_run', status: 'done', input: { workspace_id: workspace, task: 'x' } })
+      const launch = (id: string, workspace: string): Partial<WorkItem> => ({ id, name: 'aether_launch_session', status: 'done', input: { workspace_id: workspace, task: 'x' } })
       const { records, rows } = notices(5,
         record({ method: 'run.launch', target: { workspace_id: 'ws1' } }),
         record({ method: 'run.launch', target: { workspace_id: 'ws1' }, outcome: 'succeeded', result: { workspace_id: 'ws1', run_id: 'run_new' } }),
@@ -191,7 +194,7 @@ describe('assistantView', () => {
     })
 
     it('says an approved call the turn ended under did not finish, and keeps how it was approved', () => {
-      const stop = { id: '1:t0', name: 'aether_stop_run', status: 'done' as const, input: { run_id: 'r1' } }
+      const stop = { id: '1:t0', name: 'aether_stop_session', status: 'done' as const, input: { run_id: 'r1' } }
       const save = { id: '1:t1', name: 'aether_save_environment', status: 'done' as const }
       const call = (id: string) => ({ id, title: '', status: 'in_progress' })
       const { records, rows } = notices(1,
@@ -209,17 +212,17 @@ describe('the lifecycle, pull request and memory tools', () => {
   const confirm = (method: string) => ({ id: method, method, summary: '', params: {}, created_at: at, expires_at: at })
 
   it.each([
-    ['aether_run_lifecycle', { run_id: 'r1', action: 'relaunch' }, 'run.relaunch', 'Relaunch run r1', 'Relaunched run r1'],
-    ['aether_run_lifecycle', { run_id: 'r1', action: 'unprotect' }, 'run.protect', 'Unprotect run r1', 'Unprotected run r1'],
-    ['aether_run_lifecycle', { run_id: 'r1', action: 'restore' }, 'run.archive', 'Restore run r1', 'Restored run r1'],
-    ['aether_switch_run_mode', { run_id: 'r1', mode: 'enhanced' }, 'run.mode.switch', 'Switch run r1 to enhanced mode', 'Switched run r1 to enhanced mode'],
-    ['aether_handoff_run', { run_id: 'r1', to_member_id: 'Dana' }, 'run.handoff', 'Hand off run r1 to Dana', 'Handed off run r1 to Dana'],
-    ['aether_pr_create', { run_id: 'r1' }, 'run.pr.create', 'Open a pull request for run r1', 'Opened a pull request for run r1'],
+    ['aether_session_lifecycle', { run_id: 'r1', action: 'relaunch' }, 'run.relaunch', 'Relaunch session r1', 'Relaunched session r1'],
+    ['aether_session_lifecycle', { run_id: 'r1', action: 'unprotect' }, 'run.protect', 'Unprotect session r1', 'Unprotected session r1'],
+    ['aether_session_lifecycle', { run_id: 'r1', action: 'restore' }, 'run.archive', 'Restore session r1', 'Restored session r1'],
+    ['aether_switch_session_mode', { run_id: 'r1', mode: 'enhanced' }, 'run.mode.switch', 'Switch session r1 to enhanced mode', 'Switched session r1 to enhanced mode'],
+    ['aether_handoff_session', { run_id: 'r1', to_member_id: 'Dana' }, 'run.handoff', 'Hand off session r1 to Dana', 'Handed off session r1 to Dana'],
+    ['aether_pr_create', { run_id: 'r1' }, 'run.pr.create', 'Open a pull request for session r1', 'Opened a pull request for session r1'],
     ['aether_memory_add', { kind: 'gotcha', text: 'x' }, 'memory.add', 'Add a gotcha note', 'Added a gotcha note'],
     ['aether_memory_pin', { id: 'mem-9', pin: false }, 'memory.unpin', 'Unpin note mem-9', 'Unpinned note mem-9'],
-    ['aether_stop_run', { run_id: 'r1', outcome: 'merged' }, 'run.close', 'Close run r1 as merged', 'Closed run r1 as merged'],
-    ['aether_decide_approval', { run_id: 'r1' }, 'run.input.respond', 'Decide an approval for run r1', 'Decided an approval for run r1'],
-    ['aether_watch', { run_id: 'r1' }, 'watch.create', 'Watch run r1', 'Started watching run r1'],
+    ['aether_stop_session', { run_id: 'r1', outcome: 'merged' }, 'run.close', 'Close session r1 as merged', 'Closed session r1 as merged'],
+    ['aether_decide_approval', { run_id: 'r1' }, 'run.input.respond', 'Decide an approval for session r1', 'Decided an approval for session r1'],
+    ['aether_watch', { run_id: 'r1' }, 'watch.create', 'Watch session r1', 'Started watching session r1'],
     ['aether_watch', { watch_id: 'w-1', paused: true }, 'watch.update', 'Pause watch w-1', 'Paused watch w-1'],
     ['aether_unwatch', { watch_id: 'w-1' }, 'watch.delete', 'Delete watch w-1', 'Deleted watch w-1'],
   ])('%s %j waits on %s and reads "%s", then "%s"', (tool, input, method, pending, done) => {
@@ -247,7 +250,7 @@ describe('the lifecycle, pull request and memory tools', () => {
 
   it('says a pull request GitHub may not have opened is unconfirmed, never done', () => {
     const [created] = assistantView([block({ id: '1:t0', name: 'aether_pr_create', input: { run_id: 'r1' }, result: { run_id: 'r1', write: 'pending', url: '?run=r1' } })], []).actions
-    expect([created!.state, actionSummary(created!, names)]).toEqual(['unconfirmed', 'Open a pull request for run r1'])
+    expect([created!.state, actionSummary(created!, names)]).toEqual(['unconfirmed', 'Open a pull request for session r1'])
   })
 
   it('links a created pull request to GitHub', () => {
@@ -261,7 +264,7 @@ describe('the lifecycle, pull request and memory tools', () => {
 describe('launchLine', () => {
   it('names a launch\'s agent and model from the tool\'s own inputs', () => {
     const names = { run: () => undefined, workspace: () => 'api', agent: () => 'Claude Code', sharer: () => undefined }
-    const [launched] = assistantView([block({ id: '1:t0', name: 'aether_launch_run', input: { workspace_id: 'ws1', harness: 'claude', model: 'opus', task: 'x' }, result: { run_id: 'r1' } })], []).actions
-    expect(launchLine(launched!, names)).toBe('run · api · Claude Code opus')
+    const [launched] = assistantView([block({ id: '1:t0', name: 'aether_launch_session', input: { workspace_id: 'ws1', harness: 'claude', model: 'opus', task: 'x' }, result: { run_id: 'r1' } })], []).actions
+    expect(launchLine(launched!, names)).toBe('session · api · Claude Code opus')
   })
 })

@@ -481,7 +481,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised,
 	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
 		s.recordCleanupError(entry, cleanupLookupError)
-		return fmt.Errorf("scheduler: load retained run: %w", err)
+		return fmt.Errorf("scheduler: load retained session: %w", err)
 	}
 	if !run.Status.Terminal() {
 		// A reopened row, including one ahead of a stale retained sidecar,
@@ -784,7 +784,7 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 					return err
 				}
 				if err := s.cfg.Git.RemoveRunCheckout(cleanupCtx, r.ID); err != nil {
-					return fmt.Errorf("scheduler: checkout gc: remove run checkout: %w", err)
+					return fmt.Errorf("scheduler: checkout gc: remove session checkout: %w", err)
 				}
 				return nil
 			}

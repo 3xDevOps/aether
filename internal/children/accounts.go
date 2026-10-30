@@ -117,7 +117,7 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 		return launchSpec{}, invalid("%s", err.Error())
 	}
 	if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) != p.owner {
-		return launchSpec{}, denied("child runs use the owner's own %s account", req.Harness)
+		return launchSpec{}, denied("subsessions use the owner's own %s account", req.Harness)
 	}
 	spec := launchSpec{harness: req.Harness, account: p.owner, mode: mode, model: req.Model, fallback: p.parent.Fallback}
 	choices, err := s.choices(ctx, p)
@@ -131,7 +131,7 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 	}
 	defaultMode, err := s.cfg.Runs.DefaultMode(ctx, p.owner, spec.account, spec.harness)
 	if err != nil {
-		return launchSpec{}, invalid("agent %q: %s; aether-internal child options lists the agents", req.Harness, err.Error())
+		return launchSpec{}, invalid("agent %q: %s; aether-internal subsession options lists the agents", req.Harness, err.Error())
 	}
 	if spec.mode == "" {
 		spec.mode = defaultMode

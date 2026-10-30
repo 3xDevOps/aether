@@ -339,7 +339,7 @@ export function turnRows(turn: Turn): SessionRow[] {
       continue
     }
     if (slot.kind === 'reset') {
-      parts.push({ kind: 'boundary', row: { kind: 'event', id: slot.id, at: slot.at, text: 'New agent session' } })
+      parts.push({ kind: 'boundary', row: { kind: 'event', id: slot.id, at: slot.at, text: 'New agent conversation' } })
       continue
     }
     if (slot.kind === 'step') {

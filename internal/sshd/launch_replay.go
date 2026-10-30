@@ -56,7 +56,7 @@ func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, k
 	case err == nil && prior != "":
 		run, getErr := s.cfg.Store.GetRun(ctx, prior)
 		if errors.Is(getErr, store.ErrNotFound) {
-			return nil, false, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: run %s launched under idempotency_key %q was deleted", method, prior, key)}
+			return nil, false, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: session %s launched under idempotency_key %q was deleted", method, prior, key)}
 		}
 		if getErr != nil {
 			return nil, false, rpcError(getErr)
@@ -82,7 +82,7 @@ func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, k
 		bind(run.ID)
 	}
 	if bindErr != nil {
-		return nil, false, rpcError(fmt.Errorf("%s: run %s started, but recording it under idempotency_key %q failed, so a retry with this key launches again: %w", method, started, key, bindErr))
+		return nil, false, rpcError(fmt.Errorf("%s: session %s started, but recording it under idempotency_key %q failed, so a retry with this key launches again: %w", method, started, key, bindErr))
 	}
 	if perr != nil {
 		return nil, false, perr

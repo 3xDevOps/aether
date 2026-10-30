@@ -48,7 +48,7 @@ const (
 var acpTitleLookupDelay = 3 * time.Second
 
 // ErrACPNotRunning rejects input for an enhanced run with no live session.
-var ErrACPNotRunning = errors.New("scheduler: the enhanced session is not running")
+var ErrACPNotRunning = errors.New("scheduler: the Enhanced agent is not running")
 
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
 // shell, and the agent's ACP server runs beside it as a managed exec whose
@@ -133,7 +133,7 @@ func (d *acpDriver) Start(ctx context.Context, entry *supervised, att runtime.At
 	// own error, so it is recorded here rather than reported.
 	if err := d.openRestored(ctx, entry, openContinue); err != nil {
 		d.setRun(entry.runID, &acpRun{err: err})
-		d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
+		d.notice(entry.runID, "error", "Enhanced agent failed", err.Error())
 	}
 	return nil
 }
@@ -403,7 +403,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	run, err := d.s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
-		return fmt.Errorf("load run: %w", err)
+		return fmt.Errorf("load session: %w", err)
 	}
 	profile, argv, err := d.s.launchProfile(ctx, run.MemberID, run.AccountMember(), run.Harness)
 	if err != nil {
@@ -517,7 +517,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		if stopErr := d.stopExec(exec); stopErr != nil {
 			slog.Warn("scheduler: stop the failed ACP server", "run", runID, "error", stopErr)
 		}
-		return adapterError(fmt.Errorf("open the agent session: %w", err), stderr)
+		return adapterError(fmt.Errorf("open the agent conversation: %w", err), stderr)
 	}
 	if id := sess.SessionID(); id != run.HarnessSessionID {
 		if err := d.s.cfg.Store.SetRunAgentSession(ctx, runID, id); err != nil {
@@ -569,7 +569,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		if systemPrompt != "" {
 			channel = "system prompt"
 		}
-		d.s.publishTimeline(ctx, run.WorkspaceID, runID, "", events.TimelineNote, "run instructions: "+channel)
+		d.s.publishTimeline(ctx, run.WorkspaceID, runID, "", events.TimelineNote, "session instructions: "+channel)
 	}
 	switch {
 	case oneShot && marked:
@@ -629,10 +629,10 @@ func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
 		if err := d.stopAdapterLocked(ctx, entry.runID); err != nil {
 			slog.Warn("scheduler: stop the ACP server that lost its session", "run", entry.runID, "error", err)
 		}
-		d.fail(entry, fmt.Errorf("the agent lost its session again within %d minutes: %w", int(acpLostAgain.Minutes()), cause))
+		d.fail(entry, fmt.Errorf("the agent lost its conversation again within %d minutes: %w", int(acpLostAgain.Minutes()), cause))
 		return
 	}
-	if err := sess.Notice("warning", "Agent session lost", "The agent no longer has this session. Aether is restarting the agent and restoring the session from its history; send again any message that failed."); err != nil {
+	if err := sess.Notice("warning", "Agent conversation lost", "The agent no longer has this conversation. Aether is restarting the agent and restoring the conversation from its history; send again any message that failed."); err != nil {
 		slog.Warn("scheduler: record the lost session notice", "run", entry.runID, "error", err)
 	}
 	if err := d.open(ctx, entry, openRestore); err != nil {
@@ -661,7 +661,7 @@ func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {
 func (d *acpDriver) fail(entry *supervised, err error) {
 	slog.Warn("scheduler: enhanced session failed", "run", entry.runID, "error", err)
 	d.setRun(entry.runID, &acpRun{err: err})
-	d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
+	d.notice(entry.runID, "error", "Enhanced agent failed", err.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
 	if d.oneShot(entry) {
 		d.endOneShot(entry, false, idle)
@@ -733,10 +733,10 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	d.s.mu.Unlock()
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
 	if stopped != "" {
-		d.notice(entry.runID, "info", "Enhanced session stopped", stopped)
+		d.notice(entry.runID, "info", "Enhanced agent stopped", stopped)
 		idle.Reason = acpEndedReason + stopped
 	} else {
-		d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
+		d.notice(entry.runID, "error", "Enhanced agent exited", cause.Error())
 	}
 	if d.oneShot(entry) {
 		d.endOneShot(entry, false, idle)

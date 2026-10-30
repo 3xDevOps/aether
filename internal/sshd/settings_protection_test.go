@@ -50,7 +50,7 @@ func TestRunProtectReportsPublicationFailures(t *testing.T) {
 			}
 
 			if _, perr := env.srv.runProtect(context.Background(), env.member.ID, params); perr == nil ||
-				perr.Code != protocol.CodeInternal || !strings.Contains(perr.Message, "publish run protection") ||
+				perr.Code != protocol.CodeInternal || !strings.Contains(perr.Message, "publish session protection") ||
 				!strings.Contains(perr.Message, publishErr.Error()) {
 				t.Fatalf("runProtect publication error = %+v, want contextual internal error", perr)
 			}

@@ -193,7 +193,7 @@ func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunRe
 		UsageLimit: p.UsageLimit && state == agentstatus.Idle, Tools: p.Tools && state == agentstatus.Working, Subagent: p.Subagent,
 		TurnStart: p.TurnStart && state == agentstatus.Working}
 	if report.SessionID != "" && !domain.ValidAgentSessionID(report.SessionID) {
-		slog.Warn("coord: run.report carries an unusable session id; ignoring it", "run", run, "bytes", len(report.SessionID))
+		slog.Warn("coord: run.report carries an unusable agent conversation id; ignoring it", "run", run, "bytes", len(report.SessionID))
 		report.SessionID = ""
 	}
 	if p.Stop && state == agentstatus.Idle && !report.UsageLimit {

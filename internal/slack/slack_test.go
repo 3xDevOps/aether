@@ -111,7 +111,7 @@ func TestNeedShowsButtonsThenEditsAndClears(t *testing.T) {
 	for i, option := range []string{"opt-allow", "opt-reject"} {
 		var a answer
 		if err := json.Unmarshal([]byte(l.buttons[i].value), &a); err != nil || a != (answer{string(run.ID), "req1", option}) {
-			t.Fatalf("button %d value = %q (%v), want run, req1, %s", i, l.buttons[i].value, err, option)
+			t.Fatalf("button %d value = %q (%v), want session, req1, %s", i, l.buttons[i].value, err, option)
 		}
 	}
 	first := h.message(run)
@@ -158,7 +158,7 @@ func TestNeedWithoutButtons(t *testing.T) {
 	h.link()
 	long, form, escaped := h.newRun("Long"), h.newRun("Form"), h.newRun("Escaped")
 	// JSON spells each < in six bytes, so this value outgrows Slack's limit.
-	wide := permission(escaped, "Run it?")
+	wide := permission(escaped, "Session it?")
 	wide.Request.Options[0].ID = strings.Repeat("<", 400)
 	h.local.setItems(
 		permission(long, strings.Repeat("x", 700)),
@@ -221,8 +221,8 @@ func TestThreadReplyReachesRun(t *testing.T) {
 		t.Fatalf("run.inject calls = %s, want one for %s with message %q and key slack-Ev9", injects, run.ID, "a <b> & c")
 	}
 	posts := h.slack.posts()
-	if last := posts[len(posts)-1]; last.ThreadTS != ts || last.Text != "Sent to the run." {
-		t.Fatalf("reply = %+v, want %q in the run's thread", last, "Sent to the run.")
+	if last := posts[len(posts)-1]; last.ThreadTS != ts || last.Text != "Sent to the session." {
+		t.Fatalf("reply = %+v, want %q in the session's thread", last, "Sent to the session.")
 	}
 
 	h.svc.handle(bg, eventEnvelope("e2", "Ev10", threadReply("U2", "hello", ts)))
@@ -343,7 +343,7 @@ func TestStaleMessagesAreRetiredWithNothingFromTheRun(t *testing.T) {
 	}
 	retired := func(run *domain.Run) {
 		t.Helper()
-		const text = "This message no longer follows the run."
+		const text = "This message no longer follows the session."
 		updates := h.slack.calls("chat.update")
 		last := updates[len(updates)-1]
 		if last.Text != text || layoutOf(t, last).sections[0] != text || strings.Contains(last.Text, run.Title) {
@@ -402,7 +402,7 @@ func TestRepliesReachTheRunInOrder(t *testing.T) {
 	for i := range 5 {
 		h.slack.send(eventEnvelope(fmt.Sprintf("env-%d", i), fmt.Sprintf("Ev%d", i), threadReply("U1", strconv.Itoa(i), ts)))
 	}
-	eventually(t, "five replies to reach the run", func() bool { return len(h.local.calls(protocol.MethodRunInject)) == 5 })
+	eventually(t, "five replies to reach the session", func() bool { return len(h.local.calls(protocol.MethodRunInject)) == 5 })
 	for i, raw := range h.local.calls(protocol.MethodRunInject) {
 		var p protocol.RunInjectParams
 		if err := json.Unmarshal(raw, &p); err != nil || p.Message != strconv.Itoa(i) {

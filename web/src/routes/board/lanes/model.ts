@@ -241,7 +241,7 @@ function agentLanes(run: RunLane, load: AgentLoad, now: number): Lane[] {
   if (load.status === 'loading') return [note('Loading agents…')]
   if (load.status === 'error') return [note(`Agents: ${load.error}`, true)]
   const { agents, roots } = load.index
-  if (roots.length === 0) return [note(load.partial ? 'No subagents in the newest 1000 session items.' : 'No subagents.')]
+  if (roots.length === 0) return [note(load.partial ? 'No subagents in the newest 1000 conversation items.' : 'No subagents.')]
   const out: Lane[] = []
   const count = (id: string): number => agents[id].children.reduce((n, child) => n + 1 + count(child), 0)
   const walk = (id: string, depth: number, parentKey: string) => {
@@ -352,7 +352,7 @@ export function buildLanes(input: LanesInput): LanesModel {
         level: 2,
         parentKey: key,
         title: parent.title,
-        detail: [`${children.length} ${children.length === 1 ? 'child run' : 'child runs'}`, childCounts(children)].join(' · '),
+        detail: [`${children.length} ${children.length === 1 ? 'subsession' : 'subsessions'}`, childCounts(children)].join(' · '),
         open: familyOpen,
         parentID: parent.card.run.id,
         strip: strongest(children.flatMap((lane) => tonesOf(lane, least)), familyRank),

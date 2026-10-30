@@ -46,10 +46,10 @@ func TestDirectReportFencesAreErrors(t *testing.T) {
 	e.sched.runs[run.ID].killRequested = true
 	e.sched.mu.Unlock()
 	if err := e.sched.ReportWaiting(ctx, run.ID, "waiting-2", "", "on 2 workers", at.Add(time.Second)); !errors.Is(err, coord.ErrRunFinished) {
-		t.Fatalf("ReportWaiting on a run being killed = %v, want %v", err, coord.ErrRunFinished)
+		t.Fatalf("ReportWaiting on a session being killed = %v, want %v", err, coord.ErrRunFinished)
 	}
 	if err := e.sched.FinishReported(ctx, run.ID, "success-1", domain.RunCompleted, at.Add(time.Second)); err != nil {
-		t.Fatalf("FinishReported on a run being killed = %v, want the outbox to settle it", err)
+		t.Fatalf("FinishReported on a session being killed = %v, want the outbox to settle it", err)
 	}
 	e.sched.mu.Lock()
 	reason := e.sched.runs[run.ID].idleReason

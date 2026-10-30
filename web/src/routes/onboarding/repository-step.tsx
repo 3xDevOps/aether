@@ -80,7 +80,7 @@ export function RepositoryStep({
       <Step
         label="Repository"
         title="Choose a repository"
-        lead="A workspace is one repository and base branch, and the runs started from it."
+        lead="A workspace is one repository and base branch, and the sessions started from it."
       >
         {identity}
         <div className="flex min-w-0 items-center gap-2 rounded-panel border border-seam px-3 py-2">
@@ -110,7 +110,7 @@ export function RepositoryStep({
     <Step
       label="Repository"
       title="Choose a repository"
-      lead="A workspace is one repository and base branch, and the runs started from it."
+      lead="A workspace is one repository and base branch, and the sessions started from it."
       actions={(askAdmin || back) && (
         <>
           {askAdmin && <Button onClick={onNext}>Continue to Agent</Button>}

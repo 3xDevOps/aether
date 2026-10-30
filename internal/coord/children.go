@@ -51,7 +51,7 @@ func (s *Service) handleChild(ctx context.Context, run domain.RunID, method stri
 func (s *Service) Notify(ctx context.Context, from, to domain.RunID, body, correlation, key string) error {
 	target, err := s.cfg.Store.GetRun(ctx, to)
 	if err != nil {
-		return fmt.Errorf("notify run %s: %w", to, err)
+		return fmt.Errorf("notify session %s: %w", to, err)
 	}
 	if target.Status.Terminal() {
 		return nil
@@ -62,7 +62,7 @@ func (s *Service) Notify(ctx context.Context, from, to domain.RunID, body, corre
 	}
 	created, err := appendRunMessage(ctx, s.cfg.Mail, msg)
 	if err != nil {
-		return fmt.Errorf("notify run %s: %w", to, err)
+		return fmt.Errorf("notify session %s: %w", to, err)
 	}
 	if created {
 		s.wakeInbox(to)

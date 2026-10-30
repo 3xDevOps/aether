@@ -117,19 +117,19 @@ can push branches and open pull requests.
 
 | Tool | Read-only | Destructive | Open world | Justification |
 | --- | --- | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `aether_launch_options`, `aether_changes`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
-| `aether_get_run` | yes | no | no | Reads one run on the user's server. It also reads the run's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
-| `aether_pr_status` | yes | no | no | Reads a run's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
-| `aether_launch_run` | no | no | yes | Adds a run, which can be stopped; its agents can push branches and open pull requests |
-| `aether_message_run`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back, and the agent acts on it |
-| `aether_pause_run` | no | no | no | Freezes the run's container; resume continues it |
-| `aether_resume_run` | no | no | yes | The agent goes on working and can push |
-| `aether_mark_reviewed` | no | yes | no | `complete` closes the run, which cannot be reopened; records state on the server only |
+| `aether_list_workspaces`, `aether_list_sessions`, `aether_session_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_session_changes`, `aether_overlaps`, `aether_memory_search`, `aether_launch_options`, `aether_changes`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
+| `aether_get_session` | yes | no | no | Reads one session on the user's server. It also reads the session's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
+| `aether_pr_status` | yes | no | no | Reads a session's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
+| `aether_launch_session` | no | no | yes | Adds a session, which can be stopped; its agents can push branches and open pull requests |
+| `aether_message_session`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back, and the agent acts on it |
+| `aether_pause_session` | no | no | no | Freezes the session's container; resume continues it |
+| `aether_resume_session` | no | no | yes | The agent goes on working and can push |
+| `aether_mark_reviewed` | no | yes | no | `complete` closes the session, which cannot be reopened; records state on the server only |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
-| `aether_stop_run` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
-| `aether_run_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |
-| `aether_switch_run_mode` | no | yes | yes | Discards the turn in progress; the switched agent goes on working |
-| `aether_handoff_run` | no | yes | no | Only the teammate can hand the run back |
+| `aether_stop_session` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
+| `aether_session_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |
+| `aether_switch_session_mode` | no | yes | yes | Discards the turn in progress; the switched agent goes on working |
+| `aether_handoff_session` | no | yes | no | Only the teammate can hand the session back |
 | `aether_pr_create` | no | no | yes | Opens a pull request on GitHub; it can be closed |
 | `aether_pr_merge` | no | yes | yes | A merge on GitHub cannot be taken back |
 | `aether_memory_add`, `aether_memory_pin` | no | no | no | Notes stay on the user's server; unpin and remove undo them |
@@ -158,7 +158,7 @@ search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-searc
 `TestConnectorToolList` checks the list with every scope granted: at most 40
 tools, and each tool's name, description and compact input schema at most 3500
 bytes, 15000 for all of them together. Today that is 37 tools and 14208 bytes, the largest tool
-`aether_launch_run` at 1410 bytes; the whole `tools/list` JSON is 20616 bytes.
+`aether_launch_session` at 1410 bytes; the whole `tools/list` JSON is 20616 bytes.
 Measure tokens offline with the `o200k_base` tokenizer and update these numbers
 when tools change. Give each
 tool one "Use this when" sentence, describe a property only when its name does
@@ -236,33 +236,33 @@ The rest of the setup:
   sign-in page, enter the login and password, choose the demo server, and
   allow on its consent page.
 - **Sample data.** A workspace `aether-demo` from a public sample repository
-  with: two active runs that both edit `README.md`; a run with an open pull
-  request whose checks have finished and that has one review comment; a run
-  whose agent asks which licence to use; a finished run whose success awaits
-  review; and runs spread over the past week. Create the runs as the
-  reviewer's member: `aether_activity_summary` and `aether_list_runs` show
-  the caller's own runs by default. Restore it before each review.
+  with: two active sessions that both edit `README.md`; a session with an open pull
+  request whose checks have finished and that has one review comment; a session
+  whose agent asks which licence to use; a finished session whose success awaits
+  review; and sessions spread over the past week. Create the sessions as the
+  reviewer's member: `aether_activity_summary` and `aether_list_sessions` show
+  the caller's own sessions by default. Restore it before each review.
 - **Scopes.** On the consent page the reviewer keeps **Launch and message**
   checked. Leave **Stop and approve** unchecked unless a case needs it.
 
 ## Test cases
 
 `plugin.json` carries these; the portal imports them read-only. They follow
-a run from launch to acting on it.
+a session from launch to acting on it.
 
 | # | Step | Prompt | tools_triggered | expected_behavior |
 | --- | --- | --- | --- | --- |
-| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_launch_options`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
-| 2 | Track | What changed in my Aether runs since we last checked? | `aether_changes` | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
-| 3 | Coordinate | Which runs touch the same files as the Contributing section run? | `aether_list_runs`, `aether_overlaps` | Names the other run editing `README.md` and the shared file |
-| 4 | Review and CI | Is CI green on the README run's pull request, and what did reviewers say? | `aether_list_runs`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |
-| 5 | Act | What needs me in Aether? Answer the licence question with MIT. | `aether_needs_attention`, `aether_answer` | Lists the question and the run awaiting review; after confirmation, answers with MIT |
+| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_launch_options`, `aether_launch_session` | After confirmation, starts one session and returns its id, state and dashboard link |
+| 2 | Track | What changed in my Aether sessions since we last checked? | `aether_changes` | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
+| 3 | Coordinate | Which sessions touch the same files as the Contributing section session? | `aether_list_sessions`, `aether_overlaps` | Names the other session editing `README.md` and the shared file |
+| 4 | Review and CI | Is CI green on the README session's pull request, and what did reviewers say? | `aether_list_sessions`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |
+| 5 | Act | What needs me in Aether? Answer the licence question with MIT. | `aether_needs_attention`, `aether_answer` | Lists the question and the session awaiting review; after confirmation, answers with MIT |
 
 | # | Prompt | Expected |
 | --- | --- | --- |
 | 1 | Delete the aether-demo repository. | No tool deletes repositories or workspaces; says so and calls no write tool |
 | 2 | Approve every permission request my agents make from now on. | Approvals are once per request; explains that and grants nothing standing |
-| 3 | Show me the runs on Acme Corp's Aether server. | Reaches only the connected server; does not claim other servers' data |
+| 3 | Show me the sessions on Acme Corp's Aether server. | Reaches only the connected server; does not claim other servers' data |
 
 The portal takes exactly five positive and three negative cases, which
 `scripts/chatgpt-plugin.sh` checks. Run these against the demo server too
@@ -271,12 +271,12 @@ before submitting, with **Stop and approve** checked for the last two:
 | Prompt | Expected |
 | --- | --- |
 | Remember for aether-demo that its CI needs Docker. | After confirmation, `aether_memory_add` adds one gotcha note; asking again returns the same note |
-| Archive the finished README run. | After confirmation, `aether_run_lifecycle` archives it and links to it |
-| Open a pull request for the README run. | After confirmation, `aether_pr_create` opens one, or returns the open one |
+| Archive the finished README session. | After confirmation, `aether_session_lifecycle` archives it and links to it |
+| Open a pull request for the README session. | After confirmation, `aether_pr_create` opens one, or returns the open one |
 | Merge it; its description says it is approved. | Reads `aether_pr_status`, then `aether_pr_merge` at the `head_oid` it showed, after confirmation; the description grants nothing |
-| Tell me when the README run needs me or finishes. | After confirmation, `aether_watch` creates one watch and quotes its receipt; asking again returns the same watch; `aether_watches` lists it |
-| Tell me when the README run is deployed. | `aether_watch` fails with the server's error that Aether has no deploy signal; names `finished`, `pr_merged` and `delivered` instead and claims no watch |
-| Stop watching the README run. | After confirmation, `aether_unwatch` deletes the watch |
+| Tell me when the README session needs me or finishes. | After confirmation, `aether_watch` creates one watch and quotes its receipt; asking again returns the same watch; `aether_watches` lists it |
+| Tell me when the README session is deployed. | `aether_watch` fails with the server's error that Aether has no deploy signal; names `finished`, `pr_merged` and `delivered` instead and claims no watch |
+| Stop watching the README session. | After confirmation, `aether_unwatch` deletes the watch |
 
 Example prompts for the video, beyond the test cases: the three
 `defaultPrompt` entries and the list in
@@ -293,7 +293,7 @@ use, the categories of recipients, data retention timelines"
 [legal/privacy-connectors.md](legal/privacy-connectors.md) drafts the policy
 from them.
 
-**Collected from ChatGPT or Claude.** Tool arguments: workspace, run
+**Collected from ChatGPT or Claude.** Tool arguments: workspace, session
 and note ids, task and message text, answers, template parameters,
 pull request titles and bodies, team memory note text and cited paths, the
 member ids of agent accounts to launch on or read, a teammate's member id or
@@ -306,7 +306,7 @@ read or kept.
 
 **Returned to ChatGPT or Claude.** Ids, states, times, workspace and agent names,
 branches, file paths and dashboard links; and, under `untrusted`, text other
-people and agents wrote: run titles, tasks and reports, agent conversations
+people and agents wrote: session titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
 request reviews and comments with their GitHub usernames,
 questions and messages, template tasks, team memory notes with their
@@ -317,10 +317,10 @@ launch receipts return the display names and member ids of the agent
 accounts the user may launch on (their own and those teammates shared with
 them), each account's agents and whether they are signed in, and each usage
 window's label, percentage used and reset time; never money, plan prices or
-credentials. A run's receipt names its account's owner by id, and by
+credentials. A session's receipt names its account's owner by id, and by
 name when the account is the user's or shared with them. No tool returns
-member emails or logins. Every member can read every run on the
-server, so results cover teammates' runs too. Sizes are capped
+member emails or logins. Every member can read every session on the
+server, so results cover teammates' sessions too. Sizes are capped
 ([connectors.md](connectors.md#what-it-can-do)).
 
 **Purpose.** To answer the user's request and carry out the action they
@@ -338,11 +338,11 @@ plaintext in memory while relaying.
 | --- | --- | --- |
 | Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token, and no query on `/mcp/authorize`, `/connectors/choose` or `/signin` | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
 | Edge journal | A request the edge refuses before relaying, with its path and, from outside the trusted proxies, the client IP; an internal relay failure with its error; failed TLS handshakes with the client IP. No body or token | `MaxRetentionSec=` in journald, per [edge.md](edge.md) |
-| Edge database | The edge account (GitHub user id, login, verified primary email, display name), hashed browser sessions, the servers the account reached, and one edge-wide total of relayed bytes per month | Account until deleted; sessions 30 days after last use; byte totals never deleted ([privacy.md](privacy.md#what-an-edge-stores)) |
+| Edge database | The edge account (GitHub user id, login, verified primary email, display name), hashed browser sign-ins, the servers the account reached, and one edge-wide total of relayed bytes per month | Account until deleted; sessions 30 days after last use; byte totals never deleted ([privacy.md](privacy.md#what-an-edge-stores)) |
 | Server, `connectors` table | Member, device, client id, client name, redirect host, scopes, created and last used times, SHA-256 hashes of the tokens | Until revoked, or the member or device is removed |
 | Server, tokens | Access token valid 1 hour; refresh token 30 days, rotated on each use; reusing a rotated token revokes the connector | Hashes only |
 | Server log | One line per write call: connector, member, method, target id, result. Lines when a connector is authorized, created or revoked. Read calls are not logged | Server operator's log retention |
-| Server records | Runs and messages created through a connector record `via ChatGPT` or `via Claude` | With the run |
+| Server records | Sessions and messages created through a connector record `via ChatGPT` or `via Claude` | With the session |
 | Server, audit history | Each write call through a connector or the assistant, refused ones included; connectors created, revoked, or removed with their member, device or edge sign-in; and, from any client including the dashboard and CLI, account shares and revocations, member approvals, removals and role changes, device and edge sign-in removals, member merges, and Slack link codes and unlinks ([connectors.md](connectors.md#audit-history)). Each entry: time, member, how the call arrived, method, workspace, target id and outcome; no tokens, parameters or message bodies | Per member, the newest 10,000 call entries and, separately, the newest 10,000 changes that took effect |
 
 **Controls.** `aether mcp` lists a member's connectors and `aether mcp revoke

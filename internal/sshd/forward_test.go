@@ -421,7 +421,7 @@ func TestDirectTCPIPRejectsUnknownRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	client := e.dial(t)
-	assertForwardRejected(t, client, forwardTestPayload{DestHost: "run:missing", DestPort: 1}, "run not found")
+	assertForwardRejected(t, client, forwardTestPayload{DestHost: "run:missing", DestPort: 1}, "session not found")
 }
 
 func TestDirectTCPIPRejectsProtectedRunCollaborator(t *testing.T) {
@@ -436,13 +436,13 @@ func TestDirectTCPIPRejectsProtectedRunCollaborator(t *testing.T) {
 		t.Fatalf("dial collaborator: %v", err)
 	}
 	defer func() { _ = client.Close() }()
-	assertForwardRejected(t, client, forwardTestPayload{DestHost: "run:" + string(e.run.ID), DestPort: 1}, "permission denied: run is protected: only its owner or an admin may steer")
+	assertForwardRejected(t, client, forwardTestPayload{DestHost: "run:" + string(e.run.ID), DestPort: 1}, "permission denied: session is protected: only its owner or an admin may steer")
 }
 
 func TestDirectTCPIPRejectsNonRunDestination(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	assertForwardRejected(t, e.dial(t), forwardTestPayload{DestHost: "127.0.0.1", DestPort: 1}, "port forwarding targets must be run:<run-id> or terminal")
+	assertForwardRejected(t, e.dial(t), forwardTestPayload{DestHost: "127.0.0.1", DestPort: 1}, "port forwarding targets must be run:<session-id> or terminal")
 }
 
 func TestDirectTCPIPRejectsViewer(t *testing.T) {

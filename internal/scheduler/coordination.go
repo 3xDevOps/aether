@@ -259,7 +259,7 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		default:
 			channel = "instructions file"
 		}
-		s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, "run instructions: "+channel)
+		s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, "session instructions: "+channel)
 	}
 	return mounts, launchArgs, launchEnv, nil
 }

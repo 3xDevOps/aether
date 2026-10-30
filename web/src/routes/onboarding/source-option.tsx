@@ -94,7 +94,7 @@ export function OnboardingSourceOption({
               <dd className="break-all font-code">{status.accepted_commit || (canManageSource ? 'None - verify and explicitly adopt a candidate before launch' : 'None - ask an administrator to verify and adopt a candidate before launch')}</dd>
             </dl>
             {status.last_error && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{status.last_error}</Callout>}
-            {status.status !== 'ready' && <p>{canManageSource ? 'Source is not ready for a new run. Choose Review source mirror to repair, verify or review the candidate.' : 'Source is not ready for a new run. Ask an administrator to repair, verify or review the candidate with Review source mirror on the Repository page.'} The workspace is retained; do not import it again.</p>}
+            {status.status !== 'ready' && <p>{canManageSource ? 'Source is not ready for a new session. Choose Review source mirror to repair, verify or review the candidate.' : 'Source is not ready for a new session. Ask an administrator to repair, verify or review the candidate with Review source mirror on the Repository page.'} The workspace is retained; do not import it again.</p>}
           </>
         )}
       </div>

@@ -92,7 +92,7 @@ func roomTarget(s *Server, ctx context.Context, raw json.RawMessage) (permission
 		return permissions.Target{}, rpcError(err)
 	}
 	if target.Workspace != domain.WorkspaceID(p.WorkspaceID) {
-		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "run is not in workspace"}
+		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "session is not in workspace"}
 	}
 	return target, nil
 }

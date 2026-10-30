@@ -15,8 +15,8 @@ import (
 func workspaceSettings(args []string) error {
 	fs := newFlagSet("workspace settings")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	messageOthers := fs.String("message-others", "", "who may message, control and kill other members' runs: everyone or admins-only")
-	maxLive := fs.Int("child-max-live", 0, "child runs one tree may have busy at once; more wait in a queue")
+	messageOthers := fs.String("message-others", "", "who may message, control and kill other members' sessions: everyone or admins-only")
+	maxLive := fs.Int("child-max-live", 0, "subsessions one tree may have busy at once; more wait in a queue")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w\nusage: aether workspace settings [--workspace <name-or-id>] [--message-others everyone|admins-only] [--child-max-live <n>]", err)
 	}
@@ -66,7 +66,7 @@ func workspaceSettings(args []string) error {
 			return err
 		}
 		printWorkspaceSettings(ws)
-		fmt.Printf("child runs      %d busy at once per parent run (more queue)\n", child.MaxLive)
+		fmt.Printf("subsessions      %d busy at once per parent session (more queue)\n", child.MaxLive)
 		return nil
 	})
 }
@@ -98,9 +98,9 @@ func parseMessageOthers(v string) (string, error) {
 // with what it means in the same breath.
 func describeMessageOthers(v string) string {
 	if v == domain.SteerOthersAdminsOnly {
-		return "admins-only (only a run's owner and admins may message, control or kill it)"
+		return "admins-only (only a session's owner and admins may message, control or kill it)"
 	}
-	return "everyone (collaborators may message, control and kill each other's runs)"
+	return "everyone (collaborators may message, control and kill each other's sessions)"
 }
 
 func printWorkspaceSettings(ws protocol.Workspace) {

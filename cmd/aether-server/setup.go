@@ -147,7 +147,7 @@ func askSysbox(p *prompter, docker bool) bool {
 		return false
 	}
 	_, _ = fmt.Fprintln(p.w)
-	return p.confirm("Let agents use Docker inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)", true) && p.err == nil
+	return p.confirm("Let agents use Docker inside their sessions? This installs the Sysbox runtime (Ubuntu/Debian)", true) && p.err == nil
 }
 
 // reportEdge prints what a person needs to reach the server through the

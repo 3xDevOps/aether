@@ -83,7 +83,7 @@ func TestOpenCodeNativeLauncherPreservesProcessContract(t *testing.T) {
 				return
 			}
 			if exit.ExitCode() != 17 {
-				t.Fatalf("child exit was not preserved: %d %s", exit.ExitCode(), output)
+				t.Fatalf("subsession exit was not preserved: %d %s", exit.ExitCode(), output)
 			}
 			args, err := os.ReadFile(filepath.Join(dir, "argv"))
 			if err != nil {

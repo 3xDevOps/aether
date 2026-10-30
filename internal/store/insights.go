@@ -200,7 +200,7 @@ func (q InsightsQuery) ownerScope() string {
 func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error {
 	at, merged, err := encodePullRequestTimes(pr)
 	if err != nil {
-		return fmt.Errorf("store: record run pull request: %w", err)
+		return fmt.Errorf("store: record session pull request: %w", err)
 	}
 	res, err := d.db.ExecContext(ctx,
 		`INSERT INTO run_pull_requests (run_id, workspace_id, repo_workspace_id, repo, number, url, state, created_at, merged_at, checked_at)
@@ -210,7 +210,7 @@ func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error
 		     merged_at = COALESCE(excluded.merged_at, merged_at), checked_at = excluded.checked_at`,
 		pr.RepoWorkspace, pr.Repository, pr.Number, pr.URL, pr.State, at, merged, at, pr.RunID)
 	if err = notFoundOnZeroRows(res, err); err != nil {
-		return fmt.Errorf("store: record run pull request: %w", err)
+		return fmt.Errorf("store: record session pull request: %w", err)
 	}
 	return nil
 }
@@ -218,13 +218,13 @@ func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error
 func (d *DB) ObserveRunPullRequest(ctx context.Context, pr *RunPullRequest) error {
 	at, merged, err := encodePullRequestTimes(pr)
 	if err != nil {
-		return fmt.Errorf("store: observe run pull request: %w", err)
+		return fmt.Errorf("store: observe session pull request: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
 		`UPDATE run_pull_requests SET url = ?, state = CASE WHEN state = 'merged' THEN state ELSE ? END, merged_at = COALESCE(?, merged_at), checked_at = ?
 		 WHERE run_id = ? AND repo = ? AND number = ?`,
 		pr.URL, pr.State, merged, at, pr.RunID, pr.Repository, pr.Number); err != nil {
-		return fmt.Errorf("store: observe run pull request: %w", err)
+		return fmt.Errorf("store: observe session pull request: %w", err)
 	}
 	return nil
 }
@@ -234,7 +234,7 @@ func (d *DB) RunPullRequests(ctx context.Context, run domain.RunID) ([]*RunPullR
 		`SELECT repo_workspace_id, repo, number, url, state, merged_at, checked_at FROM run_pull_requests
 		 WHERE run_id = ? ORDER BY created_at DESC, rowid DESC`, run)
 	if err != nil {
-		return nil, fmt.Errorf("store: run pull requests: %w", err)
+		return nil, fmt.Errorf("store: session pull requests: %w", err)
 	}
 	prs, err := collect(rows, func(row interface{ Scan(...any) error }) (*RunPullRequest, error) {
 		var (
@@ -253,7 +253,7 @@ func (d *DB) RunPullRequests(ctx context.Context, run domain.RunID) ([]*RunPullR
 		return &pr, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("store: run pull requests: %w", err)
+		return nil, fmt.Errorf("store: session pull requests: %w", err)
 	}
 	return prs, nil
 }
@@ -465,7 +465,7 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 		WHERE `+q.ownerScope()+` AND `+insightsFinishedIn+`
 		GROUP BY r.id`, args...)
 	if err != nil {
-		return fmt.Errorf("store: insights: finished runs: %w", err)
+		return fmt.Errorf("store: insights: finished sessions: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck // read-only iteration
 	var (
@@ -481,7 +481,7 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 			input, outputs int64
 		)
 		if err := rows.Scan(&harness, &duration, &metered, &cost, &input, &outputs); err != nil {
-			return fmt.Errorf("store: insights: finished runs: %w", err)
+			return fmt.Errorf("store: insights: finished sessions: %w", err)
 		}
 		durations = append(durations, time.Duration(duration))
 		agent := agents[harness]
@@ -504,7 +504,7 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 		agent.OutputTokens += outputs
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("store: insights: finished runs: %w", err)
+		return fmt.Errorf("store: insights: finished sessions: %w", err)
 	}
 	for _, agent := range agents {
 		out.Cost.ByAgent = append(out.Cost.ByAgent, agent)
@@ -699,7 +699,7 @@ func insightsSuccess(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []an
 		FROM runs r WHERE `+q.ownerScope()+` AND `+insightsFinishedIn, args...,
 	).Scan(&out.Success.RunsFinished, &out.Success.RunsSucceeded)
 	if err != nil {
-		return fmt.Errorf("store: insights: run success: %w", err)
+		return fmt.Errorf("store: insights: session success: %w", err)
 	}
 	return nil
 }

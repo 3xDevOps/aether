@@ -246,7 +246,7 @@ describe('team refresh and summary', () => {
   it.each([
     [0, 'no spend yet'],
     [1, 'no spend reported'],
-  ])('words a zero spend with %i unmetered runs as "%s"', (unmetered, words) => {
+  ])('words a zero spend with %i unmetered sessions as "%s"', (unmetered, words) => {
     seed({
       budgets: {
         [workspace.id]: budget(workspace.id, {

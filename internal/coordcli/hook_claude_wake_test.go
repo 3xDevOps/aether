@@ -151,7 +151,7 @@ func TestClaudeWakeCarriesMailWaitingAtTurnEnd(t *testing.T) {
 func TestClaudeWakeExitsAtOnce(t *testing.T) {
 	_, _, socket, run := hookMailbox(t)
 	for _, tc := range []struct{ socket, input string }{
-		{socket, `{"hook_event_name":"Stop","stop_hook_active":true,"agent_id":"child"}`},
+		{socket, `{"hook_event_name":"Stop","stop_hook_active":true,"agent_id":"subsession"}`},
 		{socket, `{"hook_event_name":"SubagentStop"}`},
 		{"/nonexistent/coord3.sock", `{"hook_event_name":"SessionStart"}`},
 	} {

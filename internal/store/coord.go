@@ -15,7 +15,7 @@ import (
 // ErrInboxFull is returned when a run's inbox already holds the maximum
 // number of unacknowledged messages. Nothing is ever dropped silently:
 // the sender is told the condition by name.
-var ErrInboxFull = errors.New("store: run inbox is full")
+var ErrInboxFull = errors.New("store: session inbox is full")
 
 // ErrIdempotencyConflict means a mutation key was already used for another
 // message kind. The key is deliberately shared across kinds so a caller
@@ -24,7 +24,7 @@ var ErrIdempotencyConflict = errors.New("store: idempotency key belongs to anoth
 
 // ErrCoordReportConflict means a run already holds an active terminal
 // report (success or failure) under a different idempotency key.
-var ErrCoordReportConflict = errors.New("store: run already has a terminal coordination report")
+var ErrCoordReportConflict = errors.New("store: session already has a terminal coordination report")
 
 // ErrCoordReportSuperseded means a retry or evidence capture refers to a
 // terminal reservation superseded by a later interactive report or relaunch.
@@ -247,19 +247,19 @@ func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int
 // messages reached maxUnacked, and reports whether it is new.
 func (d *DB) AppendRunMessageCreated(ctx context.Context, m *RunMessage, maxUnacked int) (bool, error) {
 	if m == nil || m.WorkspaceID == "" || m.FromRun == "" || m.ToRun == "" {
-		return false, errors.New("store: append run message: workspace_id, from_run, and to_run are required")
+		return false, errors.New("store: append session message: workspace_id, from_run, and to_run are required")
 	}
 	if len([]byte(m.Body)) > 4<<10 {
-		return false, errors.New("store: append run message: body is too long")
+		return false, errors.New("store: append session message: body is too long")
 	}
 	if maxUnacked <= 0 {
-		return false, errors.New("store: append run message: maxUnacked must be positive")
+		return false, errors.New("store: append session message: maxUnacked must be positive")
 	}
 	if m.Kind == "" {
 		m.Kind = RunMessageKindMessage
 	}
 	if !m.Kind.Valid() {
-		return false, fmt.Errorf("store: append run message: invalid kind %q", m.Kind)
+		return false, fmt.Errorf("store: append session message: invalid kind %q", m.Kind)
 	}
 	id, ts, err := prepareCreate("msg", m.CreatedAt)
 	if err != nil {
@@ -271,12 +271,12 @@ func (d *DB) AppendRunMessageCreated(ctx context.Context, m *RunMessage, maxUnac
 	}
 	createdAt, err := encodeTime(ts)
 	if err != nil {
-		return false, fmt.Errorf("store: append run message: %w", err)
+		return false, fmt.Errorf("store: append session message: %w", err)
 	}
 
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("store: append run message: begin: %w", err)
+		return false, fmt.Errorf("store: append session message: begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 
@@ -294,12 +294,12 @@ func (d *DB) AppendRunMessageCreated(ctx context.Context, m *RunMessage, maxUnac
 			}
 			*m = *prior
 			if commitErr := tx.Commit(); commitErr != nil {
-				return false, fmt.Errorf("store: append run message: commit retry: %w", commitErr)
+				return false, fmt.Errorf("store: append session message: commit retry: %w", commitErr)
 			}
 			return false, nil
 		}
 		if !errors.Is(qerr, sql.ErrNoRows) {
-			return false, fmt.Errorf("store: append run message: idempotency lookup: %w", qerr)
+			return false, fmt.Errorf("store: append session message: idempotency lookup: %w", qerr)
 		}
 	}
 
@@ -312,11 +312,11 @@ func (d *DB) AppendRunMessageCreated(ctx context.Context, m *RunMessage, maxUnac
 		m.IdempotencyKey, createdAt, m.ToRun, maxUnacked,
 	)
 	if err != nil {
-		return false, fmt.Errorf("store: append run message: %w", mapConstraint(err, ErrNotFound))
+		return false, fmt.Errorf("store: append session message: %w", mapConstraint(err, ErrNotFound))
 	}
 	inserted, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("store: append run message: %w", err)
+		return false, fmt.Errorf("store: append session message: %w", err)
 	}
 	if inserted == 0 {
 		if m.IdempotencyKey != "" {
@@ -330,21 +330,21 @@ func (d *DB) AppendRunMessageCreated(ctx context.Context, m *RunMessage, maxUnac
 				}
 				*m = *prior
 				if err := tx.Commit(); err != nil {
-					return false, fmt.Errorf("store: append run message: commit retry: %w", err)
+					return false, fmt.Errorf("store: append session message: commit retry: %w", err)
 				}
 				return false, nil
 			}
 			if !errors.Is(qerr, sql.ErrNoRows) {
-				return false, fmt.Errorf("store: append run message: idempotency lookup: %w", qerr)
+				return false, fmt.Errorf("store: append session message: idempotency lookup: %w", qerr)
 			}
 		}
-		return false, fmt.Errorf("store: append run message to %s: %w", m.ToRun, ErrInboxFull)
+		return false, fmt.Errorf("store: append session message to %s: %w", m.ToRun, ErrInboxFull)
 	}
 	if err := enqueueCoordAudit(ctx, tx, CoordAuditMessage, `m.id = ?`, id); err != nil {
-		return false, fmt.Errorf("store: append run message: %w", err)
+		return false, fmt.Errorf("store: append session message: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("store: append run message: commit: %w", err)
+		return false, fmt.Errorf("store: append session message: commit: %w", err)
 	}
 	m.ID, m.CreatedAt = id, ts
 	m.CorrelationID = correlation
@@ -370,7 +370,7 @@ func coordMessageEquivalent(prior, incoming *RunMessage) bool {
 
 func (d *DB) GetRunMessage(ctx context.Context, id string) (*RunMessage, error) {
 	if id == "" {
-		return nil, errors.New("store: get run message: id is required")
+		return nil, errors.New("store: get session message: id is required")
 	}
 	row := d.db.QueryRowContext(ctx, `SELECT `+runMessageCols+` FROM run_messages WHERE id = ?`, id)
 	m, err := scanRunMessage(row)
@@ -378,7 +378,7 @@ func (d *DB) GetRunMessage(ctx context.Context, id string) (*RunMessage, error) 
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("store: get run message %s: %w", id, err)
+		return nil, fmt.Errorf("store: get session message %s: %w", id, err)
 	}
 	return m, nil
 }
@@ -395,7 +395,7 @@ func (d *DB) GetRunMessageByIdempotency(ctx context.Context, from domain.RunID, 
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("store: get run message idempotency %s: %w", key, err)
+		return nil, fmt.Errorf("store: get session message idempotency %s: %w", key, err)
 	}
 	return m, nil
 }
@@ -422,25 +422,25 @@ func (d *DB) CountUnackedRunMessages(ctx context.Context, to domain.RunID) (int,
 	if err := d.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND `+unreadMessage, to,
 	).Scan(&n); err != nil {
-		return 0, fmt.Errorf("store: count unacked run messages for %s: %w", to, err)
+		return 0, fmt.Errorf("store: count unacked session messages for %s: %w", to, err)
 	}
 	return n, nil
 }
 
 func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error) {
 	if to == "" {
-		return nil, "", false, errors.New("store: deliver run messages: to_run is required")
+		return nil, "", false, errors.New("store: deliver session messages: to_run is required")
 	}
 	if limit <= 0 {
-		return nil, "", false, errors.New("store: deliver run messages: limit must be positive")
+		return nil, "", false, errors.New("store: deliver session messages: limit must be positive")
 	}
 	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return nil, "", false, fmt.Errorf("store: deliver run messages: %w", err)
+		return nil, "", false, fmt.Errorf("store: deliver session messages: %w", err)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, "", false, fmt.Errorf("store: deliver run messages: begin: %w", err)
+		return nil, "", false, fmt.Errorf("store: deliver session messages: begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 
@@ -450,17 +450,17 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 		now, to, ackToken,
 	)
 	if aerr != nil {
-		return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", aerr)
+		return nil, "", false, fmt.Errorf("store: acknowledge session message batch: %w", aerr)
 	}
 	ackedRows, aerr := ack.RowsAffected()
 	if aerr != nil {
-		return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", aerr)
+		return nil, "", false, fmt.Errorf("store: acknowledge session message batch: %w", aerr)
 	}
 	acked := ackedRows > 0
 	if acked {
 		if qerr := enqueueCoordAudit(ctx, tx, CoordAuditAcked,
 			`m.to_run = ? AND m.delivery_token = ? AND m.acked_at = ?`, to, ackToken, now); qerr != nil {
-			return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", qerr)
+			return nil, "", false, fmt.Errorf("store: acknowledge session message batch: %w", qerr)
 		}
 	}
 
@@ -500,7 +500,7 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 		`UPDATE run_messages SET delivery_token = ?, delivered_at = ?
 		 WHERE id IN (`+placeholders(len(msgs))+`)`, args...,
 	); uerr != nil {
-		return nil, "", false, fmt.Errorf("store: stamp run message delivery: %w", uerr)
+		return nil, "", false, fmt.Errorf("store: stamp session message delivery: %w", uerr)
 	}
 	delivered := decodeTime(now)
 	for _, m := range msgs {
@@ -511,15 +511,15 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 
 func (d *DB) RetireRunMessages(ctx context.Context, to domain.RunID) error {
 	if to == "" {
-		return errors.New("store: retire run messages: to_run is required")
+		return errors.New("store: retire session messages: to_run is required")
 	}
 	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return fmt.Errorf("store: retire run messages for %s: %w", to, err)
+		return fmt.Errorf("store: retire session messages for %s: %w", to, err)
 	}
 	if _, err := d.db.ExecContext(ctx,
 		`UPDATE run_messages SET retired_at = ? WHERE to_run = ? AND `+unreadMessage, now, to); err != nil {
-		return fmt.Errorf("store: retire run messages for %s: %w", to, err)
+		return fmt.Errorf("store: retire session messages for %s: %w", to, err)
 	}
 	return nil
 }
@@ -542,14 +542,14 @@ func outstandingToken(ctx context.Context, tx *sql.Tx, to domain.RunID) (string,
 func readBatch(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]*RunMessage, error) {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("store: read run messages: %w", err)
+		return nil, fmt.Errorf("store: read session messages: %w", err)
 	}
 	return collect(rows, scanRunMessage)
 }
 
 func commitBatch(tx *sql.Tx) error {
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: deliver run messages: commit: %w", err)
+		return fmt.Errorf("store: deliver session messages: commit: %w", err)
 	}
 	return nil
 }
@@ -706,18 +706,18 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 			`SELECT `+coordReportCols+` FROM coord_reports WHERE run_id = ? AND idempotency_key = ?`,
 			report.RunID, report.IdempotencyKey))
 		if errors.Is(qerr, sql.ErrNoRows) {
-			return false, fmt.Errorf("%w: run %s", ErrCoordReportConflict, report.RunID)
+			return false, fmt.Errorf("%w: session %s", ErrCoordReportConflict, report.RunID)
 		}
 		if qerr != nil {
 			return false, fmt.Errorf("store: reserve coord report: read existing: %w", qerr)
 		}
 		if prior.SupersededAt != nil {
-			return false, fmt.Errorf("%w: run %s, idempotency key %q", ErrCoordReportSuperseded, report.RunID, report.IdempotencyKey)
+			return false, fmt.Errorf("%w: session %s, idempotency key %q", ErrCoordReportSuperseded, report.RunID, report.IdempotencyKey)
 		}
 		if prior.Outcome != report.Outcome || prior.Summary != report.Summary ||
 			prior.NextAction != report.NextAction ||
 			!equalStringSlices(prior.InputEvidenceRefs, report.InputEvidenceRefs) {
-			return false, fmt.Errorf("%w: run %s", ErrCoordReportIdempotencyConflict, report.RunID)
+			return false, fmt.Errorf("%w: session %s", ErrCoordReportIdempotencyConflict, report.RunID)
 		}
 		*report = *prior
 		if err := tx.Commit(); err != nil {
@@ -749,7 +749,7 @@ func (d *DB) SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID)
 		`UPDATE coord_reports SET superseded_at = ?
 		 WHERE run_id = ? AND outcome IN ('success', 'failure') AND superseded_at IS NULL`,
 		supersededAt, run); err != nil {
-		return fmt.Errorf("store: supersede coord report for run %s: %w", run, err)
+		return fmt.Errorf("store: supersede coord report for session %s: %w", run, err)
 	}
 	return nil
 }
@@ -848,7 +848,7 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 		return false, qerr
 	}
 	if prior.SupersededAt != nil {
-		return false, fmt.Errorf("%w: run %s, idempotency key %q", ErrCoordReportSuperseded, report.RunID, report.IdempotencyKey)
+		return false, fmt.Errorf("%w: session %s, idempotency key %q", ErrCoordReportSuperseded, report.RunID, report.IdempotencyKey)
 	}
 	*report = *prior
 	return false, nil

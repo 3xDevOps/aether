@@ -14,8 +14,8 @@ reused, not duplicated.
 
 **Non-goals:**
 
-- No interactive fallback inside `aether run`; an unknown agent fails with a
-  message naming the exact `agent add` command. Runs can be headless; one
+- No interactive fallback inside `aether session`; an unknown agent fails with a
+  message naming the exact `agent add` command. Sessions can be headless; one
   interactive flow is enough to maintain.
 - No recipe registry beyond the shipped profiles. `agent add claude` uses the
   shipped profile as its defaults; a curated table for third-party agents can
@@ -31,7 +31,7 @@ reused, not duplicated.
 
 ### Definition resolution precedence
 
-When a run or shell resolves a harness name for a member:
+When a session or shell resolves a harness name for a member:
 
 1. Server-wide spec from `--harness-definitions` (admin pin, unchanged).
 2. The member's own stored definition.
@@ -53,7 +53,7 @@ bootstrap:
   per-harness credential home directory (`<homes>/<member>/<harness>/`) is
   bind-mounted read-write at the container `$HOME`. Whatever the vendor's
   login flow writes to home is thereby persisted in exactly the place future
-  runs' credential mounts read from. Mount order puts the home mount before
+  sessions' credential mounts read from. Mount order puts the home mount before
   the staging mount so the more specific path nests over it.
 - On clean exit, the server snapshots `~/.local` staging into a tool snapshot
   (existing promotion, including executable verification), then diffs the
@@ -70,7 +70,7 @@ bootstrap:
   prints nothing).
 
 Credential-path discovery converts host-relative entries to absolute
-container paths using the existing home-dir resolution for the run user, and
+container paths using the existing home-dir resolution for the session user, and
 discovered paths that fail container-path validation (outside `/root` or
 `/home/aether`, device paths) abort registration with a clear error rather
 than storing a lame definition.
@@ -89,7 +89,7 @@ New top-level `agent` command:
 - `aether agent list`: shipped harness names plus the member's registered
   definitions, marked accordingly.
 
-`aether run`/launch with an unknown agent returns an error that names
+`aether session`/launch with an unknown agent returns an error that names
 `aether agent add <name>` - the scheduler error today is a bare
 `unknown harness`.
 
@@ -160,13 +160,13 @@ Each task: test first, minimal implementation, run the package tests, commit.
 - Create: `cmd/aether/agent.go` (+ test for prompt defaulting and list
   output, following existing command tests).
 - Modify: `cmd/aether/register.go` if needed; quickstart error text asserted
-  in scheduler test already covers the run path.
+  in scheduler test already covers the session path.
 
 ### Task 6: E2E verification
 
 - Scratch server (dev binary, throwaway data dir, port 22222), fake or real
   Docker runtime: `aether agent add myagent` end to end with a stub
-  executable standing in for a vendor CLI; then `aether run` with the
+  executable standing in for a vendor CLI; then `aether session` with the
   registered agent resolves argv. This is the check that the pieces mesh;
   it happens before review, not as a committed integration test unless the
   existing integration suite has a natural slot.

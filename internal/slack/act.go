@@ -71,7 +71,7 @@ func (s *Service) link(ctx context.Context, cb eventCallback) string {
 		case err != nil:
 			return err.Error()
 		}
-		return "Reply in a run's thread to message that run. I start nothing myself."
+		return "Reply in a session's thread to message that session. I start nothing myself."
 	}
 	now := s.now()
 	grant, ok := s.redeem(ev.Text, now)
@@ -89,7 +89,7 @@ func (s *Service) link(ctx context.Context, cb eventCallback) string {
 	if err != nil {
 		return "Linking failed: " + err.Error()
 	}
-	return fmt.Sprintf("Linked to %s on %s. Runs that need you arrive here; reply in a run's thread to message it. To unlink, run `aether slack unlink`.",
+	return fmt.Sprintf("Linked to %s on %s. Sessions that need you arrive here; reply in a session's thread to message it. To unlink, run `aether slack unlink`.",
 		member.DisplayName, s.cfg.Name)
 }
 
@@ -97,7 +97,7 @@ func (s *Service) message(ctx context.Context, cb eventCallback) string {
 	ev := cb.Event
 	last, err := s.cfg.Store.SlackMessageAt(ctx, ev.Channel, ev.ThreadTS)
 	if errors.Is(err, store.ErrNotFound) {
-		return "This thread is not a run's. Reply in the thread of a run's message to message that run."
+		return "This thread is not a session's. Reply in the thread of a session's message to message that session."
 	}
 	if err != nil {
 		return err.Error()
@@ -115,7 +115,7 @@ func (s *Service) message(ctx context.Context, cb eventCallback) string {
 	case m.State == protocol.RoomMessageQueued && m.DeliverAfter != nil:
 		return fmt.Sprintf("Queued: the member in control can approve or deny it, else it is delivered at %s.", *m.DeliverAfter)
 	case m.State == protocol.RoomMessageSent:
-		return "Sent to the run."
+		return "Sent to the session."
 	default:
 		return fmt.Sprintf("The message is %s.", m.State)
 	}
@@ -135,7 +135,7 @@ func (s *Service) press(ctx context.Context, in interaction) string {
 	}
 	last, err := s.cfg.Store.SlackMessageAt(ctx, in.Container.ChannelID, in.Container.MessageTS)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && string(last.RunID) != a.Run) {
-		return "This message no longer follows the run; answer it in the Aether dashboard."
+		return "This message no longer follows the session; answer it in the Aether dashboard."
 	}
 	if err != nil {
 		return err.Error()

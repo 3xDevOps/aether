@@ -86,7 +86,7 @@ func (e *Engine) checkCaptureBounds(ctx context.Context, run domain.RunID, check
 	if got, err := e.checkoutRunID(checkout); err != nil {
 		return err
 	} else if got != run {
-		return fmt.Errorf("gitengine: checkout %s does not match run %s", checkout, run)
+		return fmt.Errorf("gitengine: checkout %s does not match session %s", checkout, run)
 	}
 	free, err := disk.Free(checkout)
 	if err != nil {
@@ -96,14 +96,14 @@ func (e *Engine) checkCaptureBounds(ctx context.Context, run domain.RunID, check
 	listing, over, err := e.gitCheckoutBounded(ctx, run, checkout, listingLimit,
 		"ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
-		return fmt.Errorf("gitengine: list evidence input for run %s: %w", run, err)
+		return fmt.Errorf("gitengine: list evidence input for session %s: %w", run, err)
 	}
 	if over {
 		return fmt.Errorf("%w: staged file listing exceeds %d bytes", limitErr, listingLimit)
 	}
 	root, err := e.openCheckoutRoot(checkout)
 	if err != nil {
-		return fmt.Errorf("gitengine: open checkout for run %s: %w", run, err)
+		return fmt.Errorf("gitengine: open checkout for session %s: %w", run, err)
 	}
 	defer func() { _ = root.Close() }()
 	var total uint64
@@ -275,7 +275,7 @@ func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, 
 	// Every writer holds snapshotLock, so an index lock here is stale:
 	// left by a git killed at the snapshot timeout or by a server crash.
 	if rmErr := os.Remove(index + ".lock"); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-		return "", fmt.Errorf("gitengine: clear stale index lock for run %s: %w", run, rmErr)
+		return "", fmt.Errorf("gitengine: clear stale index lock for session %s: %w", run, rmErr)
 	}
 	if _, _, addErr := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); addErr != nil {
 		return "", addErr
@@ -288,7 +288,7 @@ func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, 
 	}
 	tree := strings.TrimSpace(out)
 	if !validObjectID(tree) {
-		return "", fmt.Errorf("gitengine: git write-tree for run %s returned %q, not an object id", run, tree)
+		return "", fmt.Errorf("gitengine: git write-tree for session %s returned %q, not an object id", run, tree)
 	}
 	if err = e.checkSnapshotBounds(ctx, checkout, index, tree, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
 		return "", err
@@ -462,13 +462,13 @@ func (e *Engine) removeRunHistory(ctx context.Context, run domain.RunID) error {
 		return contextErr
 	}
 	if removeErr := e.cfg.RemoveCheckout(ctx, checkout); removeErr != nil {
-		return fmt.Errorf("gitengine: remove checkout for run %s: %w", run, removeErr)
+		return fmt.Errorf("gitengine: remove checkout for session %s: %w", run, removeErr)
 	}
 	if removeErr := os.Remove(meta); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-		return fmt.Errorf("gitengine: remove run metadata for %s: %w", run, removeErr)
+		return fmt.Errorf("gitengine: remove session metadata for %s: %w", run, removeErr)
 	}
 	if removeErr := os.RemoveAll(store); removeErr != nil {
-		return fmt.Errorf("gitengine: remove snapshot store for run %s: %w", run, removeErr)
+		return fmt.Errorf("gitengine: remove snapshot store for session %s: %w", run, removeErr)
 	}
 	return nil
 }
@@ -522,7 +522,7 @@ func scratchObjects(dir, checkout string, run domain.RunID) (string, error) {
 	// Repo discovery checks that the overriding object directory exists.
 	objects := filepath.Join(dir, "objects")
 	if err := os.MkdirAll(filepath.Join(objects, "info"), 0o700); err != nil {
-		return "", fmt.Errorf("gitengine: scratch objects for run %s: %w", run, err)
+		return "", fmt.Errorf("gitengine: scratch objects for session %s: %w", run, err)
 	}
 	alternates := filepath.Join(objects, "info", "alternates")
 	want := []byte(filepath.Join(checkout, ".git", "objects") + "\n")
@@ -536,18 +536,18 @@ func scratchObjects(dir, checkout string, run domain.RunID) (string, error) {
 	}
 	tmp, err := os.CreateTemp(filepath.Join(objects, "info"), "alternates-*.tmp")
 	if err != nil {
-		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
+		return "", fmt.Errorf("gitengine: scratch alternates for session %s: %w", run, err)
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.Write(want); err != nil {
 		_ = tmp.Close()
-		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
+		return "", fmt.Errorf("gitengine: scratch alternates for session %s: %w", run, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
+		return "", fmt.Errorf("gitengine: scratch alternates for session %s: %w", run, err)
 	}
 	if err := os.Rename(tmp.Name(), alternates); err != nil {
-		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
+		return "", fmt.Errorf("gitengine: scratch alternates for session %s: %w", run, err)
 	}
 	return filepath.Join(dir, "index"), nil
 }
@@ -572,7 +572,7 @@ func scratchIndex(dir, checkout string, run domain.RunID) (string, error) {
 		return index, nil
 	}
 	if err := os.WriteFile(index, data, 0o600); err != nil {
-		return "", fmt.Errorf("gitengine: seed scratch index for run %s: %w", run, err)
+		return "", fmt.Errorf("gitengine: seed scratch index for session %s: %w", run, err)
 	}
 	return index, nil
 }

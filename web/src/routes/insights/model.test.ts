@@ -33,7 +33,7 @@ describe('insights model', () => {
     expect(days[5].members.done.map((m) => [m.name, m.count])).toEqual([['Alice', 5], ['Bob', 2]])
     expect(days[5].members.abandoned).toEqual([])
     expect(chartMax(days)).toBe(7)
-    expect(dayWords(days[5])).toBe('Wed, Oct 14: runs 7 done (Alice 5, Bob 2), 2 failed (Alice 1, Bob 1), 0 abandoned')
+    expect(dayWords(days[5])).toBe('Wed, Oct 14: sessions 7 done (Alice 5, Bob 2), 2 failed (Alice 1, Bob 1), 0 abandoned')
   })
 
   test('members get two-letter tags, numbered when they collide', () => {

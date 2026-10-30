@@ -68,7 +68,7 @@ func TestDevelopmentRetentionUsesAuthenticatedOriginAndIndependentIdempotency(t 
 	agentID := agentResult.(protocol.DevArtifactRetainResult).PacketID
 	humanID := humanResult.(protocol.DevArtifactRetainResult).PacketID
 	if agentID == humanID {
-		t.Fatal("human and run principals shared an idempotency namespace")
+		t.Fatal("human and session principals shared an idempotency namespace")
 	}
 	for _, want := range []struct {
 		id     string

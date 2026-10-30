@@ -66,7 +66,7 @@ describe('reopening', () => {
 })
 
 describe('child runs switch', () => {
-  const childSwitch = () => screen.getByRole('switch', { name: 'Child runs' })
+  const childSwitch = () => screen.getByRole('switch', { name: 'Subsessions' })
   beforeEach(() => {
     useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
     vi.mocked(api.childSettings).mockResolvedValue({ enabled: true, fallback: 'ask', shared_when_missing: false, configured: true, nudge: 'show' } as never)
@@ -396,7 +396,7 @@ describe('new run', () => {
   it('needs a task for Background and says so', async () => {
     await open()
     await userEvent.click(modeSegment('Background'))
-    expect(screen.getByText('Required. A Background run starts with this task and takes no input.')).toBeDefined()
+    expect(screen.getByText('Required. A Background session starts with this task and takes no input.')).toBeDefined()
     expect(launchButton().disabled).toBe(true)
 
     setTask('write the changelog')
@@ -461,7 +461,7 @@ describe('new run', () => {
       await userEvent.click(screen.getByRole('button', { name: /^Options/ }))
       const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
       expect(within(fallbacks).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['Bob (shared)', 'Vera (shared)', 'Carol (shared)'])
-      expect(screen.getByText("The run starts on the account here with the most usage left if Alice's usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-run.")).toBeDefined()
+      expect(screen.getByText("The session starts on the account here with the most usage left if Alice's usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-session.")).toBeDefined()
 
       await userEvent.click(screen.getByRole('button', { name: 'Move Carol (shared) up' }))
       await userEvent.click(screen.getByRole('checkbox', { name: 'Bob (shared)' }))

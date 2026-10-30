@@ -241,7 +241,7 @@ export function ViewSwitch({ view, views }: { view: RunView; views: RunView[] })
     <TabsList
       ref={strip}
       look="segmented"
-      aria-label="Run views"
+      aria-label="Session views"
       onScroll={measure}
       className={cn('overflow-x-auto [scrollbar-width:none]', more && '[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]')}
     >
@@ -299,12 +299,12 @@ export function RunHeader({
         title={
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate">{runLabel(run)}</span>
-            {run.protected && <Lock role="img" aria-label="Protected: only the owner or an admin can message, control or stop this run" className="size-3.5 shrink-0 text-muted" />}
+            {run.protected && <Lock role="img" aria-label="Protected: only the owner or an admin can message, control or stop this session" className="size-3.5 shrink-0 text-muted" />}
           </span>
         }
         stateLine={!composing && <StateLine run={run} agentName={agentName} />}
         onOpenSidebar={!mobile && collapsed ? toggleSidebar : undefined}
-        actionsLabel="Run actions"
+        actionsLabel="Session actions"
         actions={
           <>
             {primary && <Button size="sm" onClick={primary.act}>{primary.label}</Button>}

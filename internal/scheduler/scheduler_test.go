@@ -236,7 +236,7 @@ func (e *testEnv) launchFake(t *testing.T, task string) (*domain.Run, *fakeConta
 	}
 	c := e.rt.byName(string(run.ID))
 	if c == nil {
-		t.Fatalf("no container created for run %s", run.ID)
+		t.Fatalf("no container created for session %s", run.ID)
 	}
 	return run, c
 }
@@ -351,7 +351,7 @@ func (e *testEnv) waitStoreStatus(t *testing.T, run domain.RunID, status domain.
 			return r
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("run %s stuck at %s, want %s", run, r.Status, status)
+			t.Fatalf("session %s stuck at %s, want %s", run, r.Status, status)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -454,7 +454,7 @@ func TestHappyPath(t *testing.T) {
 	}
 	fresh := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if fresh.FinishedAt == nil {
-		t.Fatal("completed run must set FinishedAt")
+		t.Fatal("completed session must set FinishedAt")
 	}
 	if fresh.OutcomeUnseen {
 		t.Fatal("an unreported clean exit must not mark the outcome unseen")
@@ -470,7 +470,7 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("commits = %v", got)
 	}
 	if e.git.publishedCount(run.ID) == 0 {
-		t.Fatal("run branch never published")
+		t.Fatal("session branch never published")
 	}
 	waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
 	waitFor(t, "sidecar removed", func() bool {
@@ -741,11 +741,11 @@ func TestAgentCrash(t *testing.T) {
 		t.Fatalf("commits = %v", got)
 	}
 	if e.git.publishedCount(run.ID) == 0 {
-		t.Fatal("run branch never published after crash")
+		t.Fatal("session branch never published after crash")
 	}
 	fresh := e.waitStoreStatus(t, run.ID, domain.RunFailed)
 	if fresh.FinishedAt == nil {
-		t.Fatal("failed run must have FinishedAt")
+		t.Fatal("failed session must have FinishedAt")
 	}
 	if _, err := os.Stat(fresh.Worktree); err != nil {
 		t.Fatalf("checkout must be preserved after crash: %v", err)
@@ -1000,7 +1000,7 @@ func TestReservedLaunchReplayDoesNotRequireUpstream(t *testing.T) {
 		t.Fatalf("replay attempted fresh capture: %v", err)
 	}
 	if replayed.ID != run.ID || replayed.BaseCommit != run.BaseCommit || replayed.BaseCheckedAt != run.BaseCheckedAt {
-		t.Fatalf("replay replaced immutable run identity or base: %+v", replayed)
+		t.Fatalf("replay replaced immutable session identity or base: %+v", replayed)
 	}
 	runs, err := e.db.ListRunsByWorkspace(t.Context(), e.ws.ID)
 	if err != nil || len(runs) != 1 || runs[0].ID != run.ID {
@@ -1293,11 +1293,11 @@ func TestPendingTerminalReservationBlocksConflictingRun(t *testing.T) {
 
 	conflicting := &supervised{runID: "run-conflict", memberID: e.member.ID}
 	if err := e.sched.reserveRunUser(conflicting, "2000:2000", true); err == nil {
-		t.Fatal("conflicting run user accepted while terminal reservation was pending")
+		t.Fatal("conflicting session user accepted while terminal reservation was pending")
 	}
 	e.sched.releaseTerminalReservation(pending)
 	if err := e.sched.reserveRunUser(conflicting, "2000:2000", true); err != nil {
-		t.Fatalf("run user after terminal release: %v", err)
+		t.Fatalf("session user after terminal release: %v", err)
 	}
 }
 
@@ -1342,7 +1342,7 @@ func TestInvalidAPITransitions(t *testing.T) {
 
 	run, c := e.launchFake(t, "task")
 	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("Relaunch on running run: %v, want ErrInvalidTransition", err)
+		t.Fatalf("Relaunch on running session: %v, want ErrInvalidTransition", err)
 	}
 	if err := e.sched.Resume(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Resume on unpaused run: %v, want ErrInvalidTransition", err)
@@ -1357,13 +1357,13 @@ func TestInvalidAPITransitions(t *testing.T) {
 		t.Fatalf("CloseRun: %v", err)
 	}
 	if err := e.sched.Kill(ctx, run.ID, e.member.ID); err != nil {
-		t.Fatalf("Kill on terminal run: %v", err)
+		t.Fatalf("Kill on terminal session: %v", err)
 	}
 	if err := e.sched.Pause(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("Pause on finished run: %v, want ErrInvalidTransition", err)
+		t.Fatalf("Pause on finished session: %v, want ErrInvalidTransition", err)
 	}
 	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, domain.AgentPrompt{Text: "hi"}, false, nil); !errors.Is(err, ptyhost.ErrNoSession) {
-		t.Fatalf("Inject on finished run: %v, want ErrNoSession", err)
+		t.Fatalf("Inject on finished session: %v, want ErrNoSession", err)
 	}
 }
 
@@ -1373,7 +1373,7 @@ func TestDeleteRunRemovesTerminalRun(t *testing.T) {
 	run := &domain.Run{
 		WorkspaceID: e.ws.ID,
 		MemberID:    e.member.ID,
-		Task:        "remove stale run",
+		Task:        "remove stale session",
 		Harness:     "claude",
 		Mode:        domain.LaunchTUI,
 		Status:      domain.RunFailed,
@@ -1394,7 +1394,7 @@ func TestDeleteRunRemovesTerminalRun(t *testing.T) {
 func TestDeleteRunStopsActiveRunBeforeRemovingIt(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	run, container := e.launchFake(t, "remove active run")
+	run, container := e.launchFake(t, "remove active session")
 
 	if err := e.sched.DeleteRun(t.Context(), run.ID, e.member.ID); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
@@ -1406,14 +1406,14 @@ func TestDeleteRunStopsActiveRunBeforeRemovingIt(t *testing.T) {
 		t.Fatalf("container state = %q, want stopped", container.currentState())
 	}
 	if e.rt.byName(string(run.ID)) != nil {
-		t.Fatal("active run container was not destroyed")
+		t.Fatal("active session container was not destroyed")
 	}
 }
 
 func TestTeardownRunKeepsTheRowAndCanRepeat(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	run, _ := e.launchFake(t, "tear down active run")
+	run, _ := e.launchFake(t, "tear down active session")
 
 	for attempt := 1; attempt <= 2; attempt++ {
 		if err := e.sched.TeardownRun(t.Context(), run.ID, e.member.ID); err != nil {
@@ -1421,7 +1421,7 @@ func TestTeardownRunKeepsTheRowAndCanRepeat(t *testing.T) {
 		}
 	}
 	if e.rt.byName(string(run.ID)) != nil {
-		t.Fatal("teardown left the run's container")
+		t.Fatal("teardown left the session's container")
 	}
 	if _, err := os.Stat(e.git.checkoutPath(run.ID)); !os.IsNotExist(err) {
 		t.Fatalf("checkout after teardown: %v, want it removed", err)
@@ -1637,8 +1637,8 @@ func TestContainerAddrRequiresSupervisedRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, err := e.sched.ContainerAddr(t.Context(), "run_missing")
-	if err == nil || err.Error() != "run has no live container" {
-		t.Fatalf("ContainerAddr missing = %v, want run has no live container", err)
+	if err == nil || err.Error() != "session has no live container" {
+		t.Fatalf("ContainerAddr missing = %v, want session has no live container", err)
 	}
 }
 
@@ -1658,7 +1658,7 @@ func TestSuperviseWaitRetriesTransportErrorUntilExit(t *testing.T) {
 		t.Fatalf("retry Wait container = %q, want %q", got, c.id)
 	}
 	if _, err := e.sched.ContainerAddr(t.Context(), run.ID); err != nil {
-		t.Fatalf("live run after transient Wait: %v", err)
+		t.Fatalf("live session after transient Wait: %v", err)
 	}
 
 	sendScriptedWaitOutcome(t, rt, scriptedWaitOutcome{useUnderlying: true})

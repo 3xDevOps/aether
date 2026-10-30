@@ -281,10 +281,10 @@ func (s *Service) enhancedWakeLock(run domain.RunID) *sync.Mutex {
 // run, a child run a human holds or a run a member controls is not prompted.
 func (s *Service) RemindReport(ctx context.Context, run domain.RunID, prompt string) error {
 	if s.cfg.Disabled || s.cfg.Waker == nil || s.cfg.ReminderAdmission == nil {
-		return errors.New("coord: report reminder: no session waker")
+		return errors.New("coord: report reminder: no agent waker")
 	}
 	if !s.enterRun(run) {
-		return errors.New("coord: report reminder: the run is closing")
+		return errors.New("coord: report reminder: the session is closing")
 	}
 	defer s.leaveRun(run)
 	return s.cfg.ReminderAdmission(ctx, run, func() error { return s.cfg.Waker.Wake(ctx, run, prompt) })

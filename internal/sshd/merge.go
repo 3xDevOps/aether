@@ -160,7 +160,7 @@ func (s *Server) refuseRetainedRuns(ctx context.Context, ms store.MergeStore, a,
 		return nil
 	}
 	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-		"stop these first, then merge: finished runs %s still keep their containers, which mount the members' agent logins; merge once the server releases them, or delete the runs (aether delete <run-id>)",
+		"stop these first, then merge: finished sessions %s still keep their containers, which mount the members' agent logins; merge once the server releases them, or delete the sessions (aether delete <session-id>)",
 		strings.Join(kept, ", "))}
 }
 

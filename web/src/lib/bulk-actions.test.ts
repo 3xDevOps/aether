@@ -47,14 +47,14 @@ describe('archive closed runs', () => {
     const removeRun = vi.fn()
     const api = {
       runArchive: vi.fn(async (id: string) => {
-        if (id === gone.id) throw new ApiError(404, 'run not found', -32000)
+        if (id === gone.id) throw new ApiError(404, 'session not found', -32000)
         return run({ id })
       }),
     } as unknown as Api
     await runClearDone([kept, gone], { api, removeRun })
 
     expect(removeRun).toHaveBeenCalledWith(gone.id)
-    expect(toast.success).toHaveBeenCalledWith('Archived 2 runs')
+    expect(toast.success).toHaveBeenCalledWith('Archived 2 sessions')
   })
 })
 

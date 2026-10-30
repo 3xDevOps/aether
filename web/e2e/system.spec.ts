@@ -6,7 +6,7 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'the run container System measures needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'the session container System measures needs a reachable Docker daemon')
 
 test('Insights › System measures a running run and opens it from the list', async ({ page, aether }) => {
   const alice = await aether.member('alice')

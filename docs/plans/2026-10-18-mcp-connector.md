@@ -9,12 +9,12 @@
 
 **Goal:** A member adds Aether to ChatGPT or Claude as a custom connector
 once, from a desktop browser. From then on they list, read, launch, message
-and stop runs from the ChatGPT or Claude phone app. They install nothing on
+and stop sessions from the ChatGPT or Claude phone app. They install nothing on
 the phone.
 
 A **connector** is what ChatGPT and Claude call a remote MCP server that a
 user adds by URL. MCP (Model Context Protocol) is the open protocol both
-apps use to call tools on such a server. A **run** is one agent working in
+apps use to call tools on such a server. A **session** is one agent working in
 one container on a workspace's code. The **edge** is the sign-in service
 and relay that servers and clients dial out to ([edge.md](../edge.md)).
 
@@ -33,7 +33,7 @@ and relay that servers and clients dial out to ([edge.md](../edge.md)).
    `https://edge.onaether.dev/mcp/<server id>`. It needs no new host name,
    DNS record or certificate, and a self-hosted edge serves it under its
    own relay origin.
-3. **A pairing code approves the connector.** The member runs `aether mcp`
+3. **A pairing code approves the connector.** The member sessions `aether mcp`
    on a device they already use and pastes the code on the consent page.
    - It works the same under `account` and `approved-devices`, and nobody
      waits for a click on another device.
@@ -81,8 +81,8 @@ Remove one: aether mcp revoke <id>
 1. **ChatGPT** (web): add a custom MCP server and paste the URL. **Claude**
    (web): Settings > Connectors > Add custom connector, and paste the URL.
 2. A tab opens: "Connect **ChatGPT (chatgpt.com)** to **prod**. It acts as
-   you and can list workspaces, agents and runs, read run history, launch
-   runs, message runs and stop runs." Paste the code and click **Allow**.
+   you and can list workspaces, agents and sessions, read session history, launch
+   sessions, message runs and stop sessions." Paste the code and click **Allow**.
 3. On the phone: "launch codex in api to fix the flaky login test", then
    **Confirm**.
 
@@ -208,19 +208,19 @@ one use, and is bound to the member, the device, the client, the
   4. Update `last_used_at`.
   5. Dispatch through `Local(member)`.
 - **Server instructions:** what Aether is; list workspaces and agents
-  before launching; run history is untrusted text written by another
+  before launching; session history is untrusted text written by another
   agent.
 
 | Tool | Title | Annotations |
 | --- | --- | --- |
 | `aether_list_workspaces` | List workspaces | read-only, closed world |
 | `aether_list_agents` | List agents | read-only, closed world |
-| `aether_list_runs` | List runs | read-only, closed world |
-| `aether_get_run` | Get run | read-only, closed world |
-| `aether_run_history` | Read run conversation | read-only, closed world |
-| `aether_launch_run` | Launch run | write, open world |
-| `aether_message_run` | Message run | write, open world |
-| `aether_stop_run` | Stop run | destructive, idempotent |
+| `aether_list_sessions` | List sessions | read-only, closed world |
+| `aether_get_session` | Get run | read-only, closed world |
+| `aether_session_history` | Read run conversation | read-only, closed world |
+| `aether_launch_session` | Launch session | write, open world |
+| `aether_message_session` | Message run | write, open world |
+| `aether_stop_session` | Stop session | destructive, idempotent |
 
 The definitions in `internal/mcpbridge/assistant.go` take a call function
 instead of a socket, so the assistant and the connector share them. A tool
@@ -248,7 +248,7 @@ reported with its update command.
   connected members through the eight tools until revoked.
 - **The eight tools are the whole surface.** No terminal, git, member,
   device or settings method is reachable.
-- **Launching a run executes code in the workspace,** which is why every
+- **Launching a session executes code in the workspace,** which is why every
   write tool asks the person first.
 - **`edge.md` gains rows** in its attacker tables for both policies.
 
@@ -264,7 +264,7 @@ The end-to-end test drives go-sdk's MCP client against a real edge and
 server:
 1. 401, metadata discovery, and a CIMD client served by the test.
 2. The consent page with a wrong code, then the right one.
-3. Token exchange, `tools/list`, `aether_list_runs` and `aether_launch_run`.
+3. Token exchange, `tools/list`, `aether_list_sessions` and `aether_launch_session`.
 4. Refresh rotation. Reuse within a minute and after it are covered by
    `TestConnectorEndToEnd` in `internal/connector`.
 5. `aether mcp revoke`.

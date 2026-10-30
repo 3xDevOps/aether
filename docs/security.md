@@ -7,9 +7,9 @@ server.
 The Aether server runs on your Linux host and starts every agent in a Docker
 container. A member is a person admitted to the server. Each member has a home
 directory on the server and an environment, a long-lived container where they
-install and sign in to agent CLIs. A run is one agent task in its own
+install and sign in to agent CLIs. A session is one agent task in its own
 container, with the launching member's home mounted into it. A workspace is a
-repository and its runs. [Concepts](README.md#concepts) has the full glossary.
+repository and its sessions. [Concepts](README.md#concepts) has the full glossary.
 
 ## Report a vulnerability
 
@@ -21,50 +21,50 @@ credentials out of the report.
 
 | Surface | What it protects | What it does not protect |
 | --- | --- | --- |
-| [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Runs and environments cannot connect to each other. Agents run unprivileged. | It is not a VM. A run can read and change everything mounted into it: your home, the checkout and the workspace secrets. |
-| [Permission tiers](#permission-tiers) | A Default run's `sudo` waits for its owner or an admin. Isolated keeps every change outside the checkout inside the run. | Root access runs sudo without asking. Docker inside a Default run gives root in the container without asking. |
-| [Egress control](environments.md#egress-control) | Off by default. When on, a workspace's runs reach only its listed hosts, through the server's proxy, and never a private, loopback or metadata address. | An allowed host receives whatever the agent sends: with `github.com` allowed, the launcher's gh token can push anywhere it can write. Runs still reach the server host. |
-| [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own runs. | Every run you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
-| [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
-| [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
-| [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
-| [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
-| [Assistant](#the-assistant) | Its own container, home and sign-in, which your runs and account share recipients cannot see or change. Launching, messaging and stopping runs and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
-| [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
+| [Session container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Sessions and environments cannot connect to each other. Agents run unprivileged. | It is not a VM. A session can read and change everything mounted into it: your home, the checkout and the workspace secrets. |
+| [Permission tiers](#permission-tiers) | A Default session's `sudo` waits for its owner or an admin. Isolated keeps every change outside the checkout inside the session. | Root access runs sudo without asking. Docker inside a Default session gives root in the container without asking. |
+| [Egress control](environments.md#egress-control) | Off by default. When on, a workspace's sessions reach only its listed hosts, through the server's proxy, and never a private, loopback or metadata address. | An allowed host receives whatever the agent sends: with `github.com` allowed, the launcher's gh token can push anywhere it can write. Sessions still reach the server host. |
+| [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own sessions. | Every session you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
+| [Who can act on a session](#who-can-see-and-act-on-a-session) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your sessions, which hold your home. |
+| [Account sharing](#account-sharing) | A recipient's session gets your agent login, not your home. | The recipient's session can copy, overwrite or log out your login. Revoking does not stop running sessions. An `omp` share is as broad as sharing your home. |
+| [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Sessions sign through an agent and cannot copy the key. | Any of your sessions can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
+| [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every session of the workspace reads them, and anyone who can launch or message a session can make it print one. |
+| [Assistant](#the-assistant) | Its own container, home and sign-in, which your sessions and account share recipients cannot see or change. Launching, messaging and stopping sessions and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
+| [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the session. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the session can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Dashboard gateways](#the-dashboard-gateways) | `aether gui` listens on loopback with a per-process token. The server's dashboard is tailnet-only HTTPS with per-request identity. | Any process on the server host that connects to the host's own tailnet address is served as the node's owner. |
 | [Push notifications](#push-notifications) | The server posts only to public HTTPS endpoints, and the payload is encrypted to your browser. | A notice shows run text (title and reason) on your device. |
 | [Agent configuration and Files](#agent-configuration-and-files) | `aether config push` skips credential files and leaves out files with secrets. Files will not show a known credential file. | Files acts on your whole home. A credential under an unrecognized name is not locked. |
-| [SSH into a run and port forwarding](#ssh-into-a-run) | Same admission as a run shell. Forwards reach only the run's own loopback. | Sessions are not recorded. Attaching an editor lets the run's agent reach your computer through the editor. |
+| [SSH into a session and port forwarding](#ssh-into-a-session) | Same admission as a session shell. Forwards reach only the session's own loopback. | Sessions are not recorded. Attaching an editor lets the session's agent reach your computer through the editor. |
 | [Edge](#edge-remote-access) | SSH stays end to end. The server decides membership. By default a person approves every new device. | Under `edge-access account`, a taken-over GitHub account or edge admits a device. The edge sees connection metadata. |
 | [Connectors](#chatgpt-and-claude-connectors) | A connector acts as one member through the tools of the scopes they granted, with that member's permissions. | TLS ends at the edge, so a compromised edge sees connector traffic and tokens. Under `edge-access account` a GitHub sign-in at the edge authorizes one without a code. |
-| [Slack](#slack) | The bot connects out to Slack and acts as one linked member: it messages runs and answers requests once, with that member's permissions. | Whoever controls the linked Slack account acts as you on your runs. Slack keeps the messages it was sent. |
-| [Coordination](#coordination-between-runs) | Runs message only allowed peers in their workspace. A message grants no control. | Runs in one workspace share a repository and can influence each other through files. |
+| [Slack](#slack) | The bot connects out to Slack and acts as one linked member: it messages runs and answers requests once, with that member's permissions. | Whoever controls the linked Slack account acts as you on your sessions. Slack keeps the messages it was sent. |
+| [Coordination](#coordination-between-sessions) | Sessions message only allowed peers in their workspace. A message grants no control. | Sessions in one workspace share a repository and can influence each other through files. |
 | [Team memory](#team-memory) | Only members pin notes into briefs. Notes with secrets are refused. Agents cannot delete. | A note can be wrong or planted. It is data, never an instruction. |
-| [Sysbox](#the-agent-container) | Docker inside a run without the host socket. Container root maps to an unprivileged host user. | Installing it from the dashboard runs a root script on the host. |
+| [Sysbox](#the-agent-container) | Docker inside a session without the host socket. Container root maps to an unprivileged host user. | Installing it from the dashboard runs a root script on the host. |
 | [Release signing](#release-signing) | Updaters install only binaries listed in a signed manifest for that exact tag. | `aether gui build --zip` checks only the app layout of a local zip. |
 | [Self-update](#server-and-client-updates) | Only signed `v*` releases of `3xDevOps/Aether`. A failed download replaces nothing. | An admin chooses which release the server runs. |
 | [Vulnerability scanning](#vulnerability-scanning) | `govulncheck` runs on every pull request that changes code. | It is advisory: a finding does not fail the build. |
 
 ## The agent container
 
-The container is the only isolation boundary. It is not a VM: every run
+The container is the only isolation boundary. It is not a VM: every session
 shares the host's kernel, and Aether builds no second sandbox inside it.
 
 - Agents run as uid `1000`, or as an image's own non-root user. What they may
-  do as root depends on the run's [permission tier](#permission-tiers).
-  Treat root in a run as able to do anything the container can reach.
-- A run is never `--privileged` and never gets the host Docker socket. With
-  [Sysbox](environments.md#docker-inside-runs) installed, runs and
+  do as root depends on the session's [permission tier](#permission-tiers).
+  Treat root in a session as able to do anything the container can reach.
+- A session is never `--privileged` and never gets the host Docker socket. With
+  [Sysbox](environments.md#docker-inside-sessions) installed, runs and
   environments get their own Docker daemon, and root in the container maps to
-  an unprivileged host user. Without Sysbox a run has no Docker.
-- Runs and environments start on `aether-agents`, a Docker bridge network the
+  an unprivileged host user. Without Sysbox a session has no Docker.
+- Sessions and environments start on `aether-agents`, a Docker bridge network the
   server creates with inter-container traffic off
   (`com.docker.network.bridge.enable_icc=false`). They reach the host and the
   internet but not each other. To set its subnet or MTU, create it yourself
   with that option before the first launch; a launch fails on a network of
   that name without it.
-- A run of a workspace with [egress control](environments.md#egress-control)
+- A session of a workspace with [egress control](environments.md#egress-control)
   on starts on `aether-egress` instead: the same, but `--internal`, so its one
   way out is the server's egress proxy on the network's gateway.
 - The packaged systemd unit runs `aether-server` as root. Docker socket access
@@ -72,44 +72,44 @@ shares the host's kernel, and Aether builds no second sandbox inside it.
   checkouts to the agent's user. An unprivileged server runs every container
   as its own uid and gid, the only owner it can hand files to.
 
-What a run container is given decides what it can do:
+What a session container is given decides what it can do:
 
 ```mermaid
 flowchart LR
-  home["Launcher's home on the server"] -- "read-write as $HOME" --> run["Run container (agent is uid 1000)"]
-  checkout["Run checkout"] -- "mounted at /workspace" --> run
+  home["Launcher's home on the server"] -- "read-write as $HOME" --> run["Session container (agent is uid 1000)"]
+  checkout["Session checkout"] -- "mounted at /workspace" --> run
   secrets["Workspace variables and secrets"] -- "environment variables" --> run
-  coord["Run's coordination socket"] -- "mounted" --> run
+  coord["Session's coordination socket"] -- "mounted" --> run
   run -- "outbound network" --> net["Internet and your network"]
 ```
 
-Your home is mounted only into your environment and the runs you launch; an
+Your home is mounted only into your environment and the sessions you launch; an
 [account share](#account-sharing) is the one exception. Your git name and
 email (set with `aether member git`) are the author and committer in those
-runs, and `/run/aether/co-authors` holds a `Co-authored-by: Name <email>` line
-for each other member who messaged or typed into the run.
+sessions, and `/run/aether/co-authors` holds a `Co-authored-by: Name <email>` line
+for each other member who messaged or typed into the session.
 
 > [!WARNING]
 > If you run agents you do not trust, put the server's `--data-dir` on a
 > filesystem mounted `nosuid,nodev`. Docker has no per-mount switch for this,
-> so otherwise root in a run or environment can plant a setuid binary through
+> so otherwise root in a session or environment can plant a setuid binary through
 > a writable mount and have it survive on the host.
 
 ## Permission tiers
 
-Every run has a permission tier. Pick it under **Permission** at the top of
+Every session has a permission tier. Pick it under **Permission** at the top of
 the launch form, which remembers your last choice, or with
-`aether run --permission root|default|isolated`. Everything else launches at
-Default: the CLI without the flag, the assistant, connectors, Slack and swarm
-workers. A child run gets its parent's tier.
+`aether session --permission root|default|isolated`. Everything else launches at
+Default: the CLI without the flag, the assistant, connectors and
+Slack. A subsession gets its parent's tier.
 
 | | Root access | Default | Isolated |
 | --- | --- | --- | --- |
-| `sudo` | Runs without asking | [Asks you first](#sudo-in-a-default-run) | Refused |
+| `sudo` | Sessions without asking | [Asks you first](#sudo-in-a-default-session) | Refused |
 | Your home and tool caches | Read-write | Read-write | A throwaway copy |
 | Network | As the workspace allows | As the workspace allows | The agents' own hosts |
-| Docker inside the run | With Sysbox | With Sysbox | None |
-| Messages to other runs, team memory notes | Yes | Yes | Refused |
+| Docker inside the session | With Sysbox | With Sysbox | None |
+| Messages to other sessions, team memory notes | Yes | Yes | Refused |
 
 - In every tier the agent runs as uid `1000`, or as the image's own user when
   that is not root. An image whose user is root, such as an environment you
@@ -118,60 +118,60 @@ workers. A child run gets its parent's tier.
   before each container starts, and gives the uid a passwd entry whose home
   is `/root`: git, `ssh` and `ssh-keygen` refuse to run without one, and
   `ssh` reads `~/.ssh` from it rather than `$HOME`.
-- Default and Isolated runs get Docker's `no-new-privileges`, so no setuid
+- Default and Isolated sessions get Docker's `no-new-privileges`, so no setuid
   binary raises the agent.
 - A Root access run and your environment terminal get a sudoers entry for
   their uid before anything else starts in them.
-- Docker inside a Default run puts the agent in the daemon's group, so it can
+- Docker inside a Default session puts the agent in the daemon's group, so it can
   reach root inside the container through Docker without asking. With Sysbox
   that root maps to an unprivileged host user.
-- In every tier the run's checkout and run branch are its result. Runs
+- In every tier the session's checkout and session branch are its result. Sessions
   launched before tiers existed show as Root access.
 
-An Isolated run mounts your home and `/aether-cache` as overlays: the agent
-reads them as they are, and its writes land in the run's scratch directory,
+An Isolated session mounts your home and `/aether-cache` as overlays: the agent
+reads them as they are, and its writes land in the session's scratch directory,
 which is deleted with the container. Changes made to your home elsewhere while
 it runs may not show inside it. Its network reaches only the agent hosts in the
 [egress list](environments.md#egress-control), through the egress proxy, and
 everything else is refused with
-`aether: egress to <host> denied; an isolated run reaches only the agents' own hosts`.
-`sudo` fails with `sudo: an isolated run cannot run commands as root`, in the
+`aether: egress to <host> denied; an isolated session reaches only the agents' own hosts`.
+`sudo` fails with `sudo: an isolated session cannot run commands as root`, in the
 workspace setup script too, which then fails the launch. `aether-internal
 send`, `ask`, `reply` and `memory add` fail with
-`<method>: an isolated run cannot message other runs or write team memory`.
+`<method>: an isolated session cannot message other sessions or write team memory`.
 
-Two things in an Isolated run still reach outside it:
+Two things in an Isolated session still reach outside it:
 
 - Your agent's login file stays mounted read-write from your home. Claude
   Code and Codex replace the refresh token whenever they refresh, so a
   refresh kept only in the copy would leave your real login revoked. A login
   that is a whole directory, such as oh-my-pi's `~/.omp/agent`, stays in the
-  copy, so its refreshes are lost with the run. On another member's shared
+  copy, so its refreshes are lost with the session. On another member's shared
   account such a login cannot stay in a copy, so the launch fails with
-  `scheduler: an isolated run cannot use another member's omp login: ~/.omp/agent is a whole directory the run could change for their later sessions; launch it at Default, or on your own account`.
-- The run can read your gh token and sign with your commit signing key. With
+  `scheduler: an isolated session cannot use another member's omp login: ~/.omp/agent is a whole directory the session could change for their later sessions; launch it at Default, or on your own account`.
+- The session can read your gh token and sign with your commit signing key. With
   GitHub unreachable it cannot use the token, and a signature only covers
   commits in its own checkout.
 
-### Sudo in a Default run
+### Sudo in a Default session
 
-A Default run's `sudo` is Aether's shim at `/usr/local/bin/sudo`, ahead of
+A Default session's `sudo` is Aether's shim at `/usr/local/bin/sudo`, ahead of
 the image's on `PATH`. Docker's `no-new-privileges` stops the image's own:
 `/usr/bin/sudo` fails with `sudo: The "no new privileges" flag is set, which
 prevents sudo from running as root.`
 
-The shim sends the command to the server and waits. The run shows **Needs
+The shim sends the command to the server and waits. The session shows **Needs
 you** with `Run as root in <directory>: <command>` wherever permission requests show: the
-run's **Needs you** panel, the Needs you list, push and Slack notifications,
+session's **Needs you** panel, the Needs you list, push and Slack notifications,
 `aether answer` and the connectors' `aether_decide_approval`. The command text
 is the agent's: read it before you allow it.
 
-- Only the run's owner or a server admin may allow it, because root in the
+- Only the session's owner or a server admin may allow it, because root in the
   container acts on the owner's home and credentials. Anyone who can steer the
-  run may deny it. Anyone else gets `run.input.respond: permission denied:
-  allowing a command to run as root requires the run's owner or an admin`.
+  session may deny it. Anyone else gets `run.input.respond: permission denied:
+  allowing a command to run as root requires the session's owner or an admin`.
 - Allowed, the command runs once as root (with `-u <user>`, as that user) in
-  the run's container, with the same arguments, the shim's working directory,
+  the session's container, with the same arguments, the shim's working directory,
   the container's environment with sudo's fixed `PATH`
   (`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`, never the
   agent-writable `~/.local/bin`) and up to 1 MiB of piped standard input. A
@@ -187,42 +187,42 @@ is the agent's: read it before you allow it.
 - The shim accepts `sudo [-u user] [-E] [-H] [-n] [--] command [args...]`.
   `-E` and `-H` change nothing. `-n` fails instead of asking, with `sudo: a
   person must allow this command; -n cannot wait for one`. Any other flag
-  fails, for example `sudo: -i is not supported in an Aether Default run`.
+  fails, for example `sudo: -i is not supported in an Aether Default session`.
 - While the workspace [setup script](environments.md#setup-script) runs,
   before the agent starts, `sudo` runs without asking: an admin wrote the
   script.
 
-## Who can see and act on a run
+## Who can see and act on a session
 
 The default role, collaborator, can view, steer (type into the terminal,
-message, approve, pause) and kill every other member's run. A viewer can only
-watch ([roles](teams.md#roles)). A run's container mounts its launcher's home,
-so steering someone's run acts with their home, gh login and signing key. A
+message, approve, pause) and kill every other member's session. A viewer can only
+watch ([roles](teams.md#roles)). A session's container mounts its launcher's home,
+so steering someone's session acts with their home, gh login and signing key. A
 handoff (`aether handoff`) changes the owner but not the home.
 
 To narrow it, `aether workspace settings --message-others admins-only` limits
-messaging, steering and killing others' runs to owners and admins. `aether
-protect <run>` does the same for one run; `aether unprotect <run>` lifts it.
+messaging, steering and killing others' sessions to owners and admins. `aether
+protect <session>` does the same for one session; `aether unprotect <session>` lifts it.
 
-Development terminals, the app browser, captures and SSH into a run need
-permission to steer it even to read, because an app session can already be
+Development terminals, the app browser, captures and SSH into a session need
+permission to steer it even to read, because the app browser can already be
 signed in. Role changes reach open connections within seconds: a write attach
 that loses that permission drops to read-only.
 
 ## Account sharing
 
-Sharing your agent account lets another member run tasks on your agent
+Sharing your agent account lets another member session tasks on your agent
 subscription. Share under **Profile → Agent account sharing → Share account**
 or with `aether account share <member-id>`; revoke with **Revoke access** or
 `aether account revoke <member-id>`. The other member picks your account in
-the launch dialog's **Account** picker, or with `aether run --account
-<your-member-id>`. They stay the run's owner; usage and cost count against your
+the launch dialog's **Account** picker, or with `aether session --account
+<your-member-id>`. They stay the session's owner; usage and cost count against your
 account.
 
-Their run uses their own image and home plus your agent login file, mounted
+Their session uses their own image and home plus your agent login file, mounted
 read-write because a token refresh rewrites it. The server checks the mounted
 file is yours before their agent starts. Their own login is mounted in place in
-all their containers, so a refresh in another of their runs cannot replace the
+all their containers, so a refresh in another of their sessions cannot replace the
 file yours is mounted over and detach it. For `claude` that is
 `~/.claude/.credentials.json`;
 [harnesses.md](harnesses.md#per-agent-setup) gives each agent's path. When
@@ -230,21 +230,21 @@ they have no installation of the agent in their own `~/.local/bin`, they also
 get yours, read-only, with your whole `~/.local/bin` on their `PATH` after
 their own entries.
 
-- Root in their run can copy your login, refresh token included, and revoking
+- Root in their session can copy your login, refresh token included, and revoking
   does not recall a copy. Log out and in again to rotate it.
-- Their run can end or replace your login: `/logout` in Claude Code and
+- Their session can end or replace your login: `/logout` in Claude Code and
   `codex logout` revoke it at the vendor, and `/login` writes their login into
   your file. For every agent except `omp`, that costs the login and nothing
   else in your home.
-- Revoking blocks later launches and reopens and removes their control of runs
-  on your account, but does not stop a running container. Kill those runs
-  first: **Kill run** in the run header's **More** menu, or `aether kill
-  <run-id>`.
-- [Usage fallback](teams.md#usage-fallback) can move their run onto your
+- Revoking blocks later launches and reopens and removes their control of sessions
+  on your account, but does not stop a running container. Kill those sessions
+  first: **Kill run** in the session header's **More** menu, or `aether kill
+  <session-id>`.
+- [Usage fallback](teams.md#usage-fallback) can move their session onto your
   account when theirs runs out, without them picking it: your share is the
   consent. It never picks an account not shared with the launcher.
 - A launch checks every account it names, fallback included, when it is
-  created, so a member cannot queue a run on an account nobody shared with them:
+  created, so a member cannot queue a session on an account nobody shared with them:
   `permission denied: member <member-id> has not shared their account with you`.
 - Sharing and revoking are recorded in the
   [audit history](connectors.md#audit-history), readable by the sharing member
@@ -252,7 +252,7 @@ their own entries.
 
 > [!WARNING]
 > An `omp` share mounts your whole `~/.omp/agent` read-write, because omp
-> keeps its login in a database there. The recipient's run can plant an
+> keeps its login in a database there. The recipient's session can plant an
 > extension or MCP server command that runs in your next omp session with
 > your whole home, gh token and signing key. Share `omp` only with someone
 > you would give your home to.
@@ -291,14 +291,14 @@ in the database, and `aether env save` never captures the home.
 
 The private key is never in your home. The server keeps it in
 `signing-keys/<member-id>` in its data directory (mode 0600) and lends it to
-your runs and environment through a read-only SSH agent mounted at
+your sessions and environment through a read-only SSH agent mounted at
 `/run/aether-signing/agent.sock`, which `SSH_AUTH_SOCK` names. git signs
 through it with `ssh-keygen`. The agent lists and signs with your key and
-refuses to add, remove, lock or unlock keys. Aether signs its end-of-run
+refuses to add, remove, lock or unlock keys. Aether signs its end-of-session
 commits with the same key, read from the data directory.
 
-Root in any of your runs can read and replace the token and `~/.gitconfig`, and
-can sign anything with your key while the run lives. It cannot copy the key or
+Root in any of your sessions can read and replace the token and `~/.gitconfig`, and
+can sign anything with your key while the session lives. It cannot copy the key or
 make Aether sign with another one. The token carries gh's default scopes
 (`repo`, `read:org`, `gist`) plus the `admin:ssh_signing_key` scope Aether
 needs to register the key, so an agent can push to the workspace's origin,
@@ -306,19 +306,19 @@ open pull requests, and add or remove signing keys on your account: a key it
 registers signs commits that GitHub shows as Verified. It can also plant
 `~/.local/bin/gh`, which then runs on your next `aether github connect`.
 
-`SSH_AUTH_SOCK` names the signing agent in every run and environment. A
+`SSH_AUTH_SOCK` names the signing agent in every session and environment. A
 workspace variable of that name has no effect, and neither `aether ssh` nor an
-editor's Remote-SSH session forwards your local agent. A shell that starts its
+editor's Remote-SSH connection forwards your local agent. A shell that starts its
 own `ssh-agent` replaces it, and `git commit` there fails with `error: Couldn't
 find key in agent?`.
 
 Releases before the server-held key kept it at `~/.ssh/aether_signing`. On its
 first start after the upgrade the server moves each such key into
 `signing-keys/`, deletes it from the home and rewrites `user.signingkey`, so
-the key already registered on GitHub keeps signing. Runs and the environment
+the key already registered on GitHub keeps signing. Sessions and the environment
 started before the upgrade have no agent, so `git commit` in them fails with
 `error: Couldn't get agent socket?`. Restart the environment (`aether terminal
-stop`, then `aether terminal`); such a run's end-of-run commit is still
+stop`, then `aether terminal`); such a session's end-of-session commit is still
 signed.
 
 To revoke the connection:
@@ -334,7 +334,7 @@ To revoke the connection:
    `signing-keys/<member-id>` from the data directory; the next `aether github
    connect` creates a new one.
 4. Clear the signing settings in your environment terminal. Without the
-   private key, every `git commit` in a run fails with `error: Couldn't find
+   private key, every `git commit` in a session fails with `error: Couldn't find
    key in agent?` until you do:
 
    ```sh
@@ -349,7 +349,7 @@ To revoke the connection:
 
 A workspace variable marked secret ([environments.md](environments.md#secrets))
 is hidden in the settings and is an ordinary environment variable inside a
-run. That protects the value from someone reading the settings, not from
+session. That protects the value from someone reading the settings, not from
 someone who can run code in the workspace.
 
 - Values are stored in `<data-dir>/workspace-secrets/<workspace-id>.json`,
@@ -358,10 +358,10 @@ someone who can run code in the workspace.
 - Plain variables and the setup script are readable by every member, so keep
   credentials out of them. A variable marked secret later stays in old
   database backups: change its value too.
-- Every new run container gets the secrets as
+- Every new session container gets the secrets as
   environment variables, readable by every process in it and by anyone with
   Docker access on the host (`docker inspect`). Anyone who can launch or
-  message a run in the workspace can make it print a secret into the
+  message a session in the workspace can make it print a secret into the
   transcript.
 - A container keeps the values it was created with, so rotate a leaked
   credential at its issuer.
@@ -376,13 +376,13 @@ per member, driven from the dashboard. Its Aether tools act as you, with your
 permissions, and it uses the account you signed it in to.
 
 - Its home is `<data>/assistant/<member>/home` and its instructions are
-  read-only. No run, environment or other member's container mounts either,
+  read-only. No session, environment or other member's container mounts either,
   and only the assistant's container mounts its tool socket. It mounts nothing
-  from any member's home, so a run that changes your `CLAUDE.md`, `~/.claude`
+  from any member's home, so a session that changes your `CLAUDE.md`, `~/.claude`
   settings and hooks, `~/.codex/config.toml`, `.bashrc`, `~/.local/bin` or
   agent login does not change the assistant.
 - Its sign-in is its own, made in its container and kept in its home. Your
-  runs, and the runs of members you share your account with, cannot read or
+  sessions, and the sessions of members you share your account with, cannot read or
   replace it. A login file carries more than tokens: Claude Code also reads a
   gateway URL that receives every prompt, MCP tokens and plugin secrets from
   `.credentials.json`.
@@ -393,7 +393,7 @@ permissions, and it uses the account you signed it in to.
   refreshes the sign-in with the vendor itself and asks the vendor which
   account it belongs to, and refuses the start unless it is the account you
   signed in with. The account is recorded at the first start of either
-  agent after you sign in, before any agent session runs, so neither agent's
+  agent after you sign in, before any agent runs, so neither agent's
   session can rewrite the other's sign-in first. A sign-in the agent swapped
   for another account's, in any field, is caught at the next start.
 - What a steered agent can still do, within the one session it runs in:
@@ -405,29 +405,29 @@ permissions, and it uses the account you signed it in to.
 - The assistant does not start when the server cannot reach the vendor's
   sign-in service.
 - Reading runs and pausing or resuming them happen at once. Launching,
-  messaging or stopping a run and saving your environment wait for you to
+  messaging or stopping a session and saving your environment wait for you to
   approve a card. An unanswered card fails after 10 minutes.
 - **Let the assistant act without asking** (auto-approve, off by default)
-  skips the card for your own runs. Messaging or stopping another member's run
+  skips the card for your own sessions. Messaging or stopping another member's session
   always asks. The assistant cannot turn auto-approve on or approve a card
   itself.
 - Its shell and file tools never ask, inside its own container.
 - Transcripts it reads can carry injected instructions. With auto-approve off,
   a steered assistant still needs your click. With it on, a steered assistant
-  can launch, message and stop your runs.
+  can launch, message and stop your sessions.
 
 Every write call the assistant makes, such as a launch, message, pause or stop,
 is recorded in the [audit history](connectors.md#audit-history) as `assistant`.
 
-Never sign the `aether` CLI in inside a run or your environment terminal. Its
-client key would sit in your home, where every run can read it and act as you,
+Never sign the `aether` CLI in inside a session or your environment terminal. Its
+client key would sit in your home, where every session can read it and act as you,
 including approving the assistant's cards.
 
 ## Remote development and browser isolation
 
-A run can have development terminals, a shared app browser (a headless Chromium
-companion container) and captures of both. All need permission to steer the run,
-reads included. A terminal runs in the live run container with the run owner's
+A session can have development terminals, a shared app browser (a headless Chromium
+companion container) and captures of both. All need permission to steer the session,
+reads included. A terminal runs in the live session container with the session owner's
 home and credentials. Taking control of a terminal or the browser only decides
 whose input goes in; other processes keep running. A human can take control from
 an agent, never the reverse.
@@ -435,8 +435,8 @@ an agent, never the reverse.
 The browser companion runs as UID `1000` with a read-only root filesystem,
 every capability dropped, `no-new-privileges` and Chromium's sandbox on. It
 mounts none of the checkout, your home, keys, agent logins or the Docker
-socket. It shares the run's network, so it reaches the app's loopback ports
-and everything else the run can. Chromium is driven over a pipe, not a port.
+socket. It shares the session's network, so it reaches the app's loopback ports
+and everything else the session can. Chromium is driven over a pipe, not a port.
 
 Page content is not protected: cookies, tokens, customer data, console output,
 URLs and anything on screen can end up in a capture. Use test accounts, never
@@ -444,8 +444,8 @@ production credentials, and review a capture before you keep it. **Annotate**
 leaves out form values and redacts attributes that look like credentials, but
 sends visible text as it is, and only after you press **Send to agent**.
 
-Retaining a capture makes it workspace evidence that anyone who can view the run
-can read, without permission to steer it. Notes are at most 4096 bytes; a run
+Retaining a capture makes it workspace evidence that anyone who can view the session
+can read, without permission to steer it. Notes are at most 4096 bytes; a session
 keeps at most 64 captures and 128 MiB, and a capture is at most 8 MiB. Retention
 periods are in [privacy.md](privacy.md#remote-development-data).
 
@@ -453,7 +453,7 @@ periods are in [privacy.md](privacy.md#remote-development-data).
 
 A mirror is an admin-configured, read-only fetch of an upstream branch into a
 workspace's base branch. It is separate from the publish destination, where
-run branches and pull requests go. A source URL must not contain credentials.
+session branches and pull requests go. A source URL must not contain credentials.
 
 | Mode | Credential | Where it lives |
 | --- | --- | --- |
@@ -512,8 +512,8 @@ posts to ([networking.md](networking.md#notifications)). The server keeps only
 `https` endpoints, at most 16 per member, and connects only to public
 addresses, never its own host, LAN or tailnet. The payload is encrypted to the
 browser and signed with the key in `<data-dir>/push/vapid_key.pem`, which
-grants nothing on the server. A notice carries the run's title and a reason
-from the run.
+grants nothing on the server. A notice carries the session's title and a reason
+from the session.
 
 ### Terminal image uploads
 
@@ -521,16 +521,16 @@ You upload only bytes you pick or paste; the server never reads a path on your
 computer. Images (PNG, JPEG, GIF or WebP, at most 8 MiB) go to
 `~/.aether/terminal-images/` and other attachments (at most 64 MiB) to
 `~/.aether/terminal-files/`, mode `0600`, in the home the target container
-mounts. Uploading to a run needs permission to steer it and writes into its
+mounts. Uploading to a session needs permission to steer it and writes into its
 launcher's home. The files stay until removed or the member is deleted, every
 container that mounts the home can read them, and saved images leave them out.
 
-### Run file uploads
+### Session file uploads
 
-**Upload files…** in a run's **Files** needs permission to steer the run and
-writes into its checkout. An uploaded file is part of the run's changes, and
+**Upload files…** in a session's **Files** needs permission to steer the session and
+writes into its checkout. An uploaded file is part of the session's changes, and
 so of what it commits and publishes, unless the repository ignores it. Files
-lists ignored files too, and anyone who can view the run can read any file in
+lists ignored files too, and anyone who can view the session can read any file in
 its checkout, a `.env` included. Keep a value viewers must not see as a
 workspace secret and out of files.
 
@@ -551,42 +551,42 @@ everything in `~/.ssh` except `*.pub`, `~/.config/gh/hosts.yml`,
 it. The lock keeps credential bytes out of the browser. It is not a boundary
 against you, since your terminal reads the same home, and a credential under
 another name is not recognized. Whatever you upload or edit is visible to your
-environment and every run you launch.
+environment and every session you launch.
 
-## SSH into a run
+## SSH into a session
 
-`ssh <run-id>.aether` ([terminal.md](terminal.md#ssh-and-editors)) gives you
-a shell, file transfer and port forwarding inside a run's container.
+`ssh <session-id>.aether` ([terminal.md](terminal.md#ssh-and-editors)) gives you
+a shell, file transfer and port forwarding inside a session's container.
 
-- Admission is the run shell's: membership, permission to steer the run, and a
-  `running` or `needs-attention` run that is not paused. It is checked again
+- Admission is the session shell's: membership, permission to steer the session, and a
+  `running` or `needs-attention` session that is not paused. It is checked again
   every three seconds, and the connection closes when you fail it.
 - The container has no SSH daemon, port or key; the server speaks SSH itself
   and picks the container. `-L`, `-D` and `-W` forwards reach only loopback
-  inside the run. Remote, agent and X11 forwarding are refused.
+  inside the session. Remote, agent and X11 forwarding are refused.
 - Sessions are not recorded: teammates see that you connected, not what you
-  did. A run takes 16 connections (8 per member), each with 10 sessions and
+  did. A session takes 16 connections (8 per member), each with 10 sessions and
   64 forwards.
-- Processes you start stop when the session ends. For a paused run the stop
+- Processes you start stop when the session ends. For a paused session the stop
   waits for resume, and a server restart in between forgets it, leaving them
-  running. Only **Free container…** on a finished run is certain to end them.
+  running. Only **Free container…** on a finished session is certain to end them.
 - Your `ssh` must be OpenSSH 9.6 or a build patched for CVE-2023-51385. Older
   clients can run a command on your computer when they open a crafted
   `*.aether` host name, for example from a git submodule URL.
 
 > [!WARNING]
 > An editor attached over SSH (VS Code, Cursor, Zed) trusts the machine it
-> attaches to, and the run's agent controls that machine. A compromised remote
-> can use the connection to run code on your computer. Attach only to runs
+> attaches to, and the session's agent controls that machine. A compromised remote
+> can use the connection to run code on your computer. Attach only to sessions
 > whose task and repository you would run on your own machine; use plain `ssh`
 > for the rest.
 
-The desktop app opens only exact editor links to a run, such as
+The desktop app opens only exact editor links to a session, such as
 `vscode://vscode-remote/ssh-remote+<run-id>.aether/workspace`.
 
 ### SSH port forwarding
 
-`aether forward` and the dashboard's OAuth sign-in forwards reach only a run
+`aether forward` and the dashboard's OAuth sign-in forwards reach only a session
 (`run:<run-id>`, which needs permission to steer it) or your own environment
 (`terminal`). Other hosts and reverse forwarding are refused. For an OAuth link that
 redirects to a loopback address, the local dashboard binds that port on your
@@ -647,10 +647,10 @@ there is no terminal, file, settings or git-writing tool.
   a registered or pending one, under either `edge-access` policy. Audit
   records name the connector, such as `ChatGPT connector con-7k2m9q4xbd`.
 - Scopes: the member picks them on the consent page, not the client. `read` is
-  always granted, and every member can read every run on the server, so a
-  connector can read all of them. `write` (launch runs, message,
-  pause and resume runs, answer questions, mark runs reviewed) is checked by
-  default; `control` (decide permission requests, stop and close runs) is not, because text an agent wrote could talk the assistant into
+  always granted, and every member can read every session on the server, so a
+  connector can read all of them. `write` (launch sessions, message,
+  pause and resume sessions, answer questions, mark sessions reviewed) is checked by
+  default; `control` (decide permission requests, stop and close sessions) is not, because text an agent wrote could talk the assistant into
   approving or ending work. A connector serves only its scopes' tools, and the
   server checks every call's method against its scopes, a permission decision
   against `control`, and refuses every method outside its table
@@ -724,7 +724,7 @@ there is no terminal, file, settings or git-writing tool.
   connection you started yourself just now.
 - Refresh tokens rotate on every use and lapse after 30 days unused. A rotated
   refresh token used again a minute or more later deletes the connector.
-- Results contain text agents and other people wrote: run titles, reasons,
+- Results contain text agents and other people wrote: session titles, reasons,
   reports, history, questions, PR titles, comments and failing
   check names, memory notes. Tools put it under an `untrusted` field, and the
   server's instructions tell the assistant never to follow it. Outside that
@@ -738,7 +738,7 @@ there is no terminal, file, settings or git-writing tool.
   everything that is decided.
 - No tool takes a member id. Every agent starts on that member's account, falling back to
   accounts the member may launch on exactly as the member's own launches do.
-- `write` cannot end a live run: `aether_mark_reviewed` completes only a run
+- `write` cannot end a live session: `aether_mark_reviewed` completes only a session
   whose agent reported success and awaits review.
 
 ## Slack
@@ -755,7 +755,7 @@ replies need. Its write calls enter the
   nothing, posts in no channel, and never picks an "always" option. A request
   longer than 600 characters gets no buttons, so a press never decides text
   Slack cut.
-- Whoever controls the linked Slack account acts as you on your runs.
+- Whoever controls the linked Slack account acts as you on your sessions.
   `aether slack unlink`, revoking the device the code was minted on, or
   removing the member cuts the link off.
 - Linking takes a one-use 40-bit code, valid for 10 minutes, sent to the bot in
@@ -767,39 +767,39 @@ replies need. Its write calls enter the
   channel.
 - A link makes 30 actions at once, then one every 2 seconds.
 
-## Coordination between runs
+## Coordination between sessions
 
-Each run gets its own socket for messaging other runs
-([coordination.md](coordination.md)). The socket is the run's identity, so no
+Each session gets its own socket for messaging other sessions
+([coordination.md](coordination.md)). The socket is the session's identity, so no
 token enters the container.
 
-- A run can message its parent and child runs, runs editing the same files, and live
-  runs in its workspace that its owner may message. Never across workspaces. A
-  viewer's runs message nobody.
+- A session can message its parent and subsessions, sessions editing the same files, and live
+  sessions in its workspace that its owner may message. Never across workspaces. A
+  viewer's sessions message nobody.
 - A message is an attributed inbox item. It gives the sender no steer, kill,
   terminal, git, transcript or secret access to the recipient.
 - Messages are capped at 4 KiB, 100 unread per inbox and 8 new correspondents
-  per run outside its parent and children. Runs in one workspace share a repository, so they
+  per session outside its parent and subsessions. Sessions in one workspace share a repository, so they
   can still steer each other through file contents.
 - `aether-server config set conflict-coordination false` turns off messages
-  between runs and outcome reports; overlap warnings stay.
+  between sessions and outcome reports; overlap warnings stay.
 - Each container holds a read-only copy of the server binary for the optional
   MCP bridge. It carries no credentials.
 
 ## Team memory
 
-[Team memory](memory.md) holds short notes that runs and members share in a
+[Team memory](memory.md) holds short notes that sessions and members share in a
 workspace. A note is an attributed claim that can be stale, wrong or planted,
 never an instruction.
 
 - Only members pin notes (`aether memory pin`, which needs permission to push).
-  Pinned notes go into every run's launch brief; other notes reach an agent only
+  Pinned notes go into every session's launch brief; other notes reach an agent only
   when it searches.
 - Agents can add, search and read notes, and replace only another agent's
-  unpinned note. They cannot pin, unpin or delete. A viewer's runs only read.
+  unpinned note. They cannot pin, unpin or delete. A viewer's sessions only read.
   A note that gitleaks flags is refused, and a flagged report is withheld.
-- `aether memory rm <id>` deletes a note and `aether memory rm --run <run>`
-  every note a run wrote. Every change shows in the activity feed.
+- `aether memory rm <id>` deletes a note and `aether memory rm --run <session>`
+  every note a session wrote. Every change shows in the activity feed.
 
 ## Updates and releases
 
@@ -831,7 +831,7 @@ on the server's Docker daemon. The version must be a `v` semver tag from the
 `3xDevOps/Aether` releases; a client never supplies a URL. Both binaries are
 verified before either is replaced.
 
-**Install** in the **Docker inside runs** row of **Settings → Server** (admins
+**Install** in the **Docker inside sessions** row of **Settings → Server** (admins
 only) runs the Sysbox installer built into the server binary as root, the same
 one `sudo aether-server sysbox install` runs; the dashboard sends no script or
 URL. A server that is not root refuses with `the server does not run as root;
@@ -861,27 +861,27 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 
 - Containers share the host kernel. A kernel or Docker escape reaches the
   host.
-- Outbound traffic is limited only for runs of a workspace with egress
-  control on. Other runs and environment terminals
+- Outbound traffic is limited only for sessions of a workspace with egress
+  control on. Other sessions and environment terminals
   reach the internet, your network and ports the server host listens on.
-- An egress-limited run still reaches services on the server host, and every
+- An egress-limited session still reaches services on the server host, and every
   allowed host can receive data. A client that ignores the proxy variables
   cannot connect at all.
-- The egress proxy tells runs apart by source address. Root in a run with
-  Docker inside can claim another egress-limited run's address and get that
+- The egress proxy tells sessions apart by source address. Root in a session with
+  Docker inside can claim another egress-limited session's address and get that
   workspace's host list.
 - On Docker older than 26.0 (25.0.4 and 23.0.11 on older lines), an internal
   network still resolves names through the host (CVE-2024-29018), so an
-  egress-limited run can send data out in DNS queries.
+  egress-limited session can send data out in DNS queries.
 - Containers created before the `aether-agents` network existed keep Docker's
   default bridge, where they can reach each other's ports, until they are
   removed.
-- Every run trusts `/workspace`, and each extra repo's `/repos/<name>`, for git
+- Every session trusts `/workspace`, and each extra repo's `/repos/<name>`, for git
   through `GIT_CONFIG_COUNT`. An image
   with git older than 2.31 ignores that and can refuse the checkout when its
   owner differs from the agent's user. An image's own `ENV GIT_CONFIG_*`
   entries are replaced, so set them as workspace variables.
-- **Commit selected** in a run's changes view does not run commit hooks. Use
-  `git commit` in the run's terminal when hooks must run.
+- **Commit selected** in a session's changes view does not run commit hooks. Use
+  `git commit` in the session's terminal when hooks must run.
 - An account share's login mount can be redirected by the owner's own
   containers to another file in the owner's home, never outside it.

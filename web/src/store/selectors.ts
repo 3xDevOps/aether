@@ -46,7 +46,7 @@ export interface TreeSummary {
 }
 
 export function childRunsText({ members }: TreeSummary): string {
-  return `${members.length} ${members.length === 1 ? 'child run' : 'child runs'}`
+  return `${members.length} ${members.length === 1 ? 'subsession' : 'subsessions'}`
 }
 
 /** `children` are the members that need the viewer, which a folded tree still shows. */

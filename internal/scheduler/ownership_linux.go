@@ -112,7 +112,7 @@ func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID
 	defer lock.Unlock()
 	s.mu.Lock()
 	s.syncRunUserReservationsLocked()
-	err = s.reservationConflictLocked(entry.memberID, login, user, "live run "+string(entry.runID))
+	err = s.reservationConflictLocked(entry.memberID, login, user, "live session "+string(entry.runID))
 	s.mu.Unlock()
 	if err != nil {
 		return err
@@ -193,7 +193,7 @@ func parseNumericUser(user string) (uid, gid int, err error) {
 	parse := func(s string) (int, error) {
 		n, parseErr := strconv.ParseUint(s, 10, 32)
 		if parseErr != nil || n > 0xFFFFFFFE {
-			return 0, fmt.Errorf("scheduler: run user %q: invalid id %q", user, s)
+			return 0, fmt.Errorf("scheduler: session user %q: invalid id %q", user, s)
 		}
 		return int(n), nil
 	}

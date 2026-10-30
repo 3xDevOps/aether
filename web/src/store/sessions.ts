@@ -439,7 +439,7 @@ function timelineRow(event: Event, name: (id: string) => string): SessionRow | n
     case 'kill':
       return { ...base, kind: 'event', text: `Stopped by ${who}` }
     case 'handoff':
-      return { ...base, kind: 'event', text: `${who} handed the run to ${name(p.message ?? '')}` }
+      return { ...base, kind: 'event', text: `${who} handed the session to ${name(p.message ?? '')}` }
     case 'co-author':
       return { ...base, kind: 'event', text: `${who} messaged the agent and is now a co-author` }
     case 'report':
@@ -498,7 +498,7 @@ export function rowsForRun({ run, events, room, memberName, paused }: SessionSou
   const items: Item[] = [{
     at: run.created_at,
     order: -1,
-    row: { kind: 'event', id: `start:${run.id}`, at: run.created_at, text: 'Run started' },
+    row: { kind: 'event', id: `start:${run.id}`, at: run.created_at, text: 'Session started' },
   }]
   const steers = room.filter((m) => m.kind === 'steer_request')
   const results = new Map<string, AgentPayload>()

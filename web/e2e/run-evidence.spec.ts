@@ -7,10 +7,10 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 
-const task = 'retain the finished run evidence'
+const task = 'retain the finished session evidence'
 const terminalTimeout = 3 * 60 * 1000
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 /** Poll only the public run API, and always stop at a bounded deadline. */
 async function waitForCompletedRun(

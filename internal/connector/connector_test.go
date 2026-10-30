@@ -94,7 +94,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if len(got) > 512 {
 		t.Errorf("the instructions are %d characters, over 512: %q", len(got), got)
 	}
-	for _, want := range []string{"aether_launch_options", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted", "not questions", "every must-not", "no added scope", "Assumption:"} {
+	for _, want := range []string{"aether_launch_options", "aether_get_session", "aether_list_sessions query", "aether_message_session", "aether_needs_attention", "untrusted", "not questions", "every must-not", "no added scope", "Assumption:"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions lack %q: %q", want, got)
 		}
@@ -117,7 +117,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if out := e.callTool(t, first.session, "aether_list_workspaces", nil); !strings.Contains(out, string(e.ws.ID)) {
 		t.Fatalf("aether_list_workspaces = %s", out)
 	}
-	e.callTool(t, first.session, "aether_launch_run", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "fix the flaky test"})
+	e.callTool(t, first.session, "aether_launch_session", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "fix the flaky test"})
 	if got := e.runs.launches(); !slices.Equal(got, []string{string(e.ws.ID) + " claude fix the flaky test via Test client"}) {
 		t.Fatalf("launches = %v", got)
 	}
@@ -206,10 +206,10 @@ func TestConnectorScopes(t *testing.T) {
 		t.Fatalf("tools with no box checked = %v, want %v", got, want)
 	}
 	for name, args := range map[string]map[string]any{
-		"aether_launch_run":  {"workspace_id": e.ws.ID, "harness": "claude", "task": "t"},
-		"aether_message_run": {"run_id": "run-1", "message": "m"},
-		"aether_stop_run":    {"run_id": "run-1"},
-		"aether_answer":      {"run_id": "run-1", "answer_id": "q-1", "answer": "a"},
+		"aether_launch_session":  {"workspace_id": e.ws.ID, "harness": "claude", "task": "t"},
+		"aether_message_session": {"run_id": "run-1", "message": "m"},
+		"aether_stop_session":    {"run_id": "run-1"},
+		"aether_answer":          {"run_id": "run-1", "answer_id": "q-1", "answer": "a"},
 	} {
 		res, err := reader.session.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
 		if err == nil && !res.IsError {
@@ -237,9 +237,9 @@ func TestConnectorScopes(t *testing.T) {
 
 	launch := map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t"}
 	for range writeBurst {
-		e.callTool(t, writer.session, "aether_launch_run", launch)
+		e.callTool(t, writer.session, "aether_launch_session", launch)
 	}
-	res, err := writer.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_launch_run", Arguments: launch})
+	res, err := writer.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_launch_session", Arguments: launch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,9 +247,9 @@ func TestConnectorScopes(t *testing.T) {
 		!strings.Contains(text, fmt.Sprintf("used its %d write calls and gets one more every 2s; retry in 2s", writeBurst)) {
 		t.Fatalf("write call over the limit = %v %s", res.IsError, text)
 	}
-	e.callTool(t, writer.session, "aether_list_runs", nil)
+	e.callTool(t, writer.session, "aether_list_sessions", nil)
 	e.skew.Store(int64(2 * time.Second))
-	e.callTool(t, writer.session, "aether_launch_run", launch)
+	e.callTool(t, writer.session, "aether_launch_session", launch)
 }
 
 // A launch through the connector on an account shared with the member runs
@@ -275,7 +275,7 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	writer := e.connect(t, "write")
-	out := e.callTool(t, writer.session, "aether_launch_run", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t",
+	out := e.callTool(t, writer.session, "aether_launch_session", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t",
 		"account_member_id": string(grace.ID), "no_fallback": true})
 	var res struct {
 		Launch struct {
@@ -292,7 +292,7 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 	if a := res.Launch.Account; a["member_id"] != string(grace.ID) || a["name"] != "Grace" || a["access"] != "shared" || res.Launch.Fallback["policy"] != "off" {
 		t.Fatalf("receipt = %s", out)
 	}
-	r, err := writer.session.CallTool(ctx, &mcp.CallToolParams{Name: "aether_launch_run", Arguments: map[string]any{"workspace_id": e.ws.ID,
+	r, err := writer.session.CallTool(ctx, &mcp.CallToolParams{Name: "aether_launch_session", Arguments: map[string]any{"workspace_id": e.ws.ID,
 		"harness": "claude", "task": "t2", "account_member_id": string(bo.ID)}})
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +330,7 @@ func TestOpsMethodsFitTheirConnectorScope(t *testing.T) {
 func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 	e := newEnv(t)
 	c := e.connect(t, allScopes...)
-	e.callTool(t, c.session, "aether_launch_run", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t"})
+	e.callTool(t, c.session, "aether_launch_session", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t"})
 	var list protocol.ConnectorListResult
 	if err := e.admin.Call(protocol.MethodConnectorList, struct{}{}, &list); err != nil || len(list.Connectors) != 1 {
 		t.Fatalf("connector.list = %+v %v", list, err)
@@ -340,7 +340,7 @@ func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if res, err := c.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_list_runs"}); err == nil && !res.IsError {
+	if res, err := c.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_list_sessions"}); err == nil && !res.IsError {
 		t.Fatalf("the open session's call after revoke = %+v, want refused", res)
 	}
 	if status, _, body := e.bearer(c.token.AccessToken); status != http.StatusUnauthorized || !strings.Contains(body, "revoked") {
@@ -733,14 +733,14 @@ type connection struct {
 
 // The connector's tools by scope.
 var (
-	readTools = []string{"aether_list_workspaces", "aether_list_runs", "aether_get_run", "aether_run_history",
-		"aether_needs_attention", "aether_activity_summary", "aether_run_changes",
+	readTools = []string{"aether_list_workspaces", "aether_list_sessions", "aether_get_session", "aether_session_history",
+		"aether_needs_attention", "aether_activity_summary", "aether_session_changes",
 		"aether_pr_status", "aether_overlaps", "aether_memory_search", "search", "fetch", "aether_launch_options", "aether_changes", "aether_watches"}
-	writeTools = []string{"aether_launch_run", "aether_message_run", "aether_answer", "aether_pause_run",
-		"aether_resume_run", "aether_mark_reviewed", "aether_run_lifecycle", "aether_memory_add", "aether_memory_pin",
+	writeTools = []string{"aether_launch_session", "aether_message_session", "aether_answer", "aether_pause_session",
+		"aether_resume_session", "aether_mark_reviewed", "aether_session_lifecycle", "aether_memory_add", "aether_memory_pin",
 		"aether_watch", "aether_unwatch"}
-	controlTools = []string{"aether_decide_approval", "aether_stop_run", "aether_handoff_run",
-		"aether_pr_create", "aether_pr_merge", "aether_switch_run_mode"}
+	controlTools = []string{"aether_decide_approval", "aether_stop_session", "aether_handoff_session",
+		"aether_pr_create", "aether_pr_merge", "aether_switch_session_mode"}
 )
 
 func sorted(lists ...[]string) []string {

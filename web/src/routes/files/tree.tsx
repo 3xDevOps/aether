@@ -87,7 +87,7 @@ export function FileTree({
             {several && <p className="truncate px-2 pb-1 text-ui-sm font-medium text-muted">{workspace.name}</p>}
             <TreeDirectory source={base} path="" depth={0} client={client} onSelect={onSelect} selected={selected} icon={<GitBranch />} />
             {checkouts.length > 0 && (
-              <Disclosure id={`runs:${workspace.id}`} label="Run checkouts" count={checkouts.length}>
+              <Disclosure id={`runs:${workspace.id}`} label="Session checkouts" count={checkouts.length}>
                 {checkouts.map((run) => (
                   <RunCheckoutTree
                     key={run.id}
@@ -277,7 +277,7 @@ export function TreeDirectory({
                 style={indent(depth + 1)}
                 onClick={() => onSelect(source, childPath)}
                 leading={<><span className="w-3.5 shrink-0" /><File /></>}
-                trailing={touched.has(childPath) ? <span role="img" aria-label="Changed in this run" title="Changed in this run" className="inline-block size-1.5 rounded-full bg-accent" /> : undefined}
+                trailing={touched.has(childPath) ? <span role="img" aria-label="Changed in this session" title="Changed in this session" className="inline-block size-1.5 rounded-full bg-accent" /> : undefined}
               >
                 {entry.name}
               </ListRow>
@@ -300,7 +300,7 @@ export function RunCheckoutTree({ source, client, ...props }: Omit<ComponentProp
       client
         .filesUpload({ workspace_id: source.workspaceID, run_id: source.runID, ...(source.repo ? { repo: source.repo } : {}), path, content_base64: content })
         .catch((err: unknown) => {
-          throw err instanceof ApiError && err.status === 409 ? new Error(`${path} already exists in this run; open it to edit`) : err
+          throw err instanceof ApiError && err.status === 409 ? new Error(`${path} already exists in this session; open it to edit`) : err
         }),
     () => useStore.getState().invalidateRun(source.runID),
   )

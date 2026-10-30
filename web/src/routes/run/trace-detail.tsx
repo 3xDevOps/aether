@@ -133,7 +133,7 @@ export function TraceDetail({
         {span.status === 'waiting' && (
           <Button size="sm" variant="secondary" onClick={onRequest}>
             <MessageSquare />
-            Show in Session
+            Show in Chat
           </Button>
         )}
         {target && (
@@ -146,13 +146,13 @@ export function TraceDetail({
             }}
           >
             <MessageSquare />
-            Show in Session
+            Show in Chat
           </Button>
         )}
         {span.runID && (
           <Button size="sm" variant="secondary" onClick={() => onRun(span.runID!)}>
             <ExternalLink />
-            Open worker run
+            Open subsession
           </Button>
         )}
         {span.kind !== 'run' && span.kind !== 'notice' && (

@@ -150,7 +150,7 @@ func checkVersion(exe string) error {
 			return nil
 		}
 		if got[i] < minVersion[i] {
-			return fmt.Errorf("%s is too old: Aether attaches Codex's terminal to its app-server, which needs Codex %d.%d.%d or newer.\nUpdate it here, then start a new run:\n  %s",
+			return fmt.Errorf("%s is too old: Aether attaches Codex's terminal to its app-server, which needs Codex %d.%d.%d or newer.\nUpdate it here, then start a new session:\n  %s",
 				installed, minVersion[0], minVersion[1], minVersion[2], UpdateCommand)
 		}
 	}

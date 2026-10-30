@@ -10,8 +10,8 @@ import (
 func init() {
 	register(command{
 		name:    "kill",
-		short:   "kill a run",
-		usage:   "aether kill <run-id>",
+		short:   "kill a session",
+		usage:   "aether kill <session-id>",
 		example: "aether kill run-d6ay38tj8j",
 		run:     runKill,
 	})
@@ -19,7 +19,7 @@ func init() {
 
 func runKill(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether kill <run-id>")
+		return fmt.Errorf("usage: aether kill <session-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		return actOnRun(c, os.Stdout, protocol.MethodRunKill, args[0])

@@ -10,7 +10,7 @@ describe('run list', () => {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false })
     const listed = toRecord(run())
     const rows = listedRuns('', stateContext({ runs: runRecords(run()) }))
-    const { container } = render(<RunList runs={rows} empty="No runs yet" />)
+    const { container } = render(<RunList runs={rows} empty="No sessions yet" />)
 
     expect(within(container).getByRole('img', { name: 'Working' })).toBeDefined()
 
@@ -35,12 +35,12 @@ describe('run list child runs', () => {
   function renderFamily() {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false, route: { name: 'overview', params: {} } })
     const rows = listedRuns('', stateContext({ runs: runRecords(...family) }))
-    return render(<RunList runs={rows} empty="No runs yet" />)
+    return render(<RunList runs={rows} empty="No sessions yet" />)
   }
 
   it('nests child runs under their parent and keeps every other run top-level', () => {
     renderFamily()
-    const children = screen.getByRole('list', { name: 'Child runs of integrate' })
+    const children = screen.getByRole('list', { name: 'Subsessions of integrate' })
 
     expect(within(children).getByText('child one')).toBeDefined()
     expect(within(children).getByText('child two')).toBeDefined()
@@ -53,14 +53,14 @@ describe('run list child runs', () => {
 
   it('collapses and expands the child runs of one parent', () => {
     renderFamily()
-    fireEvent.click(screen.getByRole('button', { name: 'Hide 2 child runs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide 2 subsessions' }))
 
-    expect(screen.queryByRole('list', { name: 'Child runs of integrate' })).toBeNull()
+    expect(screen.queryByRole('list', { name: 'Subsessions of integrate' })).toBeNull()
     expect(screen.getByText('orphan child')).toBeDefined()
     expect(useStore.getState().route.name).not.toBe('run')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show 2 child runs' }))
-    expect(screen.getByRole('list', { name: 'Child runs of integrate' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 2 subsessions' }))
+    expect(screen.getByRole('list', { name: 'Subsessions of integrate' })).toBeDefined()
   })
 
   it('opens a nested child run', () => {
@@ -82,7 +82,7 @@ describe('run list family ordering', () => {
   function renderAsking() {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false, route: { name: 'overview', params: {} } })
     const ctx = stateContext({ runs: runRecords(...runs) })
-    return render(<RunList runs={listedRuns('', ctx)} empty="No runs yet" />)
+    return render(<RunList runs={listedRuns('', ctx)} empty="No sessions yet" />)
   }
 
   it('places a tree where its earliest member sits', () => {
@@ -95,17 +95,17 @@ describe('run list family ordering', () => {
 
   it('keeps a child run that needs you visible when its parent is folded', () => {
     renderAsking()
-    fireEvent.click(screen.getByRole('button', { name: 'Hide 1 child run' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide 1 subsession' }))
 
     expect(screen.getByText('asking child')).toBeDefined()
     expect(screen.queryByText('busy child')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Show 1 child run' }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByRole('button', { name: 'Show 1 subsession' }).getAttribute('aria-expanded')).toBe('false')
   })
 
   it('offers no fold when every child run needs you', () => {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false, route: { name: 'overview', params: {} } })
     const asking = runs.filter((item) => item.id !== 'run_busy')
-    render(<RunList runs={listedRuns('', stateContext({ runs: runRecords(...asking) }))} empty="No runs yet" />)
+    render(<RunList runs={listedRuns('', stateContext({ runs: runRecords(...asking) }))} empty="No sessions yet" />)
 
     expect(screen.getByText('asking child')).toBeDefined()
     expect(screen.queryByRole('button', { name: /^(Hide|Show) / })).toBeNull()
@@ -119,7 +119,7 @@ describe('run list empty states', () => {
       hydrationError: 'fetch failed',
       streamDead: false,
     })
-    render(<RunList runs={[]} empty="No runs yet" />)
+    render(<RunList runs={[]} empty="No sessions yet" />)
     expect(screen.getByText('Cannot reach the server. Retrying.')).toBeDefined()
   })
 
@@ -130,7 +130,7 @@ describe('run list empty states', () => {
         'a valid gateway token is required; restart `aether gui` for a fresh URL',
       streamDead: true,
     })
-    render(<RunList runs={[]} empty="No runs yet" />)
+    render(<RunList runs={[]} empty="No sessions yet" />)
     expect(screen.getByText(/aether gui/)).toBeDefined()
     expect(screen.queryByText(/Retrying/)).toBeNull()
   })
@@ -140,9 +140,9 @@ describe('run list empty states', () => {
     render(
       <RunList
         runs={listedRuns('', stateContext({ runs: runRecords(run({ task: '' })) }))}
-        empty="No runs yet"
+        empty="No sessions yet"
       />,
     )
-    expect(screen.getByText('Untitled run')).toBeDefined()
+    expect(screen.getByText('Untitled session')).toBeDefined()
   })
 })

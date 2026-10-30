@@ -155,7 +155,7 @@ export function GitHubRepositoryDialog({ client = api, onCreated, onClose }: {
     <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(640px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
       <DialogHeader>
         <DialogTitle>Add GitHub repository</DialogTitle>
-        <DialogDescription>Choose a repository, then review the branch and revision to use for new runs.</DialogDescription>
+        <DialogDescription>Choose a repository, then review the branch and revision to use for new sessions.</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 space-y-4 overflow-y-auto px-1">
         {!workspace && !uncertain && <GitHubConnection client={client} onConnected={() => { setConnected(true); void load() }} onDisconnected={() => {
@@ -196,19 +196,19 @@ export function GitHubRepositoryDialog({ client = api, onCreated, onClose }: {
             </details>
           </section>}
         </fieldset>}
-        <p className="text-ui-sm text-muted">Your GitHub connection is stored on this server. Runs you launch can use it. Imported code is shared with workspace members; your credentials are not copied to them.</p>
+        <p className="text-ui-sm text-muted">Your GitHub connection is stored on this server. Sessions you launch can use it. Imported code is shared with workspace members; your credentials are not copied to them.</p>
         {error && <p role="alert" className="whitespace-pre-wrap break-words text-ui-sm text-state-failed">{error}</p>}
         {error && !workspace && !uncertain && <p className="text-ui-sm">Check your GitHub connection and reload repositories if the account or access changed. For an empty repository, add an initial commit on GitHub before importing.</p>}
         {uncertain && <p role="alert" className="text-ui-sm">{workspace ? 'The last operation could not be confirmed. Check source status before taking another action; do not import again.' : 'The response did not establish whether a workspace was created. Close this dialog and inspect Workspaces before importing again; do not blindly repeat creation.'}</p>}
         {workspace && <section aria-label="Review repository revision" className="space-y-2 border-y py-3 text-ui">
           <p>Workspace: <strong>{workspace.name}</strong> · <code className="break-all text-ui-sm">{workspace.id}</code></p>
           <p className="break-all text-ui-sm">Source: {mirror?.source_url ?? selected?.full_name}</p>
-          <p>Use <strong>{mirror?.branch ?? workspace.base_branch}</strong> for new runs.</p>
+          <p>Use <strong>{mirror?.branch ?? workspace.base_branch}</strong> for new sessions.</p>
           <p className="break-all text-ui-sm">Publish changes to: {workspace.origin || 'Not configured'}</p>
           <p className="break-all text-ui-sm text-muted">Revision: <code>{mirror?.observed_commit || 'No revision fetched yet'}</code></p>
           {mirror?.accepted_commit && <p className="break-all text-ui-sm">Accepted revision: <code>{mirror.accepted_commit}</code></p>}
           <p className="text-ui-sm text-muted">Source status: {mirror?.status ?? 'Not configured'}</p>
-          <p className="text-ui-sm">{canAdopt ? 'Check the revision above: Use repository makes that exact commit the base new runs start from.' : 'The workspace is retained. A successful fetch and explicit acceptance are required before it is ready.'}</p>
+          <p className="text-ui-sm">{canAdopt ? 'Check the revision above: Use repository makes that exact commit the base new sessions start from.' : 'The workspace is retained. A successful fetch and explicit acceptance are required before it is ready.'}</p>
           {mirror?.warning && <p role="status" className="text-ui-sm">{mirror.warning}</p>}
           {mirror?.status === 'auth-failed' && <p className="text-ui-sm">Open Source settings to reconnect GitHub using the authorizing account, then return here and retry the fetch. To change the bound account or source branch, explicitly save the new source settings for this workspace.</p>}
           <div className="flex flex-wrap gap-2">

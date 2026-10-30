@@ -61,7 +61,7 @@ export function paramRows(params: unknown): [string, string][] {
     return params === undefined || params === null ? [] : [['Params', JSON.stringify(params)]]
   }
   return Object.entries(params).map(([key, value]) => {
-    const words = key.replace(/_id$/, '').replace(/_/g, ' ')
+    const words = key.replace(/_id$/, '').replace(/_/g, ' ').replace(/\bchild runs?\b|\bruns?\b/g, (m) => (m.startsWith('child') ? 'subsession' : 'session') + (m.endsWith('s') ? 's' : ''))
     return [words.charAt(0).toUpperCase() + words.slice(1), typeof value === 'string' ? value : JSON.stringify(value)]
   })
 }
@@ -96,7 +96,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
             <p className="text-ui-xs text-muted">
               {isLaunch(confirmation.method)
                 ? `${confirmation.other_owner}'s account pays for this launch, so this asks even with auto-approval on.`
-                : `${confirmation.other_owner} owns this run, so this asks even with auto-approval on.`}
+                : `${confirmation.other_owner} owns this session, so this asks even with auto-approval on.`}
             </p>
           ) : !autoApprove && (
             <p className="text-ui-xs"><AssistantSettingsLink>Skip these cards…</AssistantSettingsLink></p>

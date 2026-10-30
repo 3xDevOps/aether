@@ -17,7 +17,7 @@ const agentShim = 'sh /workspace/agent.sh'
 
 const task = 'write the result file'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   const alice = await aether.member('alice')
@@ -33,7 +33,7 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   await wizard.repository.continue().click()
   aether.installAgent(await memberID(alice), 'claude', agentShim)
   await wizard.agent.skip().click()
-  await wizard.expectStep('First run')
+  await wizard.expectStep('First session')
   await wizard.firstRun.launch('claude', task)
 
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
@@ -46,13 +46,13 @@ async function closeFirstRun(page: Page): Promise<void> {
   const header = page.locator('header').filter({ hasText: task })
   await expect(header).toContainText('Working')
   await header.getByRole('button', { name: 'More', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Close run…', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'Close this run?' })
+  await page.getByRole('menuitem', { name: 'Close session…', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Close this session?' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Merged', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   await expect(header).toContainText('Merged')
-  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('Last reasonClosed')
+  await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText('Last reasonClosed')
   await expect(dialog).toHaveCount(0)
 }
 
@@ -135,7 +135,7 @@ test('Escape closes a dialog on a run without leaving the run', async ({
   await page.keyboard.press('Escape')
 
   await expect(dialog).toHaveCount(0)
-  const tabs = page.getByRole('tablist', { name: 'Run views' })
+  const tabs = page.getByRole('tablist', { name: 'Session views' })
   await expect(tabs).toBeVisible()
   await expect(tabs.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
     'aria-selected',
@@ -186,20 +186,20 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   // a scripted focus() does not match in Chromium. Every focus ends on a key press,
   // after a Tab: outlines also need one since the last pointer press.
   await page.keyboard.press('Tab')
-  const tabs = page.getByRole('tablist', { name: 'Run views' })
+  const tabs = page.getByRole('tablist', { name: 'Session views' })
   await tabs.getByRole('tab', { name: 'Terminal' }).focus()
   await page.keyboard.press('ArrowLeft')
-  const events = tabs.getByRole('tab', { name: 'Session' })
+  const events = tabs.getByRole('tab', { name: 'Chat' })
   await expect(events).toBeFocused()
-  expectVisibleFocus('the run view tab', await indicator(events))
+  expectVisibleFocus('the session view tab', await indicator(events))
   const row = page
-    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
     .getByRole('button', { name: new RegExp(task) })
   await row.focus()
   await page.keyboard.press('Shift+Tab')
   await page.keyboard.press('Tab')
   await expect(row).toBeFocused()
-  expectVisibleFocus('the sidebar run row', await indicator(row))
+  expectVisibleFocus('the sidebar session row', await indicator(row))
 
   const surfaces = page.getByRole('navigation', { name: 'Main navigation' })
   const board = surfaces.getByRole('button', { name: 'Board', exact: true })
@@ -264,7 +264,7 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
   if (!minimum) throw new Error('minimum-width sidebar did not render')
   for (const control of [
     sidebar.getByRole('button', { name: 'Search', exact: true }),
-    sidebar.getByRole('button', { name: 'New run', exact: true }),
+    sidebar.getByRole('button', { name: 'New session', exact: true }),
     sidebar.getByRole('button', { name: 'Mine', exact: true }),
   ]) {
     const box = await control.boundingBox()

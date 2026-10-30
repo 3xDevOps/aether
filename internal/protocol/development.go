@@ -78,7 +78,7 @@ func DecodeDevAgentParams(raw json.RawMessage, params any) error {
 	for key := range fields {
 		// encoding/json matches exported field names case-insensitively.
 		if bytes.EqualFold([]byte(key), []byte("run_id")) {
-			return fmt.Errorf("run_id is supplied by the authenticated run socket")
+			return fmt.Errorf("run_id is supplied by the authenticated session socket")
 		}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))

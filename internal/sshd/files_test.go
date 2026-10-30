@@ -140,7 +140,7 @@ func TestFilesUploadWritesBytesIntoARunCheckout(t *testing.T) {
 	base := upload
 	base.RunID, base.Path = "", "base.bin"
 	if pe := wireErrOf(t, c.Call(protocol.MethodFilesUpload, base, nil)); pe.Code != protocol.CodeInvalidParams || pe.Message != "run_id is required" {
-		t.Errorf("upload without a run = %+v, want run_id is required", pe)
+		t.Errorf("upload without a session = %+v, want run_id is required", pe)
 	}
 	text := protocol.FilesWriteParams{WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID), Path: "nul.txt", Content: "a\x00b"}
 	if pe := wireErrOf(t, c.Call(protocol.MethodFilesWrite, text, nil)); pe.Code != protocol.CodeInvalidParams {

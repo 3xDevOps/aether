@@ -151,7 +151,7 @@ func TestCoordReportOutboxRetriesTheFinish(t *testing.T) {
 		c.Outcomes = outcomes
 	})
 	run := h.run(0)
-	outcomes.fail(errors.New("scheduler: the run has no live container yet"))
+	outcomes.fail(errors.New("scheduler: the session has no live container yet"))
 
 	result := report(t, h, run, protocol.CoordOutcomeFailure, "cannot build", "failure-1")
 	pub, err := h.db.GetCoordReportPublication(ctx, result.ReportID)
@@ -395,7 +395,7 @@ func TestInteractiveReportPublishesItsOutcomeNote(t *testing.T) {
 		select {
 		case ev := <-sub.Events():
 			if ev.RunID != owner.ID || ev.ActorID != owner.MemberID {
-				t.Fatalf("memory.change = %+v, want it on run %s by %s", ev, owner.ID, owner.MemberID)
+				t.Fatalf("memory.change = %+v, want it on session %s by %s", ev, owner.ID, owner.MemberID)
 			}
 			got = append(got, ev.Payload.(events.MemoryChangePayload))
 		case <-time.After(2 * time.Second):

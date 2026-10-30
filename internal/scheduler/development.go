@@ -29,7 +29,7 @@ type LiveRun struct {
 	Env         []string
 }
 
-var ErrNoLiveEnvironment = errors.New("scheduler: the run has no live environment")
+var ErrNoLiveEnvironment = errors.New("scheduler: the session has no live environment")
 
 func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPaused bool) (LiveRun, error) {
 	var live LiveRun
@@ -41,10 +41,10 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 		return live, err
 	}
 	if run.Status.Terminal() {
-		return live, fmt.Errorf("%w: the run is %s and its container is gone", ErrNoLiveEnvironment, run.Status)
+		return live, fmt.Errorf("%w: the session is %s and its container is gone", ErrNoLiveEnvironment, run.Status)
 	}
 	if run.Status != domain.RunRunning && run.Status != domain.RunNeedsAttention {
-		return live, fmt.Errorf("%w: the run is %s", ErrNoLiveEnvironment, run.Status)
+		return live, fmt.Errorf("%w: the session is %s", ErrNoLiveEnvironment, run.Status)
 	}
 	s.mu.Lock()
 	e := s.runs[id]
@@ -62,7 +62,7 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 			return live, err
 		}
 		if found != runtime.ID(sc.ContainerID) {
-			return live, errors.New("recorded run container identity mismatch")
+			return live, errors.New("recorded session container identity mismatch")
 		}
 		live = LiveRun{Run: *run, ContainerID: found, Workdir: s.cfg.WorktreeMount, User: sc.RunUser}
 		if sc.Home != "" {
@@ -81,7 +81,7 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 	}
 	if e.status != run.Status {
 		s.mu.Unlock()
-		return live, errors.New("run lifecycle changed; retry")
+		return live, errors.New("session lifecycle changed; retry")
 	}
 	live = LiveRun{Run: *run, ContainerID: e.containerID, Workdir: s.cfg.WorktreeMount, User: e.runUser}
 	if e.home != "" {
@@ -267,7 +267,7 @@ func (s *Scheduler) CallDevelopment(ctx context.Context, id domain.RunID, p cont
 		return nil, err
 	}
 	if identity.RunID != "" && identity.RunID != string(id) {
-		return nil, errors.New("development run identity mismatch")
+		return nil, errors.New("development session identity mismatch")
 	}
 	auth := func() error { return s.developmentAuthorization(ctx, id, p, authorize) }
 	if err := auth(); err != nil {

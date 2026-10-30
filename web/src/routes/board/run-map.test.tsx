@@ -253,7 +253,7 @@ it('zooms from the Runs strip around the canvas center and fits back into view',
   const initial = { x: 20, y: 30, zoom: 0.8 }
   seedCamera(initial)
   render(<RunMap cards={[card()]} scope={workspace.id} agentNames={{}} />)
-  const header = screen.getByRole('heading', { name: 'Runs 1' }).closest('header')!
+  const header = screen.getByRole('heading', { name: 'Sessions 1' }).closest('header')!
   fireEvent.click(within(header).getByRole('button', { name: 'Zoom in' }))
   expectCamera({
     x: width / 2 - (width / 2 - initial.x) * 1.2,
@@ -346,11 +346,11 @@ it('opens a wide family on a phone at 100% with its parent in view', () => {
 
 it('shows the empty message with no runs, including after a filter removes every run', () => {
   const view = render(<RunMap cards={[]} scope={workspace.id} agentNames={{}} />)
-  expect(screen.getByText('No runs in this view.')).toBeDefined()
+  expect(screen.getByText('No sessions in this view.')).toBeDefined()
   view.rerender(<RunMap cards={[card()]} scope={workspace.id} agentNames={{}} />)
-  expect(screen.queryByText('No runs in this view.')).toBeNull()
+  expect(screen.queryByText('No sessions in this view.')).toBeNull()
   view.rerender(<RunMap cards={[]} scope={workspace.id} agentNames={{}} />)
-  expect(screen.getByText('No runs in this view.')).toBeDefined()
+  expect(screen.getByText('No sessions in this view.')).toBeDefined()
 })
 
 function family() {
@@ -369,7 +369,7 @@ it('folds a family to its parent, keeps the fold, and marks hidden child runs th
   const rootBox = () => document.querySelector('[data-run-id="root"]')!.getBoundingClientRect()
   const before = rootBox()
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse the child runs of coordinate checkout' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse the subsessions of coordinate checkout' }))
   })
   expect(screen.getAllByRole('article').map((article) => article.dataset.runId)).toEqual(['root'])
   // The repack re-centres the parent in a narrower unit; the camera follows so it stays put.
@@ -377,9 +377,9 @@ it('folds a family to its parent, keeps the fold, and marks hidden child runs th
   expect(rootBox().left).toBeCloseTo(before.left, 6)
   expect(rootBox().top).toBeCloseTo(before.top, 6)
   expect(useStore.getState().boardMapFolded).toEqual({ [rootKey]: true })
-  const expand = screen.getByRole('button', { name: 'Expand the child runs of coordinate checkout, 2 hidden' })
+  const expand = screen.getByRole('button', { name: 'Expand the subsessions of coordinate checkout, 2 hidden' })
   expect(expand.textContent).toBe('+2 · 1 need you')
-  expect(screen.getByRole('heading', { name: 'Runs 3' })).toBeDefined()
+  expect(screen.getByRole('heading', { name: 'Sessions 3' })).toBeDefined()
   fireEvent.click(expand)
   expect(screen.getAllByRole('article')).toHaveLength(3)
   expect(useStore.getState().boardMapFolded).toEqual({})
@@ -409,7 +409,7 @@ it('reveals a visible child run from the Needs you chip through the unfold path 
   render(<RunMap cards={family()} scope={workspace.id} agentNames={{}} />)
   fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
   await act(async () => {
-    fireEvent.click(within(await screen.findByLabelText('Runs that need you')).getByRole('button', { name: /ask about tax/ }))
+    fireEvent.click(within(await screen.findByLabelText('Sessions that need you')).getByRole('button', { name: /ask about tax/ }))
   })
   const title = screen.getByRole('button', { name: 'ask about tax' })
   expect(document.activeElement).toBe(title)

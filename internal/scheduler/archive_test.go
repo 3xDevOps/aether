@@ -89,7 +89,7 @@ func TestSetArchivedIdempotent(t *testing.T) {
 		t.Fatalf("SetArchived: %v", err)
 	}
 	if first.ArchivedAt == nil {
-		t.Fatal("archived run has no ArchivedAt")
+		t.Fatal("archived session has no ArchivedAt")
 	}
 	payload := waitArchivedEvent(t, sub, r.ID)
 	if payload.ArchivedAt == nil {
@@ -114,7 +114,7 @@ func TestSetArchivedIdempotent(t *testing.T) {
 
 	select {
 	case ev := <-sub.Events():
-		t.Fatalf("re-archiving an archived run published an event: %+v", ev)
+		t.Fatalf("re-archiving an archived session published an event: %+v", ev)
 	case <-time.After(200 * time.Millisecond):
 	}
 }
@@ -142,7 +142,7 @@ func TestSetArchivedRestore(t *testing.T) {
 		t.Fatalf("restore: %v", err)
 	}
 	if restored.ArchivedAt != nil {
-		t.Fatalf("restored run ArchivedAt = %v, want nil", restored.ArchivedAt)
+		t.Fatalf("restored session ArchivedAt = %v, want nil", restored.ArchivedAt)
 	}
 	restoredPayload := waitArchivedEvent(t, sub, r.ID)
 	if restoredPayload.ArchivedAt != nil {
@@ -184,7 +184,7 @@ func TestRelaunchRestoresArchivedRun(t *testing.T) {
 		t.Fatalf("GetRun: %v", err)
 	}
 	if archived.ArchivedAt == nil {
-		t.Fatal("archived run has no ArchivedAt")
+		t.Fatal("archived session has no ArchivedAt")
 	}
 
 	reopened, err := e.sched.Relaunch(ctx, run.ID, e.member.ID)
@@ -195,7 +195,7 @@ func TestRelaunchRestoresArchivedRun(t *testing.T) {
 		t.Fatalf("reopened status = %s, want running", reopened.Status)
 	}
 	if reopened.ArchivedAt != nil {
-		t.Fatalf("relaunched run returned ArchivedAt = %v, want nil", reopened.ArchivedAt)
+		t.Fatalf("relaunched session returned ArchivedAt = %v, want nil", reopened.ArchivedAt)
 	}
 	restoredPayload := waitArchivedEvent(t, sub, run.ID)
 	if restoredPayload.ArchivedAt != nil {
@@ -207,7 +207,7 @@ func TestRelaunchRestoresArchivedRun(t *testing.T) {
 		t.Fatalf("GetRun: %v", err)
 	}
 	if fresh.ArchivedAt != nil {
-		t.Fatalf("relaunched run still archived: %v", fresh.ArchivedAt)
+		t.Fatalf("relaunched session still archived: %v", fresh.ArchivedAt)
 	}
 }
 

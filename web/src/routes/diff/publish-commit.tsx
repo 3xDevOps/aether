@@ -100,7 +100,7 @@ export function CommitStep({ p, wrap, onContinue }: { p: Publish; wrap: boolean;
           )}
           {preview.file?.truncated && (
             <p role="alert" className="text-ui-sm text-state-needs-you">
-              Untracked preview is truncated. Review this file in the run before committing with native Git.
+              Untracked preview is truncated. Review this file in the session before committing with native Git.
             </p>
           )}
         </section>

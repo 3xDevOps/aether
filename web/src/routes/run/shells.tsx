@@ -16,7 +16,7 @@ import { getShellSocket, initialRunShellDock, shellEnded } from '@/store/termina
 
 /** Mirrors maxRunShells in internal/scheduler/run_shell.go. */
 const maxOwnShells = 4
-const limitReason = `People can run ${maxOwnShells} shells in a run; the agent’s are counted apart. Stop one to open another.`
+const limitReason = `People can run ${maxOwnShells} shells in a session; the agent’s are counted apart. Stop one to open another.`
 
 export const shellPollMs = (visible: boolean) => (visible ? 2_000 : 10_000)
 
@@ -396,7 +396,7 @@ export function TerminalTabs({ shells, agent }: { shells: RunShells; agent: bool
             variant="ghost"
             size="sm"
             aria-label="New shell"
-            hint={shells.atLimit ? limitReason : 'Open a shell in this run’s container'}
+            hint={shells.atLimit ? limitReason : 'Open a shell in this session’s container'}
             aria-disabled={!shells.canAdd || undefined}
             onClick={() => {
               if (shells.canAdd) void shells.open()

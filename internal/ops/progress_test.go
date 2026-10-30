@@ -69,7 +69,7 @@ func TestRunEvidence(t *testing.T) {
 	}})
 	cs := connectorSession(t, f)
 
-	text, out := run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	text, out := run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1", "evidence": true})
 	ev := out["evidence"].(map[string]any)
 	if jsonOf(t, ev["conflicts"]) != `["success_with_failing_checks"]` || !strings.Contains(text, "success_with_failing_checks") {
 		t.Errorf("conflicts = %v, summary %q", ev["conflicts"], text)
@@ -90,7 +90,7 @@ func TestRunEvidence(t *testing.T) {
 
 	f.answers[protocol.MethodRunGet] = returns(runWith("running"))
 	f.answers[protocol.MethodRunPRStatus] = returns(shown(4, "MERGED"))
-	_, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	_, out = run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1", "evidence": true})
 	if pr := dig(t, out, "evidence", "pull_requests", 0).(map[string]any); pr["number"] != float64(4) || pr["source"] != sourceGitHub || pr["checked_at"] == nil {
 		t.Errorf("a pull request GitHub shows but Aether has not recorded = %v", pr)
 	}
@@ -100,11 +100,11 @@ func TestRunEvidence(t *testing.T) {
 	f.answers[protocol.MethodRunGet] = returns(runWith("merged", merged))
 	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t)
 	f.calls = nil
-	_, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	_, out = run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1", "evidence": true})
 	ev = out["evidence"].(map[string]any)
 	if len(called(f, protocol.MethodRunPRFeedback)) != 0 || ev["reviewed"] != nil || ev["report"] != notInReports ||
 		ev["closed_as_merged"] == nil || jsonOf(t, ev["conflicts"]) != `[]` {
-		t.Errorf("a merged run's evidence = %v; want no live checks and no conflict", ev)
+		t.Errorf("a merged session's evidence = %v; want no live checks and no conflict", ev)
 	}
 }
 
@@ -123,11 +123,11 @@ func TestRunEvidenceFromRecordWithoutGitHub(t *testing.T) {
 	recordOnly.Identity = ""
 	f.answers[protocol.MethodRunPRStatus] = returns(recordOnly)
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: recordOnly.PullRequest,
-		Error: "checks and review feedback need the run's environment, which is gone: no live environment"})
+		Error: "checks and review feedback need the session's environment, which is gone: no live environment"})
 	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-1", "success", "shipped"))
 	cs := connectorSession(t, f)
 
-	text, out := run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	text, out := run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1", "evidence": true})
 	ev := out["evidence"].(map[string]any)
 	pr := dig(t, ev, "pull_requests", 0).(map[string]any)
 	if pr["source"] != sourceRecord || pr["checked_at"] != "2026-10-20T09:00:00Z" || pr["not_checked_live"] != nil {
@@ -139,7 +139,7 @@ func TestRunEvidenceFromRecordWithoutGitHub(t *testing.T) {
 	if dig(t, ev, "pull_requests", 1, "not_checked_live") != true {
 		t.Errorf("the other repository's pull request = %v", dig(t, ev, "pull_requests", 1))
 	}
-	if !strings.Contains(text, "Not confirmed: 1 GitHub lookups returned an error, 1 runs have pull requests not checked live.") {
+	if !strings.Contains(text, "Not confirmed: 1 GitHub lookups returned an error, 1 sessions have pull requests not checked live.") {
 		t.Errorf("summary = %q", text)
 	}
 
@@ -148,7 +148,7 @@ func TestRunEvidenceFromRecordWithoutGitHub(t *testing.T) {
 	other.PullRequest.Repository = "acme/other"
 	f.answers[protocol.MethodRunPRStatus] = returns(other)
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Identity: "ana", PullRequest: other.PullRequest})
-	_, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	_, out = run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1", "evidence": true})
 	prs := dig(t, out, "evidence", "pull_requests").([]any)
 	if len(prs) != 2 || dig(t, prs, 1, "repository") != "acme/shop" || dig(t, prs, 1, "source") != sourceRecord {
 		t.Errorf("pull requests = %v, want acme/other#2 beside the recorded acme/shop#2", prs)
@@ -173,7 +173,7 @@ func TestEvidencePartialAndExtraRepo(t *testing.T) {
 	cut := feedback("SUCCESS")
 	cut.PullRequest.Number, cut.Truncated = 5, true
 	f.answers[protocol.MethodRunPRFeedback] = returns(cut)
-	_, out := run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	_, out := run(t, cs, "aether_get_session", map[string]any{"run_id": "run-1", "evidence": true})
 	ev := out["evidence"].(map[string]any)
 	if r := dig(t, ev, "reviewed").(map[string]any); r["approvals"] != nil || r["partial"] != true {
 		t.Errorf("reviewed from a cut-off review list = %v, want approvals unknown and partial", r)

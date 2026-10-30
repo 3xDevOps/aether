@@ -55,9 +55,9 @@ func (s *Server) attachControlAck(ack *protocol.AttachResponse, snap control.Sna
 func attachControlError(err error) (int, string) {
 	switch {
 	case errors.Is(err, control.ErrOccupied):
-		return protocol.CodeConflict, "run control is held by another session"
+		return protocol.CodeConflict, "session control is held by another client"
 	case errors.Is(err, control.ErrStale):
-		return protocol.CodeConflict, "run control generation is stale"
+		return protocol.CodeConflict, "session control generation is stale"
 	case errors.Is(err, control.ErrTakeoverRequired):
 		return protocol.CodeConflict, err.Error()
 	case errors.Is(err, control.ErrInvalidSession), errors.Is(err, control.ErrInvalid):
@@ -195,7 +195,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		return
 	}
 	if req.Interactive && !req.Framed {
-		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: protocol.CodeInvalidParams, Error: "interactive attach requires framed run stream"})
+		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: protocol.CodeInvalidParams, Error: "interactive attach requires framed session stream"})
 		return
 	}
 	var controlLease *attachControlLease
@@ -460,7 +460,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				_ = applyControlReady(true)
 				record := protocol.DashAttachControl{
 					Type: protocol.DashAttachControlFrame, OK: false,
-					Error:             "run control was revoked",
+					Error:             "session control was revoked",
 					ControlSessionID:  req.ControlSessionID,
 					ControlGeneration: lease.Generation,
 					RevocationReason:  string(lease.RevocationReason()),
@@ -681,7 +681,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			}
 			if s.cfg.Control == nil {
 				record.Code = protocol.CodeDenied
-				record.Error = "run control is not enabled"
+				record.Error = "session control is not enabled"
 				sendControlResult(record)
 				return
 			}

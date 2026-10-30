@@ -5,7 +5,7 @@ import { fixThisJourney } from './assistant-script'
 import { test } from './fixtures'
 import { dockerReachable } from './harness/server'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('Fix this launches a run from the approval card and opens it from the action card', async ({ page, aether }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })

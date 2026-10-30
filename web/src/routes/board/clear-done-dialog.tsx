@@ -29,14 +29,14 @@ export function ClearDoneConfirm({
       <DialogContent className="max-w-[min(440px,calc(100%-2rem))]">
         <DialogHeader>
           <DialogTitle>
-            {n === 0 ? 'No closed runs to archive' : `Archive ${n} closed ${n === 1 ? 'run' : 'runs'}?`}
+            {n === 0 ? 'No closed sessions to archive' : `Archive ${n} closed ${n === 1 ? 'session' : 'sessions'}?`}
           </DialogTitle>
           <DialogDescription>
             {n === 0 ? (
-              'Archive acts on merged, abandoned, failed and interrupted runs you may act on.'
+              'Archive acts on merged, abandoned, failed and interrupted sessions you may act on.'
             ) : (
               <>
-                Archive hides these runs from Finished and keeps their history until you
+                Archive hides these sessions from Finished and keeps their history until you
                 explicitly delete them. You can restore them at any time. It does not free
                 their containers; free them separately if you want the memory back now.
               </>
@@ -47,13 +47,13 @@ export function ClearDoneConfirm({
           <ul className="list-disc space-y-1 pl-4 text-ui leading-5 text-muted">
             {plan.notClosed > 0 && (
               <li>
-                {plan.notClosed} {plan.notClosed === 1 ? 'run stays' : 'runs stay'}: completed but
+                {plan.notClosed} {plan.notClosed === 1 ? 'session stays' : 'sessions stay'}: completed but
                 not yet closed - close them as merged or abandoned first.
               </li>
             )}
             {plan.notAllowed > 0 && (
               <li>
-                {plan.notAllowed} {plan.notAllowed === 1 ? 'run stays' : 'runs stay'}: you may not
+                {plan.notAllowed} {plan.notAllowed === 1 ? 'session stays' : 'sessions stay'}: you may not
                 act on {plan.notAllowed === 1 ? 'it' : 'them'}.
               </li>
             )}
@@ -93,17 +93,17 @@ export function ReleaseFinishedConfirm({
         <DialogHeader>
           <DialogTitle>
             {n === 0
-              ? 'No finished runs keep a container'
-              : `Free the retained containers of ${n} finished ${n === 1 ? 'run' : 'runs'}?`}
+              ? 'No finished sessions keep a container'
+              : `Free the retained containers of ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
           </DialogTitle>
           <DialogDescription>
             {n === 0 ? (
-              'This acts on finished runs you may act on that still keep their container.'
+              'This acts on finished sessions you may act on that still keep their container.'
             ) : (
               <>
-                Their retained containers will be removed and the runs cannot be reopened.
+                Their retained containers will be removed and the sessions cannot be reopened.
                 Checkouts, homes and repositories follow their existing retention rules;
-                history is kept until explicit deletion. This does not archive the runs.
+                history is kept until explicit deletion. This does not archive the sessions.
               </>
             )}
           </DialogDescription>

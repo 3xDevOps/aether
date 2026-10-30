@@ -13,7 +13,7 @@ var testWatch = protocol.Watch{ID: "w-1", Target: protocol.WatchTarget{Kind: pro
 	Conditions: []string{protocol.WatchNeedsYou, protocol.WatchFinished}, State: protocol.WatchActive, Source: protocol.WatchSourceMCP,
 	ExpiresAt: "2026-11-09T10:00:00Z", Observed: protocol.WatchObserved{Summary: "Working"}, Link: "/?page=settings&id=watches&watch=w-1"}
 
-const testReceipt = "Watching run Fix login for: needs you, finished. Push: 2 devices. Expires Nov 9."
+const testReceipt = "Watching session Fix login for: needs you, finished. Push: 2 devices. Expires Nov 9."
 
 // A create names its target from the one id it is given, says it came from
 // the connector, and returns the watch's state and the server's receipt;
@@ -67,7 +67,7 @@ func TestWatchCreate(t *testing.T) {
 	f.calls = nil
 	run(t, cs, "aether_watch", map[string]any{"pr": "acme/shop#7", "run_id": "run-1"})
 	if got := f.acted().params; !strings.Contains(got, `{"kind":"pr","run_id":"run-1","repo":"acme/shop","number":7}`) {
-		t.Errorf("pr with its run sent %s", got)
+		t.Errorf("pr with its session sent %s", got)
 	}
 
 	g := newFake(t)
@@ -104,7 +104,7 @@ func TestWatchUpdate(t *testing.T) {
 	f := newFake(t)
 	paused := testWatch
 	paused.State = protocol.WatchPaused
-	f.answers[protocol.MethodWatchUpdate] = returns(protocol.WatchResult{Watch: paused, Receipt: "Paused: run Fix login."})
+	f.answers[protocol.MethodWatchUpdate] = returns(protocol.WatchResult{Watch: paused, Receipt: "Paused: session Fix login."})
 	text, out := run(t, connectorSession(t, f, ScopeWrite), "aether_watch", map[string]any{"watch_id": "w-1", "paused": false})
 	if text != "Watch w-1 is paused." || out["state"] != protocol.WatchPaused {
 		t.Fatalf("update = %q %v", text, out)

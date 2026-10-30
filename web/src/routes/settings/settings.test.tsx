@@ -129,7 +129,7 @@ describe('settings view', () => {
     expect(root.dataset.theme).toBe('dark')
     expect(root.style.colorScheme).toBe('dark')
     expect(screen.queryByRole('region', { name: 'This computer' })).toBeNull()
-    expect(screen.queryByLabelText('Mirror run files')).toBeNull()
+    expect(screen.queryByLabelText('Mirror session files')).toBeNull()
     for (const [method, call] of Object.entries(client)) {
       if (method.startsWith('local')) expect(call).not.toHaveBeenCalled()
     }

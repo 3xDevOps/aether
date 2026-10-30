@@ -42,7 +42,7 @@ var watchOps = []Op{
 		"Use this when the user asks about their watches, or one watch_id's notices."+untrustedRule, listWatches).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWatchList, protocol.MethodWatchGet),
 	opOf("aether_watch", "Watch", ScopeWrite, false, nextWatches,
-		"Use this when the user wants notices on a run or pr (owner/name#7); with watch_id, change or pause it.", watch).
+		"Use this when the user wants notices on a session or pr (owner/name#7); with watch_id, change or pause it.", watch).
 		hints(false, false).offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodWatchCreate, protocol.MethodWatchUpdate),
 	opOf("aether_unwatch", "Delete watch", ScopeWrite, true, nextWatches,
 		"Use this when the user deletes a watch.", unwatch).

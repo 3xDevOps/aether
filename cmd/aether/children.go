@@ -9,12 +9,12 @@ import (
 
 func init() {
 	register(command{
-		name:  "children",
-		short: "turn child runs on or off, or list a run's child runs",
-		usage: "aether children [on|off]\n" +
-			"aether children <run-id>",
-		example: "aether children off\n" +
-			"aether children run-d6ay38tj8j",
+		name:  "subsessions",
+		short: "turn subsessions on or off, or list a session's subsessions",
+		usage: "aether subsessions [on|off]\n" +
+			"aether subsessions <session-id>",
+		example: "aether subsessions off\n" +
+			"aether subsessions run-d6ay38tj8j",
 		run: runChildren,
 	})
 }
@@ -28,21 +28,21 @@ func runChildren(args []string) error {
 		on := args[0] == "on"
 		p.Enabled, args = &on, args[1:]
 	}
-	fs := newFlagSet("children")
+	fs := newFlagSet("subsessions")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether children [on|off]\n   or: aether children <run-id>")
+		return fmt.Errorf("usage: aether subsessions [on|off]\n   or: aether subsessions <session-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var out protocol.ChildSettings
 		if err := c.Call(protocol.MethodChildSettings, p, &out); err != nil {
 			return err
 		}
-		fmt.Printf("child runs  %s\n", onOffWord(out.Enabled))
+		fmt.Printf("subsessions  %s\n", onOffWord(out.Enabled))
 		if !out.Enabled {
-			fmt.Println("Your runs' agents cannot start child runs. aether run --children on allows one run.")
+			fmt.Println("Your sessions' agents cannot start subsessions. aether session --children on allows one session.")
 		}
 		return nil
 	})
@@ -62,7 +62,7 @@ func listChildren(run string) error {
 			return err
 		}
 		if len(out.Children) == 0 {
-			fmt.Printf("run %s has no child runs\n", run)
+			fmt.Printf("session %s has no subsessions\n", run)
 		}
 		for _, ch := range out.Children {
 			agent := ch.Harness
@@ -78,9 +78,9 @@ func listChildren(run string) error {
 		u := out.Usage
 		cost := fmt.Sprintf("$%.2f", u.CostUSD)
 		if u.UnmeteredRuns > 0 {
-			cost = fmt.Sprintf("at least $%.2f (%d of %d runs report no cost)", u.CostUSD, u.UnmeteredRuns, u.Runs)
+			cost = fmt.Sprintf("at least $%.2f (%d of %d sessions report no cost)", u.CostUSD, u.UnmeteredRuns, u.Runs)
 		}
-		fmt.Printf("usage   %s, %d input and %d output tokens across %d runs\n", cost, u.InputTokens, u.OutputTokens, u.Runs)
+		fmt.Printf("usage   %s, %d input and %d output tokens across %d sessions\n", cost, u.InputTokens, u.OutputTokens, u.Runs)
 		fmt.Printf("limits  %d busy at once per parent\n", out.Limits.MaxLive)
 		return nil
 	})

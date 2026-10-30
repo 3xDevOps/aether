@@ -52,7 +52,7 @@ describe('archive confirmation dialog', () => {
   it('says so when no closed run qualifies', () => {
     useStore.setState({ runs: {} })
     render(<ClearDoneDialog />)
-    expect(screen.getByText('No closed runs to archive')).toBeDefined()
+    expect(screen.getByText('No closed sessions to archive')).toBeDefined()
     expect(screen.queryByRole('button', { name: /Archive/ })).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
     expect(useStore.getState().paletteDialog).toBeNull()
@@ -99,7 +99,7 @@ describe('release confirmation dialog', () => {
   it('says so when no finished run keeps its container', () => {
     useStore.setState({ paletteDialog: 'release-finished' })
     render(<ReleaseFinishedDialog />)
-    expect(screen.getByText('No finished runs keep a container')).toBeDefined()
+    expect(screen.getByText('No finished sessions keep a container')).toBeDefined()
     expect(screen.queryByText(/cannot be reopened/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Free/ })).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])

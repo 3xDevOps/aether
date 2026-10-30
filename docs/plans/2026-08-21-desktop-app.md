@@ -70,7 +70,7 @@ Every CLI capability, sorted by why the browser dashboard lacks it:
 | --- | --- | --- |
 | Already in the SPA | board, terminal mirror/steer, diff, events, approvals, presence, cost readout, `run.launch/inject/kill/pause/resume/close/handoff`, `template.launch` | none |
 | SSH-identity RPC | `session.new/settings`, `workspace.add`, `workspace.tools.*`, `member.invite/approve/remove/color/role`, `budget.set`, `template.save/delete`, `schedule.*`, `profile.*`, `agent.register/list`, `run.protect`, `run.relaunch`, `run.pull` | off the HTTP allowlist by design |
-| Interactive PTY beyond run attach | `agent add`, `setup`, `workspace bootstrap` (the three workspace-shell modes) | remote gateway has `/ws/attach/<run>` only |
+| Interactive PTY beyond run attach | `agent add`, `setup`, `workspace bootstrap` (the three workspace-shell modes) | remote gateway has `/ws/attach/<session>` only |
 | Local machine verbs | `link` (config + git remote), `pull` (git fetch), `sync` (mutagen overlay), `daemon` (install/run), `image` (scaffold files), `update` | a browser tab has no filesystem, git, or ssh-agent |
 
 The local gateway closes rows 2-4 by construction: it *is* an SSH client.
@@ -103,7 +103,7 @@ A new `internal/localgw` package and an `aether gui` CLI command.
 - **New route: `GET /ws/shell`.** Bridges a workspace-shell stream
   (`protocol.WorkspaceShellRequest`: bootstrap, harness-login, or
   agent-setup mode) to a WebSocket with the same framing as
-  `/ws/attach/<run>` - one text header frame, binary output, JSON
+  `/ws/attach/<session>` - one text header frame, binary output, JSON
   input/resize control frames. This is what puts `agent add`, `setup`,
   and `workspace bootstrap` behind an xterm.js pane.
 - **New routes: `POST /local/v1/<verb>`.** The local verbs, each a thin
@@ -143,7 +143,7 @@ All through the existing seams; the shell, `sync.ts` lifecycle, and
 
 ### New surfaces, in end-user terms
 
-- **Onboarding wizard** (first run of the desktop app): server address ->
+- **Onboarding wizard** (first session of the desktop app): server address ->
   key/tailnet detection -> link -> workspace init -> repo picker that adds
   the git remote and pushes. Today's quickstart steps 3-4 - the most
   error-prone stretch of the CLI journey - become three clicks. A
@@ -170,12 +170,12 @@ All through the existing seams; the shell, `sync.ts` lifecycle, and
   frontend doc's "budgets are set over SSH" holds - this *is* SSH.
 - **Profiles**: status and rollback views; push driven by the local
   discovery code in `internal/cli/profile`.
-- **Review and land** on run detail: the diff tab grows "Pull branch"
+- **Review and land** on session detail: the diff tab grows "Pull branch"
   (`run.pull` + local `git fetch`), copyable `git diff main...<ref>`
   commands, then "Close as merged / abandoned". This closes the loop the
   dashboard currently dead-ends at: today you review in the app and must
   switch to a terminal to land anything.
-- **Sync overlay** toggle on run detail; **daemon** setup card in
+- **Sync overlay** toggle on session detail; **daemon** setup card in
   settings.
 
 ### Desktop shell (Electron)
@@ -184,7 +184,7 @@ A thin wrapper, last: it spawns `aether gui` as a sidecar, loads the SPA
 from the sidecar's tokened loopback URL, and adds only what a shell can:
 
 - **Native notifications and a tray/dock badge driven by the event
-  stream.** Runs parking in needs-attention and approvals queueing are
+  stream.** Sessions parking in needs-attention and approvals queueing are
   the product moments; today someone must keep a tab open and keep
   looking. The badge count is the attention bucket size the board
   selectors already compute.
@@ -203,11 +203,11 @@ Two gaps `docs/dashboard-frontend.md` already tracks as "waiting on the
 wire" become glaring in a first-class app and are fixed first:
 
 1. **The needs-attention reason survives only in live events.** Persist
-   the reason on the run and carry it on `protocol.Run`, so a card loaded
+   the reason on the session and carry it on `protocol.Run`, so a card loaded
    after the transition can tell a stall from a clean exit waiting on
    `run.close`. Domain field + store migration + wire change shared with
    the CLI.
-2. **The paused state has no hydration source.** Expose it on the run
+2. **The paused state has no hydration source.** Expose it on the session
    read (the scheduler sidecar knows), so the paused badge and the
    palette's pause/resume verbs survive a reload.
 
@@ -224,7 +224,7 @@ mostly independent.
 1. **Run reason persistence.** Modify `internal/domain` (field),
    `internal/store` (migration + row), `internal/protocol` (wire),
    scheduler write path; SPA reads it in `runState` and drops the
-   live-event-only fallback. Test: a run fetched after its transition
+   live-event-only fallback. Test: a session fetched after its transition
    carries the reason; board test asserts the reason line without a live
    event.
 2. **Paused-state hydration.** Expose paused on `run.get`/`run.list`;
@@ -295,7 +295,7 @@ mostly independent.
     links to the OS browser.
 16. **Notifications and badge.** Event-stream-driven native
     notifications for needs-attention transitions and new approvals;
-    tray/dock badge from the attention count; clicking focuses the run.
+    tray/dock badge from the attention count; clicking focuses the session.
 17. **Deep links and updates.** `aether://` protocol registration;
     Electron auto-update for the shell; sidecar via `internal/selfupdate`.
 18. **Packaging and release.** Signed macOS/Linux/Windows builds in the
@@ -343,7 +343,7 @@ and from `web/`: `bun run typecheck && bun run test`.
   against a real server with the fake harness; `make test-integration`
   green.
 - Phase 3 exit: packaged app on each OS completes the same journey;
-  notification fires on a run parking; update path exercised against a
+  notification fires on a session parking; update path exercised against a
   test release feed (`scripts/publish-release-test.sh`).
 - Docs updated with the behavior they describe in the same phase:
   `docs/dashboard-api.md` (capabilities endpoint), a new

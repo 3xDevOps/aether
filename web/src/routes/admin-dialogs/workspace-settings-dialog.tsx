@@ -32,7 +32,7 @@ import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 const everyone = 'everyone'
 
 const limitFields: { key: keyof ChildLimits; label: string; help: string }[] = [
-  { key: 'max_live', label: 'Child runs busy at once per parent run (more queue)', help: 'Child runs of one parent run working at the same time; more wait in a queue.' },
+  { key: 'max_live', label: 'Subsessions busy at once per parent session (more queue)', help: 'Subsessions of one parent session working at the same time; more wait in a queue.' },
 ]
 
 export function WorkspaceSettingsDialog({
@@ -113,7 +113,7 @@ export function WorkspaceSettingsDialog({
               {workspace?.base_branch || 'unknown'}
             </p>
             <p className="mt-1 text-ui-sm text-muted">
-              New runs fork from this branch.
+              New sessions fork from this branch.
             </p>
           </div>
           {onRepository && <section className="space-y-2 border-b pb-3 text-ui-sm">
@@ -130,7 +130,7 @@ export function WorkspaceSettingsDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={everyone}>everyone who can message runs</SelectItem>
+                <SelectItem value={everyone}>everyone who can message sessions</SelectItem>
                 <SelectItem value="admins_only">admins only</SelectItem>
               </SelectContent>
             </Select>
@@ -140,8 +140,8 @@ export function WorkspaceSettingsDialog({
           </div>
           {limitsOffered && (
             <fieldset className="min-w-0 space-y-2 border-t pt-3 text-ui">
-              <legend className="float-left mb-1 font-medium">Child runs</legend>
-              <p className="clear-left text-ui-sm text-muted">Limits for each tree of runs that agents start from one another.</p>
+              <legend className="float-left mb-1 font-medium">Subsessions</legend>
+              <p className="clear-left text-ui-sm text-muted">Limits for each tree of sessions that agents start from one another.</p>
               {limitsError && <p role="alert" className="text-ui-sm text-state-failed">{limitsError}</p>}
               {limits && limitFields.map(({ key, label, help }) => (
                 <div key={key} className="grid grid-cols-[minmax(0,1fr)_6rem] items-center gap-x-3">

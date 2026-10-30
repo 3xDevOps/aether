@@ -71,7 +71,7 @@ func runSummary[P runParams](verb func(P) string) summarizer {
 		if rpcErr != nil {
 			return rpcErr
 		}
-		c.Summary = fmt.Sprintf(verb(p), fmt.Sprintf("run %s (%q)", id.RunID, runLabel(run))) + ownedBy(c)
+		c.Summary = fmt.Sprintf(verb(p), fmt.Sprintf("session %s (%q)", id.RunID, runLabel(run))) + ownedBy(c)
 		return nil
 	}
 }
@@ -89,7 +89,7 @@ func (s *Server) summarizeHandoff(ctx context.Context, req protocol.Request, c *
 	if rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary = fmt.Sprintf("Hand run %s (%q)%s to %s (%s), who then owns it", p.RunID, runLabel(run), commaAfter(ownedBy(c)), to, truncate(p.ToMemberID))
+	c.Summary = fmt.Sprintf("Hand session %s (%q)%s to %s (%s), who then owns it", p.RunID, runLabel(run), commaAfter(ownedBy(c)), to, truncate(p.ToMemberID))
 	return nil
 }
 
@@ -127,7 +127,7 @@ func (s *Server) summarizePRCreate(ctx context.Context, req protocol.Request, c 
 	if p.Repo != "" {
 		repo = fmt.Sprintf(" (repo %s)", truncate(p.Repo))
 	}
-	c.Summary = fmt.Sprintf("Open %s from run %s (%q)%s%s, branch %s at %.7s, into %s: %q", kind, p.RunID, runLabel(run), ownedBy(c), repo,
+	c.Summary = fmt.Sprintf("Open %s from session %s (%q)%s%s, branch %s at %.7s, into %s: %q", kind, p.RunID, runLabel(run), ownedBy(c), repo,
 		truncate(p.Expected.Branch), p.Expected.Head, into, truncate(p.Title))
 	return nil
 }
@@ -159,7 +159,7 @@ func (s *Server) summarizePRMerge(ctx context.Context, req protocol.Request, c *
 	if fb.Error != "" {
 		blockers = "GitHub's checks and reviews could not be read: " + truncate(fb.Error)
 	}
-	c.Summary = fmt.Sprintf("Merge (%s) %s of run %s (%q)%s at %.7s into %s; %s", cmp.Or(p.Method, "default"), pr, p.RunID, runLabel(run), commaAfter(ownedBy(c)),
+	c.Summary = fmt.Sprintf("Merge (%s) %s of session %s (%q)%s at %.7s into %s; %s", cmp.Or(p.Method, "default"), pr, p.RunID, runLabel(run), commaAfter(ownedBy(c)),
 		p.ExpectedHead, cmp.Or(truncate(p.ExpectedBase), "its base"), blockers)
 	return nil
 }
@@ -182,7 +182,7 @@ func (s *Server) summarizeMemoryPin(ctx context.Context, req protocol.Request, c
 		return rpcErr
 	}
 	p, _ := protocol.DecodeParams[protocol.MemoryPinParams](req.Params)
-	c.Summary = fmt.Sprintf("Pin, into new runs' briefs, note %s (%s)%s: %q", item.ID, item.Kind, forWhom(cmp.Or(p.Scope, item.Scope)), truncate(cmp.Or(item.Title, item.Body)))
+	c.Summary = fmt.Sprintf("Pin, into new sessions' briefs, note %s (%s)%s: %q", item.ID, item.Kind, forWhom(cmp.Or(p.Scope, item.Scope)), truncate(cmp.Or(item.Title, item.Body)))
 	return nil
 }
 
@@ -218,7 +218,7 @@ func (s *Server) summarizeMemoryAdd(ctx context.Context, req protocol.Request, c
 	}
 	c.Summary = fmt.Sprintf("Remember a %s in %s%s: %q", p.Kind, ws.Workspace.Name, forWhom(p.Scope), truncate(p.Text))
 	if p.Pin {
-		c.Summary += ", pinned into new runs' briefs"
+		c.Summary += ", pinned into new sessions' briefs"
 	}
 	if p.Supersedes != "" {
 		var old protocol.MemoryShowResult
@@ -244,6 +244,9 @@ func (s *Server) summarizeWatchDelete(ctx context.Context, req protocol.Request,
 	}
 	w := got.Watch
 	kind := w.Target.Kind
+	if kind == protocol.WatchTargetRun {
+		kind = "session"
+	}
 	notices := "its " + strconv.Itoa(len(got.Notifications))
 	// watch.get returns only the newest WatchNotificationsMax notices.
 	if len(got.Notifications) >= protocol.WatchNotificationsMax {

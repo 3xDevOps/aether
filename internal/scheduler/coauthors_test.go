@@ -166,7 +166,7 @@ func TestAetherCommitCreditsOwnerAndSteerers(t *testing.T) {
 	}
 	authors := e.git.commitAuthors(run.ID)
 	if len(authors) != 1 || authors[0].String() != "Ada Lovelace <ada@example.com>" {
-		t.Errorf("commit author = %v, want the run owner", authors)
+		t.Errorf("commit author = %v, want the session owner", authors)
 	}
 
 	// A handoff makes a steerer the owner: they become the author, and
@@ -477,7 +477,7 @@ func TestRunInstructionsCarryTheReportRuleOnlyWithLifecycleReporting(t *testing.
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	if got := e.sched.runInstructions(coordhooks.Guide{RunID: "run-1", Role: coordhooks.RoleInteractive}); got != "" {
-		t.Fatalf("instructions %q without a run transport, want none", got)
+		t.Fatalf("instructions %q without a session transport, want none", got)
 	}
 	for _, enabled := range []bool{false, true} {
 		e.sched.UseCoordination(&fakeCoordinator{root: t.TempDir()}, t.TempDir(), enabled)

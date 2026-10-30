@@ -178,7 +178,7 @@ function CompareMenu({ run, comparison, onSelect }: { run: RunRecord; comparison
           <History />
           <span className="@max-[640px]:sr-only">
             {comparison.kind === 'all' && 'All changes'}
-            {comparison.kind === 'start' && 'Since the run started'}
+            {comparison.kind === 'start' && 'Since the session started'}
             {comparison.kind === 'since' && `Since ${clockTime(comparison.checkpoint.time)}`}
           </span>
           <ChevronDown />
@@ -202,9 +202,9 @@ function CompareMenu({ run, comparison, onSelect }: { run: RunRecord; comparison
           {startable && (
             <MenuRadioItem
               value="start"
-              description={`Against ${shortSha(run.base_commit!)}, where the run forked. Includes upstream work merged since.`}
+              description={`Against ${shortSha(run.base_commit!)}, where the session forked. Includes upstream work merged since.`}
             >
-              Since the run started
+              Since the session started
             </MenuRadioItem>
           )}
           <MenuSeparator />
@@ -233,7 +233,7 @@ function CompareMenu({ run, comparison, onSelect }: { run: RunRecord; comparison
                   ) : (
                     after ?? (
                       <>
-                        Run had {checkpoint.files} file{checkpoint.files === 1 ? '' : 's'}
+                        Session had {checkpoint.files} file{checkpoint.files === 1 ? '' : 's'}
                         {!checkpoint.truncated && (
                           <>
                             {' · '}

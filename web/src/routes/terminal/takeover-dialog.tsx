@@ -37,9 +37,9 @@ export function TakeoverDialog({ open, requesterName, seconds, pending, error, o
         }}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>Run control requested</AlertDialogTitle>
+          <AlertDialogTitle>Session control requested</AlertDialogTitle>
           <AlertDialogDescription>
-            {requesterName} held Take control for 3 seconds and is requesting this run.
+            {requesterName} held Take control for 3 seconds and is requesting this session.
             Accept to hand over control, or deny to keep it.
           </AlertDialogDescription>
         </AlertDialogHeader>

@@ -154,7 +154,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     await feedback.getByRole('button', { name: 'Refresh' }).click()
     const selected = feedback.locator('article').filter({ hasText: selectedFeedback })
     await selected.getByRole('button', { name: 'Send to agent' }).click()
-    await expect(selected.getByRole('status')).toContainText('Open the session')
+    await expect(selected.getByRole('status')).toContainText('Open the chat')
     const room = await admin.api.rpc<{ messages: RoomMessage[] }>('run.room.list', { workspace_id: workspaceID, run_id: run.id, limit: 100 })
     const posted = room.messages.find((entry) => entry.body.includes(selectedFeedback))!
     expect(posted.kind).toBe('steer_request')

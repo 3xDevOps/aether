@@ -313,7 +313,7 @@ describe('Needs you actions', () => {
     seed([run({ ...merged, status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true, finished_at: null })])
     renderBoard()
 
-    expect(column('Needs you').getByText('Agent reported failure; review the result. Run remains open for follow-up.')).toBeDefined()
+    expect(column('Needs you').getByText('Agent reported failure; review the result. Session remains open for follow-up.')).toBeDefined()
     expect(cardOf('landed already').getByRole('img', { name: 'Failed' })).toBeDefined()
     fireEvent.click(cardOf('landed already').getByRole('button', { name: 'Review' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: merged.id, view: 'changes' } })
@@ -336,7 +336,7 @@ describe('Needs you actions', () => {
 
   it('keeps the draft and shows the server error when a reply fails', async () => {
     seed([stopped])
-    vi.mocked(api.runInject).mockRejectedValueOnce(new Error('run is not running'))
+    vi.mocked(api.runInject).mockRejectedValueOnce(new Error('session is not running'))
     renderBoard()
 
     fireEvent.click(cardOf('waiting on you').getByRole('button', { name: 'Reply' }))
@@ -344,7 +344,7 @@ describe('Needs you actions', () => {
     await userEvent.type(composer.getByRole('textbox'), 'hello')
     fireEvent.click(composer.getByRole('button', { name: 'Send' }))
 
-    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: run is not running')
+    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: session is not running')
     expect(composer.getByRole('textbox')).toHaveProperty('value', 'hello')
   })
 
@@ -380,8 +380,8 @@ describe('Needs you actions', () => {
     act(() => useStore.setState({ devices: [pendingDevice()] }))
     const composer = within(await screen.findByRole('dialog', { name: 'Reply to waiting on you' }))
     expect(composer.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
-    await act(async () => fail(new Error('run is not running')))
-    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: run is not running')
+    await act(async () => fail(new Error('session is not running')))
+    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: session is not running')
     expect(composer.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false)
   })
 
@@ -495,13 +495,13 @@ describe('Finished footer', () => {
     useStore.setState({ members: { [alice.id]: alice, [bob.id]: { ...bob, role: 'admin' } } })
     renderBoard()
 
-    await userEvent.click(screen.getByRole('button', { name: 'More finished-run actions' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Archive closed runs…' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Archive closed sessions…' }))
     const dialog = within(await screen.findByRole('dialog'))
-    expect(dialog.getByText(/1 run stays: completed but not yet closed/)).toBeDefined()
+    expect(dialog.getByText(/1 session stays: completed but not yet closed/)).toBeDefined()
     fireEvent.click(dialog.getByRole('button', { name: 'Archive 1' }))
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 run'))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 session'))
     expect(api.runArchive).toHaveBeenCalledWith(merged.id, true)
   })
 
@@ -509,15 +509,15 @@ describe('Finished footer', () => {
     const retained = run({ ...merged, reason: 'closed; retained container' })
     seed([run({ ...retained, member_id: bob.id })], { self: bob })
     const { unmount } = renderBoard()
-    await userEvent.click(screen.getByRole('button', { name: 'More finished-run actions' }))
-    expect(await screen.findByRole('menuitem', { name: 'Archive closed runs…' })).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
+    expect(await screen.findByRole('menuitem', { name: 'Archive closed sessions…' })).toBeDefined()
     expect(screen.queryByRole('menuitem', { name: 'Free retained containers…' })).toBeNull()
     await userEvent.keyboard('{Escape}')
     unmount()
 
     seed([retained])
     renderBoard()
-    await userEvent.click(screen.getByRole('button', { name: 'More finished-run actions' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Free retained containers…' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Free 1' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(retained.id))
@@ -624,7 +624,7 @@ describe('empty board', () => {
     expect(await screen.findByRole('heading', { name: 'Base branch missing' })).toBeDefined()
 
     act(() => window.dispatchEvent(new Event('focus')))
-    expect(await screen.findByRole('heading', { name: 'No runs yet' })).toBeDefined()
+    expect(await screen.findByRole('heading', { name: 'No sessions yet' })).toBeDefined()
   })
 
   it('shows any other base-branch check failure as an error', async () => {
@@ -641,7 +641,7 @@ describe('empty board', () => {
     useStore.setState({ mineOnly: true })
     renderBoard()
 
-    fireEvent.click(await screen.findByRole('button', { name: "Show everyone's runs" }))
+    fireEvent.click(await screen.findByRole('button', { name: "Show everyone's sessions" }))
     expect(column('Working').getByText('still going')).toBeDefined()
   })
 
@@ -658,8 +658,8 @@ describe('empty board', () => {
     seed([])
     renderBoard()
 
-    expect(await screen.findByText('A run is one agent working on its own branch in its own container.')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'New run' }))
+    expect(await screen.findByText('A session is one agent working on its own branch in its own container.')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'New session' }))
     expect(useStore.getState().paletteDialog).toBe('launch')
   })
 
@@ -668,8 +668,8 @@ describe('empty board', () => {
     useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.list', 'files.tree', 'agent.list'], ws: [] } })
     renderBoard()
 
-    expect(await screen.findByRole('heading', { name: 'No runs yet' })).toBeDefined()
-    expect(screen.queryByRole('button', { name: 'New run' })).toBeNull()
+    expect(await screen.findByRole('heading', { name: 'No sessions yet' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'New session' })).toBeNull()
   })
 
   it('names an unreachable server with its error instead of an empty board', () => {
@@ -723,7 +723,7 @@ describe('lanes view', () => {
   async function openLanes() {
     renderBoard()
     await userEvent.click(screen.getByRole('tab', { name: 'Lanes' }))
-    return screen.getByRole('tree', { name: 'Run lanes' })
+    return screen.getByRole('tree', { name: 'Session lanes' })
   }
 
   it('lists runs as lanes by section, reads their history, and remembers the view', async () => {
@@ -731,10 +731,10 @@ describe('lanes view', () => {
     const tree = await openLanes()
     expect(useStore.getState().boardViews[workspace.id]).toBe('lanes')
     const items = within(tree).getAllByRole('treeitem').map((item) => item.getAttribute('aria-label'))
-    expect(items[0]).toBe('Needs you, 1 run')
+    expect(items[0]).toBe('Needs you, 1 session')
     expect(items[1]).toMatch(/^waiting on you, Needs you/)
-    expect(items[2]).toBe('Working, 1 run')
-    expect(items[4]).toBe('Finished, 0 runs, 1 ended before this window')
+    expect(items[2]).toBe('Working, 1 session')
+    expect(items[4]).toBe('Finished, 0 sessions, 1 ended before this window')
     await waitFor(() => expect(api.workspaceTimeline).toHaveBeenCalledWith(expect.objectContaining({
       workspace_id: workspace.id, types: ['run.status', 'coord.message', 'coord.message.acked'], newest: true,
     })))
@@ -755,7 +755,7 @@ describe('lanes view', () => {
     await userEvent.keyboard('{Enter}')
     const dialog = await screen.findByRole('dialog', { name: /^waiting on you/ })
     expect(within(dialog).getByRole('button', { name: 'Reply' })).toBeDefined()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Open run' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: stopped.id } })
   })
 
@@ -778,7 +778,7 @@ describe('lanes view', () => {
       run({ id: 'child', task: 'implement checkout', parent_run_id: 'run_parent' }),
     ])
     const tree = await openLanes()
-    expect(within(tree).getByRole('treeitem', { name: /^Run coordinate, 1 child run/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(within(tree).getByRole('treeitem', { name: /^Session coordinate, 1 subsession/ }).getAttribute('aria-expanded')).toBe('true')
     const child = within(tree).getByRole('treeitem', { name: /^implement checkout, / })
     expect([child.getAttribute('aria-level'), child.getAttribute('aria-posinset'), child.getAttribute('aria-setsize')]).toEqual(['3', '2', '2'])
   })
@@ -851,6 +851,6 @@ describe('lanes view', () => {
     seed([])
     renderBoard()
     await userEvent.click(screen.getByRole('tab', { name: 'Lanes' }))
-    expect(screen.getByText('No runs in this view.')).toBeDefined()
+    expect(screen.getByText('No sessions in this view.')).toBeDefined()
   })
 })

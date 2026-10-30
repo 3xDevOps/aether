@@ -38,19 +38,19 @@ const (
 )
 
 var actOps = []Op{
-	opOf("aether_run_lifecycle", "Change run lifecycle", ScopeWrite, false, nextRuns,
-		"Use this when the user wants a stopped run relaunched, or a run protected from cleanup, archived or restored.", runLifecycle).
+	opOf("aether_session_lifecycle", "Change session lifecycle", ScopeWrite, false, nextRuns,
+		"Use this when the user wants a stopped session relaunched, or a session protected from cleanup, archived or restored.", runLifecycle).
 		enum("action", lifecycleRelaunch, lifecycleProtect, lifecycleUnprotect, lifecycleArchive, lifecycleRestore).
 		hints(false, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunGet, protocol.MethodRunRelaunch, protocol.MethodRunProtect,
 			protocol.MethodRunArchive),
-	opOf("aether_switch_run_mode", "Switch run mode", ScopeControl, true, nextRuns,
-		"Use this when the user wants a live run's mode switched; a turn in progress is discarded.", switchRunMode).
+	opOf("aether_switch_session_mode", "Switch session mode", ScopeControl, true, nextRuns,
+		"Use this when the user wants a live session's mode switched; a turn in progress is discarded.", switchRunMode).
 		enum("mode", lifecycleStandard, lifecycleEnhanced).
 		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunModeSwitch),
-	opOf("aether_handoff_run", "Hand off run", ScopeControl, true, "",
-		"Use this when the user gives their run to a teammate; only they can hand it back.", handoffRun).
+	opOf("aether_handoff_session", "Hand off session", ScopeControl, true, "",
+		"Use this when the user gives their session to a teammate; only they can hand it back.", handoffRun).
 		hints(true, false).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodMemberList, protocol.MethodRunHandoff),
 }
@@ -75,7 +75,7 @@ func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any,
 			return "", nil, err
 		}
 		out := launched(res.Run, l, book)
-		return fmt.Sprintf("Relaunched run %s (%s).", res.Run.ID, res.Run.Status), out, nil
+		return fmt.Sprintf("Relaunched session %s (%s).", res.Run.ID, res.Run.Status), out, nil
 	case lifecycleProtect, lifecycleUnprotect:
 		// run.protect revokes the run's control even when the flag is unchanged.
 		r, err := getRunRecord(ctx, c.read, in.RunID)
@@ -120,7 +120,7 @@ func switchRunMode(ctx context.Context, c calls, in modeInput) (string, any, err
 	if err := c.act(ctx, protocol.MethodRunModeSwitch, protocol.RunModeSwitchParams{RunID: in.RunID, Mode: mode}, &struct{}{}); err != nil {
 		// A connector or the assistant holds no control lease.
 		var perr *protocol.Error
-		if errors.As(err, &perr) && strings.Contains(perr.Message, "holds the run's control") {
+		if errors.As(err, &perr) && strings.Contains(perr.Message, "holds the session's control") {
 			return "", nil, &protocol.Error{Code: perr.Code, Data: perr.Data,
 				Message: perr.Message + "; this tool holds no control, so ask that member to release it, or switch in the Aether dashboard"}
 		}
@@ -175,12 +175,12 @@ func handoffRun(ctx context.Context, c calls, in handoffInput) (string, any, err
 	}
 	out := map[string]any{"run_id": r.ID, "owner_id": to.ID, "url": l.run(r.ID), "untrusted": map[string]any{"owner": clip(to.DisplayName, 80)}}
 	if r.MemberID == to.ID {
-		return fmt.Sprintf("Run %s is already owned by %s.", r.ID, to.ID), out, nil
+		return fmt.Sprintf("Session %s is already owned by %s.", r.ID, to.ID), out, nil
 	}
 	if err := c.act(ctx, protocol.MethodRunHandoff, protocol.RunHandoffParams{RunID: r.ID, ToMemberID: to.ID}, &struct{}{}); err != nil {
 		return "", nil, err
 	}
-	return fmt.Sprintf("Handed run %s to %s.", r.ID, to.ID), out, nil
+	return fmt.Sprintf("Handed session %s to %s.", r.ID, to.ID), out, nil
 }
 
 func jsonText(v any) string {

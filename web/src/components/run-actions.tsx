@@ -164,7 +164,7 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
         <Dialog open onOpenChange={() => setHandoff(false)}>
           <DialogContent onCloseAutoFocus={restoreFocus}>
             <DialogHeader>
-              <DialogTitle>Hand off this run</DialogTitle>
+              <DialogTitle>Hand off this session</DialogTitle>
               <DialogDescription>
                 Whoever you pick owns &quot;{runLabel(run)}&quot; from here on.
               </DialogDescription>

@@ -55,12 +55,12 @@ if grep -q '^chatgpt-plugin: warning: a test case triggers' "$tmp/built"; then
 	exit 1
 fi
 mkdir "$tmp/unknown"
-jq '.extensions["com.openai"].review.test_cases.positive[0].tools_triggered = "aether_list_runs, aether_no_such_tool"' \
+jq '.extensions["com.openai"].review.test_cases.positive[0].tools_triggered = "aether_list_sessions, aether_no_such_tool"' \
 	"$src/plugin.json" >"$tmp/unknown/plugin.json"
 cp "$src/mcp.json" "$tmp/unknown/"
 sh "$script_dir/chatgpt-plugin.sh" "$tmp/unknown.zip" "$tmp/unknown" 2>"$tmp/err"
 if ! grep -qF "triggers aether_no_such_tool, which no connector tool registers yet" "$tmp/err" ||
-	grep -qF "triggers aether_list_runs," "$tmp/err"; then
+	grep -qF "triggers aether_list_sessions," "$tmp/err"; then
 	echo "chatgpt-plugin-test: an unregistered test-case tool did not warn, or a registered one did:" >&2
 	cat "$tmp/err" >&2
 	exit 1

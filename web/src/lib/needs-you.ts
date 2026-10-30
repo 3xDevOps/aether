@@ -258,7 +258,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     reason: (run) => {
       if (turnCutShort(run)) return `${plainReason(run.reason!)} · reply to continue`
       if (waitBroken(run)) return `Wait broken: ${run.reason!.slice(waitBrokenPrefix.length)} · reply to continue`
-      return asks(run) || usageLimited(run) ? plainReason(run.reason!) : 'Open the run to see its request'
+      return asks(run) || usageLimited(run) ? plainReason(run.reason!) : 'Open the session to see its request'
     },
     // A Background run takes no input.
     action: (run) =>
@@ -288,7 +288,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     reason: (run) =>
       run.reason && run.reason !== 'agent reported failure'
         ? plainReason(run.reason)
-        : 'Agent reported failure; review the result. Run remains open for follow-up.',
+        : 'Agent reported failure; review the result. Session remains open for follow-up.',
   }),
 ]
 

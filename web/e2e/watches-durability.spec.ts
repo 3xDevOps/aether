@@ -14,7 +14,7 @@ import { expect, test, type Member } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 interface Delivery { channel: string; status: string; detail?: string }
 interface Notice { id: string; condition: string; title: string; body: string; deliveries: Delivery[] }
@@ -45,9 +45,9 @@ async function settledNeeds(member: Member, watchID: string): Promise<Notice[]> 
 
 async function allow(page: Page, member: Member, runID: string) {
   await page.goto(`${member.url}&run=${runID}`)
-  await page.getByRole('toolbar', { name: 'Run actions' }).getByRole('button', { name: 'Answer' }).click()
+  await page.getByRole('toolbar', { name: 'Session actions' }).getByRole('button', { name: 'Answer' }).click()
   await page.getByRole('button', { name: 'Allow', exact: true }).first().click()
-  await expect(page.getByRole('log', { name: 'Session' }).getByText(/permission: allow/).last()).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('log', { name: 'Chat' }).getByText(/permission: allow/).last()).toBeVisible({ timeout: 60_000 })
 }
 
 test('with every tab closed a need is noticed once, an answered need never again, and push says no device', async ({ browser, aether }, testInfo) => {
@@ -59,11 +59,11 @@ test('with every tab closed a need is noticed once, an answered need never again
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   let page = await context.newPage()
   await page.goto(`${alice.url}&run=${runID}`)
-  await expect(page.getByRole('log', { name: 'Session' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
-  await page.getByRole('toolbar', { name: 'Run actions' }).getByRole('button', { name: 'More', exact: true }).click()
+  await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('toolbar', { name: 'Session actions' }).getByRole('button', { name: 'More', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Watch…' }).click()
   await page.getByRole('dialog', { name: /^Watch / }).getByRole('button', { name: 'Watch', exact: true }).click()
-  const receipt = page.getByText(/^Watching run .* for: needs you, finished\./)
+  const receipt = page.getByText(/^Watching session .* for: needs you, finished\./)
   await expect(receipt).toContainText('in-app only')
   const { watches } = await alice.api.rpc<{ watches: { id: string }[] }>('watch.list', { run_id: runID })
   const watchID = watches[0].id

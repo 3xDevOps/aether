@@ -21,7 +21,7 @@ func (s *Service) publishProtected(ctx context.Context, run *domain.Run, actor d
 		Payload:     events.RunProtectedPayload{Protected: true},
 	})
 	if err != nil {
-		return fmt.Errorf("collab: publish protection event for run %q: %w", run.ID, err)
+		return fmt.Errorf("collab: publish protection event for session %q: %w", run.ID, err)
 	}
 	return nil
 }

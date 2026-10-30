@@ -104,7 +104,7 @@ function Details({ run, state, waiting, reason, next, cause, wait, since, counts
   const last = run.last_controller_member_id
   // An older gateway sends no controller, which is not the same as nobody.
   const unattended = isTerminal(run.status) ? undefined
-    : people.length === 0 ? 'Nobody is on this run'
+    : people.length === 0 ? 'Nobody is on this session'
       : controller === '' ? 'Nobody is controlling'
         : undefined
   // A box too tall for the window gives way one step per layout pass: a line of people at a time,
@@ -148,7 +148,7 @@ function Details({ run, state, waiting, reason, next, cause, wait, since, counts
         <dd className="truncate font-code">{run.branch}</dd>
         {counts && (
           <>
-            <dt>Child runs</dt>
+            <dt>Subsessions</dt>
             <dd>{counts}</dd>
           </>
         )}
@@ -165,7 +165,7 @@ function Details({ run, state, waiting, reason, next, cause, wait, since, counts
       </dl>
       {(people.length > 0 || unattended) && (
         <div className="flex flex-col gap-1 border-t border-seam pt-2.5">
-          {people.length > 0 && <p className="font-medium text-muted">On this run</p>}
+          {people.length > 0 && <p className="font-medium text-muted">On this session</p>}
           {unattended && (
             <p className="text-muted">
               {unattended}

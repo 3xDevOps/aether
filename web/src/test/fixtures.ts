@@ -482,7 +482,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     devTerminalStart: vi.fn<Api['devTerminalStart']>(async ({ run_id, name, cols, rows }) => {
       const inventory = terminals.get(run_id) ?? new Map<string, DevTerminal>()
       if (Array.from(inventory.values()).filter((terminal) => terminal.process.state === 'running').length >= 4) {
-        throw new Error('Test run already has four active terminals')
+        throw new Error('Test session already has four active terminals')
       }
       terminalSequence++
       const terminal: DevTerminal = {
@@ -991,7 +991,7 @@ export function systemStats(over: Partial<SystemStatsResult> = {}): SystemStatsR
     containers: [
       systemContainer(),
       ...['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) =>
-        systemContainer({ owner_id: `run_${id}`, title: `idle run ${id}`, cpu_cores: 0.02, memory_bytes: 256 * 1024 ** 2 }),
+        systemContainer({ owner_id: `run_${id}`, title: `idle session ${id}`, cpu_cores: 0.02, memory_bytes: 256 * 1024 ** 2 }),
       ),
       systemContainer({ owner_kind: 'member', owner_id: bob.id, member_id: bob.id, title: undefined, status: undefined, cpu_cores: 0.3, memory_bytes: 1024 ** 3 }),
     ],

@@ -62,7 +62,7 @@ describe('run view switch', () => {
   function openRun() {
     useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     render(<AppShell />)
-    return screen.getByRole('tablist', { name: 'Run views' })
+    return screen.getByRole('tablist', { name: 'Session views' })
   }
 
   it('moves focus with the arrow keys, wrapping at both ends, without switching', async () => {
@@ -87,12 +87,12 @@ describe('run view switch', () => {
 
   it.each(['{Enter}', ' '])('opens the focused view on %j and keeps focus on its tab', async (key) => {
     const strip = openRun()
-    const session = within(strip).getByRole('tab', { name: 'Session' })
+    const session = within(strip).getByRole('tab', { name: 'Chat' })
     session.focus()
     await userEvent.keyboard(key)
 
     expect(useStore.getState().route.params.view).toBe('session')
-    expect(document.activeElement).toBe(within(screen.getByRole('tablist', { name: 'Run views' })).getByRole('tab', { name: 'Session' }))
+    expect(document.activeElement).toBe(within(screen.getByRole('tablist', { name: 'Session views' })).getByRole('tab', { name: 'Chat' }))
   })
 
   it('is one tab stop that lands on the open view', async () => {
@@ -110,9 +110,9 @@ describe('run view switch', () => {
     fireEvent.keyDown(window, { key: '[' })
     expect(useStore.getState().route.params.view).toBe('session')
 
-    expect(screen.queryByRole('dialog', { name: 'Run details' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Session details' })).toBeNull()
     fireEvent.keyDown(window, { key: '.', ctrlKey: true })
-    expect(screen.getByRole('dialog', { name: 'Run details' })).toBeDefined()
+    expect(screen.getByRole('dialog', { name: 'Session details' })).toBeDefined()
   })
 })
 

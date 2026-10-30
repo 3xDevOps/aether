@@ -184,8 +184,8 @@ func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T)
 		return len(calls) == 2 && calls[1] == wantFired
 	})
 
-	entry := awaitTimeline(t, timeline, "scheduled run")
-	wantEntry := "scheduled run run_new from local main at 0123456789abcdef0123456789abcdef01234567 (nightly-deps)"
+	entry := awaitTimeline(t, timeline, "scheduled session")
+	wantEntry := "scheduled session run_new from local main at 0123456789abcdef0123456789abcdef01234567 (nightly-deps)"
 	if !strings.Contains(entry, wantEntry) {
 		t.Fatalf("timeline entry = %q, want %q", entry, wantEntry)
 	}
@@ -209,7 +209,7 @@ func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T)
 	}
 	clock.set(time.Date(2026, 8, 13, 3, 2, 30, 0, time.UTC))
 	skipped := awaitTimeline(t, timeline, "skipped")
-	if !strings.Contains(skipped, "may no longer launch runs") {
+	if !strings.Contains(skipped, "may no longer launch sessions") {
 		t.Fatalf("skip entry = %q, want the demotion as the reason", skipped)
 	}
 	if calls := e.runs.Calls(); len(calls) != 3 {
@@ -351,13 +351,13 @@ func TestTemplateLaunchReplayIgnoresTheVersion(t *testing.T) {
 	var pe *protocol.Error
 	err := control.Call(protocol.MethodTemplateLaunch, launch, nil)
 	if !errors.As(err, &pe) || pe.Code == protocol.CodeConflict || !strings.Contains(pe.Message, first.Run.ID) || len(e.runs.Calls()) != 1 {
-		t.Fatalf("retry after the template changed = %v after %v, want the key's run %s and no new launch", err, e.runs.Calls(), first.Run.ID)
+		t.Fatalf("retry after the template changed = %v after %v, want the key's session %s and no new launch", err, e.runs.Calls(), first.Run.ID)
 	}
 	// replay_only finds the same run, and launches nothing for a key that
 	// started none.
 	launch.ReplayOnly = true
 	if err := control.Call(protocol.MethodTemplateLaunch, launch, nil); !errors.As(err, &pe) || !strings.Contains(pe.Message, first.Run.ID) {
-		t.Fatalf("replay_only of the first key = %v, want its run %s", err, first.Run.ID)
+		t.Fatalf("replay_only of the first key = %v, want its session %s", err, first.Run.ID)
 	}
 	launch.IdempotencyKey = "k2"
 	if err := control.Call(protocol.MethodTemplateLaunch, launch, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound || len(e.runs.Calls()) != 1 {

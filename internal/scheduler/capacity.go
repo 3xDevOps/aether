@@ -64,7 +64,7 @@ func resolveRunBudgets(cfg *Config) {
 func (s *Scheduler) runLimits(ctx context.Context, override domain.RunLimits) (domain.RunLimits, error) {
 	server, err := s.cfg.Store.ServerRunLimits(ctx)
 	if err != nil {
-		return domain.RunLimits{}, fmt.Errorf("scheduler: read server run limits: %w", err)
+		return domain.RunLimits{}, fmt.Errorf("scheduler: read server session limits: %w", err)
 	}
 	return domain.RunLimits{
 		CPUs:        cmp.Or(override.CPUs, server.CPUs, s.cfg.RunCPULimit),

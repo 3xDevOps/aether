@@ -49,13 +49,13 @@ it('is one plain New run button until a launch has been saved', async () => {
   render(<SplitNewRun blocked={null} shortcut="n" onOpen={() => {}} />)
   await waitFor(() => expect(api.launchDefaultsGet).toHaveBeenCalled())
   expect(screen.queryByRole('button', { name: /Launch again/ })).toBeNull()
-  expect(screen.getByRole('button', { name: 'New run' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'New session' })).toBeTruthy()
 })
 
 it('opens the panel from the left half and launches the saved choices, without a task, from the right', async () => {
   const onOpen = vi.fn()
   render(<SplitNewRun blocked={null} shortcut="n" onOpen={onOpen} />)
-  fireEvent.click(screen.getByRole('button', { name: 'New run' }))
+  fireEvent.click(screen.getByRole('button', { name: 'New session' }))
   expect(onOpen).toHaveBeenCalledOnce()
   expect(api.runLaunch).not.toHaveBeenCalled()
 
@@ -108,7 +108,7 @@ it('shows the server refusal as a toast and stays put', async () => {
 it('does nothing on either half while launching is blocked', async () => {
   const onOpen = vi.fn()
   render(<SplitNewRun blocked="Server is offline" shortcut="n" onOpen={onOpen} />)
-  fireEvent.click(screen.getByRole('button', { name: 'New run' }))
+  fireEvent.click(screen.getByRole('button', { name: 'New session' }))
   fireEvent.click(await quick())
   expect(onOpen).not.toHaveBeenCalled()
   expect(api.runLaunch).not.toHaveBeenCalled()

@@ -106,7 +106,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-ui-sm text-muted">{plural(total, 'run')} ended in the last 7 days</p>
+        <p className="text-ui-sm text-muted">{plural(total, 'session')} ended in the last 7 days</p>
       </div>
       <div className="flex min-w-0 gap-2">
         <div aria-hidden className="flex h-40 w-6 shrink-0 flex-col justify-between pt-5 text-right text-ui-xs tabular-nums text-muted">
@@ -117,7 +117,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
           {active !== null && <Tooltip day={days[active]} index={active} count={days.length} tags={tags} team={team} />}
           <div
             role="group"
-            aria-label={`Runs per day, ${team ? 'everyone' : 'yours'}, by how they ended`}
+            aria-label={`Sessions per day, ${team ? 'everyone' : 'yours'}, by how they ended`}
             className="flex h-40 items-stretch gap-1 border-b border-seam pt-5 sm:gap-2"
           >
             {days.map((day, i) => (
@@ -149,7 +149,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
             ))}
           </div>
           {total === 0 && (
-            <p className="absolute inset-x-0 top-1/3 text-center text-ui text-muted">No runs ended in the last 7 days.</p>
+            <p className="absolute inset-x-0 top-1/3 text-center text-ui text-muted">No sessions ended in the last 7 days.</p>
           )}
         </div>
       </div>

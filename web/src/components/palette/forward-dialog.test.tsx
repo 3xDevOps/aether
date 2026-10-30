@@ -82,7 +82,7 @@ describe('forward dialog', () => {
 
     forward('5173')
 
-    expect((await screen.findByRole('alert')).textContent).toBe('Forward failed: Port 5173 is bound to 127.0.0.1 inside the run, so only the run can reach it. Start the server on 0.0.0.0 to open it on this computer.')
+    expect((await screen.findByRole('alert')).textContent).toBe('Forward failed: Port 5173 is bound to 127.0.0.1 inside the session, so only the session can reach it. Start the server on 0.0.0.0 to open it on this computer.')
     expect(api.localForwardStart).not.toHaveBeenCalled()
   })
 
@@ -91,7 +91,7 @@ describe('forward dialog', () => {
 
     forward('3000')
 
-    expect((await screen.findByRole('status')).textContent).toBe('Nothing in the run is listening on port 3000 yet. Its link works once something does.')
+    expect((await screen.findByRole('status')).textContent).toBe('Nothing in the session is listening on port 3000 yet. Its link works once something does.')
     expect(api.localForwardStart).toHaveBeenCalledWith('run:run_1', 3000)
   })
 

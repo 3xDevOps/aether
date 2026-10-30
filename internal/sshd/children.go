@@ -29,7 +29,7 @@ func init() {
 func (s *Server) children() (ChildService, *protocol.Error) {
 	if s.cfg.Services.Children == nil {
 		data, _ := json.Marshal(map[string]string{"reason": protocol.ErrorReasonChildrenUnavailable})
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "child runs are unavailable on this server", Data: data}
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "subsessions are unavailable on this server", Data: data}
 	}
 	return s.cfg.Services.Children, nil
 }

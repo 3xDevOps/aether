@@ -18,7 +18,7 @@ var turnEnds = map[string]string{
 	"cancelled": "The turn was cancelled",
 }
 
-const savedResults = "the worker's saved results"
+const savedResults = "the agent's saved results"
 
 func turnEnded(stop string) string {
 	if why, ok := stopReasons[stop]; ok {
@@ -41,7 +41,7 @@ var plainReasons = []struct {
 	{regexp.MustCompile(`(?s)^enhanced session ended: (.*)$`), func(g []string) string { return "Agent disconnected: " + g[0] }},
 	{regexp.MustCompile(`(?s)^enhanced turn failed: (.*)$`), func(g []string) string { return "Turn failed: " + g[0] }},
 	{regexp.MustCompile(`(?s)^agent exited (-?\d+)(.*)$`), func(g []string) string { return "Agent exited with code " + g[0] + g[1] }},
-	{regexp.MustCompile(`^worker finished$`), func([]string) string { return "Worker finished" }},
+	{regexp.MustCompile(`^worker finished$`), func([]string) string { return "Subsession finished" }},
 	{regexp.MustCompile(`^closed$`), func([]string) string { return "Closed" }},
 	{regexp.MustCompile(`^killed$`), func([]string) string { return "Stopped" }},
 	{regexp.MustCompile(`^retained container expired$`), func([]string) string { return "Its container was removed when it expired" }},
@@ -52,7 +52,7 @@ var plainReasons = []struct {
 	}},
 	{regexp.MustCompile(`^(?:agent idle|turn ended without a report)$`), func([]string) string { return "Turn ended without a report" }},
 	{regexp.MustCompile(`(?s)^no update for ([^\s:]+)(: .*)?$`), func(g []string) string { return "No update for " + g[0] + g[1] }},
-	{regexp.MustCompile(`^waiting for (\d+ (?:worker|child run)s?)$`), func(g []string) string { return "Waiting for " + g[0] }},
+	{regexp.MustCompile(`^waiting for (\d+) (?:worker|child run)(s?)$`), func(g []string) string { return "Waiting for " + g[0] + " subsession" + g[1] }},
 	{regexp.MustCompile(`^agent resumed$`), func([]string) string { return "Agent resumed" }},
 	{regexp.MustCompile(`^agent failed$`), func([]string) string { return "Agent failed" }},
 	{regexp.MustCompile(`^stalled: no output or file changes for (.+)$`), func(g []string) string { return "No output or file changes for " + g[0] }},
@@ -66,7 +66,7 @@ var plainReasons = []struct {
 	{regexp.MustCompile(`(?s)^send the task to the agent: (.*)$`), func(g []string) string { return "Could not send the task to the agent: " + g[0] }},
 	{regexp.MustCompile(`^review retained evidence$`), func([]string) string { return "Review " + savedResults }},
 	{regexp.MustCompile(`^resolve the blocker using the retained evidence$`), func([]string) string { return "Resolve the blocker using " + savedResults }},
-	{regexp.MustCompile(`(?s)^retained evidence (?:is )?unavailable(.*)$`), func(g []string) string { return "The worker's saved results are unavailable" + g[0] }},
+	{regexp.MustCompile(`(?s)^retained evidence (?:is )?unavailable(.*)$`), func(g []string) string { return "The agent's saved results are unavailable" + g[0] }},
 }
 
 // plainReason is plainReason in web/src/lib/reasons.ts.

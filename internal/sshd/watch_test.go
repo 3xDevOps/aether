@@ -38,7 +38,7 @@ func TestWatchesBelongToTheirCreator(t *testing.T) {
 	if w := created.Watch; w.State != protocol.WatchActive || strings.Join(w.Conditions, ",") != "needs_you,finished" || w.Link != "/?page=settings&id=watches&watch="+w.ID {
 		t.Fatalf("created = %+v", w)
 	}
-	if !strings.HasPrefix(created.Receipt, "Watching run archive me for: needs you, finished.") || !strings.Contains(created.Receipt, "in-app only") {
+	if !strings.HasPrefix(created.Receipt, "Watching session archive me for: needs you, finished.") || !strings.Contains(created.Receipt, "in-app only") {
 		t.Fatalf("receipt = %q", created.Receipt)
 	}
 	var again protocol.WatchResult

@@ -155,10 +155,10 @@ describe('needs you conditions', () => {
     ['an unseen failure', { state: 'failed', outcome_unseen: true }, 'failed'],
     ['a seen failure', { state: 'failed' }, undefined],
     ['an unseen success', { state: 'finished', outcome_unseen: true }, undefined],
-    ['a working run', { status: 'running', state: 'working' }, undefined],
-    ['an idle run', { state: 'idle' }, undefined],
-    ['a run waiting on its agents', { state: 'waiting-agents' }, undefined],
-    ['a run waiting on a tool', { state: 'waiting-tools' }, undefined],
+    ['a working session', { status: 'running', state: 'working' }, undefined],
+    ['an idle session', { state: 'idle' }, undefined],
+    ['a session waiting on its agents', { state: 'waiting-agents' }, undefined],
+    ['a session waiting on a tool', { state: 'waiting-tools' }, undefined],
     ['a paused request', { state: 'needs-you', paused: true }, undefined],
     ['a paused disconnect', { state: 'disconnected', paused: true }, undefined],
     ['a usage limit Aether resumes', { state: 'idle', reason: "Usage limit reached on Alice's account; moving to Bob's account" }, undefined],
@@ -168,10 +168,10 @@ describe('needs you conditions', () => {
     ['a usage limit Aether cannot resume', { state: 'needs-you', reason: "Usage limit reached on Alice's account; no fallback has usage left" }, 'needs-input'],
     ['a Background request', { mode: 'headless', state: 'needs-you' }, 'needs-input'],
     ['a Background failure', { mode: 'headless', state: 'failed', outcome_unseen: true }, 'failed'],
-    ["a child run's request", { parent_run_id: 'run_parent', state: 'needs-you', reason: 'needs input: Which port?' }, 'needs-input'],
+    ["a subsession's request", { parent_run_id: 'run_parent', state: 'needs-you', reason: 'needs input: Which port?' }, 'needs-input'],
     ['a blocked report', { state: 'needs-you', reason: 'blocked: no database access' }, 'blocked'],
-    ['a finished run with its outcome unseen', { status: 'failed', state: '', outcome_unseen: true }, undefined],
-    ['a live run with no state', { state: '' }, undefined],
+    ['a finished session with its outcome unseen', { status: 'failed', state: '', outcome_unseen: true }, undefined],
+    ['a live session with no state', { state: '' }, undefined],
   ] satisfies [string, Partial<Run>, NeedsYouID | undefined][])('attention for %s: %s', (_, fields, want) => {
     expect(needsYou(record({ status: 'needs-attention', ...fields }), stateContext())?.id).toBe(want)
   })
@@ -182,8 +182,8 @@ describe('needs you conditions', () => {
     ['waiting', 'no update for 12m', 'ended', 'No update for 12m'],
     ['waiting', 'no update for 30m: two reviewers on the parser', 'ended', 'No update for 30m: two reviewers on the parser'],
     ['waiting-ci', 'no update for 30m: CI on PR 12', 'waiting-ci', 'No update for 30m: CI on PR 12'],
-    ['waiting-agents', 'waiting for 2 child runs', 'waiting-agents', 'Waiting for 2 child runs'],
-    ['waiting-agents', 'waiting for 1 child run', 'waiting-agents', 'Waiting for 1 child run'],
+    ['waiting-agents', 'waiting for 2 child runs', 'waiting-agents', 'Waiting for 2 subsessions'],
+    ['waiting-agents', 'waiting for 1 child run', 'waiting-agents', 'Waiting for 1 subsession'],
     ['idle', 'stalled: no output or file changes for 10m0s', 'ended', 'No output or file changes for 10m0s'],
     ['idle', 'turn cancelled', 'ended', 'Turn cancelled'],
     ['waiting-agents', 'waiting on 3 child runs', 'waiting-agents', 'waiting on 3 child runs'],
@@ -191,7 +191,7 @@ describe('needs you conditions', () => {
     ['waiting-ci', 'waiting for the PR checks', 'waiting-ci', 'waiting for the PR checks'],
     ['waiting-tools', '', 'waiting-tools', 'Waiting for a background process'],
     ['answered', 'explained the retry policy', 'answered', 'explained the retry policy'],
-  ] as const)('never needs anyone for a %s run parked with %j', (state, reason, shownState, shown) => {
+  ] as const)('never needs anyone for a %s session parked with %j', (state, reason, shownState, shown) => {
     for (const acp of [false, true]) {
       const parked = record({ mode: acp ? 'acp' : 'tui', acp, status: 'needs-attention', state, reason: reason || undefined })
       expect(needsYou(parked, stateContext())).toBeUndefined()
@@ -207,7 +207,7 @@ describe('needs you conditions', () => {
       'wait broken: pr:o/r#12:checks resolved, but the agent was not woken',
       'Wait broken: pr:o/r#12:checks resolved, but the agent was not woken · reply to continue',
     ],
-  ])('asks for a reply to continue an Enhanced run parked with %j', (reason, shown) => {
+  ])('asks for a reply to continue an Enhanced session parked with %j', (reason, shown) => {
     const parked = record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason })
     const presented = presentRun(parked, stateContext())
     expect(presented).toMatchObject({ state: 'needs-you', reason: shown })
@@ -241,7 +241,7 @@ describe('needs you conditions', () => {
   })
 
   it.each(['agent idle', 'turn cancelled', 'turn interrupted', 'turn ended: refusal', 'needs input: Which database?'])(
-    'does not need anyone while an Enhanced run is running after %s',
+    'does not need anyone while an Enhanced session is running after %s',
     (reason) => {
       const running = record({ mode: 'acp', acp: true, status: 'running', state: 'working', reason })
       expect(needsYou(running, stateContext())).toBeUndefined()
@@ -264,7 +264,7 @@ describe('needs you conditions', () => {
   it.each([
     ['permission', 'Permission requested'],
     ['question', 'Question from the agent'],
-  ] as const)('gives no terminal instruction for an enhanced run\'s %s', (kind, reason) => {
+  ] as const)('gives no terminal instruction for an enhanced session\'s %s', (kind, reason) => {
     const enhanced = record({ mode: 'acp', acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind }] })
     expect(presentRun(enhanced, stateContext())).toMatchObject({ state: 'needs-you', reason })
   })
@@ -291,7 +291,7 @@ describe('needs you conditions', () => {
   it('shows a request that has not loaded as a plain Needs you', () => {
     const parked = record({ status: 'needs-attention', state: 'needs-you', reason: 'agent idle' })
     const shown = presentRun(parked, stateContext())
-    expect(shown).toMatchObject({ state: 'needs-you', reason: 'Open the run to see its request' })
+    expect(shown).toMatchObject({ state: 'needs-you', reason: 'Open the session to see its request' })
     expect(shown.needsYou?.action(parked)).toEqual({ kind: 'open', label: 'Open' })
   })
 })

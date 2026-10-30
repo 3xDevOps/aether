@@ -61,7 +61,7 @@ func TestEnhancedTurnWithoutAReportIsAskedOnce(t *testing.T) {
 	sub := e.subscribe(t)
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the reminder's turn", turnEnded("end_turn", 2))
-	waitNote(t, sub, "run instructions: first message")
+	waitNote(t, sub, "session instructions: first message")
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	items := waitItems(t, e.sched, run.ID, "the settled log", func([]acphost.Item) bool { return true })
 	if got := userMessages(items); len(got) != 2 || !strings.HasPrefix(got[1], reminderPrefix) || got[1] != reminderPrefix+" (answered, waiting, needs-input, blocked, success or failure) before ending the turn." {
@@ -105,7 +105,7 @@ func TestEnhancedReminderRefusedByAdmissionEndsTheTurn(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	coord, _ := withCoordination(t, e)
-	coord.remind = func(context.Context, domain.RunID, string) error { return errors.New("run is protected") }
+	coord.remind = func(context.Context, domain.RunID, string) error { return errors.New("session is protected") }
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
 	if got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); got.Reason != turnEndedReason {
@@ -138,7 +138,7 @@ func TestStandardLaunchRecordsItsInstructionChannel(t *testing.T) {
 	withCoordination(t, e)
 	sub := e.subscribe(t)
 	e.launchFake(t, "add OAuth login")
-	waitNote(t, sub, "run instructions: first message")
+	waitNote(t, sub, "session instructions: first message")
 }
 
 // A Standard turn is held once, never twice in a row, a report since its

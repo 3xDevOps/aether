@@ -159,7 +159,7 @@ describe('navigation shortcuts', () => {
   it('leaves a run that is not in the store on Escape', () => {
     useStore.setState({ route: { name: 'run', params: { runId: 'run_gone' } } })
     render(<AppShell />)
-    expect(screen.getByRole('heading', { name: 'Run not found' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Session not found' })).toBeDefined()
 
     press('Escape')
     expect(useStore.getState().route.name).toBe('board')
@@ -170,11 +170,11 @@ describe('navigation shortcuts', () => {
     render(<AppShell />)
 
     press('g')
-    press('Escape', screen.getByRole('tab', { name: 'Session' }))
+    press('Escape', screen.getByRole('tab', { name: 'Chat' }))
     expect(useStore.getState().route.name).toBe('run')
 
     // The same Escape with no chord pending is the one that leaves.
-    press('Escape', screen.getByRole('tab', { name: 'Session' }))
+    press('Escape', screen.getByRole('tab', { name: 'Chat' }))
     expect(useStore.getState().route.name).toBe('board')
   })
 
@@ -190,7 +190,7 @@ describe('navigation shortcuts', () => {
 
     // Dispatched at an element so the document listener is on the path,
     // exactly as a real key press reaches Radix before the window.
-    const tab = screen.getByRole('tab', { name: 'Session' })
+    const tab = screen.getByRole('tab', { name: 'Chat' })
     press('Escape', tab)
     expect(useStore.getState().route.name).toBe('run')
 
@@ -234,7 +234,7 @@ describe('navigation shortcuts', () => {
     ['field', '<input />'],
     ['terminal', '<div class="xterm"><span></span></div>'],
     ['dialog', '<div role="dialog"><button type="button">ok</button></div>'],
-    ['menu', '<div role="menu"><div role="menuitem">Kill run</div></div>'],
+    ['menu', '<div role="menu"><div role="menuitem">Kill session</div></div>'],
     ['list box', '<div role="listbox"><div role="option">one</div></div>'],
     ['confirm', '<div role="alertdialog"><button type="button">ok</button></div>'],
   ])('stands down while a %s has the keyboard', (_, markup) => {

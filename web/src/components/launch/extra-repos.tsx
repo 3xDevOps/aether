@@ -57,7 +57,7 @@ export function ExtraRepos({
       </div>
       {chosen.length > 0 && (
         <p className="text-ui-sm text-muted">
-          {'Each extra repo is checked out beside /workspace, at /repos/<name>, on its own run branch.'}
+          {'Each extra repo is checked out beside /workspace, at /repos/<name>, on its own session branch.'}
         </p>
       )}
     </div>

@@ -58,7 +58,7 @@ func runSchedule(args []string) error {
 			return err
 		}
 		// The policy is worth stating where people read schedules.
-		fmt.Println("\ncron rules are evaluated in UTC; runs missed while the server was down are skipped, never caught up")
+		fmt.Println("\ncron rules are evaluated in UTC; launches missed while the server was down are skipped, never caught up")
 		return nil
 	})
 }

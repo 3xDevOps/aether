@@ -31,8 +31,8 @@ export function RunCommandConfirmation({
   const runs = useStore((s) => s.runs)
   const children = confirmation.stopsChildren ? unfinishedChildren(runs, run) : []
   const stops = children.length === 1
-    ? 'Its unfinished child run stops too, with any runs it started.'
-    : `Its ${children.length} unfinished child runs stop too, with any runs they started.`
+    ? 'Its unfinished subsession stops too, with any sessions it started.'
+    : `Its ${children.length} unfinished subsessions stop too, with any sessions they started.`
   return (
     <AlertDialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <AlertDialogContent

@@ -1,39 +1,39 @@
 # Member environments
 
 Every member has an environment: their own container on the server where agent
-CLIs and system tools are installed, and from which every run they launch
+CLIs and system tools are installed, and from which every session they launch
 starts. Read this to install tools for your agents, save them, and understand
-the limits on what a run can use. Terms such as member, run and workspace are
+the limits on what a session can use. Terms such as member, session and workspace are
 in the [glossary](README.md#concepts).
 
 ```mermaid
 flowchart LR
     std["Standard image"] -->|"used until you save"| env["Your environment"]
     env -->|"Save environment"| saved["Your saved image"]
-    saved -->|"new runs start from it"| run["Each run's container"]
+    saved -->|"new sessions start from it"| run["Each session's container"]
     std -.->|"if nothing is saved"| run
     home[("Your home directory")] --- env
     home --- run
 ```
 
 Your **home directory** is a folder on the server, mounted as `$HOME` in your
-environment and in every run you launch ([environment-home.md](environment-home.md)).
-Before you save, only the home is shared. After **Save environment**, new runs
-also get the software you installed outside it. A run on another member's
+environment and in every session you launch ([environment-home.md](environment-home.md)).
+Before you save, only the home is shared. After **Save environment**, new sessions
+also get the software you installed outside it. A session on another member's
 shared agent account still starts from the image of the member who launches
 it ([teams.md](teams.md#agent-accounts)).
 
 ## The standard image
 
-When you have saved nothing, your environment and your runs start from the
+When you have saved nothing, your environment and your sessions start from the
 server's standard image. It is Ubuntu 24.04 and its contents are defined in
 [`images/standard/Dockerfile`](../images/standard/Dockerfile). It includes bash,
 build-essential, curl, Docker, Git, the GitHub CLI (`gh`), `ssh-keygen`, jq,
 Python 3, ripgrep, sudo, Go, Node and npm (via fnm), uv and Rust (via rustup).
 It does not include `rsync`.
 
-Your environment and your runs run as uid `1000`, with your home at `/root`.
-In your environment `sudo` needs no password; in a run it depends on the run's
+Your environment and your sessions run as uid `1000`, with your home at `/root`.
+In your environment `sudo` needs no password; in a session it depends on the session's
 [permission tier](security.md#permission-tiers).
 
 The server uses the image tagged for its own release, from
@@ -42,11 +42,11 @@ The server uses the image tagged for its own release, from
 `/bin/sh`, and glibc with bash, curl and tar (editors need them, see
 [terminal.md](terminal.md#editors)).
 
-### Git in run environments
+### Git in session environments
 
-Aether commits for a run with the Git in the run's container. Stock Ubuntu
+Aether commits for a session with the Git in the session's container. Stock Ubuntu
 24.04 Git is enough. These commits do not run commit hooks, so if your
-repository needs hooks, run `git commit` in the run's terminal. A custom image
+repository needs hooks, run `git commit` in the session's terminal. A custom image
 whose Git lacks prepared reference transactions (`git update-ref --stdin`
 with `prepare`) fails the commit with Git's own error and no fallback. Install
 a newer Git in your environment and save it, or
@@ -60,7 +60,7 @@ a newer Git in your environment and save it, or
 1. A saved environment wins over the standard image. Run `aether env reset`
    (this discards what you installed outside the home), or update the tool
    yourself in your environment and save again.
-2. Stop and reopen your environment and start a new run. A container keeps the
+2. Stop and reopen your environment and start a new session. A container keeps the
    image it started from.
 
 An admin who set `--standard-image` has to move it to a newer tag or digest. A
@@ -81,13 +81,13 @@ example:
 sudo apt-get install -y postgresql-client
 ```
 
-Tools under `$HOME` (for example `~/.local/bin`) are available to runs at once.
-Anything installed elsewhere in the container reaches runs only after you save
+Tools under `$HOME` (for example `~/.local/bin`) are available to sessions at once.
+Anything installed elsewhere in the container reaches sessions only after you save
 the environment. The header reads **Installs here reach agents after you
 save.** until you do. `/tmp` is scratch space that saving never captures
 ([environment-home.md](environment-home.md#what-persists)).
 
-The workspace's setup script and variables apply to runs, not to this terminal
+The workspace's setup script and variables apply to sessions, not to this terminal
 ([Workspace environment](#workspace-environment)). See
 [terminal.md](terminal.md) for the terminal itself.
 
@@ -100,11 +100,11 @@ aether env save
 ```
 
 Saving pauses the terminal for a few seconds while Docker commits it. The
-command prints `saved <tag>`, then `new runs and terminals start from this
+command prints `saved <tag>`, then `new sessions and terminals start from this
 environment`. The image is stored on the server's Docker daemon and is never
 pushed to a registry.
 
-- New runs, workspace shells and the next environment open use the saved image.
+- New sessions, workspace shells and the next environment open use the saved image.
   Running containers keep theirs.
 - Each save replaces the previous one. To fix a bad save, repair it and save
   again, or reset.
@@ -130,7 +130,7 @@ pushed to a registry.
 Open **Environment actions**, then **Reset to standard…** (offered once you
 have saved an image), or run `aether env reset`. Reset destroys the container,
 forgets your saved image and removes it from the server. Files outside your
-home are lost. The next open and all new runs use the standard image.
+home are lost. The next open and all new sessions use the standard image.
 
 On a terminal the command asks
 `This destroys your Environment's container, unsaved changes and saved image. Your home stays. Reset? [y/N]: `.
@@ -144,7 +144,7 @@ home, saved image and unsaved changes stay.
 ### When a saved image is missing
 
 Saved images live only in the server's Docker. If an operator removes yours,
-your runs and terminal fail with an error that names the missing tag:
+your sessions and terminal fail with an error that names the missing tag:
 
 ```
 scheduler: saved environment image "<tag>" is missing from the runtime; run aether env reset to return to the standard image
@@ -152,17 +152,17 @@ scheduler: saved environment image "<tag>" is missing from the runtime; run aeth
 
 Aether does not fall back to the standard image silently. Run `aether env reset`.
 
-## Docker inside runs
+## Docker inside sessions
 
 The standard image has the `docker` CLI, `dockerd`, `docker compose` and
 `docker buildx`. When the server host has the
-[Sysbox](https://github.com/nestybox/sysbox) container runtime, each run except
+[Sysbox](https://github.com/nestybox/sysbox) container runtime, each session except
 an Isolated one, and each environment terminal, starts its own `dockerd`. It
 needs no `--privileged` and no host Docker socket, so `docker run`,
 `docker build` and `docker compose up` work as on a laptop.
 
 An admin turns it on with the **Install** button under **Settings → Server**
-(admins only), by accepting the Docker-inside-runs question in `aether-server
+(admins only), by accepting the Docker-inside-sessions question in `aether-server
 setup`, or on the server host:
 
 ```sh
@@ -172,7 +172,7 @@ aether-server sysbox status     # prints on or off
 
 The host must be Ubuntu or Debian on amd64 or arm64, run Docker, and have Linux
 5.19 or newer or the `shiftfs` module. Otherwise the install stops and changes
-nothing with `Docker inside runs is unavailable on this host: <reason>`.
+nothing with `Docker inside sessions is unavailable on this host: <reason>`.
 [install.md](install.md) covers the server side.
 
 `--container-runtime` (config key `container-runtime`) defaults to `auto`: use
@@ -186,15 +186,15 @@ sudo systemctl restart aether-server
 
 What to expect:
 
-- Existing containers keep their runtime. After Sysbox is installed, new runs
+- Existing containers keep their runtime. After Sysbox is installed, new sessions
   and terminals get Docker within a minute. Reopen an open environment
   terminal.
-- Images, containers and volumes inside a run are deleted with its container,
+- Images, containers and volumes inside a session are deleted with its container,
   and `aether env save` does not keep them.
-- A port published by an inner container is on the run's own network. Reach it
+- A port published by an inner container is on the session's own network. Reach it
   at `127.0.0.1`.
-- Inner containers resolve names through `8.8.8.8`: the run's own resolver,
-  `127.0.0.11`, answers only inside the run. Where `8.8.8.8` is blocked, pass
+- Inner containers resolve names through `8.8.8.8`: the session's own resolver,
+  `127.0.0.11`, answers only inside the session. Where `8.8.8.8` is blocked, pass
   `docker run --dns <your resolver>`. With [egress control](#egress-control)
   on, inner containers need the proxy variables instead.
 - If `dockerd` cannot start, the launch fails with `runtime: dockerd did not
@@ -211,7 +211,7 @@ How the boundary differs from the host is in
 
 ## Resource limits and launch admission
 
-Each new run and environment container gets a ceiling on CPU, memory and
+Each new session and environment container gets a ceiling on CPU, memory and
 processes. An admin changes the defaults with `aether-server serve` flags:
 
 | Flag | Default (`0`) | What it limits |
@@ -224,11 +224,11 @@ processes. An admin changes the defaults with `aether-server serve` flags:
 sudo aether-server config set run-memory 12884901888   # 12 GiB
 ```
 
-An admin can also set the limits from **Settings → Server → Run limits**,
+An admin can also set the limits from **Settings → Server → Session limits**,
 which calls `server.run_limits`. Limits saved there replace the flags for
 containers created afterwards, one field at a time; clear a field to fall
-back to the flag or the default. A single run overrides both under
-**Resource limits** in the launch dialog's **Run** tab (`limits` on
+back to the flag or the default. A single session overrides both under
+**Resource limits** in the launch dialog's **Session** tab (`limits` on
 `run.launch`; CPUs, memory in GiB, processes). An empty field follows the
 server limit.
 
@@ -236,38 +236,38 @@ A new limit applies to containers created afterwards. Docker must report
 support for CPU quotas, memory and swap limits, and PID limits, or new
 containers are refused.
 
-Before it creates a run, environment, browser or agent-updater container,
+Before it creates a session, environment, browser or agent-updater container,
 Aether checks that the host has free disk and memory. Otherwise the launch
 fails with `scheduler: insufficient disk headroom`, `scheduler: insufficient
 host memory headroom` or `scheduler: host capacity unavailable`. Aether never
-stops a running agent to make room, and reopening a retained run needs no
+stops a running agent to make room, and reopening a retained session needs no
 check. [Recover from disk pressure](failure-handling.md#recover-from-disk-pressure)
 has the thresholds and what to do.
 
-## After a run closes
+## After a session closes
 
-Reporting success or failure leaves an interactive run open for follow-up, and
-quiet runs do not expire. **Close** keeps the run's container for seven days
+Reporting success or failure leaves an interactive session open for follow-up, and
+quiet sessions do not expire. **Close** keeps the session's container for seven days
 (`--run-container-ttl`) so you can **Relaunch** it, unless disk runs low first. The seven days pause
-while the run is relaunched and start over at its next close.
-[What stays after a run ends](failure-handling.md#what-stays-after-a-run-ends)
+while the session is relaunched and start over at its next close.
+[What stays after a session ends](failure-handling.md#what-stays-after-a-session-ends)
 covers Close, Kill, **Free container…** and Delete.
 
 ## Workspace environment
 
 A workspace is a repository you run agents against. Its environment applies
-to every new run in it, whoever launches it: a **setup script** that runs
-before the agent, **variables** set in the run's container, and optional
-**egress control**, which limits the hosts runs can reach. A variable can be
+to every new session in it, whoever launches it: a **setup script** that runs
+before the agent, **variables** set in the session's container, and optional
+**egress control**, which limits the hosts sessions can reach. A variable can be
 marked **secret**.
 
 An admin edits both under **Environment** on the workspace's Repository page
 (workspace switcher → **Environment**), or with `aether workspace env`. Every
 member can read the script, the variable names and the non-secret values.
 
-A change applies to runs launched afterwards. An existing container keeps its
+A change applies to sessions launched afterwards. An existing container keeps its
 variables and never reruns the script, so pausing, reopening or switching the
-mode of a run changes nothing. The egress host list is the exception: it
+mode of a session changes nothing. The egress host list is the exception: it
 applies at once. Your own environment terminal
 does not.
 
@@ -280,18 +280,18 @@ aether workspace env script --clear
 ```
 
 The script (for a Node project, one line: `npm ci`) runs once in each new
-run's container, after it starts and before the agent. It runs as `/bin/sh -ec`
+session's container, after it starts and before the agent. It runs as `/bin/sh -ec`
 (POSIX `sh`, stops at the first failing command, stderr merged into stdout) in
-`/workspace` as the run's user, which is never root. A run with
-extra repos (`aether run --repo`) runs it in the primary one; the others are at
+`/workspace` as the session's user, which is never root. A session with
+extra repos (`aether session --repo`) runs it in the primary one; the others are at
 `/repos/<workspace name>`. It sees the
 workspace variables, your `$HOME` and tool caches, `AETHER_RUN_ID` and
 `AETHER_WORKSPACE_ID`.
 
 Install system packages with `sudo`, for example `sudo apt-get install -y
-libpq-dev`. In a Default run that `sudo` runs without asking anyone, since no
-agent has started yet; a Root run's is the image's own. An Isolated run's
-fails with `sudo: an isolated run cannot run commands as root`, and so does
+libpq-dev`. In a Default session that `sudo` runs without asking anyone, since no
+agent has started yet; a Root session's is the image's own. An Isolated session's
+fails with `sudo: an isolated session cannot run commands as root`, and so does
 its launch.
 
 There is no time limit. The launch waits for it, and so does another launch by
@@ -306,8 +306,8 @@ setup script output:
 npm error code E401
 ```
 
-The last 16 KiB of output goes only to whoever launched (`aether run` prints it,
-the launch dialog shows it) and is not stored with the run. Secrets in it are
+The last 16 KiB of output goes only to whoever launched (`aether session` prints it,
+the launch dialog shows it) and is not stored with the session. Secrets in it are
 replaced with `***`.
 
 ### Variables
@@ -353,19 +353,19 @@ as secrets and have the [setup script](#setup-script) write the file:
 printf 'DATABASE_URL=%s\nSTRIPE_KEY=%s\n' "$DATABASE_URL" "$STRIPE_KEY" > .env
 ```
 
-Keep `.env` in the repository's `.gitignore` so the run never commits it. The
-file is readable by anyone who can view the run, in its **Files**. For a
-one-off file in one run, upload it in that run's **Files**.
+Keep `.env` in the repository's `.gitignore` so the session never commits it. The
+file is readable by anyone who can view the session, in its **Files**. For a
+one-off file in one session, upload it in that session's **Files**.
 
 > [!WARNING]
-> A secret is hidden from the settings, not from a run. Inside the container it
+> A secret is hidden from the settings, not from a session. Inside the container it
 > is an ordinary environment variable, so the agent can read it, and so can
-> anyone who can launch a run in the workspace or message one.
+> anyone who can launch a session in the workspace or message one.
 > [security.md](security.md#workspace-secrets) lists where the value is kept.
 
 ### Egress control
 
-Off by default. When an admin turns it on, the workspace's new runs reach only
+Off by default. When an admin turns it on, the workspace's new sessions reach only
 the hosts on its list, which starts as the hosts agents need (below):
 
 ```sh
@@ -378,25 +378,25 @@ aether workspace env egress off
 
 The dashboard has the same switch and list under **Environment**. A host is an
 exact name, or `*.` and a domain, which matches every subdomain but not the
-domain itself. On and off apply to runs launched afterwards; the host list
-applies at once to runs started with egress control on, and their open
-connections to a removed host close within 10 seconds. Agent runs are the only
+domain itself. On and off apply to sessions launched afterwards; the host list
+applies at once to sessions started with egress control on, and their open
+connections to a removed host close within 10 seconds. Sessions are the only
 containers it limits: environment terminals and agent
 installs connect directly.
 
-An [Isolated run](security.md#permission-tiers) goes through the proxy whether
+An [Isolated session](security.md#permission-tiers) goes through the proxy whether
 egress control is on or off, and reaches only the agent rows of the table
 below (Claude Code through OpenCode), whatever the workspace's list says.
 
-Such a run starts on `aether-egress`, a Docker network with no route out. Its
+Such a session starts on `aether-egress`, a Docker network with no route out. Its
 one way out is a proxy inside `aether-server` on that network's gateway, port
-3128, which the run finds in `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`,
+3128, which the session finds in `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`,
 `https_proxy`, `NO_PROXY` and `no_proxy` (`localhost,127.0.0.1,::1`), plus
 `NODE_USE_ENV_PROXY=1` for Node's `fetch`. These replace workspace variables of
 the same names, and the setup script gets them too. HTTPS passes through
 `CONNECT` untouched; plain HTTP, such as apt, is forwarded. A tool that ignores
-the proxy variables cannot connect, and the run's browser companion, which
-shares its network without a proxy, reaches only the run's own servers.
+the proxy variables cannot connect, and the session's browser companion, which
+shares its network without a proxy, reaches only the session's own servers.
 
 The proxy resolves each name itself and never connects to a loopback, private,
 link-local, tailnet (`100.64.0.0/10`) or cloud metadata address, or to the
@@ -407,7 +407,7 @@ request gets a 403 that reads, in its body and, for `CONNECT`, its status line:
 aether: egress to example.org denied; allow it with aether workspace env egress allow --workspace <workspace-id> example.org
 ```
 
-The run's timeline gets the same line once per host, for up to 20 hosts.
+The session's timeline gets the same line once per host, for up to 20 hosts.
 
 Until an admin edits it, the list is the hosts below. Agent telemetry, update
 checks and error reports are left out. pi, oh-my-pi and OpenCode need the host
@@ -431,7 +431,7 @@ on a private or tailnet address is out of reach.
 | Docker Hub | `registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com`, `production.cloudfront.docker.com`, `docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com` |
 | Ubuntu packages | `archive.ubuntu.com`, `security.ubuntu.com`, `ports.ubuntu.com` |
 
-With [Docker inside runs](#docker-inside-runs), the run's `dockerd` has the
+With [Docker inside sessions](#docker-inside-sessions), the session's `dockerd` has the
 proxy variables, so image pulls work. Containers and builds you start need
 them passed in:
 

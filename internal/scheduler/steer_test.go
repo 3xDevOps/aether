@@ -124,7 +124,7 @@ func TestPauseResumeAndStallExemption(t *testing.T) {
 		t.Fatal("Paused(run) = false after Pause")
 	}
 	if e.sched.Paused("run_unknown") {
-		t.Fatal("Paused(unknown run) = true")
+		t.Fatal("Paused(unknown session) = true")
 	}
 	if perr := e.sched.Pause(ctx, run.ID, e.member.ID); perr == nil {
 		t.Fatal("double pause accepted")
@@ -136,7 +136,7 @@ func TestPauseResumeAndStallExemption(t *testing.T) {
 		t.Fatalf("GetRun: %v", err)
 	}
 	if r.Status != domain.RunRunning {
-		t.Fatalf("paused run status = %s, want running", r.Status)
+		t.Fatalf("paused session status = %s, want running", r.Status)
 	}
 
 	if rerr := e.sched.Resume(ctx, run.ID, e.member.ID); rerr != nil {
@@ -329,7 +329,7 @@ func TestCloseRunResolvesStalledRun(t *testing.T) {
 	}
 	r := e.waitStoreStatus(t, run.ID, domain.RunMerged)
 	if r.FinishedAt == nil {
-		t.Fatal("closed run must have FinishedAt")
+		t.Fatal("closed session must have FinishedAt")
 	}
 	if e.rt.byName(string(run.ID)) == nil {
 		t.Fatal("closed TUI run lost its retained container")
@@ -400,7 +400,7 @@ func TestReleaseRetainedRunPreservesRecordAndArchive(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
 	ctx := t.Context()
-	run, _ := e.launchFake(t, "release archived run")
+	run, _ := e.launchFake(t, "release archived session")
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestReleaseRetriesTerminalCreationKeyCleanup(t *testing.T) {
 	run := syntheticDestroyPendingRun(t, e, "release pending cleanup")
 	recovered := e.newScheduler(t, e.rt, newFakePTY())
 	if err := recovered.Release(ctx, run.ID, e.member.ID); err != nil {
-		t.Fatalf("Release destroy-pending run: %v", err)
+		t.Fatalf("Release destroy-pending session: %v", err)
 	}
 	if e.rt.byName(string(run.ID)) != nil || recovered.RetainsContainer(ctx, run.ID) {
 		t.Fatal("release left creation-key container or owner")
@@ -738,7 +738,7 @@ func TestCloseRunRetainedSidecarFailureRollsBack(t *testing.T) {
 		t.Fatalf("container state after failed retained close = %q, want running", got)
 	}
 	if e.sched.Paused(run.ID) {
-		t.Fatal("failed retained close left the run paused")
+		t.Fatal("failed retained close left the session paused")
 	}
 	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil {
@@ -793,7 +793,7 @@ func TestCloseRunWithoutRetentionCommitsAndPublishes(t *testing.T) {
 		t.Fatalf("commits = %v", got)
 	}
 	if e.git.publishedCount(run.ID) == 0 {
-		t.Fatal("run branch was not published")
+		t.Fatal("session branch was not published")
 	}
 	if _, err := os.Stat(e.sched.sidecarPath(run.ID)); !os.IsNotExist(err) {
 		t.Fatalf("sidecar after no-retention close: %v", err)
@@ -818,7 +818,7 @@ func TestCloseRunWithoutRetentionRestoresAfterTransitionFailure(t *testing.T) {
 		t.Fatalf("container state after failed CloseRun = %q, want running", got)
 	}
 	if e.sched.Paused(run.ID) {
-		t.Fatal("failed CloseRun left the run paused")
+		t.Fatal("failed CloseRun left the session paused")
 	}
 	if got := e.pty.ActiveSessions(string(ptyhost.RunSession(run.ID))); len(got) != 1 {
 		t.Fatalf("restored PTY sessions = %v, want one", got)
@@ -851,14 +851,14 @@ func TestCloseRunRollbackPreservesPrePausedState(t *testing.T) {
 		t.Fatalf("container state after failed close = %q, want paused", got)
 	}
 	if !e.sched.Paused(run.ID) {
-		t.Fatal("Paused(run) = false after failed close of pre-paused run")
+		t.Fatal("Paused(run) = false after failed close of pre-paused session")
 	}
 	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil {
 		t.Fatalf("read sidecar after failed close: %v", err)
 	}
 	if !sc.Paused {
-		t.Fatal("sidecar paused = false after failed close of pre-paused run")
+		t.Fatal("sidecar paused = false after failed close of pre-paused session")
 	}
 	if got := e.pty.ActiveSessions(string(ptyhost.RunSession(run.ID))); len(got) != 1 {
 		t.Fatalf("restored PTY sessions = %v, want one", got)
@@ -915,7 +915,7 @@ func TestCloseRunRelabelsFinishedRun(t *testing.T) {
 		t.Fatalf("CloseRun abandoned to merged: %v", err)
 	}
 	if row := e.waitStoreStatus(t, run.ID, domain.RunMerged); row.FinishUnopened {
-		t.Fatal("a member's close of an opened run left it unopened")
+		t.Fatal("a member's close of an opened session left it unopened")
 	}
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun at the same outcome: %v", err)
@@ -1015,7 +1015,7 @@ func TestCloseRunRelabelsWhileExitCleanupFinalizes(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunMerged)
 
 	barrier.releaseNow()
-	waitFor(t, "completed run removed from supervision", func() bool {
+	waitFor(t, "completed session removed from supervision", func() bool {
 		e.sched.mu.Lock()
 		defer e.sched.mu.Unlock()
 		return e.sched.runs[run.ID] == nil
@@ -1065,7 +1065,7 @@ func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 			}
 			p, isStatus := ev.Payload.(events.RunStatusPayload)
 			if isStatus && ev.RunID == run.ID && p.To == domain.RunRunning {
-				t.Fatalf("steer alone returned the run to running (%q); only the agent's own output should",
+				t.Fatalf("steer alone returned the session to running (%q); only the agent's own output should",
 					p.Reason)
 			}
 		case <-quiet:
@@ -1100,7 +1100,7 @@ func TestInjectCleanExitedCompleted(t *testing.T) {
 	run, c := e.launchFake(t, "task")
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	waitFor(t, "completed run removed from supervision", func() bool {
+	waitFor(t, "completed session removed from supervision", func() bool {
 		e.sched.mu.Lock()
 		defer e.sched.mu.Unlock()
 		_, ok := e.sched.runs[run.ID]

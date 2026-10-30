@@ -75,7 +75,7 @@ test('callouts and badges share one tone palette', () => {
         The remote rejected the branch.
       </Callout>
       <Badge tone="failed">Failed</Badge>
-      <Badge>3 runs</Badge>
+      <Badge>3 sessions</Badge>
     </>,
   )
   const { text, soft } = toneClasses('failed')
@@ -83,7 +83,7 @@ test('callouts and badges share one tone palette', () => {
   expect(screen.getByText('The remote rejected the branch.').closest('[data-slot="callout"]')?.className).toContain(soft)
   expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined()
   expect(screen.getByText('Failed').className).toContain(soft)
-  expect(screen.getByText('3 runs').className).toContain(toneClasses('neutral').soft)
+  expect(screen.getByText('3 sessions').className).toContain(toneClasses('neutral').soft)
 })
 
 test('a pane header holds the view heading, its toolbar and the sidebar button', () => {
@@ -92,7 +92,7 @@ test('a pane header holds the view heading, its toolbar and the sidebar button',
     <PaneHeader
       title="Board"
       onOpenSidebar={onOpenSidebar}
-      actions={<Button>New run</Button>}
+      actions={<Button>New session</Button>}
       actionsLabel="Board actions"
     />,
   )
@@ -160,19 +160,19 @@ test('an agent glyph is monochrome unless asked for its colour', () => {
 test('a labelled spinner is a status and both loaders still under reduced motion', () => {
   const { container } = render(
     <>
-      <Spinner label="Loading runs" />
+      <Spinner label="Loading sessions" />
       <Skeleton />
     </>,
   )
-  expect(screen.getByRole('status', { name: 'Loading runs' }).getAttribute('class')).toContain('motion-reduce:animate-none')
+  expect(screen.getByRole('status', { name: 'Loading sessions' }).getAttribute('class')).toContain('motion-reduce:animate-none')
   expect(container.querySelector('[data-slot="skeleton"]')?.className).toContain('motion-reduce:after:hidden')
 })
 
 test('the small text primitives render their elements', () => {
   render(
     <>
-      <EmptyState title="No runs yet" action={<Button>New run</Button>}>
-        Runs you launch appear here.
+      <EmptyState title="No sessions yet" action={<Button>New session</Button>}>
+        Sessions you launch appear here.
       </EmptyState>
       <SectionLabel as="h2">Recent</SectionLabel>
       <Kbd>K</Kbd>
@@ -181,7 +181,7 @@ test('the small text primitives render their elements', () => {
       <Separator decorative={false} />
     </>,
   )
-  expect(screen.getByRole('heading', { name: 'No runs yet' })).toBeDefined()
+  expect(screen.getByRole('heading', { name: 'No sessions yet' })).toBeDefined()
   expect(screen.getByRole('heading', { level: 2, name: 'Recent' }).className).toContain('text-ui-sm')
   expect(screen.getByText('K').tagName).toBe('KBD')
   expect(screen.getByText('main').tagName).toBe('CODE')

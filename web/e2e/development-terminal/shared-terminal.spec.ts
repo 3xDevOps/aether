@@ -24,12 +24,12 @@ while :; do sleep 1; done`
 async function openDock(page: Page, url: string): Promise<Locator> {
   await page.goto(url)
   const sidebar = page.getByRole('button', { name: /^Open sidebar/ })
-  await expect(sidebar.or(page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }))).toBeVisible()
+  await expect(sidebar.or(page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }))).toBeVisible()
   if (await sidebar.isVisible()) {
     await sidebar.click()
     await page.getByRole('dialog', { name: 'Aether' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   } else {
-    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   }
   await showShell(page, /agent-tui/)
   const dock = page.locator('[data-slot=shell-terminal]')
@@ -55,7 +55,7 @@ async function terminalActions(page: Page, dock: Locator): Promise<Locator> {
   return page.getByRole('menu')
 }
 
-test.skip(!dockerReachable(), 'requires a real Docker daemon and run container')
+test.skip(!dockerReachable(), 'requires a real Docker daemon and session container')
 
 test('agent-created TUI shares authority, geometry, protocol responses, limits and process lifetime', async ({ page, browser, aether }, testInfo) => {
   const alice = await aether.member('alice')
@@ -195,7 +195,7 @@ test('agent-created TUI shares authority, geometry, protocol responses, limits a
   await expect.poll(async () => (await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)?.process.state).not.toBe('running')
   // A stopped shell does not come back as a tab.
   await page.reload()
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   const tabs = page.getByRole('main').getByRole('tablist', { name: 'Terminals' })
   await expect(tabs.getByRole('tab', { name: 'after-stop' })).toBeVisible()
   await expect(tabs.getByRole('tab', { name: /agent-tui/ })).toHaveCount(0)

@@ -1,16 +1,16 @@
 # Terminals
 
-Aether shows three kinds of terminal in the dashboard. A run is one agent
+Aether shows three kinds of terminal in the dashboard. A session is one agent
 working on one task in its own container; other terms are in the
 [glossary](README.md#concepts).
 
 | Terminal | What it is |
 | --- | --- |
 | **Environment** | Your own persistent shell on the server, with your home mounted at `$HOME` ([environments.md](environments.md)) |
-| A run's **Terminal** view | The agent's own terminal in a Standard run |
-| Run shells | Extra shells in a run's container |
+| A session's **Terminal** view | The agent's own terminal in a Standard session |
+| Session shells | Extra shells in a session's container |
 
-You can also reach a run over SSH from your own editor.
+You can also reach a session over SSH from your own editor.
 
 ## Open your environment
 
@@ -54,20 +54,20 @@ output:
 
 | Limit | Error |
 | --- | --- |
-| 10 minutes. The command and its children are killed. | `aether: rpc error -32603: terminal exec: the command passed the 10m0s time limit` |
+| 10 minutes. The command and its subsessions are killed. | `aether: rpc error -32603: terminal exec: the command passed the 10m0s time limit` |
 | 1 MiB of stdout and stderr together. The command may keep running. Redirect long output to a file. | `aether: rpc error -32603: terminal exec: exec output: output passed the 1048576 byte limit` |
 
 Output is returned as text. Bytes that are not valid UTF-8 arrive as U+FFFD.
 Interrupting `aether` does not stop the command.
 
-## Run control
+## Session control
 
-Open a run from the sidebar, the board or the palette and pick **Terminal** in
-the view switch (`[` and `]` cycle the views). A Standard run opens on it. The
-**Session** view lists messages, notes and tool calls, and while the agent works
+Open a session from the sidebar, the board or the palette and pick **Terminal** in
+the view switch (`[` and `]` cycle the views). A Standard session opens on it. The
+**Chat** view lists messages, notes and tool calls, and while the agent works
 it shows what the agent is doing with **Open terminal**.
 
-An [Enhanced run](enhanced-runs.md) has no agent terminal. Its Terminal view
+An [Enhanced session](enhanced-sessions.md) has no agent terminal. Its Terminal view
 says **No agent terminal** and offers run shells.
 
 ```mermaid
@@ -78,8 +78,8 @@ flowchart LR
     ask --> ctl
 ```
 
-Only one session controls a run's agent terminal at a time. You need permission
-to steer the run ([roles](teams.md#roles)) to take it. Viewing a run, or owning
+Only one client controls a session's agent terminal at a time. You need permission
+to steer the session ([roles](teams.md#roles)) to take it. Viewing a session, or owning
 it, does not give you input.
 
 - On a desktop, the owner's terminal takes control automatically when the
@@ -88,14 +88,14 @@ it, does not give you input.
   to type, and **Release** to go back to watching.
 - A second tab of your own is a different session, not a second writer. The
   toolbar reads **You control in another session since <time>**.
-- `aether attach <run>` asks for control. `aether attach --read-only <run>`
+- `aether attach <session>` asks for control. `aether attach --read-only <session>`
   only watches.
 
-To take an occupied run, hold **Take control** for three seconds (pointer,
+To take an occupied session, hold **Take control** for three seconds (pointer,
 touch, Space or Enter). Releasing early, moving off the button or pressing
 Escape cancels. The holder gets a dialog naming you. **Deny** keeps control and
 **Accept** hands it over. With no answer, control transfers after seven
-seconds. A plain click on an occupied run reports `run control is held by
+seconds. A plain click on an occupied session reports `session control is held by
 another session`.
 
 ![The holder's takeover dialog with Deny focused](media/terminal-takeover-dialog.webp)
@@ -103,38 +103,38 @@ another session`.
 If a controller disconnects, its lease is held for 15 seconds. Only the same
 tab can reclaim it in that time. After that, anyone with permission can take it.
 
-The run owner or an admin can turn on protection. It immediately removes the
+The session owner or an admin can turn on protection. It immediately removes the
 current controller and cancels every queued message. While protected, other
-members cannot message the run.
+members cannot message the session.
 
-While you control a [child run](teams.md#child-runs), mail from its parent waits
-and shows as `held`; it is delivered when you **Release** or leave the run
+While you control a [subsession](teams.md#subsessions), mail from its parent waits
+and shows as `held`; it is delivered when you **Release** or leave the session
 page, or when the lease lapses 15 seconds after the tab is killed. See
-[coordination.md](coordination.md#child-runs).
+[coordination.md](coordination.md#subsessions).
 
 ### The Terminal toolbar
 
 The toolbar shows who controls the agent terminal (**You control**, **Alice
 controls**, **Nobody controls**) with **Take control** or **Release**. A name
 marked **(last known)** is stale. The connection word (**Connecting**,
-**Reconnecting**, **Offline**) shows while the attach is down. A finished run
+**Reconnecting**, **Offline**) shows while the attach is down. A finished session
 reads **Container removed · read-only**, or **Container stopped · read-only**
 when the container is kept. Without permission to steer, the line under the
-toolbar reads **You can watch this run but not type in it.**
+toolbar reads **You can watch this session but not type in it.**
 
 The **Tools** menu has **Find**, **Smaller text**, **Larger text**, **Reset
 text size**, **Copy selection**, **Copy screen**, **Paste** and **Upload
-image…**. Runs add **Captures…**. **Copy screen** copies the visible rows, which
+image…**. Sessions add **Captures…**. **Copy screen** copies the visible rows, which
 is how to copy on a touch screen.
 
 ### Messages and notes
 
-Talk to the agent in the **Session** view's composer. Press **Enter** or
+Talk to the agent in the **Chat** view's composer. Press **Enter** or
 **Send**, and **Shift+Enter** for a newline. **Attach files** (**+**) adds up to
 eight files per message.
 
 - A message from the current controller reaches the agent's terminal at once
-  (**Sends to the agent's terminal.**). The owner of an uncontrolled run takes
+  (**Sends to the agent's terminal.**). The owner of an uncontrolled session takes
   the lease first, then sends. A message you send without the lease, from the
   assistant, `aether message` or a connector, also arrives at once while you
   are the controller.
@@ -152,26 +152,26 @@ eight files per message.
   ([Codex](harnesses.md#codex)). **Sent** then means Codex accepted it.
 - **Send to agent** in the **Changes** view sends your diff comments as one such
   message.
-- `aether message <run-id> "<text>"` (or `-` for stdin) prints the receipt:
+- `aether message <session-id> "<text>"` (or `-` for stdin) prints the receipt:
   `delivered`, `queued for the member in control` with when it is delivered,
   or the denial reason.
-- If you cannot message the agent, the composer says why: **This run has
-  finished.**, **The agent is still starting.**, **This run is protected: only
-  its owner or an admin can message the agent.** or **You can watch this run but
+- If you cannot message the agent, the composer says why: **This session has
+  finished.**, **The agent is still starting.**, **This session is protected: only
+  its owner or an admin can message the agent.** or **You can watch this session but
   not message the agent.**
 
-A reported outcome leaves an interactive run open, so send a follow-up or type
+A reported outcome leaves an interactive session open, so send a follow-up or type
 into its terminal. **Close** ends the session. Notes are for people only: the
 agent never sees them. Add one under **Details → Add a note for people on this
-run**.
+session**.
 
 Attachments (images up to 8 MiB, other files up to 64 MiB, eight per message)
 are stored under `$HOME/.aether/terminal-images/` and
 `$HOME/.aether/terminal-files/`, and the agent receives their path.
 
-## Run shells
+## Session shells
 
-A run shell is an extra shell in the run's container, started by a person or by
+A session shell is an extra shell in the session's container, started by a person or by
 the agent. **+ Shell** in the Terminal toolbar opens one as a tab after
 **Agent** and gives you control. Shells are named **Shell 1**, **Shell 2** and
 keep their number until they end. A shell the agent started carries the agent's
@@ -182,11 +182,11 @@ once. At the limit, **+ Shell** is dimmed and reads **At most 4 shells**, and
 the server refuses with:
 
 ```
-shell limit reached: people have 4 shells running in this run; stop one to start another
+shell limit reached: people have 4 shells running in this session; stop one to start another
 ```
 
-Shells open only in a running or needs-attention run that is not paused.
-Otherwise you see **You can view this run but not open a shell in it**.
+Shells open only in a running or needs-attention session that is not paused.
+Otherwise you see **You can view this session but not open a shell in it**.
 
 ### Who can type in a shell
 
@@ -216,7 +216,7 @@ under the toolbar.
 
 ## SSH and editors
 
-A live run is also an SSH host. Run this once on your computer:
+A live session is also an SSH host. Run this once on your computer:
 
 ```sh
 aether ssh-config
@@ -225,28 +225,28 @@ aether ssh-config
 ```
 wrote /home/you/.ssh/aether_config
 added an Include line for it at the top of /home/you/.ssh/config
-ssh <run-id>.aether now opens a shell in that run. scp, sftp, rsync and editors take the same host name.
+ssh <session-id>.aether now opens a shell in that session. scp, sftp, rsync and editors take the same host name.
 ```
 
 `~/.ssh/aether_config` holds one block that the command rewrites each time. It
 names the `aether` binary by path, so run it again after moving the binary. The
 only change to `~/.ssh/config` is an `Include` line at the top. The host name
-is the run id plus `.aether`, for example `run-gejd5cbk74.aether`. It reaches
+is the session id plus `.aether`, for example `run-gejd5cbk74.aether`. It reaches
 the server your CLI is linked to. Without the config, `aether ssh [ssh options]
-<run-id> [command]` takes the same options.
+<session-id> [command]` takes the same options.
 
 > [!WARNING]
 > Use OpenSSH 9.6 or later, or a build patched for CVE-2023-51385 (`ssh -V`
 > prints the version). Older builds run a crafted `*.aether` host name from a
 > link or submodule URL as a command on your computer. See
-> [security.md](security.md#ssh-into-a-run).
+> [security.md](security.md#ssh-into-a-session).
 
-| You run | In the run's container |
+| You run | In the session's container |
 | --- | --- |
 | `ssh <host>` | A login shell in `/workspace` |
 | `ssh <host> <command>` | The command through `bash -c` (or `sh -c`), output and exit status unchanged |
 | `scp`, `sftp` | Aether's own SFTP server. Relative paths are in the checkout. |
-| `ssh -L`, `-D`, `-W` | A port on the run's own loopback (`localhost`, `127.0.0.1`, `::1`) only |
+| `ssh -L`, `-D`, `-W` | A port on the session's own loopback (`localhost`, `127.0.0.1`, `::1`) only |
 
 `scp -O` and `rsync` run those programs inside the container. The standard
 image has `scp` and no `rsync`. Agent, X11 and remote (`-R`) forwarding are
@@ -254,36 +254,36 @@ refused.
 
 A session's processes end with it. When the command exits or the connection
 drops, everything it started is stopped, including background processes. Start
-long-lived work from a run shell or through the agent. Pausing the run freezes
-its SSH sessions, and new sessions are refused until it resumes.
+long-lived work from a session shell or through the agent. Pausing the session freezes
+its SSH connections, and new sessions are refused until it resumes.
 
-One run takes 16 SSH connections, at most 8 from one member. One connection
+One session takes 16 SSH connections, at most 8 from one member. One connection
 takes 10 sessions and 64 forwarded connections.
 
 ### Editors
 
-**Open in editor…** in a live run's **More** menu has a button per editor. It is
-not offered on a phone or for a finished run.
+**Open in editor…** in a live session's **More** menu has a button per editor. It is
+not offered on a phone or for a finished session.
 
 | Editor | Connect from the editor |
 | --- | --- |
 | VS Code (Remote - SSH) | **Remote-SSH: Connect to Host…**, then `<run-id>.aether` |
 | Cursor | **Remote-SSH: Connect to Host…**, then `<run-id>.aether` |
-| Zed | **Connect New Server**, then `ssh <run-id>.aether` |
+| Zed | **Connect New Server**, then `ssh <session-id>.aether` |
 
 The editor installs its own server in the container on first connection, so the
-run needs a glibc Linux image (the standard image is one; Alpine is not),
+session needs a glibc Linux image (the standard image is one; Alpine is not),
 outbound network, and a writable home. The server (`~/.vscode-server`,
 `~/.cursor-server`, `~/.zed_server`) lands in the launcher's home and is reused
-by later runs. A teammate who attaches installs theirs in your home. If the
+by later sessions. A teammate who attaches installs theirs in your home. If the
 connection drops, the editor restarts its server on reconnect, and processes in
 its own terminals are gone.
 
 ### Who can connect
 
-You can connect if you may open a writable shell in the run: you may steer it,
-you own or were given the run's agent account
-([security.md](security.md#account-sharing)), and the run is running or needs
+You can connect if you may open a writable shell in the session: you may steer it,
+you own or were given the session's agent account
+([security.md](security.md#account-sharing)), and the session is running or needs
 attention and is not paused. The server rechecks every three seconds and closes
 the connection when that stops being true. **Activity** shows **Connected over
 SSH** beside your avatar.
@@ -293,16 +293,16 @@ by UNKNOWN port 65535`:
 
 | Message | What to do |
 | --- | --- |
-| `aether: ssh into <run-id>: run not found` | Check the id and the server you are linked to. |
-| `... permission denied: run is protected: only its owner or an admin may steer` | Ask the owner or an admin. |
-| `... permission denied: member <member-id> has not shared their account with you` | The run uses that member's agent account. |
-| `... scheduler: the run has no live environment: the run is paused` | Resume the run. A finished run says its container is gone. |
-| `... you already have 8 SSH connections open to run <run-id>, the most one member takes` | Close one of yours. |
-| `... run <run-id> already has 16 SSH connections open, the most one run takes` | Close one, or ask a teammate to. |
-| `aether: "<host>" does not name a run: a run id holds only lowercase letters, digits and hyphens` | Use `<run-id>.aether`. |
-| `start the port forwarding relay: the helper exited 125: dev-exec: expected ...` | The run was created before this server version. Launch a new run. |
+| `aether: ssh into <session-id>: session not found` | Check the id and the server you are linked to. |
+| `... permission denied: session is protected: only its owner or an admin may steer` | Ask the owner or an admin. |
+| `... permission denied: member <member-id> has not shared their account with you` | The session uses that member's agent account. |
+| `... scheduler: the session has no live environment: the session is paused` | Resume the session. A finished session says its container is gone. |
+| `... you already have 8 SSH connections open to session <session-id>, the most one member takes` | Close one of yours. |
+| `... session <session-id> already has 16 SSH connections open, the most one session takes` | Close one, or ask a teammate to. |
+| `aether: "<host>" does not name a session: a session id holds only lowercase letters, digits and hyphens` | Use `<run-id>.aether`. |
+| `start the port forwarding relay: the helper exited 125: dev-exec: expected ...` | The session was created before this server version. Launch a new session. |
 | `aether: not linked; run aether link <host:port>, or aether login and then aether link --claim <code>` | Link this computer first. |
-| `ssh: Could not resolve hostname <run-id>.aether` | Run `aether ssh-config`. |
+| `ssh: Could not resolve hostname <session-id>.aether` | Run `aether ssh-config`. |
 
 ## Sign in to agents and set up GitHub
 
@@ -318,7 +318,7 @@ terminal on your computer: the environment has no `aether` command. Device-code
 logins, `gh auth login --web` among them, need no forward.
 
 Install tools in the environment, then **Save environment** (or `aether env
-save`) so new runs get them. See
+save`) so new sessions get them. See
 [environments.md](environments.md#save-the-environment).
 
 ## Keys and touch screens
@@ -335,7 +335,7 @@ These work in every terminal Aether draws, when it has focus:
 
 On a touch screen, a key bar below the terminal has **Ctrl**, **Esc**, **Tab**,
 the arrows, **Enter** and **Ctrl+C**. **Ctrl** applies to the next key only:
-tap **Ctrl**, then `d` sends `Ctrl+D`. A phone opens every run as a read-only
+tap **Ctrl**, then `d` sends `Ctrl+D`. A phone opens every session as a read-only
 mirror, so tap **Take control** before the keyboard can send input. Phones keep
 the session's size: swipe to reach parts of a larger grid.
 
@@ -353,7 +353,7 @@ cannot read your local disk, so choose the file in the chooser instead.
 Failures read **Upload failed:** or **Pasting image failed:** with the detail.
 
 **Upload image…** is disabled while the terminal is a read-only mirror,
-connecting, reconnecting or offline, or the run is starting. Take control first.
+connecting, reconnecting or offline, or the session is starting. Take control first.
 
 To delete an uploaded file, use the exact generated name and no wildcard:
 
@@ -367,18 +367,18 @@ automatically.
 
 ## Scrollback and history
 
-Scroll up in a run terminal to read older output in the same pane (`PageUp`,
+Scroll up in a session terminal to read older output in the same pane (`PageUp`,
 `Home`, or `Shift+PageUp` inside a full-screen app). Arrows, `PageUp`, `PageDown`
 and `Home` navigate while reading. Scroll to the bottom or press `End` to
 return to live output. While reading, typing and paste are off and Find searches
 the pages loaded so far. Older pages are recorded text, not the original screen
 layout, so some lines can appear on both sides of the boundary.
 
-The server keeps a run's terminal recording until you delete the run or
+The server keeps a session's terminal recording until you delete the session or
 terminal. Closing the container, reclaiming the checkout and archiving do not
 remove it. If earlier output has expired, history is marked truncated and
-cannot be recovered. `aether logs <run-id> [--limit N]` prints the recorded
-terminal lines as plain text, and an Enhanced run's messages and tool calls,
+cannot be recovered. `aether logs <session-id> [--limit N]` prints the recorded
+terminal lines as plain text, and an Enhanced session's messages and tool calls,
 one line each. `aether attach` is a raw stream that replays retained
 output and discards keystrokes typed before the replay finishes.
 
@@ -386,16 +386,16 @@ output and discards keystrokes typed before the replay finishes.
 
 The terminal reconnects and restores its output when the page or network comes
 back. If it cannot continue where the screen left off, you get the current
-screen instead. A finished run opens from its final screen and stays read-only
-unless you reopen the run.
+screen instead. A finished session opens from its final screen and stays read-only
+unless you reopen the session.
 
 The environment container survives a server restart or update, and unsaved
-changes stay. A run keeps the Aether helper it was created with, so SSH
-features added by a later server need a new run.
+changes stay. A session keeps the Aether helper it was created with, so SSH
+features added by a later server need a new session.
 
 ## Limits
 
-- Six environment tabs, and four people's plus four agent shells per run.
+- Six environment tabs, and four people's plus four agent shells per session.
 - `aether terminal exec`: 10 minutes and 1 MiB of output.
-- SSH: 16 connections per run, 8 per member.
+- SSH: 16 connections per session, 8 per member.
 - Images up to 8 MiB, other message files up to 64 MiB, eight per message.

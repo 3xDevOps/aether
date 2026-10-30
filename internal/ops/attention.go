@@ -77,17 +77,17 @@ func attentionRowOf(it protocol.AttentionItem, l links) attentionRow {
 }
 
 func answerWith(it protocol.AttentionItem) string {
-	const dashboard = "the run in the Aether dashboard"
+	const dashboard = "the session in the Aether dashboard"
 	switch it.Kind {
 	case protocol.AttentionKindPermission:
 		if it.Request != nil && len(it.Request.Options) > 0 {
 			return "aether_decide_approval"
 		}
-		return "the run's terminal in the Aether dashboard"
+		return "the session's terminal in the Aether dashboard"
 	case protocol.AttentionKindQuestion:
 		switch {
 		case it.Request == nil || len(it.Request.Options) == 0:
-			return "the run's terminal in the Aether dashboard"
+			return "the session's terminal in the Aether dashboard"
 		case it.Request.URL != "":
 			return "open untrusted.link_url, then aether_answer with an option"
 		}
@@ -98,11 +98,11 @@ func answerWith(it protocol.AttentionItem) string {
 		}
 		return dashboard
 	case protocol.AttentionKindNeedsInput, protocol.AttentionKindBlocked:
-		return "aether_message_run"
+		return "aether_message_session"
 	case protocol.AttentionKindReady:
-		return "aether_pr_status, then aether_mark_reviewed or aether_stop_run with outcome"
+		return "aether_pr_status, then aether_mark_reviewed or aether_stop_session with outcome"
 	case protocol.AttentionKindFailed:
-		return "aether_get_run, then aether_message_run or aether_stop_run with outcome"
+		return "aether_get_session, then aether_message_session or aether_stop_session with outcome"
 	}
 	return dashboard
 }

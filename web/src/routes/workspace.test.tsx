@@ -26,15 +26,15 @@ describe('repository page', () => {
 
     expect(within(screen.getByRole('region', { name: 'Base branch' })).getByText('main')).toBeDefined()
     expect(await screen.findByText(/Local-only workspace/)).toBeDefined()
-    expect(screen.getByText('$0.50 spent of $5.00, warns at $4.00: within budget. It never stops a run.')).toBeDefined()
-    expect(screen.getByText('Only admins may message runs started by other members.')).toBeDefined()
+    expect(screen.getByText('$0.50 spent of $5.00, warns at $4.00: within budget. It never stops a session.')).toBeDefined()
+    expect(screen.getByText('Only admins may message sessions started by other members.')).toBeDefined()
   })
 
   it('opens the budget dialog for an admin', async () => {
     seed()
     render(<WorkspaceView params={{ workspaceId: workspace.id }} client={fakeApi()} />)
 
-    expect(screen.getByText('No budget set. A budget warns and reports; it never stops a run.')).toBeDefined()
+    expect(screen.getByText('No budget set. A budget warns and reports; it never stops a session.')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Set budget…' }))
     expect(await screen.findByRole('dialog', { name: 'Workspace budget' })).toBeDefined()
   })
@@ -45,7 +45,7 @@ describe('repository page', () => {
 
     expect(screen.queryByRole('button', { name: 'Set budget…' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Change…' })).toBeNull()
-    expect(screen.getByText('Any member who can message runs may also message runs started by others.')).toBeDefined()
+    expect(screen.getByText('Any member who can message sessions may also message sessions started by others.')).toBeDefined()
     const environment = within(screen.getByRole('region', { name: 'Environment' }))
     expect(await environment.findByText('Only an admin can change this.')).toBeDefined()
     expect(environment.queryByRole('button', { name: 'Save' })).toBeNull()

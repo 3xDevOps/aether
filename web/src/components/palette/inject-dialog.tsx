@@ -76,7 +76,7 @@ export function InjectDialog() {
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Send a message to the agent</DialogTitle>
           <DialogDescription>
-            {run ? runLabel(run) : 'The message lands in the run transcript, attributed to you.'}
+            {run ? runLabel(run) : 'The message lands in the session transcript, attributed to you.'}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -102,7 +102,7 @@ export function InjectDialog() {
             }}
           />
           <p id="inject-help" className="text-ui-sm leading-4 text-muted">
-            This message is added to the run transcript and delivered to the agent.
+            This message is added to the session transcript and delivered to the agent.
           </p>
           {error && (
             <p role="alert" className="break-words text-ui-sm text-state-failed">

@@ -233,7 +233,7 @@ func TestMalformedAndUnknownTrafficUsesOrdinaryBudget(t *testing.T) {
 			}
 			other := h.dial(t, h.run(1))
 			if err := other.Call(protocol.MethodCoordStatus, nil, nil); err != nil {
-				t.Fatalf("invalid traffic consumed another run's budget: %v", err)
+				t.Fatalf("invalid traffic consumed another session's budget: %v", err)
 			}
 			if _, err := fmt.Fprintln(conn, `{"jsonrpc":"1.0","id":2,"method":"coord.hook.status"}`); err != nil {
 				t.Fatal(err)
@@ -283,7 +283,7 @@ func TestHookStatusBudgetIsPerRunAndReleased(t *testing.T) {
 		t.Fatalf("exhausted hook budget: %v, want temporary unavailability", err)
 	}
 	if err := h.dial(t, b).Call(protocol.MethodCoordHookStatus, nil, nil); err != nil {
-		t.Fatalf("another run's hook budget: %v", err)
+		t.Fatalf("another session's hook budget: %v", err)
 	}
 	if err := h.svc.Release(a); err != nil {
 		t.Fatal(err)

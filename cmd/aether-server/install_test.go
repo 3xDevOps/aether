@@ -39,7 +39,7 @@ func TestWriteInstallWarnsAndContinuesWithoutDocker(t *testing.T) {
 				}
 			}
 			warned := strings.HasPrefix(out.String(), "Docker does not answer: "+dockerDown+"\n") &&
-				strings.Contains(out.String(), "\nSkipping Docker inside runs (Sysbox), which needs Docker; once Docker answers: sudo aether-server sysbox install\n")
+				strings.Contains(out.String(), "\nSkipping Docker inside sessions (Sysbox), which needs Docker; once Docker answers: sudo aether-server sysbox install\n")
 			if warned != (tc.err != nil) || *installs != tc.installs || !strings.HasPrefix(nextSteps(t, out.String()), tc.first) {
 				t.Errorf("warned = %v, Sysbox installs = %d, want %d and next steps starting %q:\n%s", warned, *installs, tc.installs, tc.first, out.String())
 			}

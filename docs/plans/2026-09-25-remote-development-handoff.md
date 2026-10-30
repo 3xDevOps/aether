@@ -13,7 +13,7 @@ on the PR and release.
 | --- | --- |
 | Identity and control | One authenticated run socket exposes live development capabilities independently of conflict coordination. Terminal and browser leases are per surface; primary harness control and mission holds remain separate. |
 | Terminals | Owned process groups, authoritative shared tabs, output cursors, structured xterm-go screens, terminal protocol responses, mode-aware input, resize, wait, explicit stop, and PNG capture. Hiding a tab detaches without stopping it. |
-| Browser | On-demand non-root Chromium companion with a private Unix transport, the run's network namespace, explicit sandbox enforcement, bounded resources, DOM actions, screenshots, and shared interactive dashboard frames. No host display server or published debugging port. |
+| Browser | On-demand non-root Chromium companion with a private Unix transport, the session's network namespace, explicit sandbox enforcement, bounded resources, DOM actions, screenshots, and shared interactive dashboard frames. No host display server or published debugging port. |
 | Dashboard | Browser navigation, pages/popups, desktop/phone viewports, keyboard/pointer/touch/composition input, control takeover/release, reconnect, and the existing shared terminal dock. |
 | Git and GitHub | Administrator import without a local clone; native run-account Git/gh status, selected-path commits, explicit push repository and PR head/base, partial success, exact existing-PR discovery, uncertain-create reconciliation, and selected feedback sent to Run Room. |
 | Evidence | Explicit capture retention in existing evidence packets, known revision/dirty boundaries, bounded capture storage, authorized streaming, image presentation, and expired/unavailable states. No automatic public screenshot attachment. |
@@ -65,8 +65,8 @@ on the PR and release.
 - Genuine OpenCode completed the same CLI/web/TUI loop on the terminal-budget
   companion. All three native image-read attachments match the retained PNG
   bytes; its terminal screenshot succeeded once in 18.167 seconds. Earlier
-  timeout and vendor-crash attempts are not counted as this successful run.
-- After both headless runs completed, the actual dashboard displayed their
+  timeout and vendor-crash attempts are not counted as this successful session.
+- After both headless sessions completed, the actual dashboard displayed their
   retained desktop, phone, and terminal images with capture/revision boundaries.
 - Those earlier web loops used SSE notifications and cache-busted ES-module
   imports, not a framework HMR server. The automated mobile fixture also uses
@@ -131,7 +131,7 @@ on the PR and release.
 
 - Actual hosted HTTPS and Tailscale WhoIs worked through ordinary untagged
   devices, without a browser bearer token, local gateway or client checkout.
-  Native OpenCode built the synthetic app in the run. Hosted interaction
+  Native OpenCode built the synthetic app in the session. Hosted interaction
   exercised invalid credentials with a fresh HTTP 401 and visible error,
   normalized valid sign-in, saved Unicode text and sign-out.
 - The initial hosted app polled heading configuration; that was not counted as
@@ -156,7 +156,7 @@ on the PR and release.
   The accepted workspace base did not change. No client clone was involved.
   The fixture PR was closed after acceptance.
 - A separately imported workspace ran genuine OMP 18.3.2 headlessly against
-  that Vite app. `npm ci` and the run exited 0. Native terminal output recorded
+  that Vite app. `npm ci` and the session exited 0. Native terminal output recorded
   Vite's `hmr update /app.js` after a one-line dependency edit. Authentication,
   saved/unsaved Unicode notes, session/page/revision, app PID/start time and
   terminal incarnation stayed unchanged. Invalid login and final logout were

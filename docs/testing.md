@@ -3,7 +3,7 @@
 Which tests to run for a change, how to run each suite, what it needs, and
 how to read a failure. Build the tree first
 ([Build from source](../CONTRIBUTING.md#build-from-source)); the checks every
-pull request runs are in
+pull request sessions are in
 [Test your change](../CONTRIBUTING.md#test-your-change).
 
 ## Which suite to run
@@ -17,7 +17,7 @@ pull request runs are in
 | `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3 |
 | `.github/workflows/` | `make lint-workflows` | ShellCheck |
 | How an agent CLI is launched (`internal/harness`) | [Real-agent smoke tests](#real-agent-smoke-tests) | Docker |
-| How a run drives, reads or wakes its agent | [Real agents against a mock model](#real-agents-against-a-mock-model) | Docker, git |
+| How a session drives, reads or wakes its agent | [Real agents against a mock model](#real-agents-against-a-mock-model) | Docker, git |
 | The assistant's instructions or tools (`internal/assistant/instructions.md`, `internal/ops`) | [Assistant eval](#assistant-eval) | Claude Code signed in, spends tokens |
 | Native hook adapters (the `.mjs` files in `internal/coordhooks` and `internal/agentstatus`) | `make test-native-hooks` | Node 22.13+ |
 | `cmd/aether-edge`, `internal/edge` | `go test -race ./internal/edge/edgetest/` | Go |
@@ -81,7 +81,7 @@ CI runs the suite as root. Run it the same way to match:
 sudo env "PATH=$PATH" "HOME=$HOME" make test-integration INTEGRATION_PKGS=./internal/scheduler
 ```
 
-Without `sudo`, run containers use your uid, because the scheduler hands the
+Without `sudo`, session containers use your uid, because the scheduler hands the
 checkout to the container user and an unprivileged process can only hand
 files to itself.
 
@@ -110,7 +110,7 @@ Some tests take an image from the environment:
 | --- | --- | --- |
 | `AETHER_BROWSER_TEST_IMAGE` | `TestDockerBrowser*` and the server's browser scenarios | `aether/browser:test`, which `make browser-image` builds ([The browser companion](#the-browser-companion)) |
 | `AETHER_BROWSER_IMAGE` | The companion image a server under test starts | The build's default companion image |
-| `AETHER_NESTED_DOCKER_TEST_IMAGE` | `TestDockerNestedDocker` ([inside a run](#running-the-docker-suites-inside-a-run)) | The test skips |
+| `AETHER_NESTED_DOCKER_TEST_IMAGE` | `TestDockerNestedDocker` ([inside a session](#running-the-docker-suites-inside-a-session)) | The test skips |
 | `AETHER_ACP_IMAGE` | Enhanced-mode adapter tests ([Enhanced mode](#enhanced-mode)), `TestIntegrationAssistantIgnoresPlantedGatewayDocker` and `TestIntegrationAssistantIssuerMatchesTheBundledCLIs`, which install the assistant's adapters from the npm registry | The test skips, or uses busybox only |
 
 The resource tests check real cgroup limits, PID exhaustion and OOM
@@ -126,7 +126,7 @@ sudo env "PATH=$PATH" "HOME=$HOME" go test -race -tags=integration \
 ```
 
 Tests in `internal/runtime`, `internal/scheduler` and `internal/harness`
-label their containers `aether.test=<test name>`. After an interrupted run,
+label their containers `aether.test=<test name>`. After an interrupted session,
 `docker ps -a --filter label=aether.test` lists what was left behind.
 
 ## The E2E scenario suite
@@ -146,11 +146,11 @@ script committed to the test repository).
 | --- | --- |
 | `TestIntegrationEndToEnd` | One member: push, launch, attach, detach, steer, finish, pull |
 | `TestIntegrationMultiMember` | Joining, roles, handoff, budget caps, an agent crash |
-| `TestIntegrationChaos*` | The server killed mid-run, disk pressure, a stalled agent |
-| `TestIntegrationCoordination*` | Messages between runs |
+| `TestIntegrationChaos*` | The server killed mid-session, disk pressure, a stalled agent |
+| `TestIntegrationCoordination*` | Messages between sessions |
 | `TestIntegrationServerUpdate*` | `aether-server update`: preflight, rollback, downgrade guards |
 | `TestIntegrationServerGateway` | The dashboard the server hosts on the tailnet |
-| `TestIntegrationConnectorFlows` | A ChatGPT connector, over OAuth and MCP, launching, messaging, answering and stopping enhanced runs |
+| `TestIntegrationConnectorFlows` | A ChatGPT connector, over OAuth and MCP, launching, messaging, answering and stopping enhanced sessions |
 
 ```sh
 sudo env "PATH=$PATH" "HOME=$HOME" make test-integration \
@@ -161,15 +161,15 @@ sudo env "PATH=$PATH" "HOME=$HOME" make test-integration \
 
 `internal/harness/smoke_integration_test.go` starts the vendors' real agent
 CLIs to check that the command lines Aether builds are still accepted. A
-vendor renaming a flag breaks every run of that agent, and nothing else
+vendor renaming a flag breaks every session of that agent, and nothing else
 catches it.
 
 `TestSmokeHeadlessNoLogin` runs in CI. It launches each headless template
-with no credentials and passes when the run fails for want of a login, never
+with no credentials and passes when the session fails for want of a login, never
 for an unparseable command line. CI's `integration (server-flows, smoke)` job
 builds the standard image, adds the agent CLIs at their current versions with
 `images/smoke/Dockerfile`,
-and runs:
+and sessions:
 
 ```sh
 docker build -f images/standard/Dockerfile -t aether-standard:local .
@@ -193,7 +193,7 @@ point.
 
 ### Enhanced mode
 
-Enhanced runs drive the agent through an adapter that speaks the Agent
+Enhanced sessions drive the agent through an adapter that speaks the Agent
 Client Protocol (ACP). Most tests use `internal/acphost/acpmock`, which replays
 conversations recorded from the real adapters and answers prompts by their
 text (`ask permission`, `ask form`, `wait`, `hit the usage limit`, `demo`,
@@ -228,49 +228,49 @@ ACP_LIVE=1 go test -tags integration -run TestLiveEnhancedRunsWithoutPermissionP
 ## Real agents against a mock model
 
 `TestIntegrationRealAgents` (`internal/server/realagents_integration_test.go`)
-launches real Claude Code and Codex runs, Standard, Enhanced and Background,
+launches real Claude Code and Codex sessions, Standard, Enhanced and Background,
 on real Docker, and checks that each report an agent makes, or fails to make,
-leaves the run in the state the dashboard shows. A mock model in the test
+leaves the session in the state the dashboard shows. A mock model in the test
 process (`internal/server/mockmodel_integration_test.go`) serves streaming
 Anthropic `/v1/messages` and OpenAI `/v1/responses`. Each prompt the test
 sends carries a tag, `aether-script:<turn>;`, naming the script the mock
 plays for that turn: one tool call per step, then a text answer. The mock
 answers each report reminder Aether sends with `aether-internal report`.
 
-One Standard and one Enhanced run per agent play these turns in order. The
+One Standard and one Enhanced session per agent play these turns in order. The
 launch starts `turn`, mail starts `wake`, and `run.inject` starts the rest:
 
-| Turn | The agent | The run must show |
+| Turn | The agent | The session must show |
 | --- | --- | --- |
 | `turn` | runs a command and ends the turn without a report | `answered` after one reminder; Standard Codex, which Aether cannot remind, `waiting` |
-| `wake` | gets mail while idle | a new turn, where Aether can wake the run |
+| `wake` | gets mail while idle | a new turn, where Aether can wake the session |
 | `waiting` | reports `waiting --for ci` | `waiting-ci` with the summary |
 | `answered` | reports `answered` | `answered`, not Needs you |
-| `late-report` | reports `waiting --for process` from a detached process five seconds later | the report landing after the run parked, then `waiting-tools` |
+| `late-report` | reports `waiting --for process` from a detached process five seconds later | the report landing after the session parked, then `waiting-tools` |
 | `compaction` | claims more tokens than its context holds, compacts, then reports | the reporting rules still in the next request, then `answered` |
 | `subagent` | starts a subagent that runs for eight seconds | not Needs you at any point while it runs, the subagent never reminded, then the turn ends like `turn` |
 | `needs-input` | reports `needs-input` | `needs-you`, Needs you |
 
-Each check also reads the run's `cause`, its report entries on the timeline,
+Each check also reads the session's `cause`, its report entries on the timeline,
 and whether the report's output reached the model. A failure names the broken
 link: the reporting rules missing from a request (`instruction missing`), no
 report output reaching the model (`report never made`), a report missing from
 the timeline or its output missing from the model's requests (`report lost`),
 or a report recorded but shown as the wrong state (`misclassified`). The
-first turn and every Background run also require the launch to record where
+first turn and every Background session also require the launch to record where
 its instructions went.
 
-The `wake` turn runs where Aether can wake the run: every Enhanced run, and a
-Standard run whose agent sets `IdleWake` in its capabilities
-(`internal/harness/capabilities.go`); the others skip it. A run must never
+The `wake` turn runs where Aether can wake the session: every Enhanced session, and a
+Standard session whose agent sets `IdleWake` in its capabilities
+(`internal/harness/capabilities.go`); the others skip it. A session must never
 need you while its subagent works. It should show `working`, or
 `waiting-agents` when Standard Claude Code ends the turn with the subagent
 still running in the background. Aether gets no
 signal for a Codex subagent, and Standard Claude Code's Stop hook can arrive
-without the subagent among its background tasks, so those runs can read as
+without the subagent among its background tasks, so those sessions can read as
 idle; the test logs their idle states as a known gap and fails any other.
 
-Two Background runs per agent check that a Background run is never reminded:
+Two Background sessions per agent check that a Background session is never reminded:
 one reports `success` and finishes awaiting review, the only Background state
 that needs you; the other has its `needs-input` report refused and finishes
 without a report.
@@ -278,13 +278,13 @@ without a report.
 `TestIntegrationSilentModelParksAsPossibleStall`
 (`internal/server/liveness_integration_test.go`) launches an Enhanced Claude
 Code run against a model that accepts every request and never answers. It
-requires the run to park as a possible stall awaiting its first event, and
+requires the session to park as a possible stall awaiting its first event, and
 never to read disconnected.
 
-Runs reach the mock the way they reach a [model
+Sessions reach the mock the way they reach a [model
 gateway](harnesses.md#per-agent-setup): `ANTHROPIC_BASE_URL` for Claude Code,
 `openai_base_url` in `~/.codex/config.toml` for Codex. The test seeds the
-member home with what a member's first runs leave there: onboarding, an
+member home with what a member's first sessions leave there: onboarding, an
 approved API key and a trusted checkout. The Codex config also sets
 `model_auto_compact_token_limit`, so the `compaction` turn's claimed usage
 makes Codex compact.
@@ -298,7 +298,7 @@ sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
 ```
 
 `AGENTS_BASE=aether-standard:local` builds on a standard image you built. A
-failure prints the broken link, the run's report entries, the agent's screen
+failure prints the broken link, the session's report entries, the agent's screen
 (Standard) or ACP history (Enhanced), and the final item of each request the
 mock received.
 
@@ -343,10 +343,10 @@ AETHER_ASSISTANT_EVAL_LABEL=main \
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `AETHER_ASSISTANT_EVAL_LABEL` | `unlabeled` | Names the output files; use the commit or branch under test |
-| `AETHER_ASSISTANT_EVAL_RUNS` | `3` | Runs per scenario |
+| `AETHER_ASSISTANT_EVAL_RUNS` | `3` | Sessions per scenario |
 | `AETHER_ASSISTANT_EVAL_MODEL` | Claude Code's default | Passed to `claude --model`; the report names the model the harness reports |
 | `AETHER_ASSISTANT_EVAL_ONLY` | all | Comma-separated scenario ids |
-| `AETHER_ASSISTANT_EVAL_PARALLEL` | `4` | Concurrent agent runs |
+| `AETHER_ASSISTANT_EVAL_PARALLEL` | `4` | Concurrent agent sessions |
 | `AETHER_ASSISTANT_EVAL_OUT` | `$TMPDIR/assistant-eval` | Where `<label>.md` and `<label>.json` go |
 
 The scenarios and their expected checks are in
@@ -363,11 +363,11 @@ question after a completed launch that offers to show or edit the brief is
 reported in its own column, not as unnecessary. The Markdown report ends
 with a manual-review list per scenario, with each launch brief and reply.
 
-The report has a row per scenario: runs passed, unnecessary questions, brief offers, launches
+The report has a row per scenario: sessions passed, unnecessary questions, brief offers, launches
 that should not have happened, dropped prohibitions, invented-scope keywords,
-tool calls and latency per run, and cost. Cost is the figure `claude` reports,
+tool calls and latency per session, and cost. Cost is the figure `claude` reports,
 and "not measured" when it reports none. Results are rewritten after every
-run, and each run's timeout is capped by the test's `-timeout`, so a run that
+session, and each session's timeout is capped by the test's `-timeout`, so a session that
 hits the limit still leaves a report.
 
 A scenario marked `pending: <tool>` needs a tool the registry does not offer
@@ -379,7 +379,7 @@ need an entry for each RPC method it calls; a missing one shows up as
 "is not available in this synthetic scenario" in the reply.
 
 Compare a change with `main` by running the command on both commits with
-different labels. Model output varies between runs, so a few runs per scenario
+different labels. Model output varies between sessions, so a few sessions per scenario
 shows a direction, not a proof. Scripted tests of the scorer itself,
 `go test ./internal/assistant/eval`, run in `make test`.
 
@@ -399,9 +399,9 @@ node --experimental-vm-modules --test --test-name-pattern='omp:' \
 skips those tests where `bun` is not installed.
 
 The fixtures do not prove a real model turn. To check one, start an isolated
-coordinated Standard run with the exact CLI, server and extension versions under
+coordinated Standard session with the exact CLI, server and extension versions under
 test, end a turn idle, send it one message with
-`aether-internal send --to <run> --body <nonce>`, and confirm exactly one new
+`aether-internal send --to <session> --body <nonce>`, and confirm exactly one new
 turn reads and acknowledges it. Never edit a live hook, credentials or trust
 settings to get there.
 
@@ -564,7 +564,7 @@ Each test gets its own stack:
 again on the same port and data directory, for specs about what survives a
 crash.
 
-Specs that open a real run need Docker and skip without it.
+Specs that open a real session need Docker and skip without it.
 `onboarding-github` and `remote-development-git/native.spec.ts` fail
 without Docker instead. Some specs need more:
 
@@ -594,11 +594,11 @@ sudo env "PATH=$PATH" "HOME=$HOME" \
   `cd web && bunx playwright show-report`. A failed test has the server's
   output attached.
 - `web/test-results/` holds traces and screenshots.
-- A failed test keeps its scratch directory, `/tmp/aether-e2e-*`. After a run
+- A failed test keeps its scratch directory, `/tmp/aether-e2e-*`. After a session
   as root it holds root-owned files; remove it with `sudo rm -rf`.
 - In CI each shard uploads `playwright-report-<shard>` and
   `playwright-results-<shard>` for seven days, on success and failure:
-  `gh run download <run-id> -n playwright-report-1`.
+  `gh run download <session-id> -n playwright-report-1`.
 
 A new onboarding wizard step is one class in `web/e2e/pages/wizard.ts`: give
 it the `aria-label` of the step's `<section>`, add its label to `stepNames`
@@ -606,7 +606,7 @@ in header order, and hang it off `OnboardingWizard`.
 
 ## The browser companion
 
-A run's Browser tab is a Chromium in its own container, the companion,
+A session's Browser tab is a Chromium in its own container, the companion,
 built from `images/browser/`. It needs no display, host browser or host
 browser libraries, but it does need a working kernel user-namespace and
 AppArmor policy on Ubuntu. A sandbox failure must fail the check: do not
@@ -677,10 +677,10 @@ the server". Nothing Aether builds or installs is excluded.
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request,
 every merge queue entry and every push to `main`.
 
-| Job | Runs | Locally |
+| Job | Sessions | Locally |
 | --- | --- | --- |
 | `audit` | `scripts/public-audit.sh` | `make public-audit` |
-| `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on `main` pushes and merge queue runs only | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
+| `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on `main` pushes and merge queue sessions only | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
 | `build-and-test` | Unit tests (`-race` on the merge queue and `main` only), then `make build` | `make test build` |
 | `integration (server-rest, browser)`, `integration (server-flows, smoke)`, `integration (scheduler, rest, agents)` | [Integration tests](#integration-tests), the [smoke tests](#real-agent-smoke-tests), [real agents against a mock model](#real-agents-against-a-mock-model) and [the browser companion](#the-browser-companion), on amd64 | See the table under Integration tests |
 | `arm64` | Standard and browser image builds, smoke tests and browser runtime tests on arm64; push to `main` and merge queue only | Same commands on an arm64 host |
@@ -737,14 +737,14 @@ gh workflow run edge-image.yml --ref <branch>
 gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
 ```
 
-To rerun only the failed jobs of a run: `gh run rerun <run-id> --failed`.
+To rerun only the failed jobs of a session: `gh run rerun <session-id> --failed`.
 
-## Running the Docker suites inside a run
+## Running the Docker suites inside a session
 
 You can work on Aether from inside an Aether run (an agent's container on an
 Aether server). Two things differ there.
 
-A run sets `AETHER_*` variables (`AETHER_RUN_ID`, `AETHER_HARNESS`,
+A session sets `AETHER_*` variables (`AETHER_RUN_ID`, `AETHER_HARNESS`,
 `AETHER_WORKSPACE_ID` and others) that some tests read. `internal/coordcli`
 fails with them set. Unset them for the test command:
 
@@ -752,8 +752,8 @@ fails with them set. Unset them for the test command:
 env $(env | grep -o '^AETHER_[A-Z_]*' | sed 's/^/-u /') make test
 ```
 
-The Docker suites need a Docker daemon inside the run. On a server with
-Sysbox ([environments.md](environments.md#docker-inside-runs)) each run and
+The Docker suites need a Docker daemon inside the session. On a server with
+Sysbox ([environments.md](environments.md#docker-inside-sessions)) each session and
 environment terminal has its own `dockerd`; check with `docker info`. Paths
 the tests bind-mount resolve because the daemon and the test share one
 filesystem, which is not true of the host's socket mounted into a container.
@@ -766,7 +766,7 @@ curl -fsSL https://bun.sh/install | bash # make test-e2e also needs Bun on PATH
 make test-e2e
 ```
 
-To check Docker inside runs on a Sysbox host, install Sysbox with
+To check Docker inside sessions on a Sysbox host, install Sysbox with
 `sudo sh scripts/install-sysbox.sh`, then:
 
 ```sh
@@ -778,7 +778,7 @@ sudo env "PATH=$PATH" "HOME=$HOME" \
 sudo sh scripts/nested-docker-smoke.sh aether-standard:ci
 ```
 
-`TestDockerNestedDocker` starts `dockerd` in a run container and runs a
+`TestDockerNestedDocker` starts `dockerd` in a session container and runs a
 container inside it; it skips unless `AETHER_NESTED_DOCKER_TEST_IMAGE` names
 an image that has `dockerd`. `scripts/nested-docker-smoke.sh` runs the
 resource limit tests against a nested daemon. It pulls `busybox` and Python

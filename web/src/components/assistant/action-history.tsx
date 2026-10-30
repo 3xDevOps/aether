@@ -14,7 +14,7 @@ import { loadOlderAssistant } from '@/store/assistant-stream'
 import type { AcpSession } from '@/store/sessions'
 
 const opensWord: Record<ActionTarget['kind'], string> = {
-  run: 'opens the run',
+  run: 'opens the session',
   pr: 'opens the pull request',
   workspace: 'opens the workspace',
   environment: 'opens the environment',
