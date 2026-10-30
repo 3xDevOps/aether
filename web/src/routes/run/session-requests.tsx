@@ -33,7 +33,7 @@ export function AnsweredText({ request, command }: { request: SessionRequest; co
     <>
       <span className="font-medium">{answerWord(request)}</span>
       {' · '}
-      {command ? <>session <Code>{command}</Code></> : request.title}
+      {command ? <>run <Code>{command}</Code></> : request.title}
     </>
   )
 }

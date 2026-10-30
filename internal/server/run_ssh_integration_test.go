@@ -336,7 +336,7 @@ echo 'f00dfeed: end'
 	if err = ctrl.Call(protocol.MethodRunPause, protocol.RunIDParams{RunID: run.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, stderr, code = ada.run("", "ssh", host, "true"); code != 255 || !strings.Contains(stderr, "the run is paused") {
+	if _, stderr, code = ada.run("", "ssh", host, "true"); code != 255 || !strings.Contains(stderr, "the session is paused") {
 		t.Fatalf("paused run = status %d stderr %q", code, stderr)
 	}
 	time.Sleep(4 * time.Second)
@@ -367,7 +367,7 @@ echo 'f00dfeed: end'
 	if err = server.srv.sched.CloseRun(ctx, id, e.ada.id, domain.RunAbandoned); err != nil {
 		t.Fatal(err)
 	}
-	if _, stderr, code = ada.run("", "ssh", host, "true"); code != 255 || !strings.Contains(stderr, "the run is abandoned") {
+	if _, stderr, code = ada.run("", "ssh", host, "true"); code != 255 || !strings.Contains(stderr, "the session is abandoned") {
 		t.Fatalf("closed run = status %d stderr %q", code, stderr)
 	}
 }

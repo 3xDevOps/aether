@@ -98,7 +98,7 @@ function kindSentence(
     case 'edge-refused':
       return `${edge ?? 'the edge'} refused the connection to ${server}`
     case 'signed-out':
-      return `signed out of ${edge ?? 'the edge'} - session ${link?.edge_url ? `aether login --edge ${link.edge_url}` : 'aether login'}`
+      return `signed out of ${edge ?? 'the edge'} - run ${link?.edge_url ? `aether login --edge ${link.edge_url}` : 'aether login'}`
     case 'not-member':
       return `not a member of ${server} - ask an admin to invite you again`
     case 'device-revoked':
