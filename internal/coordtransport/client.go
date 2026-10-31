@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -146,11 +148,24 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 	line = append(line, '\n')
 	safe := repeatable(method, req.Params)
 	timeout := callTimeout(method, params)
+	wait := 0
+	if longPoll(method) && params != nil {
+		wait = pollWaitSeconds(params)
+	}
 
 	started, delay := time.Now(), retryInitialDelay
 	var missingSince time.Time
 	everSent := false
-	for {
+	for attempts := 0; ; attempts++ {
+		if attempts > 0 && wait > 0 {
+			// A retried long poll waits only for what is left of the
+			// caller's wait, so restarts do not stretch the call.
+			remaining := max(0, wait-int(math.Ceil(time.Since(started).Seconds())))
+			if line, err = withWait(req, remaining); err != nil {
+				return internalError(method, err)
+			}
+			timeout = callMargin + time.Duration(remaining)*time.Second
+		}
 		sent, err := c.attempt(ctx, timeout, method, line, result)
 		if err == nil {
 			return nil
@@ -195,6 +210,26 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 		}
 		delay = min(delay*2, retryMaxDelay)
 	}
+}
+
+// withWait returns req's request line with its params' wait_seconds set to
+// seconds.
+func withWait(req protocol.Request, seconds int) ([]byte, error) {
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(req.Params, &fields); err != nil {
+		return nil, err
+	}
+	fields["wait_seconds"] = json.RawMessage(strconv.Itoa(seconds))
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	req.Params = raw
+	line, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	return append(line, '\n'), nil
 }
 
 // attempt makes one dial-write-read round trip. sent is false only when the

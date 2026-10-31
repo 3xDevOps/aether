@@ -278,7 +278,9 @@ What is repeated depends on whether the request can have reached the server:
   `idempotency_key`. The key is chosen once per call, so every attempt carries
   the same one, and the server stores it in its database, so it dedupes across
   a restart. A cut `coord.inbox` response loses and duplicates nothing: the
-  unacknowledged batch comes back under the same token.
+  unacknowledged batch comes back under the same token. A retried
+  `inbox --wait N` waits only for what is left of the N seconds, so restarts
+  do not lengthen the call beyond N plus the time the server was down.
 - Sent, no key, not a read (`memory.add`, `dev.terminal.start`,
   `dev.terminal.input`, `dev.terminal.screenshot`, `dev.browser.screenshot`,
   `dev.browser.action`, `child.cancel` and the like): not repeated. Screenshots

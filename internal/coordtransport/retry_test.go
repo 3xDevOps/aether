@@ -3,6 +3,7 @@ package coordtransport
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -224,5 +225,34 @@ func TestMissingSocketGraceStartsAtFirstMiss(t *testing.T) {
 	// inside 2s since the socket first went missing.
 	if err := Call(context.Background(), path, protocol.MethodCoordSend, protocol.CoordSendParams{Body: "x"}, nil); err != nil {
 		t.Fatalf("call: %v", err)
+	}
+}
+
+func TestRetriedLongPollWaitsOnlyForTheRestOfTheWait(t *testing.T) {
+	path := socketPath(t)
+	waits := make(chan int, 4)
+	var n atomic.Int32
+	serveEach(t, path, func(c net.Conn, line string) {
+		var req struct {
+			Params protocol.CoordInboxParams `json:"params"`
+		}
+		if err := json.Unmarshal([]byte(line), &req); err != nil {
+			t.Error(err)
+			return
+		}
+		waits <- req.Params.WaitSeconds
+		if n.Add(1) == 1 {
+			// The server goes down mid-poll, as a restart does.
+			time.Sleep(1500 * time.Millisecond)
+			return
+		}
+		_, _ = c.Write([]byte(okLine))
+	})
+	err := Call(context.Background(), path, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: "ack", WaitSeconds: 20}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first, second := <-waits, <-waits; first != 20 || second != 18 {
+		t.Fatalf("waits = %d then %d, want 20 then 18", first, second)
 	}
 }
