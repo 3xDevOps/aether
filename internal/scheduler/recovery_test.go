@@ -1440,32 +1440,45 @@ func (r *destroyBarrierRuntime) releaseNow() {
 	r.releaseOnce.Do(func() { close(r.release) })
 }
 
-type recoveryProbeBarrierRuntime struct {
+type recoveryInspectBarrierRuntime struct {
 	runtime.Runtime
-	started chan struct{}
-	release chan struct{}
-	mu      sync.Mutex
-	waits   int
+	started  chan struct{}
+	release  chan struct{}
+	mu       sync.Mutex
+	waits    int
+	inspects int
 }
 
-func (r *recoveryProbeBarrierRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
+func (r *recoveryInspectBarrierRuntime) Inspect(ctx context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
 	r.mu.Lock()
-	r.waits++
-	call := r.waits
+	r.inspects++
+	call := r.inspects
 	r.mu.Unlock()
 	if call == 1 {
 		close(r.started)
 		select {
 		case <-r.release:
 		case <-ctx.Done():
-			return runtime.ExitStatus{}, ctx.Err()
+			return runtime.ContainerInfo{}, ctx.Err()
 		}
-		return runtime.ExitStatus{}, context.DeadlineExceeded
 	}
+	return r.Runtime.Inspect(ctx, id)
+}
+
+func (r *recoveryInspectBarrierRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
+	r.mu.Lock()
+	r.waits++
+	r.mu.Unlock()
 	return r.Runtime.Wait(ctx, id)
 }
 
-func (r *recoveryProbeBarrierRuntime) waitCount() int {
+func (r *recoveryInspectBarrierRuntime) inspectCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inspects
+}
+
+func (r *recoveryInspectBarrierRuntime) waitCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.waits
@@ -2080,9 +2093,6 @@ func TestRecoveryAttachDoesNotReplaceCloseOwner(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
-		// The barrier holds the probe open until CloseRun has run; the default test
-		// probe timeout would race its release.
-		cfg.ExitProbeTimeout = waitTimeout
 	})
 	ctx := t.Context()
 	run, _ := e.launchFake(t, "close wins recovery attach")
@@ -2093,7 +2103,7 @@ func TestRecoveryAttachDoesNotReplaceCloseOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	barrier := &recoveryProbeBarrierRuntime{
+	barrier := &recoveryInspectBarrierRuntime{
 		Runtime: e.rt, started: make(chan struct{}), release: make(chan struct{}),
 	}
 	beforeAttach := e.rt.attachCount()
@@ -2132,9 +2142,9 @@ func TestRecoveryAttachDoesNotReplaceCloseOwner(t *testing.T) {
 	}
 	// CloseRun returning does not mean its own Wait owner has started yet -
 	// that runs on a goroutine CloseRun hands off to, not before it returns.
-	waitFor(t, "Close's own Wait owner", func() bool { return barrier.waitCount() == 2 })
-	if got := barrier.waitCount(); got != 2 {
-		t.Fatalf("Wait owners/calls = %d, want probe plus Close owner", got)
+	waitFor(t, "Close's own Wait owner", func() bool { return barrier.waitCount() == 1 })
+	if got := barrier.waitCount(); got != 1 {
+		t.Fatalf("Wait owners/calls = %d, want only Close's owner", got)
 	}
 	row, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
@@ -2629,5 +2639,33 @@ func TestMigratedExpiryRetriesEvidenceBeforeDestroyAndKeepsFailureVisible(t *tes
 	if err != nil || info.CleanupPending || info.CleanupError != "" || info.RetainedUntil != nil ||
 		e.rt.byName(string(run.ID)) != nil {
 		t.Fatalf("successful reboot retry left cleanup ownership: %+v, %v", info, err)
+	}
+}
+
+func TestRecoveryAttachesRunningContainerWithoutWaiting(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "running container reattaches at once")
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
+	}
+	stored, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	probe := &recoveryInspectBarrierRuntime{Runtime: e.rt, started: make(chan struct{}), release: make(chan struct{})}
+	close(probe.release)
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	s2.cfg.Runtime = probe
+	beforeAttach := e.rt.attachCount()
+	s2.recoverSupervised(t.Context(), stored)
+	if got := e.rt.attachCount(); got != beforeAttach+1 {
+		t.Fatalf("attaches %d -> %d, want the running container reattached", beforeAttach, got)
+	}
+	if got := probe.waitCount(); got > 1 {
+		t.Fatalf("recovery called Wait %d times, want only the exit watcher", got)
+	}
+	if probe.inspectCount() != 1 {
+		t.Fatalf("recovery inspected %d times, want one", probe.inspectCount())
 	}
 }

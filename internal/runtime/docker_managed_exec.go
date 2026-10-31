@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strconv"
 	"strings"
@@ -67,14 +68,14 @@ func (d *Docker) startManagedExec(ctx context.Context, id ID, spec ExecSpec, tty
 	argv := append([]string{coordtransport.CLIPath, devexec.Command, helper, spec.CreationKey, claim}, spec.Argv...)
 	created, err := d.cli.ExecCreate(ctx, container.Container.ID, client.ExecCreateOptions{
 		TTY: tty, AttachStdin: true, AttachStdout: true, AttachStderr: true,
-		Cmd: argv, Env: spec.Env, WorkingDir: spec.WorkingDir, ConsoleSize: size,
+		Cmd: argv, Env: spec.Env, User: spec.User, WorkingDir: spec.WorkingDir, ConsoleSize: size,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: create managed execution: %w", err)
 	}
 	execution := &dockerManagedExec{docker: d, tty: tty, identity: ExecIdentity{
 		ContainerID: ID(container.Container.ID), ExecID: created.ID, CreationKey: spec.CreationKey,
-		ClaimToken: claim,
+		ClaimToken: claim, User: spec.User,
 	}}
 	published := false
 	defer func() {
@@ -117,8 +118,12 @@ func (d *Docker) RecoverExec(ctx context.Context, identity ExecIdentity) (Manage
 		return nil, fmt.Errorf("%w: incomplete identity", ErrExecUnavailable)
 	}
 	execution := &dockerManagedExec{docker: d, identity: identity}
-	if _, err := execution.inspect(ctx); err != nil {
+	_, forgotten, err := execution.inspect(ctx)
+	if err != nil {
 		return nil, err
+	}
+	if forgotten != nil {
+		return execution, nil
 	}
 	if _, err := execution.control(ctx, "status", 0); err != nil {
 		return nil, fmt.Errorf("%w: cannot prove helper ownership: %w", ErrExecUnavailable, err)
@@ -146,25 +151,56 @@ func (e *dockerManagedExec) Attachment() Attachment {
 	return e.attachment
 }
 
-func (e *dockerManagedExec) inspect(ctx context.Context) (client.ExecInspectResult, error) {
-	info, err := e.docker.cli.ExecInspect(ctx, e.identity.ExecID, client.ExecInspectOptions{})
+// inspect reads Docker's record of the exec. Docker keeps exec records only
+// in memory, so a dockerd restart with live-restore forgets an exec whose
+// processes still run: without a record, forgotten is the exec's helper's
+// own state.
+func (e *dockerManagedExec) inspect(ctx context.Context) (info client.ExecInspectResult, forgotten *devexec.State, err error) {
+	info, err = e.docker.cli.ExecInspect(ctx, e.identity.ExecID, client.ExecInspectOptions{})
 	if cerrdefs.IsNotFound(err) {
-		// Docker forgets an execution only with its container, so this one
-		// answer proves it is gone. Any other failure proves nothing.
-		return info, fmt.Errorf("%w: inspect execution: %w: %w", ErrExecUnavailable, ErrNotFound, err)
+		state, forgottenErr := e.forgotten(ctx, err)
+		return info, &state, forgottenErr
 	}
 	if err != nil {
-		return info, fmt.Errorf("%w: inspect execution: %w", ErrExecUnavailable, err)
+		return info, nil, fmt.Errorf("%w: inspect execution: %w", ErrExecUnavailable, err)
 	}
 	if info.ID != e.identity.ExecID || info.ContainerID != string(e.identity.ContainerID) {
-		return info, fmt.Errorf("%w: execution/container identity mismatch", ErrExecUnavailable)
+		return info, nil, fmt.Errorf("%w: execution/container identity mismatch", ErrExecUnavailable)
 	}
-	return info, nil
+	return info, nil, nil
+}
+
+// forgotten asks the helper of an exec Docker has no record of for its
+// state. Only a stopped or removed container, or a helper with neither a
+// supervisor nor a final record, proves the exec gone.
+func (e *dockerManagedExec) forgotten(ctx context.Context, cause error) (devexec.State, error) {
+	gone := fmt.Errorf("%w: inspect execution: %w: %w", ErrExecUnavailable, ErrNotFound, cause)
+	container, err := e.docker.cli.ContainerInspect(ctx, string(e.identity.ContainerID), client.ContainerInspectOptions{})
+	switch {
+	case cerrdefs.IsNotFound(err):
+		return devexec.State{}, gone
+	case err != nil:
+		return devexec.State{}, fmt.Errorf("%w: inspect execution: %w; inspect its container: %w", ErrExecUnavailable, cause, err)
+	case container.Container.State == nil || !container.Container.State.Running:
+		return devexec.State{}, gone
+	}
+	state, err := e.control(ctx, "status", 0)
+	if errors.Is(err, devexec.ErrNoSupervisor) {
+		return state, fmt.Errorf("%w: %w", gone, err)
+	}
+	if err != nil {
+		return state, fmt.Errorf("%w: inspect execution: %w; ask its helper: %w", ErrExecUnavailable, cause, err)
+	}
+	return state, nil
 }
 
 func (e *dockerManagedExec) control(ctx context.Context, action string, grace time.Duration) (devexec.State, error) {
 	args := []string{coordtransport.CLIPath, devexec.Command, "control", e.identity.CreationKey, e.identity.ExecID, e.identity.ClaimToken, action, strconv.FormatInt(grace.Milliseconds(), 10)}
-	code, stdout, stderr, err := e.docker.Exec(ctx, e.identity.ContainerID, args, "")
+	var stdout, stderr string
+	code, err := e.docker.exec(ctx, e.identity.ContainerID, args, "", e.identity.User, nil, func(r io.Reader) (copyErr error) {
+		stdout, stderr, copyErr = readExecOutput(r)
+		return copyErr
+	})
 	if err != nil {
 		return devexec.State{}, err
 	}
@@ -184,13 +220,20 @@ func (e *dockerManagedExec) control(ctx context.Context, action string, grace ti
 			return state, nil
 		}
 	}
-	return state, fmt.Errorf("%w: helper %s failed (status %d): %s", ErrExecUnavailable, action, code, strings.TrimSpace(stderr))
+	failed := fmt.Errorf("%w: helper %s failed (status %d): %s", ErrExecUnavailable, action, code, strings.TrimSpace(stderr))
+	if strings.Contains(stderr, devexec.ErrNoSupervisor.Error()) {
+		return state, fmt.Errorf("%w: %w", devexec.ErrNoSupervisor, failed)
+	}
+	return state, failed
 }
 
 func (e *dockerManagedExec) Status(ctx context.Context) (ExecState, error) {
-	info, err := e.inspect(ctx)
+	info, forgotten, err := e.inspect(ctx)
 	if err != nil {
 		return ExecState{}, err
+	}
+	if forgotten != nil {
+		info.Running = forgotten.Running && !forgotten.Exited
 	}
 	e.mu.Lock()
 	attached := e.attachment != nil && e.attachment.connected()
@@ -202,9 +245,13 @@ func (e *dockerManagedExec) Status(ctx context.Context) (ExecState, error) {
 	if info.Running {
 		return state, nil
 	}
-	final, err := e.control(ctx, "status", 0)
-	if err != nil {
-		return state, fmt.Errorf("%w: command exit record unavailable: %w", ErrExecUnavailable, err)
+	final := forgotten
+	if final == nil {
+		read, err := e.control(ctx, "status", 0)
+		if err != nil {
+			return state, fmt.Errorf("%w: command exit record unavailable: %w", ErrExecUnavailable, err)
+		}
+		final = &read
 	}
 	if !final.Exited || final.ExitCode == nil {
 		return state, fmt.Errorf("%w: helper ended without a command exit record", ErrExecUnavailable)
@@ -242,7 +289,7 @@ func (e *dockerManagedExec) Stop(ctx context.Context, grace time.Duration) (Exit
 	stopCtx, cancel := context.WithTimeout(ctx, devexec.StartupTimeout+grace+devexec.ReapTimeout)
 	defer cancel()
 	ctx = stopCtx
-	if _, err := e.inspect(ctx); err != nil {
+	if _, _, err := e.inspect(ctx); err != nil {
 		return ExitStatus{}, err
 	}
 	if _, err := e.control(ctx, "stop", grace); err != nil {

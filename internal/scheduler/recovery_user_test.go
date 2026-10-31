@@ -3,18 +3,22 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
+// unavailableRunMetadata answers the run's first inspect, which reports its
+// state, and fails the later one that reads its identity.
 type unavailableRunMetadata struct {
 	runtime.Runtime
-	run runtime.ID
+	run     runtime.ID
+	inspect *atomic.Int32
 }
 
 func (r unavailableRunMetadata) Inspect(ctx context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
-	if id == r.run {
+	if id == r.run && r.inspect.Add(1) > 1 {
 		return runtime.ContainerInfo{}, errors.New("runtime inspection unavailable")
 	}
 	return r.Runtime.Inspect(ctx, id)
@@ -64,7 +68,7 @@ func TestRecoveryResolvesUnknownRunUserBeforeTerminalAdoption(t *testing.T) {
 				t.Fatal(err)
 			}
 			unavailable := e.newScheduler(t, e.rt, newFakePTY())
-			unavailable.cfg.Runtime = unavailableRunMetadata{Runtime: e.rt, run: container.id}
+			unavailable.cfg.Runtime = unavailableRunMetadata{Runtime: e.rt, run: container.id, inspect: new(atomic.Int32)}
 			unavailable.recoverSupervised(t.Context(), stored)
 			if _, adoptErr := unavailable.EnsureTerminal(t.Context(), e.member.ID); adoptErr == nil {
 				t.Fatal("terminal adopted while the live session's identity was unknown")

@@ -25,9 +25,7 @@ const (
 	retainedReclaimedReason   = "retained container reclaimed for disk space"
 	recoveryPTYRetryInitial   = 10 * time.Millisecond
 	recoveryPTYRetryMax       = 250 * time.Millisecond
-	// defaultExitProbeTimeout is the startup Wait window that learns whether a
-	// container already exited before attach.
-	defaultExitProbeTimeout = 2 * time.Second
+	defaultExitProbeTimeout   = 2 * time.Second
 )
 
 func retainedTransitionError() error {
@@ -1284,22 +1282,22 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		s.finishRecoveredExit(ctx, r, sc)
 		return
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, s.cfg.ExitProbeTimeout)
-	st, waitErr := s.cfg.Runtime.Wait(probeCtx, cid)
-	cancel()
+	// The exit watcher started by supervision waits for the container to stop
+	// running, so an exit after this inspect is still seen.
+	info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
 	switch {
-	case waitErr == nil:
+	case inspectErr == nil && info.Exited:
 		sc.ExitObserved = true
-		sc.ExitCode = st.Code
+		sc.ExitCode = info.ExitCode
 		if werr := s.writeSidecar(sc); werr != nil {
 			slog.Warn("scheduler: persist exit_observed during recovery", "run", r.ID, "error", werr)
 		}
 		s.finishRecoveredExit(ctx, r, sc)
 		return
-	case errors.Is(waitErr, runtime.ErrNotFound):
+	case errors.Is(inspectErr, runtime.ErrNotFound):
 		s.didNotSurvive(ctx, r, cid)
 		return
-	case errors.Is(waitErr, context.DeadlineExceeded):
+	case inspectErr == nil:
 		s.attachAndSupervise(ctx, r, sc, cid)
 		return
 	case ctx.Err() != nil:
@@ -1822,6 +1820,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		agentSessionID:      sc.AgentSessionID,
 		agentCost:           sc.AgentCost,
 		agentExec:           sc.AgentExec,
+		agentKeeper:         sc.AgentKeeper,
 		switchIntent:        sc.Switch,
 		accountSwap:         sc.AccountSwap,
 		usageLimit:          sc.UsageLimit,

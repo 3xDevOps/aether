@@ -1,8 +1,6 @@
 package acphost
 
 import (
-	"bufio"
-	"bytes"
 	"cmp"
 	"context"
 	"crypto/rand"
@@ -20,6 +18,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -117,6 +116,8 @@ type connEvents interface {
 	authStatus(raw json.RawMessage)
 	sdkMessage(raw json.RawMessage)
 	promptAnswered()
+	// flushText writes the streamed text the session still buffers.
+	flushText()
 	requestOpened(r Request)
 	requestClosed(r Request)
 }
@@ -169,105 +170,18 @@ type Conn struct {
 	// cancelled is closed and replaced each time pending requests are
 	// cancelled.
 	cancelled chan struct{}
+	// reuse holds the ids an adopted session's log gives requests still
+	// pending, for the agent's requests the keeper sends again.
+	reuse []Request
+	// replayed is closed once the keeper has sent every one of them again,
+	// the wait for that ran out, or the pending requests were cancelled.
+	replayed     chan struct{}
+	replayClosed bool
 }
 
 // childLink is a subagent session's launch id and the launch id of the
 // session that announced it, empty for the agent's own.
 type childLink struct{ launch, parent string }
-
-// agentInput ends the connection on a failed write: the agent takes no more
-// input, and its output may stay open long after. It also reports when a
-// turn's session/prompt is on the wire.
-type agentInput struct {
-	io.WriteCloser
-	output *io.PipeWriter
-	broken atomic.Bool
-
-	mu     sync.Mutex
-	unsent chan struct{}
-	// promptID is the JSON-RPC id of the session/prompt awaiting its answer.
-	promptID string
-}
-
-type rpcHead struct {
-	Method string          `json:"method"`
-	ID     json.RawMessage `json:"id"`
-}
-
-func (in *agentInput) Write(p []byte) (int, error) {
-	var m rpcHead
-	prompt := bytes.Contains(p, []byte(`"`+acp.AgentMethodSessionPrompt+`"`)) && json.Unmarshal(p, &m) == nil &&
-		m.Method == acp.AgentMethodSessionPrompt
-	if prompt {
-		// Before the write: the agent can answer before Write returns.
-		in.mu.Lock()
-		in.promptID = string(m.ID)
-		in.mu.Unlock()
-	}
-	n, err := in.WriteCloser.Write(p)
-	if err != nil {
-		in.broken.Store(true)
-		_ = in.output.Close()
-	}
-	if prompt {
-		in.mu.Lock()
-		if in.unsent != nil {
-			close(in.unsent)
-			in.unsent = nil
-		}
-		in.mu.Unlock()
-	}
-	return n, err
-}
-
-// answersPrompt reports whether line, one line of the agent's output, is its
-// answer to the latest session/prompt.
-func (in *agentInput) answersPrompt(line []byte) bool {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	var m rpcHead
-	if in.promptID == "" || !bytes.Contains(line, []byte(`"id"`)) || json.Unmarshal(line, &m) != nil ||
-		m.Method != "" || string(m.ID) != in.promptID {
-		return false
-	}
-	in.promptID = ""
-	return true
-}
-
-// sendingPrompt holds a cancel back until the next session/prompt is
-// written, or until the returned release is called.
-func (in *agentInput) sendingPrompt() func() {
-	unsent := make(chan struct{})
-	in.mu.Lock()
-	in.unsent = unsent
-	in.mu.Unlock()
-	return func() {
-		in.mu.Lock()
-		defer in.mu.Unlock()
-		if in.unsent == unsent {
-			close(unsent)
-			in.unsent = nil
-		}
-	}
-}
-
-func (in *agentInput) promptUnsent() <-chan struct{} {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	return in.unsent
-}
-
-// gatedReader holds back reads until open is closed: the SDK's receive loop
-// starts inside NewConnection and reads the logger SetLogger writes.
-type gatedReader struct {
-	open <-chan struct{}
-	r    io.Reader
-}
-
-func (g gatedReader) Read(p []byte) (int, error) {
-	<-g.open
-	return g.r.Read(p)
-}
 
 func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logger) *Conn {
 	outR, outW := io.Pipe()
@@ -281,7 +195,9 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 		children:   make(map[string]childLink),
 		announced:  make(chan struct{}),
 		cancelled:  make(chan struct{}),
+		replayed:   make(chan struct{}),
 	}
+	c.endReplayLocked()
 	c.idle = sync.NewCond(&c.mu)
 	go c.relay(outW, r)
 	c.sessionID.Store("")
@@ -292,43 +208,6 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 	c.rpc.SetLogger(logger)
 	close(open)
 	return c
-}
-
-// relay copies the agent's output to the SDK, with answeredMarker behind the
-// answer to each session/prompt.
-func (c *Conn) relay(dst *io.PipeWriter, src io.Reader) {
-	br := bufio.NewReaderSize(src, 64<<10)
-	lineStart := true
-	for {
-		chunk, err := br.ReadSlice('\n')
-		if len(chunk) > 0 {
-			ended := chunk[len(chunk)-1] == '\n'
-			// Matched before the SDK sees the answer, which can start the
-			// next prompt.
-			answered := ended && lineStart && c.w.answersPrompt(chunk)
-			if answered {
-				c.answers.Add(1)
-			}
-			_, werr := dst.Write(chunk)
-			if werr == nil && answered {
-				_, werr = dst.Write(answeredLine)
-			}
-			if werr != nil {
-				_ = dst.CloseWithError(werr)
-				return
-			}
-			lineStart = ended
-		}
-		switch {
-		case errors.Is(err, bufio.ErrBufferFull):
-		case errors.Is(err, io.EOF):
-			_ = dst.Close()
-			return
-		case err != nil:
-			_ = dst.CloseWithError(err)
-			return
-		}
-	}
 }
 
 func (c *Conn) touch() { c.lastActivity.Store(time.Now().UnixNano()) }
@@ -393,6 +272,11 @@ func (c *Conn) initialize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return c.setInfo(res)
+}
+
+// setInfo takes what the agent advertised in its initialize result.
+func (c *Conn) setInfo(res initializeResult) error {
 	if res.ProtocolVersion != acp.ProtocolVersionNumber {
 		return fmt.Errorf("acphost: agent speaks ACP protocol version %d, the host speaks %d", res.ProtocolVersion, acp.ProtocolVersionNumber)
 	}
@@ -461,15 +345,28 @@ func nonNil(mcp []acp.McpServer) []acp.McpServer {
 	return mcp
 }
 
+// errNothingToAdopt is the keeper's answer to an adopted turn whose prompt
+// never reached it.
+var errNothingToAdopt = errors.New("acphost: the keeper has no prompt in flight")
+
 // prompt runs one turn and returns its stop reason and the tokens the agent
 // reports for it, cache reads and writes as input and thought tokens as
 // output. A malformed usage counts no tokens rather than failing the turn. It
-// returns only when the turn ends.
+// returns only when the turn ends. With no blocks it takes over the turn
+// whose prompt an earlier server process sent through the agent's keeper.
 func (c *Conn) prompt(ctx context.Context, blocks []acp.ContentBlock) (string, Spend, error) {
+	method, params := acp.AgentMethodSessionPrompt, any(acp.PromptRequest{SessionId: acp.SessionId(c.SessionID()), Prompt: blocks})
+	if blocks == nil {
+		method, params = acpkeeper.AdoptMethod, map[string]any{}
+	}
 	res, err := call[struct {
 		StopReason string          `json:"stopReason"`
 		Usage      json.RawMessage `json:"usage"`
-	}](c, ctx, acp.AgentMethodSessionPrompt, acp.PromptRequest{SessionId: acp.SessionId(c.SessionID()), Prompt: blocks})
+	}](c, ctx, method, params)
+	var re *acp.RequestError
+	if blocks == nil && errors.As(err, &re) && re.Message == acpkeeper.ErrNothingToAdopt.Error() {
+		err = errNothingToAdopt
+	}
 	var u acp.Usage
 	if len(res.Usage) == 0 || json.Unmarshal(res.Usage, &u) != nil {
 		return res.StopReason, Spend{}, err
@@ -501,7 +398,10 @@ func SessionLost(err error) bool {
 
 // steer adds input to the running turn. idleBehavior promptRequired makes
 // the agent refuse rather than start a turn the host did not open.
-func (c *Conn) steer(ctx context.Context, blocks []acp.ContentBlock) (string, error) {
+func (c *Conn) steer(ctx context.Context, blocks []acp.ContentBlock, tag string) (string, error) {
+	c.w.mu.Lock()
+	c.w.steerTag = tag
+	c.w.mu.Unlock()
 	res, err := call[struct {
 		Outcome string `json:"outcome"`
 	}](c, ctx, methodSteering, map[string]any{
@@ -591,9 +491,20 @@ func (c *Conn) listSessions(ctx context.Context, cwd, cursor string) ([]SessionS
 }
 
 func (c *Conn) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
-	if method == deliveryMarker {
+	switch method {
+	case deliveryMarker:
 		c.inbound = ctx
 		close(c.inboundSet)
+		return nil, nil
+	case acpkeeper.HandledMethod:
+		var n struct {
+			Seq uint64 `json:"seq"`
+		}
+		if kept, ok := c.w.WriteCloser.(keeperWriter); ok && json.Unmarshal(params, &n) == nil {
+			// The keeper drops what is acked: it must be in the log.
+			c.events.flushText()
+			kept.Handled(n.Seq)
+		}
 		return nil, nil
 	}
 	c.touch()
@@ -870,8 +781,19 @@ func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *a
 func (c *Conn) wait(ctx context.Context, req Request, cancelled <-chan struct{}) (answer, bool) {
 	req.ID = rand.Text()
 	req.Status = RequestPending
-	p := &pendingRequest{req: req, answer: make(chan answer, 1)}
 	c.mu.Lock()
+	if i := slices.IndexFunc(c.reuse, func(r Request) bool {
+		return r.Kind == req.Kind && r.ToolCallID == req.ToolCallID && r.Title == req.Title
+	}); i >= 0 {
+		req.ID = c.reuse[i].ID
+		c.reuse = slices.Delete(c.reuse, i, i+1)
+		if len(c.reuse) == 0 {
+			// Answers waiting on the replay take c.mu after this call has
+			// registered the request.
+			c.endReplayLocked()
+		}
+	}
+	p := &pendingRequest{req: req, answer: make(chan answer, 1)}
 	select {
 	case <-cancelled:
 		c.mu.Unlock()
@@ -939,9 +861,47 @@ func (c *Conn) answer(requestID, optionID string, content map[string]any) error 
 	return nil
 }
 
+// reuseRequests gives the agent's requests the keeper sends again the ids
+// the item log shows them pending under.
+// Answers to them wait until the keeper has sent them all, or for at most
+// wait.
+func (c *Conn) reuseRequests(pending []Request, wait time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reuse = pending
+	if len(pending) == 0 {
+		return
+	}
+	c.replayed, c.replayClosed = make(chan struct{}), false
+	replayed := c.replayed
+	time.AfterFunc(wait, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.replayed == replayed {
+			c.endReplayLocked()
+		}
+	})
+}
+
+func (c *Conn) endReplayLocked() {
+	if !c.replayClosed {
+		c.replayClosed = true
+		close(c.replayed)
+	}
+}
+
+// replayDone is closed once an adopted session's unanswered requests are
+// pending again, or will not be.
+func (c *Conn) replayDone() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.replayed
+}
+
 func (c *Conn) cancelPending() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.endReplayLocked()
 	for id, p := range c.pending {
 		delete(c.pending, id)
 		c.resolved[id] = true

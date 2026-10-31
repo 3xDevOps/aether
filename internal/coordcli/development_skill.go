@@ -30,8 +30,10 @@ incarnation or controller changes do. On a stale fence, re-observe ownership;
 do not blindly retry input or take over a human. Release the exact lease when
 you finish interacting. Release/detach does not stop the process. Never send
 development input to the primary harness.
-A server restart does not stop the process either, but its output cannot be
-read afterwards: have a long-running command also write a log file.
+A server restart does not stop the process either: once the server is back,
+output from your earlier cursor, input and wait continue (up to 2 MiB of
+output kept meanwhile). A terminal that reads "PTY unavailable after recovery"
+predates this: stop it and start another.
 Exercise the changed behavior, inspect output/screen and exit status, correct
 problems, and verify again. A successful wait RPC is not a successful process:
 inspect matched, timed_out and process.exit_code. Unsupported graphics or

@@ -377,7 +377,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
-	s.control = control.New(control.Config{OnHolderChange: s.publishController})
+	s.control = control.New(control.Config{OnHolderChange: s.publishController,
+		PersistSurface: func(run domain.RunID, surface control.Surface, lease control.SurfaceLease) error {
+			return s.sched.PersistDevelopmentLease(run, surface, lease)
+		}})
 	secrets := secretstore.New(filepath.Join(cfg.DataDir, "workspace-secrets"))
 	mem, err := newMemory(Deps{Store: s.db, Bus: s.bus, Events: s.log})
 	if err != nil {

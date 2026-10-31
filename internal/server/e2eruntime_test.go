@@ -354,12 +354,18 @@ func (r *e2eRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.Containe
 	for i, m := range c.spec.Mounts {
 		targets[i] = m.ContainerPath
 	}
-	return runtime.ContainerInfo{
+	info := runtime.ContainerInfo{
 		Image:        c.spec.Image,
 		User:         c.spec.User,
 		Env:          env,
 		MountTargets: targets,
-	}, nil
+	}
+	c.mu.Lock()
+	if c.exit != nil {
+		info.Exited, info.ExitCode = true, c.exit.Code
+	}
+	c.mu.Unlock()
+	return info, nil
 }
 
 func (r *e2eRuntime) FindByCreationKey(_ context.Context, key string) (runtime.ID, error) {

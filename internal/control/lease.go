@@ -61,6 +61,12 @@ type Config struct {
 	// loses or changes its controller, including a reconnect window that
 	// runs out. It may be called when nothing changed.
 	OnHolderChange func(run domain.RunID)
+	// PersistSurface records a surface's holder and generation so a later
+	// server process can restore them with RestoreSurface. It is called
+	// under the surface's admission lock, before an acquisition takes effect
+	// and after a release, fence or expiry. It must be bounded and must not
+	// call back into the Service.
+	PersistSurface func(run domain.RunID, surface Surface, lease SurfaceLease) error
 }
 
 // Snapshot is a wire-safe description of the current controller. SessionID is
@@ -100,10 +106,13 @@ func (s Snapshot) RevocationReason() RevocationReason {
 }
 
 type lease struct {
-	memberID       domain.MemberID
-	sessionID      string
-	generation     uint64
-	connected      bool
+	memberID   domain.MemberID
+	sessionID  string
+	generation uint64
+	connected  bool
+	// restored marks a lease reinstated from an earlier server process until
+	// its holder is admitted again.
+	restored       bool
 	acquiredAt     time.Time
 	expiresAt      time.Time
 	revocation     atomic.Uint32
@@ -147,6 +156,7 @@ type Service struct {
 	reconnectWindow time.Duration
 	maxSessionBytes int
 	onHolderChange  func(domain.RunID)
+	persistSurface  func(domain.RunID, Surface, SurfaceLease) error
 	runs            map[domain.RunID]*runState
 	surfaces        map[surfaceKey]*surfaceState
 }
@@ -167,6 +177,7 @@ func New(cfg Config) *Service {
 		reconnectWindow: cfg.ReconnectWindow,
 		maxSessionBytes: cfg.MaxSessionIDBytes,
 		onHolderChange:  cfg.OnHolderChange,
+		persistSurface:  cfg.PersistSurface,
 		runs:            make(map[domain.RunID]*runState),
 		surfaces:        make(map[surfaceKey]*surfaceState),
 	}

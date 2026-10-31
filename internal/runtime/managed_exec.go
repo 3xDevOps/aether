@@ -20,15 +20,19 @@ type ManagedExecRuntime interface {
 	// carries separate stdin, stdout and stderr streams. Its stdout never
 	// drops bytes: a reader that falls behind slows the command instead.
 	StartExecPipe(context.Context, ID, ExecSpec) (ManagedExec, error)
+	// RecoverExec, and a ManagedExec's Status and Stop, fail with
+	// ErrNotFound only once the command provably no longer runs.
 	RecoverExec(context.Context, ExecIdentity) (ManagedExec, error)
 }
 
-// ExecSpec inherits the container's configured user and environment. An empty
+// ExecSpec inherits the container's configured user and environment. A
+// non-empty User, such as "0", runs it as that user instead. An empty
 // WorkingDir inherits its configured working directory. Argv is executed
 // directly; callers wanting shell syntax must explicitly use /bin/sh -c.
 // Cols and Rows size StartExecTTY's terminal; StartExecPipe ignores them.
 type ExecSpec struct {
 	Argv       []string
+	User       string
 	WorkingDir string
 	// Env adds KEY=VALUE entries to this exec's environment.
 	Env         []string
@@ -48,6 +52,9 @@ type ExecIdentity struct {
 	ExecID      string `json:"exec_id"`
 	CreationKey string `json:"creation_key"`
 	ClaimToken  string `json:"claim_token"`
+	// User is the exec's user when it is not the container's; the helper's
+	// control socket is that user's alone.
+	User string `json:"user,omitempty"`
 }
 
 // ExecState keeps transport availability separate from command lifecycle.

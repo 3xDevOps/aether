@@ -120,7 +120,13 @@ type Config struct {
 	// Ready, when supplied, closes only after scheduler recovery has restored
 	// persisted runs and their PTY sessions. The overdue worker waits for it
 	// before claiming any steer, leaving messages durably queued during boot.
-	Ready            <-chan struct{}
+	Ready <-chan struct{}
+	// Reattached reports whether this server process adopted a run's
+	// session from the agent's keeper, and the tags of what reached the
+	// agent if so. With it, steers an earlier server process left queued
+	// behind an agent turn are settled once Ready closes and each run's
+	// reattach is decided: delivered, sent again, or not sent.
+	Reattached       func(domain.RunID) (delivered []string, state Reattach)
 	BodyLimit        int
 	AttachmentLimit  int
 	AttachmentBytes  int
@@ -165,6 +171,21 @@ type Status struct {
 
 // Service is restart-safe because all queued state is in CollaborationStore;
 // only the overdue worker goroutine is ephemeral.
+// Reattach is what became of the agent session an earlier server process
+// left with a run.
+type Reattach int
+
+const (
+	// Restored: this server process restored the session or started a new
+	// one, or the run is gone.
+	Restored Reattach = iota
+	// Adopted: this server process took the session over from the agent's
+	// keeper.
+	Adopted
+	// Undecided: the run is paused, and reattaches once it resumes.
+	Undecided
+)
+
 type Service struct {
 	cfg        Config
 	now        func() time.Time
@@ -175,6 +196,9 @@ type Service struct {
 	workerDone chan struct{}
 	overdueErr error
 	dropQueued sync.Once
+	// bootAt is when Start ran; steers queued before it are an earlier
+	// server process's.
+	bootAt time.Time
 }
 
 // OverdueDeliveryError reports the latest overdue worker failure, kept after
@@ -221,16 +245,22 @@ func New(cfg Config) (*Service, error) {
 	return &Service{cfg: cfg, now: cfg.Now}, nil
 }
 
-// Start records the steers an earlier server process left queued behind an
-// agent turn as not sent, performs an immediate overdue sweep and then keeps
-// sweeping until ctx is cancelled. Call it before the scheduler opens agent
-// sessions. Calling Start more than once is harmless.
+// Start settles the steers an earlier server process left queued behind an
+// agent turn, performs an immediate overdue sweep and then keeps sweeping
+// until ctx is cancelled. Call it before the scheduler opens agent sessions.
+// Calling Start more than once is harmless.
 func (s *Service) Start(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("%w: nil context", ErrInvalidRequest)
 	}
 	var dropErr error
-	s.dropQueued.Do(func() { dropErr = s.dropAgentQueued(ctx) })
+	s.dropQueued.Do(func() {
+		if s.cfg.Reattached == nil {
+			dropErr = s.dropAgentQueued(ctx)
+			return
+		}
+		s.bootAt = s.now()
+	})
 	if dropErr != nil {
 		return dropErr
 	}
@@ -268,6 +298,13 @@ func (s *Service) Start(ctx context.Context) error {
 				return
 			}
 		}
+		undecided, settled := false, map[string]bool{}
+		if s.cfg.Reattached != nil {
+			var err error
+			if undecided, err = s.settleAgentQueued(workerCtx, settled); err != nil {
+				s.recordOverdueError(err)
+			}
+		}
 		if _, err := s.DeliverDue(workerCtx, store.MaxCollaborationPageSize); err != nil {
 			s.recordOverdueError(fmt.Errorf("initial overdue delivery: %w", err))
 		}
@@ -282,6 +319,12 @@ func (s *Service) Start(ctx context.Context) error {
 			case <-workerCtx.Done():
 				return
 			case <-t.C:
+				if undecided {
+					var err error
+					if undecided, err = s.settleAgentQueued(workerCtx, settled); err != nil {
+						s.recordOverdueError(err)
+					}
+				}
 				if _, err := s.DeliverDue(workerCtx, store.MaxCollaborationPageSize); err != nil {
 					s.recordOverdueError(fmt.Errorf("periodic overdue delivery: %w", err))
 				}

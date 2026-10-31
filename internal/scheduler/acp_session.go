@@ -155,7 +155,7 @@ func (s *Scheduler) openItemLog(run domain.RunID) (*acphost.Log, error) {
 }
 
 func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error {
-	sess, err := s.acp.live(run)
+	sess, err := s.acp.live(context.Background(), run)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string, valu
 }
 
 func (s *Scheduler) ACPCancel(ctx context.Context, run domain.RunID) error {
-	sess, err := s.acp.live(run)
+	sess, err := s.acp.live(ctx, run)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func (s *Scheduler) ACPCancel(ctx context.Context, run domain.RunID) error {
 }
 
 func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID string, value any) error {
-	sess, err := s.acp.live(run)
+	sess, err := s.acp.live(ctx, run)
 	if err != nil {
 		return err
 	}
@@ -287,7 +287,7 @@ func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt s
 	if !s.IdleEnhanced(run) {
 		return errACPBusy
 	}
-	sess, err := s.acp.live(run)
+	sess, err := s.acp.live(ctx, run)
 	if err != nil {
 		return err
 	}

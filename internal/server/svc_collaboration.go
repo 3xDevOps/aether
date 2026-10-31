@@ -32,6 +32,7 @@ func init() {
 			},
 			Attachments: attachmentValidator,
 			Ready:       d.Runs.RecoveryReady(),
+			Reattached:  d.Runs.Reattached,
 		})
 		if err != nil {
 			return nil, err

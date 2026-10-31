@@ -139,6 +139,7 @@ func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
 	if err = e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
+	rt.dropAdapters(t)
 	if title := storedTitle(withTask.ID); title != "" {
 		t.Fatalf("a follow-up titled a session launched with a task %q", title)
 	}
