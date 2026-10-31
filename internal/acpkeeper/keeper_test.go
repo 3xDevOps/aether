@@ -555,6 +555,7 @@ func TestDetachKeepsAdapter(t *testing.T) {
 	first := a.attach(1)
 	a.send(note(1))
 	first.wantNext(note(1))
+	waitAcked(t, a.k, 1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -566,7 +567,6 @@ func TestDetachKeepsAdapter(t *testing.T) {
 	}
 	_ = first.Writer().Close()
 	_ = first.Close()
-	waitAcked(t, a.k, 1)
 	a.send(note(2))
 	select {
 	case <-a.stdinClosed:
