@@ -205,7 +205,9 @@ It fails on any of:
 - a failed CLI or bridge call the agent saw;
 - a send that failed but was delivered, unless its error says it "may already
   have applied", or a message delivered twice;
-- an unkeyed terminal input applied more than once;
+- an unkeyed terminal input applied more than once, or its echo not read
+  from the output cursor held before the restart without `missing_cursor`
+  or `truncated`;
 - a sent message that was never received, or was received twice;
 - a streamed line missing or repeated;
 - the marker file not holding lines 1 to 120, or the container's ID or start

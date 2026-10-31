@@ -224,6 +224,12 @@ func startTerminal(ctx context.Context, dir string) *terminal {
 		return nil
 	}
 	t.generation = acquired.Controller.ControlGeneration
+	// The first read, without a cursor, starts at the terminal's oldest
+	// byte and establishes the cursor every later read continues from.
+	if _, err = t.read(ctx, nil); err != nil {
+		fmt.Println("soak-error: terminal output:", err)
+		return nil
+	}
 	return t
 }
 
@@ -240,45 +246,66 @@ func (t *terminal) input(ctx context.Context, rec *recorder, token string) {
 	}
 }
 
-// output reads from the cursor held before the last restart and records
-// whether the echo of token arrived without a gap.
-func (t *terminal) output(ctx context.Context, rec *recorder, token string) {
-	start := time.Now()
-	var text strings.Builder
-	var problem string
+// read reads the output after cursor up to its current end and moves the
+// held cursor there.
+func (t *terminal) read(ctx context.Context, cursor *protocol.DevOutputCursor) ([]protocol.DevTerminalOutputResult, error) {
+	var pages []protocol.DevTerminalOutputResult
 	for range 50 {
 		res, err := cliJSON(ctx, protocol.DevTerminalOutputParams{
 			DevTerminalTarget: protocol.DevTerminalTarget{TerminalID: t.id, Incarnation: t.incarnation},
-			After:             t.cursor, Format: "text",
+			After:             cursor, Format: "text",
 		}, "terminal", "output")
 		if err != nil {
-			rec.add("term-output", start, token, err)
-			return
+			return pages, err
 		}
 		var out protocol.DevTerminalOutputResult
 		if err = json.Unmarshal(res, &out); err != nil {
-			rec.add("term-output", start, token, err)
-			return
+			return pages, err
 		}
-		if out.MissingCursor {
-			problem = "missing_cursor"
-		} else if out.Truncated {
-			problem = "truncated"
-		}
-		text.WriteString(out.Text)
+		pages = append(pages, out)
 		next := out.Next
-		t.cursor = &next
+		cursor, t.cursor = &next, &next
 		if !out.More {
 			break
 		}
 	}
-	switch {
-	case problem != "":
-		rec.add("term-output", start, token, errors.New(problem))
-	case !strings.Contains(text.String(), "out:"+token):
-		rec.add("term-output", start, token, errors.New("the echo of the input never appeared in the output"))
-	default:
-		rec.add("term-output", start, token, nil)
+	return pages, nil
+}
+
+// output reads from the cursor held before the last restart and records
+// whether the echo of token arrived without a gap. The echo may follow the
+// accepted input by a moment, so a read that does not show it yet is
+// repeated from where it ended.
+func (t *terminal) output(ctx context.Context, rec *recorder, token string) {
+	start := time.Now()
+	var text strings.Builder
+	for attempt := 0; ; attempt++ {
+		held := t.cursor
+		pages, err := t.read(ctx, held)
+		if err != nil {
+			rec.add("term-output", start, token, err)
+			return
+		}
+		for _, out := range pages {
+			switch {
+			case out.MissingCursor:
+				rec.add("term-output", start, token, fmt.Errorf("missing_cursor: the cursor %+v is not in the output, which starts at %+v", *held, out.Start))
+				return
+			case out.Truncated:
+				rec.add("term-output", start, token, fmt.Errorf("truncated: output before %+v was evicted", out.Start))
+				return
+			}
+			text.WriteString(out.Text)
+		}
+		if strings.Contains(text.String(), "out:"+token) {
+			rec.add("term-output", start, token, nil)
+			return
+		}
+		if attempt == 20 {
+			rec.add("term-output", start, token, errors.New("the echo of the input never appeared in the output"))
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 
