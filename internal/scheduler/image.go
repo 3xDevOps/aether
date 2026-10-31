@@ -40,7 +40,7 @@ func (s *Scheduler) saveTerminalUpload(ctx context.Context, actor domain.MemberI
 	var stillLive func() bool
 	if runID != "" {
 		if _, err := s.cfg.Store.GetRun(ctx, runID); err != nil {
-			return "", fmt.Errorf("scheduler: get upload target run: %w", err)
+			return "", fmt.Errorf("scheduler: get upload target session: %w", err)
 		}
 		s.mu.Lock()
 		entry := s.runs[runID]
@@ -57,10 +57,10 @@ func (s *Scheduler) saveTerminalUpload(ctx context.Context, actor domain.MemberI
 		}
 		s.mu.Unlock()
 		if entry == nil {
-			return "", errors.New("scheduler: upload target run has no live container")
+			return "", errors.New("scheduler: upload target session has no live container")
 		}
 		if home == "" {
-			return "", errors.New("scheduler: upload target run has no captured HOME")
+			return "", errors.New("scheduler: upload target session has no captured HOME")
 		}
 	} else {
 		var running bool
@@ -108,7 +108,7 @@ func (s *Scheduler) ValidateAttachment(ctx context.Context, runID domain.RunID, 
 		return errors.New("scheduler: invalid attachment reference")
 	}
 	if _, err := s.cfg.Store.GetRun(ctx, runID); err != nil {
-		return fmt.Errorf("scheduler: resolve attachment run: %w", err)
+		return fmt.Errorf("scheduler: resolve attachment session: %w", err)
 	}
 	s.mu.Lock()
 	entry := s.runs[runID]
@@ -120,7 +120,7 @@ func (s *Scheduler) ValidateAttachment(ctx context.Context, runID domain.RunID, 
 	}
 	s.mu.Unlock()
 	if entry == nil || home == "" || !path.IsAbs(home) || !path.IsAbs(reference) {
-		return errors.New("scheduler: attachment run has no valid captured HOME")
+		return errors.New("scheduler: attachment session has no valid captured HOME")
 	}
 	if name, ok := strings.CutPrefix(reference, path.Join(home, ".aether", "terminal-files")+"/"); ok {
 		if !memberhome.ValidFileName(name) {
@@ -133,7 +133,7 @@ func (s *Scheduler) ValidateAttachment(ctx context.Context, runID domain.RunID, 
 	}
 	name, ok := strings.CutPrefix(reference, path.Join(home, ".aether", "terminal-images")+"/")
 	if !ok {
-		return errors.New("scheduler: attachment is outside the run home upload directories")
+		return errors.New("scheduler: attachment is outside the session home upload directories")
 	}
 	if !memberhome.ValidImageName(name) {
 		return errors.New("scheduler: terminal image reference was not server generated")
@@ -161,7 +161,7 @@ func (s *Scheduler) ReadImage(ctx context.Context, runID domain.RunID, reference
 	}
 	run, err := s.cfg.Store.GetRun(ctx, runID)
 	if err != nil {
-		return nil, "", fmt.Errorf("scheduler: resolve terminal image run: %w", err)
+		return nil, "", fmt.Errorf("scheduler: resolve terminal image session: %w", err)
 	}
 	data, mimeType, err := s.cfg.Homes.ReadImage(run.HomeMember(), name)
 	if err != nil {
@@ -182,7 +182,7 @@ func (s *Scheduler) StatAttachedFile(ctx context.Context, runID domain.RunID, re
 	}
 	run, err := s.cfg.Store.GetRun(ctx, runID)
 	if err != nil {
-		return 0, "", fmt.Errorf("scheduler: resolve attached file run: %w", err)
+		return 0, "", fmt.Errorf("scheduler: resolve attached file session: %w", err)
 	}
 	size, mimeType, err := s.cfg.Homes.StatFile(run.HomeMember(), name)
 	if err != nil {

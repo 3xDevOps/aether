@@ -2,10 +2,10 @@
 
 What Aether does when the host reboots, a disk fills, an agent hangs or a
 connection drops, and what you do next, for whoever runs the server and for
-members who find a run in an unexpected state. Terms such as environment,
-Enhanced mode and child run are defined in [Concepts](README.md#concepts).
+members who find a session in an unexpected state. Terms such as environment,
+Enhanced mode and subsession are defined in [Concepts](README.md#concepts).
 
-A run is one agent working on one task in its own container on the server.
+A session is one agent working on one task in its own container on the server.
 While it is live its status is `running` or `needs-attention`; when it ends it
 is `completed`, `failed`, `interrupted`, `merged` or `abandoned`. The reason
 shown beside the status says why it is there.
@@ -14,67 +14,67 @@ shown beside the status says why it is there.
 
 | When | What you see | What Aether does | What you do |
 | --- | --- | --- | --- |
-| The server restarts or is killed, and run containers survive | Runs keep their status. | Reattaches to every live container. An Enhanced agent keeps running under its keeper, and the new server adopts its session, turn and open requests ([Restarts and failures](enhanced-runs.md#restarts-and-failures)). A kill accepted before the crash is issued again. | Nothing. When the keeper is gone, the session is restored in a fresh process and a turn that was cut off parks with `turn interrupted`: send a message to continue. |
-| The host reboots, or Docker restarts without `live-restore` | Live runs read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the run branch and keeps the checkout. | Pull the branch (`aether pull <run-id>`) or start a new run. An interrupted run cannot be reopened. |
+| The server restarts or is killed, and session containers survive | Sessions keep their status. | Reattaches to every live container. An Enhanced agent keeps running under its keeper, and the new server adopts its conversation, turn and open requests ([Restarts and failures](enhanced-sessions.md#restarts-and-failures)). A kill accepted before the crash is issued again. | Nothing. When the keeper is gone, the conversation is restored in a fresh process and a turn that was cut off parks with `turn interrupted`: send a message to continue. |
+| The host reboots, or Docker restarts without `live-restore` | Live sessions read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the session branch and keeps the checkout. | Pull the branch (`aether pull <session-id>`) or start a new session. An interrupted session cannot be reopened. |
 | A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
-| Host memory is low | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | Close or kill runs. A closed run's paused container still holds its memory; **Free container…** releases it. |
-| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced run is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the run supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <run-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
-| A Standard agent exits | The run stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the run. |
-| A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the run's transcript. |
-| The agent hits its account's usage limit | `Usage limit reached on <owner>'s account; ...` when it cannot continue. | Moves the run to another account that has usage left. | [Usage limit mid-run](#usage-limit-mid-run). |
+| Host memory is low | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | Close or kill sessions. A closed session's paused container still holds its memory; **Free container…** releases it. |
+| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced session is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the session supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <session-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
+| A Standard agent exits | The session stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the session. |
+| A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the session's transcript. |
+| The agent hits its account's usage limit | `Usage limit reached on <owner>'s account; ...` when it cannot continue. | Moves the session to another account that has usage left. | [Usage limit mid-session](#usage-limit-mid-session). |
 | An agent update fails, or the vendor is unreachable | Timeline note `could not update <agent> from <version>: the updater exited <code>: <output>`. | Launches whatever is installed without waiting for the update. Tries again from that home after 15 minutes. | Usually nothing. `sudo aether-server config set agent-update false` turns updates off. |
 | An agent update an older Aether interrupted left the agent's npm package missing | The launch that starts the repair may not find the agent. | Restores the copy in `~/.local/lib/.<agent>-update.*/previous` in the background, before contacting npm. | Launch again. The next launch finds the agent. |
-| An SSH connection drops during an attach | The CLI or dashboard disconnects. | Nothing changes for the run: its terminal lives on the server. Input that never reached the server is dropped whole. | Attach again. The full transcript replays before live output. |
+| An SSH connection drops during an attach | The CLI or dashboard disconnects. | Nothing changes for the session: its terminal lives on the server. Input that never reached the server is dropped whole. | Attach again. The full transcript replays before live output. |
 | An `aether forward` connection drops | The local port stops answering. | Closes both ends of the tunnel. | Run `aether forward <run-id|terminal> <port>` again. |
-| A launch cannot refresh the workspace mirror | The launch fails with `gitengine: mirror <kind> for branch "<branch>": <diagnostic>`. No run is created. | Never falls back to an older base on its own. | [Launch and mirror failures](#launch-and-mirror-failures). |
+| A launch cannot refresh the workspace mirror | The launch fails with `gitengine: mirror <kind> for branch "<branch>": <diagnostic>`. No session is created. | Never falls back to an older base on its own. | [Launch and mirror failures](#launch-and-mirror-failures). |
 | Your environment's main shell exits | The environment terminal closes. | Stops the terminal and keeps the stopped container. | Open the environment again. It starts the container, or rebuilds it from your saved image. |
-| An Enhanced session fails | **Disconnected**, with `enhanced session failed: <error>` or `enhanced session ended: ...`. | Keeps the run up on its login shell. | [Enhanced runs](#enhanced-runs). |
-| A run runs out of memory | Timeline note `Out of memory: the kernel killed a process in this run at its <n> GiB memory limit (peak <n> GiB)`. | Nothing automatic. The killed process may be a tool, the agent or the shell. | Check whether the agent is still running. Raise `--run-memory` if it keeps happening. |
-| The kernel's file-watch limits are spent | Server log `gitengine: cannot watch checkout for file changes; polling for diff snapshots instead`. | Launches the run anyway and checks its files every 60 seconds. | [Raise file-watch limits](#raise-file-watch-limits). |
+| An Enhanced session fails | **Disconnected**, with `enhanced session failed: <error>` or `enhanced session ended: ...`. | Keeps the session up on its login shell. | [Enhanced sessions](#enhanced-sessions). |
+| A session runs out of memory | Timeline note `Out of memory: the kernel killed a process in this session at its <n> GiB memory limit (peak <n> GiB)`. | Nothing automatic. The killed process may be a tool, the agent or the shell. | Check whether the agent is still running. Raise `--run-memory` if it keeps happening. |
+| The kernel's file-watch limits are spent | Server log `gitengine: cannot watch checkout for file changes; polling for diff snapshots instead`. | Launches the session anyway and checks its files every 60 seconds. | [Raise file-watch limits](#raise-file-watch-limits). |
 | Another process holds the database at startup | `store: begin migration <n>: database is locked (5) (SQLITE_BUSY)` | The server exits. | Find and stop the other writer, then start again. Never delete the database. |
-| The server is down when a schedule is due | Nothing. | Skips the missed occurrence and waits for the next one. | Launch the run by hand if it matters. |
+| The server is down when a schedule is due | Nothing. | Skips the missed occurrence and waits for the next one. | Launch the session by hand if it matters. |
 
 A lost connection does not prove that a command failed. Before you retry
 something, check its files and processes. After a crash Aether does not
-replay an agent's tool calls, but a Background Enhanced run is asked to
+replay an agent's tool calls, but a Background Enhanced session is asked to
 continue its turn, so an action can run twice.
 
-## Run activity
+## Session activity
 
-A live run carries a state that says what it is doing. The dashboard and
-`aether runs` show its label.
+A live session carries a state that says what it is doing. The dashboard and
+`aether sessions` show its label.
 
 | State | Label | Meaning |
 | --- | --- | --- |
 | `working` | Working | A turn or tool is running. |
-| `waiting-agents` | Waiting for agents | No turn runs, but the run waits on its own subagents, child runs (`waiting for <n> child runs`), or a `waiting --for agents` report. |
+| `waiting-agents` | Waiting for agents | No turn runs, but the session waits on its own subagents, subsessions (`waiting for <n> subsessions`), or a `waiting --for agents` report. |
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
-| `waiting` | Turn ended, or Stale wait for a stale wait (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
+| `waiting` | Turn ended, or Stale wait for a stale wait (`aether sessions`: Waiting) | The turn ended with no report (`turn ended without a report`), the session stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-aether-can-check). |
-| `finished` | Ready for review | An interactive run reported `success`. |
-| `failed` | Failed | The run reported `failure`, or its turn failed. |
-| `disconnected` | Disconnected | The Enhanced session failed or ended while the run is open. |
+| `finished` | Ready for review | An interactive session reported `success`. |
+| `failed` | Failed | The session reported `failure`, or its turn failed. |
+| `disconnected` | Disconnected | The Enhanced session failed or ended while the session is open. |
 
 When several apply, the first in this order wins: disconnected, needs-you,
 working, failed, finished, waiting-agents, waiting-ci, waiting-tools,
 answered, waiting. An answer never goes stale.
 A wait the agent reported with no condition goes stale after three times
-`--stall-threshold` (30 minutes by default) with no activity, unless the run
-still holds background tasks or, as a parent, has a live child run
-or unread child mail. Its reason becomes `no update for <duration>: <summary>`.
+`--stall-threshold` (30 minutes by default) with no activity, unless the session
+still holds background tasks or, as a parent, has a live subsession
+or unread subsession mail. Its reason becomes `no update for <duration>: <summary>`.
 A CI or process wait keeps its state; an agents wait shows `waiting`, or
-`waiting-agents` while a child run is live again. A wait goes stale once; the
-next turn starts it over. A wait Aether infers from child runs or background
+`waiting-agents` while a subsession is live again. A wait goes stale once; the
+next turn starts it over. A wait Aether infers from subsessions or background
 tasks lasts exactly as long as they do.
 
 ### Waits Aether can check
 
 A waiting report can name conditions Aether checks for the agent, such as
 a pull request's checks finishing, so it wakes the agent when one resolves.
-While the run shows such a wait, `aether runs <run-id>` prints a `wait` line, the run record carries
+While the session shows such a wait, `aether sessions <session-id>` prints a `wait` line, the session record carries
 `wait {kind, detail, verified_at, error}`, and the state is judged by the
 evidence:
 
@@ -85,78 +85,78 @@ evidence:
 | `system_fault` | A condition errored or expired, for example the pull request is gone, and the agent is being told. | `Waiting for CI (wait fault)` and the condition's error. | No. The agent decides what to do next. |
 | `system_fault` | A condition resolved, errored or expired, and its wake was not delivered within 5 minutes. | `Needs you`, reason `wait broken: <condition> resolved, but the agent was not woken`, and the delivery error. | Yes. The agent will not move on its own. Send it a message. |
 | `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`, and the last read error. | Yes. |
-| `system_fault` | Every read of the run's conditions failed for an hour, counted from the first failure or from the wait's report if later. A read that succeeds starts the hour over, and so does a server restart. Before that the wait is `source_unknown`. | `Needs you`, reason `wait broken: cannot read this run's wait conditions for over 1h, so the agent will not be woken`, and the read error. | Yes. |
-| `unverified` | The agent named no condition, or only ones that left pending before its current turn or whose wake was delivered. Once delivered, including a condition that resolved inside the agent's own report, the run waits on its agent, not on the condition. | The state, as described above. It goes stale like a wait with no condition. | No. |
+| `system_fault` | Every read of the session's conditions failed for an hour, counted from the first failure or from the wait's report if later. A read that succeeds starts the hour over, and so does a server restart. Before that the wait is `source_unknown`. | `Needs you`, reason `wait broken: cannot read this session's wait conditions for over 1h, so the agent will not be woken`, and the read error. | Yes. |
+| `unverified` | The agent named no condition, or only ones that left pending before its current turn or whose wake was delivered. Once delivered, including a condition that resolved inside the agent's own report, the session waits on its agent, not on the condition. | The state, as described above. It goes stale like a wait with no condition. | No. |
 
 The dashboard words the same evidence as "Waiting on <condition>: <status>
 · checked 2m ago", "Waiting on <condition>: status unknown since 01:10 —
 <error>" or "Wait fault: <condition> — <error>"
-([dashboard-frontend.md](dashboard-frontend.md#run-state)).
+([dashboard-frontend.md](dashboard-frontend.md#session-state)).
 
 A broken wait is the only one that needs you, because only then can nothing
-but a person move the run. While another of its conditions is still pending
-or its wake is on its way, or the run still holds background tasks or, as a
-parent, has a live child run or unread child
-mail, those can wake it: the run keeps its waiting state, marked `(wait fault)`, and needs you
+but a person move the session. While another of its conditions is still pending
+or its wake is on its way, or the session still holds background tasks or, as a
+parent, has a live subsession or unread subsession
+mail, those can wake it: the session keeps its waiting state, marked `(wait fault)`, and needs you
 only once they end. Its reason holds no time or source status, and names
 broken conditions in a fixed order, so it is announced once. A paused
-run is judged again when it resumes.
+session is judged again when it resumes.
 
-Each `run.status` event for a live run carries a `cause` naming what chose
+Each `run.status` event for a live session carries a `cause` naming what chose
 its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
 `wait-expired`, `wait-fault` (a broken wait), `workers`, `tasks-held`,
-`human`, or `disconnect`. While the run shows a reported wait the event
+`human`, or `disconnect`. While the session shows a reported wait the event
 carries `wait` too. A wait whose source was read again at least a minute
 later is published as a same-status event with `reread: true`;
 `aether timeline` and the dashboard's activity feed leave it out unless
 filtered to `run.status`, `changes.list` leaves it out, and the
 dashboard's lanes and trace bars never draw it as a state change. A live
-run's record carries its latest `cause` too. `aether timeline <run-id>`
+session's record carries its latest `cause` too. `aether timeline <session-id>`
 prints it after the state, for example
-`running -> needs-attention (waiting for 2 child runs) · waiting-agents by
+`running -> needs-attention (waiting for 2 subsessions) · waiting-agents by
 workers`. The dashboard ends each state's tooltip with it, for example
-`Waiting for 2 child runs since 3 minutes ago. Mail from its agents can wake it.
-Why: its child runs are live or have unread mail for it.`
+`Waiting for 2 subsessions since 3 minutes ago. Mail from its agents can wake it.
+Why: its subsessions are live or have unread mail for it.`
 
 An agent's `blocked` report reads `blocked: <summary>`, and its question reads
 `needs input: <question>`.
 
 ### Review
 
-A reported success puts the run up for review. The run page asks **Your agent
+A reported success puts the session up for review. The session page asks **Your agent
 reports this task is finished. Mark it complete?**
 
-- **Mark complete** closes a live run as `completed`: it commits, publishes
+- **Mark complete** closes a live session as `completed`: it commits, publishes
   the branch and keeps the container like **Close**.
-- **Not yet** keeps the run open and takes it out of **Needs you**.
+- **Not yet** keeps the session open and takes it out of **Needs you**.
 
 Any new turn clears the review, and a later success report asks again.
 
 ### Needs you
 
-One rule decides whether a run needs a person. The **Needs you** list,
-`aether runs --needs-you`, `aether wait` (exit 3, except that a success ready
-for review exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of runs that need
+One rule decides whether a session needs a person. The **Needs you** list,
+`aether sessions --needs-you`, `aether wait` (exit 3, except that a success ready
+for review exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of sessions that need
 you, `attention.list`
 ([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), push
-notifications and the assistant's notices all use it. The run status
+notifications and the assistant's notices all use it. The session status
 `needs-attention` alone does not: it means the agent is parked, which includes
 waiting on agents, CI or a process and a reported success.
 
-| Run | Needs you | Notifies |
+| Session | Needs you | Notifies |
 | --- | --- | --- |
 | `needs-you` | Yes | Once, when it enters the state. |
 | `disconnected` | Yes | Once. |
-| `failed`, result not yet seen by the owner | Yes, while the run is live | Once: `Failed, review the result`. |
+| `failed`, result not yet seen by the owner | Yes, while the session is live | Once: `Failed, review the result`. |
 | `failed`, result seen | No | No. |
 | Review ready, live or `completed` | Yes | Once per success: `Agent reported success, review the result`, at normal urgency. |
 | Review marked **Not yet** or complete | No | No. |
 | A broken wait (`wait-fault`) | Yes | Once: `Wait broken, send a message to continue: <condition> ...`. |
 | `working` or any waiting state, including `turn cancelled` | No | No. |
-| Any state while the run is paused | No | Checked again on resume. |
+| Any state while the session is paused | No | Checked again on resume. |
 
-A need is announced once: opening the run or restarting the server does not
-repeat it. When it ends, or the run is handed to another member, each
+A need is announced once: opening the session or restarting the server does not
+repeat it. When it ends, or the session is handed to another member, each
 browser that showed it gets a silent `No longer needs you` in place of the
 notification, and the desktop app closes its own. A server restart forgets
 which browsers showed a need, so one announced before it is not replaced.
@@ -170,10 +170,10 @@ When free space
 drops below the reserve plus 4 GiB, Aether frees space on its own, on every
 poll and before refusing a launch, in this order, until it is back above:
 
-1. Containers of closed runs, the soonest to expire first. The timeline notes
-   `Removed this closed run's container early because disk space was low; the
-   run can no longer be reopened, and its branch and history are kept`.
-2. Checkouts of every finished run, whatever their age. Skipped when
+1. Containers of closed sessions, the soonest to expire first. The timeline notes
+   `Removed this closed session's container early because disk space was low; the
+   session can no longer be reopened, and its branch and history are kept`.
+2. Checkouts of every finished session, whatever their age. Skipped when
    `--checkout-ttl` is negative.
 3. Other members' stopped environment containers. Anything they installed and
    did not save with `aether env save` is lost; their homes are kept.
@@ -186,25 +186,25 @@ If that is not enough, the launch is refused:
 scheduler: insufficient disk headroom: <filesystem> has <n> free bytes; reserve <n> bytes plus <n> bytes per provisioning (<n> already in flight)
 ```
 
-Attaching, messaging, pulling, closing, killing and deleting runs keep
-working below the reserve, and so does reopening a closed run whose container
+Attaching, messaging, pulling, closing, killing and deleting sessions keep
+working below the reserve, and so does reopening a closed session whose container
 is still there. To free space yourself:
 
 1. Open **Insights → System** to see what uses the space.
-2. Delete runs you no longer need with **Delete run** or `aether delete
-   <run-id>`. That removes the checkout, transcript and records; the
+2. Delete sessions you no longer need with **Delete run** or `aether delete
+   <session-id>`. That removes the checkout, transcript and records; the
    published branch, the timeline and the cost totals stay.
 3. Free retained containers with **Free retained containers…** (admins).
 4. Retry the launch.
 
 | What grows | What frees it |
 | --- | --- |
-| `checkouts/` | The checkout cleanup after `--checkout-ttl`, or deleting the run. |
-| `transcripts/` | Deleting the run. |
+| `checkouts/` | The checkout cleanup after `--checkout-ttl`, or deleting the session. |
+| `transcripts/` | Deleting the session. |
 | `aether.db` | Deleting runs or the workspace. |
-| `repos/` | Nothing. Every push and run branch is kept. |
+| `repos/` | Nothing. Every push and session branch is kept. |
 
-Archiving a run (**Archive closed runs…** or `aether archive <run-id>`) only
+Archiving a session (**Archive closed sessions…** or `aether archive <session-id>`) only
 hides it and frees nothing.
 
 `scheduler: host capacity unavailable: ...` means Aether could not measure a
@@ -283,7 +283,7 @@ that fails on the network or the release host is retried at the next idle
 moment, up to three times, then recorded as `failed`.
 
 After the swap, the new version must open and migrate the database, then bind
-its SSH listener and recover the runs within 5 minutes of migrating. If it
+its SSH listener and recover the sessions within 5 minutes of migrating. If it
 fails to finish booting twice, or misses those 5 minutes, Aether rolls back:
 the previous binaries go back into place, and if the schema already changed,
 the database copy taken before the update is restored. Every change made after
@@ -311,13 +311,13 @@ binaries by hand as described in [install.md](install.md#upgrading).
 ## Launch and mirror failures
 
 A workspace with a mirror refreshes it from the upstream before every launch.
-If that fails, the launch is refused and no run is created; Aether never
+If that fails, the launch is refused and no session is created; Aether never
 starts from the previously accepted commit on its own. When an accepted commit
 exists, the CLI prints a one-off retry from it:
 
 ```text
 retry from cached <commit> with:
-  aether run --agent <agent> --mode <mode> --workspace <workspace> --account <member-id> --cached-base <commit> -- <task>
+  aether session --agent <agent> --mode <mode> --workspace <workspace> --account <member-id> --cached-base <commit> -- <task>
 ```
 
 `--cached-base` applies to that launch only, and is refused when the base has
@@ -338,60 +338,60 @@ moved since. To repair the mirror itself (admins):
 An upstream that was rewritten or diverged stays held (`rewritten` or
 `diverged`) until an admin reviews it and adopts the new revision with
 `aether workspace mirror adopt --workspace <workspace> --generation <n>
---commit <reviewed-sha> --yes`. Published run branches stay fetchable while a
+--commit <reviewed-sha> --yes`. Published session branches stay fetchable while a
 mirror is failing.
 
-## Enhanced runs
+## Enhanced sessions
 
-An [Enhanced run](enhanced-runs.md) talks to its agent through a separate
-process in the run container. When that process fails, the container and its
+An [Enhanced session](enhanced-sessions.md) talks to its agent through a separate
+process in the session container. When that process fails, the container and its
 login shell stay up.
 
 | Failure | What you see | What you do |
 | --- | --- | --- |
-| The session cannot start, for example because the agent is not signed in | **Disconnected**, `enhanced session failed: <error>`. Messages are refused with `scheduler: the enhanced session is not running: <error>`. | Fix the cause, then press **Retry Enhanced** in the Session view. |
+| The session cannot start, for example because the agent is not signed in | **Disconnected**, `enhanced session failed: <error>`. Messages are refused with `scheduler: the enhanced session is not running: <error>`. | Fix the cause, then press **Retry Enhanced** in the Chat view. |
 | The agent's process exits | The turn in flight shows **Turn interrupted**; **Disconnected**, `enhanced session ended: the agent's ACP server exited with code <n>`, with `; stderr: <tail>` when it printed any. | **Retry Enhanced**. |
-| The agent drops its session but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent session lost** while Aether restores the session. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its session again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
-| The server restarts mid-turn | The turn keeps running in the adopted session; a message queued behind it is sent again unless the agent already had it. | Nothing. |
-| The server restarts and cannot reattach to the agent's keeper, or the run's container predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
+| The agent drops its conversation but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent conversation lost** while Aether restores the conversation. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
+| The server restarts mid-turn | The turn keeps running in the adopted conversation; a message queued behind it is sent again unless the agent already had it. | Nothing. |
+| The server restarts and cannot reattach to the agent's keeper, or the session's container predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
 | You cancel a turn or press Stop | **Waiting**, `turn cancelled`. | Send a message when you want it to go on. |
 | A Claude background task never ends | `running`, `working in background: <n> tasks`. | Press Stop. |
 | The old session cannot be restored | A new session starts; the item log says why. | Repeat context the agent lost. |
 
-A Background Enhanced run has no one to retry it: any of these failures ends
+A Background Enhanced session has no one to retry it: any of these failures ends
 it as `failed` with `agent exited 1: <cause>`, for example `agent exited 1:
 the agent's turn ended: cancelled`. A server restart mid-turn leaves its turn
 running; when the server cannot reattach, it restores the session and asks the
 agent to continue.
 
-## Usage limit mid-run
+## Usage limit mid-session
 
 When an agent reports that its account's usage limit stopped it, Aether moves
-the run to another account that has usage left
-([usage fallback](teams.md#usage-fallback)): the same run, checkout and branch
+the session to another account that has usage left
+([usage fallback](teams.md#usage-fallback)): the same session, checkout and branch
 continue on the new account's login, and a room note says so. When it cannot
-move, interactive runs park as **Needs you**, a Background run fails, and the reason says why:
+move, interactive sessions park as **Needs you**, a Background session fails, and the reason says why:
 
 | Reason | Meaning |
 | --- | --- |
-| `Usage limit reached on <owner>'s account; no other account is shared to fall back on` | No other account is shared with the launcher, or with the member whose home the run mounts, or listed in its `--fallback` order. Ask a teammate to share theirs, or wait for the limit to reset. |
-| `Usage limit reached on <owner>'s account; no fallback has usage left` | Every other account was read as exhausted or was already used by this run: the launcher's own, or a shared one whose login the server confirmed in the run's container. Wait for the limit to reset, or ask a teammate to share theirs. |
-| `Usage limit reached on <owner>'s account; no account that may have usage left can run <agent> here` | Accounts with usage left, or whose usage could not be read, cannot launch the agent: their owner is not signed in to it, the agent is not installed for them, or the share no longer covers the run's home. |
-| `Usage limit reached on <owner>'s account; Aether cannot read <agent>'s usage, so its runs do not move to another account` | Only `claude` and `codex` runs move ([harnesses.md](harnesses.md#usage-limit-signals)). Wait for the limit to reset, or relaunch on another account. |
-| `Usage limit reached on <owner>'s account; fallback is off for this run` | The run was launched with `--no-fallback`. |
-| `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>` | The run cannot move: for example the agent reported no session to resume, it is a member's own agent definition, or the owner may no longer launch. Nothing was changed. |
-| `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` | The move started and failed. The run fails. `start container: runtime: <path> in the container is inode <n>, not <login> in <B's home> ...` means the container would have signed in with another login than B's; the rest of the error says whether Docker or the container runtime left B's login out. |
-| `Usage limit reached on <A>'s account; the run is on <B>'s account and its session could not be restored: <error>` | The run moved, but the Enhanced session did not come back. Send a message to start fresh. |
+| `Usage limit reached on <owner>'s account; no other account is shared to fall back on` | No other account is shared with the launcher, or with the member whose home the session mounts, or listed in its `--fallback` order. Ask a teammate to share theirs, or wait for the limit to reset. |
+| `Usage limit reached on <owner>'s account; no fallback has usage left` | Every other account was read as exhausted or was already used by this session: the launcher's own, or a shared one whose login the server confirmed in the session's container. Wait for the limit to reset, or ask a teammate to share theirs. |
+| `Usage limit reached on <owner>'s account; no account that may have usage left can run <agent> here` | Accounts with usage left, or whose usage could not be read, cannot launch the agent: their owner is not signed in to it, the agent is not installed for them, or the share no longer covers the session's home. |
+| `Usage limit reached on <owner>'s account; Aether cannot read <agent>'s usage, so its sessions do not move to another account` | Only `claude` and `codex` sessions move ([harnesses.md](harnesses.md#usage-limit-signals)). Wait for the limit to reset, or relaunch on another account. |
+| `Usage limit reached on <owner>'s account; fallback is off for this session` | The session was launched with `--no-fallback`. |
+| `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>` | The session cannot move: for example the agent reported no session to resume, it is a member's own agent definition, or the owner may no longer launch. Nothing was changed. |
+| `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` | The move started and failed. The session fails. `start container: runtime: <path> in the container is inode <n>, not <login> in <B's home> ...` means the container would have signed in with another login than B's; the rest of the error says whether Docker or the container runtime left B's login out. |
+| `Usage limit reached on <A>'s account; the session is on <B>'s account and its session could not be restored: <error>` | The session moved, but the Enhanced session did not come back. Send a message to start fresh. |
 
-A paused run, or one being closed or killed, is not moved. A move survives a
+A paused session, or one being closed or killed, is not moved. A move survives a
 server restart: the next start finishes it.
 
 ## Raise file-watch limits
 
-Aether watches each run's checkout for changes with inotify. The kernel caps
+Aether watches each session's checkout for changes with inotify. The kernel caps
 watches and instances per user, and a server running as root shares that
-budget with every root process in its run containers. When the kernel refuses,
-the run still launches and its file changes arrive up to 60 seconds late,
+budget with every root process in its session containers. When the kernel refuses,
+the session still launches and its file changes arrive up to 60 seconds late,
 which also delays stall detection.
 
 `no space left on device` in the log means the watch limit is spent; `too many
@@ -414,24 +414,24 @@ open files` means the instance limit, or the server's own file descriptors.
    sudo sysctl --system
    ```
 
-Runs launched afterwards watch again. A run that is already polling keeps
+Sessions launched afterwards watch again. A session that is already polling keeps
 polling until it is reopened.
 
-## What stays after a run ends
+## What stays after a session ends
 
 | Action | Container | Checkout | Reopen |
 | --- | --- | --- | --- |
-| **Close** (`aether close <run-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the run ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <run-id>`. The deadline is cleared while the run is live; the next close sets a new 7 days. |
-| A Background run finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the run ends. | No. |
-| **Kill run** (`aether kill <run-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the run ends. | No. |
-| **Free container…** | Removed. History stays. | Kept until `--checkout-ttl` after the run ended. | No. |
-| **Delete run** (`aether delete <run-id>`) | Removed. | Removed with the transcript and records. | No. |
+| **Close** (`aether close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
+| A Background session finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the session ends. | No. |
+| **Kill run** (`aether kill <session-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the session ends. | No. |
+| **Free container…** | Removed. History stays. | Kept until `--checkout-ttl` after the session ended. | No. |
+| **Delete run** (`aether delete <session-id>`) | Removed. | Removed with the transcript and records. | No. |
 
-The run branch is published before a checkout is removed, so cleanup never
+The session branch is published before a checkout is removed, so cleanup never
 loses committed work. When disk runs low, Aether removes both sooner
 ([Recover from disk pressure](#recover-from-disk-pressure)). Relaunching resumes
 the same container and checkout; it restarts no process that had stopped. When
-retention ends, a closed run's reason reads `retained container expired` or
+retention ends, a closed session's reason reads `retained container expired` or
 `retained container unavailable`; when low disk space removes the container
 early it reads `retained container reclaimed for disk space`.
 
@@ -447,17 +447,17 @@ sudo systemctl restart aether-server
 
 | Flag | Default | What it changes | When to change it |
 | --- | --- | --- | --- |
-| `--stall-threshold` | `10m` | How long a live run may go with no agent output, file change or working report before it parks as stalled. Waiting states fall back to `waiting` after three times this. | See below. |
+| `--stall-threshold` | `10m` | How long a live session may go with no agent output, file change or working report before it parks as stalled. Waiting states fall back to `waiting` after three times this. | See below. |
 | `--first-event-grace` | `3m` | How long an Enhanced turn may wait for the agent's first update before it parks as stalled. At most `--stall-threshold`. | Raise for agents that think for minutes before they stream anything. |
 | `--stream-quiet-grace` | `5m` | How long an Enhanced turn with no tool running may go without agent progress before it parks as stalled. At most `--stall-threshold`. | As above. |
 | `--poll-interval` | `30s` | How often stalls, retention and disk are checked. Values above `1m` act as `1m`. | Keep it at a third of the threshold or less. |
-| `--checkout-ttl` | `72h` | How long a finished run's checkout is kept after the run ends. It also stays while the run's container is kept. Negative keeps every checkout, and disk cleanup leaves them alone. | Lower on a small disk. |
-| `--run-container-ttl` | `168h` | How long a closed run's container is kept for reopening. Negative removes it at once. | Lower when paused containers hold too much memory. |
+| `--checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps every checkout, and disk cleanup leaves them alone. | Lower on a small disk. |
+| `--run-container-ttl` | `168h` | How long a closed session's container is kept for reopening. Negative removes it at once. | Lower when paused containers hold too much memory. |
 | `--min-free-disk` | automatic | The free-space reserve per filesystem, in bytes. Negative turns the disk check off; the memory check stays. | See below. |
-| `--run-cpus` | 8, or the host's CPU count if lower | CPU ceiling per run and environment. | Lower to share a small host. |
-| `--run-memory` | 8 GiB | Memory ceiling per run and environment, in bytes. Swap adds a quarter of it. | Raise when runs hit out-of-memory kills. |
+| `--run-cpus` | 8, or the host's CPU count if lower | CPU ceiling per session and environment. | Lower to share a small host. |
+| `--run-memory` | 8 GiB | Memory ceiling per session and environment, in bytes. Swap adds a quarter of it. | Raise when sessions hit out-of-memory kills. |
 | `--run-pids` | `4096` | Process and thread ceiling per container. | Raise for builds that start many processes. |
-| `--agent-update` | `true` | Update a shipped agent in the member's home, in the background, when a run launches. | Turn off on a host without internet access, or to hold a version. |
+| `--agent-update` | `true` | Update a shipped agent in the member's home, in the background, when a session launches. | Turn off on a host without internet access, or to hold a version. |
 
 The CPU, memory and process ceilings apply to containers created after the
 change. A host-wide out-of-memory kill takes agent processes before the server
@@ -466,17 +466,17 @@ change. A host-wide out-of-memory kill takes agent processes before the server
 ### Picking a stall threshold
 
 For agents that report their turns (`claude`, `codex`, `opencode`, `pi` and
-`omp`), a finished turn parks the run at once, and the threshold only catches
+`omp`), a finished turn parks the session at once, and the threshold only catches
 an agent that hangs mid-turn. For other agents, silence is the only signal,
 and a long build or slow tool call looks the same as a hang.
 
-- Too low, and long tool calls park healthy runs as stalled.
+- Too low, and long tool calls park healthy sessions as stalled.
 - Too high, and a wedged agent wastes hours before anyone notices.
 
-10 minutes suits interactive runs. Raise it for Background runs with long
-builds. Lower it to a minute or two for many short scripted runs.
+10 minutes suits interactive sessions. Raise it for Background sessions with long
+builds. Lower it to a minute or two for many short scripted sessions.
 
-An Enhanced run is judged on its agent's progress: messages, thoughts, tool
+An Enhanced session is judged on its agent's progress: messages, thoughts, tool
 calls, plans, subagents, compaction, background task progress and permission
 requests. Aether's own calls to the agent, the history a restored session
 replays, and mode, command and usage updates are not progress. How long it may
@@ -487,7 +487,7 @@ stay quiet depends on where the turn is, its phase:
 | `awaiting-first-event`: the prompt was sent, nothing came back | `--first-event-grace` |
 | `streaming`: the agent replied, no tool is running | `--stream-quiet-grace` |
 | `tool-running`: a tool call or a compaction is open | `--stall-threshold` |
-| `tool-running` between turns: background tasks hold the run | three times `--stall-threshold` |
+| `tool-running` between turns: background tasks hold the session | three times `--stall-threshold` |
 | `awaiting-input`, `between-turns`, or the turn that asks for a missing report | `--stall-threshold` |
 
 A stall that names a phase is a possible stall: the dashboard shows
@@ -497,7 +497,7 @@ minutes without streaming a thought parks at the short limit and returns to
 `running` with its next update. A resume or a server restart starts the quiet
 time over.
 
-Aether restarts nothing on its own. The run's Session view shows the agent's
+Aether restarts nothing on its own. The session's Chat view shows the agent's
 last progress, the phase and the connection, and offers:
 
 - **Stop turn** cancels the turn. It costs nothing.
@@ -506,7 +506,7 @@ last progress, the phase and the connection, and offers:
   costs tokens, and the agent may repeat tool actions it already took. A turn
   that is still running finishes first, so stop it to send now.
 
-Messaging a stalled run usually gets it going. The echo of your message does
+Messaging a stalled session usually gets it going. The echo of your message does
 not count as agent output, so a hung agent still reads as stalled afterwards.
 
 ### Picking a disk floor
@@ -515,7 +515,7 @@ The automatic reserve suits most hosts; raise `--min-free-disk` for large
 checkouts or a filesystem shared with other services. Host memory is checked
 separately: a launch needs the larger of 2 GiB and 10% of RAM available, plus
 512 MiB for it and each launch already starting. Memory ceilings are not
-reservations, so idle runs can share a host. Refusals and the cleanup order
+reservations, so idle sessions can share a host. Refusals and the cleanup order
 are in [Recover from disk pressure](#recover-from-disk-pressure).
 
 ## Limits
@@ -524,7 +524,7 @@ are in [Recover from disk pressure](#recover-from-disk-pressure).
   committed write, but a power loss or kernel crash can drop the last few;
   the database stays consistent.
 - A Standard agent survives a server restart only if its own process
-  survived. Extra terminals in a run lose their old output streams.
+  survived. Extra terminals in a session lose their old output streams.
 - Aether does not restart an agent killed for memory, and an exit code alone
   does not prove memory was the cause. A cgroup v1 host posts no
   out-of-memory note; check `docker inspect` and the kernel log there.

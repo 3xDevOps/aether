@@ -36,16 +36,16 @@ lists it in full.
 ## Data types
 
 Every type below is **collected, not shared**, **required** (the app does not
-work without it), **not processed ephemerally** (the server keeps run
+work without it), **not processed ephemerally** (the server keeps session
 records), and used for **App functionality** only. Nothing is used for
 analytics, advertising, personalization, fraud prevention, or account
 management.
 
 | Category | Type | What it is |
 | --- | --- | --- |
-| App activity | Other user-generated content | What the member types into an agent's terminal and the instructions sent to a run. Play defines the type as "any other user-generated content not listed here, or in any other section"; terminal input and run instructions are content the member writes, not messages addressed to another person |
-| App activity | Other actions | Approvals, run launches and the other controls the dashboard sends the server |
-| App activity | App interactions | Whether you are online and which runs you have open, shown to your teammates (`aether who`) |
+| App activity | Other user-generated content | What the member types into an agent's terminal and the instructions sent to a session. Play defines the type as "any other user-generated content not listed here, or in any other section"; terminal input and run instructions are content the member writes, not messages addressed to another person |
+| App activity | Other actions | Approvals, session launches and the other controls the dashboard sends the server |
+| App activity | App interactions | Whether you are online and which sessions you have open, shown to your teammates (`aether who`) |
 | Photos and videos | Photos | An image the member picks to paste into a terminal; on a phone the picker opens the gallery. It is the dashboard's only upload reachable from the phone: the onboarding profile import exists only on the local `aether gui` gateway |
 | Files and docs | Files and docs | The contents of files edited in the dashboard's Files editor |
 

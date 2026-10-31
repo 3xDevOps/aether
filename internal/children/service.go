@@ -27,6 +27,7 @@ type Runs interface {
 	DefaultMode(ctx context.Context, member, account domain.MemberID, harnessName string) (domain.LaunchMode, error)
 	FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error)
 	AgentModels(ctx context.Context, member, account domain.MemberID, name string, refresh bool) (protocol.AgentModelsResult, error)
+	Paused(run domain.RunID) bool
 }
 
 // Git publishes run branches and copies a child's into its parent.
@@ -55,6 +56,7 @@ type Admitter interface {
 type Store interface {
 	store.Store
 	store.ChildStore
+	GetRunMessageByIdempotency(ctx context.Context, from domain.RunID, key string) (*store.RunMessage, error)
 }
 
 type Config struct {
@@ -72,6 +74,9 @@ type Config struct {
 	// hold across it and the launch's durable boundary.
 	Authorize       func(ctx context.Context, st store.Store, actor domain.MemberID, account string) (domain.MemberID, error)
 	AuthorizationMu *sync.Mutex
+	// Now is the clock the idle notice measures a quiet spell against;
+	// time.Now when unset.
+	Now func() time.Time
 	// Interval is how often queued and ended children are reconciled.
 	Interval time.Duration
 	// Recovered closes once the scheduler recovered the runs a restart left,
@@ -94,7 +99,10 @@ type Service struct {
 
 func New(cfg Config) (*Service, error) {
 	if cfg.Store == nil || cfg.Runs == nil || cfg.Git == nil || cfg.Authorize == nil || cfg.AuthorizationMu == nil {
-		return nil, errors.New("children: store, runs, git and launch authorization are required")
+		return nil, errors.New("subsessions: store, sessions, git and launch authorization are required")
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 3 * time.Second
@@ -106,7 +114,7 @@ func New(cfg Config) (*Service, error) {
 // Close.
 func (s *Service) Start(ctx context.Context) error {
 	if err := s.recover(ctx); err != nil {
-		return fmt.Errorf("children: recover reservations: %w", err)
+		return fmt.Errorf("subsessions: recover reservations: %w", err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -118,7 +126,7 @@ func (s *Service) Start(ctx context.Context) error {
 		sub, err := s.cfg.Bus.Subscribe(runCtx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeRunStatus}}})
 		if err != nil {
 			cancel()
-			return fmt.Errorf("children: subscribe to run status: %w", err)
+			return fmt.Errorf("subsessions: subscribe to session status: %w", err)
 		}
 		statuses = sub.Events()
 	}
@@ -216,24 +224,27 @@ func (s *Service) repairStarted(ctx context.Context) error {
 
 func (s *Service) reconcile(ctx context.Context) {
 	if err := s.repairStarted(ctx); err != nil && ctx.Err() == nil {
-		slog.Warn("children: repair started reservations", "error", err)
+		slog.Warn("subsessions: repair started reservations", "error", err)
 	}
 	if err := s.dispatch(ctx); err != nil && ctx.Err() == nil {
-		slog.Warn("children: dispatch failed", "error", err)
+		slog.Warn("subsessions: dispatch failed", "error", err)
 	}
 	if err := s.settle(ctx); err != nil && ctx.Err() == nil {
-		slog.Warn("children: settle failed", "error", err)
+		slog.Warn("subsessions: settle failed", "error", err)
+	}
+	if err := s.noticeIdle(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("children: idle notices failed", "error", err)
 	}
 }
 
-func (s *Service) notify(ctx context.Context, from, to domain.RunID, body, correlation, key string) error {
+func (s *Service) notify(ctx context.Context, from, to domain.RunID, body, key string) error {
 	s.mu.Lock()
 	mail := s.mail
 	s.mu.Unlock()
 	if mail == nil {
-		return errors.New("children: the coordination mailbox is not connected")
+		return errors.New("subsessions: the coordination mailbox is not connected")
 	}
-	if err := mail.Notify(ctx, from, to, body, correlation, key); err != nil {
+	if err := mail.Notify(ctx, from, to, body, "", key); err != nil {
 		slog.Warn("children: notify parent", "child", from, "parent", to, "error", err)
 		return err
 	}
@@ -270,13 +281,13 @@ func (s *Service) publish(ctx context.Context, run domain.RunID, actor domain.Me
 	}
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		slog.Warn("children: read run for its event", "run", run, "error", err)
+		slog.Warn("subsessions: read session for its event", "run", run, "error", err)
 		return
 	}
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
 		WorkspaceID: r.WorkspaceID, RunID: r.ID, ActorID: actor,
 		Payload: events.RunChildrenPayload{Children: r.Children, Detached: r.Detached},
 	}); err != nil {
-		slog.Warn("children: publish run.children", "run", run, "error", err)
+		slog.Warn("subsessions: publish run.children", "run", run, "error", err)
 	}
 }

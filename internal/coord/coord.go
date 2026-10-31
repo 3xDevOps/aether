@@ -50,16 +50,16 @@ var (
 	ErrNoEvidenceCapture = errors.New("coord: no evidence capture service is attached")
 	// ErrNoOutcomeSink is returned when a needs-input report arrives with no
 	// scheduler behind it.
-	ErrNoOutcomeSink = errors.New("coord: no run outcome sink is attached")
+	ErrNoOutcomeSink = errors.New("coord: no session outcome sink is attached")
 	// ErrCannotAsk is returned by OutcomeSink.ReportNeedsInput for a run
 	// that cannot take its user's answer.
-	ErrCannotAsk = errors.New("a Background run cannot ask its user; report blocked or failure instead")
+	ErrCannotAsk = errors.New("a Background session cannot ask its user; report blocked or failure instead")
 	// ErrRunFinished is returned by an OutcomeSink for a run that already
 	// finished or is ending.
-	ErrRunFinished = errors.New("the run already finished or is ending; its outcome stands, so this report cannot take effect")
+	ErrRunFinished = errors.New("the session already finished or is ending; its outcome stands, so this report cannot take effect")
 	// ErrReportSuperseded is returned by an OutcomeSink for a report older
 	// than one the run already recorded, or than its relaunch.
-	ErrReportSuperseded = errors.New("a newer report or a relaunch of this run already replaced this report; report again with a new idempotency key")
+	ErrReportSuperseded = errors.New("a newer report or a relaunch of this session already replaced this report; report again with a new idempotency key")
 	// ErrHumanOpen is returned by an OutcomeSink for an answered report
 	// while the run's question or blocker still waits on a member.
 	ErrHumanOpen = errors.New("your needs-input or blocked report is still open and stays shown; end your turn without another report")

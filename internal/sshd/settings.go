@@ -221,11 +221,11 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 			ActorID:     member,
 			Payload:     events.RunProtectedPayload{Protected: p.Protected},
 		}); publishErr != nil {
-			publicationErrs = append(publicationErrs, fmt.Errorf("publish run protection refresh event: %w", publishErr))
+			publicationErrs = append(publicationErrs, fmt.Errorf("publish session protection refresh event: %w", publishErr))
 		}
-		msg := "run protection disabled"
+		msg := "session protection disabled"
 		if run.Protected {
-			msg = "run protection enabled"
+			msg = "session protection enabled"
 		}
 		if _, publishErr := s.cfg.Bus.Publish(ctx, events.Event{
 			WorkspaceID: run.WorkspaceID,
@@ -233,7 +233,7 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 			ActorID:     member,
 			Payload:     events.TimelinePayload{Kind: events.TimelineNote, Message: msg},
 		}); publishErr != nil {
-			publicationErrs = append(publicationErrs, fmt.Errorf("publish run protection timeline event: %w", publishErr))
+			publicationErrs = append(publicationErrs, fmt.Errorf("publish session protection timeline event: %w", publishErr))
 		}
 	}
 	if len(publicationErrs) != 0 {

@@ -186,7 +186,7 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
       const kept = s.assistantAttachments.filter((held) => !attachments.some((added) => sameAttachment(held, added)))
       const keepDraft = s.assistantDraft.trim() !== ''
       const all = [...kept, ...attachments]
-      const dropped = all.slice(0, -maxAttachments).map((target) => `${target.kind} ${target.label}`)
+      const dropped = all.slice(0, -maxAttachments).map((target) => `${target.kind === 'run' ? 'session' : target.kind} ${target.label}`)
       return {
         assistantOpen: true,
         assistantNotices: 0,

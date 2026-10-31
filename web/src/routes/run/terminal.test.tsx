@@ -22,7 +22,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
 
 function terminalRoute() {
   const View = lookupRoute('run')
-  if (!View) throw new Error('run route not registered')
+  if (!View) throw new Error('session route not registered')
   return View
 }
 
@@ -144,8 +144,8 @@ describe('terminal view', () => {
       roomStatus: { run_1: status },
       roomStatusError: {},
     }))
-    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
-    expect(presence.getByText(/^You control in another session since /)).toBeDefined()
+    const presence = within(screen.getByRole('group', { name: 'Session presence' }))
+    expect(presence.getByText(/^You control in another tab since /)).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
     expect(presence.queryByText('You control')).toBeNull()
@@ -169,7 +169,7 @@ describe('terminal view', () => {
     const view = mount({}, { member_id: bob.id })
     attached()
     await act(async () => {})
-    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    const presence = within(screen.getByRole('group', { name: 'Session presence' }))
     const refresh = Promise.withResolvers<typeof occupied>()
     status.mockReturnValue(refresh.promise)
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
@@ -177,12 +177,12 @@ describe('terminal view', () => {
     expect(presence.getByText('You control')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     controlAck(false, 2, 1)
-    expect(presence.getByText(/^You control in another session since .* \(last known\)$/)).toBeDefined()
+    expect(presence.getByText(/^You control in another tab since .* \(last known\)$/)).toBeDefined()
     await act(async () => {
       refresh.reject(new Error('presence service unavailable'))
       await Promise.resolve()
     })
-    expect(presence.getByText(/^You control in another session since .* \(last known\)$/)).toBeDefined()
+    expect(presence.getByText(/^You control in another tab since .* \(last known\)$/)).toBeDefined()
     expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
     view.unmount()
   })
@@ -192,7 +192,7 @@ describe('terminal view', () => {
     attached()
     await act(async () => {})
     act(() => useStore.setState({ roomStatus: {}, roomStatusError: {} }))
-    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    const presence = within(screen.getByRole('group', { name: 'Session presence' }))
     expect(presence.getByText('Checking control…')).toBeDefined()
     act(() => useStore.setState({ roomStatusError: { run_1: 'status unavailable' } }))
     expect(presence.getByText('Control unknown')).toBeDefined()
@@ -261,12 +261,12 @@ describe('terminal view', () => {
     attached(undefined, undefined, { control_generation: 7 })
     await act(async () => {})
     const socket = StubSocket.last()
-    const controlButton = within(screen.getByRole('group', { name: 'Run presence' })).getByRole('button', { name: 'Take control' })
+    const controlButton = within(screen.getByRole('group', { name: 'Session presence' })).getByRole('button', { name: 'Take control' })
     fireEvent.click(controlButton)
     expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
     expect(socket.frames().at(-1)).not.toHaveProperty('takeover')
-    controlAck(false, 1, 7, { ok: false, error: 'run control is held by another session' })
-    expect(screen.getByText('run control is held by another session')).toBeDefined()
+    controlAck(false, 1, 7, { ok: false, error: 'session control is held by another session' })
+    expect(screen.getByText('session control is held by another session')).toBeDefined()
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(useStore.getState().terminals.run_1.write).toBe(false)
     expect(StubSocket.last()).toBe(socket)
@@ -281,7 +281,7 @@ describe('terminal view', () => {
     await act(async () => {})
     const socket = StubSocket.last()
     const header = socket.frames()[0] as { control_session_id: string }
-    const controlButton = within(screen.getByRole('group', { name: 'Run presence' })).getByRole('button', { name: 'Take control' })
+    const controlButton = within(screen.getByRole('group', { name: 'Session presence' })).getByRole('button', { name: 'Take control' })
     vi.useFakeTimers()
     try {
       fireEvent.keyDown(controlButton, { key: ' ' })
@@ -415,7 +415,7 @@ describe('terminal view', () => {
 
     act(() => StubSocket.last().onclose?.({ code: 1008, reason: 'control taken over' }))
     expect(screen.getByText('Take control')).toBeDefined()
-    expect(screen.queryByText('You can watch this run but not type in it.')).toBeNull()
+    expect(screen.queryByText('You can watch this session but not type in it.')).toBeNull()
 
     // Lease displacement sets no permission-denial latch.
     view.unmount()
@@ -442,7 +442,7 @@ describe('terminal view', () => {
       }),
     )
 
-    expect(screen.getByText('You can watch this run but not type in it.')).toBeDefined()
+    expect(screen.getByText('You can watch this session but not type in it.')).toBeDefined()
     view.unmount()
   })
 
@@ -485,7 +485,7 @@ describe('terminal view', () => {
 
     const toggle = screen.getByRole('button', { name: 'Take control' })
     expect(toggle.getAttribute('aria-disabled')).toBe('true')
-    expect(screen.getByText('You can watch this run but not type in it.')).toBeDefined()
+    expect(screen.getByText('You can watch this session but not type in it.')).toBeDefined()
     view.unmount()
   })
 
@@ -520,7 +520,7 @@ describe('terminal view', () => {
     act(() => authorized.onopen?.())
     expect(authorized.frames()[0]).toMatchObject({ write: true, screen: true })
     expect(authorized.frames()[0]).not.toHaveProperty('resume')
-    expect(screen.queryByText('You can watch this run but not type in it.')).toBeNull()
+    expect(screen.queryByText('You can watch this session but not type in it.')).toBeNull()
     view.unmount()
   })
   it('retries control on an authority change without replacing the stream', () => {
@@ -561,7 +561,7 @@ describe('terminal view', () => {
     expect(StubSocket.opened).toHaveLength(1)
     expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 3, write: true })
     controlAck(true, 3, 2)
-    expect(screen.queryByText('You can watch this run but not type in it.')).toBeNull()
+    expect(screen.queryByText('You can watch this session but not type in it.')).toBeNull()
     view.unmount()
   })
 
@@ -613,14 +613,14 @@ describe('terminal view', () => {
     attached()
     await waitFor(() => expect(document.querySelector('.xterm')).toBeDefined())
     expect(screen.getByRole('toolbar', { name: 'Terminal toolbar' })).toBeDefined()
-    expect(screen.getByRole('tablist', { name: 'Run views' })).toBeDefined()
+    expect(screen.getByRole('tablist', { name: 'Session views' })).toBeDefined()
     expect(screen.getByRole('tabpanel')).toBeDefined()
     const pane = document.querySelector('.xterm')
 
     view.unmount()
 
     expect(screen.queryByRole('toolbar', { name: 'Terminal toolbar' })).toBeNull()
-    expect(screen.queryByRole('tablist', { name: 'Run views' })).toBeNull()
+    expect(screen.queryByRole('tablist', { name: 'Session views' })).toBeNull()
     expect(screen.queryByRole('tabpanel')).toBeNull()
     expect(pane?.isConnected).toBe(false)
   })
@@ -1133,11 +1133,11 @@ describe('terminal view', () => {
     act(() => StubSocket.last().onopen?.())
     act(() =>
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: false, code: -32000, error: 'unknown run' }),
+        data: JSON.stringify({ ok: false, code: -32000, error: 'unknown session' }),
       }),
     )
 
-    expect(screen.getByText('unknown run')).toBeDefined()
+    expect(screen.getByText('unknown session')).toBeDefined()
     fireEvent.click(screen.getByText('Retry'))
     expect(StubSocket.opened).toHaveLength(2)
     view.unmount()
@@ -1152,10 +1152,10 @@ describe('terminal view', () => {
 
     act(() =>
       StubSocket.last().onmessage?.({
-        data: new TextEncoder().encode('run one output').buffer,
+        data: new TextEncoder().encode('session one output').buffer,
       }),
     )
-    await vi.waitFor(() => expect(pane()).toContain('run one output'))
+    await vi.waitFor(() => expect(pane()).toContain('session one output'))
 
     act(() => useStore.getState().upsertRun(run({ id: 'run_2', status: 'merged' })))
     const View = terminalRoute()
@@ -1166,12 +1166,12 @@ describe('terminal view', () => {
         data: JSON.stringify({
           ok: false,
           code: -32004,
-          error: 'ptyhost: no session for run',
+          error: 'ptyhost: no session for session',
         }),
       }),
     )
 
-    expect(pane()).not.toContain('run one output')
+    expect(pane()).not.toContain('session one output')
     view.unmount()
   })
 
@@ -1195,7 +1195,7 @@ describe('terminal view', () => {
         data: JSON.stringify({
           ok: false,
           code: -32004,
-          error: 'ptyhost: no session for run',
+          error: 'ptyhost: no session for session',
         }),
       }),
     )
@@ -1206,15 +1206,15 @@ describe('terminal view', () => {
   })
 
   it.each(['queued', 'provisioning'] as const)(
-    'waits for the container instead of attaching to a %s run',
+    'waits for the container instead of attaching to a %s session',
     (status) => {
       const view = mount({}, { status })
 
       expect(StubSocket.opened).toHaveLength(0)
-      expect(screen.getByText("Starting the run's container")).toBeDefined()
+      expect(screen.getByText("Starting the session's container")).toBeDefined()
       expect(screen.queryByText('Offline')).toBeNull()
       expect(screen.queryByText('Retry')).toBeNull()
-      expect(screen.queryByText('This run is not running')).toBeNull()
+      expect(screen.queryByText('This session is not running')).toBeNull()
       view.unmount()
     },
   )
@@ -1227,7 +1227,7 @@ describe('terminal view', () => {
     attached()
 
     expect(StubSocket.opened).toHaveLength(1)
-    expect(screen.queryByText("Starting the run's container")).toBeNull()
+    expect(screen.queryByText("Starting the session's container")).toBeNull()
     view.unmount()
   })
 
@@ -1247,11 +1247,11 @@ describe('terminal view', () => {
     act(() => StubSocket.last().onopen?.())
     act(() =>
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for session' }),
       }),
     )
 
-    expect(screen.queryByText("Starting the run's container")).toBeNull()
+    expect(screen.queryByText("Starting the session's container")).toBeNull()
     expect(screen.getByText('provisioning: create checkout: no space left')).toBeDefined()
     expect(screen.queryByText('Retry')).toBeNull()
     view.unmount()
@@ -1269,12 +1269,12 @@ describe('terminal view', () => {
     act(() => StubSocket.last().onopen?.())
     act(() =>
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for session' }),
       }),
     )
 
     expect(screen.queryByText('Offline')).toBeNull()
-    expect(screen.queryByText('ptyhost: no session for run')).toBeNull()
+    expect(screen.queryByText('ptyhost: no session for session')).toBeNull()
     expect(screen.queryByText('Retry')).toBeNull()
     view.unmount()
   })
@@ -1287,7 +1287,7 @@ describe('terminal view', () => {
     act(() => StubSocket.last().onopen?.())
     act(() =>
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for session' }),
       }),
     )
 
@@ -1306,7 +1306,7 @@ describe('terminal view', () => {
 
     expect(screen.getByText('the gateway refused the attach')).toBeDefined()
     expect(
-      screen.queryByText('This run has ended and left no recorded terminal to replay.'),
+      screen.queryByText('This session has ended and left no recorded terminal to replay.'),
     ).toBeNull()
     view.unmount()
   })
@@ -1320,15 +1320,15 @@ describe('terminal view', () => {
         data: JSON.stringify({
           ok: false,
           code: -32004,
-          error: 'ptyhost: no session for run',
+          error: 'ptyhost: no session for session',
         }),
       }),
     )
 
     expect(
-      screen.getByText('This run has ended and left no recorded terminal to replay.'),
+      screen.getByText('This session has ended and left no recorded terminal to replay.'),
     ).toBeDefined()
-    expect(screen.queryByText('ptyhost: no session for run')).toBeNull()
+    expect(screen.queryByText('ptyhost: no session for session')).toBeNull()
     view.unmount()
   })
 
@@ -1338,7 +1338,7 @@ describe('terminal view', () => {
 
     const toggle = screen.getByRole('button', { name: 'Release' }) as HTMLButtonElement
     expect(toggle.getAttribute('aria-disabled')).toBe('false')
-    expect(screen.queryByText('This run is not running')).toBeNull()
+    expect(screen.queryByText('This session is not running')).toBeNull()
     view.unmount()
   })
 
@@ -1348,13 +1348,13 @@ describe('terminal view', () => {
     act(() => StubSocket.last().onopen?.())
     act(() =>
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: false, code: -32000, error: 'unknown run' }),
+        data: JSON.stringify({ ok: false, code: -32000, error: 'unknown session' }),
       }),
     )
 
-    expect(screen.getByText('unknown run')).toBeDefined()
+    expect(screen.getByText('unknown session')).toBeDefined()
     expect(
-      screen.queryByText('This run has ended and left no recorded terminal to replay.'),
+      screen.queryByText('This session has ended and left no recorded terminal to replay.'),
     ).toBeNull()
     fireEvent.click(screen.getByText('Retry'))
     expect(StubSocket.opened).toHaveLength(2)

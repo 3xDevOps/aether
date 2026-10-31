@@ -69,7 +69,7 @@ func TestRunPatchReturnsCompleteDiffRequest(t *testing.T) {
 	// An unknown run is a NotFound from the store, not a patch failure.
 	err := c.Call(protocol.MethodRunPatch, protocol.RunIDParams{RunID: "run_missing"}, nil)
 	if pe := wireErrOf(t, err); pe.Code != protocol.CodeNotFound {
-		t.Errorf("unknown run code = %d, want %d", pe.Code, protocol.CodeNotFound)
+		t.Errorf("unknown session code = %d, want %d", pe.Code, protocol.CodeNotFound)
 	}
 
 	// Only a missing checkout gets the friendly message; every other failure
@@ -79,8 +79,8 @@ func TestRunPatchReturnsCompleteDiffRequest(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"no checkout", fmt.Errorf("gitengine: %w", gitengine.ErrCheckoutNotFound), "run.patch: this run has no checkout to diff"},
-		{"no identity record", gitengine.ErrRunMetadataNotFound, "run.patch: this run has no checkout to diff"},
+		{"no checkout", fmt.Errorf("gitengine: %w", gitengine.ErrCheckoutNotFound), "run.patch: this session has no checkout to diff"},
+		{"no identity record", gitengine.ErrRunMetadataNotFound, "run.patch: this session has no checkout to diff"},
 		{"deadline", fmt.Errorf("render: %w: signal: killed", context.DeadlineExceeded), "run.patch: rendering the diff took longer than 30s: render: context deadline exceeded: signal: killed"},
 		{"git failure", errors.New("gitengine: git diff: exit status 128: fatal: bad object"), "run.patch: gitengine: git diff: exit status 128: fatal: bad object"},
 	} {

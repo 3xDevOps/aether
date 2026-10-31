@@ -292,7 +292,7 @@ func TestCheckoutLifecycle(t *testing.T) {
 	dst := t.TempDir()
 	gitc(t, dst, "clone", "--branch", branch, url("ws1"), "c")
 	if got := gitc(t, filepath.Join(dst, "c"), "rev-parse", "HEAD"); got != commit {
-		t.Fatalf("fetched run branch tip = %s, want %s", got, commit)
+		t.Fatalf("fetched session branch tip = %s, want %s", got, commit)
 	}
 
 	// Removal deletes the checkout, never the branch; idempotent.
@@ -329,7 +329,7 @@ func TestRunBranchFallsBackToTheFullIDOnCollision(t *testing.T) {
 	const colliding = "01m0aaaaaaaaaaaaaaaaanq0jf3" // same last six characters
 	_, firstBranch, err := e.CreateRunCheckout(ctx, "ws1", first, "main", "Fix the Auth bug!", "")
 	if err != nil {
-		t.Fatalf("first run: %v", err)
+		t.Fatalf("first session: %v", err)
 	}
 	if firstBranch != "aether/run-fix-the-auth-bug-nq0jf3" {
 		t.Fatalf("first branch = %q, want the short-id form", firstBranch)
@@ -347,13 +347,13 @@ func TestRunBranchFallsBackToTheFullIDOnCollision(t *testing.T) {
 	// separate refs, so neither overwrites the other.
 	firstTip, err := e.PublishRunBranch(ctx, first)
 	if err != nil {
-		t.Fatalf("publish first run: %v", err)
+		t.Fatalf("publish first session: %v", err)
 	}
 	if _, err := e.PublishRunBranch(ctx, colliding); err != nil {
 		t.Fatalf("publish colliding run: %v", err)
 	}
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+firstBranch); got != firstTip {
-		t.Errorf("first run's branch tip = %s after the second published, want %s", got, firstTip)
+		t.Errorf("first session's branch tip = %s after the second published, want %s", got, firstTip)
 	}
 }
 
@@ -446,7 +446,7 @@ func TestAgentCannotRedirectPublish(t *testing.T) {
 		t.Fatalf("ws1 main = %s after attack, want %s (agent hijacked the workspace default branch)", got, victim1)
 	}
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != hostile {
-		t.Fatalf("run branch tip = %s, want the run's own commit %s", got, hostile)
+		t.Fatalf("session branch tip = %s, want the session's own commit %s", got, hostile)
 	}
 
 	// A checkout with no identity record (created before the sidecar
@@ -1325,7 +1325,7 @@ func TestReceivePackDeniesBranchDeletion(t *testing.T) {
 		t.Errorf("deletion push failed for the wrong reason:\n%s", out)
 	}
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != tip {
-		t.Fatalf("run branch tip = %s after deletion attempt, want %s", got, tip)
+		t.Fatalf("session branch tip = %s after deletion attempt, want %s", got, tip)
 	}
 	gitcFail(t, cl, "push", url("ws1"), ":refs/heads/main")
 	if got := bareRevParse(t, e, "ws1", "refs/heads/main"); len(got) != 40 {
@@ -1449,7 +1449,7 @@ func TestReceivePackPublishesGitBranch(t *testing.T) {
 
 	ev, ok := nextEvent(t, branches, 5*time.Second)
 	if !ok {
-		t.Fatal("no git.branch event after client push to run branch")
+		t.Fatal("no git.branch event after client push to session branch")
 	}
 	pl := ev.Payload.(events.GitBranchPayload)
 	if pl.Branch != branch || pl.Commit != want || pl.WorkspaceID != "ws1" {
@@ -1462,7 +1462,7 @@ func TestReceivePackPublishesGitBranch(t *testing.T) {
 	// A push to a non-run branch publishes nothing.
 	gitc(t, cl, "push", url("ws1"), "HEAD:refs/heads/feature")
 	if extra, more := nextEvent(t, branches, 600*time.Millisecond); more {
-		t.Fatalf("unexpected git.branch for non-run branch: %+v", extra.Payload)
+		t.Fatalf("unexpected git.branch for non-session branch: %+v", extra.Payload)
 	}
 }
 
@@ -1507,7 +1507,7 @@ func TestReceivePackRejectsRunBranchForcePush(t *testing.T) {
 		t.Errorf("force-push rejection message unreadable:\n%s", out)
 	}
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != tip {
-		t.Fatalf("run branch tip = %s after rejected force-push, want %s", got, tip)
+		t.Fatalf("session branch tip = %s after rejected force-push, want %s", got, tip)
 	}
 
 	// A fast-forward client push to the same run branch is still allowed.
@@ -1519,7 +1519,7 @@ func TestReceivePackRejectsRunBranchForcePush(t *testing.T) {
 	gitc(t, cl, "commit", "-m", "fast-forward")
 	gitc(t, cl, "push", url("ws1"), branch)
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != gitc(t, cl, "rev-parse", "HEAD") {
-		t.Fatal("fast-forward push to run branch did not land")
+		t.Fatal("fast-forward push to session branch did not land")
 	}
 }
 

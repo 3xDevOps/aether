@@ -16,7 +16,7 @@ import { useCapability } from '@/store/hooks'
 
 const pollEvery = 3000
 
-const nothingListening = 'Nothing in this run is listening on a port yet. Start a server in the Terminal, or ask the agent to, and it appears here.'
+const nothingListening = 'Nothing in this session is listening on a port yet. Start a server in the Terminal, or ask the agent to, and it appears here.'
 
 export interface Ports {
   /** Null until a read answers, and again after one fails. */
@@ -125,7 +125,7 @@ function PortList({ runID, ports, available, onOpen }: {
             <>
               Port {detail.port} is forwarded to{' '}
               <a href={detail.url} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">localhost:{detail.port}</a>
-              {' '}on this computer. To stop it, choose Forward a port… in the run’s More menu.
+              {' '}on this computer. To stop it, choose Forward a port… in the session’s More menu.
             </>
           ) : detail.kind === 'command' ? (
             <>
@@ -164,9 +164,9 @@ export function PortsControl({ runID, ports, available, onOpen }: {
         </Button>
       </PopoverTrigger>
       <PopoverContent data-browser align="end" className="flex w-80 flex-col gap-2">
-        <SectionLabel>Listening in this run</SectionLabel>
+        <SectionLabel>Listening in this session</SectionLabel>
         {ports.error ? <p role="alert" className="break-words text-state-failed">{ports.error}</p>
-          : !ports.list ? <Spinner label="Reading the run’s ports" />
+          : !ports.list ? <Spinner label="Reading the session’s ports" />
             : ports.list.length === 0 ? <p className="text-muted">{nothingListening}</p>
               : <PortList runID={runID} ports={ports.list} available={available} onOpen={(address) => { setOpen(false); onOpen(address) }} />}
       </PopoverContent>
@@ -176,11 +176,11 @@ export function PortsControl({ runID, ports, available, onOpen }: {
 
 /** What the pane shows before a page is open: the listening ports first. */
 export function OpenAPage({ runID, ports, onOpen }: { runID: string; ports: Ports | null; onOpen: (address: string) => void }) {
-  const beside = <>This browser runs on the server beside the run, so <span className="font-code">localhost</span> is the run’s own app, not your machine.</>
+  const beside = <>This browser runs on the server beside the session, so <span className="font-code">localhost</span> is the session’s own app, not your machine.</>
   if (ports?.list?.length) {
     return (
       <EmptyState title="Open a page" action={<PortList runID={runID} ports={ports.list} available onOpen={onOpen} />}>
-        Pick a port the run is listening on, or type an address above. {beside}
+        Pick a port the session is listening on, or type an address above. {beside}
       </EmptyState>
     )
   }

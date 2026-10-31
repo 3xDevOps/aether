@@ -106,7 +106,7 @@ export function StallCallout({ run, agent, rows, nav }: {
         title="Possibly stalled"
         actions={
           <>
-            <Button size="sm" variant="secondary" disabled={busy || !control.canAct} hint={control.canAct ? 'Cancels the agent’s turn. Costs nothing.' : 'Take control of the session to stop its turn'} onClick={stop}>
+            <Button size="sm" variant="secondary" disabled={busy || !control.canAct} hint={control.canAct ? 'Cancels the agent’s turn. Costs nothing.' : 'Take control of the conversation to stop its turn'} onClick={stop}>
               Stop turn
             </Button>
             <Button size="sm" variant="secondary" hint="Opens the turn’s timeline of model calls and tools" onClick={() => nav.go('trace')}>

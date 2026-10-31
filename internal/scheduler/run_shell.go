@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	ErrInvalidRunShellTab = errors.New("scheduler: invalid run shell tab")
+	ErrInvalidRunShellTab = errors.New("scheduler: invalid session shell tab")
 	ErrRunShellTabLimit   = errors.New("scheduler: shell limit reached")
 )
 

@@ -47,14 +47,14 @@ func (s *Service) Allow(ctx context.Context, actor *domain.Member, run domain.Ru
 	switch value {
 	case domain.ChildrenOn:
 		if actor.ID != r.MemberID {
-			return protocol.RunChildrenAllowResult{}, fmt.Errorf("%w: only the run's owner can allow its child runs, since they spend the owner's accounts", permissions.ErrDenied)
+			return protocol.RunChildrenAllowResult{}, fmt.Errorf("%w: only the session's owner can allow its subsessions, since they spend the owner's accounts", permissions.ErrDenied)
 		}
 	case domain.ChildrenOff, "":
 		if actor.ID != r.MemberID && actor.Role != domain.RoleAdmin {
-			return protocol.RunChildrenAllowResult{}, fmt.Errorf("%w: only the run's owner or an admin can change its child runs", permissions.ErrDenied)
+			return protocol.RunChildrenAllowResult{}, fmt.Errorf("%w: only the session's owner or an admin can change its subsessions", permissions.ErrDenied)
 		}
 	default:
-		return protocol.RunChildrenAllowResult{}, invalid("children must be %q, %q or empty", domain.ChildrenOn, domain.ChildrenOff)
+		return protocol.RunChildrenAllowResult{}, invalid("subsessions must be %q, %q or empty", domain.ChildrenOn, domain.ChildrenOff)
 	}
 	if err := s.cfg.Store.SetRunChildren(ctx, run, value, actor.ID); err != nil {
 		return protocol.RunChildrenAllowResult{}, err

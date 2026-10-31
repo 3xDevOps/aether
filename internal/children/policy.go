@@ -47,15 +47,15 @@ func (s *Service) resolve(ctx context.Context, parentID domain.RunID) (*policy, 
 	}
 	switch {
 	case parent.Status.Terminal():
-		p.refusal = fmt.Sprintf("run %s has finished", parent.ID)
+		p.refusal = fmt.Sprintf("session %s has finished", parent.ID)
 	case parent.Mode == domain.LaunchHeadless:
-		p.refusal = "a Background run exits when its turn ends, before a child's result can reach it; start the parent in Standard or Enhanced mode"
+		p.refusal = "a Background session exits when its turn ends, before a subsession's result can reach it; start the parent in Standard or Enhanced mode"
 	case p.parentOf != "":
-		p.refusal = fmt.Sprintf("run %s is itself a child run of %s, and child runs go one level deep; do the work yourself or message %s", parent.ID, p.parentOf, p.parentOf)
+		p.refusal = fmt.Sprintf("session %s is itself a subsession of %s, and subsessions go one level deep; do the work yourself or message %s", parent.ID, p.parentOf, p.parentOf)
 	case s.cfg.Runs.WakeRefusal(parent.Harness, parent.Mode) != nil:
 		p.refusal = s.cfg.Runs.WakeRefusal(parent.Harness, parent.Mode).Error()
 	case !memberAllows(parent, p.settings):
-		p.refusal = "child runs are off for this run's owner; they can turn them on in Settings → Child runs (aether children on) or allow them for this run only from the run's More menu (Allow child runs)"
+		p.refusal = "subsessions are off for this session's owner; they can turn them on in Settings → Subsessions (aether subsessions on) or allow them for this session only from the session's More menu (Allow subsessions)"
 	}
 	return p, nil
 }

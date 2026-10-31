@@ -15,8 +15,8 @@ import (
 func init() {
 	register(command{
 		name:  "who",
-		short: "show who is online and which runs they are watching",
-		usage: "aether who [--workspace <name>] [--run <run-id>]",
+		short: "show who is online and which sessions they are watching",
+		usage: "aether who [--workspace <name>] [--run <session-id>]",
 		example: "aether who\n" +
 			"aether who --run run-d6ay38tj8j",
 		flags: true,
@@ -27,7 +27,7 @@ func init() {
 func runWho(args []string) error {
 	fs := newFlagSet("who")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	run := fs.String("run", "", "only members watching this run")
+	run := fs.String("run", "", "only members watching this session")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

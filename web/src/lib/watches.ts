@@ -15,9 +15,9 @@ export interface ConditionChoice {
 export const conditionChoices: Record<WatchTargetKind, ConditionChoice[]> = {
   run: [
     { value: 'needs_you', label: 'Needs you', description: 'The agent asks a question, wants a permission or is blocked. Once per need.', default: true },
-    { value: 'finished', label: 'Finished', description: 'The run ends: the agent reported done or failed, it was stopped, or a member closed it. Finished means the agent reported done, not that anything merged.', default: true },
-    { value: 'pr_merged', label: 'Pull request merged', description: "The run's pull request merged on GitHub. Merged means GitHub merged the PR.", default: false },
-    { value: 'ci', label: 'CI finished', description: "The checks on the run's pull request finish, pass or fail.", default: false },
+    { value: 'finished', label: 'Finished', description: 'The session ends: the agent reported done or failed, it was stopped, or a member closed it. Finished means the agent reported done, not that anything merged.', default: true },
+    { value: 'pr_merged', label: 'Pull request merged', description: "The session's pull request merged on GitHub. Merged means GitHub merged the PR.", default: false },
+    { value: 'ci', label: 'CI finished', description: "The checks on the session's pull request finish, pass or fail.", default: false },
   ],
   pr: [
     { value: 'ci', label: 'CI finished', description: 'Every check on the newest commit finishes, pass or fail. Again after a rerun.', default: true },
@@ -56,7 +56,7 @@ export function sourceLabel(watch: Pick<Watch, 'source'>): string | undefined {
 export function targetKindLabel(target: WatchTarget): string {
   switch (target.kind) {
     case 'run':
-      return 'Run'
+      return 'Session'
     case 'pr':
       return `PR #${target.number ?? '?'}${target.repo ? ` · ${target.repo}` : ''}`
   }
@@ -85,7 +85,7 @@ export function deliveryText(delivery: WatchDelivery): string {
         case 'withdrawn':
           return detail ? `Push withdrawn: ${detail}` : 'Push withdrawn from your devices: the need ended'
         case 'skipped':
-          return `Push skipped: ${detail || 'the run notification already sent it'}`
+          return `Push skipped: ${detail || 'the session notification already sent it'}`
       }
       break
     case 'in_app':

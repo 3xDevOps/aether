@@ -105,7 +105,7 @@ function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'ne
   }
   const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : stateReasons[state]
   if (possiblyStalled(run)) return { state: 'stalled', reason, next: stateNext.stalled }
-  if (state === 'failed') return { state, reason: `${reason}. Run remains open for follow-up.` }
+  if (state === 'failed') return { state, reason: `${reason}. Session remains open for follow-up.` }
   // Only Claude Code reports held background tasks, and it starts a turn when one ends.
   if (run.reason?.startsWith('working in background: ')) return { state, reason, next: 'Claude Code resumes it when a background task ends.' }
   return { state, reason, next: stateNext[state] }
@@ -227,13 +227,13 @@ const causeWords: Record<string, string> = {
   turn: 'a turn is running',
   report: 'the agent reported it',
   'turn-end': 'the turn ended',
-  stall: 'the run stalled',
+  stall: 'the session stalled',
   'wait-expired': 'its reported wait went stale',
   'wait-fault': 'a condition it waits on resolved or broke, and the agent was not woken',
-  workers: 'its child runs are live',
+  workers: 'its subsessions are live',
   'tasks-held': 'it holds background tasks',
   human: 'a request waits on a person',
-  disconnect: 'the agent session ended',
+  disconnect: 'the agent exited',
 }
 
 /**
@@ -288,7 +288,7 @@ export function runLabel(run: { task: string; title?: string; child_purpose?: st
   const title = run.child_purpose?.trim() || run.title?.trim()
   if (title) return title
   const line = run.task.split('\n').find((l) => l.trim())?.trim() ?? ''
-  return line ? clipLabel(line) : 'Untitled run'
+  return line ? clipLabel(line) : 'Untitled session'
 }
 
 export const stateLabel: Record<PresentationState, string> = {

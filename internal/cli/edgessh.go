@@ -147,7 +147,7 @@ func RunRemote(ctx context.Context, cfg Config, user, command string, stdin io.R
 	defer func() { _ = client.Close() }()
 	sess, err := client.NewSession()
 	if err != nil {
-		return 255, fmt.Errorf("cli: open session on server %s: %w", cfg.ServerID, err)
+		return 255, fmt.Errorf("cli: open ssh channel on server %s: %w", cfg.ServerID, err)
 	}
 	defer func() { _ = sess.Close() }()
 	in, err := sess.StdinPipe()
@@ -156,7 +156,7 @@ func RunRemote(ctx context.Context, cfg Config, user, command string, stdin io.R
 	}
 	sess.Stdout, sess.Stderr = stdout, stderr
 	if err = sess.Start(command); err != nil {
-		return 255, fmt.Errorf("cli: run %q on server %s: %w", command, cfg.ServerID, err)
+		return 255, fmt.Errorf("cli: session %q on server %s: %w", command, cfg.ServerID, err)
 	}
 	// Session.Wait would also wait for stdin to reach EOF, which git may
 	// only send after the command exits; ssh does not wait for it either.

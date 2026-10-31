@@ -12,7 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-const provisionalHeader = "Provisional report: this run ended its turn without `aether-internal report`. " +
+const provisionalHeader = "Provisional report: this session ended its turn without `aether-internal report`. " +
 	"A report from it supersedes this one. Its last message:\n\n"
 
 // ProvisionalReport forwards a child run's last message to its parent when

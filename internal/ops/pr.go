@@ -29,11 +29,11 @@ type prMergeInput struct {
 
 var prOps = []Op{
 	opOf("aether_pr_create", "Open pull request", ScopeControl, true, nextRuns,
-		"Use this when the user wants a pull request opened from a run's pushed branch; an open one is returned instead.", prCreate).
+		"Use this when the user wants a pull request opened from a session's pushed branch; an open one is returned instead.", prCreate).
 		hints(false, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunPRStatus, protocol.MethodRunPRCreate),
 	opOf("aether_pr_merge", "Merge pull request", ScopeControl, true, nextRuns,
-		"Use this when the user wants a run's pull request merged after aether_pr_status; refused if its head moved.", prMerge).
+		"Use this when the user wants a session's pull request merged after aether_pr_status; refused if its head moved.", prMerge).
 		enum("method", "squash", "merge", "rebase").hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunPRFeedback, protocol.MethodRunPRMerge),
 }
@@ -51,17 +51,17 @@ func prCreate(ctx context.Context, c calls, in prCreateInput) (string, any, erro
 		return "", nil, err
 	}
 	if status.Error != "" {
-		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: status.Error + "; aether_message_run can ask the run's agent to fix its branch"}
+		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: status.Error + "; aether_message_session can ask the session's agent to fix its branch"}
 	}
 	if pr := status.PullRequest; pr != nil && pr.State == "open" {
-		return fmt.Sprintf("Run %s already has pull request #%d open: %s.", in.RunID, pr.Number, pr.URL),
+		return fmt.Sprintf("Session %s already has pull request #%d open: %s.", in.RunID, pr.Number, pr.URL),
 			map[string]any{"run_id": in.RunID, "pr": prOf(pr), "created": false, "url": l.run(in.RunID), "untrusted": map[string]any{"title": clip(pr.Title, maxReport)}}, nil
 	}
 	if status.Expected == nil || status.Target == nil {
-		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("run %s's checkout gave no branch and target to open a pull request from; open it in the Aether dashboard", in.RunID)}
+		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("session %s's checkout gave no branch and target to open a pull request from; open it in the Aether dashboard", in.RunID)}
 	}
 	if in.ExpectedHead != "" && !strings.HasPrefix(status.Expected.Head, in.ExpectedHead) {
-		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("run %s's branch %s moved to %s since %s; review aether_run_changes again",
+		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("session %s's branch %s moved to %s since %s; review aether_session_changes again",
 			in.RunID, status.Expected.Branch, status.Expected.Head, in.ExpectedHead)}
 	}
 	var res protocol.RunPRCreateResult
@@ -75,16 +75,16 @@ func prCreate(ctx context.Context, c calls, in prCreateInput) (string, any, erro
 	}
 	switch {
 	case res.Reconciled && res.PullRequest != nil:
-		return fmt.Sprintf("GitHub's answer was lost, but pull request #%d for run %s is open: %s.", res.PullRequest.Number, in.RunID, res.PullRequest.URL), out, nil
+		return fmt.Sprintf("GitHub's answer was lost, but pull request #%d for session %s is open: %s.", res.PullRequest.Number, in.RunID, res.PullRequest.URL), out, nil
 	case res.CreationUncertain:
 		out["write"] = writePending
-		return fmt.Sprintf("GitHub may have opened the pull request for run %s: %s; call aether_pr_status before trying again.", in.RunID, cmp.Or(res.Error, "its answer was lost")), out, nil
+		return fmt.Sprintf("GitHub may have opened the pull request for session %s: %s; call aether_pr_status before trying again.", in.RunID, cmp.Or(res.Error, "its answer was lost")), out, nil
 	case res.Error != "":
-		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: res.Error + "; if the branch is not pushed, aether_message_run can ask the run's agent to push it"}
+		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: res.Error + "; if the branch is not pushed, aether_message_session can ask the session's agent to push it"}
 	case res.PullRequest == nil:
 		return "", nil, &protocol.Error{Code: protocol.CodeInternal, Message: "run.pr.create returned no pull request and no error"}
 	}
-	return fmt.Sprintf("Opened pull request #%d for run %s: %s.", res.PullRequest.Number, in.RunID, res.PullRequest.URL), out, nil
+	return fmt.Sprintf("Opened pull request #%d for session %s: %s.", res.PullRequest.Number, in.RunID, res.PullRequest.URL), out, nil
 }
 
 // prMerge merges the pull request the user reviewed at expected_head_oid
@@ -104,13 +104,13 @@ func prMerge(ctx context.Context, c calls, in prMergeInput) (string, any, error)
 	}
 	pr := fb.PullRequest
 	if pr == nil {
-		return "", nil, &protocol.Error{Code: protocol.CodeNotFound, Message: cmp.Or(fb.Error, "run "+in.RunID+" has no pull request") + "; aether_pr_create opens one"}
+		return "", nil, &protocol.Error{Code: protocol.CodeNotFound, Message: cmp.Or(fb.Error, "session "+in.RunID+" has no pull request") + "; aether_pr_create opens one"}
 	}
 	out := map[string]any{"run_id": in.RunID, "pr": prOf(pr), "url": l.run(in.RunID), "blockers": fb.Blockers(), "merge_state": fb.MergeStateStatus}
 	switch {
 	case pr.Number != in.Number || !strings.EqualFold(pr.Repository, in.Repository):
 		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
-			"run %s's pull request is now %s#%d, not %s#%d; review it with aether_pr_status before merging", in.RunID, pr.Repository, pr.Number, in.Repository, in.Number)}
+			"session %s's pull request is now %s#%d, not %s#%d; review it with aether_pr_status before merging", in.RunID, pr.Repository, pr.Number, in.Repository, in.Number)}
 	case pr.State == "merged":
 		out["merged"] = true
 		return fmt.Sprintf("Pull request #%d is already merged.", pr.Number), out, nil

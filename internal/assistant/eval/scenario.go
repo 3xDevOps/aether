@@ -63,7 +63,7 @@ type Stub struct {
 // case-insensitive whole words or phrases, with an optional plural "s"; each
 // group in a list is satisfied by any one of its alternatives.
 type Checks struct {
-	// Launches is the number of aether_launch_run
+	// Launches is the number of aether_launch_session
 	// calls expected; nil does not check it.
 	Launches *int `json:"launches,omitempty"`
 	// Saves is the number of successful calls to SaveTool.
@@ -160,7 +160,7 @@ func (l launch) brief() string {
 func launches(calls []ToolCall, rejected bool) []launch {
 	var out []launch
 	for _, c := range calls {
-		if c.Tool != "aether_launch_run" || c.Error && !rejected {
+		if c.Tool != "aether_launch_session" || c.Error && !rejected {
 			continue
 		}
 		var a map[string]any

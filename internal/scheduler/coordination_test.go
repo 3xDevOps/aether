@@ -615,7 +615,7 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 				}
 				card := e.sched.runInstructions(g)
 				if !strings.Contains(card, string(run.ID)) || !strings.Contains(card, "waiting") || !strings.Contains(card, coordhooks.PeerRule) {
-					t.Fatalf("role card %q lacks the run, the waiting outcome or the peer rule", card)
+					t.Fatalf("role card %q lacks the session, the waiting outcome or the peer rule", card)
 				}
 				if strings.Contains(card, "- waiting:") != g.Wake || strings.Contains(card, "- needs-input:") == g.Background {
 					t.Fatalf("role card %q offers outcomes this %s launch cannot use (wake %v)", card, tc.mode, g.Wake)

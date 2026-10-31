@@ -98,7 +98,7 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 		t.Fatalf("commits = %v", got)
 	}
 	if e.git.publishedCount(run.ID) == 0 {
-		t.Fatal("run branch never published")
+		t.Fatal("session branch never published")
 	}
 	waitFor(t, "sidecar removed", func() bool {
 		_, err := os.Stat(e.sched.sidecarPath(run.ID))

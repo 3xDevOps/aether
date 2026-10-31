@@ -183,7 +183,7 @@ function DaemonRow({ client }: { client: Api }) {
     <SettingRow
       id="sync-daemon"
       label="Sync daemon"
-      help={status || error ? "Fetches each run's branch into your clone as the agent commits." : 'Reading the daemon…'}
+      help={status || error ? "Fetches each session's branch into your clone as the agent commits." : 'Reading the daemon…'}
       control={offered && (
         <Button size="sm" variant="secondary" type="submit" form="daemon-install" disabled={busy || !server || !repo}>
           {busy ? 'Installing…' : 'Install'}
@@ -239,11 +239,11 @@ function MirrorRow({ client }: { client: Api }) {
   return (
     <SettingRow
       id="mirror"
-      label="Mirror run files"
+      label="Mirror session files"
       labelFor={changing ? 'settings-mirror-run' : undefined}
       help={shown
-        ? "Copies a run's files into your linked repository as the agent works, so you can open them in your editor."
-        : 'No active runs to mirror.'}
+        ? "Copies a session's files into your linked repository as the agent works, so you can open them in your editor."
+        : 'No active sessions to mirror.'}
     >
       {shown && (
         changing ? (
@@ -264,7 +264,7 @@ function MirrorRow({ client }: { client: Api }) {
           </Select>
         ) : (
           <p className="flex min-w-0 items-center gap-1 text-ui-sm text-muted">
-            <span className="shrink-0">Run</span>
+            <span className="shrink-0">Session</span>
             <span className="min-w-0 truncate text-text">{runLabel(shown)}</span>
             {live.length > 1 && (
               <Button type="button" variant="link" size="sm" className="shrink-0" onClick={() => setChanging(true)}>Change</Button>

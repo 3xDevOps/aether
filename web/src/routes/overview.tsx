@@ -10,10 +10,10 @@ function Overview() {
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader
         title="All workspaces"
-        titleAdornment={<Badge>{runs.length} runs</Badge>}
+        titleAdornment={<Badge>{runs.length} sessions</Badge>}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <RunList runs={runs} empty="No runs yet." />
+        <RunList runs={runs} empty="No sessions yet." />
       </div>
     </div>
   )

@@ -27,7 +27,7 @@ func attentionItems(t *testing.T, e *testEnv, member domain.MemberID, params pro
 	items := map[domain.RunID]protocol.AttentionItem{}
 	for _, item := range result.Items {
 		if _, dup := items[domain.RunID(item.RunID)]; dup {
-			t.Fatalf("run %s listed twice: %+v", item.RunID, result.Items)
+			t.Fatalf("session %s listed twice: %+v", item.RunID, result.Items)
 		}
 		items[domain.RunID(item.RunID)] = item
 	}
@@ -84,17 +84,17 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 		stranded.ID:     {protocol.AttentionKindNeedsInput, "Wait broken: pr:o/r#12:checks resolved, but the agent was not woken · reply to continue"},
 		disconnected.ID: {protocol.AttentionKindDisconnected, "Agent disconnected: eof"},
 		blocked.ID:      {protocol.AttentionKindBlocked, "Blocked: no credentials"},
-		failed.ID:       {protocol.AttentionKindFailed, "Agent reported failure; review the result. Run remains open for follow-up."},
+		failed.ID:       {protocol.AttentionKindFailed, "Agent reported failure; review the result. Session remains open for follow-up."},
 	}
 	for id, w := range want {
 		item, ok := got[id]
 		if !ok || item.Kind != w[0] || item.Reason != w[1] {
-			t.Errorf("run %s = %+v, want kind %q reason %q", id, item, w[0], w[1])
+			t.Errorf("session %s = %+v, want kind %q reason %q", id, item, w[0], w[1])
 		}
 	}
 	for _, id := range []domain.RunID{paused.ID, working.ID, bobs.ID, e.run.ID} {
 		if item, ok := got[id]; ok {
-			t.Errorf("run %s listed for Ada: %+v", id, item)
+			t.Errorf("session %s listed for Ada: %+v", id, item)
 		}
 	}
 	p := got[permission.ID]
@@ -153,7 +153,7 @@ func TestPlainReasonMatchesTheDashboard(t *testing.T) {
 		"working in background":          "Working in background",
 		"no update for 30m":              "No update for 30m",
 		"no update for 30m: CI on PR 12": "No update for 30m: CI on PR 12",
-		"waiting for 2 workers":          "Waiting for 2 workers",
+		"waiting for 2 workers":          "Waiting for 2 subsessions",
 		"something new":                  "something new",
 	} {
 		if got := plainReason(reason); got != want {

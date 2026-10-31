@@ -421,7 +421,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const modelName = (modelOption && currentChoice(modelOption)?.name) ?? run.model
   const canCompact = state?.commands?.some((command) => command.name === 'compact') ?? false
   const compactBlock = moderated
-    ? 'Take control of the session to compact it.'
+    ? 'Take control of the conversation to compact it.'
     : busy || hasContent
       ? 'Clear the message box first, so nothing you typed is replaced.'
       : undefined

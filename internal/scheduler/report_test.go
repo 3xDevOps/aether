@@ -48,7 +48,7 @@ func (e *testEnv) launchOn(t *testing.T, harnessName string) (*domain.Run, *fake
 	}
 	c := e.rt.byName(string(run.ID))
 	if c == nil {
-		t.Fatalf("no container created for run %s", run.ID)
+		t.Fatalf("no container created for session %s", run.ID)
 	}
 	return run, c
 }
@@ -140,7 +140,7 @@ func TestAgentWaitingParksAndResumes(t *testing.T) {
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
 		t.Fatalf("second report working: %v", err)
 	}
-	expectNoStatusEvent(t, sub, run.ID, "a working report on a running run")
+	expectNoStatusEvent(t, sub, run.ID, "a working report on a running session")
 }
 
 // expectNoStatusEvent fails if a run.status event for run arrives in the
@@ -206,7 +206,7 @@ func TestAgentWaitingReplacesAStallReason(t *testing.T) {
 	// would leave the run reading "stalled:" for a member it is really
 	// waiting on.
 	stop()
-	waitFor(t, "the run to stall a second time", func() bool {
+	waitFor(t, "the session to stall a second time", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Status == domain.RunNeedsAttention && strings.HasPrefix(r.Reason, "stalled: ")
 	})
@@ -313,13 +313,13 @@ func TestReportAgentStateRefusesRunsItDoesNotSupervise(t *testing.T) {
 	working := agentstatus.Report{State: agentstatus.Working}
 
 	if err := e.sched.ReportAgentState(t.Context(), domain.RunID("nosuchrun"), working); err == nil {
-		t.Error("report for an unknown run succeeded")
+		t.Error("report for an unknown session succeeded")
 	}
 	run, c := e.launchReporting(t)
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, working); err == nil {
-		t.Error("report for a finished run succeeded")
+		t.Error("report for a finished session succeeded")
 	}
 }
 
@@ -379,7 +379,7 @@ func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
 
 	waiting := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
-		t.Fatalf("report waiting on a paused run: %v", err)
+		t.Fatalf("report waiting on a paused session: %v", err)
 	}
 	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != turnEndedReason {
 		t.Fatalf("stored reason = %q, want %q", r.Reason, turnEndedReason)
@@ -395,7 +395,7 @@ func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
 		t.Fatalf("GetRun: %v", err)
 	}
 	if r.Status != domain.RunNeedsAttention || r.Reason != turnEndedReason {
-		t.Fatalf("resumed run = %s because %q, want it still parked because %q", r.Status, r.Reason, turnEndedReason)
+		t.Fatalf("resumed session = %s because %q, want it still parked because %q", r.Status, r.Reason, turnEndedReason)
 	}
 }
 
@@ -484,7 +484,7 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 				return err == nil && r.Status == domain.RunNeedsAttention && strings.HasPrefix(r.Reason, "stalled: ")
 			}
 			if tc.stalls {
-				waitFor(t, "the run to stall", stalled)
+				waitFor(t, "the session to stall", stalled)
 				return
 			}
 			time.Sleep(2 * threshold)
@@ -492,17 +492,17 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 			if err != nil || r.Status != domain.RunRunning || stalled() {
 				t.Fatalf("run = %+v, %v; want running past the stall threshold", r, err)
 			}
-			waitFor(t, "the run to stall after the stretched limit", stalled)
+			waitFor(t, "the session to stall after the stretched limit", stalled)
 
 			stop := pump(t, c)
-			waitFor(t, "activity to resume the run with its tasks", func() bool {
+			waitFor(t, "activity to resume the session with its tasks", func() bool {
 				r, err := e.db.GetRun(t.Context(), run.ID)
 				return err == nil && r.Status == domain.RunRunning && r.Reason == tc.reason
 			})
 			stop()
 			time.Sleep(2 * threshold)
 			if stalled() {
-				t.Fatal("the resumed run stalled at the plain threshold while its tasks still run")
+				t.Fatal("the resumed session stalled at the plain threshold while its tasks still run")
 			}
 		})
 	}

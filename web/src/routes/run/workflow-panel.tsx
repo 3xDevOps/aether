@@ -102,7 +102,7 @@ export function WorkflowPanel({ run, view, agent, nav, onClose, onLeave, classNa
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2 [&>*]:shrink-0">
-        <WorkflowTree root={tree} label="Run workflow" onSelect={select} />
+        <WorkflowTree root={tree} label="Session workflow" onSelect={select} />
         {run.branch && view !== 'changes' && <GitFlow runId={run.id} compact />}
       </div>
     </div>

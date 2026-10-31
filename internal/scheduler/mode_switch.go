@@ -23,11 +23,11 @@ import (
 var ErrNotSwitchable = errors.New("scheduler: this agent cannot move a running session between Standard and Enhanced")
 
 var (
-	ErrSessionNotReported  = fmt.Errorf("%w: the agent has not reported its session yet; it does on its first turn", ErrInvalidTransition)
+	ErrSessionNotReported  = fmt.Errorf("%w: the agent has not reported its conversation yet; it does on its first turn", ErrInvalidTransition)
 	ErrAdapterNotInstalled = fmt.Errorf("%w: the agent's ACP server is not installed; install it with Enhanced selected on the Agents page", ErrInvalidTransition)
 )
 
-var ErrSwitching = errors.New("scheduler: the run is switching between Standard and Enhanced")
+var ErrSwitching = errors.New("scheduler: the session is switching between Standard and Enhanced")
 
 // tuiSettle is how long a resumed terminal must keep running for a switch to
 // Standard to count: a CLI that cannot resume the session exits at once.
@@ -64,7 +64,7 @@ func (s *Scheduler) AgentSwitchable(ctx context.Context, member, account domain.
 // returns the real error.
 func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor domain.MemberID, mode domain.LaunchMode, admit func(begin func() error) error) error {
 	if mode != domain.LaunchTUI && mode != domain.LaunchACP {
-		return fmt.Errorf("%w: a run switches to tui or acp, not %q", ErrInvalidTransition, mode)
+		return fmt.Errorf("%w: a session switches to tui or acp, not %q", ErrInvalidTransition, mode)
 	}
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
@@ -88,13 +88,13 @@ func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor doma
 	}
 	c := s.coordinationSeam()
 	if c == nil || c.svc == nil {
-		return fmt.Errorf("%w: switching needs the run directory, and coordination is not configured", ErrInvalidTransition)
+		return fmt.Errorf("%w: switching needs the session directory, and coordination is not configured", ErrInvalidTransition)
 	}
 	s.mu.Lock()
 	entry := s.runs[run]
 	s.mu.Unlock()
 	if entry == nil {
-		return fmt.Errorf("%w: the run has no live container", ErrInvalidTransition)
+		return fmt.Errorf("%w: the session has no live container", ErrInvalidTransition)
 	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
@@ -115,7 +115,7 @@ func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor doma
 		case session == "":
 			return ErrSessionNotReported
 		case !domain.ValidAgentSessionID(session):
-			return fmt.Errorf("%w: the agent's session id %q cannot be resumed", ErrInvalidTransition, session)
+			return fmt.Errorf("%w: the agent's conversation id %q cannot be resumed", ErrInvalidTransition, session)
 		}
 		from, cid = entry.launchMode, entry.containerID
 		entry.switching = mode
@@ -152,17 +152,17 @@ func (s *Scheduler) switchableLocked(entry *supervised, mode domain.LaunchMode) 
 	switch {
 	case s.runs[entry.runID] != entry || entry.containerID == "" || entry.retained || entry.destroyPending ||
 		entry.finalizing || entry.exitObserved || entry.killRequested:
-		return fmt.Errorf("%w: the run's container is not live", ErrInvalidTransition)
+		return fmt.Errorf("%w: the session's container is not live", ErrInvalidTransition)
 	case entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention:
-		return fmt.Errorf("%w: the run is %s", ErrInvalidTransition, entry.status)
+		return fmt.Errorf("%w: the session is %s", ErrInvalidTransition, entry.status)
 	case entry.paused:
-		return fmt.Errorf("%w: the run is paused; resume it first", ErrInvalidTransition)
+		return fmt.Errorf("%w: the session is paused; resume it first", ErrInvalidTransition)
 	case !entry.launchMode.Interactive():
-		return fmt.Errorf("%w: a background run cannot switch modes", ErrInvalidTransition)
+		return fmt.Errorf("%w: a background session cannot switch modes", ErrInvalidTransition)
 	case entry.launchMode == mode:
-		return fmt.Errorf("%w: the run is already %s", ErrInvalidTransition, modeName(mode))
+		return fmt.Errorf("%w: the session is already %s", ErrInvalidTransition, modeName(mode))
 	case entry.coordDir == "":
-		return fmt.Errorf("%w: the run has no run directory for its supervisor to read", ErrInvalidTransition)
+		return fmt.Errorf("%w: the session has no session directory for its supervisor to read", ErrInvalidTransition)
 	}
 	return nil
 }
@@ -199,7 +199,7 @@ func (m modeSwitch) toStandard(ctx context.Context) error {
 		return errors.Join(err, m.restoreEnhanced(ctx))
 	}
 	m.s.acp.switchNotice(m.entry.runID, "info", "Switched to Standard",
-		"The conversation continues in the agent's terminal and is not recorded here until the run switches back to Enhanced.")
+		"The conversation continues in the agent's terminal and is not recorded here until the session switches back to Enhanced.")
 	if err := m.s.commitMode(ctx, m.entry, domain.LaunchTUI, reporter); err != nil {
 		return err
 	}
@@ -252,7 +252,7 @@ func (m modeSwitch) restoreEnhanced(ctx context.Context) error {
 func (m modeSwitch) reopenEnhanced(ctx context.Context) error {
 	m.s.acp.connect(ctx, m.entry, openSwitch)
 	if _, err := m.s.acp.live(ctx, m.entry.runID); err != nil {
-		return fmt.Errorf("restore the enhanced session: %w", err)
+		return fmt.Errorf("restore the Enhanced agent's conversation: %w", err)
 	}
 	return nil
 }
@@ -287,7 +287,7 @@ func (m modeSwitch) recordIntent(intent *switchIntent) error {
 func (m modeSwitch) writeTerminal(ctx context.Context) (string, harness.Reporter, error) {
 	current, err := m.s.cfg.Store.GetRun(ctx, m.entry.runID)
 	if err != nil {
-		return "", 0, fmt.Errorf("load the run's model: %w", err)
+		return "", 0, fmt.Errorf("load the session's model: %w", err)
 	}
 	argv := m.profile.ResumeCommand(m.session, current.Model, current.Effort)
 	base, err := m.s.harnessEnvironment(ctx, m.run, m.profile, current.Model)
@@ -347,7 +347,7 @@ func (s *Scheduler) commitMode(ctx context.Context, entry *supervised, mode doma
 	acp := mode == domain.LaunchACP
 	err := s.cfg.Store.SetRunMode(ctx, entry.runID, mode, acp)
 	if err != nil {
-		err = fmt.Errorf("record the run's mode: %w", err)
+		err = fmt.Errorf("record the session's mode: %w", err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -356,7 +356,7 @@ func (s *Scheduler) commitMode(ctx context.Context, entry *supervised, mode doma
 		entry.switchIntent = nil
 	}
 	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
-		err = errors.Join(err, fmt.Errorf("persist the run's mode: %w", werr))
+		err = errors.Join(err, fmt.Errorf("persist the session's mode: %w", werr))
 	}
 	return err
 }

@@ -126,6 +126,24 @@ const (
 	ActivityIdle RunActivity = "idle"
 )
 
+// NeedsInputReasonPrefix starts the reason of a run that asked its owner a
+// question.
+const NeedsInputReasonPrefix = "needs input: "
+
+// Quiet reports whether a live run in this activity and reason is doing
+// nothing: it waits for anything, replied with nothing pending, or asked its
+// owner a question. Working, failed, finished, disconnected and every other
+// request for a human are not quiet.
+func (a RunActivity) Quiet(reason string) bool {
+	switch a {
+	case ActivityWaiting, ActivityWaitingAgents, ActivityWaitingCI, ActivityWaitingTools, ActivityAnswered, ActivityIdle:
+		return true
+	case ActivityNeedsYou:
+		return strings.HasPrefix(reason, NeedsInputReasonPrefix)
+	}
+	return false
+}
+
 // RunReview is whether the run's owner has dealt with the success its agent
 // reported: empty when no success awaits them.
 type RunReview string
@@ -146,7 +164,7 @@ const BlockedReasonPrefix = "blocked: "
 const ReportedSuccessReason = "agent reported success"
 
 // NeedsAttention is the one rule for whether a run needs a member, which
-// push notifications, assistant follow notices, aether runs --needs-you and
+// push notifications, assistant follow notices, aether sessions --needs-you and
 // the dashboard's Needs you list share: a live run with an open human
 // request, a disconnected agent, or a failure nobody has seen, or a reported
 // success awaiting review. A paused run never does.

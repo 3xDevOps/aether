@@ -176,7 +176,7 @@ func TestHookWakeUnavailableIsNotEmptySuccess(t *testing.T) {
 		code, err := Run(t.Context(), []string{"hook", "generic", event}, Config{Socket: "/nonexistent/coord3.sock", In: strings.NewReader(`{}`), Out: &out})
 		if event == "context" {
 			if code != ExitOK || err != nil || out.Len() != 0 {
-				t.Fatalf("legacy context outside a run changed: %d, %v, %q", code, err, out.String())
+				t.Fatalf("legacy context outside a session changed: %d, %v, %q", code, err, out.String())
 			}
 		} else if code != ExitFailure || err == nil || out.Len() != 0 {
 			t.Fatalf("missing wake socket appeared supported: %d, %v, %q", code, err, out.String())

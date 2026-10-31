@@ -1,8 +1,8 @@
 # Dashboard SPA (`web/`)
 
 The dashboard is the browser client for Aether. A **workspace** is one
-repository and base branch; a **run** is one agent working on its own branch
-in its own container. The dashboard shows a member's runs, lets them launch,
+repository and base branch; a **session** is one agent working on its own branch
+in its own container. The dashboard shows a member's sessions, lets them launch,
 watch, message and review them, and holds the pages for agents, files,
 templates, members and settings.
 
@@ -225,9 +225,9 @@ write, and under React 19 can loop. Lists of IDs go through `useShallow`
 (`useRunIDs(workspace)` in `src/store/hooks.ts`); one entity is read by ID
 (`useRun(id)`); a row asks for a boolean (`selected`) or its own state
 (`useRunPresentation(run)`) rather than the whole `route` or run map. Derived
-maps live in the reducer that changes their inputs. Run rows and board cards
-are `React.memo` components; reducers replace only the record of the run that
-changed, so an event about one run re-renders that run's row and card and
+maps live in the reducer that changes their inputs. Session rows and board cards
+are `React.memo` components; reducers replace only the record of the session that
+changed, so an event about one session re-renders that session's row and card and
 leaves the rest alone.
 
 **Relative times tick on one shared clock.** `<RelativeTime at>`
@@ -235,11 +235,11 @@ leaves the rest alone.
 from `timeAgo` and subscribes to `useClock()` in `src/lib/clock.ts`: one
 30-second interval for the whole app, running only while something
 subscribes. Only the `<time>` re-renders on a tick, so "2 minutes ago" on a
-board card, a run list row, a feed entry, the members and
+board card, a session list row, a feed entry, the members and
 devices views or the Changes Compare menu keeps moving without re-rendering
 the row. `compact` renders `compactAge` instead: the same steps as `timeAgo`
 in a few characters ("now" under a minute, then "15m", "3h", "2d", "1w",
-"2mo", "1y"). A sidebar run row reads the clock itself as well, because its
+"2mo", "1y"). A sidebar session row reads the clock itself as well, because its
 accessible name carries the age. A per-second countdown, such as a queued
 message's delivery (`DeliveryCountdown`), is its own small component and
 re-renders only its text.
@@ -252,11 +252,11 @@ those created at the same instant keep the order the server inserted them,
 which it reports newest first. A `coord.message` event
 carries no body, so every held scope the message belongs to re-reads its
 newest page; a scope whose first read failed is held empty so it re-reads too.
-`coord.message.acked` stamps the row. Both re-read the recipient run for its
+`coord.message.acked` stamps the row. Both re-read the recipient session for its
 `unacked_messages`.
 
 **`activeWorkspace` is the scope workspace surfaces read.** It lives on the `ui`
-slice and names the workspace the sidebar's run list, the board, launches,
+slice and names the workspace the sidebar's session list, the board, launches,
 templates, budget dialogs and the activity feed all act on. Empty means "all",
 which is what the board falls back to before hydration has named one.
 `setActiveWorkspace` carries an open `workspace` route along with it, so the
@@ -274,15 +274,15 @@ made while startup is loading takes precedence. A failed preference read shows
 the gateway's original error in a toast without blocking workspace and run
 data: the current valid selection or normal fallback still applies.
 
-Derived data (the run groups, the flat run list, the Needs you counts) lives
+Derived data (the session groups, the flat session list, the Needs you counts) lives
 in `src/store/selectors.ts` as pure functions over a `StateContext`
 (`stateContextOf` in the same file), wrapped by memoizing hooks in
 `src/store/hooks.ts`. Selectors that build new arrays must not be passed to
 `useStore` directly. A view that owns its own derived shape keeps it beside
 the view instead (`src/routes/board/selectors.ts`). `useRunInput` combines
 structured native requests and unanswered teammate
-questions for the request indicator; the run's state comes from
-[Run state](#run-state).
+questions for the request indicator; the session's state comes from
+[Session state](#session-state).
 
 **Slots** (`src/components/slots.tsx`). Where a route registry is too coarse -
 something belongs *inside* a surface another ticket owns - the surface renders
@@ -293,7 +293,7 @@ The slots that exist:
 
 | Slot | Props | Where it renders |
 | --- | --- | --- |
-| `card:meta` | `{ run }` | the run card's footer, after the owner avatar and diff counts |
+| `card:meta` | `{ run }` | the session card's footer, after the owner avatar and diff counts |
 
 Its contributors are the file-overlap chips (`routes/diff/conflict-chips.tsx`),
 the sync badge (`routes/run-sync`). `card:meta` content renders inside
@@ -329,8 +329,8 @@ top to bottom:
    workspace page) and **Environment** (the same page, scrolled to that
    section). With one workspace and no `workspace.list` method it is a
    plain label. The search button opens the command palette.
-2. **New run**, the only filled button in the shell, for a member who may
-   launch. A slanted cut splits it in two. The left half, **New run** (`n`),
+2. **New session**, the only filled button in the shell, for a member who may
+   launch. A slanted cut splits it in two. The left half, **New session** (`n`),
    slides the launch panel out of the sidebar's right edge over the view, with
    no scrim; the panel stays open while you use the view behind it, and
    Escape or its **Close** button closes it and returns focus to what opened
@@ -340,27 +340,27 @@ top to bottom:
    (`quick-launch.ts`). Hovering or focusing it slides out the saved choices.
    A Background launch needs a task, so that half opens the panel instead, as
    it does when the saved choices name an agent or model the account cannot
-   use. The panel's **Child runs** switch follows your Settings choice and
-   sends `children` only when flipped, for that run alone; it is off and
-   disabled for a Background run.
-3. **Runs** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
-   **Working** and **Finished** (see [Run state](#run-state)), each an `h2`
+   use. The panel's **Subsessions** switch follows your Settings choice and
+   sends `children` only when flipped, for that session alone; it is off and
+   disabled for a Background session.
+3. **Sessions** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
+   **Working** and **Finished** (see [Session state](#session-state)), each an `h2`
    holding an `aria-expanded` disclosure button, a chevron that turns a
    quarter and the count in a `CountBadge`; the count stays in the button's
-   name. Every group starts expanded and lists all of its runs; a group
+   name. Every group starts expanded and lists all of its sessions; a group
    closes only when its header is pressed, and the list fades back in when
    the viewer reopens it (rows never glide their height, and a group that
-   mounts with hydration does not fade). Until the first runs arrive, six
+   mounts with hydration does not fade). Until the first sessions arrive, six
    row-shaped skeletons stand in for them after ~200ms, announced as
-   "Loading runs". Needs you lists every workspace; a row outside the
+   "Loading sessions". Needs you lists every workspace; a row outside the
    selected workspace leads with that workspace's name. Working and Finished
-   list the selected workspace, and only the viewer's own runs while **Mine**
+   list the selected workspace, and only the viewer's own sessions while **Mine**
    (`mineOnly`, persisted) in the Working header is pressed. The region
    scrolls on its own, and while more rows sit below the fold its bottom edge
    fades out. The sidebar never collapses on its own at narrow widths; the
    splitter and `⌘B` stay the reader's call.
 4. **Members** (admins only) and **Settings**. Board through Templates live
-   in the header instead, leaving the sidebar's height for runs. The current
+   in the header instead, leaving the sidebar's height for sessions. The current
    destination carries `aria-current="page"`. Gates come from
    `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
    `palette` entries (Members › Devices, Manage workspaces, and Members for a
@@ -379,39 +379,39 @@ top to bottom:
    **Check for updates…**, and a **Team** line with who is online
    and the spend against workspace budgets.
 
-A run row is a 28px `ListRow` (44px on a coarse pointer). From the left: a
+A session row is a 28px `ListRow` (44px on a coarse pointer). From the left: a
 static `StatusDot`; the owner mark, a 6px right-pointing triangle filled
-with the colour of the run's owner (`member_id`, not the agent account and
+with the colour of the session's owner (`member_id`, not the agent account and
 not the controller); the title; the row's age; the agent's monochrome glyph;
-and the avatars of whoever is on the run. The age is the compact form
+and the avatars of whoever is on the session. The age is the compact form
 ("15m", "3h", "2d") of the time the explorer sorts by: when a Needs you row
-began waiting on the viewer, else the run's last status change (`since` on
+began waiting on the viewer, else the session's last status change (`since` on
 the row, `src/store/selectors.ts`). Only a snapshot without
-`status_changed_at` (see [Run state](#run-state)) leaves an estimate of that
-change, which counts a live run's age from its start until its next status
+`status_changed_at` (see [Session state](#session-state)) leaves an estimate of that
+change, which counts a live session's age from its start until its next status
 event. The title truncates before anything to its right does. Paused, finished and other
 members' working rows recede: their title is in the muted colour.
 
-**Who is on a run** is every member with a terminal or an Enhanced session
+**Who is on a session** is every member with a terminal or an Enhanced session
 attached to it, the viewer included: the `watching` lists of
 `presence.roster`, which covers every workspace (`runWatchers` and
 `runPeople` in `src/store/presence.ts`). Their avatars stack at the row's
 right edge and the age and the glyph move left to make
-room; a run nobody is on reserves none. A root with child runs shows a
+room; a session nobody is on reserves none. A root with subsessions shows a
 `Network` glyph and their count before the agent glyph, and its name adds
-"2 child runs · 1 working"; every child lists under it. The first avatar sits whole at the
+"2 subsessions · 1 working"; every subsession lists under it. The first avatar sits whole at the
 edge and each one after shows from behind it, to its left. First is the
-run's controller. While nobody holds control it is the last controller, if
-they are still on the run. The rest follow by name. A row draws three
+session's controller. While nobody holds control it is the last controller, if
+they are still on the session. The rest follow by name. A row draws three
 avatars at most: a fourth person turns the stack into two avatars and `+2`.
 While a Needs you row shows its action the stack steps aside for it, so the
 title keeps its room.
 
-**Run details.** Resting a mouse on a row for 400ms opens a box docked to
+**Session details.** Resting a mouse on a row for 400ms opens a box docked to
 the row's right edge (`run-details.tsx`): the whole title, the state's
-reason, the workspace, the agent and mode, the branch, a root's child-run counts, when the run started, when it last changed if that is later,
+reason, the workspace, the agent and mode, the branch, a root's subsession counts, when the session started, when it last changed if that is later,
 its owner, and the people on it with the controller marked **Controlling**.
-A live run nobody controls says so above them and names who had control
+A live session nobody controls says so above them and names who had control
 last, when the server knows. Moving to another row swaps the box without
 the delay or the animation. The box takes no pointer events, closes when the
 row is pressed, scrolled or left, and gives way to the hint of a button
@@ -430,33 +430,33 @@ order: people, a line at a time down to a bare count ("22 people"); then
 the reason, to one line; then the title, to three.
 
 The row's accessible name starts with the state word, then the workspace
-when it is another one, the title, the reason, the age in words, whose run
+when it is another one, the title, the reason, the age in words, whose session
 it is, who controls it and who else is watching ("Working · rewrite the
-checkout flow · Agent working · 15 minutes ago · Bob's run · Vera controls ·
+checkout flow · Agent working · 15 minutes ago · Bob's session · Vera controls ·
 you watching"). Its description is the exact time the age counts from.
 
 A Needs you row offers the condition's primary action on hover, focus and a
 coarse pointer, the same one its board card shows (see [Board](#board)):
-**Reply** opens the run's Session view with the composer focused, and every
-other action goes to the view the condition names. Run rows share one tab stop (roving `tabindex`);
+**Reply** opens the session's Chat view with the composer focused, and every
+other action goes to the view the condition names. Session rows share one tab stop (roving `tabindex`);
 Arrow keys, Home and End move within them. `j` and `k` move from anywhere (starting at the open
-run), and `u` opens the next run that needs you, oldest first.
+session), and `u` opens the next session that needs you, oldest first.
 
-A Finished or Failed row does not recede while no member has opened its run
-since it finished (`finish_unopened`, see [Run state](#run-state)): its title
+A Finished or Failed row does not recede while no member has opened its session
+since it finished (`finish_unopened`, see [Session state](#session-state)): its title
 keeps the text colour and its accessible name says "Not opened yet" before
-the age. A finished child run nested under its parent follows the same rule. Once
-any member opens the run, the row recedes in every member's dashboard.
+the age. A finished subsession nested under its parent follows the same rule. Once
+any member opens the session, the row recedes in every member's dashboard.
 
-Every unarchived child run is indented beneath its parent and joined to it
+Every unarchived subsession is indented beneath its parent and joined to it
 by tree connectors: a vertical trunk under the parent's status dot and a
-horizontal wire into each child row
+horizontal wire into each subsession row
 ([Styles](styles.md#shell-palette-and-focus)). **Mine** also filters
-these children under Working and Finished; Needs you keeps the whole tree
-visible. Selecting a run row opens that run, from anywhere on the row
+these subsessions under Working and Finished; Needs you keeps the whole tree
+visible. Selecting a session row opens that session, from anywhere on the row
 outside its buttons. The whole tree sits in
-Needs you while any member needs the viewer, but only those waiting runs
-contribute to that group's count. Relationships come from the run snapshot's
+Needs you while any member needs the viewer, but only those waiting sessions
+contribute to that group's count. Relationships come from the session snapshot's
 `parent_run_id`, not task text.
 
 ### App header
@@ -475,9 +475,9 @@ page is in **More navigation**. Gateway capability gates still apply. Hidden but
 are inert and excluded from the accessibility tree.
 
 Under 768px a second, 48px toolbar holds **Open sidebar** with an amber dot
-while anything needs you, the view's title, **Search** and **New run**. On a
-run page the title is "Run", because the run header under it already shows
-the run's title. A connection problem is one line under the toolbar. On a
+while anything needs you, the view's title, **Search** and **New session**. On a
+session page the title is "Session", because the session header under it already shows
+the session's title. A connection problem is one line under the toolbar. On a
 phone the view's own header keeps only its actions, and its `h1` stays for
 screen readers. The header's measured bottom edge sets
 `--app-header-bottom` for the command palette's position and height limit.
@@ -485,11 +485,11 @@ screen readers. The header's measured bottom edge sets
 A phone screen has one filled button. A page whose own action is filled calls
 `useHeaderPrimary(shown)` (`src/store/hooks.ts`) while that action shows; the
 `ui` slice counts the holders in `headerPrimaries`, and while the count is
-above zero the top bar draws **New run** as an icon button with the same
-accessible name. A run page always gets the icon, with or without a primary
-action. The holders are a run header with a primary action, Environment's **Open** or **Save
+above zero the top bar draws **New session** as an icon button with the same
+accessible name. A session page always gets the icon, with or without a primary
+action. The holders are a session header with a primary action, Environment's **Open** or **Save
 environment**, onboarding, Files with a file open and the Changes view's
-**Publish…**. The board, lists and settings keep the filled **New run**.
+**Publish…**. The board, lists and settings keep the filled **New session**.
 
 The sidebar opens as a left side sheet, a `dialog` named "Aether" with the
 same contents and **Close sidebar** in place of **Hide sidebar**; a tap
@@ -505,7 +505,7 @@ member's own environment; the server side is
 (`components/assistant/panel.tsx`) is mounted by `AppShell` as a flex sibling
 after `main`, so it is available on every route, onboarding included. It
 renders nothing unless the server lists `assistant.status` and the member can
-launch runs (`useAssistantAvailable`); the same check gates every entry point.
+launch sessions (`useAssistantAvailable`); the same check gates every entry point.
 
 - **Desktop, docked:** an `aside` named "Assistant", 400px by default and
   resizable from 320px to 640px by a `separator` on its left edge (same keys
@@ -517,7 +517,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   over the right edge of `main`, raised by a shadow. Its width is the saved
   width, capped so at least 240px of `main` (`uncoveredWidth`) stays
   uncovered on its left, but never below 320px. It has no backdrop, no focus
-  trap and no resize handle, so the run keeps its full width, and the part
+  trap and no resize handle, so the session keeps its full width, and the part
   the panel does not cover stays interactive. `Esc` inside it, outside an IME
   composition, closes it and returns focus to the Assistant button, unless
   something inside it, such as the **New conversation** confirmation, handled
@@ -526,7 +526,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   the draft, the focused composer and the transcript's scroll survive.
 - **Phone:** a right side sheet, a `dialog` named "Assistant".
 - **Header:** an `h2`, because the view beside it owns the page's `h1`. It
-  takes the run header's height on a run and the view header's elsewhere, so
+  takes the session header's height on a session and the view header's elsewhere, so
   the two seams line up. It holds the agent and state, **Actions**, **New conversation** (confirms, then
   `assistant.reset`) and **Close assistant**. While `auto_approve` is on, a
   line under it says the assistant acts without asking, with **Change in
@@ -536,19 +536,19 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   `/ws/terminal?assistant_login=<agent>`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
-  the run Session's `TimelineRow` and `useFlatRows`, with the Session's
+  the session Session's `TimelineRow` and `useFlatRows`, with the Session's
   open blocks, and the constant row context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
   newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
   runs and reads **Stopping…** while `assistant.cancel` is in flight, so a
   double click cancels once and an agent that ignores it can be stopped
   again; the call aborts after 10 seconds with `assistant.cancel got no
   answer within 10 seconds`). An empty conversation offers four example prompts that fill the
-  composer, led by the page's own: a failed run offers **Fix this**, one that
+  composer, led by the page's own: a failed session offers **Fix this**, one that
   needs you or waits **Why is this stuck?**, one with an open pull request
   (`useOpenPullRequest`) **Review and merge when checks pass**; the board
-  **What needs me?**. A run or pull request
+  **What needs me?**. A session or pull request
   prompt attaches its target through `askAssistant`, so it reaches the
-  agent with page sharing off. Harness permission and question prompts render as the Session
+  agent with page sharing off. Harness permission and question prompts render as the Chat
   view's request cards, answered with `assistant.answer`; each pending
   confirmation renders as a card titled with the summary, the method as its
   source line, a **Details** section with the exact params (three, then
@@ -562,20 +562,20 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   prompts in one 40dvh scroll. A card leaves only when a
   `confirmations` frame stops listing it. While `auto_approve` is off a card
   links **Skip these cards…** to Settings > Assistant; a card with
-  `other_member` says that member (`other_owner`) owns the run, so it asks
+  `other_member` says that member (`other_owner`) owns the session, so it asks
   even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
   `lib/assistant-actions.ts`): `assistantView` takes each Aether tool call out
   of its step block as a card: one whose `tool_name` ends in an `aether_*`
-  tool (Claude Code's `mcp__aether__aether_launch_run`, or the bare name), or
+  tool (Claude Code's `mcp__aether__aether_launch_session`, or the bare name), or
   a Codex call titled `mcp.aether.aether_*`, whose `{server, tool, arguments}`
   input and `{result, error}` output are unwrapped from the call's latest
   snapshot. The block splits at each call, so the card sits where the call
   ran; a part left with no work becomes the rows its prose and notices would
   have been. The card names the verb and target from the inputs and the
-  store's names ("Launched run on api with Claude Code", "Messaged run
-  fix-login", "Merged PR #42"; a run is named by `runLabel`; a tool with
-  several actions, such as `aether_run_lifecycle`,
+  store's names ("Launched session on api with Claude Code", "Messaged run
+  fix-login", "Merged PR #42"; a session is named by `runLabel`; a tool with
+  several actions, such as `aether_session_lifecycle`,
   takes its verb and the method its card waits on from its `action` input),
   a state
   (`Running`, `Done`, `Failed`, `You declined`, `No answer in 10 minutes`,
@@ -590,18 +590,18 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   `access` own, shared or other, `fell back
   from` its `requested_account`, `no fallback` for policy `off` or the
   `ordered` accounts) or a watch result gets one more line; a done launch without a receipt gets the same line from
-  the returned run and its inputs (kind, workspace, agent and model, the
+  the returned session and its inputs (kind, workspace, agent and model, the
   account only when the call named one, `no fallback`). A done launch whose
-  run is still active reads **Working in the background** and says
+  session is still active reads **Working in the background** and says
   how the member hears back; `useBackground`, shared with the **Actions**
-  list, reads the launched run from the store. The header calls the assistant's own turn
+  list, reads the launched session from the store. The header calls the assistant's own turn
   **Generating…**. The target comes from the result's `link` or
   `url`: a dashboard link (`?run=<id>`, a watch's
   settings link) opens in the app whatever its host, and any other `http(s)`
   address, such as a pull request, opens in a new tab. Without one it comes
   from the created ids, then from `run_id` or `workspace_id` in
-  the inputs. A run or workspace the hydrated store no longer holds reads
-  "This run no longer exists" and has no link; a launch's own run never does,
+  the inputs. A session or workspace the hydrated store no longer holds reads
+  "This session no longer exists" and has no link; a launch's own session never does,
   since the transcript can show it before the store hears of it. Failed,
   declined, expired and unfinished cards offer **Retry**, which adds `Retry:
   <summary>` under any text in the composer and focuses it without sending.
@@ -609,7 +609,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   whole with `assistant.item`, as does an expanded read. An `aether_*` tool
   without words of its own shows its name and inputs. The card is not a tab
   stop; Tab reaches its link, Retry and Details buttons. Consecutive read tools (and any `aether_list_*` or
-  `aether_get_*`) fold into one quiet line, "Read 3 runs and 1 workspace
+  `aether_get_*`) fold into one quiet line, "Read 3 sessions and 1 workspace
   list", that expands to each read. Expansion lives in `expandedRows` under
   `assistant`.
 - **Outcome:** a notice carrying an action record (`notice.action`, the
@@ -620,7 +620,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   other than the record's target: the oldest such call in the newest block
   that has one, so identical calls of one block take their records in turn
   and an older block's unrecorded call does not take a new record. An older
-  server's `Approved:` note names its run only in the summary: it goes to the
+  server's `Approved:` note names its session only in the summary: it goes to the
   one unclaimed call of its method, or to the one whose `run_id` the summary
   names, and otherwise stays a row. Without a record, the state comes from the
   tool call's status, a `declined`, `did not answer within` or `ended before
@@ -641,7 +641,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   notice between the transcript and the composer asks **Skip approval cards
   for the assistant?** It says what auto-approval passes, that each action is
   still noted, that read text could steer the assistant, and that messaging
-  or stopping another member's run still asks. It scrolls past 40% of the
+  or stopping another member's session still asks. It scrolls past 40% of the
   viewport height, so the composer stays visible. Its three equal buttons call
   `assistant.settings`: **Turn on auto-approval** (`auto_approve: true`, no
   second dialog: the notice is the warning), **Not now** (`suggestion:
@@ -656,7 +656,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   close the panel when it is a sheet, and leave a docked panel open.
 
 State lives in `store/assistant.ts`. The transcript is the `AcpSession` under
-`acpSessions.assistant`, built by the run reducers and kept out of `runs`, so
+`acpSessions.assistant`, built by the session reducers and kept out of `runs`, so
 it never reaches the board, sidebar or palette. The slice holds the status,
 the confirmation set, the composer draft and the generation a new
 conversation bumps; `assistantOpen` and `assistantWidth` persist.
@@ -688,9 +688,9 @@ pinned, so it follows output that arrived while the panel was closed. A
 different conversation starts at the bottom.
 
 `store/view-context.ts` builds the view context (see
-[assistant.md](assistant.md#what-it-sees)): the route's ids, the run view
+[assistant.md](assistant.md#what-it-sees)): the route's ids, the session view
 `RunFrame` reports through `setShownRunView`, the active file only on the
-Files page or its own run's Files view, and `viewHistory`, the last 8 pages,
+Files page or its own session's Files view, and `viewHistory`, the last 8 pages,
 recorded only while sharing is on and never persisted. While the panel is
 open and sharing is on, `syncViewContext` sends `syncedViewContext`, the
 page the chips show, as `assistant.view` at most once a second when it
@@ -705,7 +705,7 @@ started** it keeps the pinned page until the prompt is sent.
 A prompt carries `draftViewContext` instead. The first character of a draft,
 or an entry point, sets `assistantPin` to the page then shown; while
 `trackViewContext` runs it follows the member's later views and open file on
-the same run or page. Once they move to another,
+the same session or page. Once they move to another,
 `draftConflict` names it and `ContextChips`
 (`components/assistant/context-chips.tsx`) shows **You moved to X. Ask
 about:** with the new page and **Y (where you started)**; Send with that
@@ -715,7 +715,7 @@ what an entry point pointed the draft at; navigation never changes them,
 and sharing does not gate them. Past the cap the oldest go and
 `assistantError` names them. The chips above the composer are built from
 `nextViewContext`, so they show exactly what is sent: the page (unless
-removed or unshared, and folded into a run attachment that names
+removed or unshared, and folded into a session attachment that names
 the same page, whose remove button then removes both) and each attachment,
 labelled from the store
 (`components/assistant/labels.ts`); each chip's remove button is its tab stop
@@ -756,9 +756,9 @@ sets `assistantFocus` so the composer takes focus once, and never sends. `AskAss
 (`components/assistant/ask.tsx`) calls it and renders nothing for a member
 who cannot use the assistant. It backs **Fix this** and **Ask the
 assistant** on the session failure callout, the button beside each failing
-check pill, the button beside an open pull request's number in the run
-header; the run menu
-and palette offer **Ask the assistant to fix this run** for a failed run and
+check pill, the button beside an open pull request's number in the session
+header; the session menu
+and palette offer **Ask the assistant to fix this session** for a failed session and
 **Ask the assistant why this is stuck** for one that needs you or waits;
 the palette's **Ask about this page** pins the current page.
 
@@ -769,23 +769,23 @@ retrying with backoff from 3 seconds up to a minute, stopping on `-32004` or
 `-32602`, or once another member signs in (`resetAssistant` drops the
 choice). `status.share_view` carries it to other tabs and devices.
 
-When the assistant launches or messages a run for the member, the server
+When the assistant launches or messages a session for the member, the server
 watches it ([assistant watches](watches.md#assistant-watches)) and publishes
-`assistant.notice` on `/ws/events` as the run finishes or needs input or
+`assistant.notice` on `/ws/events` as the session finishes or needs input or
 attention; `watch_id` names the watch. The server streams it only to the
 member named by `member_id`. `applyAssistantNotice` (`store/assistant-notice.ts`) raises
-a toast with an **Open run** action (warning style for `needs_*`, plain for
+a toast with an **Open session** action (warning style for `needs_*`, plain for
 `finished`) and adds one to `assistantNotices`. The Assistant button counts
 those updates beside the waiting requests, named "Assistant, 1 request
 waiting, 2 updates", and opening the panel clears them. The stream does not
 mark replayed events, so a notice older than 30 seconds on the server's clock (the offset read from `server.info`) counts toward the
 badge but raises no toast. The desktop app shows the same notice as an OS
-notification that opens the run on click (`desktop/notify.js`), and skips a `needs_attention` one
-when a needs-you notification for the same run fired within five
+notification that opens the session on click (`desktop/notify.js`), and skips a `needs_attention` one
+when a needs-you notification for the same session fired within five
 seconds. A phone gets the web push the server sends for the same notice.
 
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
-component mounted in one place at a time: the sidebar's **New run** row (a secondary
+component mounted in one place at a time: the sidebar's **New session** row (a secondary
 icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or
 the phone toolbar under 768px; keeping it out of the top bar's row leaves that
 row to the header destinations), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
@@ -796,12 +796,12 @@ each onboarding step.
 
 **Landmarks.** The skip link "Skip to content" is the first tab stop; the
 header navigation is `nav` "Main navigation"; the sidebar is `nav` "Aether"
-containing `region` "Runs"; the content is the one `main`, with one `h1` per
+containing `region` "Sessions"; the content is the one `main`, with one `h1` per
 view from `PaneHeader` (`tabIndex=-1`). After a route
 change focus moves to that `h1`, unless the view took focus for itself. Unit
 and end-to-end tests select by these names.
 
-**Headers.** Every non-run view draws `ViewHeader`
+**Headers.** Every non-session view draws `ViewHeader`
 (`src/components/view-header.tsx`), a `PaneHeader` with the title in
 `text-title`, an optional one-line subtitle, the view's actions, the sidebar
 opener while the sidebar is hidden, and on desktop the connection problem in
@@ -862,11 +862,11 @@ exists: a shell built by an older `aether gui build` lacks them.
 `App.tsx` mounts `src/components/launch-splash.tsx` over the shell at desktop
 startup. It intentionally preserves the original animated night sky, logo
 and pixel wordmark, not the workbench's visual language
-([Styles](styles.md#run-state-and-motion)).
+([Styles](styles.md#session-state-and-motion)).
 
-The splash requires `window.aetherDesktop` and plays once per shell session,
+The splash requires `window.aetherDesktop` and plays once per desktop window,
 recorded by `aether.launchSplashShown` in `sessionStorage`. Browser tabs,
-reloads in the same shell session and `prefers-reduced-motion: reduce` skip
+reloads in the same window and `prefers-reduced-motion: reduce` skip
 it. A reduced-motion launch still marks the session. If storage cannot be
 read, the splash is skipped; a failed write never prevents startup. The
 session is marked in an effect rather than during rendering so React
@@ -879,10 +879,10 @@ its end, exposing the shell or the raw connection error and window controls.
 
 ### URL state
 
-`src/lib/url-state.ts` keeps the route in the query string. A run view is
+`src/lib/url-state.ts` keeps the route in the query string. A session view is
 `?run=<id>`, with `&view=session|trace|terminal|changes|files|browser` (an old
 `&view=diff` reads as `changes`; `changes` also takes `&repo=<workspace id>|all` on a
-[multi-repo run](#multi-repo-runs)); any other
+[multi-repo session](#multi-repo-sessions)); any other
 view is `?page=<name>`, plus `&id=<id>` for a workspace page, a
 Settings section or the selected template (`?page=templates&id=<name>`);
 the name is the route's, so Activity is `?page=timeline`, and Devices is
@@ -902,8 +902,8 @@ never reaches the server ([local-gateway.md](local-gateway.md#running-it)).
 `handedLink()` in `src/lib/url-state.ts` takes `join` and `claim` off the
 address on first load, `onHandedLink` does the same on `hashchange` for a
 page already open, and the link is held in memory for the Connect step.
-`?run=<id>` opens the run's default view (see [Run view](#run-view)). When the first
-hydration does not find the run, the dashboard opens the board instead, or
+`?run=<id>` opens the session's default view (see [Chat view](#chat-view)). When the first
+hydration does not find the session, the dashboard opens the board instead, or
 onboarding for a member who has not finished it. A `?page=` name with no
 view, or a page the gates in `src/lib/surfaces.ts` do not offer this gateway
 or member, opens the board once the first hydration has the capabilities.
@@ -961,15 +961,15 @@ replace the sidebar.
 
 A panel docked beside other content decides from room, not from the
 viewport. `minReadableWidth` (560px, `src/lib/breakpoints.ts`) is the width
-a run's content keeps beside one. The assistant docks only while `main` keeps
+a session's content keeps beside one. The assistant docks only while `main` keeps
 it, and otherwise floats over `main` ([Assistant panel](#assistant-panel)).
-The run's Details and Subagent inspectors dock only while the run's row,
+The session's Details and Subagent inspectors dock only while the session's row,
 measured with `useElementSize` and with the inspector inside it, holds the
 inspector plus that width; otherwise they open as overlays
 ([Details](#details)). Measuring the row with the inspector inside it means
 opening one never flips the answer, so the layout cannot oscillate. A
-narrower run also narrows its terminal, and the shared PTY with it, for every
-viewer, which is why the run keeps a readable width rather than giving way to
+narrower session also narrows its terminal, and the shared PTY with it, for every
+viewer, which is why the session keeps a readable width rather than giving way to
 whatever opens beside it. At the desktop shell's 960px floor with the default
 260px sidebar, the assistant floats; it docks from 1140px.
 
@@ -980,8 +980,8 @@ finger has to hit carries its touch size beside its desktop one - for example
 laptop with a trackpad keeps the desktop density. Under it the `Button`
 sizes, `Input`, `CommandItem`, `MenuItem`, the `CollapsibleTrigger`,
 the `Select` trigger and its options, the dialog close, the palette input,
-the top bar, the sidebar run and navigation rows and the sidebar's own
-buttons, the run-list title and the files tree rows
+the top bar, the sidebar session and navigation rows and the sidebar's own
+buttons, the session-list title and the files tree rows
 grow to 40-44px, and the terminal toolbar row grows with the buttons in it.
 Desktop density is untouched.
 Use this variant rather than a new breakpoint or a per-component pixel value.
@@ -1005,7 +1005,7 @@ layout viewport for the keyboard, so `useKeyboardInset()`
 browsers that resize. `md` is a width breakpoint, so a desktop window
 narrower than 768px is treated as a phone here too. A menu with more than six
 items also opens as a bottom sheet below `md`. On a phone (`phoneScreen`)
-the New run sheet's agent list shows only the chosen agent with **Change**,
+the New session sheet's agent list shows only the chosen agent with **Change**,
 so **Mode** sits above the fold; picking an agent collapses the list again.
 
 What gives way first:
@@ -1013,9 +1013,9 @@ What gives way first:
 - **Update prompts** live in the updates dialog, which scrolls inside itself;
   the sidebar carries one notice row. Technical output is bounded, and every
   prompt's actions sit on their own row so long diagnostics never hide them.
-- **The sidebar** keeps the run list scrollable between its fixed header and
+- **The sidebar** keeps the session list scrollable between its fixed header and
   its navigation rows and footer, from 220px wide up.
-- **The run header** truncates its title to one line and keeps its state
+- **The session header** truncates its title to one line and keeps its state
   line on one line: the reason gives up its room first, then the owner, then
   the mode word; the branch truncates only when it alone is wider than the
   line. The view switch always sits on its own row (see [Header](#header)).
@@ -1031,15 +1031,15 @@ is the only thing that changes it. `setWorkspaces` keeps a valid selection;
 an unset selection or a workspace that has been deleted falls back to the
 first by ID, or clears the selection when none remain. An open deleted
 workspace route moves to the replacement workspace or **Manage workspaces**;
-an open run in a deleted workspace returns to the board. A gateway that
+an open session in a deleted workspace returns to the board. A gateway that
 answers the capabilities fetch with an error status or a body that is not
 JSON is a legacy gateway: hydration succeeds and the store holds `null`. A
 fetch that gets no answer at all, such as Chromium's
 `net::ERR_NETWORK_CHANGED` after the host gains a network interface, keeps
 the capabilities the connect probe loaded; with none loaded, hydration fails
 and retries.
-The snapshot also seeds the board's paused map from each run's wire `paused`
-field, skipping runs that do not carry it.
+The snapshot also seeds the board's paused map from each session's wire `paused`
+field, skipping sessions that do not carry it.
 
 `removeWorkspace` records deleted IDs for the lifetime of the in-memory store.
 Every workspace snapshot and upsert excludes those IDs, so an older route or
@@ -1077,7 +1077,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   possible: Tailscale may identify the new connection as a different member.
   Only a local gateway's fixed identity can reuse replay without that refresh.
 - **Branch and pull request hints are counters.** `git.branch` and
-  `run.pr` bump a per-run `gitSeq` and `prSeq`
+  `run.pr` bump a per-session `gitSeq` and `prSeq`
   (`src/store/workflow-signals.ts`). A view that shows that state keys its
   `run.git.log` or `run.pr.feedback` re-read when the counter changes (a
   store subscription on `gitSeq[runID]`) instead of polling.
@@ -1180,48 +1180,48 @@ Removal also repairs the selection and open route before any refresh awaits.
   live without re-fetching and nothing else would restart that timer. A wake
   with a retry pending clears it, resets its backoff and re-fetches at once;
   a wake with none re-fetches nothing.
-- A `run.status` event for a run the client has never seen fetches that run
+- A `run.status` event for a session the client has never seen fetches that session
   before the event is applied, which is what keeps two quick transitions of a
-  brand new run in order. If the fetch fails the event is unresolved: the
+  brand new session in order. If the fetch fails the event is unresolved: the
   cursor stays put and a fresh snapshot is taken to repair the store. A
-  `run.deleted` event removes the run from every connected dashboard; a
+  `run.deleted` event removes the session from every connected dashboard; a
   `run.status` event that raced a local deletion treats a `404` re-fetch as
   resolved instead of forcing a redundant hydration. An event naming an
   unknown workspace re-fetches `workspace.list`, because workspaces arrive
-  only by fetch and a run under an unknown one would render nowhere. An event
+  only by fetch and a session under an unknown one would render nowhere. An event
   whose actor is not in the members map re-fetches `member.list` for the
   same reason: no `member.*` event exists, so a teammate who joined after
   hydration would otherwise render as a raw ID forever. A
-  `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
+  `workspace.timeline` entry of kind `handoff` re-reads its session the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
   `run.title`, `run.model`, `run.effort`, `run.protected` and `run.archived` follow the
-  same fetch-first rule on a run the client has never seen; `run.controller`
-  skips an unknown run, whose snapshot carries the holder. `run.account`
-  likewise skips an unknown run, and on a known one replaces
+  same fetch-first rule on a session the client has never seen; `run.controller`
+  skips an unknown session, whose snapshot carries the holder. `run.account`
+  likewise skips an unknown session, and on a known one replaces
   `account_member_id` and `requested_account_member_id` with the payload's, so
-  the header names the new account at once. `run.children` re-reads its run,
-  which carries the run's own child-run setting, `child_refused` and
+  the header names the new account at once. `run.children` re-reads its session,
+  which carries the session's own subsession setting, `child_refused` and
   `detached`.
-  `run.retention` also fetches an unknown run, then replaces only its runtime
-  deadline and cleanup metadata. It does not re-fetch known runs or change
+  `run.retention` also fetches an unknown session, then replaces only its runtime
+  deadline and cleanup metadata. It does not re-fetch known sessions or change
   `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or
   `finish_unopened`.
   A `server.update` event lands in the `server` slice, which feeds the update
   prompts.
-- **`run.agent` events set a run's `toolActivity`** (`{verb, target, at}` on
-  the run record, `src/store/activity.ts`), so a state line can say
-  "Reading src/auth.ts" without opening a socket to the run. A tool call
+- **`run.agent` events set a session's `toolActivity`** (`{verb, target, at}` on
+  the session record, `src/store/activity.ts`), so a state line can say
+  "Reading src/auth.ts" without opening a socket to the session. A tool call
   sets the present tense with the call's detail (file, command, task) or the
   tool name as the target; the tool result that follows turns it past tense
   ("Read", "Ran", "Edited") or `Failed`; a subagent reads "Delegating". An
-  Enhanced run's event carries `verb`, which the line shows as is.
+  Enhanced session's event carries `verb`, which the line shows as is.
   Calls in flight are kept by `tool_use_id`, so a result ends the call it
   names: while another call still runs, the line shows the newest one. Only
-  runs whose agent has an adapter emit these events, so `toolActivity` is
-  optional everywhere. An event about a run the client has not loaded is
+  sessions whose agent has an adapter emit these events, so `toolActivity` is
+  optional everywhere. An event about a session the client has not loaded is
   dropped rather than fetched. A status change - a turn ending or
   starting, a reopen - clears the activity, so an earlier action never
-  reads as current; a run re-read keeps it only while the status is
+  reads as current; a session re-read keeps it only while the status is
   unchanged, since no snapshot carries it.
 
 **The capabilities descriptor is the transport seam.** The store holds the
@@ -1334,7 +1334,7 @@ where a resend is deduped or refused and the eventual result still shows:
 | Composer **Send** and the Enhanced pill's Send, Steer and Queue | Sending… | Yes: the draft keeps its idempotency key, so a resend delivers once |
 | Enhanced pill's **Interrupt** and **Resume**, and a session option | Sending… | No: these carry no key, so a late interrupt could stop the turn sent after it |
 | **Create workspace** | Creating… | No: `workspace.add` carries no idempotency key |
-| **Launch** (launch dialog) | Launching… | The dialog's **Cancel** closes it at any time; the request keeps going, a success still opens the run, and a refusal shows as a toast |
+| **Launch** (launch dialog) | Launching… | The dialog's **Cancel** closes it at any time; the request keeps going, a success still opens the session, and a refusal shows as a toast |
 | Close dialog **Merged** / **Abandoned**, over another verb's pending prediction | Closing… | The dialog's **Cancel** closes it at any time; the answer shows as a toast |
 | Workspace settings **Save**, budget **Set** / **Clear budget** | Saving… / Clearing… | The dialog's own **Cancel** closes it at any time; the call sets values, so a repeat is harmless |
 | **Save identity** | Saving… | No: a second save could reach the server before the first and be overwritten by it |
@@ -1350,11 +1350,11 @@ where a resend is deduped or refused and the eventual result still shows:
 ## Board
 
 `src/routes/board/` is the default center view and the triage surface,
-reached through **Board** in the app header; the sidebar owns the run
-explorer and primary New run action. The **Board / List / Map / Lanes** tabs
+reached through **Board** in the app header; the sidebar owns the session
+explorer and primary New session action. The **Board / List / Map / Lanes** tabs
 in the view header choose the layout, stored per workspace in `aether.ui`:
-triage columns, the same groups as one list, a run canvas, or a timeline of
-runs. **Board** shows three columns, **Needs you**, **Working** and
+triage columns, the same groups as one list, a session canvas, or a timeline of
+sessions. **Board** shows three columns, **Needs you**, **Working** and
 **Finished**, each a `bg-chrome` well headed by its name and count that
 scrolls on its own under that header. **List** stacks the same three groups
 full width in one scroll, with Finished collapsed until opened. `board()` in
@@ -1366,9 +1366,9 @@ columns do not fit, **Board** renders the list layout and the **List** tab
 is hidden. A group of more than 60 cards renders only the cards its scroll
 shows (`card-list.tsx`, virtua).
 
-In a flat run list (`run-list.tsx`) a root lists its child runs
-under it with a toggle naming the count (**Show 2 child
-runs**). Child runs start shown, and a folded one that needs you still shows. Nested rows add the model to the
+In a flat session list (`run-list.tsx`) a root lists its subsessions
+under it with a toggle naming the count (**Show 2 subsessions
+**). Subsessions start shown, and a folded one that needs you still shows. Nested rows add the model to the
 agent.
 
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
@@ -1380,9 +1380,9 @@ A card (`run-card.tsx`, on the `Card` primitive) has three parts:
    Working card, whose live tool activity must not change the card's
    height; a card whose reason only restates its state has none;
 3. the footer: `StatusDot`, state label, compact wait or change time
-   ("4m") and the workspace name for a run outside the active workspace or
+   ("4m") and the workspace name for a session outside the active workspace or
    across several repos, which truncates first; then the agent name
-   (`agent.list` `display_name`, else the run's `harness` value), owner
+   (`agent.list` `display_name`, else the session's `harness` value), owner
    avatar, `+added −deleted` from the newest `run.diff` snapshot (`N files`
    when that snapshot is `truncated`, because its counts are only a floor),
    the `card:meta` slot (file overlaps, sync) and the Needs you action.
@@ -1391,23 +1391,23 @@ The agent name shows once the card is 365px wide, where the description and
 footer also indent under the title; a narrower card keeps it for screen
 readers only. Device and merge-proposal cards use the same frame.
 
-A click anywhere on the card opens the run. `useBoard` reuses a
+A click anywhere on the card opens the session. `useBoard` reuses a
 card's previous object while it is unchanged (`dequal`), so the memoized
 `RunCard` skips it.
 
-A **child run** is a run that another run's agent started with
-`aether-internal child start` ([child runs](plans/2026-10-26-child-runs.md));
-its parent is that run and its root the top of the tree. Every surface reads
-one hierarchy: `runParents` in `map-layout.ts` takes a run's parent
+A **subsession** is a session that another session's agent started with
+`aether-internal subsession start` ([subsessions](plans/2026-10-26-subsessions.md));
+its parent is that session and its root the top of the tree. Every surface reads
+one hierarchy: `runParents` in `map-layout.ts` takes a session's parent
 from `parent_run_id`, and
 `runTrees` in `src/store/selectors.ts` folds each tree under its root. Child
-runs fold into their
-root's card, which adds "N child runs" and a `StatusDot` count per state.
-Children never appear as separate cards. One that needs you puts its root
+sessions fold into their
+root's card, which adds "N subsessions" and a `StatusDot` count per state.
+Subsessions never appear as separate cards. One that needs you puts its root
 in Needs you, and the card's description names it:
-"`<purpose>`: `<reason>`". A child whose parent is not loaded is its own
-card. A child's label (`runLabel`) is its `child_purpose`, so the palette,
-which searches every run, finds it by purpose.
+"`<purpose>`: `<reason>`". A subsession whose parent is not loaded is its own
+card. A subsession's label (`runLabel`) is its `child_purpose`, so the palette,
+which searches every session, finds it by purpose.
 
 A Needs you card shows its primary action on hover, on keyboard focus and
 always on a touch screen (`card-action.tsx`). Each condition in
@@ -1416,15 +1416,15 @@ both show:
 
 | Condition | Action |
 | --- | --- |
-| Enhanced turn interrupted or stopped short, or a `needs input:` question | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
-| Native permission or question on a Standard run; blocked, held, or an Enhanced failure | **Open terminal** |
-| Native permission or question on an Enhanced run, or teammate question | **Answer** |
+| Enhanced turn interrupted or stopped short, or a `needs input:` question | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the session's Chat view with the composer focused |
+| Native permission or question on a Standard session; blocked, held, or an Enhanced failure | **Open terminal** |
+| Native permission or question on an Enhanced session, or teammate question | **Answer** |
 | Usage limit with no account to move to | **Open** |
 | Teammate's message waiting for the controller | **Review message** |
 | Unreviewed finish | **Review** |
 
 Every action but Approve and the card's Reply goes where the condition's
-`target` points: the run (requests and questions), its Terminal view
+`target` points: the session (requests and questions), its Terminal view
 (blocked, held, Enhanced failure), or its Changes view for an unreviewed
 finish.
 
@@ -1433,28 +1433,28 @@ key scope, pushed only then and only for the actions that card offers, so
 the keys stay free elsewhere). Closing the reply composer returns focus to
 the card. A failed send keeps the draft and shows the server's error. The
 open composer, its draft, the send in flight and its error live outside the
-card, keyed by run (`useReply`), so a card that remounts - its group
+card, keyed by session (`useReply`), so a card that remounts - its group
 crossing 60 cards, or a move to another group - keeps them and still reads
 **Sending…**. A send closes or marks failed only the reply it was sent
 from, never one opened after it. Authenticating as another member or
 server drops the reply.
 
-**Finished footer.** **Archived (n)** swaps Finished for archived runs in
-scope (Mine applies); **Back to Finished** returns. Archived runs have no
+**Finished footer.** **Archived (n)** swaps Finished for archived sessions in
+scope (Mine applies); **Back to Finished** returns. Archived sessions have no
 automatic deletion countdown. **More finished-run actions** (`…`, in the Finished
-heading, only when it has an item) holds **Archive closed runs…** and, for
+heading, only when it has an item) holds **Archive closed sessions…** and, for
 admins, **Free retained containers…**. Both open the
 store-hosted confirmations (`src/components/palette/clear-done-dialog.tsx`,
 drawn by `src/routes/board/clear-done-dialog.tsx`) over a plan snapshotted
 when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
-`src/lib/commands.ts`, over the whole active workspace whoever owns the run.
+`src/lib/commands.ts`, over the whole active workspace whoever owns the session.
 `runClearDone()` and `runReleaseFinished()` run at most six calls at once,
 continue past failures and report the first real error; archive counts
-`CodeNotFound` as done. Archiving hides a run whose status is final
+`CodeNotFound` as done. Archiving hides a session whose status is final
 (`isArchivable`) from every group without deleting its history; freeing removes
-a retained container and keeps the run and its history.
+a retained container and keeps the session and its history.
 
-**Empty board.** With no runs in scope the board names the first unmet
+**Empty board.** With no sessions in scope the board names the first unmet
 requirement, with one sentence and one button:
 
 1. no workspace: **Add your repository** (onboarding, Repository step);
@@ -1463,9 +1463,9 @@ requirement, with one sentence and one button:
    other failure shows as an error instead. The check repeats when the window
    regains focus;
 3. `agent.list` reports nothing installed: **Set up an agent** (Agents);
-4. Mine hides every run in scope: **Show everyone's runs**;
-5. otherwise: "A run is one agent working on its own branch in its own
-   container." and **New run**, for members who may launch.
+4. Mine hides every session in scope: **Show everyone's sessions**;
+5. otherwise: "A session is one agent working on its own branch in its own
+   container." and **New session**, for members who may launch.
 
 Loading shows two delayed card-sized skeletons per group; a hydrated empty
 group says "Nothing here.". An unreachable server shows its error in place
@@ -1485,72 +1485,72 @@ Needs you count changes.
 
 ### Map
 
-**Map** exposes every individual run, child runs included. `mapRuns()` reads
+**Map** exposes every individual session, subsessions included. `mapRuns()` reads
 the unaggregated `runRows()` presentation rather than Board's folded cards, and `useMapRuns` reuses unchanged card objects
 (`dequal`), so a `run.agent` event re-renders one card. A map card opens that
-individual run; its primary action still targets the condition that needs
+individual session; its primary action still targets the condition that needs
 the viewer.
 
 A map card (`map-card.tsx`) has three rows: the agent glyph in a tile, the
-run's label over a muted line (agent display name, model, and the workspace
-for a run outside the active one) and a state pill (`Badge` with the
+session's label over a muted line (agent display name, model, and the workspace
+for a session outside the active one) and a state pill (`Badge` with the
 `StatusDot`); the reason, two lines at most, in the text colour when it
 needs you and muted otherwise; and a meta row with the owner avatar when
 it differs from the section's, `+added −deleted`, the compact age, the
 `card:meta` slot, the card's action on hover, focus or a touch screen and, on
-a parent run, the fold button. The action and fold button keep their full
+a parent session, the fold button. The action and fold button keep their full
 width; when the row runs out of room, the rest is clipped from the
 `card:meta` end.
 
 The **Map workspace scope** picker selects the active workspace or **All
 workspaces**, without changing the sidebar's selected workspace or Board's
-triage scope. **Mine** filters individual Working and Finished runs by their
+triage scope. **Mine** filters individual Working and Finished sessions by their
 owner. As in Board, Needs you stays visible across workspaces and Mine.
 Cards from another workspace, and all cards in All workspaces, name their
-workspace. **Archived (n)** replaces Finished runs with individual archived
-runs while keeping Needs you and Working visible; **Back to Finished**
-returns. Archived runs obey workspace and Mine, and an all-archived scope
+workspace. **Archived (n)** replaces Finished sessions with individual archived
+sessions while keeping Needs you and Working visible; **Back to Finished**
+returns. Archived sessions obey workspace and Mine, and an all-archived scope
 keeps the toggle available.
 
-The Runs strip counts every run in scope, folded child runs included: **Runs
+The Sessions strip counts every session in scope, folded subsessions included: **Sessions
 N**, **N working**, and the **N needs you** and **N failed** chips. Each chip
 opens a list (oldest wait first; newest failure first) whose rows bring the
-run into view: its family unfolds if folded, the camera centres it at a
+session into view: its family unfolds if folded, the camera centres it at a
 readable zoom, and its title takes focus.
 
-`map-layout.ts` lays out units: a standalone run, or, for a run with child
-runs, a `family` unit with every descendant hanging under the root, captioned
-"N child runs", whoever owns them. Relationships come from `parent_run_id`
-(a detached child is its own unit). Up to four children hang in one row from
+`map-layout.ts` lays out units: a standalone session, or, for a session with subsessions
+, a `family` unit with every descendant hanging under the root, captioned
+"N subsessions", whoever owns them. Relationships come from `parent_run_id`
+(a detached subsession is its own unit). Up to four subsessions hang in one row from
 a bus; five or more fill four fixed columns row by row, each on a rail, so a
-new child is appended without moving the others.
+new subsession is appended without moving the others.
 
-Units are placed newest first by the root run's `created_at`: each takes the
+Units are placed newest first by the root session's `created_at`: each takes the
 highest free spot in a band of one common width, leftmost on a tie, so the
 newest sit top left and older units fill the room under short neighbours.
-Children keep spawn order. Sections stack the
-viewer's runs, then other owners by their newest unit, then **Needs you
+Subsessions keep spawn order. Sections stack the
+viewer's sessions, then other owners by their newest unit, then **Needs you
 elsewhere**: Needs you runs present only because Needs you ignores scope and
 Mine, last so their churn never reflows the rest: the band width and framing
 come from owner sections alone. With two or more owner sections each is
 framed and headed by its owner and count; Needs you elsewhere is always
-framed. A teammate's child run under your run shows its owner's avatar.
+framed. A teammate's subsession under your session shows its owner's avatar.
 Section headers and family captions grow as the camera zooms out so a distant
 map still reads; a caption grows only into the gap above its unit.
 
 Geometry is fixed per text size and pointer. State, reasons, titles,
 timestamps and profile edits never move a node. A repack happens only when
-runs are added or removed, ownership or relationships change, a family folds,
+sessions are added or removed, ownership or relationships change, a family folds,
 or the text size or pointer changes; moved units and cards glide from their
 old place, new cards fade in, removed ones fade out, and the camera stays.
 
-A parent's fold button shows its child count; folded, `+N`. Folding
-fades the children out and repacks, and the camera follows so the parent
+A parent's fold button shows its subsession count; folded, `+N`. Folding
+fades the subsessions out and repacks, and the camera follows so the parent
 stays where it was on screen; a folded family never unfolds by itself.
-When hidden children need you the button turns amber, as `+N · k need you`.
-Unlike the sidebar, whose fold keeps Needs you children visible, the Map
+When hidden subsessions need you the button turns amber, as `+N · k need you`.
+Unlike the sidebar, whose fold keeps Needs you subsessions visible, the Map
 never moves cards on a state change. Folds persist in `aether.ui`
-(`boardMapFolded`), pruned to runs that still exist.
+(`boardMapFolded`), pruned to sessions that still exist.
 
 - Drag the canvas or a card to pan; releasing a drag never opens the card.
   A press released outside the canvas cannot pan on hover or consume the next
@@ -1558,32 +1558,32 @@ never moves cards on a state change. Folds persist in `aether.ui`
 - Scroll to pan; Shift-scroll pans horizontally. Ctrl/Cmd-scroll zooms around
   the pointer. Touch supports dragging and two-finger pinch zoom.
 - With the canvas focused, arrow keys pan, Shift increases the step,
-  `+` / `-` zoom, and `Home` / `0` fit all runs.
+  `+` / `-` zoom, and `Home` / `0` fit all sessions.
 - **Zoom out**, the zoom percentage, **Zoom in** and **Fit** remain available
-  in the wrapping Runs toolbar. Tab reaches every run, its action and its
+  in the wrapping Sessions toolbar. Tab reaches every session, its action and its
   fold button in placement order, bringing an offscreen focused card into
   view.
 
 `aether.ui` stores Board/List/Map/Lanes per active workspace and the map camera per
 workspace/all-workspaces, Mine and archive scope. These origin-local
 preferences survive view switches, navigation and reloads. A new camera
-fits all runs once, unless that would zoom below 50%: then it opens at 100%
-on the top left, where the newest runs are, panned just enough to show the
+fits all sessions once, unless that would zoom below 50%: then it opens at 100%
+on the top left, where the newest sessions are, panned just enough to show the
 first unit's top card whole, so a wide family on a phone opens on its
 parent. Live metadata, added or removed
-runs and viewport resizing never reset a chosen camera. Use **Fit** to frame
+sessions and viewport resizing never reset a chosen camera. Use **Fit** to frame
 the changed set. Cameras saved before this layout (persist version 9) are
 dropped once.
 
 ### Lanes
 
-**Lanes** (`src/routes/board/lanes/`) draws every run in scope as a lane on
-one time axis, so you can see what ran when and how the runs relate. It shares
+**Lanes** (`src/routes/board/lanes/`) draws every session in scope as a lane on
+one time axis, so you can see what ran when and how the sessions relate. It shares
 Map's scope picker (labelled **Lanes workspace scope**), **Mine** and
 **Archived (n)**, and Map's merge-proposal and device strips. The toolbar adds:
 
 - **Time window**: 1h, 6h, 24h or 7d. Without a choice it opens on 1h while
-  any run is working, else 6h. Ctrl/Cmd-scroll zooms around the pointer and
+  any session is working, else 6h. Ctrl/Cmd-scroll zooms around the pointer and
   the control then reads **Custom**.
 - **Show**: which links to draw (Agent messages, Overlaps).
 - **Group lanes by**: status or owner.
@@ -1599,34 +1599,34 @@ dragging the track pans; the history page loads as the window reaches it.
 Working and Ready for review (newest start first), then Finished (failed
 first, then latest end). Finished starts folded into one summary lane ("37
 finished · 3 failed") whose strip shows each moment's outcome. By owner, there
-is one section per owner, yours first. A section header counts the runs that
-ended before the window and offers the next wider window. When no run reaches
+is one section per owner, yours first. A section header counts the sessions that
+ended before the window and offers the next wider window. When no session reaches
 the window, a line above the lanes says so; the axis stays, so panning and
-zooming still reach older runs. A run with child runs lists as a header lane
-(the run's title, "N child runs" and their counts, with the Network glyph)
-followed by the run and its child runs, oldest first, in the
-section of its most urgent member. A family starts open while live with eight children or fewer, or when a
-child needs you; folded, it draws its parent's bar and a strip of its
-children's most urgent state over time, and still lists any child that needs
+zooming still reach older sessions. A session with subsessions lists as a header lane
+(the session's title, "N subsessions" and their counts, with the Network glyph)
+followed by the session and its subsessions, oldest first, in the
+section of its most urgent member. A family starts open while live with eight subsessions or fewer, or when a
+subsession needs you; folded, it draws its parent's bar and a strip of its
+subsessions' most urgent state over time, and still lists any subsession that needs
 you. Disclosure choices last until the view unmounts.
 
-**Bars.** A bar runs from the run's creation to its end or now. A dashed
+**Bars.** A bar runs from the session's creation to its end or now. A dashed
 outline covers Starting (queued and provisioning); then each span takes the
 state `run.status` history gives it. History knows only the server's
 needs-attention, so a past span reads **Needed attention**; the span since
 the last change shows the viewer's own state (`presentRun`), which alone
-knows Needs you, Paused and Ready for review. Once a run ends, its working
+knows Needs you, Paused and Ready for review. Once a session ends, its working
 spans take its outcome's colour, so only live work reads Working. Time
 before the history read is a dotted outline that says "History not loaded";
-if the read fails, bars fall back to the current state and a **Run history**
+if the read fails, bars fall back to the current state and a **Session history**
 callout shows the server's error with **Retry**. A working bar has a 2px end
 cap and its activity text shimmers; a Needs you bar ends in a **Needs you**
 tag. Finished bars add "took 18m" after their end when there is room.
 
-**Links.** Mail between runs
+**Links.** Mail between sessions
 (`coord.message`, bundled per lane pair within 24px, its glyph naming a
 question, reply or report, the arrowhead hollow until every message is
-acknowledged) and, for the hovered or selected run only, file overlaps at the
+acknowledged) and, for the hovered or selected session only, file overlaps at the
 now line. A link into a folded family or Finished attaches to its header.
 Hovering or selecting a lane keeps its links in colour and greys the rest.
 Clicking a link opens its facts; a mail link reads the bodies through
@@ -1638,21 +1638,21 @@ link into a folded lane can bundle several senders) and shows them with
 "agent · state · elapsed", the title, the reason, next step, branch and diff,
 unread mail, pending inputs, overlaps and the state span under the pointer,
 then the card's primary action (Reply opens the same composer as a card),
-**Open run** and, for Enhanced runs, **Show agents**, then the
-lane's **Links**, each opening the same facts as clicking that link. A popover whose lane leaves the view, as when its run folds
-into Finished, closes and puts focus on the lane that now draws the run. Show
-agents inserts the run's subagents as sub-lanes: from the live session when
-the run is open elsewhere in this tab, else from one `run.acp.history` page of
+**Open session** and, for Enhanced sessions, **Show agents**, then the
+lane's **Links**, each opening the same facts as clicking that link. A popover whose lane leaves the view, as when its session folds
+into Finished, closes and puts focus on the lane that now draws the session. Show
+agents inserts the session's subagents as sub-lanes: from the live session when
+the session is open elsewhere in this tab, else from one `run.acp.history` page of
 1000 items, which the empty state says. Selecting a sub-lane opens the
 subagent. Escape closes and returns focus to the lane.
 
-**Keyboard.** The lanes are one `tree` named "Run lanes" with one tab stop: Up
-and Down move, Home and End jump, Right opens a section, a family or a run's
+**Keyboard.** The lanes are one `tree` named "Session lanes" with one tab stop: Up
+and Down move, Home and End jump, Right opens a section, a family or a session's
 agents (or moves into it), Left closes it or moves to its parent, Enter or
 Space opens the popover or toggles a header, and `o` and `r` open and reply as
 on a card; links open from a lane's popover. The axis is a separate tab stop,
 **Timeline window**: Left and Right pan by a tenth, `+` and `-` zoom, `0` or
-Home return to now. A polite status line announces runs that turn Needs you,
+Home return to now. A polite status line announces sessions that turn Needs you,
 Failed, Ready for review or Completed, gathered for 1.5s and at most three at
 a time (the Workflow panel's announcer, `src/lib/use-announcement.ts`).
 
@@ -1676,12 +1676,12 @@ Below 768px the label column shrinks to the state dot and agent glyph, and
 each lane's title moves into its bar; family members keep their tree elbow and
 section headers keep the ended-before count.
 
-### Run state
+### Session state
 
-A run shows one state and one plain-words reason line, derived in
-`src/lib/status.ts` (`presentRun`). A live run's state is the server's
+A session shows one state and one plain-words reason line, derived in
+`src/lib/status.ts` (`presentRun`). A live session's state is the server's
 `state` field: the scheduler derives it, so the dashboard never infers a wait
-from a reason string. A live run or stored `run.status` event from before the
+from a reason string. A live session or stored `run.status` event from before the
 server derived one has no `state`, and a newer server may send a `state`
 this dashboard does not know: a `running` one reads **Running** with a
 neutral dot, never Working, and a `needs-attention` one reads **Turn
@@ -1692,8 +1692,8 @@ without a report" or "No update for 12m"; the dashboard never invents one.
 Details lists the raw `reason` as **Last reason**.
 
 `stateLabel` and `stateTone` in `src/lib/status.ts` are the one mapping from
-state to label, dot colour and dot shape; the sidebar, board, run header,
-run lists, activity feed and palette all use it. Each state has
+state to label, dot colour and dot shape; the sidebar, board, session header,
+session lists, activity feed and palette all use it. Each state has
 its own dot shape and a text or `aria-label` label, so no state is told by
 colour alone. Only Working pulses, breathing in opacity and size, except in
 the sidebar, board, palette and All workspaces, and not under
@@ -1702,27 +1702,27 @@ Waiting states are a neutral, static glyph; Needs you is the only amber
 state.
 
 `stateWords` gives a state's words: the reason in place of the label when
-the reason names what the run waits on ("Waiting for 2 child runs", "Waiting
+the reason names what the session waits on ("Waiting for 2 subsessions", "Waiting
 for Ada"), else the label and the reason after
 it. `stateDetail` drops a reason that only restates the label or is the
 state's default, so an unreported turn end reads a quiet "Turn ended" and an
 answer "Answered" or "Answered · *summary*". Outside Needs you, where the
 label and the reason alone lead, a board card puts the words' label in its
 footer and their detail in its description ("Waiting for CI", "PR 12
-checks"); the sidebar's accessible row name reads them joined. A run list
+checks"); the sidebar's accessible row name reads them joined. A session list
 row puts the label in its status chip and the detail in its meta line.
 
 `stateTitle` builds the tooltip each surface puts on a state, and the
-sidebar's run details box shows it: "*Words* since *relative* — *reason*.
-*What happens next*. Why: *cause*.", for example "Waiting for 2 child runs
-since 3 minutes ago. Mail from its agents can wake it. Why: its child runs
+sidebar's session details box shows it: "*Words* since *relative* — *reason*.
+*What happens next*. Why: *cause*.", for example "Waiting for 2 subsessions
+since 3 minutes ago. Mail from its agents can wake it. Why: its subsessions
 are live." *What happens next* is said only where it is a fact or a request
 of the viewer; no state that asks nothing tells the viewer to send a
-message. *Cause* is the run's `cause` in words; it is shown only while the
-run is live and shows the state the server chose, so not for a paused run
+message. *Cause* is the session's `cause` in words; it is shown only while the
+session is live and shows the state the server chose, so not for a paused session
 or a request shown as "Waiting for *name*".
 
-A run that shows a reported wait carries `wait`, what Aether verified about
+A session that shows a reported wait carries `wait`, what Aether verified about
 the conditions the agent named ([Waits Aether can
 check](failure-handling.md#waits-aether-can-check)). `waitLine` words it,
 and `stateWords` puts that in place of the agent's summary, even one that
@@ -1739,90 +1739,90 @@ reads "Waiting for ...", which moves to the tooltip as "The agent reported:
 
 `toneOf` picks the dot, and the tooltip gives the exact time of the last
 read. Only the server's `needs-you` state lists a broken wait in Needs you;
-a wait's kind never does. A phone's run header adds the wait's line, wrapped,
+a wait's kind never does. A phone's session header adds the wait's line, wrapped,
 under the header, since its state line truncates; for a broken wait that
 line is the Needs you reason with the error.
-Rereads (`reread: true` events) update `wait` in the run store but never
+Rereads (`reread: true` events) update `wait` in the session store but never
 count as a state change in the lanes or trace bars. A reported wait that went
 stale (`cause` `wait-expired`) reads "Reported waiting on *summary*, no
 update for 30m", and `stateName` labels it **Stale wait** rather than Turn
 ended.
 
-The run header's state line shows the words beyond the label the Workflow
+The session header's state line shows the words beyond the label the Workflow
 chip under it already shows, a CI wait's age first ("42m · PR 12 checks";
 a stale one's reason already says "No update for 30m"), since the header
 prints no age of its own; `stateTitle` is the tooltip of
 the space it fills, there even when the line is empty. The label stays in a
 visually hidden `role=status` element, so a screen reader hears only a
-change of state. While a run waits for agents,
+change of state. While a session waits for agents,
 the header counts the Enhanced session's running subagents, "2 subagents
 running".
 
 | State | Dot | Comes from | Group |
 | --- | --- | --- | --- |
 | Working | filled circle, pulses | `state` `working` (a turn is in progress), or `queued` / `provisioning` ("Queued", "Starting") | Working |
-| Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, a run with live child runs, or a `waiting --for agents` report | Working |
+| Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, a session with live subsessions, or a `waiting --for agents` report | Working |
 | Waiting for CI | clock | `waiting-ci`: a `waiting --for ci` report | Working |
 | Waiting for process | clock | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
-| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason. Asks nothing | Working |
+| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked session with no `state`: the turn ended without a verified reason. Asks nothing | Working |
 | Stale wait | dashed ring | `waiting` with `cause` `wait-expired`: a waiting report went stale. Asks nothing | Working |
-| Waiting | dashed ring | a run whose request waits on another member, read "Waiting for *name*" | Working |
+| Waiting | dashed ring | a session whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
-| Ready for review | filled accent circle with a check | `finished` (a reported success on a live run), or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
+| Ready for review | filled accent circle with a check | `finished` (a reported success on a live session), or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
 | Completed / Merged | check | `completed`, `merged` | Finished |
 | Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
 | Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
 | Interrupted | ring with an exclamation mark | `interrupted` | Finished |
-| Disconnected | broken ring, neutral | `disconnected`: the agent session or process ended while the run is open | Needs you for its owner |
-| Paused | bars | a live run paused by a member | Working |
+| Disconnected | broken ring, neutral | `disconnected`: the agent session or process ended while the session is open | Needs you for its owner |
+| Paused | bars | a live session paused by a member | Working |
 
-The sidebar and run list show Ready for review as its own quiet group
+The sidebar and session list show Ready for review as its own quiet group
 between Working and Finished; the board lists it at the head of Finished.
 
 Live actions (stop, pause, message, Stop waiting) still gate on the wire
 `status` (`running`, `needs-attention`), not on the state.
 
-**`status_seq`** increments on every change of a run's status, state,
+**`status_seq`** increments on every change of a session's status, state,
 reason, outcome flags or `review`. `applyRunStatus` in `src/store/runs.ts` drops a
 `run.status` event whose `status_seq` is not greater than the one it holds,
 and `toRecord` keeps every field such an event set (status, reason, state,
 `cause`, `status_seq`, `outcome_unseen`, `finish_unopened`, `review`,
 `review_changed_at`, `finished_at`) when a
 snapshot is older, so an out-of-order event or a late `run.get` never moves a
-run back. A snapshot at the same `status_seq` never sets `outcome_unseen` or
-`finish_unopened` again once `run.outcome_seen` or opening the run cleared it.
+session back. A snapshot at the same `status_seq` never sets `outcome_unseen` or
+`finish_unopened` again once `run.outcome_seen` or opening the session cleared it.
 A kill's or close's prediction clears `state` with the status. `applyRunReview` applies
 a `run.review` event under the same `status_seq` rule.
 
 **Review** is the owner's answer to a reported success
 ([failure-handling.md](failure-handling.md#review)). `run.review` with
-`action` `complete` closes a live run as `completed` (or records it on a
+`action` `complete` closes a live session as `completed` (or records it on a
 `completed` run) and sets `review` to `accepted`; `later` sets it to `later`
-and leaves the run where it is. Both return `{"run": Run}` and need the same
+and leaves the session where it is. Both return `{"run": Run}` and need the same
 permission as `run.close`.
 
-The Needs you group, its counts and badges follow the run-state attention
-rule push notifications, watches and `aether runs --needs-you`
-share ([failure-handling.md](failure-handling.md)): a live run (`running` or
+The Needs you group, its counts and badges follow the session-state attention
+rule push notifications, watches and `aether sessions --needs-you`
+share ([failure-handling.md](failure-handling.md)): a live session (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
 `disconnected`, or `failed` while `outcome_unseen`, and a reported success,
 live or `completed`, whose `review` is `ready`. Waiting, every Waiting for
-state, Working, a `review` of `later` or `accepted`, and a finished run
+state, Working, a `review` of `later` or `accepted`, and a finished session
 never count. The sidebar's Needs you count, the workspace badges and the
-list's Needs you rows come from the same `runRows`, so they always agree. The request rows below need a live, unpaused run
+list's Needs you rows come from the same `runRows`, so they always agree. The request rows below need a live, unpaused session
 too.
 Needs you means the viewer can resolve it.
 
 The queued message and teammate question rows are the dashboard's own:
-they come from the room, which the run's `state` does not cover, so push and
-`aether runs --needs-you` do not announce them.
+they come from the room, which the session's `state` does not cover, so push and
+`aether sessions --needs-you` do not announce them.
 `src/lib/needs-you.ts` holds the conditions as one table, checked in order;
 `needsYou(run, ctx)` returns the first that applies:
 
 | Condition | Who it needs | Reason line |
 | --- | --- | --- |
-| Pending sudo command of a Default run, swarm workers included | owner or an admin | Permission requested |
+| Pending sudo command of a Default session | owner or an admin | Permission requested |
 | Pending native permission | owner or terminal controller | Permission: … (enhanced: Permission requested) |
 | Pending native question | owner or terminal controller | Question: answer in the terminal (enhanced: Question from the agent) |
 | Queued message from another member | terminal controller | Bob sent a message, approve to deliver |
@@ -1832,7 +1832,7 @@ they come from the room, which the run's `state` does not cover, so push and
 | `state` `needs-you` with a `needs input: <question>` reason | owner | Agent asks: …, with **Reply** |
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
-| `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the run to see its request, with **Open** |
+| `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the session to see its request, with **Open** |
 | `review` `ready` on a live `finished` or a `completed` run (labelled Ready for review) | owner | Your agent reports this task is finished |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
@@ -1840,7 +1840,7 @@ Failed and Disconnected rows show their reason in full-contrast text, as a
 Needs you row does. A control hold waits since the attempt's
 `takeover_since`.
 
-A device waiting for approval is not a run, so `deviceNeeds` in the same
+A device waiting for approval is not a session, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device
 into a card for that member. The store's `devices` come from
 `member.device.list`, which names whom approving admits each waiting
@@ -1862,15 +1862,15 @@ The card shows the account, the key fingerprint and whom approving admits
 it as, and waits since the device was recorded. No card carries an
 approval code. Merge proposal cards ([Members, devices and
 Profile](#members-devices-and-profile)), then device cards, list before
-runs in the board's Needs you and above the Map. The sidebar's Needs you
+sessions in the board's Needs you and above the Map. The sidebar's Needs you
 counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
 
-A condition that applies to someone else leaves the run in Working with
-"Waiting for Alice", labelled Waiting when the run needs its owner. A
-Background (`headless`) run follows its `state` like any run; the server
+A condition that applies to someone else leaves the session in Working with
+"Waiting for Alice", labelled Waiting when the session needs its owner. A
+Background (`headless`) run follows its `state` like any session; the server
 does not count its native questions, and neither does the dashboard. It takes
-no input, so its row offers **Open**, not **Reply**. A Working run's reason is what its agent is
+no input, so its row offers **Open**, not **Reply**. A Working session's reason is what its agent is
 doing ("Reading src/auth.ts", from `run.agent`), else "Agent working". A
 reported success, unreviewed or not, is Finished and never lists in Needs
 you.
@@ -1880,16 +1880,16 @@ message's time, else the state change); Working and Finished sort by latest
 change. Reason lines that name a wait re-read the shared clock, so "(12
 min)" keeps moving.
 
-**The change time** is `stateChangedAt` on the run record. A snapshot's
-`status_changed_at` sets it: when the run entered its status, or its reason
+**The change time** is `stateChangedAt` on the session record. A snapshot's
+`status_changed_at` sets it: when the session entered its status, or its reason
 while it needs attention. A snapshot can be older than the events already
-applied, so for a run still in that status it never moves the time
+applied, so for a session still in that status it never moves the time
 backwards. A `run.status` event moves it to the event's time
 on those same changes and leaves it alone on a same-status rewrite, as the
-server does, so a retention relabel of a run that finished last week does not
-make it the newest Finished row. An older gateway, and a run whose status
+server does, so a retention relabel of a session that finished last week does not
+make it the newest Finished row. An older gateway, and a session whose status
 last changed before the server recorded it, send no `status_changed_at`; the
-record then takes the run's finish, start or creation time and is marked
+record then takes the session's finish, start or creation time and is marked
 `stateChangedAtEstimated`, and it sorts and shows its change time by that
 estimate.
 
@@ -1897,9 +1897,9 @@ estimate.
 gateway decorates from the control lease on `run.get` and `run.list` (empty
 when nobody holds it). A `run.controller` event, published whenever a lease
 is taken, taken over, released, fenced or runs out its reconnect window,
-keeps it current, so a teammate holding control of someone else's run sees
-its requests without opening the run. Only a gateway too old to send
-the field falls back to the run's cached presence status.
+keeps it current, so a teammate holding control of someone else's session sees
+its requests without opening the session. Only a gateway too old to send
+the field falls back to the session's cached presence status.
 
 `last_controller_member_id` beside it names the latest member to hold that
 lease, the current holder included, and the `run.controller` event carries
@@ -1909,7 +1909,7 @@ someone takes control after a server restart, and on a gateway too old to
 send it. The explorer then has no last controller to put first or to name.
 
 **Paused** comes from the `paused` field the gateway decorates from the
-scheduler on `run.get` and `run.list`; a paused run still reads `running`.
+scheduler on `run.get` and `run.list`; a paused session still reads `running`.
 The hydration snapshot seeds `pausedRuns` (`seedPaused`, skipping runs
 without the field - a legacy gateway), and live `pause`/`resume` entries on
 the `workspace.timeline` stream keep it current (`pausedFromTimeline` in
@@ -1917,63 +1917,63 @@ the `workspace.timeline` stream keep it current (`pausedFromTimeline` in
 
 **Unreviewed outcome** marks a success or failure reported with
 `aether-internal report` that the owner has not opened. Interactive Standard
-and Enhanced runs stay live at `needs-attention`, with the reason
-`agent reported success` or `agent reported failure`; Background runs finish.
+and Enhanced sessions stay live at `needs-attention`, with the reason
+`agent reported success` or `agent reported failure`; Background sessions finish.
 The server owns `outcome_unseen`, so it survives reloads and needs only the
 owner. `watchOutcomeSeen` (`src/store/outcome-seen.ts`) calls `run.seen` when
-the owner reveals the run through `navigate()`, or is already on it in a
+the owner reveals the session through `navigate()`, or is already on it in a
 visible tab when the flag arrives. It makes one call per reveal: a refusal
 shows the server's error and is not retried until the owner opens it again.
 An answer is not ordered against the event stream, so one that a newer
-`run.status` event for the run overtook is dropped and the run is asked about
+`run.status` event for the session overtook is dropped and the session is asked about
 again.
 
 A reported success presents **Ready for review** whether or not the flag is
 set; a reported failure stays a **Failed** row in Needs you until its owner
-opens the run, the next turn or Close. A run that has ended is in Needs you
+opens the session, the next turn or Close. A session that has ended is in Needs you
 only while its `review` is `ready`; any other keeps its unopened marker in
 Finished.
 
 **Completion review** is the owner's answer to a reported success, held by
-the server as the run's `review` (`""`, `ready`, `later`, `accepted`) and
-`review_changed_at`. A success report sets `ready`; opening the run does not
-change it, so the run stays in Needs you. While the open run is `ready`,
+the server as the session's `review` (`""`, `ready`, `later`, `accepted`) and
+`review_changed_at`. A success report sets `ready`; opening the session does not
+change it, so the session stays in Needs you. While the open session is `ready`,
 `CompletionPrompt` (`src/routes/run/completion-prompt.tsx`) shows an inline
-callout above the Session composer, or at the foot of any other run view:
+callout above the Chat composer, or at the foot of any other session view:
 "Your agent reports this task is
-finished. Mark it complete?", the summary of the run's latest success
+finished. Mark it complete?", the summary of the session's latest success
 report when its agent messages are loaded, **Mark complete** and **Not
 yet**. Both are run commands
 (`src/lib/commands.ts`) that follow [Actions](#actions): **Mark complete**
 sends `run.review {action: "complete"}` and predicts `review` `accepted`
-and, for a live run, status `completed`; **Not yet** sends `action:
+and, for a live session, status `completed`; **Not yet** sends `action:
 "later"` and predicts `later`. A refusal puts the callout back and toasts the
 server's error. After Not yet the callout stays hidden until a new success
-report sets `ready` again, and **Mark complete** stays in the run's actions
-menu and the palette for any run that reads Ready for review. Both need the
+report sets `ready` again, and **Mark complete** stays in the session's actions
+menu and the palette for any session that reads Ready for review. Both need the
 gateway's `run.review` method and the kill permission.
-An interactive run still accepts messages and terminal input; the reason
+An interactive session still accepts messages and terminal input; the reason
 line says it remains open for follow-up. Its next working turn returns it
 to Working. Archive eligibility and input gates use the wire status, not
-the presentation state: a reported interactive outcome is not a closed run.
+the presentation state: a reported interactive outcome is not a closed session.
 Use **Close** to end that session and start its container retention grace.
 
-**Unopened finish** marks a Finished or Failed run that no member has opened
+**Unopened finish** marks a Finished or Failed session that no member has opened
 since it finished, with or without a report: an exit, a failure, an
-interruption and a parent closing its child runs count as much as a reported
-outcome. A run a member closed or stopped is not one: ending it is dealing
-with it. The server owns `finish_unopened`, so one member opening the run
+interruption and a parent closing its subsessions count as much as a reported
+outcome. A session a member closed or stopped is not one: ending it is dealing
+with it. The server owns `finish_unopened`, so one member opening the session
 settles it for every member and device. `watchOutcomeSeen` makes the same `run.seen` call for any member
-who reveals such a run, or is already on it in a visible tab when it
+who reveals such a session, or is already on it in a visible tab when it
 finishes, under the same one-call-per-reveal rule; the owner's call clears
-both flags. The flag only keeps the run's sidebar row from receding (see
-[Sidebar](#sidebar)); it moves no run between groups and changes no order.
+both flags. The flag only keeps the session's sidebar row from receding (see
+[Sidebar](#sidebar)); it moves no session between groups and changes no order.
 
 ### Execution, input and paused on the wire
 
 **The parked reason survives a fetch.** `protocol.Run` carries `reason` -
-the last `run.status` reason, persisted with the run and sanitized
-server-side - so a run that was already in needs-attention when the tab
+the last `run.status` reason, persisted with the session and sanitized
+server-side - so a session that was already in needs-attention when the tab
 loaded still says why: `waiting for your input` and its siblings when the
 agent reported it, `stalled: ...` when the silence heuristic parked it.
 `toRecord` in `src/store/runs.ts` prefers the wire reason and falls back to
@@ -1987,62 +1987,62 @@ status remains `needs-attention`. Turn completion, silence and prose such as
 the legacy `waiting for your input` reason are not evidence of a request;
 only the server's `needs-you` state and the request rows above are.
 
-**Requests are independent of execution.** A run snapshot's `pending_inputs`
+**Requests are independent of execution.** A session snapshot's `pending_inputs`
 contains native request identities (`id`, `session_id`, and `kind`: `question`,
 `permission`, `form`, or `extension_ui`), never prompt bodies or answers.
 The durable `run.input` event replaces that set via `{pending_inputs: [...]}`;
 an empty list clears it immediately. Closing one request leaves the others
-visible. Run headers, cards, lists and sidebar rows combine this set with
+visible. Session headers, cards, lists and sidebar rows combine this set with
 unanswered teammate questions, including room
 questions after execution finishes. Counts and tooltips name the source.
-Native prompts are answered in the Terminal on a Standard run and in the
-Session view on an Enhanced one, and teammate questions in Details.
+Native prompts are answered in the Terminal on a Standard session and in the
+Chat view on an Enhanced one, and teammate questions in Details.
 Unsupported native integrations show no inferred request.
 
 A terminal lifecycle transition also clears native requests if its empty
 `run.input` event is lost. Later native input events cannot revive a request
-on a finished run. This does not clear teammate questions.
+on a finished session. This does not clear teammate questions.
 
 Hydration is authoritative and queues live events until its snapshot lands.
-Ordinary run upserts preserve a known input set, including an empty one, so
+Ordinary session upserts preserve a known input set, including an empty one, so
 an older route, room or launch response cannot resurrect a closed request.
-A terminal run upsert clears native requests instead.
+A terminal upsert clears native requests instead.
 Input events
-for unknown runs follow the existing fetch-first and ordered-cursor rules.
+for unknown sessions follow the existing fetch-first and ordered-cursor rules.
 
 **An unreviewed finish is server state.** `Run.outcome_unseen` on `run.get`
 and `run.list` is true while an agent-reported outcome is unopened by the
 owner; absent (an older gateway) means false. Every `run.status` event sets
 the flag to its payload's `outcome_unseen`, the row's flag after that event -
 a same-status re-label such as retention expiry included - so a later close or
-reopen clears it. A `run.outcome_seen` event, or the Run `run.seen` returns,
+reopen clears it. A `run.outcome_seen` event, or the Session `run.seen` returns,
 clears it. `run.seen` is gated on `cap.hasMethod('run.seen')` and idempotent;
 only the owner's call clears this flag.
 
 **So is an unopened finish.** `Run.finish_unopened` on `run.get` and
-`run.list` is true while no member has opened a finished run; absent (an
+`run.list` is true while no member has opened a finished session; absent (an
 older gateway) means false, so every finished row recedes. Every `run.status`
 event sets the flag to its payload's `finish_unopened` the same way. A
 `run.finish_opened` event, a `run.outcome_seen` event (the owner's open
-clears both flags), or the Run `run.seen` returns, clears it.
+clears both flags), or the Session `run.seen` returns, clears it.
 
 **Paused hydrates from the same snapshot.** With `paused` on the wire
-(above), a reload shows Paused for a run paused earlier, and the
+(above), a reload shows Paused for a session paused earlier, and the
 palette offers the right one of pause/resume. Against a legacy gateway
-whose runs carry no `paused` field the state stays unknown until a live
+whose sessions carry no `paused` field the state stays unknown until a live
 `workspace.timeline` pause or resume arrives, and neither surface offers a
 verb rather than offering the one the server would refuse.
 
 ### All workspaces
 
 The global `overview` route (`src/routes/overview.tsx`) is **All workspaces**:
-every run in every workspace in one `RunList`, in the board's group order
+every session in every workspace in one `RunList`, in the board's group order
 (Needs you, Working, Finished) with a `StatusDot` and the state word per row.
-A child run whose parent is also listed is indented under it, by the board
+A subsession whose parent is also listed is indented under it, by the board
 map's rule (`runParents` in `src/routes/board/map-layout.ts`); a detached
-child stays in place. The tree sits where its earliest member falls, so a
-child that needs you lifts its parent into Needs you. The parent's chevron,
-**Hide <n> child runs**, folds the children that do not need you and is
+subsession stays in place. The tree sits where its earliest member falls, so a
+subsession that needs you lifts its parent into Needs you. The parent's chevron,
+**Hide <n> subsessions**, folds the subsessions that do not need you and is
 absent when all of them do.
 It is reached from the workspace switcher, `g` then `l` and the palette's
 **Open all workspaces**.
@@ -2050,35 +2050,35 @@ It is reached from the workspace switcher, `g` then `l` and the palette's
 ## Commands and the palette
 
 `src/lib/commands.ts` holds the commands as data: an id, label, icon,
-capability gate, optional confirmation and call. Run verbs (`runCommands`):
-**Pause run** / **Resume run**, **Send a message to the agent…**, **Forward a
-port…** (local gateway), **Close run…**, **Kill run**, **Delete run**, **Free
+capability gate, optional confirmation and call. Session verbs (`runCommands`):
+**Pause session** / **Resume session**, **Send a message to the agent…**, **Forward a
+port…** (local gateway), **Close session…**, **Kill run**, **Delete run**, **Free
 container…**, **Archive run** / **Restore run**, **Protect run** /
 **Unprotect run**, **Relaunch**, **Pull branch** (local gateway) and **Hand
-off to <member>**. Pull branch fetches the run branch into the linked
+off to <member>**. Pull branch fetches the session branch into the linked
 repository; unless you are already on that branch, its toast offers **Switch
 to it** (`pull.switch`, which refuses a dirty checkout with git's own
 reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommands`): **Open the board**, **Open
 all workspaces**, **Connect ChatGPT or Claude** (these three in the Navigate
 group), **Ask Aether** (opens the assistant; offered when the server
-serves `assistant.status`), **New run…**, **Launch from a template…**,
-**Archive closed runs…**, **Free retained containers…** and the three theme
+serves `assistant.status`), **New session…**, **Launch from a template…**,
+**Archive closed sessions…**, **Free retained containers…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
-reports gateway success or its real refusal in both the run's More menu and
+reports gateway success or its real refusal in both the session's More menu and
 the palette. Pause, resume, kill, close, delete, free, archive, restore,
 protect and unprotect follow [Actions](#actions): the command's `predict`
 names what the server's success certainly sets (`pausedRuns`; `status`
 `abandoned` with reason `killed`; the chosen `status` for close, which
-like kill clears `state`; the run's removal for delete; cleared
+like kill clears `state`; the session's removal for delete; cleared
 `container_retained_until` and `cleanup_pending`; `archived_at`;
 `protected`), the runner shows them at
 once, and the success toast waits for the answer. A refusal puts back each
 predicted field that still holds its predicted value; a field anything else
 wrote meanwhile stays. With no answer by the deadline, or a failure that
-carries none, the runner does not guess: it re-reads the run with `run.get`
+carries none, the runner does not guess: it re-reads the session with `run.get`
 (bounded by the same deadline) and applies the server's record. If the
-run's record or pause state changed while the read was pending, that change
+session's record or pause state changed while the read was pending, that change
 is newer than the read, so the read only replaces the predicted fields that
 still hold their predicted value. If the read's record shows the predicted
 state, the verb counts as confirmed (a field the
@@ -2088,7 +2088,7 @@ seconds." with **Retry**. If the re-read fails too, the predicted fields
 still on screen are put back and the same toast shows. The toast keeps
 **Retry** until it is pressed or the late answer arrives: a late success
 dismisses it, a late refusal replaces it. While another predicted verb is
-pending on the run, **Retry** sends nothing, stays, and a second toast says
+pending on the session, **Retry** sends nothing, stays, and a second toast says
 why. Each **Retry** is a new attempt
 with its own captured state. Once any attempt of the verb succeeds, no
 other attempt puts it back, a re-read answered before the commit is
@@ -2098,35 +2098,35 @@ nothing, and the press's late answer, re-read or refusal changes and shows
 nothing. Kill, close, delete and free
 (`slow` on the command) skip the deadline, because the server answers only
 after the container stops: `run.kill` waits out the runtime's stop grace,
-10 seconds by default; `run.close` also commits and publishes a live run,
+10 seconds by default; `run.close` also commits and publishes a live session,
 and `run.delete` purges its evidence. Past the deadline their prediction stays, More
 shows a disabled "Still waiting for the server…" entry (`waiting` on the
-run's `predicting` marker), and a late success clears it without a toast.
-Their server can publish a new status, such as a killed run's `abandoned`,
-before a later step fails, so a refusal re-reads the run with `run.get`,
-bounded by the deadline: the run shows what the server holds, the server's
+session's `predicting` marker), and a late success clears it without a toast.
+Their server can publish a new status, such as a killed session's `abandoned`,
+before a later step fails, so a refusal re-reads the session with `run.get`,
+bounded by the deadline: the session shows what the server holds, the server's
 error is toasted, and only a failed re-read puts the prediction back. A failure
-that carries no answer still re-reads the run, and if the re-read does not
+that carries no answer still re-reads the session, and if the re-read does not
 show the result, toasts that failure's own error with **Retry**. Kill's predicted change time carries
 `stateChangedAtPredicted`, so the server's `run.status` event replaces it
 even when the status is unchanged; any other estimated time stays. While a
-predicted verb is pending on a run (`predicting` in `store/runs.ts`, held
+predicted verb is pending on a session (`predicting` in `store/runs.ts`, held
 by that attempt's marker so a late answer clears only its own lock), More
-and the palette offer no other predicted verb for that run, because one
+and the palette offer no other predicted verb for that session, because one
 offered from the predicted state, such as Archive after Kill, could re-read
-the run and overwrite the prediction. Both subscribe to the lock, so an open
+the session and overwrite the prediction. Both subscribe to the lock, so an open
 menu shows the verbs again once the answer lands. An invalid-state refusal
-(`codeInvalidState`, such as "run is already paused" after a retry) re-reads
-the run with `run.get` instead, bounded by the deadline and applied on the
-same condition, and toasts only if the run does not show the
+(`codeInvalidState`, such as "session is already paused" after a retry) re-reads
+the session with `run.get` instead, bounded by the deadline and applied on the
+same condition, and toasts only if the session does not show the
 predicted state; a repeated `run.close` with the same outcome is answered
-as a success. Delete takes the run off every list at once: `deletingRuns`
+as a success. Delete takes the session off every list at once: `deletingRuns`
 (`store/runs.ts`) holds its record, and neither a snapshot nor an event's
-`run.get` puts it back before the answer. A re-read that finds the run puts
+`run.get` puts it back before the answer. A re-read that finds the session puts
 it back as read, and a refusal whose re-read fails puts back the held
 record; `not found` from `run.delete` or from any
 re-read counts as deleted, because a **Retry** can resend a delete that
-landed and another client can delete the run before its `run.deleted`
+landed and another client can delete the session before its `run.deleted`
 event arrives. Over another verb's pending prediction, Delete and the Close
 dialog's choice do not predict: they wait for the server, as an
 unpredicted verb does. Archive, restore, protect and free do not overwrite
@@ -2134,8 +2134,8 @@ the server's events with an RPC response.
 
 - **Forward a port…** opens `forward-dialog.tsx` over the local `forward.*`
   verbs. It forwards the port typed to the same port on this machine and
-  lists the ports forwarded from that run, each a link to
-  `http://localhost:<port>` beside **Stop**. For a run it reads
+  lists the ports forwarded from that session, each a link to
+  `http://localhost:<port>` beside **Stop**. For a session it reads
   `dev.port.list` first: a port bound to loopback is refused with the address
   it is bound to, and a port nothing listens on is forwarded with a note that
   its link works once something does. The Environment page's **Forward port**
@@ -2144,35 +2144,35 @@ the server's events with an RPC response.
   (`src/store/runs.ts`; `merged`, `abandoned`, `failed`, `interrupted`, never
   `completed`) plus the kill permission and the `run.archive` capability;
   neither confirms, since archiving is reversible. The palette resolves its
-  focused run from the run map by `route.params.runId` rather than the run
-  list, so an archived run's own page still offers Restore.
-- **Free container…** removes a finished run's retained container and keeps
-  the run and its history; the run can no longer be reopened. It needs
+  focused session from the session map by `route.params.runId` rather than the session
+  list, so an archived session's own page still offers Restore.
+- **Free container…** removes a finished session's retained container and keeps
+  the session and its history; the session can no longer be reopened. It needs
   `run.release`, the kill permission and a retained-container reason
-  (`isRetainedRun`). A freed or expired run no longer offers it, and the
-  server checks the lifecycle again if the run changed after the menu opened.
-- **Relaunch** resumes a retained Standard or Enhanced run after explicit
+  (`isRetainedRun`). A freed or expired session no longer offers it, and the
+  server checks the lifecycle again if the session changed after the menu opened.
+- **Relaunch** resumes a retained Standard or Enhanced session after explicit
   Close (`aether reopen` on the command line). It is offered in **More** and
-  as the primary button in the composer slot of a finished run, which calls
+  as the primary button in the composer slot of a finished session, which calls
   `run.relaunch` and swaps the finished record for the live one the server
-  returns. A run is eligible while the server reports `container_retained_until`
+  returns. A session is eligible while the server reports `container_retained_until`
   (or, before that arrives, a retained-container reason). Relaunch clears the deadline, the status event drops
   `finished_at` and `started_at` restarts, and the next close sets a fresh
   deadline. Reported interactive completion needs no relaunching. Older
-  agent-finished retained runs remain eligible.
-- **Hand off** and **Protect** need the run's owner or an admin. Before
+  agent-finished retained sessions remain eligible.
+- **Hand off** and **Protect** need the session's owner or an admin. Before
   hydration the caller's own record has not arrived, and the mirror answers
   yes rather than making the shell's buttons appear a beat late. **Pull
-  branch** is the desktop gateway fetching a published run branch into the
+  branch** is the desktop gateway fetching a published session branch into the
   repository on this machine, so it answers to `hasLocal('pull')` alone. It
   does not refresh a workspace base or authorize a mirror source.
 
 A command with a `confirm` field - Kill, Delete and Free container - opens
-the run-naming confirmation (`run-command-confirmation.tsx`) from More or the
-palette, with Cancel initially focused. **Close run…** opens its own dialog,
+the session-naming confirmation (`run-command-confirmation.tsx`) from More or the
+palette, with Cancel initially focused. **Close session…** opens its own dialog,
 which asks whether the work was merged or abandoned; a choice closes it and
 shows the outcome at once. Palette confirmations
-capture the authenticated identity with the run and command; an identity
+capture the authenticated identity with the session and command; an identity
 change dismisses a pending or visible confirmation instead of applying it to
 another account. More locks while an unpredicted verb is in flight and shows
 a spinner in place of its icon, which also stops a second click racing a
@@ -2181,16 +2181,16 @@ branch pull over SSH.
 **The command palette** (`src/components/palette/`) opens from **Search** in
 the sidebar or the phone top bar, `⌘K` on macOS or `Ctrl+K` elsewhere;
 `Cmd/Ctrl+Shift+P` remains an alias. Its groups are **Navigate** (the board
-verbs' destinations and the gated `src/lib/surfaces.ts` list), **Runs**,
-**Workspaces**, **Focused run · <title>** on a run page, and **Board
+verbs' destinations and the gated `src/lib/surfaces.ts` list), **Sessions**,
+**Workspaces**, **Focused session · <title>** on a session page, and **Board
 actions**. Navigation comes first, so opening the palette initially selects
-**Open the board**, not a mutation. With an empty query **Runs** lists the
-first 50 runs in group order, Needs you first; a query searches every run. A
-run matches on its label, branch, agent, workspace name and run ID, never the
+**Open the board**, not a mutation. With an empty query **Sessions** lists the
+first 50 sessions in group order, Needs you first; a query searches every session. A
+session matches on its label, branch, agent, workspace name and session ID, never the
 full task text. Opening a workspace also makes it the active scope.
 
-Nothing important is reachable only by a shortcut: **New run** is in the
-sidebar and on an empty board, destinations are sidebar rows, and every run
+Nothing important is reachable only by a shortcut: **New session** is in the
+sidebar and on an empty board, destinations are sidebar rows, and every session
 view has the header's primary action and **More**. Appearance has explicit
 **Use system theme**, **Use light theme** and **Use dark theme** commands
 that set the same persisted preference as Settings.
@@ -2220,7 +2220,7 @@ the palette being on screen. The template form's open state lives with
 `CommandPalette` in `index.tsx` instead, because the store's dialog union
 does not include it. Its body is the composer's template library (see
 [Templates](#templates)) with **Launch** as the primary action: it starts the
-run with `template.launch`, sending the name and the filled-in parameters,
+session with `template.launch`, sending the name and the filled-in parameters,
 then reveals it. A refusal shows the server's error and any setup output.
 
 The launch form lives in `components/launch/`. It asks for a
@@ -2240,7 +2240,7 @@ shows its error and no setup button, and Launch stays disabled.
 
 **Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
 "Native messages, approvals and progress", see
-[enhanced-runs.md](enhanced-runs.md)) with a **Recommended** badge,
+[enhanced-sessions.md](enhanced-sessions.md)) with a **Recommended** badge,
 **Standard** (`tui`, "Your agent's own terminal") and **Background**
 (`headless`, "Runs the task once, no interaction"). Enhanced is disabled,
 without the badge, with the reason under the control when the agent reports
@@ -2249,7 +2249,7 @@ installed ("The Enhanced adapter for <agent> is not installed.", with
 **Set up**). A launch never switches mode on its own: the mode sent is the
 one the control shows, and a refusal from `run.launch` appears in the dialog
 verbatim under "Launch failed" while the dialog stays open, until another
-agent or mode is chosen. `run.launch` answers only once the run is
+agent or mode is chosen. `run.launch` answers only once the session is
 provisioned, which can take seconds, so the dialog navigates only then: until
 the answer the button reads "Launching…" with a spinner,
 and past the deadline "Still waiting for the server…". A refusal that
@@ -2285,7 +2285,7 @@ default and is not remembered; switching to an agent without the chosen level
 resets it.
 
 **Permission** (`PermissionControl` in
-`src/components/launch/permission-control.tsx`) is the run tab's first field
+`src/components/launch/permission-control.tsx`) is the session tab's first field
 when `server.info` lists the `permission` feature. Its three segments are
 **Root access**, **Default** (marked Recommended) and **Isolated**
 ([permission tiers](security.md#permission-tiers)); Root access is ringed in
@@ -2301,7 +2301,7 @@ the same ones. Each open reads them again, since another device or the
 assistant may have saved since. The first pick waits for that read and for
 the saved account to be applied, then
 preselects the saved agent if it can launch, else the agent of the newest
-run, else the first launchable one, in that agent's saved mode, else
+session, else the first launchable one, in that agent's saved mode, else
 Enhanced, with its saved model. A successful launch saves only the
 agent, mode and model through `launch.defaults.set` with the revision it
 read; when another device saved since, the refusal carries the current
@@ -2311,11 +2311,11 @@ saved account is preselected when `account.list` still lists it and `get`
 does not mark it invalid, and the saved fallback policy fills the fallback
 list, keeping only listed accounts. A launch never saves the account or the
 fallback; **Save as my default** under **Options** does, and says "Saved
-for every device." until the account or fallback changes again. It saves the fallback list as the run sends
-it, without the selected account. **Run**, **Default mode** and **Set up** on
+for every device." until the account or fallback changes again. It saves the fallback list as the session sends
+it, without the selected account. **Session**, **Default mode** and **Set up** on
 Agents, and the onboarding wizard, save their agent and mode the same way
 (`rememberChoice`); **Default mode** leaves the preselected agent alone.
-Agents reads the saved choices too, and its **Default mode** and **Run** use
+Agents reads the saved choices too, and its **Default mode** and **Session** use
 the saved mode, else this browser's. Saves
 run one at a time, each from the last one's answer; a save after the
 signed-in member changes is refused, and a failed save reads the choices
@@ -2344,7 +2344,7 @@ use (no Enhanced support, or its adapter not installed) shows as Standard.
 holds the **Account** select: the caller first as "(you)", then accounts
 shared with them as "(shared)". A shared selection sends its ID as
 `account_member_id` on `agent.list` and `run.launch`. `agent.list` still
-returns the caller's own agents and installations, since the run executes
+returns the caller's own agents and installations, since the session executes
 in the caller's environment, and marks each agent the account's owner has no
 login for with `login_missing`, each name that resolves to the caller's own
 member-defined agent with `own_account_only`, and each agent whose owner
@@ -2358,12 +2358,12 @@ in from their own Environment, that the caller's own definitions run only
 on their own account, and "<agent> cannot launch on this account: " with
 the server's error unchanged. On a shared account with nothing installed the
 heading reads "Neither you nor <owner> has an agent installed." and the note
-says the run uses the owner's login and the caller's installation, or the
+says the session uses the owner's login and the caller's installation, or the
 owner's when the caller has none.
 
 Where the server offers `run.children.allow`, the form has a **Child
-runs** select: **Use my setting** (naming it, "(off)"), **Allow for this
-run** and **Off for this run**, sent as `run.launch` `children: "on"` or
+sessions** select: **Use my setting** (naming it, "(off)"), **Allow for this
+session** and **Off for this session**, sent as `run.launch` `subsessions: "on"` or
 `"off"`; the first sends nothing.
 
 Below the select, **Options** holds the [usage
@@ -2371,9 +2371,9 @@ fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
 **Fall back to another account** checkbox and the **Fallback accounts** list,
 each account with a checkbox and
 **Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "The
-run starts on the account here with the most usage left if `<owner>`'s
+session starts on the account here with the most usage left if `<owner>`'s
 usage is at 95% or more at launch, and continues there if the vendor
-reports the limit mid-run.", with "the first ticked account, top to bottom,
+reports the limit mid-session.", with "the first ticked account, top to bottom,
 with usage left" in place of "the account here with the most usage left"
 once the list was changed. Untouched, the
 form sends neither field and the server orders by usage left. After a
@@ -2383,7 +2383,7 @@ unticked, it sends `no_fallback: true` and the summary adds "· Fallback
 off". The list leaves out the selected account.
 
 The launch form does not ask which workspace to launch into: it takes
-`activeWorkspace` and says where the run will land, naming the workspace and its
+`activeWorkspace` and says where the session will land, naming the workspace and its
 base branch. The switcher is the picker, so a second one inside the dialog
 would be a place for the two to disagree.
 
@@ -2393,33 +2393,33 @@ behind it, so capability alone would put the button in front of someone the
 server would refuse.
 
 Base capture is server-side and precedes row creation. A mirror or local-base
-failure is reported by Launch and leaves no run row; the dashboard does not run
+failure is reported by Launch and leaves no session row; the dashboard does not run
 a client-side base refresh before trying again.
 
-## Run view
+## Chat view
 
 `src/routes/run/` is the one `run` route. Its params are `runId` and an
 optional `view` (`session`, `trace`, `terminal`, `changes`, `files`,
 `browser`),
 written to the address as `?run=<id>&view=<view>`; the old `?view=diff` reads
 as `changes`.
-Every way into a run navigates to `run`: board card, sidebar row, run list,
+Every way into a session navigates to `run`: board card, sidebar row, session list,
 palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
-showed for the run (`runViewMemory`, not persisted), else `defaultView`:
-Session for an Enhanced run or any run that streams a session (`acp: true`),
-Terminal otherwise. Trace follows Session for a run with `acp: true` only.
-Files is in the list while the run still has its
+showed for the session (`runViewMemory`, not persisted), else `defaultView`:
+Session for an Enhanced session or any session that streams a session (`acp: true`),
+Terminal otherwise. Trace follows Chat for a session with `acp: true` only.
+Files is in the list while the session still has its
 checkout, on a gateway that serves `files.tree` (`hasFiles` in
-`src/routes/files/open.ts`): every run the Files tree lists, a completed one
+`src/routes/files/open.ts`): every session the Files tree lists, a completed one
 that is not yet merged or abandoned included. Browser is in the list for
-every run that has not finished, on a gateway that serves
+every session that has not finished, on a gateway that serves
 `dev.browser.status` (`hasBrowser` in `src/routes/browser/open.ts`); no
 browser has to be running, and opening the view starts none. `isRunRoute` in
 `views.ts` keeps a sidebar row lit across views.
 
 The frame (header, view switch, Details) stays mounted while the view
-changes; `CenterView` remounts it only for another run, identity or event
+changes; `CenterView` remounts it only for another session, identity or event
 epoch. Session, Terminal, Changes and Files mount on first visit and stay
 mounted, laid out but `invisible` and `inert`: xterm hidden with
 `display: none` measures zero and would resize the shared PTY, a Publish
@@ -2430,7 +2430,7 @@ and a hidden Trace derives nothing and ticks no clock.
 
 The Browser can also sit beside the other three views instead of being a tab:
 its toolbar's **Show beside Session** (**Show beside Terminal** on a Standard
-run) docks it at the right of the frame with a divider, and **Show the Browser
+session) docks it at the right of the frame with a divider, and **Show the Browser
 as a tab** puts it back. The choice and the divider's position are view
 preferences (`browserBeside`, `browserBesideWidth`, persisted). Docked, it
 stays on screen across Session, Terminal and Changes, leaves the view switch,
@@ -2452,12 +2452,12 @@ closed; each older page merges below the pages before it, so same-instant
 messages keep the server's order. It polls presence every ten seconds with an abortable 15-second
 deadline.
 
-While other members watch the run, the composer shows a line above the
+While other members watch the session, the composer shows a line above the
 message box, in the space of its own fixed height: `Alice is typing...`,
 `Alice and Bob are typing...`, `Alice, Bob and Carol are typing...`, and
 `Several people are typing...` past three. The dots animate unless
 `prefers-reduced-motion` is set. Your own typing is never listed. Each
-keystroke in a draft calls `presence.typing` (Steer on the run), at most once
+keystroke in a draft calls `presence.typing` (Steer on the session), at most once
 every 3 seconds; clearing the draft, sending it or closing the composer calls
 it once more with `stopped: true`. A received entry lapses 6 seconds after its
 last signal, so a closed tab or lost connection stops showing. A restored draft
@@ -2468,22 +2468,22 @@ count, chart or timeline.
 
 The header (`header.tsx`) is a 56px `PaneHeader size="run"`: the title (the
 agent's last terminal or Enhanced session title,
-[until then](enhanced-runs.md#status) a taskless Enhanced run's first message
+[until then](enhanced-sessions.md#status) a taskless Enhanced session's first message
 line, else the task's first line cut at 120 characters, with a lock for a
-protected run), then a one-line state line: the run branch with a copy
+protected session), then a one-line state line: the session branch with a copy
 icon (click copies the name), the agent's glyph and mode ("Standard"; the
 tooltip adds the `agent.list` display name, `run.model` and `run.effort`,
 "Claude Code · Standard · opus · high"), a **Root access** (needs-you tone) or
-**Isolated** badge for a run not at Default, whose tooltip says what the tier
-allows, "On `<name>`'s account (fallback)" when the run carries
+**Isolated** badge for a session not at Default, whose tooltip says what the tier
+allows, "On `<name>`'s account (fallback)" when the session carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
-a `run.account` event updates it live when the run moves), the reason, and
+a `run.account` event updates it live when the session moves), the reason, and
 the owner. The state's dot and label are the Workflow chip's, on the row
-below. A child run adds a `nav "Run lineage"` row under the header: its
-root and parent as links, then "This child run", and **Detached** once it
+below. A subsession adds a `nav "Run lineage"` row under the header: its
+root and parent as links, then "This subsession", and **Detached** once it
 no longer counts toward its parent. The reason takes only the room left over, so a long command never
 moves or hides the branch; the owner goes below 32rem, and the mode word
-truncates before the branch does. The full task and the run record are in
+truncates before the branch does. The full task and the session record are in
 Details.
 
 The actions, in order:
@@ -2491,7 +2491,7 @@ The actions, in order:
 1. The state's one primary action, the only filled button on the frame. It is
    the label the condition names in `lib/needs-you.ts`, the same one the board
    card and sidebar row show, performed inside the frame: **Reply** focuses the
-   Session composer, **Open terminal** switches to Terminal and asks for the
+   Chat composer, **Open terminal** switches to Terminal and asks for the
    lease, **Answer** focuses the docked request on Session or reveals the
    question's card in Details, **Review message** reveals the queued message's
    card in Details, and **Review** opens Changes for a finish. On the Terminal view there is no terminal action in
@@ -2499,40 +2499,40 @@ The actions, in order:
    that send the member elsewhere use secondary buttons.
 2. **Show details** / **Hide details** (`Mod+.`).
 3. **More** (`components/run-actions.tsx`, an icon button on a phone): every
-   run verb from `lib/commands.ts` except **Send a message to the agent…**,
+   session verb from `lib/commands.ts` except **Send a message to the agent…**,
    which the composer replaces, then **Hand off…**, the mode switch,
    **Open in editor…**, **Captures…** and **Raw events…**, then **Close
-   run…**, **Kill run** and **Delete run** after a separator. Kill, Delete
+   session…**, **Kill run** and **Delete run** after a separator. Kill, Delete
    and **Free container…** confirm first. Where the server offers
-   `run.children.allow`, the owner of a live run also gets
-   **Allow child runs** (`run.children.allow` `on`), and the owner or an
-   admin **Turn off child runs** on a run that allowed them.
+   `run.children.allow`, the owner of a live session also gets
+   **Allow subsessions** (`run.children.allow` `on`), and the owner or an
+   admin **Turn off subsessions** on a session that allowed them.
 
-Kill and Delete of a run with unfinished child runs (live, not detached; the
-store's runs whose `parent_run_id` is this run) say "Its 2 unfinished child
-runs stop too." Closing a run closes its child runs with it.
+Kill and Delete of a session with unfinished subsessions (live, not detached; the
+store's sessions whose `parent_run_id` is this session) say "Its 2 unfinished subsessions
+ stop too." Closing a session closes its subsessions with it.
 
-**Open in editor…** (`open-in-editor.tsx`) is offered for a live run the
-member may steer, by the same `allowed('steer', …)` question the run verbs
+**Open in editor…** (`open-in-editor.tsx`) is offered for a live session the
+member may steer, by the same `allowed('steer', …)` question the session verbs
 ask, and never on a phone (`phoneScreen`), which has no editor to hand the
-run to. A paused run shows it disabled with **Resume the run first**. Its
+session to. A paused session shows it disabled with **Resume the session first**. Its
 dialog has a **VS Code**, a **Cursor** and a **Zed** button, each navigating
 to that editor's deep link for the ssh host `<run-id>.aether` and the
-checkout `/workspace`, then `ssh <run-id>.aether` and `aether ssh-config` as
+checkout `/workspace`, then `ssh <session-id>.aether` and `aether ssh-config` as
 copyable commands for whoever has not set the host up. The item is
-not offered for a run whose id is not one lowercase host label (`runHost`),
+not offered for a session whose id is not one lowercase host label (`runHost`),
 the only kind the links and the command are built from. The dashboard calls
 nothing: the server authorizes when the editor connects
 ([terminal.md](terminal.md#ssh-and-editors)). The desktop app lets exactly
 those three link shapes out of its window.
 
 The mode switch (`mode-switch.tsx`) is **Switch to Enhanced…** or **Switch
-to Standard…**, shown only for a live run of an agent `agent.list` reports
+to Standard…**, shown only for a live session of an agent `agent.list` reports
 as `switchable`. It confirms what happens, then calls `run.mode.switch` with
 the lease the tab holds; while the switch runs the item and the state line
 read "Switching to Enhanced…". The dashboard decides ahead what it can: with
 `enhanced_installed` false the item reads **Enhanced adapter not installed ·
-Set up** and opens Agents. A refusal's `data.reason` is kept for the run's
+Set up** and opens Agents. A refusal's `data.reason` is kept for the session's
 current status: `session_not_reported` disables the item with **Available
 after the agent's first turn**, `adapter_not_installed` shows the setup
 line, and `not_switchable` hides the item. Every error toast goes through
@@ -2540,16 +2540,16 @@ line, and `not_switchable` hides the item. Every error toast goes through
 package names (`run.mode.switch: scheduler: `) and keeps the server's
 sentence.
 
-The view switch is a segmented `tablist` named "Run views" with manual
+The view switch is a segmented `tablist` named "Session views" with manual
 activation, on its own 32px row under the header at every width. When the
-row is too narrow for every tab, as on a phone whose run has a pull request,
+row is too narrow for every tab, as on a phone whose session has a pull request,
 the tabs scroll sideways (`ViewSwitch`): the shown view's tab is kept in
 sight as the view or the room changes, and the right edge fades while more
 tabs lie past it. The [Workflow panel](#workflow-panel)'s chip follows the
 tabs. On a phone with the composer focused the header keeps only the title
 line.
 
-A run with a pull request shows it at the right end of that row
+A session with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the
 state of its checks as a button, **2 failing**, **Checks running**, **Checks
 passed** or **No checks**, and **Merged** or **Closed** once it is. Failing
@@ -2560,16 +2560,16 @@ row under 480px wide keeps the dot and the failing count. The panel is
 mounted beside the header, not in that row, so a send waiting for control
 survives the row leaving while the composer has focus on a phone. The server stores no pull request, so the
 dashboard reads it (`routes/diff/publish-pr.ts`): `run.pr.feedback` for the
-pull request from the checkout's branch on its GitHub remote into the run's
+pull request from the checkout's branch on its GitHub remote into the session's
 base branch, the same target the Publish dialog fills in, or one a member
 typed into that dialog and found or opened a pull request at. It asks once
-when the run page opens, every 60
+when the session page opens, every 60
 seconds while the page is visible, after each push or creation in the
-dialog, and at once on a `run.pr` or `git.branch` event for the run. The header and the [git card](#changes-view-and-publish)
-share one poll per run however many of them are mounted. It re-reads `run.git.status` only when the answer says the branch or
-HEAD moved. Both calls execute `git` and `gh` in the run's container, so the
-check state exists only while the run is `running` or `needs-attention`: a
-run that leaves those states keeps the link and drops the state, and a page
+dialog, and at once on a `run.pr` or `git.branch` event for the session. The header and the [git card](#changes-view-and-publish)
+share one poll per session however many of them are mounted. It re-reads `run.git.status` only when the answer says the branch or
+HEAD moved. Both calls execute `git` and `gh` in the session's container, so the
+check state exists only while the session is `running` or `needs-attention`: a
+session that leaves those states keeps the link and drops the state, and a page
 loaded after that shows neither. The board and sidebar show no pull request.
 See
 [Changes view and Publish](#changes-view-and-publish) for the panel the button
@@ -2577,7 +2577,7 @@ opens.
 
 ### Multiplayer controls
 
-Enhanced runs render `MultiplayerControls` (`routes/run/multiplayer-controls.tsx`)
+Enhanced sessions render `MultiplayerControls` (`routes/run/multiplayer-controls.tsx`)
 below the view switch at frame level, so Session, Terminal and Changes share
 one control surface. The Browser view leaves it out: it is about who controls
 the agent's session, and the page has a lease of its own
@@ -2605,7 +2605,7 @@ failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
-cancellation and server acknowledgement as Standard runs. Streaming updates
+cancellation and server acknowledgement as Standard sessions. Streaming updates
 do not cancel a held gesture. Explicit control choices and revocations stop
 automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
@@ -2626,7 +2626,7 @@ while the dots move or a hold is under way, then half once acquisition
 settles, breathing on an infinite 8-second loop. During a hold
 `--control-hold` moves a 4rem gradient mask that fades the teal out and a
 red copy in. In
-Enhanced runs its appearance follows the acknowledged ACP lease, not the
+Enhanced sessions its appearance follows the acknowledged ACP lease, not the
 unused agent terminal's history or connection state, and it shows on every
 view that shows the strip. Voluntary release retracts it; takeover
 feedback requires an explicit revocation matching the held session and
@@ -2634,23 +2634,23 @@ generation. Disconnects, permission loss and other fencing return it to
 neutral immediately. The shared component supplies acquisition, holder
 progress, takeover loss and reduced-motion behavior.
 
-### Session view
+### Chat view
 
-The Session view (`session-view.tsx`) is the run's conversation: what was said
-to the agent, what it did and asked, and the run's notes. It is a `virtua`
+The Chat view (`session-view.tsx`) is the session's conversation: what was said
+to the agent, what it did and asked, and the session's notes. It is a `virtua`
 list in a 736px column over `rowsForRun` (`store/sessions.ts`). For a Standard
-run the rows come from the run's `run.agent`, `workspace.timeline` and
-`run.status` events (read with `workspace.timeline` filtered by run and type,
-then kept live by sync), room messages, the run record and its pending inputs:
+session the rows come from the session's `run.agent`, `workspace.timeline` and
+`run.status` events (read with `workspace.timeline` filtered by session and type,
+then kept live by sync), room messages, the session record and its pending inputs:
 `user` (a message to the agent with its delivery word), `note` (the Notes
 thread's row, without the thread's own arrival motion), `steps` (consecutive
 tool calls in one closed block, "Ran 3 commands and read 2 files", expanding
 to verb-first steps), `request` (an agent request reads "Answer in
 the terminal." with **Open terminal**, or "Answer it from the agent's
-session." when the run has no agent terminal; a teammate question offers
+session." when the session has no agent terminal; a teammate question offers
 **Reply**, the owner's own question is a plain message), `event`,
-`finished`, and while the run works with no pending input a `live` row (the
-run's `toolActivity`, "Reading src/billing.js", else its state label such as
+`finished`, and while the session works with no pending input a `live` row (the
+session's `toolActivity`, "Reading src/billing.js", else its state label such as
 "Working" or "Waiting for agents", with that state's dot, which pulses only
 while Working) and a
 `terminal-note` row, **Live detail is in the Terminal.** with **Open
@@ -2666,40 +2666,40 @@ from `next_seq`, which a backward page sets to the head. The list is
 `role="log"` with `aria-live="off"`, and each row carries
 `aria-setsize`/`aria-posinset`. The docked composer ("Message the agent",
 **Send**) posts a room `steer_request` with the lease the tab holds; its rules
-are in [Run control](terminal.md#run-control). A refused send or image upload
+are in [Session control](terminal.md#session-control). A refused send or image upload
 shows the error above the textarea (`role="alert"`, **Dismiss**); Details
 shows only the failures of its own actions. Details' **Agent messages**
 section ends with **Hide from Session** (**Show in Session** once hidden),
-which drops those messages from the timeline; the choice is per run, in
+which drops those messages from the timeline; the choice is per session, in
 `hiddenAgentMessages`, until the page reloads. `Esc` in an empty composer focuses the list's
-viewport; the next `Esc` is the run's `leave-run`.
+viewport; the next `Esc` is the session's `leave-run`.
 
-The composer fills the Session pane with 16px gutters on both sides; on wide
+The composer fills the Chat pane with 16px gutters on both sides; on wide
 screens, opening Details narrows the pane rather than overlaying the composer.
 Its focus highlight follows the outer border around the textarea and attachments.
 Transcript rows retain their 736px reading width.
 
 The changes bar (`changes-bar.tsx`) sits above the composer: one line,
-"14 files changed +612 −140" and **Review**. It counts the run's whole
+"14 files changed +612 −140" and **Review**. It counts the session's whole
 worktree against its base, the Changes view's **All changes**, so
 edits made by shell commands count too. Its source is the newest `run.diff`
 stat set. Until the page has received one live, it reads the newest with
 `workspace.timeline` (`types: ["run.diff"]`, `newest: true`, `limit: 1`)
 on load and again whenever the connection returns, since the page may hold
 no replay cursor yet; after that, a resumed event stream replays any it
-missed. It starts collapsed and stays expanded per run
+missed. It starts collapsed and stays expanded per session
 once opened. Expanded, it lists each file with its status letter and
 `+a −d`, at most 192px tall (30% of the viewport on a phone). A file opens
 the Changes view at that file; **Review** opens its **All changes**. A
 `truncated` snapshot shows no line counts, because they are only a floor.
-The bar is hidden while nothing has changed and once the run is merged or
+The bar is hidden while nothing has changed and once the session is merged or
 abandoned, which removes its checkout; a
 failed read shows the server's error with **Retry**. Conversation rows carry no file lists: each edit's diff stays in its edit step.
 
-For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
-from its [session item log](enhanced-runs.md#instructions-and-the-session-log) instead.
+For a session with `acp: true` (Enhanced, or Background over ACP) the rows come
+from its [session item log](enhanced-sessions.md#instructions-and-the-session-log) instead.
 With no conversation rows or older-history control, the pane shows a
-decorative, low-contrast Aether mark above the run's title, workspace, agent
+decorative, low-contrast Aether mark above the session's title, workspace, agent
 and mode, branch, owner and creation time. The title and each metadata row
 are centered in the conversation pane, including when long metadata needs
 scrolling. The overview gives way to the conversation as rows arrive. History
@@ -2710,21 +2710,21 @@ Screenshots with fixture data: [desktop](media/acp-session-desktop.png),
 [phone](media/acp-session-phone.png),
 [history error](media/acp-session-history-error.png).
 
-`useAgentTerminal` subscribes the run to `/ws/acp/<run>` while the run is open
+`useAgentTerminal` subscribes the session to `/ws/acp/<session>` while the session is open
 and not `switching`; `store/session-stream.ts` owns the socket
 (`lib/acp-stream.ts`: the events feed's backoff and `onWake`, `after_seq`
 resume, an immediate resubscribe on close 1012, a final stop on 1008 or a
-`-32602` refusal) and the control session id, so the lease and timed takeover
+`-32602` refusal) and the controller id, so the lease and timed takeover
 frames work as on an attach and switching views keeps the stream. The tab asks
 for the lease once it has shown Session and the stream has acked, when the
 terminal would (the owner, not a phone). A refused
 automatic request shows no error: it retries with backoff while the holder is
 the viewer or nobody, and again when `run.controller` reports the lease free.
-Leaving the run page, by navigating elsewhere in the dashboard or by closing
+Leaving the session page, by navigating elsewhere in the dashboard or by closing
 or reloading the tab, releases a held lease before the stream closes, so a
 reload takes it straight back. Navigating away waits up to 2 s for the release's answer, because the
 server commits it on the stream's context. Closing the stream resets the
-run's stream and lease state. Frames go through `batchNotifications`, so a
+session's stream and lease state. Frames go through `batchNotifications`, so a
 burst re-renders once per frame.
 
 An ack or history page's `truncated_before` displays the expired-prefix
@@ -2733,7 +2733,7 @@ retained boundary. A same-epoch reset preserves the ack's authoritative
 pending approvals and expiry metadata; it cannot synthesize missing frames.
 An expired full-item request shows the server's error rather than empty detail.
 
-The `sessions` slice keeps each run's `AcpSession`: items grouped into
+The `sessions` slice keeps each session's `AcpSession`: items grouped into
 turns (`store/session-rows.ts`), the ack's live state (turn in flight,
 pending requests, config options, commands, auth, steering), the lease and
 the stream state. A `reset` frame or an ack with `oldest_seq` starts the
@@ -2760,15 +2760,15 @@ turn's rows are derived once and kept; only the open turn re-derives. At most
 three sessions stay whole; the least recently
 opened others keep their newest 200 items. Rows: `user` (a
 right-aligned bubble; the author shows only when it is not the viewer or the
-message came through a connector, and the run's appended instructions hide
+message came through a connector, and the session's appended instructions hide
 under its task), `steps`, `assistant` (markdown through `react-markdown` and
 `remark-gfm`, split into blocks with `marked`'s lexer so only the streaming
 block re-renders, code highlighted with the Lezer languages), `live`,
-`event` (a wake, a new agent session, or a notice outside a block),
+`event` (a wake, a new agent conversation, or a notice outside a block),
 `finished` and `agent-message`.
 
 `turnRows` splits a turn into segments at each person's message, wake and
-new agent session (`store/session-steps.ts`). In a segment, the agent's
+new agent conversation (`store/session-steps.ts`). In a segment, the agent's
 prose stays in the conversation as `assistant` rows, and the work between
 two pieces of prose (thoughts, tool calls, plans, subagent launches and
 answered requests) joins one `steps` block. The prose after the last block
@@ -2811,7 +2811,7 @@ header, so they virtualize. The answer's footer keeps the turn's outcome,
 to a check, show on hover. A turn that ends **Cancelled** (stop reason
 `cancelled`), **Interrupted** (`interrupted`, a turn a restart or lost
 connection cut off) or **Stopped**, or ends without an answer, gets a
-`finished` row with its dot instead, matching the run reasons `turn
+`finished` row with its dot instead, matching the session reasons `turn
 cancelled` and `turn interrupted`. Rows that arrive while the view is open
 rise in, at most eight at a time, and a streaming answer's new blocks fade
 in from a blur above a pulsing dot; a first load, a replay and a history
@@ -2861,17 +2861,17 @@ subagents". A fallback launch shows a card with no nested items;
 an agent with neither child sessions nor a launch call renders as before.
 
 A card opens the subagent inspector (`routes/run/subagent-inspector.tsx`)
-at `?agent=<tool call id>`. While the run's row holds 448px for it plus
+at `?agent=<tool call id>`. While the session's row holds 448px for it plus
 `minReadableWidth` (560px), it is an inline aside that replaces Details
 while open; narrower, it is a side sheet, and a bottom sheet on phones.
 Until the row is measured neither renders. An inline inspector that loses
-that room to the assistant docking beside the run closes instead of reopening
+that room to the assistant docking beside the session closes instead of reopening
 as a modal sheet over it, and focus stays in the assistant
 (`replaceRouteKeepingFocus` in `components/shell/center-view.tsx` skips the
-focus move to the run heading). Losing the room any other way, such as
-showing the sidebar or narrowing the window, reopens it as the side sheet. It shows breadcrumbs back to **Session** through nested
+focus move to the session heading). Losing the room any other way, such as
+showing the sidebar or narrowing the window, reopens it as the side sheet. It shows breadcrumbs back to **Chat** through nested
 subagents, **Previous subagent** and **Next subagent** among siblings, and
-**Close subagent**; `Esc` closes it before it leaves the run. Stepping
+**Close subagent**; `Esc` closes it before it leaves the session. Stepping
 between siblings and closing replace the history entry, so Back does not
 reopen it. Below them,
 one virtualized list holds the prompt (`raw_input.prompt`, read whole with
@@ -2888,8 +2888,8 @@ with **Retry**.
 A tool call snapshot logged in a later turn than the call's first, as
 when a call outlives its turn, joins that first turn and keeps one row.
 
-A path the agent names opens that file in the run's
-[Files view](#files-in-a-run): in an answer's, narration's or thought's prose
+A path the agent names opens that file in the session's
+[Files view](#files-in-a-session): in an answer's, narration's or thought's prose
 and inline code, in a tool step's command and output tail, and in a
 `DiffBlock`'s caption. A Markdown link whose target is a repository path
 opens there as well, where it used to open a dead address in a new tab. A link to a
@@ -2912,8 +2912,8 @@ in flight sets `background` while a task `holds` or a `follow_up` is owed;
 one with no tasks and `stop_reason: "interrupted"` clears them. A turn
 boundary sets `turn_in_flight` and, at `turn_end`, `background` from the held
 tasks. `backgroundWait` returns the live tasks while the stream is live,
-`background` is set, no turn is in flight, and the run is `running` or
-parked `stalled:` or `needs input:`. A `running` run's wait adds a `live`
+`background` is set, no turn is in flight, and the session is `running` or
+parked `stalled:` or `needs input:`. A `running` session's wait adds a `live`
 row reading "Working in background" when only a follow-up is owed, or
 "Working in background: N tasks" with N held tasks.
 
@@ -2923,8 +2923,8 @@ The Enhanced composer (`routes/run/composer.tsx`, state in
 **Queue** (`Mod+Shift` held, or no steering), **Interrupt** (`run.acp.cancel`,
 an empty composer during a turn), **Stop waiting** (`run.acp.cancel`, an
 empty composer while `backgroundWait` holds, including a wait that stalled
-or shows a question) or **Resume** (a paused run). **Stop waiting** ends the
-wait and parks the run `turn cancelled`; the agent's background tasks keep
+or shows a question) or **Resume** (a paused session). **Stop waiting** ends the
+wait and parks the session `turn cancelled`; the agent's background tasks keep
 running, and a later follow-up opens a new autonomous turn. With text typed
 the pill is **Send**, which starts a turn, so a reply to the question still
 goes out. `Enter` does what the pill says and nothing without text or
@@ -2996,7 +2996,7 @@ used (it counts to each new report, and jumps under reduced motion), a percent b
 that turns `state-needs-you` at 90%, a 24 by 9 grid of 216 cells, a legend, and
 a footer with the tokens left, or by how much the window is exceeded. The agent
 reports only used and total tokens, so the grid has only what they imply: used
-and free. When the Session view still holds the turn before the newest one that
+and free. When the Chat view still holds the turn before the newest one that
 reported, and the window grew since, used splits into **Earlier context** and
 **Latest turn**; after a compaction or once that turn is trimmed it is one
 **Used** row. Pointing at a legend row or a cell dims the other cells and
@@ -3009,13 +3009,13 @@ how it goes out. It is inert, with the reason on hover, while a prompt is
 being sent, the box holds text or files (a draft is never replaced), or you do
 not hold control of the session.
 
-An unsent prompt is a per-run draft held by `composer-state.ts`: the text, the
+An unsent prompt is a per-session draft held by `composer-state.ts`: the text, the
 attached files with their uploaded paths, and the idempotency key of the last
 attempt to send them, so sending the same prompt again delivers it once. The
 Standard and Enhanced composers read the same draft, so it survives opening
-another run or page, an event-log restart that remounts the run, and a switch
+another session or page, an event-log restart that remounts the session, and a switch
 between Standard and Enhanced. A sent prompt empties the draft; deleting the
-run, or authenticating as another member or server, drops it.
+session, or authenticating as another member or server, drops it.
 
 A send or an upload outlives the composer that started it, so the
 request in flight and its error are part of the draft too. A composer that
@@ -3038,7 +3038,7 @@ keystrokes in a controlled textarea.
 
 **Insert a template** (shown when the gateway offers `template.list`,
 disabled while the draft is locked) opens the template library above the
-button, or as a sheet on a phone, over the run's workspace's templates, with
+button, or as a sheet on a phone, over the session's workspace's templates, with
 a clock on each scheduled one (`schedule.list`). Its primary action,
 **Insert**, writes the filled-in task into the draft: over
 the textarea's selection, or after a blank line when nothing is selected.
@@ -3054,7 +3054,7 @@ rather than caption text, so separate image-only messages remain separate; an
 ACP row whose `resource_link` URIs name attached files matches the room
 message with the same text and the same attachment paths. `message-images.tsx`
 fetches authorized image blobs through `api.roomImage` and revokes its object
-URLs when identity, run or row changes, and shows each other file as a chip
+URLs when identity, session or row changes, and shows each other file as a chip
 named by its basename with the path as its title. Attachments sit outside the
 text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
@@ -3062,12 +3062,12 @@ Mode and effort menus use content-sized described rows; model selectors use
 group with search by name, ID and description. Selections use
 `run.acp.set_option`; `/` completes the agent's commands and `@` paths from
 the Files tree cache. It closes with one line of reason while switching, for a
-Background run, while connecting, or while the controller has a pending
+Background session, while connecting, or while the controller has a pending
 request (keeping **Interrupt**). An authorized non-controller can **Send**
 through the existing 45-second moderated path even while an agent request
 waits for an answer; model and mode menus stay disabled and the hint explains
 controller approval. `useImplicitControl`
-(`agent-terminal.ts`) lets the owner of a run nobody controls act in one step
+(`agent-terminal.ts`) lets the owner of a session nobody controls act in one step
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10
 seconds). Pending requests dock above it
@@ -3075,7 +3075,7 @@ one at a time, oldest first, with "1 of N" and **Previous request** / **Next
 request** in the card header (`routes/run/request-dock.tsx`). The dock holds
 the card on screen by request id, so arrivals and other answers never swap
 it, and stays empty until the stream has replayed up to the ack's `seq`, so
-a run opened with a request waiting shows it whole and without motion. The
+a session opened with a request waiting shows it whole and without motion. The
 dock scrolls at 50dvh (40dvh on phones) and the card's footer sticks to its
 bottom.
 
@@ -3113,53 +3113,53 @@ agent's auth methods.
 ### Trace view
 
 The Trace view (`src/routes/run/trace-view.tsx`) shows when each part of an
-Enhanced run ran, as a span tree beside a time waterfall. A span is one
-timed piece of the run: the run itself, a turn, a tool call, a subagent, a
-wait for a person, an error notice, or a child run.
+Enhanced session ran, as a span tree beside a time waterfall. A span is one
+timed piece of the session: the session itself, a turn, a tool call, a subagent, a
+wait for a person, an error notice, or a subsession.
 `deriveTrace` in `src/store/trace.ts` builds the tree from data the Session
 view already holds; nothing new is read from the agent:
 
 | Span | Start | End |
 | --- | --- | --- |
-| Run | `started_at`, else `created_at` | `finished_at`, else now |
+| Session | `started_at`, else `created_at` | `finished_at`, else now |
 | Turn | its `turn_start` item | its `turn_end`, or its last child's end |
 | Tool call | the call's first snapshot | the snapshot that settles it (a background task's own status) |
 | Subagent | `startedAt` from the subagent index | `settledAt`, or its last activity for a Workflow or background agent |
 | Wait | the `request` item opening it | the item answering or cancelling it |
-| Child run | its `started_at`, else `created_at` | `finished_at`, else now |
+| Subsession | its `started_at`, else `created_at` | `finished_at`, else now |
 
 A subagent whose launch is not held starts at its first held item and sits
-in that item's turn, or under the run when that turn is not held either. A run's child
-runs join the Workers group as spans from their creation
+in that item's turn, or under the session when that turn is not held either. A session's subsessions
+sessions join the Workers group as spans from their creation
 (or start) to their end, drawn failed or stopped by their status; they come
-from the runs the dashboard already holds, so a new child appears at once.
+from the sessions the dashboard already holds, so a new subsession appears at once.
 
 A call still open when its turn or subagent ended is **Stopped** at that end,
-unless it is a background task of a live run. Item times are log times, so a
+unless it is a background task of a live session. Item times are log times, so a
 call that settled within 50ms is instant. A turn is named by the first line
 of its prompt, by Aether's wake-up wording ("Woken by new agent messages"),
-or `Turn N`. The run's bar is its `run.status` history, coloured by state;
-`readTraceLog` (`src/store/trace-log.ts`) reads the run's `run.status` and
+or `Turn N`. The session's bar is its `run.status` history, coloured by state;
+`readTraceLog` (`src/store/trace-log.ts`) reads the session's `run.status` and
 `run.cost` events with `workspace.timeline` (newest first, at most 2,000),
 and sync appends later ones while the log is held. Until that read finishes
-the run's bar stays neutral; a failed read shows its error on the bar, and
+the session's bar stays neutral; a failed read shows its error on the bar, and
 the next read starts again from the newest event.
 
 The stats strip shows Duration (shimmering while live), Turns, Tool calls,
 Subagents when there are any, and Errors: failed calls, subagents, turns
 and error notices. Errors is a button that steps through the failures,
 unfolding each one's ancestors and opening its details. Tokens and Cost appear only for a metered
-run (`run.cost` with `metered`: Enhanced increments add, headless totals
+session (`run.cost` with `metered`: Enhanced increments add, headless totals
 replace) and never as an invented zero; a failed read shows **Not read**
 with the server's error; when the read stopped at 2,000 events they read
 `≥`. While earlier history is not held the counts read `≥`. A neutral **Slowest** pill marks the longest finished tool call once
 three have finished.
 
-The axis is elapsed run time. A stretch with nothing running that is longer
+The axis is elapsed session time. A stretch with nothing running that is longer
 than a minute and 5% of the active time becomes a fixed break labelled with
 its length ("2h idle"); history before the first held item is a hatched
 **Not loaded** break. An idle stretch reaching now is a break too, its label
-updated once a minute. While the run is live the axis keeps headroom and
+updated once a minute. While the session is live the axis keeps headroom and
 steps through a ladder of round lengths, as does a zoom to a running span; a
 line and dot mark now, moving each second on the server's clock
 (`serverOffset`), and the list follows new rows at its end until you
@@ -3170,16 +3170,16 @@ take those state tones; a turn's or subagent's bar packs its model time and
 its tool calls' density, failures and waits.
 
 Closed turns start folded with a `+N` count; the live and the last turn
-are open, as is a running subagent, and the Workers group while it has 8 or
+are open, as is a running subagent, and the Subsessions group while it has 8 or
 fewer. A failed or waiting span shows under its folded parent. **Trace
 actions** has **Expand all** and **Collapse all**. Folds, zoom, the
-keyboard's row and the older pages read so far are kept per run in this tab
+keyboard's row and the older pages read so far are kept per session in this tab
 (`traceViews`), not persisted.
 Past 200 visible rows the list renders only those in view. The tree takes
 one tab stop: Up, Down, Home and End move, Right unfolds or enters, Left
 folds or leaves, Enter or Space opens the span's details, and Shift+Enter
 zooms the axis to it. Escape closes the details, then leaves the zoom
-(**Whole run** does too), then falls through to leaving the run. One polite
+(**Whole session** does too), then falls through to leaving the session. One polite
 status line announces turn starts and ends and new failures, batched over
 1.5 seconds; failures in older history as it loads stay silent.
 
@@ -3189,15 +3189,14 @@ end ("+43s", the clock time in its tooltip), exit code, spans below, files
 changed, context window, the command and the stop reason or exit code of a
 failure. **Open subagent**, **Show in Session** (switches views and scrolls
 the Session to that row, opening its block of steps and any fold that hides
-the step; for a wait still open, focuses the docked request), **Open worker
-run**, **Zoom to this span** and **Copy command** act on it.
+the step; for a wait still open, focuses the docked request), **Open subsession**, **Zoom to this span** and **Copy command** act on it.
 
 While earlier history is not held, the view reads up to 5 older pages
 (`run.acp.history`, 1,000 items each), then leaves **Load earlier**. Expired
 history reads "History before 14:02 expired on the server." and a failed
 page shows its error with **Retry**. Below 561px the rows stack: the name
 and duration, then the bar on its own line. The view is not offered for a
-Standard run, which has no turns or timed tool calls.
+Standard session, which has no turns or timed tool calls.
 
 ### Terminal view
 
@@ -3207,23 +3206,23 @@ terminal tabs (**Agent**, then each shell; one menu under 768px), **+ Shell**,
 the **Tools** menu, and on the right the presence summary with
 `ControlButton` (click to take a free lease, hold three seconds to request an
 occupied one; **Release** has the accent fill) and the connection word only
-while a live run's attach is not live. A finished run reads "Container
+while a live session's attach is not live. A finished session reads "Container
 removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
-run with no agent terminal, such as an Enhanced run, shows "No agent
+session with no agent terminal, such as an Enhanced session, shows "No agent
 terminal" and the shell controls. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus.
 
-**Shells.** A shell is a shared development terminal in the run's container
-([terminal.md](terminal.md#run-shells)). **+ Shell** (named "New shell")
+**Shells.** A shell is a shared development terminal in the session's container
+([terminal.md](terminal.md#session-shells)). **+ Shell** (named "New shell")
 starts one with `dev.terminal.start`. `useRunShells(runID, visible)` in
 `shells.tsx` lists them with `dev.terminal.list` every two seconds while the
 Terminal view is showing and every ten behind another view, and holds what
-outlives one mounted shell: the write intent and control session of each
-incarnation, and `open`, `show` and `stop`. A run's shells start hidden behind
+outlives one mounted shell: the write intent and controller of each
+incarnation, and `open`, `show` and `stop`. A session's shells start hidden behind
 the agent's terminal (`shellShown: false` in `initialRunShellDock`, keyed by
-run id in `shellDocks`).
+session id in `shellDocks`).
 
 `TerminalTabs` draws one tab per shell: its name ("Shell 2" for the server's
 `tab-2`, so a number never moves), the agent's glyph when `started_by` is
@@ -3240,7 +3239,7 @@ description. `syncShellTerminals` gives an ended shell a tab only where it
 ended in front of this viewer, so a closed one never returns.
 
 `ShellTerminal` (`shell-terminal.tsx`) owns the selected shell's attach on
-`/ws/attach/<run>?shell=<terminal_id>` (sockets registered in
+`/ws/attach/<session>?shell=<terminal_id>` (sockets registered in
 `store/terminal.ts`) and its own control lease, independent of the agent's and
 the Browser's. A shell that `open` started attaches asking for the lease. In
 any other shell nobody else controls, the first `onData` buffers what is typed
@@ -3258,30 +3257,30 @@ line under the toolbar. Leaving the Terminal view releases the lease. **Shell
 actions** holds **Take a screenshot** and the close items. `shells.stop` uses
 the lease the page holds, or acquires one with `dev.control.acquire` and
 releases it afterwards; `StopShellDialog` asks first when someone else holds
-it. A member without steer permission gets "You can view this run but not
+it. A member without steer permission gets "You can view this session but not
 open a shell in it" in place of the terminal.
 
 `TerminalTools` in `src/components/terminal-pane.tsx` is the **Tools** menu
 (named "Terminal tools"): **Find** (**Find in recorded output** while
 reading history), the text size with **Smaller text**, **Larger text** and
 **Reset text size**, **Copy selection**, **Copy screen**, **Paste**,
-**Upload image…** and, on a run, **Captures…**. It is one menu at every
+**Upload image…** and, on a session, **Captures…**. It is one menu at every
 width; on a phone a menu longer than six items opens as a bottom sheet.
 
-The rest of this section is the terminal machinery the run terminal, its
+The rest of this section is the terminal machinery the session terminal, its
 shells and the Environment share.
 
 `CenterView` mounts only the active route. A terminal key includes the route,
-the authenticated identity, the terminal data-generation epoch, and the run id,
+the authenticated identity, the terminal data-generation epoch, and the session id,
 so a change of identity or epoch remounts the surface instead of reusing it.
-Leaving the run closes its WebSocket and disposes xterm; no hidden live
+Leaving the session closes its WebSocket and disposes xterm; no hidden live
 terminal stays warm. A pinned view retains only its static presentation and
 history state. Returning attaches again at the compact current screen behind
-the saved reading surface, without replacing its content or position. A run
+the saved reading surface, without replacing its content or position. A session
 left following live output shows that fresh current screen. Neither path
 replays the retained archive into xterm.
 
-The normal run xterm requests up to 5,000 scrollback rows. Once the server
+The normal session xterm requests up to 5,000 scrollback rows. Once the server
 acknowledges geometry, xterm adapts the combined normal and alternate buffers
 to stay near 1,000,000 cells; wider terminals therefore retain fewer rows.
 That bound is the live surface. `history.tsx` integrates older recorded output
@@ -3309,8 +3308,8 @@ the ever-changing live bottom. Prepending pages and switching A to B to A
 preserve that anchor and the same cursor-linked row while output continues.
 The frozen rows keep their captured layout through live geometry changes;
 shared font zoom scales their presentation without rewrapping them.
-Storage is scoped by authenticated identity, terminal-data epoch, run id and
-creation time. Identity/epoch changes, authoritative run deletion and stale
+Storage is scoped by authenticated identity, terminal-data epoch, session id and
+creation time. Identity/epoch changes, authoritative session deletion and stale
 async completions cannot restore another scope's data. Leaving cancels fetching,
 not the saved view. Browser-storage failures are visible; unavailable storage
 allows an in-memory session fallback, not a durable-restore guarantee. Missing
@@ -3323,7 +3322,7 @@ older-page loading from another window.
 Arrows, `PageUp`/`PageDown`, `Home`, wheel and touch browse the read surface.
 Scrolling downward to its bottom or pressing `End` returns live. Only a new
 reading episode after returning live resets paging to the newest archive
-head; remounting a pinned run keeps its continuation and loaded pages.
+head; remounting a pinned session keeps its continuation and loaded pages.
 Empty bounded scan windows continue automatically while yielding to input;
 genuine fetch/storage failures appear inline. Existing pane Find searches
 retained loaded pages and frozen rows, not unfetched server history; copy
@@ -3334,23 +3333,23 @@ actions without suppressing authorized terminal-generated protocol replies.
 A same-incarnation resume, when the current surface is still mounted, supplies
 only the bounded gap. An invalid cursor, ring, geometry, or incarnation falls
 back to a compact current-screen bootstrap through the hidden serial
-transaction. A finished run stays read-only until that same run is reopened.
-A reopened run reattaches its agent terminal once the old stream ends with
+transaction. A finished session stays read-only until that same session is reopened.
+A reopened session reattaches its agent terminal once the old stream ends with
 `session ended`. A `run.account` move does the same, because the replacement
-session keeps the same name while the run stays live.
+session keeps the same name while the session stays live.
 
 Find replaces the toolbar strip's contents while it is open, so it never
 obscures a matched terminal line; closing it returns focus to the terminal.
 
 `TerminalPane` lays out its shared toolbar and optional Find row above the
-terminal host. During a dashboard run's compact current-screen
+terminal host. During a dashboard session's compact current-screen
 bootstrap it receives `replaying={replaying}`: the xterm host is hidden with
 CSS visibility while each frame-sized operation is parsed through one serial
 xterm write chain. When no saved reading surface covers it, the pane says
 **Restoring terminal history** throughout the parse, paint delay, and
 saved-viewport restoration; the status clears only when the surface is ready
 to reveal. It describes compact bootstrap restoration, not an archive scan.
-When a pinned view exists it remains visible instead. The run terminal,
+When a pinned view exists it remains visible instead. The session terminal,
 run-shell tabs, and environment dock all use this shared replay gate. User
 input and terminal-generated replies remain muted through the final replay
 write callback. That callback restores authorized protocol replies, including
@@ -3368,7 +3367,7 @@ the reading surface or compact-bootstrap overlay.
 Live xterm follows output at the bottom. Its controller still
 protects viewport intent across structural replay or column reflow: it restores
 only a current operation, with no intervening viewport interaction and no
-normal/alternate-buffer change. The run's saved static reading surface is
+normal/alternate-buffer change. The session's saved static reading surface is
 independent of those live-buffer operations, so a fresh bootstrap cannot
 overwrite it or shift its anchor.
 
@@ -3412,7 +3411,7 @@ the `follow` flag (`docs/local-gateway.md`): a follower renders the session
 at the size it already is, is left out of that minimum whether or not it can
 write, and is told the size in the ack and in a `geometry` frame after every
 change. On `phoneScreen` - a coarse pointer on a screen narrower than `sm`,
-from `src/lib/hooks.ts` - all three terminals follow: the run's terminal, its
+from `src/lib/hooks.ts` - all three terminals follow: the session's terminal, its
 shell tabs and the environment dock, each of which is a session someone else
 may be watching at a desktop's width.
 
@@ -3432,7 +3431,7 @@ A following terminal therefore:
   scroll event has not fired. The integrated run-history surface owns both
   axes while reading, with live-grid panning disabled. Holding control still
   keeps this viewer out of the shared size calculation.
-- does not ask for control on entry even on the member's own run. **Take
+- does not ask for control on entry even on the member's own session. **Take
   control** is the only way in, and `disableStdin` holds until the ack grants write - that is
   what makes xterm's textarea read-only, so a tap on a mirror raises no
   keyboard.
@@ -3446,7 +3445,7 @@ characters and never a modifier: it rewrites the next character into its
 control code, and a key it has no code for keeps the modifier armed rather
 than spending it on the wrong byte.
 
-In a run's normal buffer, a downward finger drag pans the live grid to its
+In a session's normal buffer, a downward finger drag pans the live grid to its
 top before handing off continuously to integrated history. Horizontal drags
 do not enter history. Subsequent history swipes browse older pages or return
 live at the bottom. Panning either surface does not resize the PTY or raise
@@ -3456,7 +3455,7 @@ and the Environment keep native xterm scrollback.
 
 - **The socket is `attach.ts`**, framework-free. It reuses `backoff()` from
   `src/lib/stream.ts`, splits paste input below the gateway's 64 KiB frame cap,
-  and keeps callbacks bound to the current terminal host. The primary run
+  and keeps callbacks bound to the current terminal host. The primary session
   header requests `screen:true` and `interactive:true`; shells and CLI
   attachments keep their existing stream modes. `screen:true` bootstraps the
   compact current screen and bounded scrollback. Upward scrolling fetches older
@@ -3474,8 +3473,8 @@ and the Environment keep native xterm scrollback.
   dots behind the terminal toolbar while input is writable
   ([styles.md](styles.md)). They
   never change layout, and return to neutral during replay or history
-  reading and after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
-  ended runs show no control and replay their recording, or say **This run
+  reading and after release, mirroring, disconnect or a refused write. Starting sessions keep their spinner;
+  ended sessions show no control and replay their recording, or say **This session
   has ended and left no recorded terminal to replay.** Whether a member may
   write is the server's answer: `-32001` downgrades the attach to a mirror
   and disables the control button. An
@@ -3484,7 +3483,7 @@ and the Environment keep native xterm scrollback.
 
   The attach ack's `replay` count is the exact bootstrap/live byte boundary,
   even when a WebSocket frame straddles it. For a fresh, live, or finished
-  dashboard run attach, those bytes are the compact current-screen snapshot,
+  dashboard session attach, those bytes are the compact current-screen snapshot,
   not the complete retained transcript. A valid same-incarnation
   `resume`/`cursor`/`resume_id` supplies only the bounded gap and keeps the
   warm screen. If the cursor or ring cannot serve it, `resumed:false` selects
@@ -3508,34 +3507,34 @@ and the Environment keep native xterm scrollback.
   reconnect. Input carries the current `control_generation`; stale input is
   fenced. Take and release do not reconnect or replay, and the UI changes its
   writable state only from acknowledged metadata.
-- **A missing session is not a dead terminal.** `-32004` means the run has
-  no PTY session, and `internal/sshd/attach.go` refuses rather than waits
+- **A missing session is not a dead terminal.** `-32004` means the session has
+  no PTY, and `internal/sshd/attach.go` refuses rather than waits
   for one, so the client is what has to tell a container that is still
   starting apart from a terminal that is gone. A `queued` or `provisioning`
-  run is not attached to at all: the tab clears the pane and covers it with
+  session is not attached to at all: the tab clears the pane and covers it with
   `TerminalSpinner`, the overlay the environment dock uses, reading
-  **Starting the run's container**, and reports no connection state while
+  **Starting the session's container**, and reports no connection state while
   nothing is connecting. The attach effect already re-runs on `run.status`,
-  so the run turning `running` attaches on its own. On a run that is up, a
+  so the session turning `running` attaches on its own. On a session that is up, a
   `-32004` is retried a bounded number of times on the usual `backoff()`
   before it counts as final, because the server names that case transient -
   recovery starts a session under a row that already reads `running` - and
   says the client's retry is what resolves it. Only then does the tab show
   the gateway's error.
 - **A dead end gets no Retry.** Retry is offered on every refusal except on
-  a run that has finished, where no session will ever answer it.
+  a session that has finished, where no session will ever answer it.
   `endedStatuses` is that set, and it mirrors `replayableStatus` in
   internal/sshd/attach.go, which is `domain.RunStatus.Terminal()`: the same
   answer decides whether a missing session is worth waiting out, so the
-  client cannot drift from the server gate. A run waiting for a human is not
-  finished, so it keeps both its retry and the gateway's own words. A run
+  client cannot drift from the server gate. A session waiting for a human is not
+  finished, so it keeps both its retry and the gateway's own words. A session
   that never started has no transcript either, and its `run.reason` carries
   the provisioning failure, so the tab shows that reason directly alongside the
-  shared run header. That substitution is keyed on the
-  refusal's own code: only a missing session says anything about the run, so
+  shared session header. That substitution is keyed on the
+  refusal's own code: only a missing session says anything about the session, so
   a revoked token or a withdrawn membership still shows the gateway's own
   message.
-- **Every attach answers for itself.** The agent run slice is reset when the
+- **Every attach answers for itself.** The agent conversation slice is reset when the
   view mounts, and a successful attach clears the standing refusal. Otherwise
   a denial outlives the socket that produced it: leaving the tab and coming
   back would show a live terminal beside a stale error, with steering greyed
@@ -3587,7 +3586,7 @@ re-reads them when the dark class on `<html>` changes.
 
 ### Changes view and Publish
 
-`src/routes/diff/` is the run's Changes view, and `src/store/diff.ts` holds
+`src/routes/diff/` is the session's Changes view, and `src/store/diff.ts` holds
 both what it renders and the overlap set the conflict chips read.
 
 - **One strip, then the files.** A 32px strip (`strip.tsx`) holds the file
@@ -3600,7 +3599,7 @@ both what it renders and the overlap set the conflict chips read.
   menu of the same files. Picking a file opens it and scrolls its header to
   just under the strip. With nothing changed the view is the "No changes
   yet." empty state. `Land` (`land.tsx`) adds a row above the git card only
-  after a pull put the run branch on this machine, with the same **Switch to
+  after a pull put the session branch on this machine, with the same **Switch to
   it** as the pull's toast.
 - **The card scrolls away; the strip stays.** Everything right of the file
   list is one scroller: `Land`, the git card, the strip with the review bar,
@@ -3610,7 +3609,7 @@ both what it renders and the overlap set the conflict chips read.
   `--diff-top` CSS variable the file headers stick to, and the virtual file
   list's `startMargin` is its measured offset in the scroller.
 - **The git card sits above the strip.** `components/workflow/git-flow.tsx`
-  (`GitFlow`, model in `store/git-flow.ts`) is the run branch, its pull
+  (`GitFlow`, model in `store/git-flow.ts`) is the session branch, its pull
   request, checks and merge readiness in one card that updates in place.
   The header is the pull request's title and `#128` linking to GitHub with
   **Draft**, **Open**, **Merged** or **Closed** and its dot, or the branch
@@ -3622,7 +3621,7 @@ both what it renders and the overlap set the conflict chips read.
   unfolding the graph. The panel leaves it out while the Changes view shows
   the full card.
 - **The graph is `run.git.log`.** One 28px row per commit under one SVG of
-  two lanes: the run branch's commits (`commits`) on the accent lane, the
+  two lanes: the session branch's commits (`commits`) on the accent lane, the
   base's commits the branch does not have (`upstream`) muted on the second,
   interleaved by time, and the merge base at the bottom. A merge curves into
   the base lane from its own row; the branch's first commit bends into the
@@ -3651,7 +3650,7 @@ both what it renders and the overlap set the conflict chips read.
   **Conflicts**, **Review** and **Base**, each with its own dot. With a pull
   request, **Conflicts** and **Base** are GitHub's `mergeable` and
   `merge_state_status`: `CONFLICTING` is "GitHub reports conflicts with
-  main", naming the file count when the run's log measured the same merge;
+  main", naming the file count when the session's log measured the same merge;
   `BEHIND` is "Behind main"; `BLOCKED`, a branch rule GitHub still
   enforces such as a second required approval, blocks the row and offers
   **Open on GitHub** instead of **Merge**; `UNKNOWN`, which GitHub answers while it is
@@ -3669,7 +3668,7 @@ both what it renders and the overlap set the conflict chips read.
   tab, with nothing to publish yet) opens the Changes tab; **Open pull
   request** opens the Publish dialog, which also appears when the branch is
   ahead of its base with an empty patch; **Ask agent to resolve conflicts**
-  sends the run, through `useAgentSend`, one message naming the base, its
+  sends the session, through `useAgentSend`, one message naming the base, its
   commit and every conflicting file the log found (or only GitHub's report
   when it found none against that base), under the composer's rules, and
   the receipt reads "Sent conflict list to Claude Code."; **Squash and
@@ -3681,8 +3680,8 @@ both what it renders and the overlap set the conflict chips read.
   draft, a blocked, an unpushed, a merged or a closed pull request. A merge
   GitHub accepted but has not done, as through a merge queue, shows `gh`'s
   output, or "GitHub has not merged #128; it is open.". Open, merge and
-  resolve need a live run, the collaborator role and leave to steer the run
-  (its owner, or anyone the run's protection and the workspace's
+  resolve need a live session, the collaborator role and leave to steer the session
+  (its owner, or anyone the session's protection and the workspace's
   `steer_others` allow), the rules the server applies; resolve also needs a
   member who may message the agent now. While the card
   offers an action, **Publish…** turns secondary, so the view keeps one
@@ -3690,16 +3689,16 @@ both what it renders and the overlap set the conflict chips read.
   names itself in the status line. Every error, from the log, the feedback,
   a send or a merge, is shown as the server or GitHub wrote it.
 - **The card reads on events, not timers.** The log is read when the first
-  card for a run mounts and again on each `git.branch` event for the run (`gitSeq` in
+  card for a session mounts and again on each `git.branch` event for the session (`gitSeq` in
   `store/workflow-signals.ts`), and with each 60s pull request poll, since
   a fetch moves the base without a `git.branch` event. The pull request is
   read again on `run.pr` and `git.branch`. One read
-  of each is in flight per run (`store/coalesce.ts`). A refetch keeps every
+  of each is in flight per session (`store/coalesce.ts`). A refetch keeps every
   row whose commit did not change as the same object, so its memoised row
   does not re-render. A polite screen-reader region repeats the status line
   once it has held for a second.
 - **The patch is fetched, the events only say when.** `run.diff` carries
-  per-file stats and no patch text, so a snapshot bumps the run's `revision`
+  per-file stats and no patch text, so a snapshot bumps the session's `revision`
   and the view re-fetches the chosen comparison from `GET /api/v1/run/<id>/patch`
   (`docs/local-gateway.md`) whenever that has moved past the `fetched`
   revision the stored patch answers for. Counters rather than a stale flag,
@@ -3708,10 +3707,10 @@ both what it renders and the overlap set the conflict chips read.
   issued at, and anything newer asks again. A failure records the revision
   too, so it cannot spin, and the patch already on screen stays beside the
   server's error; the next snapshot or **Refresh** asks again. One fetch per
-  run is in flight at a time, even across a remount of the view. A stored
+  session is in flight at a time, even across a remount of the view. A stored
   patch over 1 MiB is not re-fetched on a snapshot, so a reader is never
   frozen or reshuffled mid-read: the strip's button becomes **New changes ·
-  Refresh** and loads them on click. The store keeps one patch per run and
+  Refresh** and loads them on click. The store keeps one patch per session and
   records which comparison it answers for (`from`); choosing another
   comparison shows a loading state and fetches at once, never the previous
   comparison's text. The loading state, after ~200ms, is a skeleton of a file
@@ -3728,24 +3727,24 @@ both what it renders and the overlap set the conflict chips read.
   review comments are not redone.
 - **Compare is a menu.** The Compare menu chooses what the patch is measured
   against, and its trigger names the choice. **All changes** (the default)
-  is the cumulative diff against the run's effective base, described as
+  is the cumulative diff against the session's effective base, described as
   "Against main @ 1a2b3c4" with the base branch and the short sha the patch
-  response names. **Since the run started** appears only when that base
-  differs from the fork point on the run record (`base_commit`), meaning the
-  run merged upstream work: it requests `?from=<fork_tree>`, so it also
+  response names. **Since the session started** appears only when that base
+  differs from the fork point on the session record (`base_commit`), meaning the
+  session merged upstream work: it requests `?from=<fork_tree>`, so it also
   counts that upstream work. Under **Changes since a checkpoint** every
   recorded `run.diff` snapshot is a row, newest first, labelled with its local
-  time (with the date when not today) and its age. Its description is the run
+  time (with the date when not today) and its age. Its description is the session
   at that checkpoint, not the size of what choosing it shows: "After" and the
   commit subject when `head` moved since the next older checkpoint, otherwise
-  "Run had N files · +a −d", the run's totals then (the count alone for a
+  "Session had N files · +a −d", the session's totals then (the count alone for a
   `truncated` snapshot). The newest row says "Latest checkpoint" in place of
   the totals, after the subject when it has one, since choosing it shows only
   edits not yet snapshotted. Choosing a row requests `?from=<tree>`:
   everything that changed since that checkpoint up to now, which grows as the
-  run goes on and re-fetches on each new snapshot like the whole diff. The
+  session goes on and re-fetches on each new snapshot like the whole diff. The
   newest 50 checkpoints load from `workspace.timeline`
-  (`types: ["run.diff"]`, `newest: true`) when the view first opens for a run
+  (`types: ["run.diff"]`, `newest: true`) when the view first opens for a session
   on this page, live
   snapshots join them, one row per tree, and **Show older checkpoints** pages
   back with `before_seq` while the timeline says `more`. A checkpoint keeps
@@ -3769,14 +3768,14 @@ both what it renders and the overlap set the conflict chips read.
   characters followed by "… N more characters"; review comments still quote
   the whole line. Lines carry old and new line numbers, which `parse.ts`
   reads from the hunk headers.
-- **The path opens the file.** Clicking a file's path opens it in the run's
-  [Files view](#files-in-a-run) (`openInFiles` in `routes/files/open.ts`),
-  without leaving the run. It needs a run that has a Files view. Binary files
+- **The path opens the file.** Clicking a file's path opens it in the session's
+  [Files view](#files-in-a-session) (`openInFiles` in `routes/files/open.ts`),
+  without leaving the session. It needs a session that has a Files view. Binary files
   and files the current diff shows as deleted have no link.
-- **A link can name a file.** A navigation to the run route with
+- **A link can name a file.** A navigation to the session route with
   `view: 'changes'` and `file: <path>` selects **All changes**, expands that
   file and scrolls to it once the diff has it; `diff: 'current'` selects
-  **All changes** alone. The Session view's changes bar navigates these
+  **All changes** alone. The Chat view's changes bar navigates these
   ways. `file` is not written to the
   address.
 - **Lines take comments.** A review comment is a note on one line or a range
@@ -3813,24 +3812,24 @@ both what it renders and the overlap set the conflict chips read.
   message from the store, so a later denial or failed delivery replaces it. A
   send the server refuses, cannot deliver or cannot vouch for keeps every
   comment and shows the server's error in the bar, beside the reason when the
-  run has since stopped taking messages.
-- **`sendToAgent` is the send path.** `src/lib/send-to-agent.ts` takes a run,
+  session has since stopped taking messages.
+- **`sendToAgent` is the send path.** `src/lib/send-to-agent.ts` takes a session,
   the text and, when the tab holds it, the control lease. It posts a room
   `steer_request` and returns the room message, whose `state` is the receipt,
-  so the composer's rules in [Run control](terminal.md#run-control) apply
+  so the composer's rules in [Session control](terminal.md#session-control) apply
   unchanged. A send the server has not answered keeps its idempotency key by
-  run and text until it is answered or another member signs in: the same text
-  sent again is delivered once, whatever went to the run in between.
+  session and text until it is answered or another member signs in: the same text
+  sent again is delivered once, whatever went to the session in between.
   `useAgentSend` (`agent-send.ts`) wraps it for the review bar and the pull
-  request panel: it passes the lease and, for the owner of a run nobody
+  request panel: it passes the lease and, for the owner of a session nobody
   controls, takes it first (`useImplicitControl`); anyone else's message
   waits 45 seconds for the controller, and both surfaces say so. **Send to
   agent** is disabled, with the composer's own sentence beside it, for a
-  finished, starting or switching run, a Background run, a protected run and
+  finished, starting or switching session, a Background session, a protected session and
   a member who may not message the agent. Both surfaces word their receipts
   with the same `receipt` function.
 - **A pull request's feedback is one click from the agent.** The check state
-  in the run header ([Header](#header)) opens `publish-feedback.tsx`, a
+  in the session header ([Header](#header)) opens `publish-feedback.tsx`, a
   dialog that is a bottom sheet on a phone: the pull request's title linking
   to GitHub, its state and target, then **Checks** and **Review comments**
   from the last `run.pr.feedback` answer, with **Refresh** to ask again.
@@ -3852,11 +3851,11 @@ both what it renders and the overlap set the conflict chips read.
   arrives says so and frees them. GitHub's own error, when the read fails,
   shows above the lists with the last answer kept under it.
 - **Comments follow their lines.** Unsent comments sit in their own Zustand
-  store in `review.ts`, keyed by run, for the reason composer drafts do. They
+  store in `review.ts`, keyed by session, for the reason composer drafts do. They
   survive switching views, opening another page and every diff refresh, and
-  end with the page, a deleted run or another identity. A comment stores the
+  end with the page, a deleted session or another identity. A comment stores the
   lines it was written on - kind, text, old and new numbers - and which
-  comparison that was: `''` for All changes, `start` for Since the run
+  comparison that was: `''` for All changes, `start` for Since the session
   started, `since:<tree>` for a checkpoint. `locate` finds those lines in the
   diff on screen: at the same numbers first, otherwise where the same block
   appears exactly once. A comment therefore follows code that moved, and is
@@ -3868,14 +3867,14 @@ both what it renders and the overlap set the conflict chips read.
   otherwise.
 - **Colour is the whole of the highlighting.** Added and removed lines use the
   `diff-add` and `diff-del` tokens. The dashboard never edits code, so there
-  is no editor and no language grammar. The server sends complete run diffs
+  is no editor and no language grammar. The server sends complete session diffs
   up to 64 MiB, and the parser stays tolerant of incomplete input.
 - **Long lines wrap or scroll, and the pointer picks which first.** **Wrap
   lines** starts on for a coarse pointer and off for a mouse. The choice is a
   persisted view preference on the UI slice (`diffWrap`), which the Files diff
   pane and the Publish dialog's diffs read too.
 - **Review locally is a dialog.** **More → Review locally…** shows the two
-  copyable `git` commands that read the run branch in the linked repository
+  copyable `git` commands that read the session branch in the linked repository
   and the output of the last pull (`review-commands.tsx`). It is gated on the
   `pull` local verb: a gateway without it - a phone on the server's
   dashboard - has no repository for those commands to run in.
@@ -3888,7 +3887,7 @@ both what it renders and the overlap set the conflict chips read.
   untracked contents, and runs **Commit selected**. **2 · Push and pull
   request** is where the dialog opens when the first status has nothing to
   commit. The dialog's state lives in `publish-state.ts` and stays mounted
-  while the run is open, because the Changes view stays mounted after its
+  while the session is open, because the Changes view stays mounted after its
   first visit, so a typed message and a PR creation whose outcome is
   uncertain survive switching steps, closing the dialog and switching views.
 - **The destination is two sentences.** Step 2 (`publish-push.tsx`) says
@@ -3918,10 +3917,10 @@ both what it renders and the overlap set the conflict chips read.
   nothing is chosen. The push URL is the remote's, when it has exactly one,
   and the branch is the upstream's or the checkout's. The pull request's head
   is that push when its URL is a github.com repository, its base branch is
-  the run's, and its repository is the one the workspace's source mirror
+  the session's, and its repository is the one the workspace's source mirror
   reads (`workspace.mirror.status`), which for a fork Origin is the
   upstream; without a GitHub mirror it is the head repository. The title is
-  HEAD's subject (`head_subject`) once the run has a commit of its own.
+  HEAD's subject (`head_subject`) once the session has a commit of its own.
 - **One button publishes, and says how far it got.** With no pull request
   yet the filled button is **Push and open pull request**: it pushes, and
   only if the push landed opens the pull request. Each half reports under
@@ -3950,14 +3949,14 @@ both what it renders and the overlap set the conflict chips read.
   count into `card:meta`, whose popover lists the chips, and the Changes view
   renders the chips in its strip. It reads the overlap set the conflict radar
   reports (`run.overlaps` at hydration, then `run.overlap` events), names the
-  file and the other member, and navigates to their run. Attribution comes
-  from the runs the store already holds; an empty peer list means the overlap
+  file and the other member, and navigates to their session. Attribution comes
+  from the sessions the store already holds; an empty peer list means the overlap
   cleared and the chip goes.
 
-### Multi-repo runs
+### Multi-repo sessions
 
-A run launched with extra workspaces carries `repos` (`RunRepo`: workspace id,
-name, container path, branch, `primary`), the primary first; a single-repo run
+A session launched with extra workspaces carries `repos` (`RunRepo`: workspace id,
+name, container path, branch, `primary`), the primary first; a single-repo session
 has none and shows none of what follows. The dashboard offers it only when the
 gateway lists the `run.repos` method.
 
@@ -3965,17 +3964,17 @@ gateway lists the `run.repos` method.
   repos** (`launch/extra-repos.tsx`) in the launch form, a checklist of the
   member's other workspaces. Each pick becomes a chip and goes out as
   `extra_workspace_ids` on `run.launch`; the repo
-  is checked out at `/repos/<name>`. A child run inherits its parent's
+  is checked out at `/repos/<name>`. A subsession inherits its parent's
   extra repositories.
 - **Changes.** The view gains a **Repos** tab strip above it: one tab per repo
   with its changed-file count, then **All repos**. The choice is the `repo`
   query parameter of `?run=<id>&view=changes` (a workspace id, or `all`; none
   is the primary). The primary tab is today's view unchanged. Another repo
   (`repo-changes.tsx`) shows that repo's files against its base, with its own
-  review comments (kept under `<run id>#<workspace id>` in `review.ts`),
+  review comments (kept under `<session id>#<workspace id>` in `review.ts`),
   **Publish**, pull request and **Merge** (squash); every call carries `repo`.
-  It has no Compare menu: Compare ranges over the run's diff snapshots, which
-  exist for the primary repo only. The primary tab's count comes from the run's snapshot, and from a `run.patch`
+  It has no Compare menu: Compare ranges over the session's diff snapshots, which
+  exist for the primary repo only. The primary tab's count comes from the session's snapshot, and from a `run.patch`
   read until the first snapshot arrives. **All repos** lists each repo's changed files under its name, branch
   and pull request; a file opens in its repo. Paths in a repo are relative to
   that repo.
@@ -3988,23 +3987,23 @@ gateway lists the `run.repos` method.
   PRs**, with the worst check state of them (failing, then running, then the
   rest). It opens a list of repo, `#number` link, state and checks, and
   **Feedback** opens the usual panel for that repo (`repo-pull-requests.tsx`).
-  A pull request is tracked per run and repo in `publish-pr.ts`.
-- **Names.** The run header, sidebar rows and board cards read `repo +N` when
-  the run has extra repos.
+  A pull request is tracked per session and repo in `publish-pr.ts`.
+- **Names.** The session header, sidebar rows and board cards read `repo +N` when
+  the session has extra repos.
 
 ### Browser view
 
-`src/routes/browser/` is the run's **Browser**: a tab among the run's views,
-or a pane beside them (see [Run view](#run-view)), in the same bundle the
+`src/routes/browser/` is the session's **Browser**: a tab among the session's views,
+or a pane beside them (see [Chat view](#chat-view)), in the same bundle the
 local SSH gateway and the server-hosted tailnet gateway serve. It shows the
-run's own Chromium, which the server starts beside the run's container in the
-same network namespace, so `http://localhost:3000` is the app in the run, not
+session's own Chromium, which the server starts beside the session's container in the
+same network namespace, so `http://localhost:3000` is the app in the session, not
 the phone or laptop looking at it. It is not an iframe or a forwarded preview
 host: app JavaScript, cookies, redirects, popups and hot updates run there.
 No debugging/CDP endpoint is exposed to the dashboard.
 
 Opening the view reads status, pages and the control lease; it starts no
-browser. It re-reads every 1.5 seconds while the tab is visible and the run
+browser. It re-reads every 1.5 seconds while the tab is visible and the session
 is live. The first page starts the browser, which takes longer than later
 pages; the pane says **Starting the browser** meanwhile. A server that cannot
 run one answers the status read with its reason, and the pane shows that
@@ -4012,7 +4011,7 @@ reason under **Browser unavailable**. A status read that fails shows its
 error the same way:
 
 ```
-dev.browser.status: scheduler: the run has no live environment: the run is provisioning
+dev.browser.status: scheduler: the session has no live environment: the session is provisioning
 ```
 
 **One row of chrome** (`index.tsx`), a `toolbar` named "Browser":
@@ -4021,7 +4020,7 @@ dev.browser.status: scheduler: the run has no live environment: the run is provi
   their shortcuts. Reload is a spinner while a navigation this tab started is
   in flight.
 - The **Address** field (`address-bar.tsx`).
-- **Ports** (`ports.tsx`): how many ports the run is listening on, with their
+- **Ports** (`ports.tsx`): how many ports the session is listening on, with their
   list behind it. A pane narrower than 480px has no room for it; the address
   field and the empty pane list the ports there.
 - **Keyboard**, on a coarse pointer only: it opens the phone's keyboard for
@@ -4048,7 +4047,7 @@ page for the agent and every other viewer. **New page** opens a blank page
 and puts the caret in the address field.
 
 Under the chrome there is only the page. Before one is open the pane reads
-**Open a page** over the ports the run is listening on, each a button that
+**Open a page** over the ports the session is listening on, each a button that
 opens it (see Ports below), and the address field has focus, except on a
 touch device and when the Browser is docked beside another view. A message
 about an action,
@@ -4080,8 +4079,8 @@ the draft. With no page open the pane already lists them.
 
 **Ports.** `usePorts` (`ports.tsx`) reads `dev.port.list` when the view opens
 and every three seconds while the view is shown, the browser tab is visible
-and the run is live. Nothing is pushed, and a server without the method gets
-none of this. A port reads as the address that reaches it from inside the run
+and the session is live. Nothing is pushed, and a server without the method gets
+none of this. A port reads as the address that reaches it from inside the session
 and the name of the executable listening, as in `localhost:5173 node`:
 `localhost` for a port bound to every interface or to loopback, the address
 itself for any other binding (`portAddress` in `src/lib/ports.ts`). The ports
@@ -4091,7 +4090,7 @@ the first interaction takes the lease, and the keyboard goes to the page once
 it is open. With nothing listening the pane says what to do:
 
 ```
-Nothing in this run is listening on a port yet. Start a server in the Terminal, or ask the agent to, and it appears here.
+Nothing in this session is listening on a port yet. Start a server in the Terminal, or ask the agent to, and it appears here.
 ```
 
 A read that fails shows the server's error where the list would be.
@@ -4107,10 +4106,10 @@ bound to loopback ([local-gateway.md](local-gateway.md#forwarding-a-port)),
 so none is started and the row names the address:
 
 ```
-Port 5173 is bound to ::1 inside the run, so only the run can reach it. Start the server on 0.0.0.0 to open it on this computer.
+Port 5173 is bound to ::1 inside the session, so only the session can reach it. Start the server on 0.0.0.0 to open it on this computer.
 ```
 
-A port that closed since the last read answers "Nothing in the run is
+A port that closed since the last read answers "Nothing in the session is
 listening on port 5173.", and a forward the gateway refuses shows its error:
 
 ```
@@ -4119,9 +4118,9 @@ localops: listen on 127.0.0.1:8000: bind: address already in use
 
 The server-hosted dashboard has no machine of the viewer's to open a port on.
 There the button is **Open on your own computer**, and it shows
-`aether forward <run-id> <port>` beside **Copy the command**.
+`aether forward <session-id> <port>` beside **Copy the command**.
 
-**Control.** Input to the page is serialized by one lease per run browser
+**Control.** Input to the page is serialized by one lease per session browser
 (`dev.control.*`, surface `browser`). The server fences every mutation by the
 lease's session and generation, an agent may take a free lease but never one
 a person holds, and a person may take over from anyone; see
@@ -4168,7 +4167,7 @@ a second, and never while a pointer is down, text is being composed or an
 earlier correction is still being applied: a resize invalidates input aimed
 at the old viewport. The first page opens at
 the target. A preset is remembered for the
-run while the dashboard stays open (`browserPresets`). Presets change the
+session while the dashboard stays open (`browserPresets`). Presets change the
 real remote viewport, not the displayed image, and emulate no user agent,
 pixel ratio or hardware. A page someone else drives keeps their size here and
 is shrunk to fit; a frame is never enlarged, so a preset smaller than the
@@ -4212,16 +4211,16 @@ Browser first when it is neither selected nor docked. It is also the way out
 of the page for a keyboard user, since Tab goes to the page.
 
 **Links from a terminal.** `openRunLink` (`open.ts`) is the link handler of a
-run's agent terminal and shells. An `http(s)` link to `localhost`,
-`127.0.0.1`, `0.0.0.0` or `[::1]` is recorded in `browserRequests`; the run
+session's agent terminal and shells. An `http(s)` link to `localhost`,
+`127.0.0.1`, `0.0.0.0` or `[::1]` is recorded in `browserRequests`; the session
 frame shows the Browser unless it is already docked, and the Browser opens
-the address as if it had been typed. A path in the run's checkout opens in
-its [Files view](#files-in-a-run). Every other link opens in a new tab as
+the address as if it had been typed. A path in the session's checkout opens in
+its [Files view](#files-in-a-session). Every other link opens in a new tab as
 before, and an OAuth callback link is still intercepted first. The
 address-bar shortcut uses the same record with an empty address.
 
-Switching to another run view or closing the dashboard detaches observation
-only. The app, pages and login continue according to the run's lifetime.
+Switching to another session view or closing the dashboard detaches observation
+only. The app, pages and login continue according to the session's lifetime.
 **Close page…** and **Reset session…** take the lease like any other action
 and then confirm in the shared `AlertDialog`. Close removes the selected page
 for everyone while leaving the other pages and the session; Reset destroys
@@ -4230,7 +4229,7 @@ control identity and generation, plus the page and revision for Close. A
 replacement page, session or authority invalidates it rather than retargeting
 the mutation; that includes the lease released by a window blur. Cancel
 restores focus to **Browser actions**, and raw failures remain readable in
-the confirmation. Closing the run owns stopping the companion itself.
+the confirmation. Closing the session owns stopping the companion itself.
 
 **Annotate.** A person points at what is wrong instead of describing it.
 While **Annotate** is on (`annotate.tsx`), the pointer picks elements and
@@ -4253,12 +4252,12 @@ the Browser shows the page they were made on at the same viewport size, and
 they follow the page's scroll. Picking needs a pointer; a screenshot note and
 the console rows below do not.
 
-A server without the method, or a run whose browser companion is older than
+A server without the method, or a session whose browser companion is older than
 the server, cannot annotate. The toggle is dimmed, and its tooltip and a
 notice give the reason in the server's words:
 
 ```
-dev.browser.inspect: this run's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the run to replace the companion: browser: invalid_request: Unknown browser operation
+dev.browser.inspect: this session's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the session to replace the companion: browser: invalid_request: Unknown browser operation
 ```
 
 **Screenshot** calls the real capture API at its own recorded boundary, not
@@ -4267,17 +4266,17 @@ private transient capture and a note for it, with its card open: words for
 the agent are optional, **Keep as evidence…** opens **Captures** (see
 [Captures](#captures)), where a
 member inspects and retains it, and **Remove** takes it out of the message
-while the capture stays in the run. Taking a screenshot does not publish or
+while the capture stays in the session. Taking a screenshot does not publish or
 retain anything.
 
 **Send to agent.** Once there is a confirmed note, a screenshot or a ticked
 row, a bar under the toolbar (`feedback-bar.tsx`) counts them, "2 annotations,
 1 screenshot, 1 failed request", beside **Discard** and **Send to agent**. It
 is the Changes view's review bar for a page: one message, sent under the
-Session composer's rules (`useAgentSend`), with delivery reported the same
+Chat composer's rules (`useAgentSend`), with delivery reported the same
 way. A refused send leaves everything in place under the server's reason.
 Sending first uploads each annotated element's picture through
-`terminal.image`, which returns a path inside the run. The picture is cut in
+`terminal.image`, which returns a path inside the session. The picture is cut in
 the dashboard from the frame that was on the canvas when the element was
 picked, with 12 pixels around it. A gateway without `terminal.image` sends the
 notes without pictures. The message (`feedbackMessage` in `feedback.ts`)
@@ -4285,8 +4284,8 @@ gives the page URL and viewport, then for each note what the person wrote
 followed by what the page says:
 
 ````
-Feedback from the page in this run's browser: 1 annotation, 1 failed request.
-Each screenshot path is an image file inside the run; open it to see what I saw.
+Feedback from the page in this session's browser: 1 annotation, 1 failed request.
+Each screenshot path is an image file inside the session; open it to see what I saw.
 Page: http://localhost:3000/settings (viewport 1280x800)
 
 1. button "Save changes"
@@ -4314,8 +4313,8 @@ development build of React 18 or earlier, `Component` any development build
 of React. HTML is trimmed to 1200 characters. No form control's value is in
 the message; see `inspect` in
 [coordination.md](coordination.md#development-terminals-browser-and-captures).
-A screenshot note names the capture's own path in the run. One message
-carries at most 20 notes. What waits to be sent is kept per run while the
+A screenshot note names the capture's own path in the session. One message
+carries at most 20 notes. What waits to be sent is kept per session while the
 dashboard stays open, across view switches.
 
 **Console and network.** The strip under the page (`logs.tsx`) stands in for
@@ -4338,13 +4337,13 @@ control/viewport rejection, and annotating an element of a page the agent is
 driving, with a failed request, into one message. The app container publishes no host port.
 Use the normal E2E binary/build prerequisites and a built `aether/browser:test`
 image, or the harness's inherited `AETHER_BROWSER_IMAGE` override. The
-deterministic harness only holds the run alive: these are not proof of an
+deterministic harness only holds the session alive: these are not proof of an
 authenticated vendor model/tool loop, nor an authenticated Tailscale-hosted
 device run.
 
 ### Details
 
-While the run's row holds 320px for it plus `minReadableWidth` (560px),
+While the session's row holds 320px for it plus `minReadableWidth` (560px),
 Details is a 320px `complementary "Run details"` beside the view, toggled by
 the header button or `Mod+.` and remembered (`detailsOpen`, persisted). When
 the row narrows, for example when the assistant docks, the inline panel goes
@@ -4360,21 +4359,21 @@ whatever opened it. Sections (`details.tsx`):
   decision or reply locks only its own card ([Actions](#actions)). With none of
   these, one card with the needs-you reason and the header's action as a
   secondary button, or "Nothing is waiting on you."
-- **Child runs**, where the server offers `run.children` and the run has
+- **Subsessions**, where the server offers `run.children` and the session has
   any: every descendant, nearest first and indented by depth, with its
   purpose, state, agent and model, "On `<name>`'s account" plus "(fallback
-  from `<name>`)" when the store's run carries `requested_account_member_id`,
+  from `<name>`)" when the store's session carries `requested_account_member_id`,
   its cost or "Cost not reported", its latest report and error, and
-  a **Detached** badge. **Open** opens a started child. Under the list: the cost of this run and all its
-  descendants, "At least $X: N runs report no cost" when some are unmetered
+  a **Detached** badge. **Open** opens a started subsession. Under the list: the cost of this session and all its
+  descendants, "At least $X: N sessions report no cost" when some are unmetered
   and "Cost not reported" when none are metered, never $0; the split by
   paying account; tokens; and "1 of 8 busy, 1 queued" against the
   workspace limit. The list rereads whenever a
   descendant the store holds changes.
-- **Agent messages**: the run-scoped agent mail, which the Session view also
+- **Agent messages**: the session-scoped agent mail, which the Chat view also
   shows inline, with **Show older** and **Show all**.
 - **Notes**: a comment thread (`note-thread.tsx`) of `comment` room messages,
-  human to human on the run, and teammates' `question` messages. Each note is
+  human to human on the session, and teammates' `question` messages. Each note is
   a row: the author's `Avatar` ringed in their member colour, the name
   ("via ChatGPT" after it when a connector posted it, the name the message
   carried when the member is gone), a **question** badge, the time, and the
@@ -4404,15 +4403,15 @@ whatever opened it. Sections (`details.tsx`):
   never shows twice. A refusal keeps the key too: `run.room.post` can save
   the note and then fail, so the key is dropped only when a saved copy with
   it arrives or the signed-in member changes. The field, pending keys and failures live in the store
-  per run, so they survive closing Details, and are dropped, with any note
+  per session, so they survive closing Details, and are dropped, with any note
   still reading "Sending…", when the signed-in member changes; an answer or failure that arrives after the
   change is dropped too. Adding a note never disables **Reply**,
   **Approve** / **Deny** or the composer.
 - **Details**: the task, Owner, Agent account (when it is someone else's),
   Agent and mode, Branch, Created, Changed, Last commit, In control,
   Watching, Container ("Starting", "Running", "Stopped, kept for reopening"
-  or "Removed"), Container size (what the run wrote inside its container
-  outside the mounted home, checkout and cache; shown to the run's owner and
+  or "Removed"), Container size (what the session wrote inside its container
+  outside the mounted home, checkout and cache; shown to the session's owner and
   admins once measured), Archived, and **Last reason**, the server's `run.reason`, so
   a parked error or stall detail the reason line leaves out is never hidden.
 
@@ -4421,40 +4420,40 @@ Any other failed room action shows its error above the sections with
 
 ### Workflow panel
 
-The Workflow panel (`src/routes/run/workflow-panel.tsx`) shows what the run
+The Workflow panel (`src/routes/run/workflow-panel.tsx`) shows what the session
 and its agents are doing as a tree; the [Trace view](#trace-view) shows when
 they did it. Its chip sits after the view switch and
-mirrors the run's state: `● Working · 2 agents running` (subagents and
+mirrors the session's state: `● Working · 2 agents running` (subagents and
 workflows running at any depth, a background one included) or
 `● Waiting for CI · 3 of 9 checks` (passing checks of the pull request's
 checks this tab last read). The chip toggles the panel. While the
-run's row holds 320px for it plus `minReadableWidth`, the panel is a 320px
+session's row holds 320px for it plus `minReadableWidth`, the panel is a 320px
 `complementary "Workflow"` rail at the right of the frame, remembered per
 device (`workflowOpen`, persisted, closed until the chip first opens it). A
 row too narrow for it beside Details or the subagent inspector shows those
 instead; the chip then closes Details to make room.
 Narrower rows open it as a side sheet and phones as a bottom sheet, a
 `dialog "Workflow"` that returns focus to the chip, and that closes when a
-row opens the subagent inspector or the request, or the view changes. Under the tree, a run
+row opens the subagent inspector or the request, or the view changes. Under the tree, a session
 with a branch shows the compact git card (`GitFlow` in
 `src/components/workflow/git-flow.tsx`), except on the Changes view, which
 shows the full one.
 
 The tree (`src/components/workflow/workflow-tree.tsx`) is derived by
-`src/store/workflow.ts` from what the dashboard already holds: the run's
+`src/store/workflow.ts` from what the dashboard already holds: the session's
 `presentRun` state and reason, and the session's subagent index. Its root is
-the run; a run that needs you leads with a Needs you row naming the
+the session; a session that needs you leads with a Needs you row naming the
 request; under it every subagent and nested workflow nests under the agent
 that launched it (one whose launch the loaded history lacks sits under the
-run, `Not checked yet`), with its label, state and a summary of its tool calls
-("Read 3 files and ran 2 commands"), never its prose. Child runs follow the
-agents, each under the run that started it, at any depth; selecting one
+session, `Not checked yet`), with its label, state and a summary of its tool calls
+("Read 3 files and ran 2 commands"), never its prose. Subsessions follow the
+agents, each under the session that started it, at any depth; selecting one
 opens it. Node ids are server
 ids (`run:<id>`, `agent:<tool call id>`), and a re-derivation keeps every
 unchanged subtree's object, so only rows that changed re-render.
 
 Each 28px row shows a status dot (shape and text, the vocabulary of
-[Run state](#run-state) plus `Not started` and `Not checked yet`), the label,
+[Session state](#session-state) plus `Not started` and `Not checked yet`), the label,
 the muted reason, and at the right the elapsed time in tabular figures, or
 on the root real counts (`2 agents running`, counting every depth, or
 `3 of 5 tasks done`).
@@ -4485,48 +4484,48 @@ reduced motion requested, neither animates.
 
 **Captures…** in More (and in the terminal's **Tools** menu) opens
 `routes/run/captures.tsx`, a dialog titled **Captures** (a bottom sheet on
-phones, positioned against the viewport so the run view's scroll containers
+phones, positioned against the viewport so the session view's scroll containers
 cannot clip it). Captures record what was seen, not that it was verified. The
 dialog holds, top to bottom:
 
 - **Select transient captures to retain** and **Retain selected captures**:
   a screenshot from the Browser or a shell is private and transient until
   retained here. Nothing is retained or attached to a pull request on its own.
-- The run's retained packets, each with **Open**, and **Load older**. An open
+- The session's retained packets, each with **Open**, and **Load older**. An open
   packet shows its summary, changed files, source availability, unresolved
   questions, verification notes and retained captures, with its patch and
   transcript on demand. **Answer** on an unresolved question closes the
   dialog and puts the question in the Notes field.
 
-**Raw events…** opens the run's slice of the activity feed
+**Raw events…** opens the session's slice of the activity feed
 (`routes/run/raw-events.tsx`) and restores the feed filters on close.
 
 ### Missing run
 
-A run id none of the four tabs can find renders one shared `MissingRun`
+A session id none of the four tabs can find renders one shared `MissingRun`
 (`src/components/missing-run.tsx`) instead of that header, its tab strip and
 four copies of a sentence with nothing to press. What it says is what the
 store actually knows. While the server is unreachable it reports that, in
 the same words `run-list.tsx` uses and with the same split - a dead token is
 not a server that is retrying, so that one says what the error recorded -
-rather than a claim about the run. While the store is still hydrating it is
+rather than a claim about the session. While the store is still hydrating it is
 a skeleton, held behind `useDelayed` so a fast load never flashes one. Only
-once the store has hydrated does it say the run is not on the server, and
-offer **Back to board**. The launch paths seed the run they just started -
-both template launches and the onboarding first-run form, the way
+once the store has hydrated does it say the session is not on the server, and
+offer **Back to board**. The launch paths seed the session they just started -
+both template launches and the onboarding first-session form, the way
 `launch-dialog.tsx` does - so a launch never lands on the deleted claim.
 
 ## Activity and budgets
 
 `src/routes/team/` holds presence and budgets, and `src/routes/activity/` the
 workspace activity feed - the readouts of the team features
-(`internal/timeline`, `internal/cost`). Watchers show in the run view,
+(`internal/timeline`, `internal/cost`). Watchers show in the session view,
 presence and spend are the **Team** line in the sidebar footer menu, and the
 full view is a registry route: **Activity** (`timeline`) is in the header
 navigation (or its overflow menu), gated on the method it needs.
 
-Teammate questions and queued messages stay contextual to their run, in its
-Details **Needs you** section. Unanswered questions to the owner put the run
+Teammate questions and queued messages stay contextual to their session, in its
+Details **Needs you** section. Unanswered questions to the owner put the session
 in **Needs you**.
 
 - **Events keep them current; a full read only fills gaps.**
@@ -4552,7 +4551,7 @@ in **Needs you**.
     and returns before the cursor check, so it cannot move `lastSeq`.
     `stopped: true`, or that member's `workspace.room_message`, removes the entry.
   These reads start without holding up the events queued behind them (only a
-  run fetch does, for the cursor rule), and each is coalesced in
+  session fetch does, for the cursor rule), and each is coalesced in
   `src/store/coalesce.ts`: per workspace, one in flight and one queued, so a
   burst of results or attaches costs two requests. `AppShell` mounts the hook
   once, which is also where the presence heartbeat lives (every 15 s, with the
@@ -4565,15 +4564,15 @@ in **Needs you**.
 - **One refresh covers every workspace, and there is only the one.** These
   reads are per workspace on the wire, and a workspace is a repo plus its
   team settings. A deployment has a handful of them and they outlive every
-  run in them. So `refreshTeam` reads all of them each time rather than
+  session in them. So `refreshTeam` reads all of them each time rather than
   splitting into a bounded recurring pass and a wide occasional one. The
   Team line asks a whole-deployment question anyway - it claims the worst
   budget state anywhere - and a workspace does not stop being over its cap
-  when its last run finishes, so no subset could answer it. Failures leave
+  when its last session finishes, so no subset could answer it. Failures leave
   the last good data in place.
 - **The heartbeat is narrower.** It claims only the workspace in view -
   `focusedWorkspace` prefers the route's `workspaceId`, then the workspace of
-  the run in view, then `activeWorkspace` - because presence is keyed on
+  the session in view, then `activeWorkspace` - because presence is keyed on
   (member, workspace) and beating them all would report you online to
   teammates in workspaces you have never opened.
 - **The feed opens at the end of the log.** The feed reads
@@ -4581,7 +4580,7 @@ in **Needs you**.
   page past the end - that answer carries the log head - and opens a window
   back from it. After that the feed is live without reading: while a feed view
   is mounted (`useLiveFeed`), `applyEvent` appends each event the filters
-  select by the server reader's own rule (workspace, run or mail to it, actor,
+  select by the server reader's own rule (workspace, session or mail to it, actor,
   type; `run.diff`, `run.title`, `run.agent`, `coord.message.acked`,
   `run.pr` and `workspace.presence`
   only when asked for by type),
@@ -4602,13 +4601,13 @@ in **Needs you**.
   one scoped surface that keeps a workspace filter of its own (shown when
   there is more than one workspace), because comparing what happened in one
   workspace against another is the question the view exists to answer; it
-  opens on the active workspace and switching it clears the run filter, since
-  a run belongs to exactly one workspace.
+  opens on the active workspace and switching it clears the session filter, since
+  a session belongs to exactly one workspace.
 - **A feed row is a sentence.** `src/components/event-words.tsx` words
   every event type the server declares: "You messaged the agent: “…”",
   "Waiting: turn ended without a report", "Alice approved “Bash: rm -rf build”", "Failed:
   Agent exited with code 1". The viewer is "You", server reasons go through
-  `plainReason` (`src/lib/status.ts`), and room ids, run ids and wire enums
+  `plainReason` (`src/lib/status.ts`), and room ids, session ids and wire enums
   never appear outside Raw events. Its table is keyed by `src/lib/events.ts`'s
   type names, which also name the filter options, so a type cannot gain a
   name without words. `src/lib/events.test.tsx` reads the event, timeline
@@ -4620,11 +4619,11 @@ in **Needs you**.
   the headless Claude output that triggered it "Usage limit reached: You've
   hit your session limit · resets 3pm (UTC)", the agent's message cut at 160
   characters (`run.usage_limit`, filter **Usage limit reached**).
-- **Opening a run is one row.** Viewing a run takes its control and leaving
+- **Opening a session is one row.** Viewing a session takes its control and leaving
   releases it; `foldVisits` (`routes/activity/visits.ts`) folds each
   `run.controller` take and the release that ends it into one "Alice viewed
-  the run" row ("is viewing" while it lasts). A release with no take on the
-  page stays "Control released". **Show › Run control** lists only these
+  the session" row ("is viewing" while it lasts). A release with no take on the
+  page stays "Control released". **Show › Session control** lists only these
   rows. Raw events does not fold.
 - **One Filter popover.** **Filter** in the Activity header holds Workspace,
   **Show** (every event, one event type, or **Agent messages**), Run and
@@ -4637,18 +4636,18 @@ in **Needs you**.
   messages" in the Agent messages view). An empty feed is an `EmptyState` with
   a history icon.
 - **Rows share one time column.** Each row is a grid: relative time, a state
-  dot only on `run.status` (the run's new state), the actor's avatar or the
-  message kind glyph, the sentence, and the run as a quiet link. On a phone
-  the sentence shares the first line with the time and the run link takes
+  dot only on `run.status` (the session's new state), the actor's avatar or the
+  message kind glyph, the sentence, and the session as a quiet link. On a phone
+  the sentence shares the first line with the time and the session link takes
   the full width under it. `coord.message` and `coord.message.acked` rows
-  name sender and recipient by their run titles, never
+  name sender and recipient by their session titles, never
   the payload's ids, and a delivery word only
   once the message is in the messages slice; the event alone does not say
   whether it was delivered.
   `run.retention` has its own **Runtime retention** filter and describes the
   exact grace deadline, pending cleanup, and safe cleanup diagnostic. It has
   no business-state dot; cleared metadata is not another completed outcome
-  or proof that a reopened run's runtime was removed.
+  or proof that a reopened session's runtime was removed.
 - **The feed is virtualized.** `virtua` mounts only the rows near the
   viewport of the view's scroller (`routes/activity/virtual-list.tsx`); each
   row carries `aria-setsize` and `aria-posinset`, so a screen reader still
@@ -4658,9 +4657,9 @@ in **Needs you**.
 - **Agent messages is the workspace's message history.** Choosing it in
   **Show** swaps the feed for `coord.messages.list` rows, newest first, drawn
   by `components/messages/message-row.tsx`: kind glyph, sender → recipient
-  (each a muted link to that run), kind word, delivery word (Sent, Delivered,
+  (each a muted link to that session), kind word, delivery word (Sent, Delivered,
   Acknowledged), relative time, and the body clamped at three lines. Sender
-  or Recipient asks the server for that run's mail (`run_id`) and keeps the
+  or Recipient asks the server for that session's mail (`run_id`) and keeps the
   chosen side; **Thread** on a question or report asks the server for that
   thread (`correlation_id`), so replies on older pages show too; all three
   are in the Filter popover while Agent messages is shown. The search box filters the bodies already loaded and says so while
@@ -4670,10 +4669,10 @@ in **Needs you**.
   footer menu shows the spend and the worst state any workspace is in (`ok`,
   `warn`, `exceeded`) - every workspace, ones with nothing running included,
   which is what the wide read above is for - and says so in those words, for
-  example "1 online · $12.40 spent". The spend is every run's total, not a
-  month's. A spend that includes unmetered runs renders as a floor ("at least
+  example "1 online · $12.40 spent". The spend is every session's total, not a
+  month's. A spend that includes unmetered sessions renders as a floor ("at least
   $1.20 spent"), because an agent with no adapter reports nothing; a zero
-  spend reads "no spend yet", or "no spend reported" when only unmetered runs
+  spend reads "no spend yet", or "no spend reported" when only unmetered sessions
   exist.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
@@ -4692,13 +4691,13 @@ is the System tab: `use-system-stats.ts` polls `system.stats` every
 `interval_ms` while the tab is mounted, the connection is live and the
 document is visible, sends the newest `t_ms` as `since_ms`, merges samples
 into a one-hour buffer and polls once more after 1.5 s while a container has
-no CPU figure. `model.ts` builds the donut slices and keeps each run on its
+no CPU figure. `model.ts` builds the donut slices and keeps each session on its
 colour slot (`--series-1` to `--series-8`) while it is present. Charts are
 Recharts, framed by `components/ui/chart.tsx`. The Storage section there
 replaced the disk rows of Settings › Server. The CPU, Memory and Network
 figures glide between polls (`useTween`, one glide per new sample; they never
 count up on mount and snap under reduced motion); the Disk figure is a meter.
-Storage's container and owner rows are an `InsetList`, a row that names a run
+Storage's container and owner rows are an `InsetList`, a row that names a session
 opening it. While the first sample is read, six tile skeletons stand in after
 ~200ms.
 
@@ -4717,21 +4716,21 @@ section loads, fails and retries on its own.
   request carries the browser's IANA time zone for day buckets, or "" (UTC)
   when the browser reports none, which the page then says. The choice lasts
   while the page is open; it is not in the address. On a phone it wraps
-  above the content instead of sitting in the header. Runs in **Needs you**
+  above the content instead of sitting in the header. Sessions in **Needs you**
   follow as a link to the Board.
 - **My statistics** and **Team statistics.** Two sections with the same
   layout, mine first. Each has three `StatTile`s and one chart; until they load, four tile skeletons
   and a chart skeleton stand in:
-  - *Runs completed*: `outcomes.runs.done`, with the failed and
+  - *Sessions completed*: `outcomes.runs.done`, with the failed and
     abandoned counts below. Every number is from `outcomes`, work
     that finished in the window, so the box and the chart agree.
-  - *Success rate*: runs that ended with a merged pull request
+  - *Success rate*: sessions that ended with a merged pull request
     over all that finished, `success.runs`, rounded
     down in integers so 100% means exactly all succeeded; a dash when none finished. Each
     fraction is written out below.
   - *Total tokens used*: `cost.total_tokens` as "100K tokens", with the
     harness at the head of `cost.by_agent` and its share, rounded down
-    ("Claude Code used 56% of the 100K tokens") and how many runs reported no tokens.
+    ("Claude Code used 56% of the 100K tokens") and how many sessions reported no tokens.
 - **Outcome chart.** One chart per section: seven day groups, each three
   bars side by side, Done, Failed and Abandoned, from `outcomes.series`. Every bar carries its
   count; the letters D, F and A under each group name its bars, and Failed is
@@ -4749,33 +4748,33 @@ section loads, fails and retries on its own.
   chart always draws its
   axes and says so when nothing ended. The y axis tops out at the busiest
   bar.
-The sections below cover only the member's own runs in the same window.
+The sections below cover only the member's own sessions in the same window.
 
-- **Finished work.** The server's 50 most recent runs that ended, ten shown
+- **Finished work.** The server's 50 most recent sessions that ended, ten shown
   until **Show all**: title, outcome badge, workspace, agent and model
-  ("default model" when the run used the agent's own), duration, pull
-  request link and relative end time. A row opens the run. The server
-  learns a merge only when `run.pr.status` is called for the run, so after
-  each load the page calls `run.pr.status {"run_id":"<run-id>"}` one after
-  another for up to ten listed runs whose pull request is recorded `open`,
+  ("default model" when the session used the agent's own), duration, pull
+  request link and relative end time. A row opens the session. The server
+  learns a merge only when `run.pr.status` is called for the session, so after
+  each load the page calls `run.pr.status {"run_id":"<session-id>"}` one after
+  another for up to ten listed sessions whose pull request is recorded `open`,
   then reads `insights.get` again once if any state changed. The team
-  statistics do the same for their own list, skipping runs already
+  statistics do the same for their own list, skipping sessions already
   checked, and a change in either rereads both. A failed call
   leaves the row as it was and puts the error in the pull request link's
   tooltip; a failed second read is shown above the page, which keeps the
   first.
-- **Last 26 weeks.** A calendar heatmap of runs active each day in one
+- **Last 26 weeks.** A calendar heatmap of sessions active each day in one
   accent hue, with a Fewer to More scale. It is one tab stop; arrow keys
   move by day and week, and each day is labelled with its date and count.
 - **Breakdown.** By workspace and by agent: launched, finished and failed as
   numbers beside a bar.
-- **Time.** Median and slowest-10% run time, and, from the server's state
+- **Time.** Median and slowest-10% session time, and, from the server's state
   record, median time working, waiting on you and your response time. When
-  fewer runs have state times than run times it says "measured for N of M
-  runs; Aether records this from <date> on."
+  fewer sessions have state times than session times it says "measured for N of M
+  sessions; Aether records this from <date> on."
 - **Usage**, collapsed: cost as a floor ("at least $4.12") with how many
-  runs reported it, tokens, and a link to **Settings › Usage** for
-  subscription quota. Cost never stops a run.
+  sessions reported it, tokens, and a link to **Settings › Usage** for
+  subscription quota. Cost never stops a session.
 
 A failed read shows the server's error with **Retry** in the section that
 failed; a server without `insights.get`, or one whose answer lacks
@@ -4787,8 +4786,8 @@ and the chart says nothing ended.
 ## Memory
 
 `src/routes/memory/` is **Memory** (`?page=memory`), the active workspace's
-[team memory](memory.md): short attributed notes every run can search and
-write, and the brief a new run starts with. It is in the header navigation
+[team memory](memory.md): short attributed notes every session can search and
+write, and the brief a new session starts with. It is in the header navigation
 after **Insights** when the gateway offers `memory.search`. It reads
 `memory.search`, `memory.show` and `memory.brief`, writes with `memory.add`,
 `memory.pin`, `memory.unpin` and `memory.rm`, and re-reads the list, the tab
@@ -4826,11 +4825,11 @@ Top to bottom:
   searching) head the groups when both have notes. A row is the title, at
   most two lines, and one line of kind, source (Agent note, Member note, Run
   report), the author with the agent's display name, the pull
-  request or else the run as a link (not on a phone, where the detail lists
+  request or else the session as a link (not on a phone, where the detail lists
   them), the age, the pin badge ("Pinned by
   Dana", or "Pinned for you" or "Pinned for Dana" on a pin for one member's
   briefs) and **Superseded**; cited files are in the detail. Under a mouse,
-  hover or focus shows **Pin for every new run** or **Pin for your new runs**
+  hover or focus shows **Pin for every new session** or **Pin for your new sessions**
   (no `scope`, so the note keeps its own, as `aether memory pin`), **Unpin**,
   **Replace** and **Remove**; a replaced note offers only **Remove**. On a
   touch screen a tap opens the detail instead. A pin or unpin glides the row
@@ -4848,8 +4847,8 @@ Top to bottom:
 - The footer line, a live region: **Undo** after a removal, the composer's
   keys and byte count against 1024, then the last result ("Added
   note-…", "Replaced note-… with note-…", "Already kept as note-…") for four
-  seconds, then what the hovered or focused row does for new runs ("Pinned
-  by Dana · in every new run's brief", "Not pinned · runs find it by
+  seconds, then what the hovered or focused row does for new sessions ("Pinned
+  by Dana · in every new session's brief", "Not pinned · sessions find it by
   searching"), and otherwise the count of listed notes and pins, or matches.
   When a read returns 100 notes it says what the list holds instead: every
   pinned note, or the 100 newest pinned notes or best pinned matches, then
@@ -4867,7 +4866,7 @@ back as a toast with the server's text and the note returns. Focus that was
 on the removed note moves to the next note, else the previous one, else **Add
 note**.
 
-A row opens `memory.show`: the note's text, its provenance (author, run and
+A row opens `memory.show`: the note's text, its provenance (author, session and
 its ID, commit, pull request, files, the report or question it came from,
 when it was written and pinned, what replaced it) and the supersede chain in
 replacement order, each other note a link. A member who may push gets **Pin
@@ -4891,25 +4890,25 @@ this note needs 120; unpin one first`. A pin refused after an add
 because the note was stored. A viewer sees no write controls. A server
 without `memory.search` gets a neutral line asking for an update. Activity
 words `memory.change` as "Dana pinned a team memory note", "The agent
-added a team memory note" for a run's write or outcome.
+added a team memory note" for a session's write or outcome.
 
 ## Files
 
 `src/routes/files/` is the Files explorer and editor. It combines each visible
-workspace's base branch, live run checkouts, and **Home**, the authenticated
+workspace's base branch, live session checkouts, and **Home**, the authenticated
 member's whole persistent home ([Home](#home)). `files.tree`,
 `files.read`, `files.write`, `files.diff`, and the `home.*` methods are
 available through both the local SSH-backed gateway and the server-hosted
 WhoIs gateway. Directory requests are lazy and cached in
 `src/store/files.ts`; file content comes from `files.read` or `home.read`.
-A live run's file can switch from **File** to **Changes vs base**. The same
-tree and editor are a view of each run, scoped to that run's checkout: see
-[Files in a run](#files-in-a-run).
+A live session's file can switch from **File** to **Changes vs base**. The same
+tree and editor are a view of each session, scoped to that session's checkout: see
+[Files in a session](#files-in-a-session).
 
 Folder chevrons turn as a folder opens, and the empty editor pane is an
-`EmptyState` with a folder-tree icon. The tree lists each workspace's `base: <branch>` first, then its live runs
-under **Run checkouts**, then one **Home** row; both start folded, so a
-run's tree or the home is read only when it is opened. Folder expansion is
+`EmptyState` with a folder-tree icon. The tree lists each workspace's `base: <branch>` first, then its live sessions
+under **Session checkouts**, then one **Home** row; both start folded, so a
+session's tree or the home is read only when it is opened. Folder expansion is
 kept per view. The tree sits beside the
 editor from `md` up. On a phone it is the first view; once a file is open the
 editor fills the screen and **Browse** opens the tree as a side sheet.
@@ -4922,7 +4921,7 @@ The action label states the write target: base files show **Commit to
 <branch>…**, which opens a dialog saying the commit lands on that branch and
 is not pushed upstream, then creates one file commit (a failed commit keeps
 the dialog open with the error); live-run files show **Save**, changing the
-run's uncommitted checkout; Home files show **Save**, changing only
+session's uncommitted checkout; Home files show **Save**, changing only
 the authenticated member's persistent home. Base writes need the push
 permission, run writes the steer permission, and Home reads and writes are
 always for the calling member and need the launch permission. A text file
@@ -4939,47 +4938,47 @@ The revision is the SHA-256 of the complete bytes read. A failed or stale save
 keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
-All runs the member launches and their Environment mount one shared
+All sessions the member launches and their Environment mount one shared
 read-write persistent HOME, so uploaded configuration and saves are
-visible to active and future runs; a tool may need to reload. Files edits
+visible to active and future sessions; a tool may need to reload. Files edits
 do not create CLI snapshot history. Optional run
 snapshot pins are provenance, not isolated writable copies. Manual profile
 push and rollback overlay snapshot files into that same HOME without removing
 paths absent from the snapshot; rollback is not an exact-tree restore.
 
-A `run.diff` event drops every listing and document cached for that run,
-because its checkout changed; a save into a run's checkout causes one too.
+A `run.diff` event drops every listing and document cached for that session,
+because its checkout changed; a save into a session's checkout causes one too.
 The tree and the editor keep what they last read until the reread lands
 (`TreeDirectory`, `FileEditor`), and `EditableDocument` then replaces only
 the span that differs, so an open folder does not blink and the caret, the
 scroll position and the marked line stay where they were. A draft started
 during the reread is still based on the revision that was on screen.
 
-### Files in a run
+### Files in a session
 
-`RunFiles` (`run-files.tsx`) is the run page's Files view: that run's
+`RunFiles` (`run-files.tsx`) is the session page's Files view: that session's
 checkout under its branch name, with the tree, the editor, the tabs and the
 phone layout of the Files route (`FilesPane`, `closeTab` in `pane.tsx`). Its
-tabs are the open files of that run; they are the same tabs the Files route
-shows under **Run checkouts**. The base branch and Home stay
+tabs are the open files of that session; they are the same tabs the Files route
+shows under **Session checkouts**. The base branch and Home stay
 on the Files route. The pane is measured: below 640px, with the Browser
 docked beside it for instance, it shows the tree until a file is open and
 then the editor with **Browse**, as a phone does.
 
-A live run's checkout root, here and under **Run checkouts** on the Files
+A live session's checkout root, here and under **Session checkouts** on the Files
 route, is a `RunCheckoutTree` (`tree.tsx`). When the gateway serves
 `files.upload`, its row has an **Upload files…** icon button, and files and
 folders dropped on its tree upload into the root of the repository it shows,
 folders kept (`droppedUploads`). `useUpload` sends one `files.upload` per
 file, so a path the checkout has
-fails as **README.md already exists in this run; open it to edit**; there is
+fails as **README.md already exists in this session; open it to edit**; there is
 no **Replace**. `UploadStatus` under that tree shows progress and failures as
-on Home, and `invalidateRun` rereads the run's listings afterwards. The
+on Home, and `invalidateRun` rereads the session's listings afterwards. The
 upload state lives in the tree: closing the phone sheet or folding **Run
 checkouts** hides an upload's progress, not the upload.
 
 `openInFiles(runID, { path, line, column })` (`open.ts`) is the one way in
-from outside the tree. It navigates to the run route with `view: 'files'`,
+from outside the tree. It navigates to the session route with `view: 'files'`,
 `file` and, when named, `line` and `column`; those three are not written to
 the address. The view opens the file, opens the folders above it in the tree
 and scrolls its row into view (`TreeExpansion reveal`), and the editor puts
@@ -4990,11 +4989,11 @@ shows the line again. A line past the end of the file marks the last line.
 A file the checkout does not have opens with the server's `files.read` error.
 
 Three things call it: a file's header in the Changes view, a path in the
-Session view and a path in one of the run's terminals.
+Chat view and a path in one of the session's terminals.
 
 `findPaths` (`paths.ts`) reads what could name a file: `path`, `path:line`,
 `path:line:col` and `path#L12`, relative to the repository, with a leading
-`./`, or under `/workspace/`, where every run's checkout is mounted. A lone
+`./`, or under `/workspace/`, where every session's checkout is mounted. A lone
 word counts only with an extension or a line (`go.mod`, `Makefile:12`).
 URLs, absolute paths outside `/workspace`, `..` and `.git` segments are not
 paths.
@@ -5004,7 +5003,7 @@ does not ask the server about text that is merely on screen. `isRunFile`
 answers from the directory listings in `src/store/files.ts`, the cache the
 tree fills, and reads at most two it lacks: the repository root, which rules
 out prose such as "and/or" with no request of its own, and the file's
-directory. The Session view asks when the pointer reaches a path or a finger
+directory. The Chat view asks when the pointer reaches a path or a finger
 taps it (`FileLink` in `path-link.tsx`); a terminal asks for the line under
 the pointer (`findRunFiles`, through `useXterm`'s `findLinks`, which joins a
 wrapped line before it is searched). Each listing is fetched once however
@@ -5021,10 +5020,10 @@ a whole checkout.
 
 **Home** is one root row with a trailing `~`, shown when the gateway serves
 `home.tree`. Under it is the member's whole persistent home, the directory
-that is `$HOME` in their Environment and runs, read one folder at a time
+that is `$HOME` in their Environment and sessions, read one folder at a time
 through `home.tree` with nothing filtered. Only this tree creates, renames,
 moves and deletes entries; base and run-checkout trees are read and edited,
-and a live run's takes uploads ([Files in a run](#files-in-a-run)). The
+and a live session's takes uploads ([Files in a session](#files-in-a-session)). The
 methods and the server's rules are in
 [local-gateway.md](local-gateway.md#files-and-member-configuration).
 
@@ -5060,7 +5059,7 @@ Home listing from the store (`refreshHome`), so each open folder is reread;
 watches the home: a file an agent writes shows after a refresh.
 
 A name is typed where the entry sits. **New file** and **New folder** open
-the folder and put `NameRow` first among its children, with the entry's
+the folder and put `NameRow` first among its subsessions, with the entry's
 icon; **Rename**, or F2 on a focused row, replaces the row's label with a
 field holding the name, its stem selected. Enter commits, and a new file
 then opens in the editor. Escape or leaving the field cancels. A name is one
@@ -5149,7 +5148,7 @@ disabled **Launch**; **Copy** copies the rendered task. `Enter` in a field
 moves to the next empty one, or launches once none is left. **Launch** sends
 `template.launch` with only the values typed over a default, never the task,
 reads "Launching…", with every **Launch** held, until the server answers so
-one click starts one run, and opens the new run; a refusal toasts the
+one click starts one session, and opens the new session; a refusal toasts the
 server's error. Typed values last, per workspace, while the page is open.
 On a phone the list and the detail are one pane at a time, with
 **Templates** to go back. A failed `template.list` read shows the
@@ -5160,7 +5159,7 @@ the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
 `<name> copy`. The form's agent select lists the agents from `agent.list` by
 display name and keeps the template's current agent as an extra option when
-the list omits it. An **Effort** field, as in New run, shows for an agent with
+the list omits it. An **Effort** field, as in New session, shows for an agent with
 `effort_levels`, and picking an agent that lacks the chosen level clears it. Its **Parameters** group lists each `{{name}}` the task
 uses, live, with an optional default (clearing the field removes it); defaults for names the task no longer
 uses are dropped, and the template's budget hint is kept, so an edit never
@@ -5219,7 +5218,7 @@ changed lands on the list of the workspace it was sent from, not the shown one.
 
 ## Agents
 
-An **agent** is the coding CLI a run starts, such as Claude Code or Codex.
+An **agent** is the coding CLI a session starts, such as Claude Code or Codex.
 `src/routes/agents/` is the **Agents** page; it and onboarding's Agent step
 render the same parts from `src/components/agents/`, so this section covers
 both. The page header has **Add agent…** where the gateway serves
@@ -5240,14 +5239,14 @@ deleted (`~/.local/bin/<executable>`, plus the Enhanced adapter's link, or the
 member's definition) and what stays; a refusal appears in the open dialog, and
 success reloads the shared agent list, so the launcher's picker updates too. On the Agents page an installed agent's row also has a **Default
 mode** select, shown as "Default: Standard", which writes `launchDefaults`
-without changing which agent **New run** preselects. Rows sit in an `InsetList` with the glyph in an `IconTile`. Once one agent is
+without changing which agent **New session** preselects. Rows sit in an `InsetList` with the glyph in an `IconTile`. Once one agent is
 installed the page folds the rest under **More agents**, whose count is a
 `CountBadge` (the button is named "More agents (n)"). While `agent.list` is
 pending, three row-shaped skeletons stand in after ~200ms. **What's the
 difference?** beside the page's lead opens the Standard and Enhanced cards
 (`ModeOverview`) in a dialog.
-**Run** remembers the agent and its default mode and opens **New run** on it;
-in onboarding it moves to First run with that agent preselected. **Add
+**Run** remembers the agent and its default mode and opens **New session** on it;
+in onboarding it moves to First session with that agent preselected. **Add
 agent…** (`add-agent.tsx`) asks for a name, a Standard and a Background
 command and an optional Enhanced command, Enhanced start mode and login file,
 sent through `agent.register`. The Background default follows the Standard
@@ -5261,7 +5260,7 @@ member's Profile and opens it with **Set it in Profile** rather than editing
 the identity itself; **GitHub**; and **Agent config files**, a prompt that
 has an agent on the member's computer upload its configuration.
 
-**Set up** opens `agent-setup.tsx`, three numbered steps: **Choose how runs
+**Set up** opens `agent-setup.tsx`, three numbered steps: **Choose how sessions
 show it**, **Install and log in** and **Check**. The first is
 `mode-comparison.tsx`: a `radiogroup` of two cards (`ModeOverview` draws the
 same cards as a static list with agent-neutral notes), side by side
@@ -5274,7 +5273,7 @@ modes run with full permissions by default. Both are spans with `aria-hidden`, s
 the radio's button; the description and
 trade-off are its `aria-describedby`. Below the cards a `dl` gives the
 per-agent lines from `agent-copy.ts`: support, setup, switching (from
-`switchable`, otherwise "Chosen when the run starts"), fallback, and billing
+`switchable`, otherwise "Chosen when the session starts"), fallback, and billing
 for Claude Code. An agent whose `enhanced` is not `native` or `adapter` gets
 the Enhanced card disabled with the reason as its note; otherwise the note
 is `permissionNote` from `agent-copy.ts`, which says per shipped agent how it
@@ -5292,8 +5291,8 @@ install command there instead, and one without a terminal socket prints the
 **Installed**, **Enhanced installed** and **Login found** or **No login
 found**; the copy never says "signed in", because the probe checks for a
 file. **Done** appears once the agent is installed with no missing login and
-calls `rememberLaunch` with the chosen mode, which seeds **New run** and
-First run. Setup does not save the Environment image: the install lands in
+calls `rememberLaunch` with the chosen mode, which seeds **New session** and
+First session. Setup does not save the Environment image: the install lands in
 the member's home directory, which every container mounts.
 
 **GitHub (member-scoped terminal setup).** `github-connect.tsx` remains the
@@ -5302,7 +5301,7 @@ onboarding instead uses the shared browser connection described under
 [Manage workspaces](#manage-workspaces), including a persisted status check on
 the Agent step so Repository-step authorization need not be repeated.
 The terminal setup's closed `<section aria-label="Connect GitHub">` says what a connection
-buys - runs push branches and open pull requests as the member, and commits
+buys - sessions push branches and open pull requests as the member, and commits
 are signed with a key kept in their home directory - and **Connect GitHub**
 opens the sub-screen. The sub-screen mounts the same `TerminalDock` the
 setup screen uses and calls `github.probe` once that dock reports a running
@@ -5410,7 +5409,7 @@ protocol](local-gateway.md#files-and-member-configuration) for the
 
 `src/routes/environment/` is the member's **Environment**: a shell into their
 own long-lived container, where they install tools, log in to agents and save
-the result as the image new runs start from
+the result as the image new sessions start from
 ([environment-home.md](environment-home.md)). It is reached through the
 header's **Environment** button (or **More navigation → Environment**) or
 `g e`, and only when the gateway advertises the `terminal` WebSocket.
@@ -5460,7 +5459,7 @@ control toggles between half of the room it has and all of it.
 screens type into it.
 
 The environment dock's state and socket registry live in
-`src/store/env-terminal.ts` (run shells use `src/store/terminal.ts`). The
+`src/store/env-terminal.ts` (session shells use `src/store/terminal.ts`). The
 live attachment objects stay outside persisted Zustand state, but a dock
 socket can outlive the component that last displayed it. When a new xterm
 host adopts one, the dock calls `Attachment.rebind()` with fresh callbacks.
@@ -5568,7 +5567,7 @@ server with through an edge: the member's own, or every member's for an
 admin, with status **Approved**, **Pending**, **Registered** (admitted by
 signing in under `edge-access account`) or **Revoked**, and the key
 fingerprint. Approving by id is the Needs you card's
-([Run state](#run-state)); this tab approves by an approval code typed in
+([Session state](#session-state)); this tab approves by an approval code typed in
 from that device, which no row shows: **Review** looks the code up with
 `member.device.lookup`, and a dialog shows the device, its account, its
 fingerprint, and the member and role approving admits it as, before
@@ -5627,7 +5626,7 @@ opens a dialog with two tabs:
   a failed read keeps the proposals shown and its error shows on the
   board and in Sign-ins.
 - **I have a merge code** sends `member.merge.preview` and shows both
-  members side by side (role, sign-ins, devices, runs, schedules,
+  members side by side (role, sign-ins, devices, sessions, schedules,
   settings), stacked at phone width. **Keep settings from** has no
   default; choosing a side lists what the other loses. When the roles
   differ the resulting role is stated, and the admin side gets **Keep the
@@ -5660,7 +5659,7 @@ archive path.
 
 `member.list`'s `merged_into` is kept as `mergedInto`. `memberName` and
 `resolveMember` in `lib/member-name.ts` follow it, so an id history names
-(events, runs, costs, comments, devices) shows the survivor's name
+(events, sessions, costs, comments, devices) shows the survivor's name
 with `(merged)`. A `member.merged` event (workspace id `server`) takes a
 fresh snapshot: a merge moves runs and roles without their own events, and
 a session absorbed by the merge then shows the survivor, with its role,
@@ -5672,7 +5671,7 @@ without a reload.
 while the list loads. Selecting a row opens the
 workspace: it becomes the active one and the board shows. Each row's menu
 holds **Repository** (the repository page), **Environment** (its Environment
-section), **Settings…** (who may message others' runs) and **Delete…**, each
+section), **Settings…** (who may message others' sessions) and **Delete…**, each
 gated by its permission. **Add
 workspace** in the header shows the creation choices above the list; with no
 workspace yet they show without it. Open the page from the workspace
@@ -5760,18 +5759,18 @@ their selection and any open deleted workspace or run.
 
 The workspace switcher's **Repository** item and the **Repository** item of
 a row's menu in Manage workspaces open `routes/workspace.tsx`. It is one
-workspace in sections: **Base branch**, read-only because runs have already
+workspace in sections: **Base branch**, read-only because sessions have already
 forked from it; **Source and clone**, the shared
 `components/workspace-repository.tsx` (link a local clone, the
 server-fetched source with its mirror status and deploy key, the checkout
 Origin) with its Advanced part open; **Environment**, below; and **Team**,
 the budget with **Set budget…** (`budget.set`) and who may message others'
-runs with **Change…** (`workspace.settings`), and, where the server offers
-`workspace.child_limits`, the child-run limit ("8 child runs busy at once per parent run"). The
+sessions with **Change…** (`workspace.settings`), and, where the server offers
+`workspace.child_limits`, the subsession limit ("8 subsessions busy at once per parent session"). The
 admin's **Change…** dialog edits it as **Busy at once**, saving with
 `workspace.child_limits`. Each button is gated by its
 server-side permission; a member without it reads the same facts. The page
-lists no runs: the board does.
+lists no sessions: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
 setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
@@ -5800,12 +5799,12 @@ section scrolls into view once it has loaded.
 - **Limit outbound traffic** is a checkbox. While it is ticked, the allowed
   hosts show, each with **Remove**, over a field with **Allow** that refuses a
   URL, a port or a repeat before anything is sent. Its help says that on and
-  off reach runs launched afterwards and the host list reaches limited runs at
+  off reach sessions launched afterwards and the host list reaches limited sessions at
   once. A server from before egress control gets no such row.
 - **Save** sends one `workspace.environment.set` holding only what changed,
   so an untouched secret is never named. It is disabled until something
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it
-  the page says what a save reaches: runs launched afterwards, not containers
+  the page says what a save reaches: sessions launched afterwards, not containers
   that exist. A row that cannot be saved - no name, a name used twice, `=` in
   a name, a secret with no value - is marked on **Save**, which focuses it and
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
@@ -5814,7 +5813,7 @@ section scrolls into view once it has loaded.
   **Secret** in place of a secret's value, whether egress is limited and to
   which hosts, and **Only an admin can change this.** A failed read shows the server's error with **Retry**.
 
-When the setup script fails a launch, the New run and template launch
+When the setup script fails a launch, the New session and template launch
 dialogs show the server's reason and, under **Setup script output**, what
 the script printed (`components/launch/setup-output.tsx`, from the error's
 `setup_output`).
@@ -5853,10 +5852,10 @@ while one of its entries is visible, so the nav and search never disagree.
 | You | Notifications (`notifications`) | Push notifications (`push`); Watch notifications: push devices (`watch-push`), Quiet hours (`quiet-hours`); Slack (`slack`) |
 | You | Watches (`watches`) | Watches (`watch-list`) |
 | You | Assistant (`assistant`) | Approvals (`auto-approve`) |
-| You | Child runs (`children`) | Child runs (`child-runs`): the on/off switch, Limits (`child-limits`) |
+| You | Subsessions (`children`) | Subsessions (`child-runs`): the on/off switch, Limits (`child-limits`) |
 | You | Usage (`usage`) | Subscription usage (`subscription-usage`) |
-| This computer | This computer (`this-computer`) | Link (`link`); Syncing: Sync daemon (`sync-daemon`), Mirror run files (`mirror`); Danger zone (`danger-zone`) |
-| Server | Server (`server`) | Status: Version (`version`), Tailnet dashboard, Disk and performance (`disk`); Admin: Docker inside runs (`docker`), Retained containers (`retained-containers`) |
+| This computer | This computer (`this-computer`) | Link (`link`); Syncing: Sync daemon (`sync-daemon`), Mirror session files (`mirror`); Danger zone (`danger-zone`) |
+| Server | Server (`server`) | Status: Version (`version`), Tailnet dashboard, Disk and performance (`disk`); Admin: Docker inside sessions (`docker`), Retained containers (`retained-containers`) |
 | Server | Remote access (`remote-access`) | Edge (`edge`) |
 
 **Addressing.** The route is `{name: "settings", params: {section}}`, and
@@ -5893,7 +5892,7 @@ full width under its label; checkboxes and icon buttons stay on the right.
 While a row's first read is pending its help reads `Reading …` and its
 controls are disabled. A failed read shows the error verbatim in a
 `role="alert"` callout with **Try again**, which reads again (Slack,
-Assistant, Linked server, Sync daemon, Docker inside runs, Remote access).
+Assistant, Linked server, Sync daemon, Docker inside sessions, Remote access).
 
 Categories:
 
@@ -5944,7 +5943,7 @@ Categories:
   a server without `connector.list` (`-32601`) gets the update command and
   hides the steps, the no-edge and not-connected errors link `docs/edge.md`,
   anything else links the connector troubleshooting. The palette's **Connect
-  ChatGPT or Claude** and the first run step's optional **Finish setup and
+  ChatGPT or Claude** and the first session step's optional **Finish setup and
   connect ChatGPT or Claude**, both shown only where the gateway serves
   `connector.list`, navigate with `{section: "connectors"}`.
 - **GitHub**, in **Connections** for admins when the GitHub OAuth methods
@@ -5953,7 +5952,7 @@ Categories:
   shared picker, not another importer. Existing native authorization is
   reused. Successful explicit revision acceptance upserts/selects the
   workspace and opens its repository page. Non-admins see neither row.
-- **Notifications**: **Notify this device when a run needs me**, described
+- **Notifications**: **Notify this device when a session needs me**, described
   under [Push notifications](#push-notifications), **Watch notifications**
   and Slack direct messages ([slack.md](slack.md)). Watch notifications
   (`notify.prefs.get` and `notify.prefs.set`, shown when the server has
@@ -5968,11 +5967,11 @@ Categories:
   [Watches](#watches).
 - **Assistant**, where the assistant is available (`useAssistantAvailable`):
   **Let the assistant act without asking** reads and sets `assistant.settings`
-  `auto_approve`. Under it, **What auto-approval covers** lists what runs
+  `auto_approve`. Under it, **What auto-approval covers** lists what sessions
   without a card, what always asks and that the assistant's shell and file
   tools are unaffected. Turning it on first asks **Let the assistant act
-  without asking?** with the warning that the assistant will launch runs,
-  message and stop the member's runs and save the environment on its own;
+  without asking?** with the warning that the assistant will launch sessions,
+  message and stop the member's sessions and save the environment on its own;
   turning it off does not ask. A refusal stays in the dialog or under the
   row. **Change in Settings** in the assistant panel opens
   `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
@@ -5989,11 +5988,11 @@ Categories:
   dialog with **Save as my default**. **Clear** asks first, then clears
   them. Each change uses `launch.defaults.set` with the revision read and
   retries once on a conflict, as the launch dialog does. The section starts
-  over, closing **Clear**'s confirmation, when a different member signs in. Child runs keep
-  their own choices in **Child runs**.
-- **Child runs**, where the server offers `child.settings`: **Let my runs
-  start child runs** (`enabled`, on by default), with a **What child runs
-  cover** list (what it allows, that budgets and limits apply, how to override it for one run). The switch saves
+  over, closing **Clear**'s confirmation, when a different member signs in. Subsessions keep
+  their own choices in **Subsessions**.
+- **Subsessions**, where the server offers `child.settings`: **Let my sessions
+  start subsessions** (`enabled`, on by default), with a **What subsessions
+  cover** list (what it allows, that budgets and limits apply, how to override it for one session). The switch saves
   on change; a refused change rereads the setting and keeps the error under
   the row. Where the server offers `workspace.child_limits`, a read-only row
   gives the active workspace's limit.
@@ -6005,10 +6004,10 @@ Categories:
   server** before any) and **Manage workspaces**, **Saved servers** (the
   default link, then named ones) with **Switch**, which calls `link.switch`
   and reloads the dashboard, the **Sync daemon** (`daemon.status`), and
-  **Mirror run files**, which starts and stops a live run's sync overlay
+  **Mirror session files**, which starts and stops a live session's sync overlay
   (`sync.status`). Each row says in one sentence what it does and prefills
   its target read-only: the daemon the linked server and repository, the
-  mirror the newest live run (or the one already mirroring). **Change** edits
+  mirror the newest live session (or the one already mirroring). **Change** edits
   the target; **Install** and **Start mirroring** are secondary buttons.
   The daemon's enable command stays across category changes until a read
   finds no daemon.
@@ -6027,14 +6026,14 @@ Categories:
   **Disk and performance**, a link to [Insights › System](#insights). For
   admins, **Free retained containers…** opens the same confirmation as the
   board's Finished menu for the active workspace. It prevents reopening those
-  runs but does not delete all run data: checkouts, homes, repositories and
+  sessions but does not delete all session data: checkouts, homes, repositories and
   history retain their existing lifecycle.
-- **Run limits**, a row in **Server › Admin**, for admins when the server
+- **Session limits**, a row in **Server › Admin**, for admins when the server
   answers `server.run_limits`: CPUs, memory in GiB and processes, empty
   meaning the flag or automatic value shown in grey, and **Save**. The launch
   dialog reads the same method for the grey values and sends a
-  run's own `limits` under **Resource limits**.
-- **Docker inside runs**, a row in **Server › Admin**, for admins when the
+  session's own `limits` under **Resource limits**.
+- **Docker inside sessions**, a row in **Server › Admin**, for admins when the
   server answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States:
   **On**, **Off** with **Install**, `Unavailable on this host` plus the
   server's reason, `Installing… this takes a minute or two`, and **Install
@@ -6042,12 +6041,12 @@ Categories:
   `CodeBlock`) and **Try again**. **Install** calls `server.sysbox.install`,
   which returns at once; the row then polls `server.sysbox.status` every 2
   seconds while the state is `installing`. Reaching **On** from an install
-  announces `New runs get it now. Reopen your Environment to use it there.`
+  announces `New sessions get it now. Reopen your Environment to use it there.`
   in a polite status region, because an existing Environment keeps its old
   container. The last state read lives in the store until the dashboard
   follows another server, so an install that finishes while another
   category is open still announces itself on return. On the board, an admin whose server reports `off` sees a
-  neutral callout, `Let agents use Docker in their runs`, with **Install**
+  neutral callout, `Let agents use Docker in their sessions`, with **Install**
   and **Dismiss** (`src/components/sysbox-nudge.tsx`). It stays through
   `installing` and `failed`, and shows `unsupported` (with the reason) only
   after an install the admin started from it; it never shows for a plain
@@ -6079,7 +6078,7 @@ Repository settings, base freshness and the source mirror live on the
 ### Watches
 
 A **watch** is a member's standing request that the server tell them when a
-run or a pull request needs them or finishes; the server evaluates
+session or a pull request needs them or finishes; the server evaluates
 it, so it keeps checking with every page closed. Notices appear in the
 dashboard and go to the member's push devices when push is on. The server side and the
 conditions are in [watches.md](watches.md). The dashboard's parts:
@@ -6097,7 +6096,7 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   a watch is and where to add one.
 - **Detail** (`src/routes/settings/watch-detail.tsx`): a row opens
   `?page=settings&id=watches&watch=<id>`, a dialog that is a full-screen
-  sheet under 768px. Its **Open run** or **Open pull
+  sheet under 768px. Its **Open session** or **Open pull
   request** link is built from `watch.target`, since `watch.link` is the
   watch's own page. It reads `watch.get` and shows what the server sees
   (`observed`), the conditions, label and end date to change
@@ -6114,16 +6113,16 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   server's detail), `Push failed: <error>`, and `In the assistant chat` for a notice
   the assistant also wrote into its chat. Opening or closing it keeps focus in
   the dialog's hands rather than the category heading.
-- **Creating**: **Watch…** in a live run's menu and the palette
-  (`runCommands`, when the server has `watch.create`), and **Watch PR** beside a run's pull request status open
+- **Creating**: **Watch…** in a live session's menu and the palette
+  (`runCommands`, when the server has `watch.create`), and **Watch PR** beside a session's pull request status open
   `WatchDialog` (`src/components/palette/watch-dialog.tsx`). It pre-checks
   the target's default conditions, describes each (Finished means the agent
   reported done; Merged means GitHub merged the PR), and sends one
   idempotency key per open form. The success toast is the server's receipt
   with **View watch**; a refusal stays in the form verbatim.
-- **Watched runs**: the run header's state line shows **Watch on** (or
+- **Watched sessions**: the session header's state line shows **Watch on** (or
   **Watch paused**, **Watch failing**) while the member has a live watch on
-  the run; its hint names the watch's conditions, or why it is paused or
+  the session; its hint names the watch's conditions, or why it is paused or
   failing, and it opens the watch. A watched pull request shows **Watching PR**.
 - **Live**: `watch.changed` reaches only the watch's owner. The dashboard
   re-reads `watch.get` (`src/store/watch-notice.ts`); when the event names a
@@ -6133,8 +6132,8 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   in a new tab. A watch the assistant made (`source: assistant`) toasts
   through its `assistant.notice` instead, here and in the desktop app.
 - **Desktop app**: `desktop/notify.js` shows each new watch notice natively
-  and opens its link on click. A run's needs-you or finished notice shares
-  the run's five-second duplicate window with `run.status`, so one need or
+  and opens its link on click. A session's needs-you or finished notice shares
+  the session's five-second duplicate window with `run.status`, so one need or
   one outcome shows once, in either order. A live failure the owner has not
   seen is a needs-you notice on the server, so it shares the need's window. A need's notice closes when the
   need is answered, a finish's when its outcome is seen or put off.
@@ -6169,20 +6168,20 @@ then in the browser. A failure of either, or of **Send test notification**
 
 `web/public/sw.js` is the whole worker. On `push` it shows the notification
 under the message's own `tag` when it has one, as every [watch](watches.md)
-notice does so the run's clears never replace it; otherwise under the run's
+notice does so the session's clears never replace it; otherwise under the session's
 ID, `budget:<workspace>` for a budget notice, or the message's `url` for a
 notice about another page. A newer one replaces the older, and it shows a fallback for a message it
 cannot read, because Safari drops a subscription whose push shows nothing.
-A message with `clear` set means the run's need, or the watch's, ended: for
+A message with `clear` set means the session's need, or the watch's, ended: for
 the same reason it is not simply closed but replaced, under the same tag and keeping the shown
 title, by a `silent` notification with the server's body,
 `No longer needs you`. The server sends it only to the devices whose push
-service took the need, when the need ends or the run changes hands,
-under the run's Web Push topic, so a need still queued at the push service
+service took the need, when the need ends or the session changes hands,
+under the session's Web Push topic, so a need still queued at the push service
 is never shown, and tries again a minute later for a device it could not
 reach. The worker handles pushes in arrival order, so a clear still reading
 the shown notification never lands over a newer need. An assistant's news
-about the run, such as that it finished, carries `notice`; a clear that
+about the session, such as that it finished, carries `notice`; a clear that
 finds it shown shows it again, silently, as it was. An assistant's notice of
 a need carries no `notice`, so a clear replaces it like any need. On
 `notificationclick` it focuses a dashboard window that is already open and
@@ -6203,29 +6202,29 @@ again.
 
 The desktop shell does not use Web Push. `desktop/notify.js` applies push's
 rule to each `run.status` event (see
-[failure-handling.md](failure-handling.md#run-activity)): it reads the run
+[failure-handling.md](failure-handling.md#session-activity)): it reads the session
 with `run.get` for its title, `paused` and `member_id`, and
-announces only runs the signed-in member owns, as push does. When `run.get`
-fails it announces nothing. It notifies once per need, keyed on the run's status, state, reason and `status_changed_at`, and
+announces only sessions the signed-in member owns, as push does. When `run.get`
+fails it announces nothing. It notifies once per need, keyed on the session's status, state, reason and `status_changed_at`, and
 words it as `internal/push/need.go` does. An event whose `status_seq` is not
 above the last one seen is ignored. `waiting`, `waiting-*` and `working`
 never notify. A need counts toward the dock badge and its notification
 closes when the need ends, including on `run.outcome_seen` for an unseen
 failure and on a `run.review` event that sets `later` or `accepted`. A
 review `ready` gets one silent, low-urgency notice per entry into `ready`,
-counted in the badge; an unseen failure of a run that already ended gets
+counted in the badge; an unseen failure of a session that already ended gets
 one outside it.
 It also shows watch notices; see [Watches](#watches).
 `cd desktop && node --test` runs `desktop/notify.test.js`; `make
 test-scripts` includes it.
 Clicking it pushes `?run=<id>` onto the page's history and dispatches
-`popstate`, which `bindRouteToUrl` follows, so the run opens without the
+`popstate`, which `bindRouteToUrl` follows, so the session opens without the
 reload that would discard an unsent message.
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path: four steps under one
-header, **Connect**, **Repository**, **Agent** and **First run**. The header is
+`src/routes/onboarding/` is the guided first-session path: four steps under one
+header, **Connect**, **Repository**, **Agent** and **First session**. The header is
 the view's `PaneHeader` with the steps as numbered chips in its right-hand
 slot; there is no step counter or second header. A local gateway starts at
 Connect. A hosted gateway, which has no `link.status`, starts at Repository:
@@ -6233,10 +6232,10 @@ remote import, server-side agent setup and configuration do not require a
 clone or SSH identity on the browser's machine. Only the local clone controls
 require local capabilities, and their hosted replacement names the exact
 desktop/CLI handoff. Each step's action row holds its filled button, so on a
-phone the top bar's **New run** is an icon throughout onboarding.
+phone the top bar's **New session** is an icon throughout onboarding.
 
 Each step is a file: `connect-step.tsx` (with `edge-link.tsx`),
-`repository-step.tsx`, `agent-step.tsx` and `first-run-step.tsx`, all built on
+`repository-step.tsx`, `agent-step.tsx` and `first-session-step.tsx`, all built on
 `Step` from `layout.tsx`, which draws the step's `<section aria-label>`, its
 title and lead line, and the sticky action row. Git identity is
 `git-identity.tsx`, a form rather than a step. The shared
@@ -6262,7 +6261,7 @@ In the step header, every step the member has already reached carries a check
 as well as back, so walking backwards does not strand them on a step they
 cannot leave. The current step and the ones never reached are inert text.
 Leaving the wizard keeps its progress, and **Settings › General › Open
-guide** reopens it at the furthest step reached; only finishing First run
+guide** reopens it at the furthest step reached; only finishing First session
 starts it over.
 
 Git identity is the name and email the member's commits are authored as,
@@ -6275,7 +6274,7 @@ without saving leaves the server's fallback in place, so it never blocks the
 wizard. See [teams.md](teams.md) for what the identity does once it is set.
 
 Repository's first line defines the word: a workspace is one repository and
-base branch, and the runs started from it. With no workspace chosen it lists
+base branch, and the sessions started from it. With no workspace chosen it lists
 the member's workspaces with **Use** and, for an admin whose gateway serves
 `workspace.import` or `workspace.add`, the shared **Add a workspace** choices.
 **Add GitHub repository** leads when its methods are available on either
@@ -6315,13 +6314,13 @@ workspace reads what happened instead of git's `! [rejected] main -> main
 
 Local-only workspaces retain **Push now**, **Fast-forward my clone**, daemon
 base pushes and direct base writes. A mirrored workspace owns its base on the
-server and rejects direct base writes; run branches can still be pulled.
+server and rejects direct base writes; session branches can still be pulled.
 The dashboard withholds base push controls while an administrator's source
 status is unresolved or identifies a mirror. Configuring or fetching a source
 never silently authorizes its candidate.
 
-When `link.repo` answers an `origin`, the connected line adds `Runs push to
-<origin>`: the upstream a run pushes to, the same one `aether link --repo`
+When `link.repo` answers an `origin`, the connected line adds `Sessions push to
+<origin>`: the upstream a session pushes to, the same one `aether link --repo`
 prints. That push destination is separate from the Source control read source.
 A link that recorded none says nothing about one.
 
@@ -6350,7 +6349,7 @@ diverged and the fast-forward result - are `aria-live="polite"`, because they
 appear without a page change.
 
 The branch is the workspace's base branch, so a workspace created with
-`--base` seeds the branch its runs fork from. When `repo.push` is unavailable,
+`--base` seeds the branch its sessions fork from. When `repo.push` is unavailable,
 the step shows only the copyable command.
 
 Link, push and fast-forward always carry the selected workspace ID. Each
@@ -6377,7 +6376,7 @@ with the old path; a blank form there would ask again for a remote that
 already exists.
 
 The UI slice persists the resume point, furthest step reached, selected
-workspace, source choice, connected repository and First run draft. Finishing
+workspace, source choice, connected repository and First session draft. Finishing
 the wizard or navigating away clears these fields. Steps are stored by name
 rather than position, so inserting a step never
 relocates someone who is mid-wizard. The persisted state is versioned, and one
@@ -6391,7 +6390,7 @@ the first backward jump would turn every later step inert. Versions before 8
 named the six steps of the old wizard; each maps to the step that absorbed it
 (Link and Git identity to Connect, Workspace to Repository, Agents to Agent).
 Anything it cannot place starts over. Repository without a workspace opens on
-the workspace list; Agent never needs one; First run without one says so and
+the workspace list; Agent never needs one; First session without one says so and
 offers **Choose a repository**.
 
 Hydration reads `link.status` first for a local gateway. A linked machine with
@@ -6400,7 +6399,7 @@ unlinked local gateway routes here when `onboarded` is false. Hosted onboarding
 also resumes after reload when its saved workspace still exists, even after
 the first import. A linked clone must not erase a resumed wizard's workspace
 or draft, and a reconnect must not redirect navigation.
-Authorized run deep links take precedence. Completing the final step or
+Authorized session deep links take precedence. Completing the final step or
 navigating elsewhere marks the UI onboarded and clears wizard state.
 
 Connect asks **How does this computer reach your server?** with three
@@ -6464,7 +6463,7 @@ message with the console command, and calls
 a `token-revoked` or `not-signed-in` refusal signs the panel out and offers
 **Sign in**, and a `join-wrong` refusal, an invitation that names another
 account, offers **Sign in with another account**;
-the admin's side is the Needs you card ([Run state](#run-state)). A join
+the admin's side is the Needs you card ([Session state](#session-state)). A join
 or claim that succeeds but could not move the clone's `aether` remote
 shows the gateway's `remote_error` as an error toast; the link stays. A
 gateway without `edge.join` or `edge.claim`, such as the Android app's
@@ -6481,9 +6480,9 @@ sub-screen's Back row scrolls with the page rather than sticking over the
 cards. A gateway that cannot
 install agents says to run `aether agent add` from a terminal instead.
 
-First run is the launch form, not a copy of it: `RunFields` and
+First session is the launch form, not a copy of it: `RunFields` and
 `useAgentChoice` from `src/components/launch/run-fields.tsx` are what the
-**New run** dialog's run tab renders, so the task, the agent picker and the
+**New session** dialog's session tab renders, so the task, the agent picker and the
 **Mode** control follow the same rules - task optional except for
 Background, a mode the agent cannot use disabled with its reason. The persisted
 draft's agent wins the first pick, then the most recently remembered launch
@@ -6604,17 +6603,17 @@ that runs a newer release than a client refuses that client
     release notes link. What else the row offers comes from
     `server.update_status`:
     - *capable*: **Update now** and **Update when idle**. Update now opens
-      a confirm dialog. It counts the runs active in this member's own run
-      list, using the server's definition of busy: a paused run and one
+      a confirm dialog. It counts the sessions active in this member's own session
+      list, using the server's definition of busy: a paused session and one
       parked at needs-attention do not count. The dialog says what the
-      restart costs: runs keep going because the server reattaches to
+      restart costs: sessions keep going because the server reattaches to
       their containers, and attached terminals reconnect on their own. The
       confirm calls `server.update` with `when: "now"`. Update when idle
       sends `when: "idle"`, and the row becomes *Server X is scheduled.
-      Scheduled by <member>, applies when no run is active.*, with a
+      Scheduled by <member>, applies when no session is active.*, with a
       **Cancel** that sends `when: "cancel"`. A scheduled row also names
       what the update is still waiting for (`status.waiting`), because a
-      live terminal attach holds it back the same way a working run does.
+      live terminal attach holds it back the same way a working session does.
     - *not capable*: no buttons. The row shows the server's own reason,
       then the commands to run on the server host, each with a copy button.
       A server without `server.update_status` falls back to
@@ -6663,7 +6662,7 @@ that runs a newer release than a client refuses that client
   running one, says what updating costs, and offers **Update now**, the
   release notes and a dismiss. Updating replaces the `aether` binary on
   this machine and restarts the dashboard, which stops attached terminals
-  and any running sync session; the runs keep going on the server.
+  and any running sync session; the sessions keep going on the server.
 
   What the button does is decided before the click, from `update.check`'s
   `install_method` (`docs/local-gateway.md`):
@@ -6833,7 +6832,7 @@ And `ring-*` already means "selected" on the member colour swatches, where a
 focus ring in the same property could not be told apart from the selection.
 
 The outline sits 2px outside the control, except where the control has no
-room outside it: a row that fills its scroll container - a sidebar run, a run
+room outside it: a row that fills its scroll container - a sidebar session, a session
 list entry, a changed-file row, a board card - and a menu item, which sits flush
 against its neighbours. There it is drawn 2px inside instead. An outline
 outside a full-bleed row is clipped at both edges by the scroller, and padding
@@ -6872,15 +6871,15 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘B` / `Ctrl+B` | global | Show or hide the sidebar |
 | `⌘Shift+Space` / `Ctrl+Shift+Space` | global | Open or close the assistant, from a field, an editor or a terminal too |
 | `?` | global | Open the shortcuts dialog |
-| `n` | global | New run |
-| `u` | global | Open the next run that needs you |
-| `j` / `k` | global | Focus the next or previous run in the sidebar |
+| `n` | global | New session |
+| `u` | global | Open the next session that needs you |
+| `j` / `k` | global | Focus the next or previous session in the sidebar |
 | `g` then `b`, `l`, `a`, `f`, `g`, `e`, `,` | global | Go to the board, all workspaces, activity, files, agents, environment, settings |
-| `[` / `]` | run | Show the previous or next run view, Trace included on an Enhanced run |
-| `⌘.` / `Ctrl+.` | run | Show or hide run details |
-| `c` | run | Message the agent (focuses the Session composer) |
-| `Esc` | run | Leave a run for the board |
-| `⌘L` / `Ctrl+L` | browser | Focus the Browser's address bar, from anywhere in the run |
+| `[` / `]` | run | Show the previous or next session view, Trace included on an Enhanced session |
+| `⌘.` / `Ctrl+.` | run | Show or hide session details |
+| `c` | run | Message the agent (focuses the Chat composer) |
+| `Esc` | run | Leave a session for the board |
+| `⌘L` / `Ctrl+L` | browser | Focus the Browser's address bar, from anywhere in the session |
 | `⌘R` / `Ctrl+R` | browser | Reload the page |
 | `⌘[` / `Alt+←` | browser | Go back |
 | `⌘]` / `Alt+→` | browser | Go forward |
@@ -6894,20 +6893,20 @@ pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
 The scopes are `global`, `run`, `browser`, `card`, `request` and `composer`;
 `card` is the board's `r`/`o` on the focused card, `request` the option
 digits on a focused Session request, `composer` the send keys while the
-Session composer has focus and `browser` the keys of a run's Browser
-while it is on screen. `Esc` is the run's, to leave it, and the table gives a
+Chat composer has focus and `browser` the keys of a session's Browser
+while it is on screen. `Esc` is the session's, to leave it, and the table gives a
 key to one binding; while a page is being annotated the Browser answers
 `Esc` itself first and stops annotating instead. When a key matches in two live scopes, the
 innermost wins. A binding without a handler does
 nothing and is left out of the dialog: `n` is offered only to a member who
-may launch, and a `g` destination only when the gateway serves it. A run's
-keys are listed even from the board, where no run scope is on screen.
+may launch, and a `g` destination only when the gateway serves it. A session's
+keys are listed even from the board, where no session scope is on screen.
 
 A dialog a shortcut opens has no trigger to return to, so `useReturnFocus` in
 `src/lib/hooks.ts` records what had focus when it opened and puts focus back
-there on close: New run (`n`), the shortcuts dialog (`?`) and every dialog the
+there on close: New session (`n`), the shortcuts dialog (`?`) and every dialog the
 palette opens. A palette command that opens a dialog hands the palette's own
-invoker over (`handOverFocus`), so closing New run after `⌘K` returns to
+invoker over (`handOverFocus`), so closing New session after `⌘K` returns to
 where `⌘K` was pressed, not to the vanished palette input.
 
 Two window listeners serve every scope. Chords (a modifier beyond Shift) are
@@ -6930,7 +6929,7 @@ that goes somewhere else ends the wait.
 
 A chord's own handler or its `when` decides where it stands down. The palette
 chords cannot be mistaken for typing, and with the terminal holding the focus
-and swallowing Tab they are the way out of a run. They stand down for a modal
+and swallowing Tab they are the way out of a session. They stand down for a modal
 rather than for anything that has the keyboard, through `inModal` and the
 store flag that names the form the shell is hosting. They take the key from
 the browser either way, so a stand-down cannot land the reader in the address
@@ -6938,8 +6937,8 @@ bar. `Mod+B` stands down like a single key, so a terminal keeps Ctrl+B for
 tmux.
 
 The Browser's chords are the host browser's own, taken from it only where
-they are about the page. `Mod+L` answers anywhere in the run except inside a
-terminal, a menu or a dialog, so Ctrl+L still clears a shell; the run frame
+they are about the page. `Mod+L` answers anywhere in the session except inside a
+terminal, a menu or a dialog, so Ctrl+L still clears a shell; the session frame
 registers it, so it works before the Browser is on screen. Reload, back
 and forward answer only while focus is inside the Browser (its page, its
 address field or its toolbar); anywhere else the host browser or the desktop
@@ -6953,7 +6952,7 @@ That guard reads the event target rather than the document. Radix dismisses an
 overlay from a capturing document listener without stopping the event, and
 React commits the close in a microtask that runs before a window listener is
 reached: asking the DOM what is open would find the dialog already gone and
-let Escape both close the dialog and leave the run. The shell also stands down
+let Escape both close the dialog and leave the session. The shell also stands down
 on `defaultPrevented`, which is how Radix marks the Escape it just acted on.
 The document is asked in one case only, by both guards: a key that landed on
 `body`, where focus falls when an overlay removes the control that was holding
@@ -6969,14 +6968,14 @@ orphaning it.
 An open tooltip is the one overlay that neither guard names, and it does not
 need to: a tooltip owns no keys, and its trigger is an ordinary control.
 Escape is the exception. Radix closes the tooltip and marks that press
-handled, so the shell ignores it: on a run, the first Escape closes the
+handled, so the shell ignores it: on a session, the first Escape closes the
 tooltip and the second leaves. Every other key reaches the shell as usual, and a
 tooltip closes on the first of them whatever it is, so a pending `g` is
 untouched.
 
 Blocking a control with `aria-disabled` rather than `disabled` keeps it in the
-tab order, which is the point; the Styleguide rule below says why. The run's
-More trigger, the shell button and the Run mode toggle keep their tab stops
+tab order, which is the point; the Styleguide rule below says why. The session's
+More trigger, the shell button and the Session mode toggle keep their tab stops
 while their verbs are unavailable, and each guards its own handler rather
 than relying on the browser.
 
@@ -6988,9 +6987,9 @@ xterm, not the table, and accepts Ctrl and Meta alike. Terminal copy, paste and
 find are Ctrl on every platform, because that is what xterm binds; see
 [terminal.md](terminal.md).
 
-**Tab strips behave as tab lists.** The run view switch is a Radix `Tabs`
-(`TabsList look="segmented"`) whose panels are the run's views, so Radix wires
-`aria-controls` and the `tabpanel`s. The terminal strip in the run toolbar
+**Tab strips behave as tab lists.** The session view switch is a Radix `Tabs`
+(`TabsList look="segmented"`) whose panels are the session's views, so Radix wires
+`aria-controls` and the `tabpanel`s. The terminal strip in the session toolbar
 (`TerminalTabs` in `routes/run/shells.tsx`, named "Terminals") and the
 Environment dock (`components/dock.tsx`) carry `role="tablist"`,
 `aria-selected`, a single tab stop that follows focus, and Left/Right/Home/End
@@ -7038,7 +7037,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **Typography and density.** DM Sans at 13px with 12px supporting copy, on
   the type scale in [styles.md](styles.md#type). JetBrainsMono NFM is the
   terminal's alone; code uses the system monospace stack. Use the 28px
-  control and row, 24px small control, 44px view header and 56px run header,
+  control and row, 24px small control, 44px view header and 56px session header,
   and avoid promotional titles or oversized cards.
 - **Flat shell and palette host.** One 220-400px sidebar beside the content
   view; under 768px a 48px top bar and the sidebar as a side sheet. Mount the
@@ -7046,16 +7045,16 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   `AppShell`.
 - **Agent and state are separate.** The agent glyph says who is running;
   the state mark says what state. `StatusDot`
-  (`src/components/ui/status-dot.tsx`) is the only run-state mark: one shape
+  (`src/components/ui/status-dot.tsx`) is the only session-state mark: one shape
   and colour per state (filled circle Working, clock Waiting for, dashed ring
   Waiting, amber ring Needs you, filled accent check Ready for review, check
   Completed, ring with a bar Closed, cross Failed, ring with an exclamation
   mark Interrupted, broken ring Disconnected, bars Paused), named by the state
   word where it stands alone.
   `StateLine` pairs it with the reason. The states are
-  described under [Run state](#run-state).
+  described under [Session state](#session-state).
 - **Lists stay still.** Sidebar rows, board cards, the palette and All
-  workspaces draw a static dot. Only the run header's dot and the Session
+  workspaces draw a static dot. Only the session header's dot and the Session
   view's live row or live steps header pulse while Working (`state-pulse`, a
   breathe in opacity and size).
 - **Motion is optional.** Every animation and transition stops under
@@ -7092,9 +7091,9 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **Disclosures normally unmount closed content.** `CollapsibleTrigger`
   supplies the marker, which turns over 200ms; the body glides its height
   open and shut and unmounts once the closing glide ends.
-- **Status and metadata pills are `Badge`.** It takes a run-state `tone` or
+- **Status and metadata pills are `Badge`.** It takes a session-state `tone` or
   stays neutral. A `Badge` takes no `title` of its own, so a pill whose text
-  can be clipped wears one on the span around it. Run and dock tab strips
+  can be clipped wears one on the span around it. Session and dock tab strips
   retain their custom manual tab semantics.
 - **A hint a reader needs is a `Tooltip`, not a `title`.** A `title` is drawn
   by the pointer and by nothing else, so on a control a keyboard can land on
@@ -7110,7 +7109,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **A yes-or-no confirm is an `AlertDialog`, not a `Dialog`.** The role
   interrupts rather than announcing a form, it takes the close X away, and an
   outside click no longer dismisses it. A dialog that asks which of several
-  outcomes to record - closing a run as merged or abandoned - is a choice
+  outcomes to record - closing a session as merged or abandoned - is a choice
   rather than a confirm, and stays a `Dialog`. `AlertDialogAction` is
   destructive unless the caller says otherwise. A confirm that reports its own
   failure prevents the default on that click and closes on the answer instead,
@@ -7153,24 +7152,24 @@ Session component fixtures unmount before restoring timers or browser globals.
 Await the stream-disposal batch, then reset the root store to cancel its held
 notification frame and fallback timer.
 
-Run actions cover the retained-run contract: Close chooses merged or abandoned,
-while Reopen run appears only for eligible retained Standard runs. Free
-container is also offered for finished retained child runs; its
+Session actions cover the retained-run contract: Close chooses merged or abandoned,
+while Reopen run appears only for eligible retained Standard sessions. Free
+container is also offered for finished retained subsessions; its
 confirmation and error path do not hide or delete history. Expired or
-unavailable runs offer no Free container. Sidebar tests cover group
+unavailable sessions offer no Free container. Sidebar tests cover group
 disclosure: every group starts expanded and closes when its header is pressed.
-They also cover an unopened finish: the row and a nested child run keep the text
+They also cover an unopened finish: the row and a nested subsession keep the text
 colour and say so in their names until `finish_unopened` clears. They also
-cover a run row's age, owner mark, people stack and details box.
+cover a session row's age, owner mark, people stack and details box.
 `src/lib/needs-you.test.ts` has one case per Needs you condition, and the
 device cards an admin and a member see.
 `src/routes/board/lanes/model.test.ts` covers lane segments from status
 history, section order and folding, axis ticks and link
 bundling; the board test's `lanes view` cases cover the tree keyboard, the
-run popover and its links, a popover whose lane folds away, an empty
+session popover and its links, a popover whose lane folds away, an empty
 window, bundled mail bodies and failed history reads.
 
-`src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar
+`src/a11y.test.tsx` exercises the session tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,
 Delete and Backspace close, focus handoff, clamped resizing and collapse.
 `src/store/trace.test.ts` covers span derivation (open, stopped and
@@ -7204,23 +7203,23 @@ they are part of the contract.
 browser against the local `aether gui` gateway and the server it proxies,
 while the same static bundle is also usable through the server-hosted
 gateway. `keyboard-focus` checks Escape ordering across an open dialog, the
-footer menu and a run view, confirms that a focused control paints the app
+footer menu and a session view, confirms that a focused control paints the app
 outline, and drags the sidebar resizer. `window-sizing` exercises the updates
 dialog at the smallest desktop window and below it. `run-deep-link` checks
 that the address follows navigation, survives a reload and agrees with back
-and Escape. `run-session` streams an Enhanced run, answers a permission,
+and Escape. `run-session` streams an Enhanced session, answers a permission,
 sends a message and stops it with Interrupt, then checks its Trace tab.
 
 The touch shell is driven by the `mobile` project, which
 [testing.md](testing.md) describes: `shell-drawer.mobile.spec.ts` opens the
-phone drawer, taps a run and finds the drawer gone with the run on screen and
+phone drawer, taps a session and finds the drawer gone with the session on screen and
 focus on its heading; `dialog-anchor.mobile.spec.ts` checks that a short
 dialog sits at the top rather than the middle, and that the launch form keeps
 its footer on screen on a viewport as short as a keyboard leaves;
 `toast-clearance.mobile.spec.ts` checks that a toast comes to rest 8px clear
 of the bottom edge; `home-screen.mobile.spec.ts` checks the manifest, icons
 and that the top bar clears a phone status bar; `run-views.mobile.spec.ts`
-protects a run from More and reads its changes; and `files-browser.mobile.spec.ts` opens a second file
+protects a session from More and reads its changes; and `files-browser.mobile.spec.ts` opens a second file
 from the tree sheet. `sidebar-drawer.spec.ts` stays on the desktop project
 because its keyboard contract - `Mod+B` closing the drawer and the palette
 coming back once it is gone - needs a narrow window with a keyboard rather
@@ -7262,9 +7261,9 @@ terminal links.
 `src/routes/files/home.test.tsx` covers the Home tree: each row's menu,
 naming in place, delete, upload from the picker and from a drop, and moving
 a dragged row.
-`src/routes/files/run-files.test.tsx` covers the run's Files view, a drop
+`src/routes/files/run-files.test.tsx` covers the session's Files view, a drop
 uploaded into its checkout, and path
-links in the Session view, `paths.test.ts` what reads as a path, and
+links in the Chat view, `paths.test.ts` what reads as a path, and
 `src/routes/run/terminal-links.test.tsx` a path link in a terminal.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
 `src/routes/settings/notifications.test.tsx` covers every state of the

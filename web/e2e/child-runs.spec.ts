@@ -15,7 +15,7 @@ import { runCoordCLI, waitForCoordCLI } from './harness/coord'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'the runs need a reachable Docker daemon')
+test.skip(!dockerReachable(), 'the sessions need a reachable Docker daemon')
 
 const launchTimeout = 3 * 60 * 1000
 const shots = process.env.AETHER_E2E_SHOTS
@@ -50,7 +50,7 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   settings.searchParams.set('page', 'settings')
   settings.searchParams.set('id', 'children')
   await page.goto(settings.toString())
-  const toggle = page.getByRole('checkbox', { name: 'Let my runs start child runs' })
+  const toggle = page.getByRole('checkbox', { name: 'Let my sessions start subsessions' })
   await expect(toggle).toBeChecked({ timeout: 30_000 })
   const saved = await alice.api.rpc<{ enabled: boolean }>('child.settings', {})
   expect(saved).toEqual({ enabled: true })
@@ -60,11 +60,11 @@ test('an agent starts a child run that its owner sees, follows and stops', async
     workspace_id: workspaces[0].id, task: 'Fix the login redirect', harness: 'claude', mode: 'tui',
   })
   await waitForCoordCLI(parent.id, aether.server.dataDir)
-  const options = runCoordCLI<{ allowed: boolean; choices: { harness: string; status: string }[] }>(parent.id, ['child', 'options'])
+  const options = runCoordCLI<{ allowed: boolean; choices: { harness: string; status: string }[] }>(parent.id, ['subsession', 'options'])
   expect(options.allowed).toBe(true)
   expect(options.choices).toContainEqual(expect.objectContaining({ harness: 'codex', status: 'ready' }))
   const receipt = runCoordCLI<{ run_id: string; next: string }>(parent.id, [
-    'child', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Adversarial review of the redirect fix',
+    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Adversarial review of the redirect fix',
     '--task', 'Review the last commit for open redirects.', '--idempotency-key', 'review-1',
   ])
   expect(receipt.next).toContain('Do not poll')
@@ -75,7 +75,7 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   const parentURL = new URL(alice.url)
   parentURL.searchParams.set('run', parent.id)
   await page.goto(parentURL.toString())
-  const section = page.getByRole('region', { name: 'Child runs' })
+  const section = page.getByRole('region', { name: 'Subsessions' })
   await expect(section.getByText('Adversarial review of the redirect fix')).toBeVisible({ timeout: 60_000 })
   await expect(section.getByText(/^Working · codex · On \S+'s account · Cost not reported$/)).toBeVisible()
   if (shots) await page.screenshot({ path: `${shots}/parent.png`, fullPage: true })
@@ -91,8 +91,8 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   const childURL = new URL(alice.url)
   childURL.searchParams.set('run', receipt.run_id)
   await page.goto(childURL.toString())
-  const lineage = page.getByRole('navigation', { name: 'Run lineage' })
-  await expect(lineage.getByText('This child run')).toBeVisible({ timeout: 60_000 })
+  const lineage = page.getByRole('navigation', { name: 'Session lineage' })
+  await expect(lineage.getByText('This subsession')).toBeVisible({ timeout: 60_000 })
   if (shots) await page.screenshot({ path: `${shots}/child.png` })
   if (shots) {
     const phone = await browser.newPage({ viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true })
@@ -104,11 +104,11 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   }
 
   const second = runCoordCLI<{ run_id: string }>(parent.id, [
-    'child', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Long-running audit',
+    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Long-running audit',
     '--task', 'Audit every redirect.', '--idempotency-key', 'audit-1',
   ])
   await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: launchTimeout }).toBe('running')
   await alice.api.rpc('run.kill', { run_id: parent.id })
   await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: 60_000 }).toBe('completed')
-  expect((await runStatus(alice, second.run_id)).reason).toContain(`stopped by parent run ${parent.id}`)
+  expect((await runStatus(alice, second.run_id)).reason).toContain(`stopped by parent session ${parent.id}`)
 })

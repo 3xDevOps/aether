@@ -194,7 +194,7 @@ func TestEnhancedAdapterExitIsDisconnected(t *testing.T) {
 	if _, err := execs[len(execs)-1].Stop(t.Context(), 0); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the run to read disconnected", func() bool {
+	waitFor(t, "the session to read disconnected", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Activity == domain.ActivityDisconnected
 	})
@@ -255,7 +255,7 @@ func TestRestartRestartsTheStallClock(t *testing.T) {
 func waitQuietFrom(t *testing.T, s *Scheduler, id domain.RunID, from time.Time) {
 	t.Helper()
 	var quiet time.Time
-	waitFor(t, "the scheduler to supervise the run", func() bool {
+	waitFor(t, "the scheduler to supervise the session", func() bool {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		entry := s.runs[id]
@@ -276,7 +276,7 @@ func waitQuietFrom(t *testing.T, s *Scheduler, id domain.RunID, from time.Time) 
 func waitStalledAfter(t *testing.T, e *testEnv, id domain.RunID, from time.Time, threshold time.Duration) {
 	t.Helper()
 	var r *domain.Run
-	waitFor(t, "the run to stall", func() bool {
+	waitFor(t, "the session to stall", func() bool {
 		var err error
 		r, err = e.db.GetRun(t.Context(), id)
 		return err == nil && strings.HasPrefix(r.Reason, "stalled: ")

@@ -21,18 +21,18 @@ import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 
 const scriptHelp = (
   <>
-    Runs once in each new run&apos;s container before the agent starts: <Code>sh -e</Code> in <Code>/workspace</Code>,
+    Runs once in each new session&apos;s container before the agent starts: <Code>sh -e</Code> in <Code>/workspace</Code>,
     as the container&apos;s user, with the variables below. The launch waits for it. If it exits non-zero the launch
     fails and the launch dialog shows what it printed.
   </>
 )
 
 const variablesHelp =
-  'Set in every new run’s container. Anyone who can launch a run here can print them inside it, secrets included. A secret’s value is never shown on this page again.'
+  'Set in every new session’s container. Anyone who can launch a session here can print them inside it, secrets included. A secret’s value is never shown on this page again.'
 
 const egressHelp = (
   <>
-    Runs launched while this is on reach the internet only through Aether&apos;s proxy, and only the hosts listed
+    Sessions launched while this is on reach the internet only through Aether&apos;s proxy, and only the hosts listed
     here, which start as the ones agents and package managers need. Turning it on or off applies to runs launched
     afterwards; the host list applies at once to runs started with it on. <Code>*.example.com</Code> allows every
     subdomain of example.com.
@@ -419,7 +419,7 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3">
         <p className="min-w-0 flex-[1_1_16rem] text-ui-sm text-muted">
           {dirty && <span className="font-medium text-text">Unsaved changes. </span>}
-          Runs launched after you save get this. Containers that already exist keep what they started with.
+          Sessions launched after you save get this. Containers that already exist keep what they started with.
         </p>
         <div className="flex shrink-0 items-center gap-2">
           {dirty && <Button variant="secondary" disabled={busy} onClick={discard}>Discard</Button>}

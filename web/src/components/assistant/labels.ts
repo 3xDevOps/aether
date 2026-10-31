@@ -9,7 +9,7 @@ const everything = { hasMethod: () => true, hasLocal: () => true, hasWS: () => t
 export const kindWord: Record<ViewAttachment['kind'] | 'page', string> = {
   page: 'Page',
   workspace: 'Workspace',
-  run: 'Run',
+  run: 'Session',
   pr: 'PR',
   check: 'Check',
   failure: 'Error',

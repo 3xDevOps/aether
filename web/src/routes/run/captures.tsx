@@ -191,7 +191,7 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
     <>
           <DialogHeader>
             <DialogTitle>Captures</DialogTitle>
-            <DialogDescription>Screenshots and retained captures for this run. They record what was seen, not that it was verified.</DialogDescription>
+            <DialogDescription>Screenshots and retained captures for this session. They record what was seen, not that it was verified.</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="border-b border-seam px-3 py-2 text-ui-xs text-muted">
@@ -203,7 +203,7 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
             {!selectedID ? (
               <div className="p-3">
                 {loading && <p className="text-ui-sm text-muted">Loading captures…</p>}
-                {!loading && !packets.length && <p className="text-ui-sm text-muted">No retained packets for this run.</p>}
+                {!loading && !packets.length && <p className="text-ui-sm text-muted">No retained packets for this session.</p>}
                 <div className="divide-y divide-seam">
                   {packets.map((item) => (
                     <div key={item.id} className="flex items-start gap-2 py-2">
@@ -484,7 +484,7 @@ function CaptureMetadata({ capture }: { capture: DevArtifact }) {
     <dl className="mt-2 space-y-1 break-words text-ui-xs text-muted">
       <div><dt className="inline font-medium">Original source: </dt><dd className="inline">{capture.source} · {capture.id}</dd></div>
       <div><dt className="inline font-medium">Captured: </dt><dd className="inline">{when(capture.captured_at)}</dd></div>
-      <div><dt className="inline font-medium">Session / incarnation: </dt><dd className="inline break-all">{capture.incarnation || 'Not recorded'}</dd></div>
+      <div><dt className="inline font-medium">Conversation / incarnation: </dt><dd className="inline break-all">{capture.incarnation || 'Not recorded'}</dd></div>
       {capture.terminal_id && <div><dt className="inline font-medium">Terminal: </dt><dd className="inline">{capture.terminal_id} · screen revision {capture.screen_revision ?? 'unknown'}</dd></div>}
       {capture.page_id && <div><dt className="inline font-medium">Page: </dt><dd className="inline">{capture.page_id} · revision {capture.page_revision ?? 'unknown'}</dd></div>}
       <div><dt className="inline font-medium">Original geometry: </dt><dd className="inline">{capture.width} × {capture.height} pixels{capture.cols !== undefined && capture.rows !== undefined ? ` · ${capture.cols} × ${capture.rows} cells` : ''} · geometry revision {capture.geometry_revision ?? 'unknown'}{capture.viewport_id ? ` · viewport ${capture.viewport_id}` : ''}</dd></div>

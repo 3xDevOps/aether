@@ -359,7 +359,7 @@ describe('a persisted store from an older release', () => {
       expect(resumeFrom(version, 1)).toBe('Repository')
       expect(resumeFrom(version, 2)).toBe('Repository')
       expect(resumeFrom(version, 3)).toBe('Agent')
-      expect(resumeFrom(version, 4)).toBe('First run')
+      expect(resumeFrom(version, 4)).toBe('First session')
     }
   })
 
@@ -377,7 +377,8 @@ describe('a persisted store from an older release', () => {
     expect(resumeFrom(7, 'Workspace')).toBe('Repository')
     expect(resumeFrom(7, 'Repository')).toBe('Repository')
     expect(resumeFrom(7, 'Agents')).toBe('Agent')
-    expect(resumeFrom(7, 'First run')).toBe('First run')
+    expect(resumeFrom(7, 'First run')).toBe('First session')
+    expect(resumeFrom(10, 'First run')).toBe('First session')
   })
 
   it('runs the migrate on every version behind this one', () => {
@@ -410,7 +411,7 @@ describe('a persisted store from an older release', () => {
     window.localStorage.setItem(
       'aether.ui',
       JSON.stringify({
-        state: { onboardingStep: 'Agent', onboardingFurthest: 'First run' },
+        state: { onboardingStep: 'Agent', onboardingFurthest: 'First session' },
         version: 9,
       }),
     )
@@ -418,7 +419,7 @@ describe('a persisted store from an older release', () => {
     const migrated = createRootStore().getState()
 
     expect(migrated.onboardingStep).toBe('Agent')
-    expect(migrated.onboardingFurthest).toBe('First run')
+    expect(migrated.onboardingFurthest).toBe('First session')
     window.localStorage.removeItem('aether.ui')
   })
 })

@@ -24,8 +24,8 @@ interface Example {
 const asked = (text: string, attachments?: AttachedTarget[]): Example => ({ label: text, text, attachments })
 
 const generalPrompts = [
-  asked("What's the status of my runs?"),
-  { label: 'Launch a run to …', text: 'Launch a run to ' },
+  asked("What's the status of my sessions?"),
+  { label: 'Launch a session to …', text: 'Launch a session to ' },
   asked('Install Rust in my environment'),
 ]
 
@@ -125,7 +125,7 @@ export function EmptyConversation({ autoApprove, onPick }: { autoApprove: boolea
   return (
     <section aria-label="Suggestions" className="flex min-h-0 flex-1 flex-col justify-center gap-3 overflow-y-auto p-4">
       <p className="text-ui text-muted">
-        Ask in plain language. The assistant acts with your permissions and {autoApprove ? 'launches, messages and stops your runs and saves your environment without asking.' : 'asks before it launches, messages or stops a run, or saves your environment.'}
+        Ask in plain language. The assistant acts with your permissions and {autoApprove ? 'launches, messages and stops your sessions and saves your environment without asking.' : 'asks before it launches, messages or stops a session, or saves your environment.'}
       </p>
       <div className="flex flex-col items-start gap-2">
         {examples.map(({ label, text, attachments }) => (

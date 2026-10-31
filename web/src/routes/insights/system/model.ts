@@ -119,7 +119,7 @@ export function breakdown(
   if (remaining.length > 0) {
     slices.push({
       key: 'other',
-      label: 'Other runs',
+      label: 'Other sessions',
       kind: 'other',
       value: remaining.reduce((sum, c) => sum + metricValue(c, metric), 0),
       containers: remaining,

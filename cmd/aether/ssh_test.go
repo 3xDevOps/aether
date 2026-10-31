@@ -37,7 +37,7 @@ func TestSSHArgvPutsTheRunOptionsAheadOfTheCallers(t *testing.T) {
 		t.Fatalf("argv for a full host name = %q %v", argv, err)
 	}
 	if _, err = sshArgv(nil); err == nil || !strings.Contains(err.Error(), sshUsage) {
-		t.Fatalf("no run = %v, want the usage", err)
+		t.Fatalf("no session = %v, want the usage", err)
 	}
 }
 
@@ -57,8 +57,8 @@ func TestSSHRefusesAHostThatIsNotARun(t *testing.T) {
 			"ssh --stdio": runSSH([]string{"--stdio", host}),
 			"ssh":         runSSH([]string{"--", host, "true"}),
 		} {
-			if err == nil || errors.Is(err, cli.ErrNotLinked) || !strings.Contains(err.Error(), "does not name a run") {
-				t.Errorf("aether %s %q = %v, want the host refused as no run", name, host, err)
+			if err == nil || errors.Is(err, cli.ErrNotLinked) || !strings.Contains(err.Error(), "does not name a session") {
+				t.Errorf("aether %s %q = %v, want the host refused as no session", name, host, err)
 			}
 		}
 	}

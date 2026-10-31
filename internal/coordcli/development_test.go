@@ -13,7 +13,7 @@ import (
 
 func TestDevelopmentRejectsIdentityAndMalformedParametersBeforeDial(t *testing.T) {
 	for _, tc := range []struct{ name, group, command, input string }{
-		{"run identity", "terminal", "list", `{"run_id":"other"}`},
+		{"session identity", "terminal", "list", `{"run_id":"other"}`},
 		{"null identity", "browser", "status", `{"run_id":null}`},
 		{"case folded identity", "artifact", "list", `{"RUN_ID":""}`},
 		{"unknown field", "terminal", "start", `{"actor":"admin"}`},
@@ -117,7 +117,7 @@ func TestDevelopmentSkillGitMarksPullRequestsWithRunID(t *testing.T) {
 		return protocol.Response{Result: data}
 	})
 	code, raw := runCLI(t, s.path, []string{"skill", "git"}, "")
-	if code != ExitOK || !strings.Contains(raw, "\n  Opened from Aether run run-7\n") {
+	if code != ExitOK || !strings.Contains(raw, "\n  Opened from Aether session run-7\n") {
 		t.Fatalf("git skill lost the pull request run marker: %d %s", code, raw)
 	}
 }

@@ -12,7 +12,7 @@ func identity(value string) bool               { return value != "" && len(value
 
 func (r Request) validateTarget() error {
 	if !identity(r.SessionID) || !identity(r.PageID) || r.PageRevision == 0 || r.PageRevision > 1<<53-1 {
-		return invalid("current session, page, and revision are required")
+		return invalid("current browser context, page, and revision are required")
 	}
 	return nil
 }
@@ -49,12 +49,12 @@ func (r Request) Validate() error {
 		return nil
 	case "reset":
 		if !identity(r.SessionID) {
-			return invalid("current browser session is required")
+			return invalid("current browser context is required")
 		}
 		return nil
 	case "open":
 		if len(r.SessionID) > 256 {
-			return invalid("invalid session identity")
+			return invalid("invalid browser context identity")
 		}
 		if (r.Width != 0 && !bounded(r.Width, 240, 2560)) || (r.Height != 0 && !bounded(r.Height, 240, 1600)) {
 			return invalid("open viewport exceeds dimension limit")

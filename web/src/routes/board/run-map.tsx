@@ -273,7 +273,7 @@ function MapViewport({ layout, cards, scope, agentNames, actions, empty }: MapPr
   const labelScale = Math.min(8, Math.max(1, 0.9 / viewport.zoom))
 
   return (
-    <section aria-label="Workspace run map" className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section aria-label="Workspace session map" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <MapHeader
         cards={cards}
         actions={actions}
@@ -289,9 +289,9 @@ function MapViewport({ layout, cards, scope, agentNames, actions, empty }: MapPr
       />
       <p id={instructionsId} className="sr-only">
         Drag the canvas or use the arrow keys to pan. Scroll to pan; Control or Command plus scroll zooms around the pointer.
-        On touch screens, drag to pan or pinch to zoom. Plus and minus zoom; Home or zero fits all runs. Tab reaches each run and its controls.
-        Runs read newest first; child runs sit under the run that started them, whose fold button hides or shows them.
-        The needs you and failed counts open lists that bring a run into view. Needs you includes runs from every workspace, even with Mine selected.
+        On touch screens, drag to pan or pinch to zoom. Plus and minus zoom; Home or zero fits all sessions. Tab reaches each session and its controls.
+        Sessions read newest first; subsessions sit under the session that started them, whose fold button hides or shows them.
+        The needs you and failed counts open lists that bring a session into view. Needs you includes sessions from every workspace, even with Mine selected.
       </p>
       <div
         ref={canvas}
@@ -330,7 +330,7 @@ function MapViewport({ layout, cards, scope, agentNames, actions, empty }: MapPr
           if (dx || dy) commit({ ...camera.current, x: camera.current.x + dx, y: camera.current.y + dy })
         }}
       >
-        {layout.nodes.length === 0 && (empty ?? <p className="p-4 text-ui-sm text-muted">No runs in this view.</p>)}
+        {layout.nodes.length === 0 && (empty ?? <p className="p-4 text-ui-sm text-muted">No sessions in this view.</p>)}
         <div
           ref={world}
           data-run-map-world

@@ -414,7 +414,7 @@ func (a *realAgentRun) instructed(t *testing.T) {
 	t.Helper()
 	noted := false
 	a.events(t, func(_ protocol.Event, p events.TimelinePayload) {
-		noted = noted || (p.Kind == events.TimelineNote && strings.HasPrefix(p.Message, "run instructions: "))
+		noted = noted || (p.Kind == events.TimelineNote && strings.HasPrefix(p.Message, "session instructions: "))
 	})
 	if !noted {
 		t.Errorf("instruction missing: no run instructions note on the timeline")

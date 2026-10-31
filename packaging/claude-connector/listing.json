@@ -3,8 +3,8 @@
   "auth_type": "oauth_cimd",
   "callback_url": "https://claude.ai/api/mcp/auth_callback",
   "name": "Aether",
-  "one_liner": "Launch, track and steer the coding agents on your own Aether server: see what needs you, read runs and pull requests, and act.",
-  "description": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This connector links Claude to the Aether server you are a member of, through the Aether edge at edge.onaether.dev.\n\nAsk what needs you, what your agents did this week, or what a run changed. Read a run's conversation or terminal, its reports, diff, and its pull request's checks, reviews and comments. Search runs and a workspace's team memory, and see which active runs touch the same files.\n\nWith the Launch and message scope, checked by default on the consent page, launch a run on a task, message a run, answer an agent's question, pause or resume a run, and accept a run's reported success. With the Stop and approve scope, off by default, allow or deny one permission request, stop or close a run.\n\nWho it is for: developers whose team already runs an Aether server. You need an Aether account on a server linked to the Aether edge, signed in with GitHub.\n\nLimitations: agents run with the access your server gave them, so a launched agent can push branches and open pull requests. No connector tool installs Aether, changes server settings, merges pull requests or deletes repositories or workspaces; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
+  "one_liner": "Launch, track and steer the coding agents on your own Aether server: see what needs you, read sessions and pull requests, and act.",
+  "description": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This connector links Claude to the Aether server you are a member of, through the Aether edge at edge.onaether.dev.\n\nAsk what needs you, what your agents did this week, or what a session changed. Read a session's conversation or terminal, its reports, diff, and its pull request's checks, reviews and comments. Search sessions and a workspace's team memory, and see which active sessions touch the same files.\n\nWith the Launch and message scope, checked by default on the consent page, launch a session on a task, message a session, answer an agent's question, pause or resume a session, and accept a session's reported success. With the Stop and approve scope, off by default, allow or deny one permission request, stop or close a session.\n\nWho it is for: developers whose team already runs an Aether server. You need an Aether account on a server linked to the Aether edge, signed in with GitHub.\n\nLimitations: agents run with the access your server gave them, so a launched agent can push branches and open pull requests. No connector tool installs Aether, changes server settings, merges pull requests or deletes repositories or workspaces; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
   "categories": ["Developer tools"],
   "slug": "aether",
   "documentation_url": "https://github.com/3xDevOps/Aether/blob/main/docs/connectors.md",
@@ -15,17 +15,17 @@
   "access": "read and write",
   "prerequisites": "An Aether account on an Aether server linked to edge.onaether.dev, with a GitHub account bound to your member. A server under edge-access approved-devices also asks for a one-time code from aether mcp.",
   "use_cases": [
-    "Triage: ask what needs you across your runs (agent questions, permission requests, runs awaiting review) and answer from the chat.",
-    "Delegate: launch a run on a task in a workspace, then follow its state and reports.",
-    "Review: read what a run changed, its pull request's checks and reviewers' comments, and accept or redirect the work.",
-    "Coordinate: see which active runs touch the same files and message a run to change course."
+    "Triage: ask what needs you across your sessions (agent questions, permission requests, sessions awaiting review) and answer from the chat.",
+    "Delegate: launch a session on a task in a workspace, then follow its state and reports.",
+    "Review: read what a session changed, its pull request's checks and reviewers' comments, and accept or redirect the work.",
+    "Coordinate: see which active sessions touch the same files and message a session to change course."
   ],
   "example_prompts": [
     "What needs me in Aether?",
-    "Launch a Claude Code run in the api workspace to fix the flaky login test.",
+    "Launch a Claude Code session in the api workspace to fix the flaky login test.",
     "Is CI green on the login fix pull request? What did reviewers say?",
-    "Which runs touch the same files as the migration run?",
-    "Tell the parser run to use the new tokenizer."
+    "Which sessions touch the same files as the migration session?",
+    "Tell the parser session to use the new tokenizer."
   ],
   "company": {
     "name": "3xDevOps",

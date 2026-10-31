@@ -19,10 +19,10 @@ import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 
 function budgetWords(report: BudgetReport | undefined): string {
-  if (!report?.budget) return 'No budget set. A budget warns and reports; it never stops a run.'
+  if (!report?.budget) return 'No budget set. A budget warns and reports; it never stops a session.'
   const spent = money.format(report.spend.cost_usd) + (report.advisory ? '+' : '')
   const warn = report.budget.warn_usd === undefined ? '' : `, warns at ${money.format(report.budget.warn_usd)}`
-  return `${spent} spent of ${money.format(report.budget.limit_usd)}${warn}: ${budgetStateLabel[report.state]}. It never stops a run.`
+  return `${spent} spent of ${money.format(report.budget.limit_usd)}${warn}: ${budgetStateLabel[report.state]}. It never stops a session.`
 }
 
 export function WorkspaceView({ params, client = api }: RouteProps & { client?: Api }) {
@@ -52,7 +52,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
           <SettingsSection title="Base branch" heading="h2">
             <SettingRow
               label={<Code>{workspace.base_branch}</Code>}
-              help="New runs fork from this branch. It is fixed when the workspace is created."
+              help="New sessions fork from this branch. It is fixed when the workspace is created."
             />
           </SettingsSection>
           <section aria-label="Source and clone" className="flex min-w-0 flex-col gap-2">
@@ -86,10 +86,10 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
               )}
             />
             <SettingRow
-              label="Messages to others' runs"
+              label="Messages to others' sessions"
               help={adminOnly
-                ? 'Only admins may message runs started by other members.'
-                : 'Any member who can message runs may also message runs started by others.'}
+                ? 'Only admins may message sessions started by other members.'
+                : 'Any member who can message sessions may also message sessions started by others.'}
               control={isAdmin && caps.hasMethod('workspace.settings') && (
                 <Button size="sm" variant="secondary" onClick={() => setDialog('settings')}>Change…</Button>
               )}

@@ -66,7 +66,7 @@ type HandoffOutboxPager interface {
 func validateHandoffOutbox(h *HandoffOutbox) error {
 	if h == nil || h.ID == "" || h.WorkspaceID == "" || h.RunID == "" ||
 		h.ActorID == "" || h.FromMemberID == "" || h.ToMemberID == "" {
-		return errors.New("store: handoff outbox requires operation, workspace, run, actor, from, and to")
+		return errors.New("store: handoff outbox requires operation, workspace, session, actor, from, and to")
 	}
 	if h.EvidenceState == "" {
 		h.EvidenceState = HandoffEvidencePending
@@ -169,14 +169,14 @@ func (d *DB) TransferRunWithHandoff(ctx context.Context, h *HandoffOutbox) error
 	result, err := tx.ExecContext(ctx, `UPDATE runs SET member_id = ? WHERE id = ? AND member_id = ?`,
 		h.ToMemberID, h.RunID, h.FromMemberID)
 	if err != nil {
-		return fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
+		return fmt.Errorf("store: transfer session: %w", mapConstraint(err, ErrNotFound))
 	}
 	if _, err = tx.ExecContext(ctx, detachTransferred, h.RunID, h.ToMemberID); err != nil {
-		return fmt.Errorf("store: transfer run: %w", err)
+		return fmt.Errorf("store: transfer session: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("store: transfer run rows: %w", err)
+		return fmt.Errorf("store: transfer session rows: %w", err)
 	}
 	if affected == 0 {
 		var owner domain.MemberID

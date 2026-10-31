@@ -111,12 +111,12 @@ func TestEnhancedWakeOncePerUnreadSet(t *testing.T) {
 	waker.endTurn(b)
 	h.svc.wakeEnhanced(b)
 	if n := waker.count(); n != 1 {
-		t.Fatalf("an unchanged unread set woke the run again: %d wakes", n)
+		t.Fatalf("an unchanged unread set woke the session again: %d wakes", n)
 	}
 	h.svc.EnhancedSessionOpened(b)
 	h.svc.wakeEnhanced(b)
 	if n := waker.count(); n != 1 {
-		t.Fatalf("a reconnect woke the run again for mail it took: %d wakes", n)
+		t.Fatalf("a reconnect woke the session again for mail it took: %d wakes", n)
 	}
 
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "second")); err != nil {

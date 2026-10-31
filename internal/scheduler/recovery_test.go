@@ -349,7 +349,7 @@ func TestRebootRecoveryContainerGone(t *testing.T) {
 		t.Fatal("branch not published during recovery")
 	}
 	if r.Worktree == "" {
-		t.Fatal("interrupted run must keep its worktree")
+		t.Fatal("interrupted session must keep its worktree")
 	}
 	if _, err := os.Stat(r.Worktree); err != nil {
 		t.Fatalf("checkout must survive recovery: %v", err)
@@ -1172,7 +1172,7 @@ func TestTUICloseRelaunchKeepsExactRunAndContainer(t *testing.T) {
 		t.Fatalf("Relaunch: %v", err)
 	}
 	if reopened.ID != run.ID || reopened.Worktree != worktree || reopened.Status != domain.RunRunning {
-		t.Fatalf("reopened run = %+v, want same running row/worktree", reopened)
+		t.Fatalf("reopened session = %+v, want same running row/worktree", reopened)
 	}
 	if got := e.rt.byName(string(run.ID)); got == nil || got.id != containerID {
 		t.Fatalf("relaunch replaced container: got %v, want %s", got, containerID)
@@ -1212,7 +1212,7 @@ func TestRelaunchSuspendsRuntimeGraceUntilTheNextClose(t *testing.T) {
 	}
 	live, err := e.sched.Retention(reopened)
 	if err != nil || live.RetainedUntil != nil {
-		t.Fatalf("relaunched retention = %+v, %v; want no deadline while the run is live", live, err)
+		t.Fatalf("relaunched retention = %+v, %v; want no deadline while the session is live", live, err)
 	}
 	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil || sc.Retained || sc.RetainedUntil != nil {
@@ -2560,7 +2560,7 @@ func TestRecoveryRetentionPolicyDoesNotExpireActiveOrReopenedRuns(t *testing.T) 
 			}
 			info, err := s2.Retention(after)
 			if err != nil || info.RetainedUntil != nil || info.CleanupPending || info.CleanupError != "" {
-				t.Fatalf("active run has terminal cleanup metadata: %+v, %v", info, err)
+				t.Fatalf("active session has terminal cleanup metadata: %+v, %v", info, err)
 			}
 		})
 	}

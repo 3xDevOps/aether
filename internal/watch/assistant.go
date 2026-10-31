@@ -82,7 +82,7 @@ func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain
 		case protocol.WatchDone:
 			r, err := s.store.GetRun(ctx, run)
 			if err != nil {
-				return protocol.WatchResult{}, fmt.Errorf("run %s: %w", run, err)
+				return protocol.WatchResult{}, fmt.Errorf("session %s: %w", run, err)
 			}
 			if r.Status.Final() {
 				return res, nil

@@ -59,7 +59,7 @@ func TestRunModeSwitchNeedsSteerAndAHeldLease(t *testing.T) {
 	}
 	defer func() { _ = writer.Close() }()
 	if _, perr := switchTo(e.member.ID, "tui", protocol.ACPLease{}); perr == nil || perr.Code != protocol.CodeConflict ||
-		!strings.Contains(perr.Message, string(e.member.ID)+" holds the run's control") {
+		!strings.Contains(perr.Message, string(e.member.ID)+" holds the session's control") {
 		t.Fatalf("switch without the held lease: %v", perr)
 	}
 	if _, perr := switchTo(e.member.ID, "tui", protocol.ACPLease{ControlSessionID: "tab-2", ControlGeneration: ack.ControlGeneration}); perr == nil || perr.Code != protocol.CodeConflict {

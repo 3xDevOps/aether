@@ -21,13 +21,13 @@ import (
 
 func init() {
 	register(command{
-		name:  "runs",
-		short: "list runs (--needs-you: runs that need you; --archived: only archived), or show one: aether runs <run-id>",
-		usage: "aether runs [--needs-you|--archived] [--json]\n" +
-			"aether runs <run-id> [--json]",
-		example: "aether runs --json\n" +
-			"aether runs --needs-you\n" +
-			"aether runs run-d6ay38tj8j --json",
+		name:  "sessions",
+		short: "list sessions (--needs-you: sessions that need you; --archived: only archived), or show one: aether sessions <session-id>",
+		usage: "aether sessions [--needs-you|--archived] [--json]\n" +
+			"aether sessions <session-id> [--json]",
+		example: "aether sessions --json\n" +
+			"aether sessions --needs-you\n" +
+			"aether sessions run-d6ay38tj8j --json",
 		flags: true,
 		run:   runRuns,
 	})
@@ -36,7 +36,7 @@ func init() {
 func runNotFound(runID string, err error) error {
 	var perr *protocol.Error
 	if errors.As(err, &perr) && perr.Code == protocol.CodeNotFound {
-		return fmt.Errorf("run %s not found; aether runs lists runs", runID)
+		return fmt.Errorf("session %s not found; aether sessions lists sessions", runID)
 	}
 	return err
 }
@@ -191,7 +191,7 @@ func writeJSON(w io.Writer, v any) error {
 }
 
 func statusLine(v runView) string {
-	line := fmt.Sprintf("run %s %s", v.ID, v.Status)
+	line := fmt.Sprintf("session %s %s", v.ID, v.Status)
 	if v.Reason != "" {
 		line += ": " + printable(v.Reason)
 	}
@@ -352,10 +352,10 @@ var statusLabels = map[domain.RunStatus]string{
 }
 
 func runRuns(args []string) error {
-	fs := newFlagSet("runs")
-	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (state needs-you or disconnected, an unseen failure, or a reported success ready for review; never paused)")
-	archived := fs.Bool("archived", false, "list only archived runs")
-	asJSON := fs.Bool("json", false, "print a JSON array, or with a run id one JSON object: id, workspace_id, workspace, status, state, reason, pending_inputs, branch, report")
+	fs := newFlagSet("sessions")
+	onlyNeedsYou := fs.Bool("needs-you", false, "list only sessions that need you (state needs-you or disconnected, an unseen failure, or a reported success ready for review; never paused)")
+	archived := fs.Bool("archived", false, "list only archived sessions")
+	asJSON := fs.Bool("json", false, "print a JSON array, or with a session id one JSON object: id, workspace_id, workspace, status, state, reason, pending_inputs, branch, report")
 	runID := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		runID, args = args[0], args[1:]
@@ -366,14 +366,14 @@ func runRuns(args []string) error {
 	if runID == "" && fs.NArg() == 1 {
 		runID = fs.Arg(0)
 	} else if fs.NArg() > 0 {
-		return fmt.Errorf("usage: aether runs [--needs-you|--archived] [--json]\n   or: aether runs <run-id> [--json]")
+		return fmt.Errorf("usage: aether sessions [--needs-you|--archived] [--json]\n   or: aether sessions <session-id> [--json]")
 	}
 	if *onlyNeedsYou && *archived {
-		return fmt.Errorf("aether runs: --needs-you and --archived cannot be used together")
+		return fmt.Errorf("aether sessions: --needs-you and --archived cannot be used together")
 	}
 	if runID != "" {
 		if *onlyNeedsYou || *archived {
-			return fmt.Errorf("aether runs <run-id> shows one run: drop --needs-you and --archived")
+			return fmt.Errorf("aether sessions <session-id> shows one session: drop --needs-you and --archived")
 		}
 		return runShow(runID, *asJSON)
 	}
@@ -437,8 +437,8 @@ func runRuns(args []string) error {
 		// The notice goes to stderr so it never lands in a pipeline reading
 		// the table, and it is skipped when the table already is the answer.
 		if waiting > 0 && !*onlyNeedsYou && !*archived {
-			_, _ = fmt.Fprintf(os.Stderr, "\n%s waiting for you: aether runs --needs-you\n",
-				plural(waiting, "run"))
+			_, _ = fmt.Fprintf(os.Stderr, "\n%s waiting for you: aether sessions --needs-you\n",
+				plural(waiting, "session"))
 		}
 		return nil
 	})

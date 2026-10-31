@@ -111,7 +111,7 @@ func TestIntegrationHeadlessFallback(t *testing.T) {
 	// The resumed agent fails for another reason once the adapter has tapped
 	// its session: the first agent's usage limit, still in the run's
 	// transcript, must not be read as this one's.
-	rt.script("Your previous turn stopped because Bo's usage ran out. The run continues on Ada's account. Continue the task where you stopped.", func(c *e2eContainer) {
+	rt.script("Your previous turn stopped because Bo's usage ran out. The session continues on Ada's account. Continue the task where you stopped.", func(c *e2eContainer) {
 		c.output("resumed\r\n")
 		time.Sleep(time.Second)
 		c.exitNow(1)

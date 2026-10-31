@@ -170,7 +170,7 @@ func (w childWait) live() bool { return w.children > 0 || w.unread > 0 }
 func (s *Scheduler) childWait(ctx context.Context, run domain.RunID, since time.Time) (childWait, error) {
 	children, unread, err := s.cfg.Store.UnfinishedChildren(ctx, run, since)
 	if err != nil {
-		return childWait{}, fmt.Errorf("scheduler: read the child runs of %s: %w", run, err)
+		return childWait{}, fmt.Errorf("scheduler: read the subsessions of %s: %w", run, err)
 	}
 	return childWait{children, unread}, nil
 }

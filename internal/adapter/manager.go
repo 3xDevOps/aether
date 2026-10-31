@@ -85,7 +85,7 @@ func (m *Manager) Start(ctx context.Context) error {
 func (m *Manager) scan(ctx context.Context) {
 	runs, err := m.runs.ListActiveRuns(ctx)
 	if err != nil {
-		slog.Warn("adapter: scan active runs failed", "error", err)
+		slog.Warn("adapter: scan active sessions failed", "error", err)
 		return
 	}
 	for _, r := range runs {
@@ -165,7 +165,7 @@ func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID, replace
 	ctx := context.Background()
 	r, err := m.runs.GetRun(ctx, run)
 	if err != nil {
-		slog.Warn("adapter: resolve run failed", "run", run, "error", err)
+		slog.Warn("adapter: resolve session failed", "run", run, "error", err)
 		return
 	}
 	if r.Mode != domain.LaunchHeadless || r.ACP {

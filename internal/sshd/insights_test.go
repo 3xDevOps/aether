@@ -416,7 +416,7 @@ func TestInsightsGet(t *testing.T) {
 	lookup := []string{string(alice) + " acme/app#4"}
 	observed, perr := status("top2")
 	if perr != nil || observed.PullRequest == nil || observed.PullRequest.State != "merged" || observed.Identity != "octocat" || observed.AccountMemberID != string(bob) || !reflect.DeepEqual(gh.lookups, lookup) {
-		t.Errorf("run.pr.status of a finished run = %+v, %+v, lookups %v; want the merge observed with the run home's GitHub login", observed, perr, gh.lookups)
+		t.Errorf("run.pr.status of a finished session = %+v, %+v, lookups %v; want the merge observed with the session home's GitHub login", observed, perr, gh.lookups)
 	}
 	again, perr := status("top2")
 	if perr != nil || again.PullRequest.State != "merged" || !reflect.DeepEqual(gh.lookups, lookup) {
@@ -437,7 +437,7 @@ func TestInsightsGet(t *testing.T) {
 		feedback.PullRequest.State != "merged" || feedback.PullRequest.MergedAt == nil || !feedback.PullRequest.Draft || feedback.Identity != "octocat" || !reflect.DeepEqual(feedback.Checks, wantChecks) ||
 		len(feedback.Reviews) != 1 || feedback.Reviews[0].Author != "grace" || feedback.Reviews[0].State != "CHANGES_REQUESTED" ||
 		gh.lookups[len(gh.lookups)-1] != "snapshot "+string(alice)+" acme/app#4 page 2" {
-		t.Errorf("run.pr.feedback of a finished run = %+v, %+v, lookups %v; want GitHub's checks and reviews, truncated by the clipped review, comments marked unavailable", feedback, perr, gh.lookups)
+		t.Errorf("run.pr.feedback of a finished session = %+v, %+v, lookups %v; want GitHub's checks and reviews, truncated by the clipped review, comments marked unavailable", feedback, perr, gh.lookups)
 	}
 	// Bob revoking his share while the read is between pages stops it,
 	// with the access error and nothing read after.
@@ -475,7 +475,7 @@ func TestInsightsGet(t *testing.T) {
 	}
 	paused, perr := status("top3")
 	if perr == nil || perr.Code != protocol.CodeInvalidState || perr.Message != scheduler.ErrRunPaused.Error() || !reflect.DeepEqual(gh.lookups, lookup) {
-		t.Errorf("run.pr.status of a paused run with a recorded PR = %+v, %+v, lookups %v; want the paused error without asking GitHub", paused, perr, gh.lookups)
+		t.Errorf("run.pr.status of a paused session with a recorded PR = %+v, %+v, lookups %v; want the paused error without asking GitHub", paused, perr, gh.lookups)
 	}
 	merged, perr := get(alice, week)
 	if perr != nil || merged.PullRequests != (protocol.InsightsPullRequests{Opened: 2, Merged: 2}) {
@@ -521,7 +521,7 @@ func TestInsightsGet(t *testing.T) {
 	var left int
 	if err := raw.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run_state_transitions WHERE run_id = 'top1')
 		+ (SELECT COUNT(*) FROM run_pull_requests WHERE run_id = 'top1')`).Scan(&left); err != nil || left != 0 {
-		t.Errorf("rows left after deleting the run = %d, %v; want 0", left, err)
+		t.Errorf("rows left after deleting the session = %d, %v; want 0", left, err)
 	}
 }
 

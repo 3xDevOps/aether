@@ -31,7 +31,7 @@ describe('workspace environment', () => {
 
     const script = await screen.findByRole('textbox', { name: 'Setup script' })
     expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
-    expect(screen.getByText(/Runs launched after you save get this\. Containers that already exist keep what they started with\./)).toBeDefined()
+    expect(screen.getByText(/Sessions launched after you save get this\. Containers that already exist keep what they started with\./)).toBeDefined()
 
     fireEvent.change(script, { target: { value: 'npm ci\nnpm run build\n' } })
     fireEvent.change(within(rowOf('NODE_ENV')).getByRole('textbox', { name: 'Value of NODE_ENV' }), { target: { value: 'ci' } })

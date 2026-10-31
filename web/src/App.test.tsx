@@ -34,7 +34,7 @@ async function mount() {
 
 /** The sidebar's run list; the board repeats every run task it shows. */
 function sidebar() {
-  return within(within(screen.getByRole('navigation', { name: 'Aether' })).getByRole('region', { name: 'Runs' }))
+  return within(within(screen.getByRole('navigation', { name: 'Aether' })).getByRole('region', { name: 'Sessions' }))
 }
 
 describe('App', () => {
@@ -65,7 +65,7 @@ describe('App', () => {
     fireEvent.click(row)
 
     expect(row.getAttribute('aria-current')).toBe('page')
-    const strip = await screen.findByRole('tablist', { name: 'Run views' })
+    const strip = await screen.findByRole('tablist', { name: 'Session views' })
     await vi.waitFor(() =>
       expect(
         within(strip).getByRole('tab', { name: 'Terminal' }).getAttribute('aria-selected'),
@@ -79,11 +79,11 @@ describe('App', () => {
   it('opens the launch form from the sidebar, with no palette involved', async () => {
     await mount()
     const nav = await screen.findByRole('navigation', { name: 'Aether' })
-    const launch = await within(nav).findByRole('button', { name: 'New run' })
+    const launch = await within(nav).findByRole('button', { name: 'New session' })
 
     fireEvent.click(launch)
 
-    expect(await screen.findByRole('dialog', { name: 'New run' })).toBeDefined()
+    expect(await screen.findByRole('dialog', { name: 'New session' })).toBeDefined()
     expect(await screen.findByLabelText('Target workspace')).toBeDefined()
     expect(useStore.getState().paletteOpen).toBe(false)
   })

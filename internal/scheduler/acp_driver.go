@@ -49,7 +49,7 @@ const (
 var acpTitleLookupDelay = 3 * time.Second
 
 // ErrACPNotRunning rejects input for an enhanced run with no live session.
-var ErrACPNotRunning = errors.New("scheduler: the enhanced session is not running")
+var ErrACPNotRunning = errors.New("scheduler: the Enhanced agent is not running")
 
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
 // shell, and the agent's ACP server runs beside it under a keeper, a managed
@@ -138,7 +138,7 @@ func (d *acpDriver) Start(ctx context.Context, entry *supervised, att runtime.At
 	// own error, so it is recorded here rather than reported.
 	if err := d.openRestored(ctx, entry, openContinue); err != nil {
 		d.setRun(entry.runID, &acpRun{err: err})
-		d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
+		d.notice(entry.runID, "error", "Enhanced agent failed", err.Error())
 	}
 	return nil
 }
@@ -436,7 +436,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	run, err := d.s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
-		return fmt.Errorf("load run: %w", err)
+		return fmt.Errorf("load session: %w", err)
 	}
 	profile, argv, err := d.s.launchProfile(ctx, run.MemberID, run.AccountMember(), run.Harness)
 	if err != nil {
@@ -581,7 +581,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		} else {
 			d.forget(entry, exec)
 		}
-		return adapterError(fmt.Errorf("open the agent session: %w", err), stderr)
+		return adapterError(fmt.Errorf("open the agent conversation: %w", err), stderr)
 	}
 	if id := sess.SessionID(); id != run.HarnessSessionID {
 		if err := d.s.cfg.Store.SetRunAgentSession(ctx, runID, id); err != nil {
@@ -637,7 +637,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		if systemPrompt != "" {
 			channel = "system prompt"
 		}
-		d.s.publishTimeline(ctx, run.WorkspaceID, runID, "", events.TimelineNote, "run instructions: "+channel)
+		d.s.publishTimeline(ctx, run.WorkspaceID, runID, "", events.TimelineNote, "session instructions: "+channel)
 	}
 	switch {
 	case oneShot && marked:
@@ -686,7 +686,7 @@ func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {
 func (d *acpDriver) fail(entry *supervised, err error) {
 	slog.Warn("scheduler: enhanced session failed", "run", entry.runID, "error", err)
 	d.setRun(entry.runID, &acpRun{err: err})
-	d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
+	d.notice(entry.runID, "error", "Enhanced agent failed", err.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
 	if d.oneShot(entry) {
 		d.endOneShot(entry, false, idle)

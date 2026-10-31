@@ -27,7 +27,7 @@ function reduceMotion() {
 function RunViews() {
   return (
     <Tabs defaultValue="session">
-      <TabsList aria-label="Run views">
+      <TabsList aria-label="Session views">
         <TabsTrigger value="session">Session</TabsTrigger>
         <TabsTrigger value="changes">Changes</TabsTrigger>
       </TabsList>

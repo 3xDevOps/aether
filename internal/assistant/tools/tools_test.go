@@ -140,7 +140,7 @@ func TestConfirmedApproveAndDecline(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeDenied || !strings.Contains(err.Error(), "declined by the member") {
 		t.Fatalf("decline: %v", err)
 	}
-	if got.Summary != `Stop run run-1 ("Fix login")` || got.Method != protocol.MethodRunKill {
+	if got.Summary != `Stop session run-1 ("Fix login")` || got.Method != protocol.MethodRunKill {
 		t.Fatalf("confirmation: %+v", got)
 	}
 	for _, m := range fc.called() {
@@ -221,14 +221,14 @@ func TestConfirmedCallsNameAnotherMembersRun(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeDenied {
 		t.Fatalf("inject: %v", err)
 	}
-	if want := `Send to run run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
+	if want := `Send to session run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
 		t.Fatalf("inject summary %q, owner %q, want %q by Grace", got.Summary, got.OtherOwner, want)
 	}
 	err = coordtransport.Call(t.Context(), sock, protocol.MethodRunKill, protocol.RunIDParams{RunID: "run-1"}, nil)
 	if rpcCode(t, err) != protocol.CodeDenied {
 		t.Fatalf("kill: %v", err)
 	}
-	if want := `Stop run run-1 ("Fix login"), owned by Grace`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
+	if want := `Stop session run-1 ("Fix login"), owned by Grace`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
 		t.Fatalf("kill summary %q, owner %q, want %q by Grace", got.Summary, got.OtherOwner, want)
 	}
 	for _, m := range fc.called() {
@@ -241,8 +241,8 @@ func TestConfirmedCallsNameAnotherMembersRun(t *testing.T) {
 		return errors.New("no")
 	})
 	_ = coordtransport.Call(t.Context(), sock, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "hi"}, nil)
-	if want := `Send to run run-1 ("Fix login"): "hi"`; got.Summary != want || got.OtherMember || got.OtherOwner != "" {
-		t.Fatalf("own run summary %q, owner %q, want %q and no other owner", got.Summary, got.OtherOwner, want)
+	if want := `Send to session run-1 ("Fix login"): "hi"`; got.Summary != want || got.OtherMember || got.OtherOwner != "" {
+		t.Fatalf("own session summary %q, owner %q, want %q and no other owner", got.Summary, got.OtherOwner, want)
 	}
 }
 
@@ -456,7 +456,7 @@ func (c *replayCaller) Call(ctx context.Context, method string, params json.RawM
 	case p.ReplayOnly && p.IdempotencyKey == "k-done":
 		return json.RawMessage(`{"run":{"id":"run-first"},"replayed":true}`), nil
 	case p.ReplayOnly:
-		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "template.launch: no run was launched under idempotency_key"}
+		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "template.launch: no session was launched under idempotency_key"}
 	}
 	return json.RawMessage(`{"run":{"id":"run-new"}}`), nil
 }
@@ -479,7 +479,7 @@ func TestTemplateLaunchRetryReplaysBeforeTheCard(t *testing.T) {
 	got, perr := launch(protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}, ExpectedVersion: "v0",
 		IdempotencyKey: "k-done"})
 	if perr != nil || !strings.Contains(string(got), "run-first") || len(cards) != 0 || !slices.Equal(followed, []string{"run-first"}) {
-		t.Fatalf("retry of a stale launch = %s, %v with %d cards, followed %v; want the first run, no card", got, perr, len(cards), followed)
+		t.Fatalf("retry of a stale launch = %s, %v with %d cards, followed %v; want the first session, no card", got, perr, len(cards), followed)
 	}
 	if _, perr = launch(protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}, ExpectedVersion: "v0",
 		IdempotencyKey: "k-new"}); perr == nil || perr.Code != protocol.CodeConflict || len(cards) != 0 {

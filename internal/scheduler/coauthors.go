@@ -27,7 +27,7 @@ var coAuthorsPath = path.Join(coordtransport.MountDir, coord.CoAuthorsName)
 // The list changes while the agent works, so re-reading it is part of the
 // instruction.
 var coAuthorInstruction = "Before each commit, read " + coAuthorsPath +
-	". It holds one Co-authored-by trailer per person other than the run owner who has steered this run," +
+	". It holds one Co-authored-by trailer per person other than the session owner who has steered this session," +
 	" and it changes while you work. End every commit message you write, and the description of any pull" +
 	" request you open, with exactly those lines. If the file is missing or empty, add nothing." +
 	" After those lines, end every pull request description with \"Opened from Aether run <run id>\", using the run_id" +
@@ -172,7 +172,7 @@ func coAuthorTrailers(members []*domain.Member, credited ...string) []string {
 func (s *Scheduler) runCoAuthors(ctx context.Context, run *domain.Run, credited ...string) ([]string, error) {
 	steerers, err := s.cfg.Store.ListRunSteerers(ctx, run.ID)
 	if err != nil {
-		return nil, fmt.Errorf("scheduler: list run steerers: %w", err)
+		return nil, fmt.Errorf("scheduler: list session steerers: %w", err)
 	}
 	return coAuthorTrailers(steerers, credited...), nil
 }
@@ -189,7 +189,7 @@ func (s *Scheduler) runCoAuthors(ctx context.Context, run *domain.Run, credited 
 func (s *Scheduler) containerCoAuthors(ctx context.Context, run *domain.Run, author string) ([]string, error) {
 	steerers, err := s.cfg.Store.ListRunSteerers(ctx, run.ID)
 	if err != nil {
-		return nil, fmt.Errorf("scheduler: list run steerers: %w", err)
+		return nil, fmt.Errorf("scheduler: list session steerers: %w", err)
 	}
 	members := steerers
 	if owner, oerr := s.cfg.Store.GetMember(ctx, run.MemberID); oerr != nil {
@@ -274,7 +274,7 @@ func (s *Scheduler) RecordHandoff(ctx context.Context, run domain.RunID, from do
 func (s *Scheduler) RecordHandoffOperation(ctx context.Context, run domain.RunID, from domain.MemberID, operationID string, at time.Time) error {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return fmt.Errorf("scheduler: resolve run after handoff: %w", err)
+		return fmt.Errorf("scheduler: resolve session after handoff: %w", err)
 	}
 	if operationID == "" {
 		return fmt.Errorf("scheduler: handoff operation ID is required")
@@ -388,7 +388,7 @@ func (s *Scheduler) refreshCoAuthorsErr(ctx context.Context, run domain.RunID) e
 	defer entry.coAuthorMu.Unlock()
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return fmt.Errorf("scheduler: resolve run for co-authors: %w", err)
+		return fmt.Errorf("scheduler: resolve session for co-authors: %w", err)
 	}
 	trailers, err := s.containerCoAuthors(ctx, r, author)
 	if err != nil {

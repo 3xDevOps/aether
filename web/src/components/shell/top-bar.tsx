@@ -199,7 +199,7 @@ function PhoneToolbar() {
   const needsYou = useNeedsYouCount()
   const iconLaunch = useStore((s) => s.headerPrimaries > 0 || s.route.name === 'run')
   const title = route.name === 'run'
-    ? 'Run'
+    ? 'Session'
     : run
     ? runLabel(run)
     : workspace?.name ?? titles[route.name] ?? surfaces(cap, true).find((surface) => surface.name === route.name)?.label ?? 'Aether'
@@ -212,7 +212,7 @@ function PhoneToolbar() {
             id="sidebar-drawer-trigger"
             variant="ghost"
             size="icon"
-            label={needsYou > 0 ? `Open sidebar, ${needsYou} ${needsYou === 1 ? 'run needs' : 'runs need'} you` : 'Open sidebar'}
+            label={needsYou > 0 ? `Open sidebar, ${needsYou} ${needsYou === 1 ? 'session needs' : 'sessions need'} you` : 'Open sidebar'}
             aria-expanded={drawerOpen}
             aria-controls="sidebar-drawer"
             onClick={() => setDrawerOpen(true)}
@@ -229,13 +229,13 @@ function PhoneToolbar() {
         </Button>
         <AssistantButton />
         {canLaunch({ cap, role }) && (iconLaunch ? (
-          <Button variant="ghost" size="icon" label="New run" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
+          <Button variant="ghost" size="icon" label="New session" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
             <Plus />
           </Button>
         ) : (
           <Button size="sm" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
             <Plus />
-            New run
+            New session
           </Button>
         ))}
       </div>

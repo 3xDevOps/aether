@@ -104,5 +104,5 @@ func (d *Docker) EgressCreationKey(ctx context.Context, ip netip.Addr) (string, 
 			return c.Labels[labelCreationKey], nil
 		}
 	}
-	return "", fmt.Errorf("runtime: no run container has %s on %s: %w", ip, EgressNetwork, ErrNotFound)
+	return "", fmt.Errorf("runtime: no session container has %s on %s: %w", ip, EgressNetwork, ErrNotFound)
 }

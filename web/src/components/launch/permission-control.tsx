@@ -24,7 +24,7 @@ export const permissions: { value: Permission; label: string; description: strin
     value: 'isolated',
     label: 'Isolated',
     description: 'Only the checkout is kept',
-    detail: 'The agent works on a throwaway copy of your home, with no sudo or Docker, and reaches only its own service. Nothing it changes outside the checkout outlives the run.',
+    detail: 'The agent works on a throwaway copy of your home, with no sudo or Docker, and reaches only its own service. Nothing it changes outside the checkout outlives the session.',
   },
 ]
 

@@ -122,7 +122,7 @@ func (s *Scheduler) syncRunUserReservationsLocked() {
 			home:  entry.memberID,
 			login: entry.loginMember,
 			user:  entry.runUser,
-			owner: "live run " + string(entry.runID),
+			owner: "live session " + string(entry.runID),
 			run:   entry,
 		}
 		s.credentialUsers[reservation] = struct{}{}
@@ -141,7 +141,7 @@ func (s *Scheduler) reservationConflictLocked(home, login domain.MemberID, user,
 			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
 				home, other.owner, other.user, owner, user)
 		}
-		return fmt.Errorf("the login %s shares is held by %s as user %s, but %s resolved user %s; a run on a shared account must use the uid:gid of the owner's live containers and of other runs on that login",
+		return fmt.Errorf("the login %s shares is held by %s as user %s, but %s resolved user %s; a session on a shared account must use the uid:gid of the owner's live containers and of other sessions on that login",
 			login, other.owner, other.user, owner, user)
 	}
 	return nil
@@ -176,7 +176,7 @@ func (s *Scheduler) reserveTerminalUser(entry *terminalSupervision, user string)
 // reserveRunUser records the resolved run user and reserves its writable
 // member home and shared login for the full live-run registry lifetime.
 func (s *Scheduler) reserveRunUser(entry *supervised, user string, sharedHome bool) error {
-	_, err := s.reserveCredentialUser(entry.memberID, entry.loginMember, user, sharedHome, "live run "+string(entry.runID), entry)
+	_, err := s.reserveCredentialUser(entry.memberID, entry.loginMember, user, sharedHome, "live session "+string(entry.runID), entry)
 	return err
 }
 
@@ -232,7 +232,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 				Harness: harness, Mode: mode, Model: opts.Model, Effort: opts.Effort,
 			}
 			if !sameReservedRun(existing, requested) || (opts.CachedBase != "" && opts.CachedBase != existing.BaseCommit) {
-				return nil, errors.New("scheduler: reserved run does not match launch request")
+				return nil, errors.New("scheduler: reserved session does not match launch request")
 			}
 			return s.freshen(ctx, existing), nil
 		}
@@ -382,7 +382,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		if errors.As(err, &setup) {
 			return &SetupFailure{run: run.ID, reason: reason, Output: setup.Output}
 		}
-		return fmt.Errorf("run %s failed: %s", run.ID, reason)
+		return fmt.Errorf("session %s failed: %s", run.ID, reason)
 	}
 	return nil
 }
@@ -394,7 +394,7 @@ type SetupFailure struct {
 	Output string
 }
 
-func (e *SetupFailure) Error() string { return fmt.Sprintf("run %s failed: %s", e.run, e.reason) }
+func (e *SetupFailure) Error() string { return fmt.Sprintf("session %s failed: %s", e.run, e.reason) }
 
 func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile) error {
 	checkout, branch, err := s.createCheckouts(ctx, run, ws)
@@ -469,7 +469,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 		return nil, reserveErr
 	}
 	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {
-		return nil, fmt.Errorf("apply run ownership: %w", ownErr)
+		return nil, fmt.Errorf("apply session ownership: %w", ownErr)
 	}
 	if ownErr := s.applyLoginOwnership(entry, plan.LoginMember, plan.Mounts, plan.User); ownErr != nil {
 		return nil, fmt.Errorf("apply login ownership: %w", ownErr)
@@ -574,7 +574,7 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	driver := s.entryDriver(entry)
 	if perr := driver.Start(ctx, entry, att); perr != nil {
 		_ = att.Close()
-		return nil, s.failContainer(ctx, entry, cid, "start pty session", perr)
+		return nil, s.failContainer(ctx, entry, cid, "start terminal", perr)
 	}
 	return driver, nil
 }
@@ -739,10 +739,10 @@ func createRun(ctx context.Context, st store.Store, run *domain.Run, reserved do
 	run.ID = reserved
 	byID, ok := st.(store.ReservedRunStore)
 	if !ok {
-		return errors.New("scheduler: reserved run IDs are unavailable")
+		return errors.New("scheduler: reserved session IDs are unavailable")
 	}
 	if err := byID.CreateRunWithID(ctx, run); err != nil {
-		return fmt.Errorf("create reserved run %s: %w", reserved, err)
+		return fmt.Errorf("create reserved session %s: %w", reserved, err)
 	}
 	return nil
 }

@@ -146,7 +146,7 @@ export function useRowContext(run: RunRecord, agent: AgentTerminal, nav: RunNavi
 function MailRow({ messageID, runID }: { messageID: string; runID: string }) {
   const m = useStore((s) => s.runMessages[messageID])
   if (!m) return null
-  return <div className="pl-6"><AgentMessage message={m} flush label={(id) => (id === runID ? 'This run' : undefined)} /></div>
+  return <div className="pl-6"><AgentMessage message={m} flush label={(id) => (id === runID ? 'This session' : undefined)} /></div>
 }
 
 function UserRow({ row, ctx, name }: { row: Extract<SessionRow, { kind: 'user' }>; ctx: RowContext; name: (id: string) => string }) {

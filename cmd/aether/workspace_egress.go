@@ -25,7 +25,7 @@ func workspaceEnvEgress(args []string) error {
 		return errors.New(workspaceEnvEgressUsage)
 	}
 	change := protocol.WorkspaceEnvironmentSetParams{}
-	scope := "the host list applies at once to runs started with egress control on"
+	scope := "the host list applies at once to sessions started with egress control on"
 	switch verb {
 	case "list", "on", "off":
 		if fs.NArg() != 0 {
@@ -34,7 +34,7 @@ func workspaceEnvEgress(args []string) error {
 		if verb != "list" {
 			on := verb == "on"
 			change.Egress = &on
-			scope = "egress control " + verb + " applies to runs launched afterwards"
+			scope = "egress control " + verb + " applies to sessions launched afterwards"
 		}
 	case "allow", "deny":
 		if fs.NArg() == 0 || slices.ContainsFunc(fs.Args(), func(arg string) bool { return strings.HasPrefix(arg, "-") }) {

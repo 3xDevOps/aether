@@ -230,7 +230,7 @@ it('drops what was typed when the server gives the shell to someone else first',
   const refused = StubSocket.last()
   act(() => {
     refused.onopen?.()
-    refused.onmessage?.({ data: JSON.stringify({ ok: false, code: -32003, error: 'run control is held by another session' }) })
+    refused.onmessage?.({ data: JSON.stringify({ ok: false, code: -32003, error: 'session control is held by another session' }) })
     refused.onclose?.({ code: 1008 })
   })
   expect(await screen.findByText('The agent controls')).toBeTruthy()
@@ -440,11 +440,11 @@ it('polls every two seconds while the Terminal view shows and every ten behind a
   try {
     const view = render(<Shells />)
     await waitFor(() => expect(api.devControlStatus).toHaveBeenCalledTimes(1))
-    vi.mocked(api.devTerminalList).mockRejectedValue(new Error('dev.terminal.list: run is not running'))
+    vi.mocked(api.devTerminalList).mockRejectedValue(new Error('dev.terminal.list: session is not running'))
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
     await waitFor(() => expect(api.devControlStatus).toHaveBeenCalledTimes(2))
     expect(api.devTerminalList).toHaveBeenCalledTimes(2)
-    expect((await screen.findByRole('alert')).textContent).toContain('run is not running')
+    expect((await screen.findByRole('alert')).textContent).toContain('session is not running')
     view.rerender(<Shells visible={false} />)
     await waitFor(() => expect(api.devTerminalList).toHaveBeenCalledTimes(3))
     await act(async () => { await vi.advanceTimersByTimeAsync(8_000) })

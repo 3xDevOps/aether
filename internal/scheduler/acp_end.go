@@ -49,10 +49,10 @@ func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
 		if err := d.stopAdapterLocked(ctx, entry.runID); err != nil {
 			slog.Warn("scheduler: stop the ACP server that lost its session", "run", entry.runID, "error", err)
 		}
-		d.fail(entry, fmt.Errorf("the agent lost its session again within %d minutes: %w", int(acpLostAgain.Minutes()), cause))
+		d.fail(entry, fmt.Errorf("the agent lost its conversation again within %d minutes: %w", int(acpLostAgain.Minutes()), cause))
 		return
 	}
-	if err := sess.Notice("warning", "Agent session lost", "The agent no longer has this session. Aether is restarting the agent and restoring the session from its history; send again any message that failed."); err != nil {
+	if err := sess.Notice("warning", "Agent conversation lost", "The agent no longer has this conversation. Aether is restarting the agent and restoring the conversation from its history; send again any message that failed."); err != nil {
 		slog.Warn("scheduler: record the lost session notice", "run", entry.runID, "error", err)
 	}
 	// Its keeper's agent lost the session: open must replace it even when
@@ -117,10 +117,10 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	d.s.mu.Unlock()
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
 	if stopped != "" {
-		d.notice(entry.runID, "info", "Enhanced session stopped", stopped)
+		d.notice(entry.runID, "info", "Enhanced agent stopped", stopped)
 		idle.Reason = acpEndedReason + stopped
 	} else {
-		d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
+		d.notice(entry.runID, "error", "Enhanced agent exited", cause.Error())
 	}
 	if d.oneShot(entry) {
 		d.endOneShot(entry, false, idle)

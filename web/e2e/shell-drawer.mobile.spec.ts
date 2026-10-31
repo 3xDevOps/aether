@@ -6,7 +6,7 @@ import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('the phone drawer closes onto the run it opened', async ({ page, aether }) => {
   const alice = await aether.member('alice')
@@ -45,7 +45,7 @@ test('the phone drawer closes onto the run it opened', async ({ page, aether }) 
   // the title shows once, in the run header, and its controls are finger-sized.
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
   const bar = page.getByRole('banner')
-  await expect(bar).toContainText('Run')
+  await expect(bar).toContainText('Session')
   await expect(bar).not.toContainText('read the deployment log')
   const search = bar.getByRole('button', { name: 'Search', exact: true })
   expect((await search.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)

@@ -53,11 +53,11 @@ export function RowHint({ item }: { item: MemoryItem }) {
   const who = useName(item.pinned_by, item.pinned_by_name, 'a member')
   if (item.superseded_by) return <Line>Superseded by {item.superseded_by}</Line>
   if (item.invalid_at) return <Line>Replaced · listed under Superseded</Line>
-  if (!item.pinned_at) return <Line>Not pinned · runs find it by searching</Line>
+  if (!item.pinned_at) return <Line>Not pinned · sessions find it by searching</Line>
   if (item.scope === 'member') {
-    return <Line>Pinned for {who} · in {who === 'you' ? 'your' : `${who}'s`} new runs' briefs</Line>
+    return <Line>Pinned for {who} · in {who === 'you' ? 'your' : `${who}'s`} new sessions' briefs</Line>
   }
-  return <Line>Pinned by {who} · in every new run's brief</Line>
+  return <Line>Pinned by {who} · in every new session's brief</Line>
 }
 
 /** What RowHint says for a note, so the footer stays still while the pointer crosses rows that share it. */

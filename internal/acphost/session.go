@@ -378,7 +378,7 @@ func (s *Session) open(ctx context.Context) error {
 			res, restoreErr = s.conn.loadSession(ctx, id, s.cfg.Cwd, s.cfg.MCPServers)
 		}
 		if restoreErr != nil && s.cfg.RequireRestore {
-			return fmt.Errorf("restore session %s: %w", id, restoreErr)
+			return fmt.Errorf("restore conversation %s: %w", id, restoreErr)
 		}
 	}
 	if s.cfg.SessionID == "" || restoreErr != nil {
@@ -397,8 +397,8 @@ func (s *Session) open(ctx context.Context) error {
 		s.emitLocked(Item{Kind: KindReset})
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{
 			Severity:    "warning",
-			Title:       "Started a new agent session",
-			Description: fmt.Sprintf("Session %s could not be restored: %v", s.cfg.SessionID, restoreErr),
+			Title:       "Started a new agent conversation",
+			Description: fmt.Sprintf("Conversation %s could not be restored: %v", s.cfg.SessionID, restoreErr),
 		}})
 	}
 	s.sessionOptionsLocked(res)

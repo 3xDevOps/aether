@@ -104,52 +104,52 @@ const launchInput = { workspace_id: workspace.id, harness: 'claude', task: 'Fix 
 
 describe('action cards', () => {
   it('follows a launch from approval to a run working in the background, and opens it', async () => {
-    const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'Fix the login test'), aether(1, 't1', 'aether_launch_run', 'in_progress', { raw_input: launchInput })])
+    const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'Fix the login test'), aether(1, 't1', 'aether_launch_session', 'in_progress', { raw_input: launchInput })])
     assistantSocket().send({ status: status({ state: 'running', confirmations: [launch] }) })
-    const pending = await card(aside, /^Launching run on main-repo with Claude Code\. Waiting for your approval$/)
+    const pending = await card(aside, /^Launching session on main-repo with Claude Code\. Waiting for your approval$/)
     expect(pending.dataset.state).toBe('approval')
-    expect(pending.textContent).toBe('Launching run on main-repo with Claude Code · Waiting for your approval below')
+    expect(pending.textContent).toBe('Launching session on main-repo with Claude Code · Waiting for your approval below')
     expect(within(pending).queryAllByRole('button')).toHaveLength(0)
     expect(aside.querySelector('[data-slot="live-row"]')).toBeNull()
 
     act(() => useStore.getState().upsertRun(run({ id: 'run_9', title: 'login-test', status: 'running' })))
     assistantSocket().send({ status: status({ state: 'running' }) }).items(
       item('notice', 1, { notice: { severity: 'info', title: `Approved: ${launch.summary}`, description: 'run.launch passed after you approved its card.' } }),
-      aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_9' } } }),
+      aether(1, 't1', 'aether_launch_session', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_9' } } }),
     )
-    const done = await card(aside, /^Launched run on main-repo with Claude Code\. Working in the background · approved by you$/)
+    const done = await card(aside, /^Launched session on main-repo with Claude Code\. Working in the background · approved by you$/)
     expect(within(aside).queryByText(`Approved: ${launch.summary}`)).toBeNull()
 
     expect(done.tabIndex).toBe(-1)
     within(aside).getByRole('textbox').focus()
-    const primary = within(done).getByRole('button', { name: 'Open run' })
+    const primary = within(done).getByRole('button', { name: 'Open session' })
     while (document.activeElement !== primary) await userEvent.tab()
     await userEvent.keyboard('{Enter}')
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
 
     act(() => useStore.getState().upsertRun(run({ id: 'run_9', title: 'login-test', status: 'completed' })))
-    expect(await card(aside, /^Launched run on main-repo with Claude Code\. Done · approved by you$/)).toBeDefined()
+    expect(await card(aside, /^Launched session on main-repo with Claude Code\. Done · approved by you$/)).toBeDefined()
   })
 
   it('says a declined action was declined and retries only into the composer', async () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Stop fix-login'),
-      aether(1, 't1', 'aether_stop_run', 'failed', { raw_input: { run_id: 'run_fix' }, content: [{ type: 'text', text: 'run.kill was not approved: the member declined this action' }] }),
+      aether(1, 't1', 'aether_stop_session', 'failed', { raw_input: { run_id: 'run_fix' }, content: [{ type: 'text', text: 'run.kill was not approved: the member declined this action' }] }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const declined = await card(aside, /^Stop run fix-login\. You declined$/)
+    const declined = await card(aside, /^Stop session fix-login\. You declined$/)
     expect(within(declined).queryByRole('alert')).toBeNull()
     expect(within(declined).queryByText(/not approved/)).toBeNull()
     await userEvent.click(within(declined).getByRole('button', { name: 'Details' }))
     expect(within(declined).getByText('run.kill was not approved: the member declined this action')).toBeDefined()
 
     await userEvent.click(within(declined).getByRole('button', { name: 'Retry' }))
-    expect(useStore.getState().assistantDraft).toBe('Retry: Stop run fix-login')
+    expect(useStore.getState().assistantDraft).toBe('Retry: Stop session fix-login')
     expect(document.activeElement).toBe(within(aside).getByRole('textbox'))
     expect(api.assistantPrompt).not.toHaveBeenCalled()
 
-    await userEvent.click(within(declined).getByRole('button', { name: 'Open run' }))
+    await userEvent.click(within(declined).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_fix' } })
   })
 
@@ -157,17 +157,17 @@ describe('action cards', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Message both'),
-      aether(1, 't1', 'aether_message_run', 'failed', { raw_input: { run_id: 'run_fix', message: 'rebase' }, raw_output: 'run.inject was not approved: the member did not answer within 10m0s' }),
-      aether(1, 't2', 'aether_message_run', 'failed', { raw_input: { run_id: 'run_gone', message: 'rebase' }, raw_output: 'run.inject: run run_gone not found (-32004)' }),
+      aether(1, 't1', 'aether_message_session', 'failed', { raw_input: { run_id: 'run_fix', message: 'rebase' }, raw_output: 'run.inject was not approved: the member did not answer within 10m0s' }),
+      aether(1, 't2', 'aether_message_session', 'failed', { raw_input: { run_id: 'run_gone', message: 'rebase' }, raw_output: 'run.inject: session run_gone not found (-32004)' }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const expired = await card(aside, /^Message run fix-login\. No answer in 10 minutes$/)
+    const expired = await card(aside, /^Message session fix-login\. No answer in 10 minutes$/)
     expect(within(expired).queryByRole('alert')).toBeNull()
     expect(within(expired).getByRole('button', { name: 'Retry' })).toBeDefined()
-    const failed = await card(aside, /^Message run run_gone\. Failed$/)
-    expect(within(failed).getByRole('alert').textContent).toBe('run.inject: run run_gone not found (-32004)')
-    expect(within(failed).getByText('This run no longer exists')).toBeDefined()
-    expect(within(failed).queryByRole('button', { name: 'Open run' })).toBeNull()
+    const failed = await card(aside, /^Message session run_gone\. Failed$/)
+    expect(within(failed).getByRole('alert').textContent).toBe('run.inject: session run_gone not found (-32004)')
+    expect(within(failed).getByText('This session no longer exists')).toBeDefined()
+    expect(within(failed).queryByRole('button', { name: 'Open session' })).toBeNull()
     expect(within(failed).getByRole('button', { name: 'Retry' })).toBeDefined()
   })
 
@@ -177,7 +177,7 @@ describe('action cards', () => {
       say(1, 'user', 'Save it'),
       aether(1, 't1', 'aether_save_environment', 'in_progress'),
       item('notice', 1, { notice: { severity: 'info', title: 'Auto-approved: Save your environment', description: 'env.save passed without a card: auto-approval is on.' } }),
-      item('notice', 1, { notice: { severity: 'info', title: 'Auto-approved: Stop run run_x', description: 'run.kill passed without a card: auto-approval is on.' } }),
+      item('notice', 1, { notice: { severity: 'info', title: 'Auto-approved: Stop session run_x', description: 'run.kill passed without a card: auto-approval is on.' } }),
       aether(1, 't1', 'aether_save_environment', 'completed', { raw_output: { image: 'img_1' } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
@@ -185,7 +185,7 @@ describe('action cards', () => {
     await userEvent.click(within(saved).getByRole('button', { name: 'Open environment' }))
     expect(useStore.getState().route).toEqual({ name: 'environment', params: {} })
     expect(within(aside).queryByText('Auto-approved: Save your environment')).toBeNull()
-    expect(within(aside).getByText('Auto-approved: Stop run run_x')).toBeDefined()
+    expect(within(aside).getByText('Auto-approved: Stop session run_x')).toBeDefined()
   })
 
   it('opens a merged pull request in a new tab', async () => {
@@ -206,7 +206,7 @@ describe('action cards', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Launch and watch it'),
-      aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: {
+      aether(1, 't1', 'aether_launch_session', 'completed', { raw_input: launchInput, raw_output: {
         run: { id: 'run_fix' },
         launch: { kind: 'run', id: 'run_fix', workspace_id: workspace.id, harness: 'claude', model: 'opus', mode: 'acp', mode_name: 'Enhanced', account: { member_id: 'mem_bob', name: 'Bob', access: 'shared' }, requested_account: { member_id: alice.id, name: 'Alice', access: 'own' }, fallback: { policy: 'ordered', order: ['mem_bob', alice.id] }, url: '?run=run_fix' },
       } }),
@@ -216,9 +216,9 @@ describe('action cards', () => {
       } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const launched = await card(aside, /^Launched run on main-repo with Claude Code\./)
-    expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · fell back from your account · then mem_bob, your account")).toBeDefined()
-    const watching = await card(aside, /^Started watching run fix-login\. Done$/)
+    const launched = await card(aside, /^Launched session on main-repo with Claude Code\./)
+    expect(within(launched).getByText("session · main-repo · Claude Code opus · Bob's account, shared · fell back from your account · then mem_bob, your account")).toBeDefined()
+    const watching = await card(aside, /^Started watching session fix-login\. Done$/)
     expect(within(watching).getByText('active · on needs you, finished')).toBeDefined()
     await userEvent.click(within(watching).getByRole('button', { name: 'Open watch' }))
     expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'watches', watch: 'wat-1' } })
@@ -239,21 +239,21 @@ describe('action cards', () => {
   it('collapses consecutive reads into one line that expands to each read', async () => {
     const aside = await openPanel([
       item('turn_start', 1),
-      say(1, 'user', 'How are my runs?'),
-      aether(1, 'r1', 'aether_get_run', 'completed', { raw_input: { run_id: 'a' }, raw_output: { id: 'a' } }),
-      aether(1, 'r2', 'aether_get_run', 'completed', { raw_input: { run_id: 'b' }, raw_output: { id: 'b' } }),
+      say(1, 'user', 'How are my sessions?'),
+      aether(1, 'r1', 'aether_get_session', 'completed', { raw_input: { run_id: 'a' }, raw_output: { id: 'a' } }),
+      aether(1, 'r2', 'aether_get_session', 'completed', { raw_input: { run_id: 'b' }, raw_output: { id: 'b' } }),
       aether(1, 'r3', 'aether_list_workspaces', 'completed', { raw_output: { workspaces: [] } }),
-      aether(1, 'r4', 'aether_get_run', 'failed', { raw_input: { run_id: 'c' }, raw_output: 'run.get: run c not found' }),
-      say(1, 'assistant', 'Two runs are fine.'),
+      aether(1, 'r4', 'aether_get_session', 'failed', { raw_input: { run_id: 'c' }, raw_output: 'run.get: session c not found' }),
+      say(1, 'assistant', 'Two sessions are fine.'),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const line = await within(aside).findByRole('button', { name: /^Read 3 runs and 1 workspace list\s*· 1 failed$/ })
+    const line = await within(aside).findByRole('button', { name: /^Read 3 sessions and 1 workspace list\s*· 1 failed$/ })
     expect(within(aside).queryAllByRole('group', { name: /Done$/ })).toHaveLength(0)
     expect(line.getAttribute('aria-expanded')).toBe('false')
     await userEvent.click(line)
     expect(line.getAttribute('aria-expanded')).toBe('true')
-    expect(within(aside).getByText('Run c')).toBeDefined()
-    expect(within(aside).getByText('run.get: run c not found')).toBeDefined()
+    expect(within(aside).getByText('Session c')).toBeDefined()
+    expect(within(aside).getByText('run.get: session c not found')).toBeDefined()
   })
 })
 
@@ -262,18 +262,18 @@ describe('action history', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Launch, then message'),
-      aether(1, 'r1', 'aether_list_runs', 'completed', { raw_output: { runs: [] } }),
-      aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }),
-      aether(1, 't2', 'aether_message_run', 'failed', { raw_input: { run_id: 'run_fix', message: 'go' }, raw_output: 'run.inject was not approved: the member declined this action' }),
+      aether(1, 'r1', 'aether_list_sessions', 'completed', { raw_output: { runs: [] } }),
+      aether(1, 't1', 'aether_launch_session', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }),
+      aether(1, 't2', 'aether_message_session', 'failed', { raw_input: { run_id: 'run_fix', message: 'go' }, raw_output: 'run.inject was not approved: the member declined this action' }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    await card(aside, /^Message run fix-login\. You declined$/)
+    await card(aside, /^Message session fix-login\. You declined$/)
     await userEvent.click(within(aside).getByRole('button', { name: 'Actions' }))
     const list = await screen.findByRole('list', { name: 'Actions' })
     const entries = within(list).getAllByRole('button')
     expect(entries.map((entry) => entry.textContent)).toEqual([
-      expect.stringMatching(/^Message run fix-loginYou declined · opens the run/),
-      expect.stringMatching(/^Launched run on main-repo with Claude CodeWorking in the background · opens the run/),
+      expect.stringMatching(/^Message session fix-loginYou declined · opens the session/),
+      expect.stringMatching(/^Launched session on main-repo with Claude CodeWorking in the background · opens the session/),
     ])
     expect(document.activeElement).toBe(entries[0])
     await userEvent.keyboard('{ArrowDown}')
@@ -295,28 +295,28 @@ describe('review fixes', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Stop fix-login'),
-      aether(1, 't1', 'aether_stop_run', 'failed', { raw_input: { run_id: 'run_fix' }, raw_output: 'run.kill was not approved: the member declined this action' }),
+      aether(1, 't1', 'aether_stop_session', 'failed', { raw_input: { run_id: 'run_fix' }, raw_output: 'run.kill was not approved: the member declined this action' }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     act(() => useStore.getState().setAssistantDraft('also check CI'))
-    await userEvent.click(within(await card(aside, /^Stop run fix-login\. You declined$/)).getByRole('button', { name: 'Retry' }))
-    expect(useStore.getState().assistantDraft).toBe('also check CI\n\nRetry: Stop run fix-login')
+    await userEvent.click(within(await card(aside, /^Stop session fix-login\. You declined$/)).getByRole('button', { name: 'Retry' }))
+    expect(useStore.getState().assistantDraft).toBe('also check CI\n\nRetry: Stop session fix-login')
     expect(api.assistantPrompt).not.toHaveBeenCalled()
   })
 
   it('opens the run a launch approved by an older server names only in its text result', async () => {
     useStore.setState({ route: { name: 'run', params: { runId: 'run_fix' } } })
-    const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'Fix this'), aether(1, 't1', 'aether_launch_run', 'in_progress', { raw_input: launchInput })])
+    const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'Fix this'), aether(1, 't1', 'aether_launch_session', 'in_progress', { raw_input: launchInput })])
     assistantSocket().send({ status: status({ state: 'running', confirmations: [launch] }) })
     await card(aside, /Waiting for your approval$/)
-    const text = `Launched run run_9.\n${JSON.stringify({ run_id: 'run_9', state: 'queued', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' })}`
+    const text = `Launched session run_9.\n${JSON.stringify({ run_id: 'run_9', state: 'queued', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' })}`
     assistantSocket().send({ status: status({ state: 'running' }) }).items(
       item('notice', 1, { notice: { severity: 'info', title: `Approved: ${launch.summary}`, description: 'run.launch passed after you approved its card.' } }),
-      aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, content: [{ type: 'text', text }] }),
+      aether(1, 't1', 'aether_launch_session', 'completed', { raw_input: launchInput, content: [{ type: 'text', text }] }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     )
-    const done = await card(aside, /^Launched run on main-repo with Claude Code\. .*approved by you$/)
-    await userEvent.click(within(done).getByRole('button', { name: 'Open run' }))
+    const done = await card(aside, /^Launched session on main-repo with Claude Code\. .*approved by you$/)
+    await userEvent.click(within(done).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
   })
 
@@ -324,31 +324,31 @@ describe('review fixes', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Launch'),
-      aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_new' } } }),
+      aether(1, 't1', 'aether_launch_session', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_new' } } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const launched = await card(aside, /^Launched run on main-repo with Claude Code\. Done$/)
-    expect(within(launched).queryByText('This run no longer exists')).toBeNull()
-    await userEvent.click(within(launched).getByRole('button', { name: 'Open run' }))
+    const launched = await card(aside, /^Launched session on main-repo with Claude Code\. Done$/)
+    expect(within(launched).queryByText('This session no longer exists')).toBeNull()
+    await userEvent.click(within(launched).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_new' } })
   })
 
   it('reads the whole item behind a cut-down call when its details open', async () => {
     const head = [item('turn_start', 1), say(1, 'user', 'Message')]
-    const cut = { ...aether(1, 't1', 'aether_message_run', 'completed', { raw_input: { run_id: 'run_fix' } }), truncated: true }
+    const cut = { ...aether(1, 't1', 'aether_message_session', 'completed', { raw_input: { run_id: 'run_fix' } }), truncated: true }
     vi.mocked(api.assistantItem).mockResolvedValue({ ...cut, truncated: false, tool_call: { ...cut.tool_call!, raw_input: { run_id: 'run_fix', message: 'the whole message' }, raw_output: { delivered: true } } })
     const aside = await openPanel([...head, cut, item('turn_end', 1, { stop_reason: 'end_turn' })])
-    await userEvent.click(within(await card(aside, /^Messaged run fix-login\. Done$/)).getByRole('button', { name: 'Details' }))
+    await userEvent.click(within(await card(aside, /^Messaged session fix-login\. Done$/)).getByRole('button', { name: 'Details' }))
     expect(api.assistantItem).toHaveBeenCalledWith(cut.seq)
     expect(await within(aside).findByText(/the whole message/)).toBeDefined()
   })
 
   it('stops saying it is loading once the whole item is read, even if the call still reads as cut', async () => {
     const head = [item('turn_start', 1), say(1, 'user', 'Message')]
-    const cut = { ...aether(1, 't1', 'aether_message_run', 'completed', { raw_input: { run_id: 'run_fix' } }), truncated: true }
+    const cut = { ...aether(1, 't1', 'aether_message_session', 'completed', { raw_input: { run_id: 'run_fix' } }), truncated: true }
     vi.mocked(api.assistantItem).mockResolvedValue(cut)
     const aside = await openPanel([...head, cut, item('turn_end', 1, { stop_reason: 'end_turn' })])
-    const messaged = await card(aside, /^Messaged run fix-login\. Done$/)
+    const messaged = await card(aside, /^Messaged session fix-login\. Done$/)
     await userEvent.click(within(messaged).getByRole('button', { name: 'Details' }))
     await waitFor(() => expect(api.assistantItem).toHaveBeenCalledWith(cut.seq))
     await waitFor(() => expect(within(messaged).queryByText('Loading the whole call…')).toBeNull())
@@ -374,7 +374,7 @@ describe('review fixes', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Watch it'),
-      item('notice', 1, { notice: { severity: 'info', title: 'Watching run fix-login', description: 'Aether tells you when it finishes. [Stop or change this watch](?page=settings&id=watches&watch=wat-1)' } }),
+      item('notice', 1, { notice: { severity: 'info', title: 'Watching session fix-login', description: 'Aether tells you when it finishes. [Stop or change this watch](?page=settings&id=watches&watch=wat-1)' } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     await userEvent.click(await within(aside).findByRole('link', { name: 'Stop or change this watch' }))
@@ -382,8 +382,8 @@ describe('review fixes', () => {
   })
 
   it('loads earlier actions into the history when the conversation has more', async () => {
-    const older = [item('turn_start', 1), say(1, 'user', 'Launch'), aether(1, 'o1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }), item('turn_end', 1, { stop_reason: 'end_turn' })]
-    const recent = [item('turn_start', 2), say(2, 'user', 'Read'), aether(2, 'r1', 'aether_get_run', 'completed', { raw_input: { run_id: 'run_fix' } }), item('turn_end', 2, { stop_reason: 'end_turn' })]
+    const older = [item('turn_start', 1), say(1, 'user', 'Launch'), aether(1, 'o1', 'aether_launch_session', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }), item('turn_end', 1, { stop_reason: 'end_turn' })]
+    const recent = [item('turn_start', 2), say(2, 'user', 'Read'), aether(2, 'r1', 'aether_get_session', 'completed', { raw_input: { run_id: 'run_fix' } }), item('turn_end', 2, { stop_reason: 'end_turn' })]
     vi.mocked(api.assistantHistory).mockResolvedValue({ frames: older.map((it) => ({ seq: it.seq, item: it })), oldest_seq: 1 })
     render(<AppShell />)
     await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
@@ -393,7 +393,7 @@ describe('review fixes', () => {
     expect(await screen.findByText('No actions in the loaded messages. Reads are not listed.')).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Show earlier actions' }))
     const list = await screen.findByRole('list', { name: 'Actions' })
-    expect(within(list).getByRole('button').textContent).toMatch(/^Launched run on main-repo with Claude Code/)
+    expect(within(list).getByRole('button').textContent).toMatch(/^Launched session on main-repo with Claude Code/)
   })
 })
 
@@ -402,30 +402,30 @@ describe('agents and turn ends', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Stop fix-login'),
-      tool(1, 'c1', 'execute', 'mcp.aether.aether_stop_run', 'completed', {
-        raw_input: { server: 'aether', tool: 'aether_stop_run', arguments: { run_id: 'run_fix' } },
+      tool(1, 'c1', 'execute', 'mcp.aether.aether_stop_session', 'completed', {
+        raw_input: { server: 'aether', tool: 'aether_stop_session', arguments: { run_id: 'run_fix' } },
         raw_output: { result: { content: [{ type: 'text', text: '{"url":"https://aether.example/?run=run_fix"}' }] }, error: null },
       }),
-      tool(1, 'c2', 'execute', 'mcp.aether.aether_message_run', 'failed', {
-        raw_input: { server: 'aether', tool: 'aether_message_run', arguments: { run_id: 'run_fix', message: 'go' } },
+      tool(1, 'c2', 'execute', 'mcp.aether.aether_message_session', 'failed', {
+        raw_input: { server: 'aether', tool: 'aether_message_session', arguments: { run_id: 'run_fix', message: 'go' } },
         raw_output: { result: null, error: { message: 'run.inject was not approved: the member declined this action' } },
       }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const stopped = await card(aside, /^Stopped run fix-login\. Done$/)
-    await userEvent.click(within(stopped).getByRole('button', { name: 'Open run' }))
+    const stopped = await card(aside, /^Stopped session fix-login\. Done$/)
+    await userEvent.click(within(stopped).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_fix' } })
-    expect(await card(aside, /^Message run fix-login\. You declined$/)).toBeDefined()
+    expect(await card(aside, /^Message session fix-login\. You declined$/)).toBeDefined()
   })
 
   it('says a call the turn ended under did not finish, rather than done', async () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Stop fix-login'),
-      aether(1, 't1', 'aether_stop_run', 'in_progress', { raw_input: { run_id: 'run_fix' } }),
+      aether(1, 't1', 'aether_stop_session', 'in_progress', { raw_input: { run_id: 'run_fix' } }),
       item('turn_end', 1, { stop_reason: 'cancelled' }),
     ])
-    const open = await card(aside, /^Stop run fix-login\. Did not finish: the turn ended first$/)
+    const open = await card(aside, /^Stop session fix-login\. Did not finish: the turn ended first$/)
     expect(within(open).getByRole('button', { name: 'Retry' })).toBeDefined()
   })
 })
@@ -440,19 +440,19 @@ describe('status words', () => {
 
 describe('quiet outcomes and names', () => {
   it('says a withdrawn card in its own words, without an error or a retry', async () => {
-    const withdrawn: AssistantActionRecord = { id: 'a1', method: 'run.kill', summary: 'Stop run fix-login', target: { run_id: 'run_fix' }, outcome: 'withdrawn', confirmation_id: 'c1', created_at: '2026-10-26T10:00:00Z' }
+    const withdrawn: AssistantActionRecord = { id: 'a1', method: 'run.kill', summary: 'Stop session fix-login', target: { run_id: 'run_fix' }, outcome: 'withdrawn', confirmation_id: 'c1', created_at: '2026-10-26T10:00:00Z' }
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Stop fix-login'),
-      aether(1, 't1', 'aether_stop_run', 'in_progress', { raw_input: { run_id: 'run_fix' } }),
-      item('notice', 1, { notice: { severity: 'info', title: 'Withdrawn: Stop run fix-login', action: withdrawn } }),
-      aether(1, 't1', 'aether_stop_run', 'failed', { raw_input: { run_id: 'run_fix' }, raw_output: 'run.kill was not approved: the turn or session ended before the member answered' }),
+      aether(1, 't1', 'aether_stop_session', 'in_progress', { raw_input: { run_id: 'run_fix' } }),
+      item('notice', 1, { notice: { severity: 'info', title: 'Withdrawn: Stop session fix-login', action: withdrawn } }),
+      aether(1, 't1', 'aether_stop_session', 'failed', { raw_input: { run_id: 'run_fix' }, raw_output: 'run.kill was not approved: the turn or session ended before the member answered' }),
       item('turn_end', 1, { stop_reason: 'cancelled' }),
     ])
-    const stopped = await card(aside, /^Stop run fix-login\. Withdrawn: the turn ended before you answered$/)
+    const stopped = await card(aside, /^Stop session fix-login\. Withdrawn: the turn ended before you answered$/)
     expect(within(stopped).queryByRole('alert')).toBeNull()
     expect(within(stopped).queryByRole('button', { name: 'Retry' })).toBeNull()
-    expect(within(aside).queryByText('Withdrawn: Stop run fix-login')).toBeNull()
+    expect(within(aside).queryByText('Withdrawn: Stop session fix-login')).toBeNull()
   })
 
   it('names a run by its task when it has no title', async () => {
@@ -460,10 +460,10 @@ describe('quiet outcomes and names', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Stop it'),
-      aether(1, 't1', 'aether_stop_run', 'completed', { raw_input: { run_id: 'run_untitled' } }),
+      aether(1, 't1', 'aether_stop_session', 'completed', { raw_input: { run_id: 'run_untitled' } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    expect(await card(aside, /^Stopped run Fix the flaky login test\. Done$/)).toBeDefined()
+    expect(await card(aside, /^Stopped session Fix the flaky login test\. Done$/)).toBeDefined()
   })
 
   it('says what a launch started without a receipt, and how the member hears back', async () => {
@@ -472,16 +472,16 @@ describe('quiet outcomes and names', () => {
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Fix the login test on Bob'),
-      aether(1, 't1', 'aether_launch_run', 'completed', {
+      aether(1, 't1', 'aether_launch_session', 'completed', {
         raw_input: { ...launchInput, model: 'opus', account_member_id: 'mem_bob', no_fallback: true },
-        content: [{ type: 'text', text: `Launched run run_9.\n${JSON.stringify({ run_id: 'run_9', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' })}` }],
+        content: [{ type: 'text', text: `Launched session run_9.\n${JSON.stringify({ run_id: 'run_9', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' })}` }],
       }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const launched = await card(aside, /^Launched run on main-repo with Claude Code\. Working in the background$/)
-    expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · no fallback")).toBeDefined()
+    const launched = await card(aside, /^Launched session on main-repo with Claude Code\. Working in the background$/)
+    expect(within(launched).getByText("session · main-repo · Claude Code opus · Bob's account, shared · no fallback")).toBeDefined()
     expect(within(launched).getByText(/^Aether notifies you here/)).toBeDefined()
-    await userEvent.click(within(launched).getByRole('button', { name: 'Open run' }))
+    await userEvent.click(within(launched).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
   })
 })

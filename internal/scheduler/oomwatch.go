@@ -176,7 +176,7 @@ func readUint(path string) uint64 {
 }
 
 func oomMessage(st memoryStats) string {
-	msg := "Out of memory: the kernel killed a process in this run"
+	msg := "Out of memory: the kernel killed a process in this session"
 	if st.max > 0 {
 		msg += " at its " + formatGiB(st.max) + " memory limit"
 	}

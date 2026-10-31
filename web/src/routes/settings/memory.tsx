@@ -178,7 +178,7 @@ function MemoryBody({ client }: { client: Api }) {
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-1 text-ui text-muted">
-        <p>Only you can see these. Teammates, admins, your runs and connected apps can&apos;t. Server operators can read the server database.</p>
+        <p>Only you can see these. Teammates, admins, your sessions and connected apps can&apos;t. Server operators can read the server database.</p>
         <p>The assistant uses them when they fit; what you say in a message always wins.</p>
       </div>
       {load.kind === 'failed' && <FailureCallout error={load.error} onRetry={() => setAttempt((n) => n + 1)} />}

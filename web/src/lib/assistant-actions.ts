@@ -46,21 +46,21 @@ export interface AssistantView {
 
 /** The RPC methods each acting tool may call, by its input where it says which: what a pending card and an action record name. */
 const toolMethods: Record<string, string | string[] | ((input: Record<string, unknown>) => string | undefined)> = {
-  aether_launch_run: 'run.launch',
-  aether_message_run: 'run.inject',
-  aether_stop_run: (input) => (text(input.outcome) ? 'run.close' : 'run.kill'),
-  aether_pause_run: 'run.pause',
-  aether_resume_run: 'run.resume',
+  aether_launch_session: 'run.launch',
+  aether_message_session: 'run.inject',
+  aether_stop_session: (input) => (text(input.outcome) ? 'run.close' : 'run.kill'),
+  aether_pause_session: 'run.pause',
+  aether_resume_session: 'run.resume',
   aether_save_environment: 'env.save',
   aether_pr_merge: 'run.pr.merge',
   aether_pr_create: 'run.pr.create',
-  aether_relaunch_run: 'run.relaunch',
+  aether_relaunch_session: 'run.relaunch',
   // The question the answer_id names decides: an agent's or a teammate's.
   aether_answer: ['run.input.respond', 'run.room.post'],
   aether_decide_approval: 'run.input.respond',
-  aether_run_lifecycle: (input) => ({ relaunch: 'run.relaunch', protect: 'run.protect', unprotect: 'run.protect', archive: 'run.archive', restore: 'run.archive' } as Record<string, string>)[text(input.action) ?? ''],
-  aether_switch_run_mode: 'run.mode.switch',
-  aether_handoff_run: 'run.handoff',
+  aether_session_lifecycle: (input) => ({ relaunch: 'run.relaunch', protect: 'run.protect', unprotect: 'run.protect', archive: 'run.archive', restore: 'run.archive' } as Record<string, string>)[text(input.action) ?? ''],
+  aether_switch_session_mode: 'run.mode.switch',
+  aether_handoff_session: 'run.handoff',
   aether_remember: 'assistant.remember',
   aether_forget: 'assistant.forget',
   aether_memory_add: 'memory.add',
@@ -76,10 +76,10 @@ function toolMethod(tool: string, input: Record<string, unknown>): string[] {
 }
 
 const readTools: Record<string, [string, string]> = {
-  aether_list_runs: ['run list', 'run lists'],
-  aether_get_run: ['run', 'runs'],
-  aether_run_history: ['run conversation', 'run conversations'],
-  aether_run_changes: ['run diff', 'run diffs'],
+  aether_list_sessions: ['session list', 'session lists'],
+  aether_get_session: ['session', 'sessions'],
+  aether_session_history: ['session conversation', 'session conversations'],
+  aether_session_changes: ['session diff', 'session diffs'],
   aether_list_workspaces: ['workspace list', 'workspace lists'],
   aether_get_workspace: ['workspace', 'workspaces'],
   aether_list_agents: ['agent list', 'agent lists'],
@@ -98,14 +98,19 @@ const readTools: Record<string, [string, string]> = {
   aether_watches: ['watch list', 'watch lists'],
 }
 
-/** The Aether tool a call's `tool_name` names: Claude Code's `mcp__aether__aether_get_run`, or a bare name. */
+/** The Aether tool a call's `tool_name` names: Claude Code's `mcp__aether__aether_get_session`, or a bare name. */
 export function aetherTool(name: string | undefined): string | undefined {
-  return /(?:^|__|[./])(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(name ?? '')?.[1]
+  return currentTool(/(?:^|__|[./])(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(name ?? '')?.[1])
+}
+
+/** Saved transcripts name tools from before runs became sessions; read them under today's names. */
+function currentTool(tool: string | undefined): string | undefined {
+  return tool?.replace(/^aether_child_/, 'aether_subsession_').replace(/^aether_children$/, 'aether_subsessions').replace(/_runs?(?=_|$)/g, (m) => m.replace('run', 'session'))
 }
 
 /** Codex reports no tool name; its MCP call's title is `mcp.<server>.<tool>`. */
 function codexTool(call: SessionToolCall | undefined): string | undefined {
-  return /^mcp\.aether\.(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(call?.title ?? '')?.[1]
+  return currentTool(/^mcp\.aether\.(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(call?.title ?? '')?.[1])
 }
 
 function isRead(tool: string): boolean {
@@ -508,7 +513,7 @@ const words = (verb: string): Verb => {
   return [verb.charAt(0).toUpperCase() + verb.slice(1), `${verb.charAt(0).toUpperCase() + verb.slice(1)}${verb.endsWith('e') ? 'd' : 'ed'}`, `${stem.charAt(0).toUpperCase() + stem.slice(1)}ing`]
 }
 
-const runVerb = (verb: Verb, suffix = '') => ({ verb, object: (a: AssistantAction, n: ActionNames) => `run ${runName(a, n)}${suffix}` })
+const runVerb = (verb: Verb, suffix = '') => ({ verb, object: (a: AssistantAction, n: ActionNames) => `session ${runName(a, n)}${suffix}` })
 
 function runName(action: AssistantAction, names: ActionNames): string {
   const id = text(action.input.run_id) ?? (action.target?.kind === 'run' ? action.target.id : undefined)
@@ -526,7 +531,7 @@ function launchObject(kind: string) {
 function prName(action: AssistantAction, names: ActionNames): string {
   const result = record(action.result)
   const number = text(result.number) ?? text(record(result.pull_request).number) ?? text(record(result.pr).number) ?? text(action.input.number) ?? text(action.input.pr_number)
-  return number ? `PR #${number}` : `the pull request of run ${runName(action, names)}`
+  return number ? `PR #${number}` : `the pull request of session ${runName(action, names)}`
 }
 
 function alreadyGone(action: AssistantAction): boolean {
@@ -534,19 +539,19 @@ function alreadyGone(action: AssistantAction): boolean {
 }
 
 const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb); object: (action: AssistantAction, names: ActionNames) => string }> = {
-  aether_launch_run: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run') },
-  aether_relaunch_run: runVerb(['Relaunch', 'Relaunched', 'Relaunching']),
-  aether_message_run: runVerb(['Message', 'Messaged', 'Messaging']),
-  aether_stop_run: {
+  aether_launch_session: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('session') },
+  aether_relaunch_session: runVerb(['Relaunch', 'Relaunched', 'Relaunching']),
+  aether_message_session: runVerb(['Message', 'Messaged', 'Messaging']),
+  aether_stop_session: {
     verb: (a) => (text(a.input.outcome) ? ['Close', 'Closed', 'Closing'] : ['Stop', 'Stopped', 'Stopping']),
-    object: (a, n) => `run ${runName(a, n)}${text(a.input.outcome) ? ` as ${text(a.input.outcome)}` : ''}`,
+    object: (a, n) => `session ${runName(a, n)}${text(a.input.outcome) ? ` as ${text(a.input.outcome)}` : ''}`,
   },
-  aether_pause_run: runVerb(['Pause', 'Paused', 'Pausing']),
-  aether_resume_run: runVerb(['Resume', 'Resumed', 'Resuming']),
-  aether_close_run: runVerb(['Close', 'Closed', 'Closing']),
+  aether_pause_session: runVerb(['Pause', 'Paused', 'Pausing']),
+  aether_resume_session: runVerb(['Resume', 'Resumed', 'Resuming']),
+  aether_close_session: runVerb(['Close', 'Closed', 'Closing']),
   aether_mark_reviewed: runVerb(['Mark', 'Marked', 'Marking'], ' reviewed'),
   aether_answer: runVerb(['Answer', 'Answered', 'Answering']),
-  aether_decide_approval: { verb: ['Decide', 'Decided', 'Deciding'], object: (a, n) => `an approval for run ${runName(a, n)}` },
+  aether_decide_approval: { verb: ['Decide', 'Decided', 'Deciding'], object: (a, n) => `an approval for session ${runName(a, n)}` },
   aether_pr_merge: {
     verb: (a) => (record(a.result).write === 'pending' && record(a.result).merged === false ? ['Queue to merge', 'Queued to merge', 'Queueing to merge'] : ['Merge', 'Merged', 'Merging']),
     object: prName,
@@ -555,10 +560,10 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
   aether_remember: { verb: ['Remember', 'Remembered', 'Remembering'], object: () => 'a preference' },
   aether_forget: { verb: ['Forget', 'Forgotten', 'Forgetting'], object: () => 'a preference' },
   aether_my_preferences: { verb: ['Read', 'Read', 'Reading'], object: () => 'your preferences' },
-  aether_run_lifecycle: { verb: (a) => words(text(a.input.action) ?? 'change'), object: (a, n) => `run ${runName(a, n)}` },
-  aether_switch_run_mode: { verb: ['Switch', 'Switched', 'Switching'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.mode) ?? 'another'} mode` },
-  aether_handoff_run: { verb: ['Hand off', 'Handed off', 'Handing off'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.to_member_id) ?? 'a teammate'}` },
-  aether_pr_create: { verb: ['Open', 'Opened', 'Opening'], object: (a, n) => `a pull request for run ${runName(a, n)}` },
+  aether_session_lifecycle: { verb: (a) => words(text(a.input.action) ?? 'change'), object: (a, n) => `session ${runName(a, n)}` },
+  aether_switch_session_mode: { verb: ['Switch', 'Switched', 'Switching'], object: (a, n) => `session ${runName(a, n)} to ${text(a.input.mode) ?? 'another'} mode` },
+  aether_handoff_session: { verb: ['Hand off', 'Handed off', 'Handing off'], object: (a, n) => `session ${runName(a, n)} to ${text(a.input.to_member_id) ?? 'a teammate'}` },
+  aether_pr_create: { verb: ['Open', 'Opened', 'Opening'], object: (a, n) => `a pull request for session ${runName(a, n)}` },
   aether_memory_add: { verb: ['Add', 'Added', 'Adding'], object: (a) => (text(a.input.kind) ? `a ${text(a.input.kind)} note` : 'a note') },
   aether_memory_pin: { verb: (a) => (a.input.pin === false ? ['Unpin', 'Unpinned', 'Unpinning'] : ['Pin', 'Pinned', 'Pinning']), object: (a) => `note ${text(a.input.id) ?? ''}`.trimEnd() },
   aether_watch: {
@@ -569,7 +574,7 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
       const pr = text(a.input.pr)
       if (watch) return `watch ${watch}`
       if (pr) return `PR ${pr}`
-      return text(a.input.run_id) ? `run ${runName(a, n)}` : ''
+      return text(a.input.run_id) ? `session ${runName(a, n)}` : ''
     },
   },
   aether_unwatch: {
@@ -641,12 +646,12 @@ export function launchLine(action: AssistantAction, names: ActionNames): string 
   const result = record(action.result)
   const launch = record(result.launch)
   const kind = text(launch.kind)
-  if (!kind) return action.state === 'done' && action.tool === 'aether_launch_run' ? askedLaunch(action, result, names) : undefined
+  if (!kind) return action.state === 'done' && action.tool === 'aether_launch_session' ? askedLaunch(action, result, names) : undefined
   const workspace = text(launch.workspace_id)
   const harness = text(launch.harness)
   const requested = record(launch.requested_account)
   return [
-    kind,
+    kind === 'run' ? 'session' : kind,
     workspace && (names.workspace(workspace) ?? workspace),
     harness && [names.agent(harness) ?? harness, text(launch.model)].filter(Boolean).join(' '),
     accountWords(record(launch.account), names),
@@ -678,7 +683,7 @@ function askedLaunch(action: AssistantAction, result: Record<string, unknown>, n
   const account = text(input.account_member_id)
   const sharer = account ? names.sharer(account) : undefined
   return [
-    'run',
+    'session',
     workspace && (names.workspace(workspace) ?? workspace),
     harness && [names.agent(harness) ?? harness, text(input.model)].filter(Boolean).join(' '),
     account && (sharer ? `${sharer}'s account, shared` : 'your account'),

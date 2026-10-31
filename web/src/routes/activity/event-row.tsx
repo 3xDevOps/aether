@@ -80,7 +80,7 @@ export const VisitRow = memo(function VisitRow({ visit }: { visit: Visit }) {
   const self = useStore((s) => s.info?.member.id === visit.memberID)
   return (
     <Row time={visit.time} who={<MemberAvatar id={visit.memberID} />} runID={visit.runID}>
-      <Who id={visit.memberID} /> {visit.open ? `${self ? 'are' : 'is'} viewing the run` : 'viewed the run'}
+      <Who id={visit.memberID} /> {visit.open ? `${self ? 'are' : 'is'} viewing the session` : 'viewed the session'}
     </Row>
   )
 })

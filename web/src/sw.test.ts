@@ -71,7 +71,7 @@ describe('service worker', () => {
   it('quietly replaces the notification of a need that ended, keeping its title', async () => {
     const { self, dispatch } = worker([], [{ tag: 'run-7k2m9q4xbd', title: 'Fix the login redirect' }])
     await dispatch('push', {
-      data: { json: () => ({ title: 'Renamed run', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) },
+      data: { json: () => ({ title: 'Renamed session', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) },
     })
     expect(self.registration.showNotification).toHaveBeenCalledWith('Fix the login redirect', {
       body: 'No longer needs you',
@@ -96,10 +96,10 @@ describe('service worker', () => {
   })
 
   it("keeps an assistant's newer notice about the run when its need clears", async () => {
-    const notice = { tag: 'run-7k2m9q4xbd', title: 'Run "Fix it" finished', body: 'All green', data: { run: 'run-7k2m9q4xbd', notice: true } }
+    const notice = { tag: 'run-7k2m9q4xbd', title: 'Session "Fix it" finished', body: 'All green', data: { run: 'run-7k2m9q4xbd', notice: true } }
     const { self, dispatch } = worker([], [notice])
     await dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) } })
-    expect(self.registration.showNotification).toHaveBeenCalledWith('Run "Fix it" finished', {
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Session "Fix it" finished', {
       body: 'All green',
       tag: 'run-7k2m9q4xbd',
       silent: true,
@@ -147,7 +147,7 @@ describe('service worker', () => {
   it('still shows something for a push it cannot read', async () => {
     const { self, dispatch } = worker()
     await dispatch('push', { data: null })
-    expect(self.registration.showNotification).toHaveBeenCalledWith('Aether', expect.objectContaining({ body: 'A run needs you.', tag: 'aether' }))
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Aether', expect.objectContaining({ body: 'A session needs you.', tag: 'aether' }))
   })
 
   it('opens the run in a window when no dashboard is open', async () => {
@@ -190,7 +190,7 @@ describe('service worker', () => {
   it('keeps one notification per page and opens the page it names', async () => {
     const { self, dispatch } = worker()
     const url = '/?run=run-rtgje8zxp6'
-    await dispatch('push', { data: { json: () => ({ title: 'Ship watches', body: 'Run completed', url }) } })
+    await dispatch('push', { data: { json: () => ({ title: 'Ship watches', body: 'Session completed', url }) } })
     expect(self.registration.showNotification).toHaveBeenCalledWith('Ship watches', expect.objectContaining({ tag: url, data: { url } }))
     await dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
     expect(self.clients.openWindow).toHaveBeenCalledWith(url)

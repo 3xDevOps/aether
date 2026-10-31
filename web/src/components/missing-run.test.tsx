@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MissingRun } from '@/components/missing-run'
 import { useStore } from '@/store'
 
-const gone = 'This run is not on the server. It may have been deleted.'
+const gone = 'This session is not on the server. It may have been deleted.'
 
 describe('missing run', () => {
   it('shows nothing at all until the load has run past the delay', () => {
@@ -19,7 +19,7 @@ describe('missing run', () => {
       // flashing on a load that was never slow.
       act(() => vi.advanceTimersByTime(200))
 
-      expect(screen.getByRole('status', { name: 'Loading the run' })).toBeDefined()
+      expect(screen.getByRole('status', { name: 'Loading the session' })).toBeDefined()
       expect(screen.queryByText(gone)).toBeNull()
       expect(screen.queryByRole('button', { name: 'Back to board' })).toBeNull()
     } finally {

@@ -279,7 +279,7 @@ func (s *Service) DeliverDue(ctx context.Context, limit int) (int, error) {
 			for _, msg := range page.Items {
 				run, err := s.cfg.Runs.GetRun(ctx, msg.RunID)
 				if err != nil {
-					sweepErrs = append(sweepErrs, fmt.Errorf("load overdue run %q for message %q: %w", msg.RunID, msg.ID, err))
+					sweepErrs = append(sweepErrs, fmt.Errorf("load overdue session %q for message %q: %w", msg.RunID, msg.ID, err))
 					continue
 				}
 				if _, err := s.deliverResult(ctx, msg, nil, run, false, "", nil, nil, false); err != nil {

@@ -675,7 +675,7 @@ func TestAskSysboxDefaultsToYes(t *testing.T) {
 		if got := askSysbox(newPrompter(&out, answers(answer)), true); got != want {
 			t.Errorf("answer %q = %v, want %v", answer, got, want)
 		}
-		if !strings.Contains(out.String(), "Let agents use Docker inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)") {
+		if !strings.Contains(out.String(), "Let agents use Docker inside their sessions? This installs the Sysbox runtime (Ubuntu/Debian)") {
 			t.Errorf("prompt = %q", out.String())
 		}
 	}
@@ -692,7 +692,7 @@ func TestAskSysboxIsSilentWhenSysboxIsOn(t *testing.T) {
 func TestAskSysboxIsSkippedWithoutDocker(t *testing.T) {
 	fakeSysbox(t, false, nil)
 	var out bytes.Buffer
-	if askSysbox(newPrompter(&out, answers("yes")), false) || out.String() != "\nSkipping Docker inside runs (Sysbox), which needs Docker; once Docker answers: sudo aether-server sysbox install\n" {
+	if askSysbox(newPrompter(&out, answers("yes")), false) || out.String() != "\nSkipping Docker inside sessions (Sysbox), which needs Docker; once Docker answers: sudo aether-server sysbox install\n" {
 		t.Errorf("askSysbox without Docker = output %q, want the skip line and no question", out.String())
 	}
 }
@@ -741,10 +741,10 @@ func TestInstallSysboxReportsWithoutFailingSetup(t *testing.T) {
 		want string
 	}{
 		"done":        {nil, ""},
-		"unsupported": {&sysbox.UnsupportedError{Reason: "kernel 5.4 cannot ID-map bind mounts"}, "Docker inside runs is unavailable on this host: kernel 5.4 cannot ID-map bind mounts\n"},
+		"unsupported": {&sysbox.UnsupportedError{Reason: "kernel 5.4 cannot ID-map bind mounts"}, "Docker inside sessions is unavailable on this host: kernel 5.4 cannot ID-map bind mounts\n"},
 		"failure":     {errors.New("sysbox: install: exit status 1: checksum mismatch"), "checksum mismatch\nInstall it later with: sudo aether-server sysbox install\n"},
 		"detached": {&sysbox.DetachedError{Unit: "aether-sysbox-install"}, "Stopped waiting for Sysbox: the installer keeps running as the aether-sysbox-install unit; " +
-			"`systemctl status aether-sysbox-install` shows whether it has finished\nOnce it has, check Docker inside runs with: aether-server sysbox status\n"},
+			"`systemctl status aether-sysbox-install` shows whether it has finished\nOnce it has, check Docker inside sessions with: aether-server sysbox status\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			installs := fakeSysbox(t, false, func(io.Writer) error { return tc.err })

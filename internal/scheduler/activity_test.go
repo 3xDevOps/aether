@@ -83,7 +83,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	if row.Activity != domain.ActivityWorking {
-		t.Fatalf("launched run activity = %q, want working", row.Activity)
+		t.Fatalf("launched session activity = %q, want working", row.Activity)
 	}
 	seq := row.StatusSeq
 	sub := e.subscribe(t)
@@ -108,7 +108,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		{"next turn", func() { report(working) }, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
 		{"permission mid-turn", func() { report(permissionInput("open")) }, domain.RunRunning, domain.ActivityNeedsYou, agentstatus.ReasonResumed},
 		{"permission answered", func() { report(permissionInput("close")) }, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
-		{"turn end with a live child run", func() {
+		{"turn end with a live subsession", func() {
 			children.workers.Store(1)
 			report(idle)
 		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 child run"},
@@ -267,7 +267,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 	refreshed := e.sched.runs[run.ID].lastWorking.After(before)
 	e.sched.mu.Unlock()
 	if !refreshed {
-		t.Fatal("a subagent's activity did not count as the run's")
+		t.Fatal("a subagent's activity did not count as the session's")
 	}
 }
 
@@ -460,7 +460,7 @@ func TestTheChildRunsReasonFollowsTheChildren(t *testing.T) {
 	}
 	children.workers.Store(0)
 	e.sched.refreshActivities(ctx)
-	expect("the child runs done", domain.ActivityWaiting, turnEndedReason)
+	expect("the subsessions done", domain.ActivityWaiting, turnEndedReason)
 }
 
 func TestCauseOnlyExplainsTheActivityAsked(t *testing.T) {
@@ -475,6 +475,6 @@ func TestCauseOnlyExplainsTheActivityAsked(t *testing.T) {
 		t.Fatalf("Cause(waiting-ci) = %q, want none", got)
 	}
 	if got := s.Cause("run-2", domain.ActivityWorking); got != "" {
-		t.Fatalf("Cause(unknown run) = %q, want none", got)
+		t.Fatalf("Cause(unknown session) = %q, want none", got)
 	}
 }

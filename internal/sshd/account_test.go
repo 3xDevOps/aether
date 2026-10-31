@@ -263,7 +263,7 @@ func TestAccountRevokeFencesAdmittedProvisioningRun(t *testing.T) {
 	}
 	i := slices.IndexFunc(active, func(r *domain.Run) bool { return r.MemberID == grantee.ID })
 	if i < 0 {
-		t.Fatalf("active runs while provisioning = %+v, want the admitted run", active)
+		t.Fatalf("active sessions while provisioning = %+v, want the admitted run", active)
 	}
 	admitted := active[i]
 	lease, _, err := e.srv.cfg.Control.Acquire(string(admitted.ID), string(grantee.ID), "grace-tab", false)
@@ -302,7 +302,7 @@ func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if _, err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", "", nil, nil); err != nil {
-		t.Fatalf("mark run retained: %v", err)
+		t.Fatalf("mark session retained: %v", err)
 	}
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 	if err := e.store.TransferRun(ctx, e.run.ID, grantee.ID); err != nil {
@@ -331,7 +331,7 @@ func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
 	}
 	reopened := result.(protocol.RunResult).Run
 	if reopened.ID != string(e.run.ID) {
-		t.Fatalf("relaunch returned %q, want addressed run %q", reopened.ID, e.run.ID)
+		t.Fatalf("relaunch returned %q, want addressed session %q", reopened.ID, e.run.ID)
 	}
 	if calls := e.runs.Calls(); len(calls) != 1 || calls[0] != "relaunch:"+string(e.run.ID)+":"+string(grantee.ID) {
 		t.Fatalf("scheduler calls after granted relaunch = %v, want addressed run", calls)
@@ -353,7 +353,7 @@ func TestRelaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if _, err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", "", nil, nil); err != nil {
-		t.Fatalf("mark run retained: %v", err)
+		t.Fatalf("mark session retained: %v", err)
 	}
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
@@ -416,7 +416,7 @@ func TestRelaunchAdmissionSerializesWorkspaceSteerRevocation(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if _, err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", "", nil, nil); err != nil {
-		t.Fatalf("mark run retained: %v", err)
+		t.Fatalf("mark session retained: %v", err)
 	}
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 	if _, err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
@@ -519,7 +519,7 @@ func TestRunLaunchFallsBackFromExhaustedAccount(t *testing.T) {
 	}
 	run := result.(protocol.RunLaunchResult).Run
 	if run.AccountMemberID != string(e.member.ID) || run.RequestedAccountMemberID != string(grantee.ID) {
-		t.Fatalf("run account/requested = %s/%s, want %s/%s", run.AccountMemberID, run.RequestedAccountMemberID, e.member.ID, grantee.ID)
+		t.Fatalf("session account/requested = %s/%s, want %s/%s", run.AccountMemberID, run.RequestedAccountMemberID, e.member.ID, grantee.ID)
 	}
 
 	usage[e.member.ID] = 99
@@ -528,7 +528,7 @@ func TestRunLaunchFallsBackFromExhaustedAccount(t *testing.T) {
 		t.Fatalf("run.launch with every account exhausted: %+v", perr)
 	}
 	if run := result.(protocol.RunLaunchResult).Run; run.AccountMemberID != string(grantee.ID) || run.RequestedAccountMemberID != "" {
-		t.Fatalf("run account/requested with no usable fallback = %s/%s, want %s/none", run.AccountMemberID, run.RequestedAccountMemberID, grantee.ID)
+		t.Fatalf("session account/requested with no usable fallback = %s/%s, want %s/none", run.AccountMemberID, run.RequestedAccountMemberID, grantee.ID)
 	}
 	both, err := json.Marshal(protocol.RunLaunchParams{
 		WorkspaceID: string(e.ws.ID), Harness: "claude", FallbackAccountMemberIDs: []string{string(e.member.ID)}, NoFallback: true,

@@ -196,7 +196,7 @@ describe('workspaces view', () => {
   })
 
   it('keeps a refusal visible and allows deletion to be retried', async () => {
-    const refusal = 'workspace has active runs; close them before deleting'
+    const refusal = 'workspace has active sessions; close them before deleting'
     const client = fakeApi({
       workspaceListFull: vi.fn().mockResolvedValueOnce([workspace]).mockResolvedValue([]),
       workspaceDelete: vi.fn()

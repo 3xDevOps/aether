@@ -81,7 +81,7 @@ func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, pa
 	}
 	defer lock.Unlock()
 	if !s.authorizationMu.TryLock() {
-		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "run admission is in progress; retry workspace deletion when it finishes"}
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "session admission is in progress; retry workspace deletion when it finishes"}
 	}
 	defer s.authorizationMu.Unlock()
 	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {

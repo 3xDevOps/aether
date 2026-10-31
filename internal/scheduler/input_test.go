@@ -277,7 +277,7 @@ func TestInputPublicationRecoveryUsesCurrentLifetimeSet(t *testing.T) {
 				}
 				want = []domain.RunInputRequest{}
 				if err := e.sched.ReportAgentState(t.Context(), run.ID, report); err == nil {
-					t.Fatal("terminal run accepted stale report")
+					t.Fatal("terminal session accepted stale report")
 				}
 				if scenario == "relaunched" {
 					if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {

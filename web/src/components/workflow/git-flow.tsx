@@ -133,7 +133,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
     acting === 'merge' ? `Merging #${pr?.number} into ${base}…`
       : acting === 'resolve' ? `Sending the conflict list to ${agentName}…`
         : queued && pr?.state === 'open' ? queued
-          : said?.text ?? (logged.reading && !log ? 'Reading the branch…' : summary || (live ? 'Not checked yet' : 'The run is not live; its branch is not read.'))
+          : said?.text ?? (logged.reading && !log ? 'Reading the branch…' : summary || (live ? 'Not checked yet' : 'The session is not live; its branch is not read.'))
   const announced = useAnnounced(status)
   const errors = [logged.error, tracked.error, feedback?.error].filter((entry): entry is string => !!entry)
 
@@ -149,7 +149,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
       setActing(null)
       if (error) setFailure(error)
     }
-    dropped.current = window.setTimeout(() => settle('Control of the run did not arrive, so nothing was sent.'), implicitControlWindowMs + 500)
+    dropped.current = window.setTimeout(() => settle('Control of the session did not arrive, so nothing was sent.'), implicitControlWindowMs + 500)
     send.dispatch(() => {
       clearTimeout(dropped.current)
       void send.post(resolvePrompt(current, pr)).then(
@@ -311,7 +311,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
             <>
               Merges <span className="font-code">{confirming.pr.head_branch}</span> at{' '}
               <span className="font-code">{confirming.pr.head_oid.slice(0, 7)}</span> into{' '}
-              <span className="font-code">{confirming.pr.base_branch}</span> on GitHub through the run's checkout. GitHub refuses it if
+              <span className="font-code">{confirming.pr.base_branch}</span> on GitHub through the session's checkout. GitHub refuses it if
               either has changed.
             </>
           }

@@ -51,7 +51,7 @@ func LoopbackAddrs(host string) ([]string, error) {
 	if ip, err := netip.ParseAddr(host); err == nil && ip.IsLoopback() && ip.Zone() == "" {
 		return []string{ip.String()}, nil
 	}
-	return nil, fmt.Errorf("port forwarding reaches only the run's own loopback: forward to localhost, not %q", host)
+	return nil, fmt.Errorf("port forwarding reaches only the session's own loopback: forward to localhost, not %q", host)
 }
 
 // ServeForward serves the SSH channel protocol on conn and relays each

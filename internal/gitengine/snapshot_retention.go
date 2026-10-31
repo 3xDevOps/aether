@@ -79,7 +79,7 @@ func (e *Engine) retainRecordedSnapshotTrees(ctx context.Context, workspace doma
 		for _, event := range page {
 			payload, ok := event.Payload.(events.RunDiffPayload)
 			if !ok {
-				return fmt.Errorf("gitengine: invalid recorded diff payload for run %s", run)
+				return fmt.Errorf("gitengine: invalid recorded diff payload for session %s", run)
 			}
 			for _, id := range []string{payload.ParentTree, payload.Tree} {
 				if validObjectID(id) {

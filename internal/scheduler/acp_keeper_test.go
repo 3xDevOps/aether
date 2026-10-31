@@ -301,7 +301,7 @@ func TestEnhancedRunRestoresWhenTheServerStoppedBeforeItsSessionOpened(t *testin
 	t.Cleanup(func() { _ = s.Close() })
 	startScheduler(t, s)
 	items := waitItems(t, s, run.ID, "the restart notice", hasNotice("Agent restarted"))
-	if hasNotice("Enhanced session failed")(items) {
+	if hasNotice("Enhanced agent failed")(items) {
 		t.Fatalf("the run failed: %+v", items)
 	}
 	waitFor(t, "the restored session", func() bool { return s.acp.session(run.ID) != nil })

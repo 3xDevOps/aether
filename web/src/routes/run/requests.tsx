@@ -146,7 +146,7 @@ function SudoCard({ run, request }: { run: RunRecord; request: RunInputRequest }
             ? <RequestActions><DecisionButtons decide={decide} /></RequestActions>
             : (
                 <>
-                  <p className="text-ui-sm text-muted">Only the run&apos;s owner or an admin can allow it.</p>
+                  <p className="text-ui-sm text-muted">Only the session&apos;s owner or an admin can allow it.</p>
                   {mayDeny && <RequestActions><RequestAction label="Deny" onClick={() => void decide(false)} /></RequestActions>}
                 </>
               )}

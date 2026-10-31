@@ -99,16 +99,16 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	own := launchShareRun(t, e, docker, cli, ada, ada, "plant files", "ada-login")
 	for _, rel := range []string{"CLAUDE.md", ".claude/settings.json", ".local/bin/claude-agent-acp"} {
 		if _, err := os.Stat(filepath.Join(adaHome, rel)); err != nil {
-			t.Fatalf("the run did not plant %s: %v", rel, err)
+			t.Fatalf("the session did not plant %s: %v", rel, err)
 		}
 	}
 	for _, m := range own.mounts {
 		if strings.Contains(m.Source, "/assistant") {
-			t.Fatalf("the run mounts the assistant's %s at %s", m.Source, m.Destination)
+			t.Fatalf("the session mounts the assistant's %s at %s", m.Source, m.Destination)
 		}
 	}
 	if code, out := own.sh(t, "grep -c aether-assistant /proc/self/mountinfo"); code != 1 {
-		t.Fatalf("the run's mount table names the assistant: %s", out)
+		t.Fatalf("the session's mount table names the assistant: %s", out)
 	}
 	// Both runs mount Ada's home volume; the second's cleanup removes it.
 	if err := docker.Destroy(ctx, own.id); err != nil {
@@ -339,7 +339,7 @@ func TestIntegrationAssistantIgnoresPlantedGatewayDocker(t *testing.T) {
 	launchShareRun(t, e, docker, cli, grace.ID, ada, "plant the shared login", "ada-login")
 	planted, err := os.ReadFile(filepath.Join(adaHome, ".claude", ".credentials.json"))
 	if err != nil || !strings.Contains(string(planted), "http://127.0.0.1:8899") {
-		t.Fatalf("the runs did not plant the gateway: %q, %v", planted, err)
+		t.Fatalf("the sessions did not plant the gateway: %q, %v", planted, err)
 	}
 
 	seedHome(t, AssistantHomeDir(assistantDir, ada), map[string]string{".claude/.credentials.json": `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"ada~0","expiresAt":4102444800000,"scopes":["user:inference"]}}`})
@@ -414,7 +414,7 @@ func TestIntegrationAssistantIgnoresPlantedGatewayDocker(t *testing.T) {
 		send(fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":%q,"prompt":[{"type":"text","text":"Say hi"}]}}`, created.Result.SessionID))
 		t.Logf("prompt answered: %.300s", reply(3))
 		if code, log := assistant.sh(t, "cat /tmp/gateway.log 2>/dev/null"); code == 0 {
-			t.Fatalf("the gateway the runs planted saw the assistant: %q", log)
+			t.Fatalf("the gateway the sessions planted saw the assistant: %q", log)
 		}
 	}
 	prompt()

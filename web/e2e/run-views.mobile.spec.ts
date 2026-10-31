@@ -4,7 +4,7 @@ import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('a phone protects a run from More and reads its changes', async ({
   page,
@@ -39,14 +39,14 @@ test('a phone protects a run from More and reads its changes', async ({
   await actions.tap()
 
   const menu = page.getByRole('menu')
-  const protect = menu.getByRole('menuitem', { name: 'Protect run' })
+  const protect = menu.getByRole('menuitem', { name: 'Protect session' })
   await expect(protect).toBeVisible()
   expect((await protect.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
   await protect.tap()
 
   await expect(page.getByRole('img', { name: /^Protected:/ })).toBeVisible()
   await actions.tap()
-  await expect(menu.getByRole('menuitem', { name: 'Unprotect run' })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Unprotect session' })).toBeVisible()
   await page.keyboard.press('Escape')
 
   // The agent writes result.txt a second after it greets, and the tab fetches
@@ -55,7 +55,7 @@ test('a phone protects a run from More and reads its changes', async ({
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
   // Browser is offered before any browser has started for the run.
-  for (const name of ['Browser', 'Session', 'Changes']) {
+  for (const name of ['Browser', 'Chat', 'Changes']) {
     const tab = page.getByRole('tab', { name, exact: true })
     await tab.tap()
     await expect(tab).toHaveAttribute('aria-selected', 'true')

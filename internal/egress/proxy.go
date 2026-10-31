@@ -58,7 +58,7 @@ var (
 	sharedAddressSpace = netip.MustParsePrefix("100.64.0.0/10")
 	thisNetwork        = netip.MustParsePrefix("0.0.0.0/8")
 
-	errUnknownSource = errors.New("not a run with egress control on")
+	errUnknownSource = errors.New("not a session with egress control on")
 )
 
 type addrsKey struct{}
@@ -198,7 +198,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	if !allowed(runHosts(run, ws), host) {
 		msg := fmt.Sprintf("aether: egress to %s denied; allow it with aether workspace env egress allow --workspace %s %s", host, ws.ID, host)
 		if run.Permission == domain.PermissionIsolated {
-			msg = fmt.Sprintf("aether: egress to %s denied; an isolated run reaches only the agents' own hosts", host)
+			msg = fmt.Sprintf("aether: egress to %s denied; an isolated session reaches only the agents' own hosts", host)
 		}
 		p.deny(w, r, run, host, msg)
 		return
@@ -242,7 +242,7 @@ func (p *Proxy) source(ctx context.Context, remote string) (*domain.Run, *domain
 	// creation key.
 	run, err := p.store.GetRun(ctx, domain.RunID(key))
 	if err != nil {
-		return nil, nil, fmt.Errorf("look up run %s: %w", key, err)
+		return nil, nil, fmt.Errorf("look up session %s: %w", key, err)
 	}
 	ws, err := p.store.GetWorkspace(ctx, run.WorkspaceID)
 	if err != nil {

@@ -132,7 +132,7 @@ function occupyAndReconnect(): StubSocket {
       data: JSON.stringify({
         ok: false,
         code: -32003,
-        error: 'run control is held by another session',
+        error: 'session control is held by another session',
         has_control: false,
         control_generation: 5,
       }),
@@ -392,7 +392,7 @@ describe('useRunTerminalSession', () => {
     ['identity', { currentIdentityKey: 'identity-b' }, run()],
     ['terminal cache epoch', { currentCacheEpoch: 1 }, run()],
     ['authority', { currentAuthorityKey: 'mem_alice:owner:mem_alice:true:' }, run()],
-    ['run creation time', {}, run({ created_at: '2030-01-01T00:00:00Z' })],
+    ['session creation time', {}, run({ created_at: '2030-01-01T00:00:00Z' })],
   ] as const)('starts a fresh control session when the %s changes', (_name, nextProps, record) => {
     const sessionID = steerThenLeave()
 

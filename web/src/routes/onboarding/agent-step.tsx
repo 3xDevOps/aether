@@ -72,7 +72,7 @@ export function AgentStep({
     <Step
       label="Agent"
       title="Set up an agent"
-      lead="An agent is the coding CLI a run starts, such as Claude Code or Codex. Set one up once and every workspace can use it."
+      lead="An agent is the coding CLI a session starts, such as Claude Code or Codex. Set one up once and every workspace can use it."
       actions={
         <>
           {installed ? <Button onClick={() => onNext(false)}>Continue</Button> : <Button variant="secondary" onClick={() => onNext(true)}>Skip for now</Button>}

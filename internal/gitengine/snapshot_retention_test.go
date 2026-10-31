@@ -104,7 +104,7 @@ func TestSnapshotHistorySurvivesCheckoutCleanupAndExplicitDeletion(t *testing.T)
 		t.Fatalf("source branch changed: %s != %s", got, sourceTip)
 	}
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != branchTip {
-		t.Fatalf("run branch changed: %s != %s", got, branchTip)
+		t.Fatalf("session branch changed: %s != %s", got, branchTip)
 	}
 }
 
@@ -291,7 +291,7 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 	}
 	for _, unknown := range []string{unrelatedTree, unrecordedLocal} {
 		if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: unknown}); !errors.Is(rangeErr, ErrSnapshotTreeMissing) {
-			t.Fatalf("another run/workspace's source tree became recorded history: %v", rangeErr)
+			t.Fatalf("another session/workspace's source tree became recorded history: %v", rangeErr)
 		}
 	}
 	for range 3 {

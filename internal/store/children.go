@@ -40,6 +40,10 @@ type ChildStore interface {
 	// whose parent ended or was deleted, and completed children their
 	// closed parent left unreviewed.
 	ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, error)
+	// IdleChildren returns the attached started children of a live parent
+	// whose live run has been quiet (domain.RunActivity.Quiet) since before
+	// cutoff, with when that spell began.
+	IdleChildren(ctx context.Context, cutoff time.Time) ([]IdleChild, error)
 	// SetChildState moves a reservation from one of from to to.
 	SetChildState(ctx context.Context, run domain.RunID, to domain.ChildState, errText string, from ...domain.ChildState) error
 	DetachChild(ctx context.Context, run domain.RunID) error
@@ -108,7 +112,7 @@ func scanChild(row interface{ Scan(...any) error }) (*domain.ChildReservation, e
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(order), &c.Fallback.Order); err != nil {
-		return nil, fmt.Errorf("store: decode child fallback order: %w", err)
+		return nil, fmt.Errorf("store: decode subsession fallback order: %w", err)
 	}
 	c.CreatedAt = decodeTime(createdAt)
 	c.StartedAt = decodeTimePtr(startedAt)
@@ -118,7 +122,7 @@ func scanChild(row interface{ Scan(...any) error }) (*domain.ChildReservation, e
 func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation) (*domain.ChildReservation, bool, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, false, fmt.Errorf("store: reserve child: %w", err)
+		return nil, false, fmt.Errorf("store: reserve subsession: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // committed below
 	prior, err := scanChild(tx.QueryRowContext(ctx,
@@ -128,7 +132,7 @@ func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation) (*dom
 		return prior, true, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, false, fmt.Errorf("store: reserve child: %w", err)
+		return nil, false, fmt.Errorf("store: reserve subsession: %w", err)
 	}
 	id, ts, err := prepareCreate("run", c.CreatedAt)
 	if err != nil {
@@ -136,11 +140,11 @@ func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation) (*dom
 	}
 	order, err := jsonText(c.Fallback.Order, "[]")
 	if err != nil {
-		return nil, false, fmt.Errorf("store: reserve child: %w", err)
+		return nil, false, fmt.Errorf("store: reserve subsession: %w", err)
 	}
 	createdAt, err := encodeTime(ts)
 	if err != nil {
-		return nil, false, fmt.Errorf("store: reserve child: %w", err)
+		return nil, false, fmt.Errorf("store: reserve subsession: %w", err)
 	}
 	c.RunID, c.CreatedAt, c.State = domain.RunID(id), ts, domain.ChildQueued
 	if _, err = tx.ExecContext(ctx,
@@ -151,10 +155,10 @@ func (d *DB) ReserveChild(ctx context.Context, c *domain.ChildReservation) (*dom
 		c.RunID, c.ParentRunID, c.RootRunID, c.TreeKey, c.WorkspaceID, c.OwnerID, c.AccountID,
 		c.Harness, c.Mode, c.Model, c.Purpose, c.Task, c.BaseCommit, c.BaseBranch,
 		c.Fallback.Disabled, order, c.IdempotencyKey, c.RequestHash, c.State, createdAt); err != nil {
-		return nil, false, fmt.Errorf("store: reserve child: %w", mapConstraint(err, ErrNotFound))
+		return nil, false, fmt.Errorf("store: reserve subsession: %w", mapConstraint(err, ErrNotFound))
 	}
 	if err = tx.Commit(); err != nil {
-		return nil, false, fmt.Errorf("store: reserve child: %w", err)
+		return nil, false, fmt.Errorf("store: reserve subsession: %w", err)
 	}
 	return c, false, nil
 }
@@ -165,23 +169,23 @@ func (d *DB) GetChild(ctx context.Context, run domain.RunID) (*domain.ChildReser
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("store: get child: %w", err)
+		return nil, fmt.Errorf("store: get subsession: %w", err)
 	}
 	return c, nil
 }
 
 func (d *DB) ListChildren(ctx context.Context, run domain.RunID) ([]*domain.ChildReservation, error) {
-	return d.listChildren(ctx, "list children",
+	return d.listChildren(ctx, "list subsessions",
 		`SELECT `+childCols+` FROM run_children rc WHERE rc.parent_run_id = ? ORDER BY rc.created_at, rc.run_id`, run)
 }
 
 func (d *DB) ChildrenInState(ctx context.Context, state domain.ChildState) ([]*domain.ChildReservation, error) {
-	return d.listChildren(ctx, "children in state",
+	return d.listChildren(ctx, "subsessions in state",
 		`SELECT `+childCols+` FROM run_children rc WHERE rc.state = ? ORDER BY rc.created_at, rc.run_id`, state)
 }
 
 func (d *DB) ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, error) {
-	return d.listChildren(ctx, "children to settle",
+	return d.listChildren(ctx, "subsessions to settle",
 		`SELECT `+childCols+` FROM run_children rc
 		 LEFT JOIN runs child ON child.id = rc.run_id
 		 LEFT JOIN runs parent ON parent.id = rc.parent_run_id
@@ -192,6 +196,80 @@ func (d *DB) ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, 
 		        AND (parent.status = 'merged' OR (parent.status = 'abandoned' AND parent.reason <> 'killed')
 		         OR (parent.status = 'completed' AND parent.review = 'accepted')))
 		 ORDER BY rc.created_at`)
+}
+
+// IdleChild is a child run in an unbroken quiet spell.
+type IdleChild struct {
+	Child *domain.ChildReservation
+	Run   *domain.Run
+	Since time.Time
+}
+
+func (d *DB) IdleChildren(ctx context.Context, cutoff time.Time) ([]IdleChild, error) {
+	live, args := liveStatusArgs()
+	cands, err := d.listChildren(ctx, "idle children",
+		`SELECT `+childCols+` FROM run_children rc
+		 JOIN runs child ON child.id = rc.run_id
+		 JOIN runs parent ON parent.id = rc.parent_run_id
+		 WHERE rc.detached = 0 AND rc.state = 'started'
+		   AND child.status IN (`+live+`) AND parent.status IN (`+live+`)
+		 ORDER BY rc.created_at`, append(args, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	var out []IdleChild
+	for _, c := range cands {
+		run, err := d.GetRun(ctx, c.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if !run.Activity.Quiet(run.Reason) {
+			continue
+		}
+		since, err := d.quietSince(ctx, c.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if !since.IsZero() && !since.After(cutoff) {
+			out = append(out, IdleChild{Child: c, Run: run, Since: since})
+		}
+	}
+	return out, nil
+}
+
+// quietSince is when the run's current unbroken quiet spell began: the
+// oldest of the newest transitions that are all quiet. A reason change
+// inside the spell keeps it going. It is zero when the newest transition is
+// not quiet.
+func (d *DB) quietSince(ctx context.Context, run domain.RunID) (time.Time, error) {
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT activity, reason, at FROM run_state_transitions WHERE run_id = ? ORDER BY rowid DESC`, run)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("store: read run %s transitions: %w", run, err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var since int64
+	for rows.Next() {
+		var (
+			activity domain.RunActivity
+			reason   string
+			at       int64
+		)
+		if err := rows.Scan(&activity, &reason, &at); err != nil {
+			return time.Time{}, fmt.Errorf("store: read run %s transitions: %w", run, err)
+		}
+		if !activity.Quiet(reason) {
+			break
+		}
+		since = at
+	}
+	if err := rows.Err(); err != nil {
+		return time.Time{}, fmt.Errorf("store: read run %s transitions: %w", run, err)
+	}
+	if since == 0 {
+		return time.Time{}, nil
+	}
+	return decodeTime(since), nil
 }
 
 func (d *DB) listChildren(ctx context.Context, what, query string, args ...any) ([]*domain.ChildReservation, error) {
@@ -220,7 +298,7 @@ func (d *DB) ChildCounts(ctx context.Context, parent domain.RunID) (ChildCounts,
 		`SELECT COALESCE(SUM(`+childBusy+`), 0), COALESCE(SUM(rc.state = 'queued'), 0)
 		 FROM run_children rc WHERE rc.parent_run_id = ?`, parent).Scan(&c.Busy, &c.Queued)
 	if err != nil {
-		return ChildCounts{}, fmt.Errorf("store: child counts: %w", err)
+		return ChildCounts{}, fmt.Errorf("store: subsession counts: %w", err)
 	}
 	return c, nil
 }
@@ -235,9 +313,9 @@ func (d *DB) SetChildState(ctx context.Context, run domain.RunID, to domain.Chil
 	}
 	if err := notFoundOnZeroRows(d.db.ExecContext(ctx, query, args...)); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return fmt.Errorf("%w: child %s is not %v", ErrConflict, run, from)
+			return fmt.Errorf("%w: subsession %s is not %v", ErrConflict, run, from)
 		}
-		return fmt.Errorf("store: set child state: %w", err)
+		return fmt.Errorf("store: set subsession state: %w", err)
 	}
 	return nil
 }
@@ -253,7 +331,7 @@ func repeatPlaceholders(n int) string {
 func (d *DB) DetachChild(ctx context.Context, run domain.RunID) error {
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx, `UPDATE run_children SET detached = 1 WHERE run_id = ?`, run))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("store: detach child: %w", err)
+		return fmt.Errorf("store: detach subsession: %w", err)
 	}
 	return err
 }
@@ -261,7 +339,7 @@ func (d *DB) DetachChild(ctx context.Context, run domain.RunID) error {
 func (d *DB) MarkChildEndNotified(ctx context.Context, run domain.RunID) (bool, error) {
 	res, err := d.db.ExecContext(ctx, `UPDATE run_children SET end_notified = 1 WHERE run_id = ? AND end_notified = 0`, run)
 	if err != nil {
-		return false, fmt.Errorf("store: mark child end notified: %w", err)
+		return false, fmt.Errorf("store: mark subsession end notified: %w", err)
 	}
 	n, err := res.RowsAffected()
 	return n == 1, err
@@ -272,7 +350,7 @@ func (d *DB) UnfinishedChildren(ctx context.Context, parent domain.RunID, since 
 	if !since.IsZero() {
 		var err error
 		if after, err = encodeTime(since); err != nil {
-			return 0, 0, fmt.Errorf("store: unfinished children: %w", err)
+			return 0, 0, fmt.Errorf("store: unfinished subsessions: %w", err)
 		}
 	}
 	var unfinished, unread int
@@ -283,7 +361,7 @@ func (d *DB) UnfinishedChildren(ctx context.Context, parent domain.RunID, since 
 			 WHERE m.to_run = ?1 AND rc.parent_run_id = ?1 AND m.created_at > ?2 AND m.acked_at IS NULL AND m.retired_at IS NULL)`,
 		parent, after).Scan(&unfinished, &unread)
 	if err != nil {
-		return 0, 0, fmt.Errorf("store: unfinished children: %w", err)
+		return 0, 0, fmt.Errorf("store: unfinished subsessions: %w", err)
 	}
 	return unfinished, unread, nil
 }
@@ -295,7 +373,7 @@ func (d *DB) ChildSettings(ctx context.Context, member domain.MemberID) (ChildSe
 		return s, nil
 	}
 	if err != nil {
-		return ChildSettings{}, fmt.Errorf("store: child settings: %w", err)
+		return ChildSettings{}, fmt.Errorf("store: subsession settings: %w", err)
 	}
 	return s, nil
 }
@@ -306,7 +384,7 @@ func (d *DB) PutChildSettings(ctx context.Context, member domain.MemberID, s Chi
 		 ON CONFLICT(member_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`,
 		member, s.Enabled)
 	if err != nil {
-		return fmt.Errorf("store: put child settings: %w", mapConstraint(err, ErrNotFound))
+		return fmt.Errorf("store: put subsession settings: %w", mapConstraint(err, ErrNotFound))
 	}
 	return nil
 }
@@ -315,7 +393,7 @@ func (d *DB) SetRunChildren(ctx context.Context, run domain.RunID, value string,
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET children = ?, children_set_by = ? WHERE id = ?`, value, setBy, run))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("store: set run children: %w", err)
+		return fmt.Errorf("store: set session subsessions: %w", err)
 	}
 	return err
 }
@@ -328,7 +406,7 @@ func (d *DB) WorkspaceChildLimits(ctx context.Context, ws domain.WorkspaceID) (d
 		return l, ErrNotFound
 	}
 	if err != nil {
-		return l, fmt.Errorf("store: workspace child limits: %w", err)
+		return l, fmt.Errorf("store: workspace subsession limits: %w", err)
 	}
 	return l, nil
 }
@@ -337,7 +415,7 @@ func (d *DB) SetWorkspaceChildLimits(ctx context.Context, ws domain.WorkspaceID,
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE workspaces SET child_max_live = ? WHERE id = ?`, l.MaxLive, ws))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("store: set workspace child limits: %w", err)
+		return fmt.Errorf("store: set workspace subsession limits: %w", err)
 	}
 	return err
 }
@@ -361,7 +439,7 @@ func (d *DB) ChildReported(ctx context.Context, run domain.RunID) (bool, error) 
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}
-		return false, fmt.Errorf("store: child reported: %w", err)
+		return false, fmt.Errorf("store: subsession reported: %w", err)
 	}
 	return reported, nil
 }

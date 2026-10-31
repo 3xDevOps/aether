@@ -103,11 +103,11 @@ func TestDevelopmentSocketRejectsIdentityAndLifetimeEscapes(t *testing.T) {
 	}
 	err = client.Call(protocol.MethodDevTerminalList, nil, nil)
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeUnavailable || dev.calls.Load() != 1 {
-		t.Fatalf("finished run dispatch = %v, calls=%d", err, dev.calls.Load())
+		t.Fatalf("finished session dispatch = %v, calls=%d", err, dev.calls.Load())
 	}
 	status, statusErr := h.svc.Status(t.Context(), h.run(0))
 	if statusErr != nil || slices.Contains(status.Capabilities, protocol.MethodDevTerminalList) {
-		t.Fatalf("finished run capabilities = %+v, %v", status, statusErr)
+		t.Fatalf("finished session capabilities = %+v, %v", status, statusErr)
 	}
 	if _, err := h.svc.Status(t.Context(), "unknown-run"); err == nil || err.Code != protocol.CodeNotFound {
 		t.Fatalf("unknown identity = %v", err)

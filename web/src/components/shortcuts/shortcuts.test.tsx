@@ -46,8 +46,8 @@ describe('shortcut reference', () => {
     expect(await screen.findByRole('heading', { name: 'Everywhere' })).toBeDefined()
     expect(screen.getByText('Open this reference')).toBeDefined()
     expect(screen.queryByLabelText('g then b')).toBeNull()
-    expect(screen.getByRole('heading', { name: 'In a run' })).toBeDefined()
-    expect(screen.getByText('Leave a run for the board')).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'In a session' })).toBeDefined()
+    expect(screen.getByText('Leave a session for the board')).toBeDefined()
   })
 
   it('ignores a "?" typed into a field', () => {

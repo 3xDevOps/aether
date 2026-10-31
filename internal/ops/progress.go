@@ -197,7 +197,7 @@ func conflicts(r protocol.Run, rep *report, prs []mergedPR, o *observation) []st
 // not GitHub.
 func closedAs(r protocol.Run) string {
 	if r.Status == "merged" {
-		return "a person closed the run as merged; this is not a GitHub merge"
+		return "a person closed the session as merged; this is not a GitHub merge"
 	}
 	return ""
 }
@@ -254,7 +254,7 @@ func caveats(failed, unchecked int) string {
 		parts = append(parts, fmt.Sprintf("%d GitHub lookups returned an error", failed))
 	}
 	if unchecked > 0 {
-		parts = append(parts, fmt.Sprintf("%d runs have pull requests not checked live", unchecked))
+		parts = append(parts, fmt.Sprintf("%d sessions have pull requests not checked live", unchecked))
 	}
 	if len(parts) == 0 {
 		return ""

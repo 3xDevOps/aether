@@ -6,7 +6,7 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 const openWriter = async (
   url: URL,
@@ -178,7 +178,7 @@ done
   })
   await page.goto(alice.url)
   await page
-    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
     .getByRole('button', { name: /same socket control/ })
     .click()
   const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
@@ -373,7 +373,7 @@ test('scrolling reaches every retained page and prepends without moving visible 
   })
   try {
     await page.goto(alice.url)
-    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
       .getByRole('button', { name: run.task }).click()
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live).toContainText('LONG-CURRENT', { timeout: 30_000 })
@@ -598,7 +598,7 @@ test('switching live runs restores the same recorded rows and pixel offsets with
   })
   try {
     await page.goto(alice.url)
-    const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+    const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
     await sidebar.getByRole('button', { name: runA.task }).click()
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live).toContainText('RESTORE-A-CURRENT', { timeout: 30_000 })
@@ -634,7 +634,7 @@ test('switching live runs restores the same recorded rows and pixel offsets with
     await expect.poll(() => [...activeSockets.values()]).toEqual([runA.id])
     expect(historyRequests).toHaveLength(requestsBeforeReturn)
     expect(await scroller.locator('[data-history-row]').count()).toBeLessThan(250)
-    await testInfo.attach('restored run A while live output continues', {
+    await testInfo.attach('restored session A while live output continues', {
       body: await page.screenshot({ fullPage: true }),
       contentType: 'image/png',
     })

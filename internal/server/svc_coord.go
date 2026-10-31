@@ -23,7 +23,7 @@ func init() {
 	registerService("coord", func(d Deps) (Service, error) {
 		mail, ok := d.Store.(store.MessageStore)
 		if !ok {
-			return nil, errors.New("coordination needs a store with the run mailbox")
+			return nil, errors.New("coordination needs a store with the session mailbox")
 		}
 		childSvc, _ := d.SSH.Services.Children.(*children.Service)
 		var childAuthority coord.ChildService

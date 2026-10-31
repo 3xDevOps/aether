@@ -53,7 +53,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
         <div className="border-y border-seam px-3 py-3">
           <p className="text-ui font-medium">{empty}</p>
           <p className="mt-1 text-ui-sm leading-4 text-muted">
-            New runs will appear here as soon as they are launched.
+            New sessions will appear here as soon as they are launched.
           </p>
         </div>
       </div>
@@ -64,7 +64,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
     <div className="w-full px-3 py-2 sm:px-4 sm:py-3">
       <div className="border-y border-seam">
         <div className="hidden grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] gap-4 border-b bg-chrome/30 px-3 py-1.5 text-ui-sm font-medium text-muted md:grid">
-          <span>Run</span>
+          <span>Session</span>
           <span>Owner</span>
           <span>Status</span>
           <span className="text-right">Changed</span>
@@ -88,7 +88,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                 <ul
                   id={workersID(row.run.id)}
                   hidden={shown(row, workers).length === 0}
-                  aria-label={`Child runs of ${runLabel(row.run)}`}
+                  aria-label={`Subsessions of ${runLabel(row.run)}`}
                   className={cn(
                     '[--wire:--spacing(4.75)]',
                     foldable(workers) > 0 ? '[--trunk:--spacing(12.75)] coarse:[--trunk:--spacing(17.75)]' : '[--trunk:--spacing(4.75)]',
@@ -164,7 +164,7 @@ function Row({
           <Button
             variant="ghost"
             size="icon-sm"
-            label={`${toggle.expanded ? 'Hide' : 'Show'} ${toggle.count} child run${toggle.count === 1 ? '' : 's'}`}
+            label={`${toggle.expanded ? 'Hide' : 'Show'} ${toggle.count} subsession${toggle.count === 1 ? '' : 's'}`}
             aria-expanded={toggle.expanded}
             aria-controls={workersID(run.id)}
             onClick={toggle.onToggle}

@@ -148,7 +148,7 @@ func TestIntegrationConnectorFlows(t *testing.T) {
 	var wg sync.WaitGroup
 	for i, task := range tasks {
 		wg.Go(func() {
-			launched[i], errs[i] = session.CallTool(ctx, &mcp.CallToolParams{Name: "aether_launch_run", Arguments: map[string]any{
+			launched[i], errs[i] = session.CallTool(ctx, &mcp.CallToolParams{Name: "aether_launch_session", Arguments: map[string]any{
 				"workspace_id": ws, "harness": "fake", "mode": "acp", "task": task, "idempotency_key": fmt.Sprintf("launch-%d", i)}})
 		})
 	}
@@ -157,32 +157,32 @@ func TestIntegrationConnectorFlows(t *testing.T) {
 		if errs[i] != nil || res.IsError {
 			t.Fatalf("launch of %q: %v %+v", tasks[i], errs[i], res)
 		}
-		t.Logf("aether_launch_run %q\n  -> %s", tasks[i], res.Content[0].(*mcp.TextContent).Text)
+		t.Logf("aether_launch_session %q\n  -> %s", tasks[i], res.Content[0].(*mcp.TextContent).Text)
 		ids[i], _ = res.StructuredContent.(map[string]any)["run_id"].(string)
 		if ids[i] == "" {
-			t.Fatalf("launch of %q returned no run id: %+v", tasks[i], res.StructuredContent)
+			t.Fatalf("launch of %q returned no session id: %+v", tasks[i], res.StructuredContent)
 		}
 	}
-	if again := tool("aether_launch_run", map[string]any{"workspace_id": ws, "harness": "fake", "mode": "acp", "task": tasks[1],
+	if again := tool("aether_launch_session", map[string]any{"workspace_id": ws, "harness": "fake", "mode": "acp", "task": tasks[1],
 		"idempotency_key": "launch-1"}); again["run_id"] != ids[1] || again["replayed"] != true {
-		t.Fatalf("launch replayed under its key = %v, want run %s", again, ids[1])
+		t.Fatalf("launch replayed under its key = %v, want session %s", again, ids[1])
 	}
 	for _, id := range ids {
 		waitTurns(ctx, t, env.srv, domain.RunID(id), 1)
 	}
 
-	active := tool("aether_list_runs", map[string]any{"active_only": true})["runs"].([]any)
+	active := tool("aether_list_sessions", map[string]any{"active_only": true})["runs"].([]any)
 	if len(active) != len(tasks) {
-		t.Fatalf("active runs = %v, want the %d launched", active, len(tasks))
+		t.Fatalf("active sessions = %v, want the %d launched", active, len(tasks))
 	}
 
-	found := tool("aether_list_runs", map[string]any{"query": "rate limiting"})["runs"].([]any)
+	found := tool("aether_list_sessions", map[string]any{"query": "rate limiting"})["runs"].([]any)
 	if len(found) != 1 || found[0].(map[string]any)["id"] != ids[2] {
-		t.Fatalf("runs working on rate limiting = %v, want %s", found, ids[2])
+		t.Fatalf("sessions working on rate limiting = %v, want %s", found, ids[2])
 	}
-	tool("aether_message_run", map[string]any{"run_id": ids[2], "message": "use a token bucket", "idempotency_key": "msg-1"})
+	tool("aether_message_session", map[string]any{"run_id": ids[2], "message": "use a token bucket", "idempotency_key": "msg-1"})
 	waitPrompted(ctx, t, env.srv, domain.RunID(ids[2]), "use a token bucket")
-	tool("aether_message_run", map[string]any{"run_id": ids[3], "message": acpmock.PromptAskPermission, "idempotency_key": "msg-2"})
+	tool("aether_message_session", map[string]any{"run_id": ids[3], "message": acpmock.PromptAskPermission, "idempotency_key": "msg-2"})
 
 	var permission map[string]any
 	for permission == nil {
@@ -203,38 +203,38 @@ func TestIntegrationConnectorFlows(t *testing.T) {
 		"action": permission["untrusted"].(map[string]any)["text"]})
 	waitTurns(ctx, t, env.srv, domain.RunID(ids[3]), 2)
 
-	if paused := tool("aether_pause_run", map[string]any{"run_id": ids[1]}); paused["paused"] != true {
-		t.Fatalf("aether_pause_run = %v, want paused", paused)
+	if paused := tool("aether_pause_session", map[string]any{"run_id": ids[1]}); paused["paused"] != true {
+		t.Fatalf("aether_pause_session = %v, want paused", paused)
 	}
-	if got := tool("aether_get_run", map[string]any{"run_id": ids[1]}); got["paused"] != true {
-		t.Fatalf("aether_get_run after pause = %v, want paused", got)
+	if got := tool("aether_get_session", map[string]any{"run_id": ids[1]}); got["paused"] != true {
+		t.Fatalf("aether_get_session after pause = %v, want paused", got)
 	}
-	if resumed := tool("aether_resume_run", map[string]any{"run_id": ids[1]}); resumed["paused"] != false {
-		t.Fatalf("aether_resume_run = %v, want not paused", resumed)
+	if resumed := tool("aether_resume_session", map[string]any{"run_id": ids[1]}); resumed["paused"] != false {
+		t.Fatalf("aether_resume_session = %v, want not paused", resumed)
 	}
-	if got := tool("aether_get_run", map[string]any{"run_id": ids[1]}); got["paused"] != false {
-		t.Fatalf("aether_get_run after resume = %v, want not paused", got)
+	if got := tool("aether_get_session", map[string]any{"run_id": ids[1]}); got["paused"] != false {
+		t.Fatalf("aether_get_session after resume = %v, want not paused", got)
 	}
-	tool("aether_run_history", map[string]any{"run_id": ids[1]})
+	tool("aether_session_history", map[string]any{"run_id": ids[1]})
 
 	for _, id := range ids {
-		tool("aether_stop_run", map[string]any{"run_id": id})
+		tool("aether_stop_session", map[string]any{"run_id": id})
 	}
 	for _, id := range ids {
 		for {
-			r := tool("aether_get_run", map[string]any{"run_id": id})["run"].(map[string]any)
+			r := tool("aether_get_session", map[string]any{"run_id": id})["run"].(map[string]any)
 			if r["state"] != "running" && r["state"] != "needs-attention" {
 				break
 			}
 			select {
 			case <-ctx.Done():
-				t.Fatalf("run %s is still %s after it was stopped", id, r["state"])
+				t.Fatalf("session %s is still %s after it was stopped", id, r["state"])
 			case <-time.After(500 * time.Millisecond):
 			}
 		}
 	}
 	summary := tool("aether_activity_summary", map[string]any{"period": "today"})
 	if raw, _ := json.Marshal(summary); !strings.Contains(string(raw), ids[2]) {
-		t.Fatalf("today's activity = %s, want the runs launched today", raw)
+		t.Fatalf("today's activity = %s, want the sessions launched today", raw)
 	}
 }

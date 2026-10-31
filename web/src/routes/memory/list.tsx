@@ -62,7 +62,7 @@ export function NoteList({
             )
             : (
               <EmptyState title="No notes yet." className="py-10">
-                Runs add decisions, conventions and gotchas with <Code>aether-internal memory add</Code>, and each run that reports success or failure records its outcome here.
+                Sessions add decisions, conventions and gotchas with <Code>aether-internal memory add</Code>, and each session that reports success or failure records its outcome here.
               </EmptyState>
             )
         )}

@@ -235,12 +235,12 @@ function FinishedMenu() {
   return (
     <Menu>
       <MenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" label="More finished-run actions">
+        <Button variant="ghost" size="icon-sm" label="More finished-session actions">
           <Ellipsis />
         </Button>
       </MenuTrigger>
       <MenuContent align="end">
-        {canArchive && <MenuItem onSelect={() => openDialog('clear-done')}>Archive closed runs…</MenuItem>}
+        {canArchive && <MenuItem onSelect={() => openDialog('clear-done')}>Archive closed sessions…</MenuItem>}
         {canFree && <MenuItem onSelect={() => openDialog('release-finished')}>Free retained containers…</MenuItem>}
       </MenuContent>
     </Menu>

@@ -81,7 +81,7 @@ func TestBackgroundRunOverACPFinishesOnEndTurn(t *testing.T) {
 	e, rt := newBackgroundEnv(t, enhancedAgent, true)
 	run := e.launchBackground(t, enhancedAgent, "say pong")
 	if !run.ACP {
-		t.Fatal("a background run of an agent with an installed ACP server is not driven over ACP")
+		t.Fatal("a background session of an agent with an installed ACP server is not driven over ACP")
 	}
 	c := e.rt.byName(string(run.ID))
 	cmd := strings.Join(c.spec.Command, " ")
@@ -97,7 +97,7 @@ func TestBackgroundRunOverACPFinishesOnEndTurn(t *testing.T) {
 
 	got := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if got.Reason != exitedCompletedReason || !got.ACP {
-		t.Fatalf("finished run %+v, want completed with %q", got, exitedCompletedReason)
+		t.Fatalf("finished session %+v, want completed with %q", got, exitedCompletedReason)
 	}
 	page, err := e.sched.ACPHistory(run.ID, 0, 0)
 	if err != nil {
@@ -272,7 +272,7 @@ func TestBackgroundRunKeepsCommandLine(t *testing.T) {
 			e, rt := newBackgroundEnv(t, tc.agent, tc.installed)
 			run := e.launchBackground(t, tc.agent, "say pong")
 			if run.ACP {
-				t.Fatal("the background run is driven over ACP")
+				t.Fatal("the background session is driven over ACP")
 			}
 			if cmd := e.rt.byName(string(run.ID)).spec.Command; !slices.Equal(cmd, []string{"fake-agent", "-p", withInstructions("say pong", e.sched.runInstructions(coordhooks.Guide{Role: coordhooks.RoleBackground, Background: true}))}) {
 				t.Fatalf("container command %q, want the headless command line", cmd)
@@ -351,7 +351,7 @@ func TestEnhancedClaudeRunStaysRunningWhileABackgroundTaskRuns(t *testing.T) {
 		t.Fatalf("status events %+v, want the one park after the follow-up", trail)
 	}
 	if !assistantSaidNow(e, run.ID, "background done") {
-		t.Fatal("the run parked before the background follow-up")
+		t.Fatal("the session parked before the background follow-up")
 	}
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if got.Reason != turnEndedReason {
@@ -382,7 +382,7 @@ func TestEnhancedClaudeRunParksWhileADevServerRuns(t *testing.T) {
 	run := e.launchClaudeACP(t, acpmock.PromptDevServer)
 	trail := e.statusTrail(t, sub, run.ID, parkedIdle)
 	if i := slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return strings.HasPrefix(p.Reason, agentstatus.ReasonBackground) }); i >= 0 {
-		t.Fatalf("status events %+v, want the dev server never to hold the run working", trail)
+		t.Fatalf("status events %+v, want the dev server never to hold the session working", trail)
 	}
 }
 
@@ -416,7 +416,7 @@ func TestEnhancedClaudeRunRestoredWithATaskPendingIsInterrupted(t *testing.T) {
 		sess := e.sched.acp.session(run.ID)
 		return sess != nil && assistantSaidNow(e, run.ID, "started") && sess.State().Background
 	})
-	waitFor(t, "the run to report its task", func() bool {
+	waitFor(t, "the session to report its task", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Reason == "working in background: 1 task"
 	})
@@ -434,7 +434,7 @@ func TestEnhancedClaudeRunRestoredWithATaskPendingIsInterrupted(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s2.Close() })
 	startScheduler(t, s2)
-	waitFor(t, "the restored run to report the interrupted turn", func() bool {
+	waitFor(t, "the restored session to report the interrupted turn", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Status == domain.RunNeedsAttention && r.Reason == acpInterruptedReason
 	})
@@ -462,7 +462,7 @@ func TestEnhancedClaudeRunKeepsAQuestionAskedBeforeItsTurnEndedWithTasksLive(t *
 		}
 	}
 	inject(acpmock.PromptBackground)
-	waitFor(t, "the run to report its task", func() bool {
+	waitFor(t, "the session to report its task", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Reason == "working in background: 1 task"
 	})
@@ -497,7 +497,7 @@ func TestEnhancedClaudeRunKeepsAQuestionAskedBeforeItsTurnEndedWithTasksLive(t *
 	asked := statusIndex(trail, domain.RunNeedsAttention, question)
 	for _, p := range trail[asked+1:] {
 		if p.To != domain.RunNeedsAttention || p.Reason != question {
-			t.Fatalf("status events %+v, want nothing to move the run off its question", trail[asked:])
+			t.Fatalf("status events %+v, want nothing to move the session off its question", trail[asked:])
 		}
 	}
 	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunNeedsAttention || r.Reason != question {
@@ -515,7 +515,7 @@ func TestEnhancedClaudeRunParksAQuestionAskedBetweenTurnsWithTasksLive(t *testin
 	e, _ := newACPEnv(t)
 	withCoordination(t, e)
 	run := e.launchClaudeACP(t, acpmock.PromptHold)
-	waitFor(t, "the run to report its task", func() bool {
+	waitFor(t, "the session to report its task", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Reason == "working in background: 1 task"
 	})

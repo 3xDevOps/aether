@@ -8,7 +8,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const generalDiscovery = `No live capabilities are assumed. Run aether-internal status inside a run
+const generalDiscovery = `No live capabilities are assumed. Run aether-internal status inside a session
 for its current authority; aether-internal --help describes syntax only.
 Use aether-internal skill again after identity or assignment changes.
 Native Git/gh and image-reading tools depend on your own harness/environment;
@@ -57,21 +57,21 @@ Subsequent mutations carry session_id, the exact controller fence and, for
 page operations, page_id + page_revision. Node IDs come from the current
 snapshot; coordinate input also carries the observed viewport_id. Re-observe
 after navigation, DOM changes or viewport changes; do not replay stale clicks.
-Start the app in a development terminal, open its run-local URL, inspect the
+Start the app in a development terminal, open its session-local URL, inspect the
 DOM/accessibility snapshot, interact, wait for an explicit condition, inspect
 console/network failures and capture the rendered page. Correct the checkout
 and repeat the same flow. DOM/text output alone is not visual verification.
 Reset is explicit and invalidates session/page/control identities; acquire the
 new surface before further mutation. Close closes a page. Releasing control or
 detaching a viewer does not kill the companion or app.
-This runs on a standard headless Ubuntu server: no X11, Wayland, Xvfb, desktop,
-host browser or disabled sandbox. The companion shares only the run network;
+This sessions on a standard headless Ubuntu server: no X11, Wayland, Xvfb, desktop,
+host browser or disabled sandbox. The companion shares only the session network;
 it does not mount the checkout, member home, credentials or Docker socket.
 `
 
 const captureSkill = `Visible evidence:
 Screenshot responses contain private server artifact metadata and a read-only
-in-run path, never image base64. Open that path with an image-consuming tool
+in-session path, never image base64. Open that path with an image-consuming tool
 ONLY if your harness actually supports it. If it cannot read images, report
 exactly that limitation and the text/DOM checks you did; do not claim visual
 verification from text alone. Preserve capture identity/revision, note any
@@ -103,7 +103,7 @@ does not prove the Git boundary of an earlier screenshot; unknown stays unknown.
 const nativeGitSkill = `Native Git and gh (not an Aether Git RPC/tool registration):
 Check command availability in your harness/account environment before use.
 Inspect git status --short, git diff, git diff --cached, git branch --show-current
-and git remote -v in the run checkout. Review changes and stage exact paths;
+and git remote -v in the session checkout. Review changes and stage exact paths;
 respect existing author identity, signing configuration and coauthor trailers.
 Do not disable signing or overwrite user configuration to make a commit pass.
 Verify behavior and the staged diff before committing; observe the real result.
@@ -111,7 +111,7 @@ The workspace mirror's import source is not necessarily the checkout's origin.
 Inspect the actual checkout remote before fetch/push. For a fork PR, explicitly
 identify the base repository + branch and head owner + branch; inspect gh auth
 status and existing PR metadata before create/update to avoid duplicate PRs.
-Use native git/gh for authenticated push and PR operations under the run account,
+Use native git/gh for authenticated push and PR operations under the session account,
 not a second Git engine. Aether capabilities do not prove gh, credentials,
 push rights, image readers or a public upload destination exist. Do not silently
 change remotes, auto-upload screenshots or merge a PR; follow the assigned
@@ -145,7 +145,7 @@ func writeDevelopmentEntrypoints(out io.Writer, status *protocol.CoordStatusResu
 	var terminalView string
 	if len(skillDevelopmentCommands(status, "terminal")) > 0 {
 		topics = append(topics, "terminal")
-		terminalView = "Terminals started with aether-internal terminal appear in the run's Terminal view in the dashboard; your own shell tool's sessions do not.\n"
+		terminalView = "Terminals started with aether-internal terminal appear in the session's Terminal view in the dashboard; your own shell tool's sessions do not.\n"
 	}
 	if len(skillDevelopmentCommands(status, "browser")) > 0 {
 		topics = append(topics, "browser")
@@ -162,7 +162,7 @@ func writeDevelopmentEntrypoints(out io.Writer, status *protocol.CoordStatusResu
 
 func writeDevelopmentSkill(out io.Writer, status *protocol.CoordStatusResult, topic string) (int, error) {
 	if status == nil {
-		if _, err := io.WriteString(out, "No mounted run socket: no live "+topic+" capabilities can be discovered.\n"+generalDiscovery); err != nil {
+		if _, err := io.WriteString(out, "No mounted session socket: no live "+topic+" capabilities can be discovered.\n"+generalDiscovery); err != nil {
 			return ExitFailure, err
 		}
 		return ExitOK, nil
@@ -190,7 +190,7 @@ func writeDevelopmentSkill(out io.Writer, status *protocol.CoordStatusResult, to
 			}
 		}
 	}
-	text := nativeGitSkill + "End every pull request description with this line:\n  Opened from Aether run " + boundedSkillField(status.RunID) + "\n"
+	text := nativeGitSkill + "End every pull request description with this line:\n  Opened from Aether session " + boundedSkillField(status.RunID) + "\n"
 	switch topic {
 	case "terminal":
 		text = terminalSkill + captureSkill

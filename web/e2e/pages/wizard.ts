@@ -8,7 +8,7 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 
 /** The step labels the wizard's header lists, in order. */
-export const stepNames = ['Connect', 'Repository', 'Agent', 'First run'] as const
+export const stepNames = ['Connect', 'Repository', 'Agent', 'First session'] as const
 
 export type StepName = (typeof stepNames)[number]
 
@@ -214,7 +214,7 @@ export class ConfigurationPrompt {
 
 export class FirstRunStep extends Step {
   constructor(page: Page) {
-    super(page, 'First run')
+    super(page, 'First session')
   }
 
   /**

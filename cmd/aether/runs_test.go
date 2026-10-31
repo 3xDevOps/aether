@@ -46,7 +46,7 @@ func TestRenderRuns(t *testing.T) {
 		wantIDs  []string
 	}{
 		{
-			name: "default hides archived runs",
+			name: "default hides archived sessions",
 			want: "ID   STATUS                           AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
 				"r1   Working                          claude  m1      m1                            Title one  task one\n" +
 				"r2   Needs you                        claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n" +
@@ -68,7 +68,7 @@ func TestRenderRuns(t *testing.T) {
 			wantIDs:  []string{"r2", "r6", "r8", "r13"},
 		},
 		{
-			name:     "--archived shows only archived runs",
+			name:     "--archived shows only archived sessions",
 			archived: true,
 			wantIDs:  []string{"r3"},
 		},
@@ -85,11 +85,11 @@ func TestRenderRuns(t *testing.T) {
 			if tc.wantIDs != nil {
 				rows := strings.Split(strings.TrimSpace(buf.String()), "\n")
 				if len(rows) != len(tc.wantIDs)+1 {
-					t.Fatalf("renderRuns() rows = %q, want a header and %d runs", rows, len(tc.wantIDs))
+					t.Fatalf("renderRuns() rows = %q, want a header and %d sessions", rows, len(tc.wantIDs))
 				}
 				for i, id := range tc.wantIDs {
 					if fields := strings.Fields(rows[i+1]); len(fields) == 0 || fields[0] != id {
-						t.Errorf("renderRuns() row = %q, want run %s", rows[i+1], id)
+						t.Errorf("renderRuns() row = %q, want session %s", rows[i+1], id)
 					}
 				}
 			}
@@ -221,6 +221,6 @@ func TestLatestReportCostsOneCallForARunThatNeverReported(t *testing.T) {
 		t.Fatalf("reportsOf = %v, want %v", got, want)
 	}
 	if !reflect.DeepEqual(calls, []string{"r1", "r2"}) {
-		t.Fatalf("timeline calls = %v, want one per run", calls)
+		t.Fatalf("timeline calls = %v, want one per session", calls)
 	}
 }

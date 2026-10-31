@@ -124,7 +124,7 @@ function FoldButton({ label, unitKey, childRuns, hidden, hiddenNeedsYou, control
       data-map-fold
       aria-expanded={!folded}
       aria-controls={controls}
-      aria-label={folded ? `Expand the child runs of ${label}, ${hidden} hidden` : `Collapse the child runs of ${label}`}
+      aria-label={folded ? `Expand the subsessions of ${label}, ${hidden} hidden` : `Collapse the subsessions of ${label}`}
       className={cn('gap-1 px-1.5 tabular-nums', hiddenNeedsYou > 0 && 'text-state-needs-you')}
       onClick={() => onFold(unitKey, !folded)}
     >

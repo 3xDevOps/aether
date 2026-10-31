@@ -366,12 +366,12 @@ func (p *PRs) refreshRun(ctx context.Context, t prTarget, snap github.Snapshot) 
 	}
 	run, err := p.store.GetRun(ctx, t.run)
 	if err != nil {
-		return fmt.Errorf("record run %s pull request: %w", t.run, err)
+		return fmt.Errorf("record session %s pull request: %w", t.run, err)
 	}
 	if err := p.store.ObserveRunPullRequest(ctx, &store.RunPullRequest{
 		RunID: t.run, Repository: t.repo, Number: t.number, URL: snap.URL, State: snap.State, MergedAt: snap.MergedAt, ObservedAt: p.now().UTC(),
 	}); err != nil {
-		return fmt.Errorf("record run %s pull request: %w", t.run, err)
+		return fmt.Errorf("record session %s pull request: %w", t.run, err)
 	}
 	if p.bus == nil {
 		return nil

@@ -393,7 +393,7 @@ export function deriveTrace(sources: TraceSources): Span {
     children.push(sized({
       id: 'workers',
       kind: 'workers',
-      label: 'Workers',
+      label: 'Subsessions',
       sub: String(workers.length),
       start: workers[0]!.start,
       end: reach(workers, workers[0]!.start),
@@ -406,7 +406,7 @@ export function deriveTrace(sources: TraceSources): Span {
   return sized({
     id: 'run',
     kind: 'run',
-    label: 'Run',
+    label: 'Session',
     start,
     end: sources.end === null ? null : Math.max(sources.end, ...children.map((child) => child.end ?? sources.end!)),
     status: live ? 'running' : failed ? 'failed' : 'done',

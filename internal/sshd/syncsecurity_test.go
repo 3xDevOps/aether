@@ -256,7 +256,7 @@ func TestSyncSessionIDRejectsPathElements(t *testing.T) {
 	}
 	got, err := syncSessionID("01jq2wz8xa9c")
 	if err != nil {
-		t.Fatalf("syncSessionID on a real run id: %v", err)
+		t.Fatalf("syncSessionID on a real session id: %v", err)
 	}
 	if strings.ContainsAny(got, `/\:`) || got == "" {
 		t.Fatalf("syncSessionID = %q, want one opaque path element", got)

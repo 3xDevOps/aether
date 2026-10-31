@@ -127,7 +127,7 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers, en
     ws.onclose = (ev) => {
       socket = null
       if (ev.code === policy) {
-        stop(ev.reason || 'The server closed the session stream.')
+        stop(ev.reason || 'The server closed the agent stream.')
         return
       }
       if (ev.code === resubscribe) attempt = 0
@@ -136,7 +136,7 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers, en
   }
 
   const refused = (ack: SessionStreamAck) => {
-    const error = ack.error ?? 'The server refused the session stream.'
+    const error = ack.error ?? 'The server refused the agent stream.'
     detach()
     if (ack.code === codeInvalidParams) {
       stop(error)

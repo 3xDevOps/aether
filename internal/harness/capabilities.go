@@ -60,7 +60,7 @@ func WakeRefusal(agent string, mode domain.LaunchMode) error {
 		return nil
 	}
 	if p.EnhancedSupport() == EnhancedNone {
-		return fmt.Errorf("%s in Standard mode has no idle wake, and it has no Enhanced mode; start it as a Background run", agent)
+		return fmt.Errorf("%s in Standard mode has no idle wake, and it has no Enhanced mode; start it as a Background session", agent)
 	}
 	return fmt.Errorf("%s in Standard mode has no idle wake; start it in Enhanced", agent)
 }

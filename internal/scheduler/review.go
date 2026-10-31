@@ -26,7 +26,7 @@ func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.M
 	switch action {
 	case protocol.RunReviewLater:
 		if r.Review != domain.ReviewReady && r.Review != domain.ReviewLater {
-			return nil, fmt.Errorf("%w: run %s has no reported success to review later", ErrInvalidTransition, run)
+			return nil, fmt.Errorf("%w: session %s has no reported success to review later", ErrInvalidTransition, run)
 		}
 		return s.setReview(ctx, run, actor, domain.ReviewLater, domain.ReviewReady)
 	case protocol.RunReviewComplete:
@@ -37,7 +37,7 @@ func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.M
 	case r.Review == domain.ReviewAccepted:
 		return r, nil
 	case r.Status.Live() && reportedOnly && r.Review != domain.ReviewReady:
-		return nil, fmt.Errorf("%w: run %s", ErrReviewNotReported, run)
+		return nil, fmt.Errorf("%w: session %s", ErrReviewNotReported, run)
 	case r.Status.Live():
 		spec := humanClose(domain.RunCompleted, actor)
 		spec.reportedOnly = reportedOnly
@@ -48,7 +48,7 @@ func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.M
 			return nil, err
 		}
 	case r.Status != domain.RunCompleted:
-		return nil, fmt.Errorf("%w: a %s run cannot be marked complete", ErrInvalidTransition, r.Status)
+		return nil, fmt.Errorf("%w: a %s session cannot be marked complete", ErrInvalidTransition, r.Status)
 	}
 	return s.setReview(ctx, run, actor, domain.ReviewAccepted, "", domain.ReviewReady, domain.ReviewLater)
 }
@@ -65,7 +65,7 @@ func (s *Scheduler) setReview(ctx context.Context, run domain.RunID, actor domai
 			return nil, err
 		}
 		if current.Status != domain.RunCompleted {
-			return nil, fmt.Errorf("%w: run %s is %s, not completed", ErrInvalidTransition, run, current.Status)
+			return nil, fmt.Errorf("%w: session %s is %s, not completed", ErrInvalidTransition, run, current.Status)
 		}
 	}
 	stamp, changed, err := s.cfg.Store.SetRunReview(ctx, run, review, from...)
@@ -78,7 +78,7 @@ func (s *Scheduler) setReview(ctx context.Context, run domain.RunID, actor domai
 	}
 	if !changed {
 		if fresh.Review != review {
-			return nil, fmt.Errorf("%w: run %s review is %q", ErrInvalidTransition, run, fresh.Review)
+			return nil, fmt.Errorf("%w: session %s review is %q", ErrInvalidTransition, run, fresh.Review)
 		}
 		return fresh, nil
 	}

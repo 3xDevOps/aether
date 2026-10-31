@@ -31,7 +31,7 @@ func TestBusyCountsAWorkingRun(t *testing.T) {
 	run, c := e.launchFake(t, "keep the server busy")
 	got := e.sched.Busy(t.Context())
 	if got.Idle() || got.Runs != 1 {
-		t.Fatalf("busy with a live run = %+v, want 1 working run", got)
+		t.Fatalf("busy with a live session = %+v, want 1 working run", got)
 	}
 
 	if _, err := e.db.UpdateRunStatus(t.Context(), run.ID, domain.RunNeedsAttention, "stalled: no output", "", nil, nil); err != nil {
@@ -44,10 +44,10 @@ func TestBusyCountsAWorkingRun(t *testing.T) {
 	c.exitNow(0)
 	completed := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if completed.FinishedAt == nil {
-		t.Fatal("completed run must have FinishedAt")
+		t.Fatal("completed session must have FinishedAt")
 	}
 	if got = e.sched.Busy(t.Context()); !got.Idle() {
-		t.Fatalf("busy with a completed run = %+v, want idle", got)
+		t.Fatalf("busy with a completed session = %+v, want idle", got)
 	}
 }
 
@@ -69,14 +69,14 @@ func TestBusyDoesNotCountAPausedRun(t *testing.T) {
 		t.Fatalf("GetRun: %v", err)
 	}
 	if stored.Status != domain.RunRunning {
-		t.Fatalf("paused run status = %q, want it to still be running", stored.Status)
+		t.Fatalf("paused session status = %q, want it to still be running", stored.Status)
 	}
 	got := e.sched.Busy(t.Context())
 	if !got.Idle() {
-		t.Fatalf("busy with only a paused run = %+v, want idle", got)
+		t.Fatalf("busy with only a paused session = %+v, want idle", got)
 	}
 	if got.Paused != 1 || got.Runs != 0 {
-		t.Fatalf("busy = %+v, want the run counted as paused, not working", got)
+		t.Fatalf("busy = %+v, want the session counted as paused, not working", got)
 	}
 
 	// Resuming puts it back to work and the update waits again.

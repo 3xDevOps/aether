@@ -77,7 +77,7 @@ func TestCallRetriesServerRunClosing(t *testing.T) {
 	var n atomic.Int32
 	serveEach(t, path, func(c net.Conn, _ string) {
 		if n.Add(1) == 1 {
-			_, _ = c.Write([]byte("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32004,\"message\":\"coord.send: run is closing\"}}\n"))
+			_, _ = c.Write([]byte("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32004,\"message\":\"coord.send: session is closing\"}}\n"))
 			return
 		}
 		_, _ = c.Write([]byte(okLine))

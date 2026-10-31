@@ -131,7 +131,7 @@ func TestSetupEndsOnNextStepsWhenSysboxIsInterrupted(t *testing.T) {
 		map[string]string{"data-dir": filepath.Join(dir, "data")}, false, true, true, ""); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Docker inside runs is not installed: context canceled\n") ||
+	if !strings.Contains(out.String(), "Docker inside sessions is not installed: context canceled\n") ||
 		!strings.HasSuffix(out.String(), "\n       aether link <this-host>:2222\n") {
 		t.Errorf("want the cancelled install reported and the next steps last:\n%s", out.String())
 	}

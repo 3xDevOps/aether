@@ -163,13 +163,13 @@ func TestEnhancedRunHooksStaySilent(t *testing.T) {
 		var out, errOut bytes.Buffer
 		code, err := Run(t.Context(), []string{"hook", tc.harness, tc.event}, Config{Socket: socket, In: strings.NewReader(tc.input), Out: &out, ErrOut: &errOut})
 		if err != nil || code != ExitOK || out.Len() != 0 || errOut.Len() != 0 {
-			t.Fatalf("%s %s in an enhanced run = %d, %v, %q, %q; want silent success", tc.harness, tc.event, code, err, out.String(), errOut.String())
+			t.Fatalf("%s %s in an enhanced session = %d, %v, %q, %q; want silent success", tc.harness, tc.event, code, err, out.String(), errOut.String())
 		}
 	}
 	var out bytes.Buffer
 	code, err := Run(t.Context(), []string{"hook", "omp", "wake"}, Config{Socket: socket, In: strings.NewReader(`{"seen_message_ids":[]}`), Out: &out})
-	if code != ExitUsage || err == nil || !strings.Contains(err.Error(), "enhanced run") {
-		t.Fatalf("wake receiver in an enhanced run = %d, %v; want a usage error that stops it", code, err)
+	if code != ExitUsage || err == nil || !strings.Contains(err.Error(), "enhanced session") {
+		t.Fatalf("wake receiver in an enhanced session = %d, %v; want a usage error that stops it", code, err)
 	}
 }
 
@@ -204,13 +204,13 @@ func TestHookDoesNotContinueAbortedOrRepeatedStops(t *testing.T) {
 		{"cursor", "stop", `{"status":"aborted"}`},
 		{"cursor", "stop", `{"status":"error"}`},
 		{"cursor", "stop", `{"status":"completed","loop_count":1}`},
-		{"claude", "PostToolBatch", `{"agent_id":"child"}`},
-		{"codex", "PostToolUse", `{"agent_id":"child"}`},
+		{"claude", "PostToolBatch", `{"agent_id":"subsession"}`},
+		{"codex", "PostToolUse", `{"agent_id":"subsession"}`},
 	} {
 		var out bytes.Buffer
 		code, err := Run(t.Context(), []string{"hook", tc.harness, tc.event}, Config{Socket: socket, In: strings.NewReader(tc.input), Out: &out})
 		if err != nil || code != ExitOK || out.Len() != 0 {
-			t.Fatalf("%s %s %s changed a stopped/child turn: %d, %v, %q", tc.harness, tc.event, tc.input, code, err, out.String())
+			t.Fatalf("%s %s %s changed a stopped/subsession turn: %d, %v, %q", tc.harness, tc.event, tc.input, code, err, out.String())
 		}
 	}
 	if count, err := db.CountUnackedRunMessages(t.Context(), run); err != nil || count != 1 {
@@ -346,7 +346,7 @@ func TestSubagentStartFollowsCapabilities(t *testing.T) {
 			}
 			if tc.want == "" {
 				if out != "" {
-					t.Fatalf("a run without report or send capabilities briefed its subagent: %s", out)
+					t.Fatalf("a session without report or send capabilities briefed its subagent: %s", out)
 				}
 				return
 			}
@@ -507,11 +507,11 @@ func TestSessionStartAppendsTheMemoryBrief(t *testing.T) {
 		return response.Context
 	}
 	t.Setenv(coordtransport.RoleCardEnv, "")
-	if got := start(); !strings.HasPrefix(got, "You are Aether run run-1") || !strings.HasSuffix(got, "\n"+brief) {
+	if got := start(); !strings.HasPrefix(got, "You are Aether session run-1") || !strings.HasSuffix(got, "\n"+brief) {
 		t.Fatalf("sessionStart must carry the role card, then the brief: %q", got)
 	}
 	briefErr.Store(&protocol.Error{Code: protocol.CodeInternal, Message: "memory.brief: database is locked"})
-	if got := start(); !strings.HasPrefix(got, "You are Aether run run-1") || !strings.HasSuffix(got, "\nTeam memory brief unavailable: memory.brief: database is locked [aether error -32603]") {
+	if got := start(); !strings.HasPrefix(got, "You are Aether session run-1") || !strings.HasSuffix(got, "\nTeam memory brief unavailable: memory.brief: database is locked [aether error -32603]") {
 		t.Fatalf("a failed brief must keep the role card and show the error: %q", got)
 	}
 	t.Setenv(coordtransport.RoleCardEnv, "1")

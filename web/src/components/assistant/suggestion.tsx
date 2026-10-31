@@ -100,9 +100,9 @@ export function AutoApproveSuggestion({ busy, hasRows }: { busy: boolean; hasRow
       )}
     >
       <p>
-        You've approved the last few actions yourself. With auto-approval on, the assistant launches, messages and stops your runs and saves your environment without a card. Each action is still noted here before it runs. Text the assistant reads from runs, files or web pages could steer it, so turn this on only if you trust what it reads.
+        You've approved the last few actions yourself. With auto-approval on, the assistant launches, messages and stops your sessions and saves your environment without a card. Each action is still noted here before it runs. Text the assistant reads from sessions, files or web pages could steer it, so turn this on only if you trust what it reads.
       </p>
-      <p className="mt-1 text-muted">Still asks: messaging or stopping another member's run.</p>
+      <p className="mt-1 text-muted">Still asks: messaging or stopping another member's session.</p>
       {error && <p ref={alert} role="alert" tabIndex={-1} className="mt-1 text-state-failed outline-none">{error}</p>}
     </Callout>
   )

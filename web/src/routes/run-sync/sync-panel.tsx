@@ -126,7 +126,7 @@ export function SyncPanel({
             <span>{session.conflict}</span>
           </p>
           <p className="mt-1 pl-5 text-ui-sm leading-5 text-muted">
-            The conflict was reported to the server; the session is paused until
+            The conflict was reported to the server; syncing is paused until
             it is resolved.
           </p>
         </div>

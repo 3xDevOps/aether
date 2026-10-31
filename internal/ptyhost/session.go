@@ -555,7 +555,7 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 				replay, replayBytes, err := s.tr.snapshot(c.sessionReplay)
 				if err != nil {
 					s.mu.Unlock()
-					return fmt.Errorf("ptyhost: snapshot run transcript: %w", err)
+					return fmt.Errorf("ptyhost: snapshot session transcript: %w", err)
 				}
 				c.replay = replay
 				c.replayBytes = replayBytes

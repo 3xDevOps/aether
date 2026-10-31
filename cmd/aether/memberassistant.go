@@ -41,8 +41,8 @@ func memberAssistant(args []string) error {
 			state = "on: the actions below run without a card, noted in the transcript first"
 		}
 		fmt.Println("auto-approve  " + state)
-		fmt.Println("covers        launching runs, messaging and stopping your own runs, saving your environment")
-		fmt.Println("always asks   messaging or stopping another member's run")
+		fmt.Println("covers        launching sessions, messaging and stopping your own sessions, saving your environment")
+		fmt.Println("always asks   messaging or stopping another member's session")
 		fmt.Println("not covered   the assistant's own shell and file tools, which never ask")
 		return nil
 	})

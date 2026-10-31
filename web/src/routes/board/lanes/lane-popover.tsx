@@ -66,7 +66,7 @@ export function RunPopover({ lane, at, agentName, now, onReply, onAgents }: {
           card.next,
           run.branch && `${run.branch}${totals ? ` +${totals.additions} −${totals.deletions}` : ''}`,
           pending > 0 && `${pending} ${pending === 1 ? 'input' : 'inputs'} waiting`,
-          overlaps !== undefined && overlaps.length > 0 && `Overlaps ${overlaps.length} ${overlaps.length === 1 ? 'run' : 'runs'} on ${new Set(overlaps.flatMap((o) => o.files)).size} files`,
+          overlaps !== undefined && overlaps.length > 0 && `Overlaps ${overlaps.length} ${overlaps.length === 1 ? 'session' : 'sessions'} on ${new Set(overlaps.flatMap((o) => o.files)).size} files`,
           segment && (segment.state === 'unloaded'
             ? `History before ${clockTime(iso(segment.end), now)} not loaded`
             : `${segmentLabel[segment.state]} ${clockTime(iso(segment.start), now)}–${clockTime(iso(segment.end), now)}`),
@@ -74,7 +74,7 @@ export function RunPopover({ lane, at, agentName, now, onReply, onAgents }: {
       />
       <Actions>
         {action && <CardActionButton card={card} action={action} onReply={onReply} />}
-        <Button variant="secondary" size="sm" onClick={() => navigate('run', { runId: run.id })}>Open run</Button>
+        <Button variant="secondary" size="sm" onClick={() => navigate('run', { runId: run.id })}>Open session</Button>
         {onAgents && <Button variant="ghost" size="sm" onClick={() => onAgents(!lane.agentsOpen)}>{lane.agentsOpen ? 'Hide agents' : 'Show agents'}</Button>}
       </Actions>
     </>
@@ -85,10 +85,10 @@ export function FamilyPopover({ lane }: { lane: FamilyLane }) {
   const navigate = useStore((s) => s.navigate)
   return (
     <>
-      <Header>Run · {lane.detail}</Header>
+      <Header>Session · {lane.detail}</Header>
       <p className="mt-0.5 text-ui font-medium break-words">{lane.title}</p>
       <Actions>
-        <Button variant="secondary" size="sm" onClick={() => navigate('run', { runId: lane.parentID })}>Open run</Button>
+        <Button variant="secondary" size="sm" onClick={() => navigate('run', { runId: lane.parentID })}>Open session</Button>
       </Actions>
     </>
   )
@@ -102,7 +102,7 @@ function MessageList({ scope, ids }: { scope: MessageScope; ids: ReadonlySet<str
   const loaded = useStore((s) => Boolean(s.messageLists[key]))
   if (error) return <p role="alert" className="mt-2 text-ui-sm text-state-failed">{error}</p>
   if (!loaded) return <p className="mt-2 text-ui-sm text-muted">Loading messages…</p>
-  if (messages.length === 0) return <p className="mt-2 text-ui-sm text-muted">These messages are older than the newest page this run's mail list reads.</p>
+  if (messages.length === 0) return <p className="mt-2 text-ui-sm text-muted">These messages are older than the newest page this session's mail list reads.</p>
   return (
     <div className="-mx-3 mt-1 flex flex-col">
       {messages.map((m) => <MessageRow key={m.id} message={m} />)}

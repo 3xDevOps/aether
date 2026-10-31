@@ -33,7 +33,7 @@ import {
   unregisterShellSocket,
 } from '@/store/terminal'
 
-const shellRefusal = 'You can view this run but not open a shell in it'
+const shellRefusal = 'You can view this session but not open a shell in it'
 // xterm reports focus changes and mouse events for an application that asked
 // for them. Looking at a shell is not typing in it.
 const terminalReport = /^\x1b\[(?:[IO]|<\d+;\d+;\d+[Mm])$/

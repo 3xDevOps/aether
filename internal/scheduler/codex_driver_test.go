@@ -130,7 +130,7 @@ func TestStandardCodexRunsThroughItsAppServer(t *testing.T) {
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	if !e.sched.Wakeable(run.ID) || !e.sched.InTurn(run.ID) {
-		t.Fatal("a connected Standard Codex run is not wakeable mid-turn")
+		t.Fatal("a connected Standard Codex session is not wakeable mid-turn")
 	}
 	if err := e.sched.Wake(t.Context(), run.ID, "Aether has 1 unacknowledged inbox item(s)."); err != nil {
 		t.Fatalf("Wake: %v", err)

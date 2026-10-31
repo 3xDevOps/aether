@@ -215,7 +215,7 @@ func (s *Service) hold(ctx context.Context, w *store.Watch, n *store.WatchNotifi
 
 // errRunPaused keeps a needs_you push queued while its run is paused: the
 // run's need reads as none then, though it is still pending.
-var errRunPaused = errors.New("the run is paused")
+var errRunPaused = errors.New("the session is paused")
 
 // stillDue reads n's watch and returns the status that drops n's push,
 // empty when it is still to be sent.

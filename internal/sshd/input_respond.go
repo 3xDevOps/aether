@@ -21,7 +21,7 @@ func init() {
 
 type controlHeldError struct{ holder domain.MemberID }
 
-func (e *controlHeldError) Error() string { return "run control is held by " + string(e.holder) }
+func (e *controlHeldError) Error() string { return "session control is held by " + string(e.holder) }
 
 // runInputRespond is run.input.answer for a caller with no ACP stream. It
 // answers under the run's control admission lock, so no lease can be taken
@@ -78,7 +78,7 @@ func (s *Server) runInputRespond(ctx context.Context, member domain.MemberID, ra
 		}
 		data, _ := json.Marshal(map[string]string{"reason": protocol.ErrorReasonControlHeld, "member_id": string(heldErr.holder)})
 		return nil, &protocol.Error{Code: protocol.CodeConflict, Data: data, Message: fmt.Sprintf(
-			"%s: %s controls run %s, so the request is theirs to answer; ask them, or take control in the dashboard", protocol.MethodRunInputRespond, name, run)}
+			"%s: %s controls session %s, so the request is theirs to answer; ask them, or take control in the dashboard", protocol.MethodRunInputRespond, name, run)}
 	case err != nil:
 		return nil, acpError(err)
 	}
@@ -115,7 +115,7 @@ func (s *Server) decideSudo(ctx context.Context, member domain.MemberID, run dom
 	}
 	err := s.cfg.Runs.DecideSudo(ctx, run, request, allow, member)
 	if errors.Is(err, scheduler.ErrSudoNotPending) {
-		return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: run %s: %v", protocol.MethodRunInputRespond, run, err)}
+		return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: session %s: %v", protocol.MethodRunInputRespond, run, err)}
 	}
 	if err != nil {
 		return rpcError(err)

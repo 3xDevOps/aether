@@ -104,9 +104,9 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"run fallback order", `UPDATE runs SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
 			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
 		{"run child settings", `UPDATE runs SET children_set_by = ?2 WHERE children_set_by = ?1`},
-		{"child runs", `UPDATE run_children SET owner_member_id = ?2 WHERE owner_member_id = ?1`},
-		{"child runs", `UPDATE run_children SET account_member_id = ?2 WHERE account_member_id = ?1`},
-		{"child run fallback order", `UPDATE run_children SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
+		{"subsessions", `UPDATE run_children SET owner_member_id = ?2 WHERE owner_member_id = ?1`},
+		{"subsessions", `UPDATE run_children SET account_member_id = ?2 WHERE account_member_id = ?1`},
+		{"subsession fallback order", `UPDATE run_children SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
 			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
 		{"schedules", `UPDATE schedules SET member_id = ?2 WHERE member_id = ?1`},
 		{"push subscriptions", `UPDATE push_subscriptions SET member_id = ?2 WHERE member_id = ?1`},

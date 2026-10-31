@@ -8,7 +8,7 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test.use({ serverOptions: { args: ['--first-event-grace', '3s', '--poll-interval', '1s'] } })
 
@@ -23,8 +23,8 @@ test('a turn with no progress reads Possibly stalled with its last progress, and
   const status = async () => (await alice.api.rpc<{ run: { status: string; state?: string; reason?: string; liveness?: { phase?: string; transport: string } } }>('run.get', { run_id: run.id })).run
 
   await page.goto(`${alice.url}&run=${run.id}`)
-  const log = page.getByRole('log', { name: 'Session' })
-  const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+  const log = page.getByRole('log', { name: 'Chat' })
+  const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
   const header = page.locator('[data-slot="pane-header"]')
   const callout = page.locator('[data-slot="callout"]').filter({ hasText: 'Possibly stalled' })
   const box = page.getByRole('combobox', { name: 'Message the agent' })
@@ -41,7 +41,7 @@ test('a turn with no progress reads Possibly stalled with its last progress, and
   const words = /No progress for \d+s while awaiting the model's first reply; connection open/
   await expect(runs.getByRole('button', { name: /^Possibly stalled · / })).toBeVisible()
   await expect(header.getByText(words)).toBeVisible()
-  await expect(header.locator('[title^="Possibly stalled since"]')).toHaveAttribute('title', /Why: the run stalled\.$/)
+  await expect(header.locator('[title^="Possibly stalled since"]')).toHaveAttribute('title', /Why: the session stalled\.$/)
   await expect(runs.getByRole('button', { name: /^Needs you/ })).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Needs you' })).toContainText('Nothing is waiting on you.')
   await expect(page.getByText('Disconnected', { exact: true })).toHaveCount(0)
@@ -54,7 +54,7 @@ test('a turn with no progress reads Possibly stalled with its last progress, and
 
   await callout.getByRole('button', { name: 'Open trace' }).click()
   await expect(page.getByRole('tree', { name: 'Trace' }).getByRole('treeitem', { name: /^chatter, Turn/ })).toBeVisible()
-  await page.getByRole('tab', { name: 'Session' }).click()
+  await page.getByRole('tab', { name: 'Chat' }).click()
 
   await callout.getByRole('button', { name: 'Resend last prompt…' }).click()
   const dialog = page.getByRole('alertdialog', { name: 'Resend your last prompt?' })

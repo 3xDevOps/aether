@@ -51,7 +51,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
         title="No workspace yet"
         action={withAsk(<Button onClick={() => onboard('Repository')}>Add your repository</Button>)}
       >
-        A workspace is a repository and the base branch every run starts from.
+        A workspace is a repository and the base branch every session starts from.
       </EmptyState>
     )
   }
@@ -71,7 +71,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
         title="Base branch missing"
         action={withAsk(<Button onClick={() => onboard('Repository')}>Push your base branch</Button>)}
       >
-        Runs start from <code className="font-code">{workspace.base_branch}</code>, which the server cannot read yet:{' '}
+        Sessions start from <code className="font-code">{workspace.base_branch}</code>, which the server cannot read yet:{' '}
         {base.error}
       </EmptyState>
     )
@@ -83,26 +83,26 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
         title="No agent installed"
         action={withAsk(<Button onClick={() => useStore.getState().navigate('agents')}>Set up an agent</Button>)}
       >
-        An agent is the coding CLI a run starts, such as Claude Code or Codex.
+        An agent is the coding CLI a session starts, such as Claude Code or Codex.
       </EmptyState>
     )
   }
   if (hiddenByMine) {
     return (
       <EmptyState
-        title="No runs of yours"
-        action={withAsk(<Button onClick={() => useStore.getState().setMineOnly(false)}>Show everyone's runs</Button>)}
+        title="No sessions of yours"
+        action={withAsk(<Button onClick={() => useStore.getState().setMineOnly(false)}>Show everyone's sessions</Button>)}
       >
-        Mine is on, so runs started by teammates are hidden.
+        Mine is on, so sessions started by teammates are hidden.
       </EmptyState>
     )
   }
   return (
     <EmptyState
-      title="No runs yet"
-      action={withAsk(canLaunch({ cap: caps, role }) && <Button variant={mobile ? 'secondary' : 'primary'} onClick={() => openDialog('launch')}>New run</Button>)}
+      title="No sessions yet"
+      action={withAsk(canLaunch({ cap: caps, role }) && <Button variant={mobile ? 'secondary' : 'primary'} onClick={() => openDialog('launch')}>New session</Button>)}
     >
-      A run is one agent working on its own branch in its own container.
+      A session is one agent working on its own branch in its own container.
     </EmptyState>
   )
 }

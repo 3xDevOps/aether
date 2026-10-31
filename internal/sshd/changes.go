@@ -82,7 +82,7 @@ func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams)
 	if p.WorkspaceID != "" {
 		id := domain.WorkspaceID(p.WorkspaceID)
 		if ws != "" && ws != id {
-			return "", false, invalidParams("workspace_id does not contain the named run")
+			return "", false, invalidParams("workspace_id does not contain the named session")
 		}
 		if _, err := s.cfg.Store.GetWorkspace(ctx, id); gone(err) {
 			deleted, derr := s.workspaceDeleted(ctx, id)

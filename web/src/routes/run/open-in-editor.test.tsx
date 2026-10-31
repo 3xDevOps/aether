@@ -103,15 +103,15 @@ describe('Open in editor', () => {
 
   it('says a paused run must be resumed first', async () => {
     open({}, { pausedRuns: { [runID]: true } })
-    const item = (await more()).getByRole('menuitem', { name: /Open in editor….*Resume the run first/ })
+    const item = (await more()).getByRole('menuitem', { name: /Open in editor….*Resume the session first/ })
     expect(item.getAttribute('aria-disabled')).toBe('true')
   })
 
   it.each([
-    ['a finished run', { status: 'completed' as const }, {}],
-    ['a protected run of someone else', { protected: true }, { info: { ...serverInfo, member: bob } }],
+    ['a finished session', { status: 'completed' as const }, {}],
+    ['a protected session of someone else', { protected: true }, { info: { ...serverInfo, member: bob } }],
     ['a viewer', {}, { info: { ...serverInfo, member: vera } }],
-    ['a run whose id is not a host label', { id: 'run_1' }, {}],
+    ['a session whose id is not a host label', { id: 'run_1' }, {}],
   ])('is not offered for %s', async (_name, over, state) => {
     open(over, state)
     expect((await more()).queryByRole('menuitem', { name: /Open in editor/ })).toBeNull()

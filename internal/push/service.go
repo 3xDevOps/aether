@@ -277,7 +277,7 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 		var wake <-chan time.Time
 		switch {
 		case err != nil:
-			slog.Warn("push: read run; trying again later", "run", id, "in", retry, "error", err)
+			slog.Warn("push: read session; trying again later", "run", id, "in", retry, "error", err)
 			wake = time.After(retry)
 		case n == nil:
 			// Devices and the sink are cleared independently, each tried

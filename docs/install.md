@@ -1,7 +1,7 @@
 # Install, upgrade and remove Aether
 
 This guide installs, upgrades and removes Aether on every platform. For the
-shortest path to a first run, follow [quickstart.md](quickstart.md), then come
+shortest path to a first session, follow [quickstart.md](quickstart.md), then come
 back here for other platforms, options and errors. Aether's terms are defined
 in the [glossary](README.md#concepts).
 
@@ -12,7 +12,7 @@ it keeps your repositories and runs each agent in its own Docker container. A
 client is any machine you work from: the `aether` CLI, the desktop app and the
 Android app all connect to that server.
 
-| Component | Runs on | What it is | Install it with |
+| Component | Sessions on | What it is | Install it with |
 | --- | --- | --- | --- |
 | `aether-server` | Linux, x64 and arm64 | The server. Needs Docker. | [The install script](#the-install-script), answering `server` |
 | `aether` | Linux, macOS and Windows, x64 and arm64 | The CLI. `aether gui` also serves the dashboard on your machine. | [The install script](#the-install-script) or the [Windows install script](#windows-install-script) |
@@ -29,14 +29,14 @@ flowchart LR
   phone["Phone<br/>Android app"] -- "HTTPS over Tailscale" --> server
   laptop & phone -- "GitHub sign-in" --> edge["Edge relay"]
   edge -- "relays SSH" --> server
-  server -- "one container per run" --> docker["Docker"]
+  server -- "one container per session" --> docker["Docker"]
 ```
 
 ## Server prerequisites
 
 - Linux; a headless server is fine. Windows and macOS run only clients.
 - Docker Engine, running
-  ([install Docker Engine](https://docs.docker.com/engine/install/)). Every run
+  ([install Docker Engine](https://docs.docker.com/engine/install/)). Every session
   and member environment is a container. The snap package does not work: the
   `aether-server` unit requires `docker.service`. Sharing an agent account
   between members ([teams.md](teams.md#agent-accounts)) needs Docker Engine
@@ -44,16 +44,16 @@ flowchart LR
 - git, and `ssh-keygen` (package `openssh-client` on Debian and Ubuntu), which
   git uses to sign the commits Aether makes for members who connected GitHub.
 - At least 2.5 GiB of available memory and 6 GiB of free disk, plus disk for
-  the images the server pulls on first use. A run starts only while 2 GiB of
-  memory (a tenth of RAM above 20 GiB) plus 512 MiB per run starting stays
+  the images the server pulls on first use. A session starts only while 2 GiB of
+  memory (a tenth of RAM above 20 GiB) plus 512 MiB per session starting stays
   available, and while the data and Docker filesystems keep their reserve (5%
   of the filesystem, at least 5 GiB, at most 20 GiB; `min-free-disk` overrides
-  it) plus 1 GiB per starting run free
+  it) plus 1 GiB per starting session free
   ([environments.md](environments.md#resource-limits-and-launch-admission)).
   `aether-server install` warns below this.
-- Optional: Sysbox, so agents can run Docker inside their runs. Setup offers
+- Optional: Sysbox, so agents can run Docker inside their sessions. Setup offers
   it on Ubuntu and Debian
-  ([environments.md](environments.md#docker-inside-runs)).
+  ([environments.md](environments.md#docker-inside-sessions)).
 - Optional: Tailscale. Without it the server needs only outbound HTTPS to the
   edge ([networking.md](networking.md)).
 
@@ -237,7 +237,7 @@ To build from source, see [CONTRIBUTING.md](../CONTRIBUTING.md#build-from-source
 
 The desktop app is a window around the dashboard. It starts `aether gui`, the
 dashboard server built into the CLI, with the same access the CLI has. While
-open, it notifies you when a run needs attention and opens `aether://run/<id>`
+open, it notifies you when a session needs attention and opens `aether://run/<id>`
 and edge join and claim links ([edge.md](edge.md#the-dashboard)). Both install
 scripts can install it; to install or rebuild it yourself:
 
@@ -327,7 +327,7 @@ nothing written.
 | `Dashboard HTTPS port (0 = off)` | 443 | Asked after a tailnet yes without a key requirement ([networking.md](networking.md#the-dashboard)). |
 | `Turn on the edge too` | no | Asked after a tailnet yes. Without a tailnet, setup turns the edge on without asking. |
 | `Who may reach this server through the edge?` | no default | `1`, account access: a GitHub sign-in is enough. `2`, approved devices: each new device waits for approval ([edge.md](edge.md#access-policies)). |
-| `Let agents use Docker inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)` | yes | Skipped when Docker already has Sysbox or does not answer. |
+| `Let agents use Docker inside their sessions? This installs the Sysbox runtime (Ubuntu/Debian)` | yes | Skipped when Docker already has Sysbox or does not answer. |
 
 With the edge on and no owner yet, setup prints a claim link holding a code
 valid for 30 minutes (`sudo aether-server edge claim-code` prints a new one).
@@ -390,12 +390,12 @@ after the key and value of `config set`.
 | `edge-reviewer` | off | Under `edge-access account`, a connector authorized by the edge's [reviewer account](edge.md#reviewer-account) acts as the member an admin binds it to with `aether member link --reviewer <login> <member-id>`. |
 | `tailnet-auto-join` | off | Tailnet logins join as approved members instead of pending. |
 | `tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. Cannot be combined with `web-port`. |
-| `run-cpus`, `run-memory`, `run-pids` | 8 CPUs (at most the host's), 8 GiB, 4096 | Ceilings per run and member environment, not reservations. |
-| `min-free-disk` | `0` (5% of the filesystem, 5 to 20 GiB) | Free-space reserve below which new runs are refused. Negative turns the check off. |
-| `checkout-ttl` | `72h` | How long a finished run's checkout is kept after the run ends. It also stays while the run's container is kept. Negative keeps it forever. |
-| `run-container-ttl` | `168h` | How long a closed run's container is kept so the run can be relaunched. A relaunched run's clock restarts at its next close. |
-| `browser-image` | `ghcr.io/3xdevops/aether-browser:<release>` | The image a run's **Browser** tab starts from. Set it and updates stop moving it. |
-| `conflict-coordination` | on | Let overlapping runs message each other ([coordination.md](coordination.md)). |
+| `run-cpus`, `run-memory`, `run-pids` | 8 CPUs (at most the host's), 8 GiB, 4096 | Ceilings per session and member environment, not reservations. |
+| `min-free-disk` | `0` (5% of the filesystem, 5 to 20 GiB) | Free-space reserve below which new sessions are refused. Negative turns the check off. |
+| `checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps it forever. |
+| `run-container-ttl` | `168h` | How long a closed session's container is kept so the session can be relaunched. A relaunched session's clock restarts at its next close. |
+| `browser-image` | `ghcr.io/3xdevops/aether-browser:<release>` | The image a session's **Browser** tab starts from. Set it and updates stop moving it. |
+| `conflict-coordination` | on | Let overlapping sessions message each other ([coordination.md](coordination.md)). |
 
 API keys for key-based agents go in `/etc/aether/aether-server.env`, which the
 unit loads; subscription logins live in each member's home
@@ -416,7 +416,7 @@ variables. `<config dir>` is the directory that holds `config.json`.
 | `<config dir>/edge-tokens.json` | The device token for each edge you signed in to with `aether login`. Do not share or commit it. `aether logout` revokes the token at the edge and deletes it here. |
 | `~/.ssh/id_ed25519` | Your SSH key, which `aether link <host:port>` creates only when you have none. |
 | `~/.ssh/known_hosts` | Where `aether link` pins the server's host key. |
-| `~/.ssh/aether_config`, `~/.ssh/aether_known_hosts` | Written by `aether ssh-config` ([terminal.md](terminal.md)): the `<run>.aether` host block and its host key. |
+| `~/.ssh/aether_config`, `~/.ssh/aether_known_hosts` | Written by `aether ssh-config` ([terminal.md](terminal.md)): the `<session>.aether` host block and its host key. |
 | `AETHER_CONFIG_DIR` | Replaces the platform config directory above. |
 | `AETHER_NO_UPDATE_CHECK` | Any non-empty value turns off release checks. |
 | `AETHER_BIN` | Path of the `aether` binary the desktop app starts and `aether gui build` requires. |
@@ -424,8 +424,8 @@ variables. `<config dir>` is the directory that holds `config.json`.
 ## The client-side sync daemon
 
 The sync daemon keeps a local clone current without `git fetch`: it fetches
-run branches as agents commit to them, and in a workspace without a source
-mirror it pushes your local base branch to the server. It is optional and runs
+session branches as agents commit to them, and in a workspace without a source
+mirror it pushes your local base branch to the server. It is optional and sessions
 once per clone.
 
 ```sh
@@ -465,10 +465,10 @@ Both check the signature, replace `aether-server` and the `aether` beside
 it, and restart the service. The old binaries stay as `aether-server.prev` and
 `aether.prev`, and the database is copied first when its schema changes. If
 the new server does not finish starting, it restores both and records why.
-Runs keep going; `aether attach` and `aether sync --live` reconnect.
+Sessions keep going; `aether attach` and `aether sync --live` reconnect.
 
-`aether server update --when idle` waits until no run is working, no terminal
-is attached and no SSH session into a run is open; `--cancel` clears that
+`aether server update --when idle` waits until no session is working, no terminal
+is attached and no SSH connection into a session is open; `--cancel` clears that
 pending update. `--allow-downgrade` allows an older release, `--yes` skips the
 confirmation, and `--status`, which any member can run, shows the versions,
 any pending update and the last update's outcome and error.
@@ -543,8 +543,8 @@ One from `v0.7.0-alpha.12` or older needs one restart by hand:
   containers running, it prints `sudo systemctl restart sysbox` for later.
 - An open member environment, which keeps its image until it is stopped and
   reopened ([environments.md](environments.md#the-standard-image)).
-- A run's open **Browser** tab, which keeps its image until you stop and reopen
-  the run. A browser action it lacks fails with an error that says so.
+- A session's open **Browser** tab, which keeps its image until you stop and reopen
+  the session. A browser action it lacks fails with an error that says so.
 
 ### When the server refuses an older client
 
@@ -596,11 +596,11 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 
 | Path | Contents |
 | --- | --- |
-| `aether.db` | The SQLite database: members, workspaces, runs and their history. |
+| `aether.db` | The SQLite database: members, workspaces, sessions and their history. |
 | `ssh/`, `edge/`, `push/` | The SSH host key, which clients pin and the edge knows the server by; edge enrollment; and the push notification key, without which every device must turn notifications off and on again. |
 | `repos/` | One bare git repository per workspace. |
-| `checkouts/` | One git worktree per run, and each run's recorded diff history in `<run-id>.diffsnap/`. |
-| `transcripts/` | Terminal recordings and Enhanced conversation logs, kept until you delete the run. |
+| `checkouts/` | One git worktree per session, and each session's recorded diff history in `<run-id>.diffsnap/`. |
+| `transcripts/` | Terminal recordings and Enhanced conversation logs, kept until you delete the session. |
 | `homes/<member>/` | Each member's persistent home: installed agents, agent logins, uploaded configuration, and their GitHub token. |
 | `signing-keys/` | Each member's private commit signing key, which no container mounts. Without a backup, each member runs `aether github connect` again for a new key. |
 | `workspace-secrets/` | Secret workspace variables in plain text, readable only by the server's user. |
@@ -618,9 +618,9 @@ up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`, `homes/`,
 > restrict who can read them, and never attach them to an issue
 > ([security.md](security.md#github-credentials-and-signing-keys)).
 
-Recordings and diff history stay until you delete the run, so watch the disk.
+Recordings and diff history stay until you delete the session, so watch the disk.
 Keep the path short: one too deep for Unix sockets under `coord/` (about 100
-characters) logs `coordination unavailable for this run`. For agents you do
+characters) logs `coordination unavailable for this session`. For agents you do
 not trust, mount the data directory `nosuid,nodev` ([security.md](security.md)).
 
 ## Uninstalling
@@ -729,7 +729,7 @@ rundll32 'sysdm.cpl,EditEnvironmentVariables'
 ### Linked repositories
 
 Each clone that `aether link --repo` or `aether workspace import` linked
-(`aether status` lists them) has an `aether` remote and a branch per run you
+(`aether status` lists them) has an `aether` remote and a branch per session you
 pulled. Repoint the base branch, which `aether link` set to the `aether`
 remote, before removing it, or `git push` on it fails. This runs in PowerShell
 too:

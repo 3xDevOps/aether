@@ -167,7 +167,7 @@ do
 		kill -ALRM 1
 	fi
 	if [ "$i" -ge 150 ]; then
-		echo "the run supervisor did not stop its child within 15 seconds" >&2
+		echo "the session supervisor did not stop its child within 15 seconds" >&2
 		exit 2
 	fi
 	sleep 0.1
@@ -191,11 +191,11 @@ func (s *Scheduler) swapChild(ctx context.Context, cid runtime.ID, nonce string,
 	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, argv, "")
 	switch {
 	case err != nil:
-		return fmt.Errorf("signal the run supervisor: %w", err)
+		return fmt.Errorf("signal the session supervisor: %w", err)
 	case code == 3:
 		return fmt.Errorf("the agent's terminal exited with code %s as it started; the Terminal tab shows its output", strings.TrimSpace(stdout))
 	case code != 0:
-		return fmt.Errorf("signal the run supervisor: exit %d: %s", code, strings.TrimSpace(stderr))
+		return fmt.Errorf("signal the session supervisor: exit %d: %s", code, strings.TrimSpace(stderr))
 	}
 	return nil
 }

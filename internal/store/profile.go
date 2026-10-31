@@ -273,7 +273,7 @@ func (d *DB) SetRunProfileSnapshot(ctx context.Context, run domain.RunID, id dom
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET profile_snapshot_id = ? WHERE id = ?`, id, run))
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set run profile snapshot: %w", err)
+		err = fmt.Errorf("store: set session profile snapshot: %w", err)
 	}
 	return err
 }

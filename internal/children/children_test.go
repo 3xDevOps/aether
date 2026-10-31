@@ -31,6 +31,7 @@ type fakeRuns struct {
 	accounts []domain.MemberID
 	killed   []domain.RunID
 	closed   []domain.RunID
+	paused   map[domain.RunID]bool
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
@@ -56,9 +57,11 @@ func (f *fakeRuns) StopForParent(ctx context.Context, run, parent domain.RunID) 
 	f.killed = append(f.killed, run)
 	f.mu.Unlock()
 	now := time.Now()
-	_, err := f.db.UpdateRunStatus(ctx, run, domain.RunCompleted, "stopped by parent run "+string(parent), "", nil, &now)
+	_, err := f.db.UpdateRunStatus(ctx, run, domain.RunCompleted, "stopped by parent session "+string(parent), "", nil, &now)
 	return err
 }
+
+func (f *fakeRuns) Paused(run domain.RunID) bool { return f.paused[run] }
 
 func (f *fakeRuns) WakeRefusal(agent string, mode domain.LaunchMode) error {
 	return agentharness.WakeRefusal(agent, mode)
@@ -123,18 +126,38 @@ type mail struct {
 	body     string
 }
 
+// fakeMail dedupes by key, or, with db set, appends to the real mailbox and
+// keeps the errors it returns.
 type fakeMail struct {
 	mu   sync.Mutex
 	sent []mail
 	keys map[string]bool
 	fail bool
+	db   *store.DB
+	errs []error
 }
 
-func (m *fakeMail) Notify(_ context.Context, from, to domain.RunID, body, _, key string) error {
+func (m *fakeMail) Notify(ctx context.Context, from, to domain.RunID, body, _, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.fail {
 		return errors.New("inbox full")
+	}
+	if m.db != nil {
+		target, err := m.db.GetRun(ctx, to)
+		if err != nil {
+			return err
+		}
+		created, err := m.db.AppendRunMessageCreated(ctx, &store.RunMessage{WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to,
+			Kind: store.RunMessageKindMessage, Body: body, IdempotencyKey: key}, protocol.CoordMaxUnread)
+		if err != nil {
+			m.errs = append(m.errs, err)
+			return err
+		}
+		if created {
+			m.sent = append(m.sent, mail{from, to, body})
+		}
+		return nil
 	}
 	if m.keys[key] {
 		return nil
@@ -151,6 +174,7 @@ type harness struct {
 	svc    *Service
 	runs   *fakeRuns
 	mail   *fakeMail
+	now    time.Time
 	agents *fakeAgents
 	ws     *domain.Workspace
 	ada    *domain.Member
@@ -165,7 +189,8 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
+	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db, paused: map[domain.RunID]bool{}}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
+	h.now = time.Now()
 	h.ws = &domain.Workspace{Name: "app"}
 	if err = db.CreateWorkspace(ctx, h.ws); err != nil {
 		t.Fatal(err)
@@ -179,6 +204,7 @@ func newHarness(t *testing.T) *harness {
 			return fallback.ResolveLaunchAccount(ctx, st, actor, account)
 		},
 		AuthorizationMu: &mu,
+		Now:             func() time.Time { return h.now },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +273,7 @@ func (h *harness) mustStart(parent domain.RunID, p protocol.ChildStartParams) pr
 	h.t.Helper()
 	out, err := h.start(parent, p)
 	if err != nil {
-		h.t.Fatalf("child start: %v", err)
+		h.t.Fatalf("subsession start: %v", err)
 	}
 	return out
 }
@@ -267,7 +293,7 @@ func (h *harness) settle() {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	h.t.Fatal("children still launching")
+	h.t.Fatal("subsessions still launching")
 }
 
 func code(err error) int {
@@ -283,14 +309,14 @@ func TestOnByDefaultAndOffRefuses(t *testing.T) {
 	parent := h.run(h.ada.ID, domain.LaunchACP, "fix login")
 	settings, _ := h.svc.Settings(h.ctx, h.ada.ID)
 	if !settings.Enabled {
-		t.Fatalf("default settings = %+v, want child runs on", settings)
+		t.Fatalf("default settings = %+v, want subsessions on", settings)
 	}
 	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "review"})
 	off := false
 	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: &off})
 	_, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "again"})
-	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Settings → Child runs") {
-		t.Fatalf("start with child runs off = %v, want a denial pointing at Settings", err)
+	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Settings → Subsessions") {
+		t.Fatalf("start with subsessions off = %v, want a denial pointing at Settings", err)
 	}
 	if bob, _ := h.svc.Settings(h.ctx, h.bob.ID); !bob.Enabled {
 		t.Fatal("one member's setting changed another's")
@@ -313,7 +339,7 @@ func TestRunSettingOverridesOnlyWhileItsSetterOwnsTheRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("after a handoff to a member with child runs off = %v, want denied", err)
+		t.Fatalf("after a handoff to a member with subsessions off = %v, want denied", err)
 	}
 }
 
@@ -348,7 +374,7 @@ func TestStartIsIdempotentAndQueuesBeyondTheLimit(t *testing.T) {
 	h.settle()
 	counts, _ = h.db.ChildCounts(h.ctx, a.ID)
 	if counts.Busy != 2 || counts.Queued != 1 {
-		t.Fatalf("after one child reported: %+v, want a queued child started", counts)
+		t.Fatalf("after one subsession reported: %+v, want a queued subsession started", counts)
 	}
 	for _, opts := range h.runs.launched {
 		if opts.FromCommit != strings.Repeat("a", 40) || opts.ReservedRunID == "" {
@@ -363,7 +389,7 @@ func TestAChildCannotStartChildren(t *testing.T) {
 	child := h.mustStart(root.ID, protocol.ChildStartParams{Harness: "codex"})
 	h.settle()
 	_, err := h.start(domain.RunID(child.RunID), protocol.ChildStartParams{Harness: "claude", Task: "grandchild"})
-	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "child runs go one level deep") {
+	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "subsessions go one level deep") {
 		t.Fatalf("a grandchild = %v, want the one-level refusal", err)
 	}
 }
@@ -377,7 +403,7 @@ func TestParentsMustWakeOnMail(t *testing.T) {
 	}
 	_, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"})
 	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "gemini in Standard mode has no idle wake; start it in Enhanced") {
-		t.Fatalf("start from a Standard run that cannot wake = %v", err)
+		t.Fatalf("start from a Standard session that cannot wake = %v", err)
 	}
 }
 
@@ -398,7 +424,7 @@ func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	stopped := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "stop"})
 	h.settle()
 	if err := h.svc.ValidateReport(h.ctx, parent.ID, store.CoordOutcomeSuccess); code(err) != protocol.CodeInvalidState {
-		t.Fatalf("success with unfinished children = %v, want refused", err)
+		t.Fatalf("success with unfinished subsessions = %v, want refused", err)
 	}
 	if err := h.db.DetachChild(h.ctx, domain.RunID(kept.RunID)); err != nil {
 		t.Fatal(err)
@@ -427,11 +453,11 @@ func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	h.settle()
 	k, _ := h.db.GetRun(h.ctx, domain.RunID(kept.RunID))
 	if k.Status.Terminal() {
-		t.Fatal("a detached child was stopped with its parent")
+		t.Fatal("a detached subsession was stopped with its parent")
 	}
 	attached := h.mustStartAfterEnd(parent.ID)
 	if attached {
-		t.Fatal("an ended parent started a child")
+		t.Fatal("an ended parent started a subsession")
 	}
 }
 
@@ -466,7 +492,7 @@ func TestTreeUsageCountsEachRunOnceOnThePayingAccount(t *testing.T) {
 	}
 	for _, c := range out.Children {
 		if c.Purpose == "" || (c.RunID == metered.RunID && (c.CostUSD == nil || *c.CostUSD != 0.5)) {
-			t.Fatalf("child %+v", c)
+			t.Fatalf("subsession %+v", c)
 		}
 	}
 }
@@ -479,7 +505,7 @@ func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("start after an admin turned child runs off = %v, want denied", err)
+		t.Fatalf("start after an admin turned subsessions off = %v, want denied", err)
 	}
 	if _, err := h.svc.Allow(h.ctx, h.bob, parent.ID, ""); err != nil {
 		t.Fatal(err)
@@ -490,14 +516,14 @@ func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	if related, _ := h.svc.Related(h.ctx, parent.ID, domain.RunID(child.RunID)); related {
-		t.Fatal("a child handed to another member still messages its old parent outside the usual rules")
+		t.Fatal("a subsession handed to another member still messages its old parent outside the usual rules")
 	}
 	_, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildCancel, json.RawMessage(`{"run_id":"`+child.RunID+`"}`))
 	if code(err) != protocol.CodeDenied {
-		t.Fatalf("the old parent cancelling a handed-off child = %v, want denied", err)
+		t.Fatalf("the old parent cancelling a handed-off subsession = %v, want denied", err)
 	}
 	if err := h.svc.ValidateReport(h.ctx, parent.ID, store.CoordOutcomeSuccess); err != nil {
-		t.Fatalf("a handed-off child still holds its old parent's success: %v", err)
+		t.Fatalf("a handed-off subsession still holds its old parent's success: %v", err)
 	}
 }
 
@@ -515,7 +541,7 @@ func TestSettleForgetsEndedTrees(t *testing.T) {
 	h.settle()
 	left, err := h.db.ChildrenToSettle(h.ctx)
 	if err != nil || len(left) != 0 {
-		t.Fatalf("children left to settle = %d, %v; want none once the tree ended", len(left), err)
+		t.Fatalf("subsessions left to settle = %d, %v; want none once the tree ended", len(left), err)
 	}
 }
 
@@ -580,7 +606,7 @@ func TestFinishedChildrenOutliveTheirParent(t *testing.T) {
 	kept, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID))
 	stopped, _ := h.db.GetRun(h.ctx, domain.RunID(busy.RunID))
 	if kept.Status.Terminal() || !kept.Detached || !stopped.Status.Terminal() {
-		t.Fatalf("finished child %s detached=%v, busy child %s; want the finished one kept for review and the busy one stopped",
+		t.Fatalf("finished subsession %s detached=%v, busy subsession %s; want the finished one kept for review and the busy one stopped",
 			kept.Status, kept.Detached, stopped.Status)
 	}
 }
@@ -604,7 +630,7 @@ func TestClosedParentClosesItsChildren(t *testing.T) {
 	for _, id := range []string{done.RunID, live.RunID} {
 		r, _ := h.db.GetRun(h.ctx, domain.RunID(id))
 		if r.Status != domain.RunMerged {
-			t.Fatalf("child %s = %s, want merged with its parent", id, r.Status)
+			t.Fatalf("subsession %s = %s, want merged with its parent", id, r.Status)
 		}
 	}
 }
@@ -625,10 +651,10 @@ func TestKilledParentKeepsItsFinishedChildrenForReview(t *testing.T) {
 	h.settle()
 	h.settle()
 	if r, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID)); r.Status != domain.RunCompleted {
-		t.Fatalf("child of a killed parent = %s, want it left completed for review", r.Status)
+		t.Fatalf("subsession of a killed parent = %s, want it left completed for review", r.Status)
 	}
 	if left, err := h.db.ChildrenToSettle(h.ctx); err != nil || len(left) != 0 {
-		t.Fatalf("children left to settle = %d, %v", len(left), err)
+		t.Fatalf("subsessions left to settle = %d, %v", len(left), err)
 	}
 }
 
@@ -639,7 +665,7 @@ func TestClosedParentSettlesAChildStoppedWhileProvisioning(t *testing.T) {
 	child := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "slow"})
 	h.settle()
 	now := time.Now()
-	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(child.RunID), domain.RunAbandoned, "stopped by parent run "+string(parent.ID), "", nil, &now); err != nil {
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(child.RunID), domain.RunAbandoned, "stopped by parent session "+string(parent.ID), "", nil, &now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunCompleted, "agent reported success", "", nil, &now); err != nil {
@@ -651,7 +677,7 @@ func TestClosedParentSettlesAChildStoppedWhileProvisioning(t *testing.T) {
 	h.settle()
 	h.settle()
 	if left, err := h.db.ChildrenToSettle(h.ctx); err != nil || len(left) != 0 {
-		t.Fatalf("children left to settle = %d, %v; want none", len(left), err)
+		t.Fatalf("subsessions left to settle = %d, %v; want none", len(left), err)
 	}
 }
 
@@ -678,6 +704,76 @@ func TestChildChecksOutItsParentsExtraRepositories(t *testing.T) {
 	h.runs.mu.Lock()
 	defer h.runs.mu.Unlock()
 	if len(h.runs.launched) != 1 || !slices.Equal(h.runs.launched[0].ExtraWorkspaces, extra) {
-		t.Fatalf("child launch = %+v, want the parent's extra repositories %v", h.runs.launched, extra)
+		t.Fatalf("subsession launch = %+v, want the parent's extra repositories %v", h.runs.launched, extra)
+	}
+}
+
+func TestParentIsToldOncePerIdleSpell(t *testing.T) {
+	h := newHarness(t)
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	waiter := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "watch ci", Task: "w"})
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "x"})
+	paused := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "y"})
+	h.settle()
+	h.mail.db = h.db
+	park := func(id string, reason string, activity domain.RunActivity) {
+		t.Helper()
+		if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(id), domain.RunNeedsAttention, reason, activity, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idle := func() (n int) {
+		for _, m := range h.mail.sent {
+			if m.from == domain.RunID(waiter.RunID) && strings.Contains(m.body, "has been") {
+				n++
+			}
+		}
+		return n
+	}
+	park(waiter.RunID, "checks pending", domain.ActivityWaitingCI)
+	park(paused.RunID, "checks pending", domain.ActivityWaitingCI)
+	h.runs.paused[domain.RunID(paused.RunID)] = true
+	h.now = h.now.Add(59 * time.Minute)
+	h.settle()
+	if len(h.mail.sent) != 0 {
+		t.Fatalf("notices before an hour = %+v, want none", h.mail.sent)
+	}
+	h.now = h.now.Add(2 * time.Minute)
+	h.settle()
+	h.settle()
+	if idle() != 1 || len(h.mail.sent) != 1 {
+		t.Fatalf("notices = %+v, want one for the waiting child only (not the working or paused one)", h.mail.sent)
+	}
+	body := h.mail.sent[0].body
+	for _, want := range []string{waiter.RunID, "watch ci", "waiting-ci", "checks pending", "aether-internal send --to " + waiter.RunID, "subsession cancel --run-id " + waiter.RunID} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("notice %q lacks %q", body, want)
+		}
+	}
+	if h.mail.sent[0].to != parent.ID {
+		t.Fatalf("notice went to %s, want the parent", h.mail.sent[0].to)
+	}
+
+	// A reason change and more time inside the spell are the same spell.
+	park(waiter.RunID, "still pending", domain.ActivityWaitingCI)
+	h.now = h.now.Add(5 * time.Minute)
+	h.settle()
+	if idle() != 1 || len(h.mail.errs) != 0 {
+		t.Fatalf("later passes in the spell sent %+v, errors %v; want the one notice", h.mail.sent, h.mail.errs)
+	}
+
+	// Work resets the spell; a second hour of quiet is told again.
+	park(waiter.RunID, "", domain.ActivityWorking)
+	h.settle()
+	park(waiter.RunID, "turn ended without a report", domain.ActivityWaiting)
+	h.now = time.Now().Add(30 * time.Minute)
+	h.settle()
+	if idle() != 1 {
+		t.Fatalf("a fresh spell was told before an hour: %+v", h.mail.sent)
+	}
+	h.now = time.Now().Add(61 * time.Minute)
+	h.settle()
+	if idle() != 2 || len(h.mail.errs) != 0 {
+		t.Fatalf("notices after a second spell = %+v, errors %v; want 2", h.mail.sent, h.mail.errs)
 	}
 }

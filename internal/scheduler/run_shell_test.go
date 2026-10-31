@@ -47,7 +47,7 @@ func TestEnsureRunShellTabRejectsInvalidAndMissingRuns(t *testing.T) {
 	t.Parallel()
 	e := newTerminalTestEnv(t, nil)
 	if err := e.sched.EnsureRunShellTab(t.Context(), "missing", "tab", 80, 24); !errors.Is(err, ptyhost.ErrNoSession) {
-		t.Fatalf("missing run error = %v, want ErrNoSession", err)
+		t.Fatalf("missing session error = %v, want ErrNoSession", err)
 	}
 	run, _ := e.launchFake(t, "shell validation")
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "Bad_tab", 80, 24); err == nil || !strings.Contains(err.Error(), "tab") {
@@ -131,7 +131,7 @@ func TestEnsureRunShellTabRejectsPausedStalledRun(t *testing.T) {
 		t.Fatalf("mark run stalled: %v", err)
 	}
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "paused", 80, 24); !errors.Is(err, ptyhost.ErrNoSession) {
-		t.Fatalf("paused run error = %v, want ErrNoSession", err)
+		t.Fatalf("paused session error = %v, want ErrNoSession", err)
 	}
 }
 
@@ -187,10 +187,10 @@ func TestEnsureRunShellTabRejectsCompletedRun(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "completed", 80, 24); !errors.Is(err, ptyhost.ErrNoSession) {
-		t.Fatalf("completed run error = %v, want ErrNoSession", err)
+		t.Fatalf("completed session error = %v, want ErrNoSession", err)
 	}
 	if got := len(e.rt.execTTYCalls()); got != 0 {
-		t.Fatalf("ExecTTY calls = %d, want none for completed run", got)
+		t.Fatalf("ExecTTY calls = %d, want none for completed session", got)
 	}
 }
 

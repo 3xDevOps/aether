@@ -326,7 +326,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 			next := e.sidecar()
 			next.WorkersReason = workersReason
 			if writeErr := s.writeSidecar(next); writeErr != nil {
-				return fmt.Errorf("scheduler: persist the workers reason: %w", writeErr)
+				return fmt.Errorf("scheduler: persist the subsessions reason: %w", writeErr)
 			}
 		}
 	}
@@ -680,7 +680,7 @@ func (s *Scheduler) removeSidecar(run domain.RunID) {
 	s.removeScratch(string(run))
 }
 
-const stoppedByParentReason = "stopped by parent run "
+const stoppedByParentReason = "stopped by parent session "
 
 // killedOutcome is the status a stopped run ends in: a child its parent
 // stopped completed its part, anything else was abandoned.
@@ -705,7 +705,7 @@ func (e *supervised) stopNoticeLocked() string {
 	case !e.killRequested:
 		return ""
 	case e.killBy != "":
-		return "Stopped by its parent run " + string(e.killBy) + "."
+		return "Stopped by its parent session " + string(e.killBy) + "."
 	case e.killActor != "":
 		return "Stopped by a person."
 	}

@@ -46,7 +46,7 @@ func launchParams(t *testing.T, f *fakeServer) protocol.RunLaunchParams {
 func TestLaunchAppliesSavedDefaults(t *testing.T) {
 	f := savedFake(t, savedChoices)
 	cs := connectorSession(t, f, ScopeWrite)
-	_, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
+	_, out := run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
 	p := launchParams(t, f)
 	if p.Harness != "claude" || p.Mode != "acp" || p.Model != "opus" || p.AccountMemberID != "mem-ada" || !slices.Equal(p.FallbackAccountMemberIDs, []string{"mem-me"}) {
 		t.Fatalf("run.launch params = %+v, want the saved choices", p)
@@ -59,7 +59,7 @@ func TestLaunchAppliesSavedDefaults(t *testing.T) {
 	// The assistant's card is told what saved defaults filled; its socket
 	// takes that off before the server sees it.
 	f = savedFake(t, savedChoices)
-	run(t, assistantSession(t, f.call), "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
+	run(t, assistantSession(t, f.call), "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
 	if !strings.Contains(f.acted().params, `"saved_defaults":{"applied":["account_member_id","fallback","harness","mode","model"]}`) {
 		t.Fatalf("assistant run.launch params = %s", f.acted().params)
 	}
@@ -70,7 +70,7 @@ func TestLaunchAppliesSavedDefaults(t *testing.T) {
 func TestLaunchExplicitParamsBeatSavedDefaults(t *testing.T) {
 	f := savedFake(t, savedChoices)
 	cs := connectorSession(t, f, ScopeWrite)
-	_, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "codex", "account_member_id": "mem-me",
+	_, out := run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "codex", "account_member_id": "mem-me",
 		"no_fallback": true, "idempotency_key": "k1"})
 	p := launchParams(t, f)
 	if p.Harness != "codex" || p.Mode != "tui" || p.Model != "gpt-5" || p.AccountMemberID != "mem-me" || !p.NoFallback || p.FallbackAccountMemberIDs != nil {
@@ -84,14 +84,14 @@ func TestLaunchExplicitParamsBeatSavedDefaults(t *testing.T) {
 
 	f = savedFake(t, savedChoices)
 	cs = connectorSession(t, f, ScopeWrite)
-	run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "claude", "saved_defaults": "ignore", "idempotency_key": "k2"})
+	run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "claude", "saved_defaults": "ignore", "idempotency_key": "k2"})
 	if got := f.acted().params; got != `{"workspace_id":"ws-1","task":"t","harness":"claude","idempotency_key":"k2"}` {
 		t.Fatalf("run.launch params with saved_defaults ignore = %s", got)
 	}
 	if len(called(f, protocol.MethodLaunchDefaultsGet)) != 0 {
 		t.Fatal("saved_defaults ignore read the saved defaults")
 	}
-	text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "saved_defaults": "ignore"})
+	text, _, failed := try(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "saved_defaults": "ignore"})
 	if !failed || !strings.Contains(text, "harness is required: you have no saved agent") {
 		t.Fatalf("a launch with no harness and saved defaults ignored = %q", text)
 	}
@@ -109,7 +109,7 @@ func TestLaunchSkipsUnusableSavedChoices(t *testing.T) {
 	saved.Unknown = []protocol.LaunchDefaultIssue{{Field: "agents.codex.model", Value: "gpt-5", Reason: "Aether has no current list of the models codex offers"}}
 	f := savedFake(t, saved)
 	cs := connectorSession(t, f, ScopeWrite)
-	_, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "codex", "mode": "", "idempotency_key": "k1"})
+	_, out := run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "codex", "mode": "", "idempotency_key": "k1"})
 	p := launchParams(t, f)
 	if p.Mode != "tui" || p.Model != "gpt-5" || !p.NoFallback {
 		t.Fatalf("run.launch params = %+v, want the saved mode and model, fallback off", p)
@@ -127,7 +127,7 @@ func TestLaunchSkipsUnusableSavedChoices(t *testing.T) {
 	saved.Defaults.Agent = "codex"
 	f = savedFake(t, saved)
 	cs = connectorSession(t, f, ScopeWrite)
-	_, out = run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k2"})
+	_, out = run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k2"})
 	if p := launchParams(t, f); p.Harness != "codex" || p.Mode != "" {
 		t.Fatalf("run.launch params = %+v, want codex in its default mode", p)
 	}
@@ -144,7 +144,7 @@ func TestLaunchRefusesUnusableSavedAccount(t *testing.T) {
 	saved.Invalid = []protocol.LaunchDefaultIssue{{Field: "account_member_id", Value: "mem-ada", Reason: "permission denied: member mem-ada has not shared their account with you"}}
 	f := savedFake(t, saved)
 	cs := connectorSession(t, f, ScopeWrite)
-	text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
+	text, _, failed := try(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
 	if !failed || !strings.Contains(text, "saved account mem-ada: permission denied: member mem-ada has not shared their account with you; pass account_member_id or clear it") {
 		t.Fatalf("launch on a revoked saved account = %q", text)
 	}
@@ -159,11 +159,11 @@ func TestLaunchRefusesUnusableSavedAccount(t *testing.T) {
 		return protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "claude", Installed: true, LoginMissing: p.AccountMemberID == "mem-ada"}}}
 	})
 	cs = connectorSession(t, f, ScopeWrite)
-	text, _, failed = try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
+	text, _, failed = try(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
 	if !failed || !strings.Contains(text, "harness is required: your saved agent claude cannot launch: the account's owner is not signed in to it") {
 		t.Fatalf("launch with an unusable saved agent = %q", text)
 	}
-	run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "account_member_id": "mem-me", "idempotency_key": "k2"})
+	run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "account_member_id": "mem-me", "idempotency_key": "k2"})
 	if p := launchParams(t, f); p.Harness != "claude" || p.AccountMemberID != "mem-me" {
 		t.Fatalf("run.launch params = %+v, want the saved agent on your own account", p)
 	}
@@ -176,7 +176,7 @@ func TestKeyedRetryAfterSavedDefaultsChanged(t *testing.T) {
 	f.errs[protocol.MethodRunLaunch] = &protocol.Error{Code: protocol.CodeConflict,
 		Message: `run.launch: idempotency_key "k1" was used for a launch with other params; use a new key for a new launch`}
 	cs := connectorSession(t, f, ScopeWrite)
-	text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
+	text, _, failed := try(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
 	if !failed || !strings.Contains(text, "use a new key for a new launch; your saved defaults may have changed since the first attempt; pass the fields explicitly") {
 		t.Fatalf("keyed retry = %q", text)
 	}
@@ -188,11 +188,11 @@ func TestTemplateLaunchIgnoresSavedDefaults(t *testing.T) {
 	f := savedFake(t, savedChoices)
 	f.answers[protocol.MethodTemplateLaunch] = returns(protocol.TemplateLaunchResult{Run: testRun})
 	cs := connectorSession(t, f, ScopeWrite)
-	run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "template": "triage", "idempotency_key": "k1"})
+	run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "template": "triage", "idempotency_key": "k1"})
 	if len(called(f, protocol.MethodLaunchDefaultsGet)) != 0 {
 		t.Fatal("a template launch read the saved defaults")
 	}
-	text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "template": "triage", "saved_defaults": "skip", "idempotency_key": "k2"})
+	text, _, failed := try(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "template": "triage", "saved_defaults": "skip", "idempotency_key": "k2"})
 	if !failed || !strings.Contains(text, `saved_defaults: enum: skip does not equal any of: [ apply ignore]`) {
 		t.Fatalf("template launch with saved_defaults skip = %q", text)
 	}
@@ -210,9 +210,9 @@ func TestFallbackMovedRunReportsSavedModelUnchecked(t *testing.T) {
 		return protocol.RunLaunchResult{Run: r}
 	})
 	cs := connectorSession(t, f, ScopeWrite)
-	_, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
+	_, out := run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
 	unchecked := jsonOf(t, out["launch"].(map[string]any)["defaults_unchecked"])
-	if unchecked != `[{"field":"model","reason":"it was saved and checked for account mem-me, and usage fallback started the run on mem-bo"}]` {
+	if unchecked != `[{"field":"model","reason":"it was saved and checked for account mem-me, and usage fallback started the session on mem-bo"}]` {
 		t.Fatalf("defaults_unchecked = %s", unchecked)
 	}
 }
@@ -224,7 +224,7 @@ func TestRepeatedLaunchReceiptOmitsSavedDefaults(t *testing.T) {
 	f := savedFake(t, savedChoices)
 	f.answers[protocol.MethodRunLaunch] = returns(protocol.RunLaunchResult{Run: testRun, Replayed: true})
 	cs := connectorSession(t, f, ScopeWrite)
-	_, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
+	_, out := run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
 	receipt := jsonOf(t, out["launch"])
 	if out["replayed"] != true || strings.Contains(receipt, "defaults_") {
 		t.Fatalf("replayed launch = %v, receipt %s", out, receipt)
@@ -236,7 +236,7 @@ func TestRepeatedLaunchReceiptOmitsSavedDefaults(t *testing.T) {
 	prior.FallbackAccountMemberIDs, prior.CreatedAt = []string{"mem-me"}, time.Now().UTC().Format(time.RFC3339)
 	f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{prior}})
 	cs = connectorSession(t, f, ScopeWrite)
-	_, out = run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart"})
+	_, out = run(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "fix the cart"})
 	if receipt = jsonOf(t, out["launch"]); out["duplicate"] != true || strings.Contains(receipt, "defaults_") {
 		t.Fatalf("duplicate launch = %v, receipt %s", out, receipt)
 	}
@@ -309,7 +309,7 @@ func TestRevokedSavedAccountFailsAtLaunch(t *testing.T) {
 	f := savedFake(t, savedChoices)
 	f.errs[protocol.MethodRunLaunch] = &protocol.Error{Code: protocol.CodeDenied, Message: "run.launch: permission denied: member mem-ada has not shared their account with you"}
 	cs := connectorSession(t, f, ScopeWrite)
-	text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
+	text, _, failed := try(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "idempotency_key": "k1"})
 	if !failed || !strings.HasPrefix(text, "run.launch: permission denied: member mem-ada has not shared their account with you") || len(called(f, protocol.MethodRunLaunch)) != 1 {
 		t.Fatalf("launch on a share revoked meanwhile = %q after %d launches", text, len(called(f, protocol.MethodRunLaunch)))
 	}
@@ -321,7 +321,7 @@ func TestRevokedSavedAccountFailsAtLaunch(t *testing.T) {
 func TestSavedAgentLaunchesWhenAgentsCannotBeListed(t *testing.T) {
 	f := savedFake(t, savedChoices)
 	f.errs[protocol.MethodAgentList] = &protocol.Error{Code: protocol.CodeInternal, Message: "read codex installation: permission denied"}
-	_, out := run(t, connectorSession(t, f, ScopeWrite), "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
+	_, out := run(t, connectorSession(t, f, ScopeWrite), "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "fix the cart", "idempotency_key": "k1"})
 	if p := launchParams(t, f); p.Harness != "claude" || p.Mode != "acp" {
 		t.Fatalf("run.launch params = %+v, want the saved agent and mode", p)
 	}
@@ -352,7 +352,7 @@ func TestClearedSavedChoicesStayCleared(t *testing.T) {
 	f = savedFake(t, protocol.LaunchDefaultsResult{})
 	f.errs[protocol.MethodRunLaunch] = &protocol.Error{Code: protocol.CodeConflict,
 		Message: `run.launch: idempotency_key "k1" was used for a launch with other params; use a new key for a new launch`}
-	text, _, failed := try(t, connectorSession(t, f, ScopeWrite), "aether_launch_run", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "claude", "idempotency_key": "k1"})
+	text, _, failed := try(t, connectorSession(t, f, ScopeWrite), "aether_launch_session", map[string]any{"workspace_id": "ws-1", "task": "t", "harness": "claude", "idempotency_key": "k1"})
 	if !failed || !strings.Contains(text, "your saved defaults may have changed since the first attempt") {
 		t.Fatalf("keyed retry after the saved choices were cleared = %q", text)
 	}

@@ -580,15 +580,15 @@ func (d *DB) DeleteMemory(ctx context.Context, workspace domain.WorkspaceID, id 
 func (d *DB) DeleteMemoryByRun(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, vet func(*Memory) error) ([]string, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store: delete memory of run %s: begin: %w", run, err)
+		return nil, fmt.Errorf("store: delete memory of session %s: begin: %w", run, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	ids, err := vetThenDeleteMemory(ctx, tx, vet, `workspace_id = ? AND run_id = ? AND run_id <> ''`, workspace, run)
 	if err != nil {
-		return nil, fmt.Errorf("store: delete memory of run %s: %w", run, err)
+		return nil, fmt.Errorf("store: delete memory of session %s: %w", run, err)
 	}
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store: delete memory of run %s: commit: %w", run, err)
+		return nil, fmt.Errorf("store: delete memory of session %s: commit: %w", run, err)
 	}
 	return ids, nil
 }
@@ -684,7 +684,7 @@ func (d *DB) CountAgentNotesByRun(ctx context.Context, run domain.RunID) (int, e
 	var n int
 	if err := d.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM memory WHERE run_id = ? AND source = 'agent'`, run).Scan(&n); err != nil {
-		return 0, fmt.Errorf("store: count agent notes of run %s: %w", run, err)
+		return 0, fmt.Errorf("store: count agent notes of session %s: %w", run, err)
 	}
 	return n, nil
 }
@@ -759,7 +759,7 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 		WHERE r.workspace_id = ? AND r.finished_at >= ?
 		ORDER BY r.finished_at DESC, r.rowid DESC LIMIT ?`, q.Workspace, since, q.Runs)
 	if err != nil {
-		return nil, fmt.Errorf("store: read memory brief: runs: %w", err)
+		return nil, fmt.Errorf("store: read memory brief: sessions: %w", err)
 	}
 	brief.Runs, err = collect(rows, func(row interface{ Scan(...any) error }) (*MemoryBriefRun, error) {
 		var r MemoryBriefRun
@@ -780,7 +780,7 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM runs WHERE workspace_id = ? AND id <> ? AND status IN (`+placeholders+`)`,
 		append([]any{q.Workspace, q.Self}, statuses...)...).Scan(&brief.LiveRuns); err != nil {
-		return nil, fmt.Errorf("store: read memory brief: live runs: %w", err)
+		return nil, fmt.Errorf("store: read memory brief: live sessions: %w", err)
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE m.source = 'agent' AND m.pinned_at IS NULL)
 		FROM memory m WHERE m.workspace_id = ? AND `+memoryLive, q.Workspace).Scan(&brief.Notes, &brief.AgentNotes); err != nil {
@@ -812,7 +812,7 @@ func (d *DB) latestRunDiff(ctx context.Context, workspace domain.WorkspaceID, ru
 		return nil, "", nil
 	}
 	if err != nil {
-		return nil, "", fmt.Errorf("read the latest diff of run %s: %w", run, err)
+		return nil, "", fmt.Errorf("read the latest diff of session %s: %w", run, err)
 	}
 	var diff struct {
 		Files []struct {
@@ -821,7 +821,7 @@ func (d *DB) latestRunDiff(ctx context.Context, workspace domain.WorkspaceID, ru
 		Head string `json:"head"`
 	}
 	if err := json.Unmarshal([]byte(payload), &diff); err != nil {
-		return nil, "", fmt.Errorf("decode the latest diff of run %s: %w", run, err)
+		return nil, "", fmt.Errorf("decode the latest diff of session %s: %w", run, err)
 	}
 	var files []string
 	for _, f := range diff.Files[:min(len(diff.Files), MemoryMaxFiles)] {
@@ -839,7 +839,7 @@ func (d *DB) reportMemory(ctx context.Context, report *CoordReport) (*Memory, er
 	// An isolated run writes nothing other runs read.
 	var permission domain.Permission
 	if err := d.db.QueryRowContext(ctx, `SELECT permission FROM runs WHERE id = ?`, report.RunID).Scan(&permission); err != nil {
-		return nil, fmt.Errorf("read the permission of run %s: %w", report.RunID, err)
+		return nil, fmt.Errorf("read the permission of session %s: %w", report.RunID, err)
 	}
 	if permission == domain.PermissionIsolated {
 		return nil, nil
@@ -871,7 +871,7 @@ func upsertReportMemory(ctx context.Context, tx *sql.Tx, m *Memory) (OutcomeNote
 	err := tx.QueryRowContext(ctx, `SELECT id, pinned_at IS NOT NULL FROM memory
 		WHERE run_id = ? AND source = 'report' AND invalid_at IS NULL`, m.RunID).Scan(&live, &pinned)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return OutcomeNote{}, fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
+		return OutcomeNote{}, fmt.Errorf("store: record session %s outcome in memory: %w", m.RunID, err)
 	}
 	id, ts, err := prepareCreate("note", time.Time{})
 	if err != nil {
@@ -893,7 +893,7 @@ func upsertReportMemory(ctx context.Context, tx *sql.Tx, m *Memory) (OutcomeNote
 		RETURNING id`,
 		id, m.WorkspaceID, m.Kind, m.Scope, m.Source, m.SourceRef, m.Title, m.Body, strings.Join(m.Files, "\n"),
 		m.Commit, MemoryHash(m.Body), now, now, m.RunID).Scan(&note); err != nil {
-		return OutcomeNote{}, fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
+		return OutcomeNote{}, fmt.Errorf("store: record session %s outcome in memory: %w", m.RunID, err)
 	}
 	rewritten := note == live
 	return OutcomeNote{ID: note, Rewritten: rewritten, Unpinned: rewritten && pinned}, nil

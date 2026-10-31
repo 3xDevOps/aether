@@ -1677,7 +1677,7 @@ describe('connectAttach', () => {
         data: JSON.stringify({
           ok: false,
           code: codeConflict,
-          error: 'run control is held by another session',
+          error: 'session control is held by another session',
           control_generation: 3,
         }),
       })

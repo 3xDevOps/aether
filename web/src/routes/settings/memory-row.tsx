@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 
 export const forgetWarning =
-  "New conversations and launches won't use it. Runs already started keep the text they were given. Server backups and update snapshots taken earlier may still contain it until replaced. The current assistant conversation keeps it until New conversation. Copies a connected app or agent made aren't removed."
+  "New conversations and launches won't use it. Sessions already started keep the text they were given. Server backups and update snapshots taken earlier may still contain it until replaced. The current assistant conversation keeps it until New conversation. Copies a connected app or agent made aren't removed."
 
 export type Scope = 'all' | 'workspace'
 

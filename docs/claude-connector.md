@@ -175,7 +175,7 @@ Checklist:
 - [ ] `tools/list` returns every tool with a `title` and `readOnlyHint`,
       `destructiveHint` and `openWorldHint`.
 - [ ] Each read tool returns a result with no generic error.
-- [ ] Each write and control tool, called on a throwaway demo run, does what
+- [ ] Each write and control tool, called on a throwaway demo session, does what
       its description says.
 - [ ] `aether mcp revoke <id>` on a second connector makes its next call
       answer 401.

@@ -78,7 +78,7 @@ export interface OnboardingRepo {
 
 /** The resume point is persisted by name, not position, so inserting a step
  * never relocates someone mid-wizard. */
-export const onboardingSteps = ['Connect', 'Repository', 'Agent', 'First run'] as const
+export const onboardingSteps = ['Connect', 'Repository', 'Agent', 'First session'] as const
 
 export type OnboardingStep = (typeof onboardingSteps)[number]
 

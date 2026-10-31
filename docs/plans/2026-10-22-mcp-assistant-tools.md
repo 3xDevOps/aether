@@ -3,24 +3,24 @@
 **Status:** Done. Not shipped from this plan:
 
 - A queued message from a teammate is approved or denied only in the
-  dashboard: deciding it needs the run's control lease, which a connector
+  dashboard: deciding it needs the session's control lease, which a connector
   never holds.
-- `aether_list_runs` rows carry no pull request link: `run.list` has none, and
-  asking GitHub per row would blow the time limit. `aether_get_run` and
+- `aether_list_sessions` rows carry no pull request link: `run.list` has none, and
+  asking GitHub per row would blow the time limit. `aether_get_session` and
   `aether_pr_status` carry it.
-- `aether_mark_reviewed complete` reads the run's review, then calls
-  `run.review`; a run whose review changes between the two is completed
+- `aether_mark_reviewed complete` reads the session's review, then calls
+  `run.review`; a session whose review changes between the two is completed
   anyway. Accepted: the window is one round trip, and `ready` only moves
-  when the member or the agent acts on the run.
-- `aether_activity_summary` counts and lists finished runs only; runs still
-  working are in `aether_list_runs`. Follow-up.
+  when the member or the agent acts on the session.
+- `aether_activity_summary` counts and lists finished sessions only; runs still
+  working are in `aether_list_sessions`. Follow-up.
 - The keyless swarm guard reads the workspace's newest 20 swarms, so a
   duplicate older than those is missed. Follow-up.
 
 **Goal:** From ChatGPT (or Claude), a member launches runs and swarms, sees
 what needs them, answers agents and approvals, reads pull request status
 and review feedback, sees what got done today and coordinates overlapping
-runs, all through the connector of
+sessions, all through the connector of
 [2026-10-18-mcp-connector.md](2026-10-18-mcp-connector.md).
 
 ## 1. Decisions
@@ -44,7 +44,7 @@ runs, all through the connector of
    research schema asks. Results carry ids and, while the tailnet
    dashboard serves, `url` links built from `server.info`'s `dashboard_url`.
 4. **Untrusted text is fenced.** Text agents, teammates or GitHub users
-   wrote goes under an `untrusted` field: run titles (terminal titles the
+   wrote goes under an `untrusted` field: session titles (terminal titles the
    agent sets), the server's reasons (which quote questions and blocked
    reports), reports, request and approval text, option labels, link URLs,
    swarm goals, PR titles, comments and failing check names, tasks, memory
@@ -54,22 +54,22 @@ runs, all through the connector of
    text. The server instructions and every such tool's
    description say it is data, not instructions; the instructions, at most
    512 characters whole, carry it with listing before launching, polling
-   with `aether_get_run`, `aether_list_runs` query, `aether_message_run` and
+   with `aether_get_session`, `aether_list_sessions` query, `aether_message_session` and
    `aether_needs_attention`. `search` and `fetch` have fixed shapes, so
    their descriptions carry the rule and `fetch`'s text marks where agent
    text begins.
 5. **Failures say what to do next.** A not-found or invalid-params failure
    is an `isError` result with the server's message and a hint, such as
-   `run run-x not found; call aether_list_runs for run ids`. A
+   `session run-x not found; call aether_list_sessions for session ids`. A
    `run.input.respond` refused for `control_held` adds "ask the member in
-   control, or send your answer with aether_message_run".
+   control, or send your answer with aether_message_session".
 6. **No tool takes a member id.** `tools.Prepare` refuses any
    `*member_id`, and for `mission.create` fills the accountable human and
    every account with the connector's member.
 7. **Idempotency is the caller's key.** Launch, swarm and message take an
-   optional `idempotency_key`. Without one, a run launch of the same
+   optional `idempotency_key`. Without one, a session launch of the same
    workspace, agent, task, mode and model by the member within 60 seconds
-   that has not failed, been interrupted or been abandoned returns that run,
+   that has not failed, been interrupted or been abandoned returns that session,
    and a swarm of the same workspace, objective, integrator and worker
    choices whose accountable human is the member (`server.info`'s member)
    within 60 seconds that is not cancelled returns that swarm
@@ -86,7 +86,7 @@ runs, all through the connector of
    one, which would change the agent's policy unasked. Its `action` argument
    must equal the pending request's text, so the client's confirmation shows
    what is decided, and a request whose action or detail is longer than the
-   600 characters the connector shows is refused with the run's dashboard
+   600 characters the connector shows is refused with the session's dashboard
    link: deciding it by id would decide text nobody saw. Its summary and
    errors name the request by id and never quote its text.
 9. **One tool answers every question kind.** `aether_answer` looks the item
@@ -95,23 +95,23 @@ runs, all through the connector of
    `run.room.post` reply, an agent's question to `run.input.respond`. It
    refuses permission items, which need `control`.
 10. **Calls fit ChatGPT's wait.** Each tool answers within 40 seconds,
-    inside ChatGPT's roughly 50; every call but a launch's runs under that
+    inside ChatGPT's roughly 50; every call but a launch's sessions under that
     deadline. The server stays stateless.
 11. **A call never fails after its action.** Write and control tools make
     every lookup that can fail (`server.info`, `run.get`, `attention.list`)
-    before they act. The run state read after a pause, resume, stop, close
+    before they act. The session state read after a pause, resume, stop, close
     or review is reported as `state_error` in a successful result.
-12. **`write` cannot end a live run.** `run.review complete` closes any
-    live run, so `aether_mark_reviewed` completes only a run whose review is
-    `ready` and otherwise points at `aether_close_run` under `control`.
+12. **`write` cannot end a live session.** `run.review complete` closes any
+    live session, so `aether_mark_reviewed` completes only a session whose review is
+    `ready` and otherwise points at `aether_close_session` under `control`.
 13. **Read tools stay read-only.** `aether_list_agents` lists no models:
     `agent.models` needs Launch and may start the member's container. A
     launch's `model` is free text, as the agent names it.
-14. **Finding a run takes one call.** `aether_list_runs` `query` matches
+14. **Finding a session takes one call.** `aether_list_sessions` `query` matches
     title, task, workspace name and branch, and rows carry the workspace
     name and the last report; tools taking `run_id` or `swarm_id` strip the
     `run:` and `swarm:` prefixes `search` ids carry. `search` points chat
-    use at `aether_list_runs`.
+    use at `aether_list_sessions`.
 15. **Schemas are small.** Fixed values are enums (launch and worker mode
     `tui`/`headless`/`acp`, integrator mode `tui`/`acp`, period, decision,
     close outcome, review action, memory kind); an optional one also takes
@@ -119,13 +119,13 @@ runs, all through the connector of
     `additionalProperties: false` is dropped and the handler refuses an
     unknown argument itself, naming the ones the tool takes; descriptions
     say when to call a tool, not what it returns.
-16. **Launches outlive the tool call.** `run.launch` provisions the run
+16. **Launches outlive the tool call.** `run.launch` provisions the session
     synchronously and `mission.create` launches its integrator the same
     way; cancelling either fails what it started, and an image pull can
-    outlast ChatGPT's wait. Both run on `context.WithoutCancel`, keeping
+    outlast ChatGPT's wait. Both session on `context.WithoutCancel`, keeping
     the caller's identity and attribution. After 30 seconds the tool
     replays the key and answers with the id and `state: "starting"`; the
-    server's per-key launch lock is released once the run row is bound to
+    server's per-key launch lock is released once the session row is bound to
     the key, so that replay (and a client's own retry) returns at once. If
     the replay is not answered within 5 seconds either, the tool returns
     the key to retry with.
@@ -136,33 +136,33 @@ runs, all through the connector of
 | --- | --- | --- |
 | `aether_list_workspaces` | read | `workspace.list` |
 | `aether_list_agents` | read | `agent.list` |
-| `aether_list_runs` | read | `workspace.list`, `run.list` (`mine` default true), `attention.list`, `workspace.timeline` |
-| `aether_get_run` | read | `run.get`, `attention.list`, `workspace.timeline`, `run.pr.status` |
-| `aether_run_history` | read | `run.acp.history` or `terminal.history`, `workspace.timeline` |
+| `aether_list_sessions` | read | `workspace.list`, `run.list` (`mine` default true), `attention.list`, `workspace.timeline` |
+| `aether_get_session` | read | `run.get`, `attention.list`, `workspace.timeline`, `run.pr.status` |
+| `aether_session_history` | read | `run.acp.history` or `terminal.history`, `workspace.timeline` |
 | `aether_needs_attention` | read | `attention.list` |
 | `aether_activity_summary` | read | `insights.get` (scope mine), `workspace.timeline` |
 | `aether_list_swarms`, `aether_get_swarm` | read | `mission.list` (paged), `mission.show`, `coord.messages.list` |
-| `aether_run_changes` | read | `run.git.log`, `run.evidence.list`, `run.git.diff` |
+| `aether_session_changes` | read | `run.git.log`, `run.evidence.list`, `run.git.diff` |
 | `aether_pr_status` | read | `run.pr.feedback` |
 | `aether_overlaps` | read | `run.overlaps`, `run.list`, `workspace.list` |
 | `aether_memory_search` | read | `memory.search` |
 | `search`, `fetch` | read | `run.list`, `mission.list`, `run.get`, `workspace.timeline`, `mission.show` |
-| `aether_launch_run` | write | `run.launch` |
+| `aether_launch_session` | write | `run.launch` |
 | `aether_launch_swarm` | write | `mission.list`, `mission.create` |
-| `aether_message_run` | write | `run.inject` |
+| `aether_message_session` | write | `run.inject` |
 | `aether_answer` | write | `mission.question.answer`, `run.room.post`, `run.input.respond` |
-| `aether_pause_run`, `aether_resume_run` | write | `run.pause`, `run.resume` |
+| `aether_pause_session`, `aether_resume_session` | write | `run.pause`, `run.resume` |
 | `aether_mark_reviewed` | write | `run.get`, `run.review` |
 | `aether_decide_approval` | control | `approval.decide`, `run.input.respond` |
-| `aether_stop_run`, `aether_close_run` | control | `run.kill`, `run.close` |
+| `aether_stop_session`, `aether_close_session` | control | `run.kill`, `run.close` |
 | `aether_cancel_swarm` | control | `mission.cancel` |
 
 Reports come from `workspace.timeline` entries of kind `report`: every
-run's `aether_report` is projected there, while `coord.messages.list` holds
+session's `aether_report` is projected there, while `coord.messages.list` holds
 only the report messages a swarm worker sends its integrator, so a
-standalone run's reports never appear in it. A run's report is found when it
-is among its workspace's last 100 timeline entries (or the run's own, for
-`aether_get_run`).
+standalone session's reports never appear in it. A session's report is found when it
+is among its workspace's last 100 timeline entries (or the session's own, for
+`aether_get_session`).
 
 ## 3. Limits
 
@@ -176,12 +176,12 @@ is among its workspace's last 100 timeline entries (or the run's own, for
   subjects, a list row's reason, last report or swarm goal; 300 for each PR
   review or comment; 2000 for a conversation item; 12000 for a diff; 600
   for the rest (tasks, reports, attention reasons, questions, request and
-  approval text, terminal lines, memory notes). `fetch` returns a run's
+  approval text, terminal lines, memory notes). `fetch` returns a session's
   title, task and reason and a swarm's goal whole.
-- `aether_run_history` pages an enhanced run's conversation by the oldest
+- `aether_session_history` pages an enhanced session's conversation by the oldest
   seq of each page and stops at the oldest retained one. `aether_pr_status`
   passes `run.pr.feedback`'s `truncated` on and qualifies its counts;
-  `aether_run_changes` reports `run.git.diff`'s error as `diff_error`.
+  `aether_session_changes` reports `run.git.diff`'s error as `diff_error`.
 - The write limiter of 30 calls, then one every 2 seconds, is unchanged.
 
 ## 4. Tests
@@ -197,10 +197,10 @@ is among its workspace's last 100 timeline entries (or the run's own, for
   refusals and hints.
 - `internal/assistant/tools`: `Prepare` fills and guards `mission.create`.
 - `internal/sshd/launch_replay_test.go`: a retry with the key during the
-  first launch's provisioning returns its run at once.
+  first launch's provisioning returns its session at once.
 - `internal/edge/edgetest/connector_tools_test.go`: through a real edge and
   server with OAuth, the tools per scope, launch replay and duplicate
   launches, a swarm as its caller, a message, a teammate's question listed
-  and answered, a standalone run's report read from the persisted timeline,
-  a write-only connector refused completing a running run, and a viewer's
+  and answered, a standalone session's report read from the persisted timeline,
+  a write-only connector refused completing a running session, and a viewer's
   launch refused.

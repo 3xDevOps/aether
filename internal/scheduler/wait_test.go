@@ -440,7 +440,7 @@ func TestAConditionStoreBreaksTheWaitOnlyAfterAnHourOfFailures(t *testing.T) {
 	age(time.Hour)
 	judged("an hour of failures", domain.WaitFault, true)
 	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if want := waitBrokenReasonPrefix + "cannot read this run's wait conditions for over 1h, so the agent will not be woken"; row.Reason != want {
+	if want := waitBrokenReasonPrefix + "cannot read this session's wait conditions for over 1h, so the agent will not be woken"; row.Reason != want {
 		t.Fatalf("reason = %q, want %q", row.Reason, want)
 	}
 	if got := e.sched.Wait(run.ID, domain.ActivityNeedsYou); got == nil || got.Kind != domain.WaitFault || !strings.Contains(got.Error, "database is locked") {
@@ -645,10 +645,10 @@ func TestAPausedOrEndedRunHasNoWait(t *testing.T) {
 	}
 	e.sched.refreshActivities(ctx)
 	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.Activity != domain.ActivityWaitingCI || row.NeedsAttention(true) {
-		t.Fatalf("paused run shows %s %q", row.Activity, row.Reason)
+		t.Fatalf("paused session shows %s %q", row.Activity, row.Reason)
 	}
 	if got := e.sched.Wait(run.ID, domain.ActivityWaitingCI); got != nil {
-		t.Fatalf("paused run has wait %+v", got)
+		t.Fatalf("paused session has wait %+v", got)
 	}
 	if err := e.sched.Resume(ctx, run.ID, e.member.ID); err != nil {
 		t.Fatal(err)
@@ -662,7 +662,7 @@ func TestAPausedOrEndedRunHasNoWait(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
 	for _, activity := range []domain.RunActivity{"", domain.ActivityNeedsYou, domain.ActivityWaitingCI} {
 		if got := e.sched.Wait(run.ID, activity); got != nil {
-			t.Fatalf("ended run has wait %+v", got)
+			t.Fatalf("ended session has wait %+v", got)
 		}
 	}
 }
@@ -715,7 +715,7 @@ func TestConditionEventsRaceTheStallSweep(t *testing.T) {
 	e.sched.refreshActivities(ctx)
 	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if row.Activity != domain.ActivityWaitingCI || row.Reason != "CI on #582" {
-		t.Fatalf("after the race the run shows %s %q", row.Activity, row.Reason)
+		t.Fatalf("after the race the session shows %s %q", row.Activity, row.Reason)
 	}
 	if got := e.sched.Wait(run.ID, domain.ActivityWaitingCI); got == nil || got.Kind != domain.WaitCondition {
 		t.Fatalf("after the race Wait = %+v", got)

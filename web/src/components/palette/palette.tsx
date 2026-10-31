@@ -146,10 +146,10 @@ export function PaletteBody({
       <CommandInput
         value={search}
         onValueChange={setSearch}
-        placeholder="Search commands, runs, workspaces…"
+        placeholder="Search commands, sessions, workspaces…"
       />
       <CommandList browseOrder={browseOrder} className="min-h-0 px-1 pb-1">
-        <CommandEmpty className="py-4">No commands, runs, or workspaces match.</CommandEmpty>
+        <CommandEmpty className="py-4">No commands, sessions, or workspaces match.</CommandEmpty>
 
         <CommandGroup heading="Navigate">
           {navigationCommands.map(item)}
@@ -165,7 +165,7 @@ export function PaletteBody({
           ))}
         </CommandGroup>
 
-        <CommandGroup heading="Runs">
+        <CommandGroup heading="Sessions">
           {runItems.map(({ run, state, value }) => (
             <CommandItem
               key={run.id}
@@ -204,7 +204,7 @@ export function PaletteBody({
         {focusedContext && (
           <>
             <CommandSeparator />
-            <CommandGroup heading={`Focused run · ${runLabel(focusedContext.run)}`}>
+            <CommandGroup heading={`Focused session · ${runLabel(focusedContext.run)}`}>
               {focusedCommands.map(item)}
             </CommandGroup>
           </>

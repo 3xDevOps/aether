@@ -104,7 +104,7 @@ func TestMemoryAddSendsTheNoteAndPrintsTheReceipt(t *testing.T) {
 	for _, want := range []string{
 		coordhooks.MemoryRule + "\n",
 		"note-new0000000 saved, replacing note-old0000000.\n",
-		"Searchable now; reaches new runs only after a member pins it: aether memory pin note-new0000000\n",
+		"Searchable now; reaches new sessions only after a member pins it: aether memory pin note-new0000000\n",
 		"Similar notes:\nnote-sim0000000 gotcha agent ben 5m: Close the pool first.\n",
 	} {
 		if !strings.Contains(out, want) {
@@ -122,7 +122,7 @@ func TestMemoryCLIPrintsServerErrorsVerbatim(t *testing.T) {
 		{[]string{"add", "--kind", "gotcha", "token=abc"}, protocol.Error{Code: protocol.CodeDenied, Message: "memory.add: rejected, gitleaks rule generic-api-key at 1:1; remove the secret and retry"}, ExitDenied},
 		{[]string{"add", "--kind", "convention", "--supersedes", "note-ab12", "Use bun"}, protocol.Error{Code: protocol.CodeDenied, Message: "memory.add: note-ab12 is pinned by dana; ask a member to replace it (aether memory add --supersedes note-ab12)"}, ExitDenied},
 		{[]string{"show", "note-gone000000"}, protocol.Error{Code: protocol.CodeNotFound, Message: "memory.show: note note-gone000000 not found"}, ExitMissing},
-		{[]string{"search", "bun"}, protocol.Error{Code: protocol.CodeUnavailable, Message: "memory.search: run has finished"}, ExitMissing},
+		{[]string{"search", "bun"}, protocol.Error{Code: protocol.CodeUnavailable, Message: "memory.search: session has finished"}, ExitMissing},
 		{[]string{"brief"}, protocol.Error{Code: protocol.CodeInternal, Message: "memory.brief: database is locked"}, ExitFailure},
 	} {
 		s := newCLISocket(t, func(protocol.Request) protocol.Response { return protocol.Response{Error: &tc.err} })
@@ -186,7 +186,7 @@ func TestMemoryShowPrintsProvenanceAndChain(t *testing.T) {
 	}
 	for _, want := range []string{
 		coordhooks.MemoryRule + "\nnote-mid0000000 decision, agent note, workspace scope, 2h old\n",
-		"Author: dana (mem-dana)\nRun: run-a1\nHarness: claude\nCommit: 0123abcd\nFiles: go.mod\n",
+		"Author: dana (mem-dana)\nSession: run-a1\nHarness: claude\nCommit: 0123abcd\nFiles: go.mod\n",
 		"Pull request: #7 open https://github.com/example/repo/pull/7\n",
 		"Pinned: by ben at " + pinned + "\n",
 		"Replaced by: note-new0000000\n",

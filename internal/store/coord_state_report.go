@@ -55,7 +55,7 @@ func (d *DB) RecordCoordStateReport(ctx context.Context, report *CoordStateRepor
 		return false, err
 	}
 	if prior.Outcome != report.Outcome || prior.WaitingFor != report.WaitingFor || prior.Summary != report.Summary {
-		return false, fmt.Errorf("%w: run %s", ErrCoordReportIdempotencyConflict, report.RunID)
+		return false, fmt.Errorf("%w: session %s", ErrCoordReportIdempotencyConflict, report.RunID)
 	}
 	*report = *prior
 	return false, nil

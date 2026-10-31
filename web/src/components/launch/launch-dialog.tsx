@@ -146,7 +146,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     if (parsedLimits.error !== undefined) throw new Error(parsedLimits.error)
     // An older server drops limits it does not know and reports success, so send none it has not confirmed.
     if (Object.keys(parsedLimits.limits).length && serverLimits.limits === null) {
-      throw new Error(`Run limits need a server that answers server.run_limits: ${serverLimits.error ?? 'still reading the server limits, try again in a moment'}`)
+      throw new Error(`Session limits need a server that answers server.run_limits: ${serverLimits.error ?? 'still reading the server limits, try again in a moment'}`)
     }
     const run = await api.runLaunch({
       workspace_id: workspaceID,
@@ -166,7 +166,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     upsertRun(run)
     close()
     navigate('run', { runId: run.id })
-    toast.success('Run launched')
+    toast.success('Session launched')
   }
 
   const submit = async () => {
@@ -194,7 +194,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           actions={<Button type="button" size="sm" onClick={setUp}>Set up an agent</Button>}
         >
           {sharedAccount
-            ? `A run on ${accountName}'s account uses ${accountName}'s login and your installation of the agent, or ${accountName}'s when you have none. Set up an agent opens Agents, where Add agent installs it in your environment.`
+            ? `A session on ${accountName}'s account uses ${accountName}'s login and your installation of the agent, or ${accountName}'s when you have none. Set up an agent opens Agents, where Add agent installs it in your environment.`
             : 'Set up an agent opens Agents, where Add agent installs it.'}
         </Callout>
       )}
@@ -227,7 +227,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
         className={cn(surface, 'relative grid h-full w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-none border-y-0 border-l-0 p-4 pt-[calc(1rem+var(--safe-top))] shadow-dialog outline-none')}
       >
         <DialogHeader>
-          <DialogTitle>New run</DialogTitle>
+          <DialogTitle>New session</DialogTitle>
           <DialogDescription>Starts an agent in its own container on the workspace's base branch.</DialogDescription>
         </DialogHeader>
         <form
@@ -238,7 +238,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
           <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
           {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
-          {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background runs cannot start child runs.' : undefined} disabled={launching} />}
+          {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
           {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
           {notes}
           {options}

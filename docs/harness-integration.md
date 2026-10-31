@@ -1,8 +1,8 @@
 # Integrating an unsupported agent
 
 This guide connects an agent CLI that Aether does not ship to Aether's durable
-mailbox. A **run** is one agent session that Aether launches in a container.
-Other runs and people send it messages, which Aether stores until the agent reads
+mailbox. A **session** is one agent that Aether launches in a container for one task.
+Other sessions and people send it messages, which Aether stores until the agent reads
 them. Read [Agents](harnesses.md#custom-and-unlisted-agents) first to register
 the CLI as a custom agent. For a shipped agent, you do not need this guide.
 
@@ -13,14 +13,14 @@ The levels build on each other. Stop at the first one that is enough.
 3. Native idle wake, which starts a turn in a session that is waiting.
 
 Native tools run in the agent's container in every mode. Enhanced mode does not
-move them elsewhere ([Enhanced runs](enhanced-runs.md#limits)).
+move them elsewhere ([Enhanced sessions](enhanced-sessions.md#limits)).
 
-## Get a working run
+## Get a working session
 
-Every managed run mounts `/usr/local/bin/aether-internal` and its own socket,
-`/run/aether/coord3.sock`. The socket identifies the run, so the CLI needs no
-run ID, token or credential. Member terminals get the CLI but no socket, so the
-commands below work only inside a run.
+Every managed session mounts `/usr/local/bin/aether-internal` and its own socket,
+`/run/aether/coord3.sock`. The socket identifies the session, so the CLI needs no
+session ID, token or credential. Member terminals get the CLI but no socket, so the
+commands below work only inside a session.
 
 1. Register the agent:
 
@@ -30,7 +30,7 @@ commands below work only inside a run.
 
 2. Install the executable into `~/.local/bin` and sign in
    ([Agents](harnesses.md#set-up-an-agent)).
-3. Launch it with `aether run "<task>" --agent <name>`.
+3. Launch it with `aether session "<task>" --agent <name>`.
 
 Aether gives the agent its [instructions](coordination.md#agent-instructions) after
 the task prompt. A launch with no task gets none, so tell the agent's own startup
@@ -38,7 +38,7 @@ mechanism to run `aether-internal skill` and `aether-internal memory brief`.
 
 ## Explicit inbox reads
 
-Inside a coordinated run:
+Inside a coordinated session:
 
 ```sh
 /usr/local/bin/aether-internal skill
@@ -46,7 +46,7 @@ Inside a coordinated run:
 /usr/local/bin/aether-internal inbox --wait 30
 ```
 
-`skill` loads the role and assignment. `status` lists the run's peers and what it
+`skill` loads the role and assignment. `status` lists the session's peers and what it
 may do. `inbox --wait 30` is one server-side wait, not a polling loop. It returns
 the messages and an `ack_token`. The agent's next `inbox` read acknowledges that
 batch; to acknowledge it without reading on:
@@ -84,7 +84,7 @@ guidance: an instruction to read the inbox, plus any overlap notes. It
 prints nothing when there is no mail. Peer message bodies are never in the output.
 They stay in the inbox as attributed data.
 
-- Outside a run, a missing socket is a successful no-op, so a user-level hook can
+- Outside a session, a missing socket is a successful no-op, so a user-level hook can
   stay installed. A broken socket exits nonzero with the reason on stderr.
 - Copy the script to the agent's documented hook location and register it at the
   context event. There is no universal path.
@@ -131,7 +131,7 @@ agent through its native API. The exit codes:
 | 1 | Transport failure, missing socket, rate limit | Retry with bounded backoff and a finite limit |
 | 2 | Invalid input or unsupported protocol | Stop the receiver and show the error |
 | 3 | Denied, conflicting or invalid state | Stop and show the error |
-| 4 | The run was not found | Stop |
+| 4 | The session was not found | Stop |
 
 The same `wake` event also works for `pi`, `omp` and `opencode`.
 
@@ -145,7 +145,7 @@ The receiver follows these rules:
   is not yet notified. Check the session and the user's Stop and approval state
   immediately before the call.
 - Use one receiver for the root session. Replacing a session cancels the old
-  receiver and discards late responses. Children never take the mailbox.
+  receiver and discards late responses. Subsessions never take the mailbox.
 - A human Stop stops the receiver until the host's documented user-resume event.
 - Do not wake during an approval wait or a busy turn. Wait for successful
   settlement, then start the next check with `wait_seconds: 0`.
@@ -162,7 +162,7 @@ Working references: [pi](../internal/coordhooks/pi.ts),
 ## Check that it works
 
 A copied file, a `skill` check or a helper response does not prove a model turn ran.
-Test with the real agent in a coordinated run:
+Test with the real agent in a coordinated session:
 
 1. Check the CLI version and its hook or plugin load errors and trust state.
 2. Have a peer send a message while `inbox --wait 30` is active. The call should
@@ -180,7 +180,7 @@ Test with the real agent in a coordinated run:
 
 ## Limits
 
-- Hooks and wake apply only to Standard runs with a task. Background runs and
+- Hooks and wake apply only to Standard sessions with a task. Background sessions and
   taskless launches get neither.
 - A Background or exited process is never restarted by mail.
-- Keep credentials and run state out of checked-in examples and tests.
+- Keep credentials and session state out of checked-in examples and tests.

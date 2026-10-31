@@ -1,16 +1,16 @@
-# Choose the effort for a run
+# Choose the effort for a session
 
 **Status:** Planned.
 
-**Goal:** Whoever launches a run picks the agent's effort or thinking level
-next to its model: from the New run dialog, a swarm, a template or the CLI.
+**Goal:** Whoever launches a session picks the agent's effort or thinking level
+next to its model: from the New session dialog, a swarm, a template or the CLI.
 The first turn runs at it, and the choice survives a reopen, a resume, a mode
 switch and a recovery relaunch, exactly like the model
-([model-per-run](2026-10-11-model-per-run.md)).
+([model-per-session](2026-10-11-model-per-session.md)).
 
 ## 1. Today
 
-Nobody picks an effort at launch. An Enhanced run can change it from the
+Nobody picks an effort at launch. An Enhanced session can change it from the
 composer's effort menu, but only after the first turn has already run at the
 agent's default, and a reopen does not re-apply it.
 
@@ -25,23 +25,23 @@ agent's default, and a reopen does not re-apply it.
 3. `domain.ValidEffort` accepts empty, or at most 32 bytes with no whitespace
    or control characters and no leading `-`. A launch then refuses a level
    the agent does not list, and an agent with no effort flag refuses any
-   effort outside an Enhanced run, both with an error naming the agent.
+   effort outside an Enhanced session, both with an error naming the agent.
 4. Effort is part of a swarm's execution choice. The tuple becomes
    (account, harness, mode, model, effort).
 5. Standard, Background and resume launches pass the effort as the agent's
    CLI flag, after the model flag and before the task prompt.
-6. An Enhanced run sets the effort after the session opens, after the model,
+6. An Enhanced session sets the effort after the session opens, after the model,
    since an agent's levels can depend on the model. It sets the agent's
    session config option of category `thought_level`. Copilot's ACP server is
-   its own CLI and reads `--reasoning-effort`, so a Copilot Enhanced run
+   its own CLI and reads `--reasoning-effort`, so a Copilot Enhanced session
    passes the flag instead. A failure is an **Effort not set** notice; a
-   Background run driven over ACP fails rather than run unattended at the
+   Background session driven over ACP fails rather than run unattended at the
    default.
-7. An effort picked from the composer menu becomes the run's recorded
+7. An effort picked from the composer menu becomes the session's recorded
    effort, so a reopen keeps it, and is published as `run.effort`. Claude's
    adapter offers `default`, which `claude --effort` refuses, so it is
    recorded as empty.
-8. The run header shows the effort after the model.
+8. The session header shows the effort after the model.
 9. Saved launch defaults do not remember an effort: every launch starts at
    the agent's default unless the launcher picks one.
 
@@ -89,15 +89,15 @@ as it keeps the model flag.
 - **Store and protocol:** the fields in section 4.
 - **Mission:** every tuple comparison in section 5 of the model plan gains
   effort.
-- **CLI:** `--effort` on `aether run`, `aether template save`,
+- **CLI:** `--effort` on `aether session`, `aether template save`,
   `aether swarm create`, `aether swarm replace-integrator` and
   `aether-internal worker start`; `--worker agent[:mode[+effort][:model]]`
   puts a worker's effort on the mode, because a model may itself contain
   `:` (pi's `sonnet:high`) or `@` (Vertex ids).
-- **Dashboard:** an **Effort** field beside Model in New run, the Swarm tab
+- **Dashboard:** an **Effort** field beside Model in New session, the Swarm tab
   (integrator and each worker row) and the template editor; the effort in
-  the replace-integrator choices and the run header.
-- **Docs:** `docs/harnesses.md`, `docs/enhanced-runs.md`,
+  the replace-integrator choices and the session header.
+- **Docs:** `docs/harnesses.md`, `docs/enhanced-sessions.md`,
   `docs/dashboard-frontend.md`, `docs/teams.md`, `docs/coordination.md`,
   `docs/local-gateway.md`.
 
@@ -118,6 +118,6 @@ as it keeps the model flag.
 - Remembering an effort in saved launch defaults.
 - Checking an effort against what the chosen model supports.
 - Effort settings for custom definitions.
-- An effort for child runs and for launches through `internal/ops` (the
+- An effort for subsessions and for launches through `internal/ops` (the
   assistant and connectors): a child started from a swarm choice runs at the
   agent's default effort.
