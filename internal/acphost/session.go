@@ -456,6 +456,12 @@ func (s *Session) Cancel(ctx context.Context) error {
 
 // Answer resolves a pending request with one of its option ids. Content is
 // the form answer for an accepted question and nil otherwise.
+// Replayed is closed once an adopted session's unanswered requests can be
+// answered again: the keeper has sent each one again, Adoption.ReplayWait
+// ran out, or they were cancelled. It is closed from the start for a
+// session that was not adopted.
+func (s *Session) Replayed() <-chan struct{} { return s.conn.replayDone() }
+
 func (s *Session) Answer(requestID, optionID string, content map[string]any) error {
 	return s.conn.answer(requestID, optionID, content)
 }

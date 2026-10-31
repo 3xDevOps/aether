@@ -9,12 +9,15 @@ import (
 
 // Adoption is what the keeper reported about the session a server takes
 // over: the agent's initialize and session results, and the item log turn of
-// the session/prompt it has in flight, zero for none.
+// the session/prompt it has in flight, zero for none. ReplayWait bounds how
+// long answers wait for the keeper to send again the requests the log
+// leaves unanswered.
 type Adoption struct {
 	Initialize json.RawMessage
 	Session    json.RawMessage
 	SessionID  string
 	PromptTurn int64
+	ReplayWait time.Duration
 }
 
 // adopt takes over the session the keeper reported. A turn the log leaves
@@ -34,7 +37,7 @@ func (s *Session) adopt(openTurn bool) error {
 		return fmt.Errorf("acphost: adopt session %q: %w", a.SessionID, errors.Join(err, errors.New("the keeper reported no session")))
 	}
 	s.conn.sessionID.Store(a.SessionID)
-	s.conn.reuseRequests(PendingRequests(s.log))
+	s.conn.reuseRequests(PendingRequests(s.log), a.ReplayWait)
 	started := LastItem(s.log, KindTurnStart)
 	s.mu.Lock()
 	defer s.mu.Unlock()

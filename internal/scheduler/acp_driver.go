@@ -309,24 +309,34 @@ func (d *acpDriver) session(run domain.RunID) *acphost.Session {
 }
 
 // live waits, while Start recovers runs, for a run that has no session or
-// failure recorded yet, so a call right after a restart is not refused. A
-// cancelled ctx ends the wait.
+// failure recorded yet, and then for an adopted session's replay of the
+// agent's unanswered requests, so a call right after a restart is not
+// refused. A cancelled ctx ends the wait.
 func (d *acpDriver) live(ctx context.Context, run domain.RunID) (*acphost.Session, error) {
 	sess, err, opened := d.liveNow(run)
-	if opened || !d.s.recovering.Load() {
-		return sess, err
+	if !opened && d.s.recovering.Load() {
+		_, started, release := d.started(run)
+		defer release()
+		select {
+		case <-started:
+		case <-d.s.RecoveryReady():
+		case <-time.After(acpRecoveryWait):
+		case <-ctx.Done():
+			return nil, fmt.Errorf("wait for the enhanced session: %w", ctx.Err())
+		}
+		sess, err, _ = d.liveNow(run)
 	}
-	_, started, release := d.started(run)
-	defer release()
+	if err != nil {
+		return nil, err
+	}
+	// An adopted session is ready once its keeper has sent again the
+	// agent's unanswered requests, so an answer to one finds it.
 	select {
-	case <-started:
-	case <-d.s.RecoveryReady():
-	case <-time.After(acpRecoveryWait):
+	case <-sess.Replayed():
 	case <-ctx.Done():
 		return nil, fmt.Errorf("wait for the enhanced session: %w", ctx.Err())
 	}
-	sess, err, _ = d.liveNow(run)
-	return sess, err
+	return sess, nil
 }
 
 // liveNow is live without waiting; opened is false when nothing has opened
@@ -476,7 +486,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		exec, keeper, bridge, err = d.reattach(ctx, entry, managed, cid)
 		if err == nil {
 			state := keeper.State()
-			adopt = &acphost.Adoption{Initialize: state.Initialize, Session: state.Session, SessionID: state.SessionID}
+			adopt = &acphost.Adoption{Initialize: state.Initialize, Session: state.Session, SessionID: state.SessionID, ReplayWait: acpRecoveryWait}
 			if state.Prompt != nil {
 				adopt.PromptTurn = state.Prompt.Turn
 			}

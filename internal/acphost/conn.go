@@ -173,6 +173,10 @@ type Conn struct {
 	// reuse holds the ids an adopted session's log gives requests still
 	// pending, for the agent's requests the keeper sends again.
 	reuse []Request
+	// replayed is closed once the keeper has sent every one of them again,
+	// the wait for that ran out, or the pending requests were cancelled.
+	replayed     chan struct{}
+	replayClosed bool
 }
 
 // childLink is a subagent session's launch id and the launch id of the
@@ -191,7 +195,9 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 		children:   make(map[string]childLink),
 		announced:  make(chan struct{}),
 		cancelled:  make(chan struct{}),
+		replayed:   make(chan struct{}),
 	}
+	c.endReplayLocked()
 	c.idle = sync.NewCond(&c.mu)
 	go c.relay(outW, r)
 	c.sessionID.Store("")
@@ -781,6 +787,11 @@ func (c *Conn) wait(ctx context.Context, req Request, cancelled <-chan struct{})
 	}); i >= 0 {
 		req.ID = c.reuse[i].ID
 		c.reuse = slices.Delete(c.reuse, i, i+1)
+		if len(c.reuse) == 0 {
+			// Answers waiting on the replay take c.mu after this call has
+			// registered the request.
+			c.endReplayLocked()
+		}
 	}
 	p := &pendingRequest{req: req, answer: make(chan answer, 1)}
 	select {
@@ -852,15 +863,45 @@ func (c *Conn) answer(requestID, optionID string, content map[string]any) error 
 
 // reuseRequests gives the agent's requests the keeper sends again the ids
 // the item log shows them pending under.
-func (c *Conn) reuseRequests(pending []Request) {
+// Answers to them wait until the keeper has sent them all, or for at most
+// wait.
+func (c *Conn) reuseRequests(pending []Request, wait time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.reuse = pending
+	if len(pending) == 0 {
+		return
+	}
+	c.replayed, c.replayClosed = make(chan struct{}), false
+	replayed := c.replayed
+	time.AfterFunc(wait, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.replayed == replayed {
+			c.endReplayLocked()
+		}
+	})
+}
+
+func (c *Conn) endReplayLocked() {
+	if !c.replayClosed {
+		c.replayClosed = true
+		close(c.replayed)
+	}
+}
+
+// replayDone is closed once an adopted session's unanswered requests are
+// pending again, or will not be.
+func (c *Conn) replayDone() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.replayed
 }
 
 func (c *Conn) cancelPending() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.endReplayLocked()
 	for id, p := range c.pending {
 		delete(c.pending, id)
 		c.resolved[id] = true
