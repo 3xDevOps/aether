@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acpkeeper"
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -142,4 +143,44 @@ func releaseTerminal(terminal *runTerminal) error {
 		return terminal.Exec.Detach()
 	}
 	return nil
+}
+
+// PersistDevelopmentLease records a kept terminal's control lease in the
+// run's terminal registry. Leases of other surfaces end with this process.
+// The control service calls it under the surface's admission lock, which
+// is always taken before the run's shell lock.
+func (s *Scheduler) PersistDevelopmentLease(run domain.RunID, surface control.Surface, lease control.SurfaceLease) error {
+	if surface.Kind != control.SurfaceTerminal {
+		return nil
+	}
+	lock := s.lockForShell(run)
+	lock.Lock()
+	defer lock.Unlock()
+	s.mu.Lock()
+	set := s.runShellTerminals[run]
+	s.mu.Unlock()
+	// A surface is validated against a loaded registry before it can be held.
+	if set == nil {
+		return nil
+	}
+	terminal := set.Terminals[surface.ID]
+	if terminal == nil || terminal.Incarnation != surface.Incarnation || terminal.Keeper == nil {
+		return nil
+	}
+	terminal.Control = &lease
+	return s.persistRunTerminalsLocked(run, set)
+}
+
+// restoreTerminalLease reinstates the lease an earlier server process
+// recorded for terminal once this process has reattached to its running
+// keeper. A lease on a terminal that ended, or in a closed run, is not.
+func (s *Scheduler) restoreTerminalLease(run domain.RunID, set *runTerminalSet, terminal *runTerminal) {
+	if terminal.Control == nil || terminal.Keeper == nil || terminal.Generation == 0 || !terminal.State.Running ||
+		set.Closed || s.cfg.Control == nil {
+		return
+	}
+	surface := control.Surface{Kind: control.SurfaceTerminal, ID: terminal.ID, Incarnation: terminal.Incarnation}
+	if err := s.cfg.Control.RestoreSurface(string(run), surface, *terminal.Control); err != nil {
+		slog.Warn("scheduler: restore a terminal's control lease; its holder must acquire it again", "run", run, "terminal", terminal.ID, "error", err)
+	}
 }

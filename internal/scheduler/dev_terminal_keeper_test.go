@@ -8,11 +8,13 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/control"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -322,5 +324,76 @@ func TestDevelopmentTerminalWithAGoneExecDoesNotBlockCloseOrStop(t *testing.T) {
 	}
 	if states := list(); states[closing.TerminalID].State != "exited" || !strings.Contains(states[closing.TerminalID].Reason, "No such exec instance") {
 		t.Fatalf("closed terminals = %+v", states)
+	}
+}
+
+func TestDevelopmentTerminalLeaseSurvivesSchedulerRestart(t *testing.T) {
+	e := newKeptTerminalEnv(t)
+	rt := e.sched.cfg.Runtime.(*terminalTestRuntime)
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixNano())
+	current := e.sched
+	leases := func() *control.Service {
+		return control.New(control.Config{Now: func() time.Time { return time.Unix(0, clock.Load()) },
+			PersistSurface: func(run domain.RunID, surface control.Surface, lease control.SurfaceLease) error {
+				return current.PersistDevelopmentLease(run, surface, lease)
+			}})
+	}
+	e.sched.cfg.Control = leases()
+	run, _ := e.launchFake(t, "kept-lease")
+	kept := startTestTerminal(t, e, run.ID, "kept")
+	ended := startTestTerminal(t, e, run.ID, "ended")
+	agent := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
+	keptFence := terminalTestFence(t, e, run.ID, kept, agent, "agent", false)
+	endedFence := terminalTestFence(t, e, run.ID, ended, agent, "agent", false)
+	lock := e.sched.lockForShell(run.ID)
+	lock.Lock()
+	set, err := e.sched.loadRunTerminalsLocked(t.Context(), run.ID)
+	keptKeeper, endedKeeper := rt.keeperTerms[set.Terminals[kept.TerminalID].Keeper.Socket], rt.keeperTerms[set.Terminals[ended.TerminalID].Keeper.Socket]
+	lock.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err = e.sched.DetachDevelopmentTerminals(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	endedKeeper.exec.process.exitNow(0)
+	cfg := e.sched.cfg
+	cfg.Control = leases()
+	host, err := ptyhost.New(ptyhost.Config{TranscriptDir: t.TempDir(), ReplayBytes: 1 << 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	cfg.PTY = host
+	recovered, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = recovered.Close() })
+	current = recovered
+	if err = recovered.RecoverDevelopmentTerminals(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The agent comes back well after the reconnect window with the lease
+	// it acquired before the restart.
+	clock.Add(int64(4 * control.DefaultReconnectWindow))
+	if _, err = terminalTestCall(t, recovered, run.ID, agent, protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{
+		DevTerminalTarget: terminalTestTarget(kept), DevControlFence: keptFence, Kind: "text", Text: "ls\r"}); err != nil {
+		t.Fatalf("input with the pre-restart lease: %v", err)
+	}
+	keptKeeper.eventually(t, "the input", func() bool { return strings.HasSuffix(keptKeeper.input.String(), "ls\r") })
+	keptSurface := control.Surface{Kind: control.SurfaceTerminal, ID: kept.TerminalID, Incarnation: kept.Incarnation}
+	if _, _, err = cfg.Control.AcquireSurface(string(run.ID), keptSurface, agent, "another", false, 0, func() error { return nil }); !errors.Is(err, control.ErrOccupied) {
+		t.Fatalf("another session acquired the restored lease: %v", err)
+	}
+	if _, ok := cfg.Control.SurfaceStatus(string(run.ID), control.Surface{Kind: control.SurfaceTerminal, ID: ended.TerminalID, Incarnation: ended.Incarnation}); ok {
+		t.Fatal("restored the lease of a terminal that exited during the restart")
+	}
+	if _, err = terminalTestCall(t, recovered, run.ID, agent, protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{
+		DevTerminalTarget: terminalTestTarget(ended), DevControlFence: endedFence, Kind: "text", Text: "ls\r"}); err == nil {
+		t.Fatal("input reached a terminal that exited during the restart")
 	}
 }

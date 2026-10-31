@@ -135,10 +135,11 @@ func (s *Service) cleanSurfaceLocked(state *surfaceState) error {
 	return state.cleanupErr
 }
 
-func (s *Service) expireSurfaceLocked(state *surfaceState, now time.Time) {
+func (s *Service) expireSurfaceLocked(run string, surface Surface, state *surfaceState, now time.Time) {
 	if state.current != nil && !state.current.connected && !state.current.expiresAt.After(now) {
 		state.current = nil
 		_ = s.cleanSurfaceLocked(state)
+		_ = s.recordSurfaceStateLocked(run, surface, state)
 	}
 }
 
@@ -178,7 +179,7 @@ func (s *Service) AcquireSurface(run string, surface Surface, principal Principa
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	now := s.now()
-	s.expireSurfaceLocked(state, now)
+	s.expireSurfaceLocked(run, surface, state, now)
 	if expectedGeneration != 0 && (state.current == nil || state.generation != expectedGeneration) {
 		return SurfaceSnapshot{}, nil, ErrStale
 	}
@@ -193,6 +194,9 @@ func (s *Service) AcquireSurface(run string, surface Surface, principal Principa
 			}
 			if err := s.cleanSurfaceLocked(state); err != nil {
 				state.current = nil
+				return SurfaceSnapshot{}, nil, errors.Join(err, s.recordSurfaceStateLocked(run, surface, state))
+			}
+			if err := s.recordSurfaceLocked(run, surface, state.generation+1, principal, c); err != nil {
 				return SurfaceSnapshot{}, nil, err
 			}
 			generation, err := s.nextGenerationLocked(&state.runState)
@@ -201,6 +205,7 @@ func (s *Service) AcquireSurface(run string, surface Surface, principal Principa
 			}
 			c.generation = generation
 			c.connected = true
+			c.restored = false
 			c.expiresAt = time.Time{}
 			return surfaceSnapshot(run, surface, state), nil, nil
 		}
@@ -220,14 +225,17 @@ func (s *Service) AcquireSurface(run string, surface Surface, principal Principa
 		// Cleanup may have partially reached the resource. Neither the old
 		// writer nor a replacement can write until cleanup is confirmed.
 		state.current = nil
+		return SurfaceSnapshot{}, nil, errors.Join(err, s.recordSurfaceStateLocked(run, surface, state))
+	}
+	next := &lease{sessionID: session, generation: state.generation + 1, connected: true, acquiredAt: now}
+	if err := s.recordSurfaceLocked(run, surface, next.generation, principal, next); err != nil {
 		return SurfaceSnapshot{}, nil, err
 	}
-	generation, err := s.nextGenerationLocked(&state.runState)
-	if err != nil {
+	if _, err := s.nextGenerationLocked(&state.runState); err != nil {
 		return SurfaceSnapshot{}, nil, err
 	}
 	state.principal = principal
-	state.current = &lease{sessionID: session, generation: generation, connected: true, acquiredAt: now}
+	state.current = next
 	return surfaceSnapshot(run, surface, state), displaced, nil
 }
 
@@ -249,7 +257,7 @@ func (s *Service) withSurface(run string, surface Surface, fn func(*surfaceState
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	s.expireSurfaceLocked(state, s.now())
+	s.expireSurfaceLocked(run, surface, state, s.now())
 	return fn(state)
 }
 
@@ -268,11 +276,17 @@ func (s *Service) AdmitSurface(run string, surface Surface, principal Principal,
 		return err
 	}
 	return s.withSurface(run, surface, func(state *surfaceState) error {
-		if !s.matchSurface(state, principal, session, generation, true) {
+		c := state.current
+		readmit := c != nil && c.restored && s.matchSurface(state, principal, session, generation, false)
+		if !readmit && !s.matchSurface(state, principal, session, generation, true) {
 			return ErrStale
 		}
 		state.cleanupNeeded = state.cleanup != nil
-		return fn()
+		err := fn()
+		if err == nil && readmit {
+			c.connected, c.restored, c.expiresAt = true, false, time.Time{}
+		}
+		return err
 	})
 }
 
@@ -292,8 +306,8 @@ func (s *Service) ReleaseSurface(run string, surface Surface, principal Principa
 		if err := admit(); err != nil {
 			return err
 		}
-		s.fenceSurfaceLocked(run, surface, state)
-		return state.cleanupErr
+		_, err := s.fenceSurfaceLocked(run, surface, state)
+		return errors.Join(state.cleanupErr, err)
 	})
 }
 
@@ -323,7 +337,7 @@ func (s *Service) SurfaceStatus(run string, surface Surface) (SurfaceSnapshot, b
 	return result, present
 }
 
-func (s *Service) fenceSurfaceLocked(run string, surface Surface, state *surfaceState) *SurfaceSnapshot {
+func (s *Service) fenceSurfaceLocked(run string, surface Surface, state *surfaceState) (*SurfaceSnapshot, error) {
 	var displaced *SurfaceSnapshot
 	if state.current != nil {
 		copy := surfaceSnapshot(run, surface, state)
@@ -332,7 +346,7 @@ func (s *Service) fenceSurfaceLocked(run string, surface Surface, state *surface
 	}
 	_, _ = s.nextGenerationLocked(&state.runState)
 	_ = s.cleanSurfaceLocked(state)
-	return displaced
+	return displaced, s.recordSurfaceStateLocked(run, surface, state)
 }
 
 // RevokeSurface commits an authority change and fences only this surface. The
@@ -350,12 +364,12 @@ func (s *Service) RevokeSurface(run string, surface Surface, revoke func() error
 	state := s.surfaceStateFor(run, surface, true)
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	s.expireSurfaceLocked(state, s.now())
+	s.expireSurfaceLocked(run, surface, state, s.now())
 	if err := revoke(); err != nil {
 		return nil, err
 	}
-	displaced := s.fenceSurfaceLocked(run, surface, state)
-	return displaced, state.cleanupErr
+	displaced, err := s.fenceSurfaceLocked(run, surface, state)
+	return displaced, errors.Join(state.cleanupErr, err)
 }
 
 // fenceSurfacesLocked requires the run's exclusive surfaceGate. Called by the
@@ -376,7 +390,8 @@ func (s *Service) fenceSurfacesLocked(run domain.RunID) []SurfaceSnapshot {
 	s.mu.Unlock()
 	var displaced []SurfaceSnapshot
 	for _, entry := range states {
-		if old := s.fenceSurfaceLocked(string(run), entry.surface, entry.state); old != nil {
+		// The revocation is committed; a failed record is already logged.
+		if old, _ := s.fenceSurfaceLocked(string(run), entry.surface, entry.state); old != nil {
 			displaced = append(displaced, *old)
 		}
 	}

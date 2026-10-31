@@ -208,6 +208,8 @@ It fails on any of:
 - an unkeyed terminal input applied more than once, or its echo not read
   from the output cursor held before the restart without `missing_cursor`
   or `truncated`;
+- no terminal input accepted after the first restart with the control lease
+  the probe acquired before it;
 - a sent message that was never received, or was received twice;
 - a streamed line missing or repeated;
 - the marker file not holding lines 1 to 120, or the container's ID or start

@@ -117,7 +117,7 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 			shown := 0
 			for _, ev := range evs {
 				if !ev.OK && shown < 3 {
-					fmt.Fprintf(&report, "  first failures %s.%s at +%dms: %s\n", name, ev.Kind, ev.T-e.outages[0].down.UnixMilli(), firstLine(ev.Err))
+					fmt.Fprintf(&report, "  first failures %s.%s at +%dms after %dms: %s\n", name, ev.Kind, ev.T-e.outages[0].down.UnixMilli(), ev.Dur, firstLine(ev.Err))
 					shown++
 				}
 			}
@@ -165,9 +165,15 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 	if prof.burst {
 		for _, name := range prof.probes {
 			termLog, _ := containerFile(ids[name], "/workspace/soak/term.log")
+			// The agent acquires its terminal lease once, before the first
+			// restart, and keeps using that generation.
+			leaseKept := len(e.outages) == 0
 			for _, ev := range logs[name] {
 				if ev.Kind != "term-input" {
 					continue
+				}
+				if ev.OK && len(e.outages) > 0 && ev.T+ev.Dur > e.outages[0].up.UnixMilli() {
+					leaseKept = true
 				}
 				applied := strings.Count(termLog, ev.ID)
 				fmt.Fprintf(&report, "terminal input %s: ok=%v applied=%d %s\n", ev.ID, ev.OK, applied, firstLine(ev.Err))
@@ -194,6 +200,10 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 				if !ev.OK && applied > 0 && !strings.Contains(ev.Err, "may already have applied") {
 					t.Errorf("terminal input %s failed with %q but was applied", ev.ID, firstLine(ev.Err))
 				}
+			}
+			fmt.Fprintf(&report, "terminal lease %s: admitted input after a restart=%v\n", name, leaseKept)
+			if !leaseKept {
+				t.Errorf("run %s: the terminal lease acquired before the first restart admitted no input after it", name)
 			}
 		}
 	}

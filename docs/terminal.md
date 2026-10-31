@@ -404,7 +404,17 @@ session, it reattaches and replays the kept output: the same process keeps
 running, typing, resize and Ctrl-C work, `terminal output` continues from a
 cursor taken before the restart, and `terminal wait` reports the real exit.
 Output older than the kept 2 MiB is lost, and reading from a cursor before it
-reports `truncated`. When the shell exits while no server is attached, the
+reports `truncated`. Control of a kept terminal survives too: the server
+records each lease's holder, `control_session_id` and `control_generation`
+in the session's terminal registry under the server's state directory when
+it is acquired, released or revoked, and the next server restores it. A lease the agent took
+with `aether-internal control acquire` comes back as it was, so its next
+`terminal input` with the same generation is accepted however long after the
+restart it arrives. A person's lease comes back disconnected for 15 seconds,
+in which the same browser tab reconnects and keeps control; after that it
+lapses. Anyone else is fenced exactly as before, and a person can still take
+control. A lease on a terminal that exited, or in a session that closed,
+during the restart is dropped. When the shell exits while no server is attached, the
 keeper holds its exit status for the next server for up to 31 seconds, and
 background jobs the shell left behind run until the keeper exits.
 

@@ -71,7 +71,10 @@ type runTerminal struct {
 	Keeper *terminalKeeper `json:"keeper,omitempty"`
 	// Gone records that the runtime no longer knows the exec: nothing is
 	// left to stop, and its exit status is lost.
-	Gone       bool                  `json:"gone,omitempty"`
+	Gone bool `json:"gone,omitempty"`
+	// Control is the terminal's control lease, recorded for a kept terminal
+	// so a lease survives a server restart.
+	Control    *control.SurfaceLease `json:"control,omitempty"`
 	Generation uint64                `json:"-"`
 	Exec       runtime.ManagedExec   `json:"-"`
 	Client     *acpkeeper.TermClient `json:"-"`
@@ -186,6 +189,7 @@ func (s *Scheduler) loadRunTerminalsLocked(ctx context.Context, run domain.RunID
 					terminal.Unavailable = "reattach to the terminal's keeper: " + attachErr.Error()
 				}
 			}
+			s.restoreTerminalLease(run, set, terminal)
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, err
