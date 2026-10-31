@@ -171,6 +171,20 @@ func assertSoak(t *testing.T, e *soakEnv, prof soakProfile, ids map[string]strin
 				}
 				applied := strings.Count(termLog, ev.ID)
 				fmt.Fprintf(&report, "terminal input %s: ok=%v applied=%d %s\n", ev.ID, ev.OK, applied, firstLine(ev.Err))
+				if ev.OK {
+					found := false
+					for _, out := range logs[name] {
+						if out.Kind == "term-output" && out.ID == ev.ID {
+							found = true
+							if !out.OK {
+								t.Errorf("terminal output after input %s: %s", ev.ID, out.Err)
+							}
+						}
+					}
+					if !found {
+						t.Errorf("terminal input %s has no output check", ev.ID)
+					}
+				}
 				if ev.OK && applied != 1 {
 					t.Errorf("terminal input %s was accepted but applied %d times, want once", ev.ID, applied)
 				}

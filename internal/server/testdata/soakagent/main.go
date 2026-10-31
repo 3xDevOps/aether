@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -174,6 +175,8 @@ func burst(ctx context.Context, rec *recorder, b *mcpConn, term *terminal, name,
 type terminal struct {
 	id, incarnation, session string
 	generation               uint64
+	// cursor is where the last output read ended; it is held across restarts.
+	cursor *protocol.DevOutputCursor
 }
 
 func cliJSON(ctx context.Context, params any, args ...string) (json.RawMessage, error) {
@@ -197,7 +200,7 @@ func cliJSON(ctx context.Context, params any, args ...string) (json.RawMessage, 
 }
 
 func startTerminal(ctx context.Context, dir string) *terminal {
-	script := fmt.Sprintf(`while IFS= read -r l; do echo "$l" >> %s; done`, filepath.Join(dir, "term.log"))
+	script := fmt.Sprintf(`while IFS= read -r l; do echo "$l" >> %s; echo "out:$l"; done`, filepath.Join(dir, "term.log"))
 	res, err := cliJSON(ctx, protocol.DevTerminalStartParams{Name: "soak-term", Command: []string{"sh", "-c", script}}, "terminal", "start")
 	if err != nil {
 		fmt.Println("soak-error: terminal start:", err)
@@ -232,6 +235,51 @@ func (t *terminal) input(ctx context.Context, rec *recorder, token string) {
 		Kind:              "text", Text: token + "\n",
 	}, "terminal", "input")
 	rec.add("term-input", start, token, err)
+	if err == nil {
+		t.output(ctx, rec, token)
+	}
+}
+
+// output reads from the cursor held before the last restart and records
+// whether the echo of token arrived without a gap.
+func (t *terminal) output(ctx context.Context, rec *recorder, token string) {
+	start := time.Now()
+	var text strings.Builder
+	var problem string
+	for range 50 {
+		res, err := cliJSON(ctx, protocol.DevTerminalOutputParams{
+			DevTerminalTarget: protocol.DevTerminalTarget{TerminalID: t.id, Incarnation: t.incarnation},
+			After:             t.cursor, Format: "text",
+		}, "terminal", "output")
+		if err != nil {
+			rec.add("term-output", start, token, err)
+			return
+		}
+		var out protocol.DevTerminalOutputResult
+		if err = json.Unmarshal(res, &out); err != nil {
+			rec.add("term-output", start, token, err)
+			return
+		}
+		if out.MissingCursor {
+			problem = "missing_cursor"
+		} else if out.Truncated {
+			problem = "truncated"
+		}
+		text.WriteString(out.Text)
+		next := out.Next
+		t.cursor = &next
+		if !out.More {
+			break
+		}
+	}
+	switch {
+	case problem != "":
+		rec.add("term-output", start, token, errors.New(problem))
+	case !strings.Contains(text.String(), "out:"+token):
+		rec.add("term-output", start, token, errors.New("the echo of the input never appeared in the output"))
+	default:
+		rec.add("term-output", start, token, nil)
+	}
 }
 
 // startLong runs the long command as a plain child, the way an agent's shell
