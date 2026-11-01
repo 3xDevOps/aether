@@ -131,8 +131,11 @@ Slack. A subsession gets its parent's tier.
   be traced, and their socket sits in a root-only directory under
   `/run/aether-acp`, so the agent's user cannot read the conversation's
   stream, inject into it or take it over. The adapter itself runs as the
-  agent's user. Root in the container can reach the keeper: in a Root access
-  session, or a Default session with Docker, that boundary is the tier's.
+  agent's user. The agent's group can read the status of the keeper's exec
+  and stop it, which ends only its own agent, so that a server build without
+  keepers can still stop a keeper after a rollback. Root in the container can
+  reach the keeper: in a Root access session, or a Default session with
+  Docker, that boundary is the tier's.
 - In every tier the session's checkout and session branch are its result. Sessions
   launched before tiers existed show as Root access.
 

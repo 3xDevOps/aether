@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,9 +67,15 @@ func (d *Docker) startManagedExec(ctx context.Context, id ID, spec ExecSpec, tty
 		helper, size = "run", client.ConsoleSize{Width: spec.Cols, Height: spec.Rows}
 	}
 	argv := append([]string{coordtransport.CLIPath, devexec.Command, helper, spec.CreationKey, claim}, spec.Argv...)
+	env := spec.Env
+	if config := container.Container.Config; config != nil && spec.User != "" && spec.User != config.User {
+		if _, gid, ok := strings.Cut(config.User, ":"); ok && allDigits(gid) {
+			env = append(slices.Clone(env), devexec.ControlGroupEnv+"="+gid)
+		}
+	}
 	created, err := d.cli.ExecCreate(ctx, container.Container.ID, client.ExecCreateOptions{
 		TTY: tty, AttachStdin: true, AttachStdout: true, AttachStderr: true,
-		Cmd: argv, Env: spec.Env, User: spec.User, WorkingDir: spec.WorkingDir, ConsoleSize: size,
+		Cmd: argv, Env: env, User: spec.User, WorkingDir: spec.WorkingDir, ConsoleSize: size,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: create managed execution: %w", err)
