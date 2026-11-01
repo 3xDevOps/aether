@@ -250,8 +250,8 @@ export function feedbackMessage(notes: Note[], logs: LogEntry[]): string {
   const pictured = notes.some((note) => note.kind === 'screenshot' || note.path)
   return [
     [
-      `Feedback from the page in this run's browser: ${summary(notes, logs)}.`,
-      pictured && 'Each screenshot path is an image file inside the run; open it to see what I saw.',
+      `Feedback from the page in this session's browser: ${summary(notes, logs)}.`,
+      pictured && 'Each screenshot path is an image file inside the session; open it to see what I saw.',
       shared && `Page: ${pages[0]}`,
     ].filter(Boolean).join('\n'),
     ...notes.map((note, at) => (note.kind === 'screenshot' ? screenshotBlock(note, at + 1, shared) : elementBlock(note, note.element!, at + 1, shared))),

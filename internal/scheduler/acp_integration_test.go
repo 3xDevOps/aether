@@ -79,7 +79,7 @@ func TestIntegrationBackgroundRunDocker(t *testing.T) {
 		})
 	}
 	if !run.ACP {
-		t.Fatal("the background run is not driven over ACP")
+		t.Fatal("the background session is not driven over ACP")
 	}
 	got := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if got.Reason != exitedCompletedReason {

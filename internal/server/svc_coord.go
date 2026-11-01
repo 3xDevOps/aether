@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/children"
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -15,13 +17,13 @@ import (
 )
 
 // The per-run authenticated transport remains available independently of the
-// conflict-coordination policy. Disabled coordination still blocks peer/radar,
-// mission, and lifecycle-report actions without removing run identity.
+// conflict-coordination policy. Disabled coordination still blocks peer/radar
+// and lifecycle-report actions without removing run identity.
 func init() {
 	registerService("coord", func(d Deps) (Service, error) {
 		mail, ok := d.Store.(store.MessageStore)
 		if !ok {
-			return nil, errors.New("coordination needs a store with the run mailbox")
+			return nil, errors.New("coordination needs a store with the session mailbox")
 		}
 		childSvc, _ := d.SSH.Services.Children.(*children.Service)
 		var childAuthority coord.ChildService
@@ -41,6 +43,7 @@ func init() {
 			Reports:     d.Runs,
 			Waits:       d.Runs,
 			Outcomes:    d.Runs,
+			Sudo:        d.Runs,
 			Development: d.Runs,
 			Memory:      d.Memory,
 			// coord.report captures evidence before accepting the durable
@@ -49,7 +52,7 @@ func init() {
 			Evidence:          coordEvidenceCapture{service: d.Evidence},
 			EvidencePackets:   d.Store,
 			Until:             lazyWaits{ssh: d.SSH},
-			Mission:           lazyMission{ssh: d.SSH, runs: d.Runs},
+			Controlled:        controlled(d.Control),
 			Children:          childAuthority,
 			WakeAdmission:     newCoordWakeAdmission(d),
 			Waker:             d.Runs,
@@ -63,7 +66,7 @@ func init() {
 		}
 		// Every new container receives the verified CLI; runs receive identity
 		// transport even when conflict coordination is disabled. The policy flag
-		// still gates mission admission and harness lifecycle reporting.
+		// still gates harness lifecycle reporting.
 		d.Runs.UseCoordination(
 			svc,
 			filepath.Join(d.DataDir, "runtime", "bin"),
@@ -99,4 +102,15 @@ func (r lazyRadar) Overlaps(ctx context.Context) ([]overlap.Entry, error) {
 		return nil, errors.New("server: the conflict radar is not enabled")
 	}
 	return idx.Overlaps(ctx)
+}
+
+// controlled reports whether a member holds a run's control lease.
+func controlled(svc *control.Service) func(domain.RunID) bool {
+	if svc == nil {
+		return nil
+	}
+	return func(run domain.RunID) bool {
+		_, held := svc.Status(string(run))
+		return held
+	}
 }

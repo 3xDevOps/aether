@@ -170,7 +170,7 @@ func (s *Session) Start(ctx context.Context, runID string) error {
 	none := &synchronization.Configuration{}
 	id, err := s.manager.Create(ctx, alpha, beta, cfg, none, none, "aether-overlay", nil, false, "")
 	if err != nil {
-		return fmt.Errorf("overlay: create session: %w", err)
+		return fmt.Errorf("overlay: create sync: %w", err)
 	}
 	s.sessionID = id
 	return nil

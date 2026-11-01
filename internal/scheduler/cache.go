@@ -79,7 +79,7 @@ func (s *Scheduler) cacheOwnershipSnapshot(ctx context.Context) (cacheOwnership,
 			return owners, readErr
 		}
 		if sc.RunID != string(id) {
-			return owners, errors.New("run ownership metadata mismatch")
+			return owners, errors.New("session ownership metadata mismatch")
 		}
 		run, getErr := s.cfg.Store.GetRun(ctx, id)
 		if getErr != nil {

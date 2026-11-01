@@ -1,4 +1,5 @@
 import type { Tone } from '@/components/ui/status-dot'
+import { isReread } from '@/lib/events'
 import type { SessionItem, SessionRequest, SessionToolCall } from '@/lib/session-types'
 import { liveStateOf, outcomeState, stateLabel, stateTone } from '@/lib/status'
 import type { Event, RunStatus, RunStatusPayload } from '@/lib/types'
@@ -347,7 +348,8 @@ function laneTone(to: RunStatus, state: string | undefined): { tone: Tone; label
 
 function lane(sources: TraceSources, start: number): LaneSegment[] | undefined {
   if (!sources.statusEvents) return undefined
-  const changes = sources.statusEvents.map((event) => ({ at: Date.parse(event.time), ...(event.payload as RunStatusPayload) }))
+  // A capped read can hold only rereads; the oldest still marks where loaded history starts.
+  const changes = sources.statusEvents.filter((event, i) => i === 0 || !isReread(event)).map((event) => ({ at: Date.parse(event.time), ...(event.payload as RunStatusPayload) }))
   if (changes.length === 0) return [{ from: start, to: sources.end, ...laneTone(sources.runStatus, sources.runState) }]
   return changes.map((change, i) => ({
     from: Math.max(change.at, start),
@@ -358,7 +360,7 @@ function lane(sources: TraceSources, start: number): LaneSegment[] | undefined {
 
 const workersFoldAbove = 8
 
-/** The span tree of an Enhanced run: the run, its turns, their tool calls, waits and subagents, and an integrator's workers. */
+/** The span tree of an Enhanced run: the run, its turns, their tool calls, waits and subagents, and its child runs. */
 export function deriveTrace(sources: TraceSources): Span {
   const { turns, agents, live } = sources
   const byTurn = new Map<number, Span[]>()
@@ -391,7 +393,7 @@ export function deriveTrace(sources: TraceSources): Span {
     children.push(sized({
       id: 'workers',
       kind: 'workers',
-      label: 'Workers',
+      label: 'Subsessions',
       sub: String(workers.length),
       start: workers[0]!.start,
       end: reach(workers, workers[0]!.start),
@@ -404,7 +406,7 @@ export function deriveTrace(sources: TraceSources): Span {
   return sized({
     id: 'run',
     kind: 'run',
-    label: 'Run',
+    label: 'Session',
     start,
     end: sources.end === null ? null : Math.max(sources.end, ...children.map((child) => child.end ?? sources.end!)),
     status: live ? 'running' : failed ? 'failed' : 'done',

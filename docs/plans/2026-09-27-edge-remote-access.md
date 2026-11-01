@@ -16,7 +16,7 @@ direct SSH-key connections, and the phone dashboard over a tailnet, keep
 working unchanged.
 
 An **edge** is a relay and sign-in service that Aether servers and clients
-both dial out to. The project runs one, signing people in at
+both dial out to. The project sessions one, signing people in at
 `auth.onaether.dev` and relaying at `edge.onaether.dev`; anyone can run
 their own from the same binary. An **account** is a person signed in to the
 edge with GitHub or Google. A **device** is one client install holding its
@@ -194,7 +194,7 @@ dashboard over a tailnet; a computer through `aether gui`.
    for 30 minutes and five attempts. The full id lets the client refuse an
    answer for any other server, which a host key ground to match a shorter
    prefix could otherwise give.
-2. The owner runs `aether link --claim <code>`. The client dials
+2. The owner sessions `aether link --claim <code>`. The client dials
    `/v1/connect/<server id>/claim` and presents the code inside SSH once the
    host key has proved the id; the newer plan, section 4, has the steps.
    The edge has no **Add a server** page.
@@ -272,7 +272,7 @@ and dropped after 30 minutes.
 | Failure | Behaviour |
 | --- | --- |
 | Edge down | Server keeps running and retries. Clients with a direct or tailnet address use it. Others fail with the edge's error |
-| Edge restart | Every splice drops. Servers and clients reconnect. Runs are unaffected. The edge sends `drain` first on a clean stop |
+| Edge restart | Every splice drops. Servers and clients reconnect. Sessions are unaffected. The edge sends `drain` first on a clean stop |
 | Server offline | `503 server is not connected to the edge` |
 | Data socket not attached in 10 s | Client closed with `server did not attach` |
 | Edge signing key lost | Every server refuses the edge with both fingerprints until its operator runs `aether-server edge trust` |

@@ -282,7 +282,7 @@ func TestRunWireShape(t *testing.T) {
 		t.Error("host paths leaked onto the wire")
 	}
 	if _, ok := m["status_changed_at"]; ok {
-		t.Errorf("status_changed_at = %v on a run without one, want it absent", m["status_changed_at"])
+		t.Errorf("status_changed_at = %v on a session without one, want it absent", m["status_changed_at"])
 	}
 
 	started := created.Add(time.Minute)

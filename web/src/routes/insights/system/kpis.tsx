@@ -58,7 +58,7 @@ export function Kpis({ stats, samples, disk }: { stats: SystemStats; samples: Sy
         {stats.containersAt === 0
           ? 'Measuring containers…'
           : [
-              `${runs} ${runs === 1 ? 'run' : 'runs'}`,
+              `${runs} ${runs === 1 ? 'session' : 'sessions'}`,
               browsers > 0 && `${browsers} ${browsers === 1 ? 'browser' : 'browsers'}`,
               `${environments} ${environments === 1 ? 'environment' : 'environments'}`,
               `up ${uptimeText(host.uptime_seconds)}`,

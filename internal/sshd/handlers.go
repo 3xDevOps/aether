@@ -52,7 +52,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetDashboardError: dashboardErr,
 		DashboardURL:          dashboardURL,
 		MinClientVersion:      s.minClientVersion(),
-		Features:              []string{protocol.FeatureMultiRepo, protocol.FeatureSwarmRepos},
+		Features:              []string{protocol.FeatureMultiRepo, protocol.FeaturePermission},
 	}, nil
 }
 
@@ -126,8 +126,15 @@ func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, para
 		return nil, perr
 	}
 	id := domain.MemberID(p.MemberID)
+	before, err := s.cfg.Store.GetMember(ctx, id)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	if approveErr := s.cfg.Store.ApproveMember(ctx, id); approveErr != nil {
 		return nil, rpcError(approveErr)
+	}
+	if before.Pending {
+		noteChange(ctx)
 	}
 	approved, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {
@@ -137,7 +144,7 @@ func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, para
 }
 
 func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	p, perr := decodeParams[protocol.RunLaunchParams](params)
+	p, perr := decodeLaunchParams[protocol.RunLaunchParams](params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -149,6 +156,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		return nil, invalidParams("invalid mode: " + p.Mode)
 	}
 	if err := domain.ValidModel(p.Model); err != nil {
+		return nil, invalidParams(err.Error())
+	}
+	if err := domain.ValidEffort(p.Effort); err != nil {
 		return nil, invalidParams(err.Error())
 	}
 	// A taskless launch opens the agent's TUI with no prompt; headless has no
@@ -178,6 +188,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancel()
 	defer context.AfterFunc(s.authCtx(), cancel)()
+	var skipped []protocol.SkippedAccount
 	var childrenErr *protocol.Error
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
 		return s.launchRun(ctx, member, p, mode, policy, func(id domain.RunID) {
@@ -189,7 +200,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 			if p.Children != "" {
 				childrenErr = s.setRunChildren(ctx, member, id, p.Children)
 			}
-		})
+		}, &skipped)
 	})
 	if perr != nil {
 		return nil, perr
@@ -199,14 +210,15 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	// by a retry of this failed call.
 	if childrenErr != nil {
 		if killErr := s.cfg.Runs.Kill(context.WithoutCancel(ctx), run.ID, member); killErr != nil {
-			return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; stopping run %s also failed: %v", childrenErr.Message, run.ID, killErr)}
+			return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; stopping session %s also failed: %v", childrenErr.Message, run.ID, killErr)}
 		}
-		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; run %s was stopped, so launch again", childrenErr.Message, run.ID)}
+		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; session %s was stopped, so launch again", childrenErr.Message, run.ID)}
 	}
-	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
+	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed, SkippedFallbackAccounts: skipped}, nil
 }
 
-func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback, created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback,
+	created func(domain.RunID), skipped *[]protocol.SkippedAccount) (*domain.Run, *protocol.Error) {
 	measured, err := fallback.Measure(ctx, s.cfg.Store, s.cfg.Services.Usage, member, p.AccountMemberID, p.Harness, policy)
 	if err != nil {
 		return nil, rpcError(err)
@@ -233,19 +245,24 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	if excluded != nil {
 		slog.Warn("sshd: fallback accounts left out of a launch", "member", member, "error", excluded)
 	}
+	*skipped = fallback.Skipped(excluded)
 	var limits domain.RunLimits
 	if p.Limits != nil {
 		limits = domain.RunLimits{CPUs: p.Limits.CPUs, MemoryBytes: p.Limits.MemoryBytes, Pids: p.Limits.Pids}
 	}
+	permission, err := domain.ParsePermission(p.Permission)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: protocol.MethodRunLaunch + ": " + err.Error()}
+	}
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		Limits:     limits,
-		CachedBase: p.CachedBase, Model: p.Model, RequestedAccount: requested, Fallback: policy,
+		CachedBase: p.CachedBase, Model: p.Model, Effort: p.Effort, Permission: permission, RequestedAccount: requested, Fallback: policy,
 		Admitted: unlockAuthorization, Created: created,
 		ExtraWorkspaces: workspaceIDs(p.ExtraWorkspaceIDs),
 	})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {
-			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.launch: launch options (a cached base or a model) are not supported by this server"}
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.launch: launch options (a cached base, a model or an effort) are not supported by this server"}
 		}
 		return nil, rpcError(err)
 	}
@@ -310,11 +327,20 @@ func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := []protocol.Run{s.runSnapshot(run)}
-	if err := s.fillWaitConditions(ctx, member, []*domain.Run{run}, out); err != nil {
+	prs, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
+	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: out[0]}, nil
+	snap := []protocol.Run{s.runSnapshot(run)}
+	if err := s.fillWaitConditions(ctx, member, []*domain.Run{run}, snap); err != nil {
+		return nil, rpcError(err)
+	}
+	out := protocol.RunResult{Run: snap[0]}
+	for _, pr := range prs {
+		out.PullRequests = append(out.PullRequests, protocol.RecordedPullRequest{Repo: string(pr.RepoWorkspace), Repository: pr.Repository,
+			Number: pr.Number, URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, CheckedAt: pr.ObservedAt})
+	}
+	return out, nil
 }
 
 // runSnapshot decorates every run response, including mutation results. A
@@ -508,7 +534,7 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	run, err := s.cfg.Runs.Review(ctx, domain.RunID(p.RunID), member, p.Action, reportedOnly)
 	if errors.Is(err, scheduler.ErrReviewNotReported) {
 		id, _ := ctx.Value(connIdentityKey{}).(connIdentity)
-		return nil, scopeRefusal(id, protocol.MethodRunReview+" complete of a run with no reported success awaiting review", scopeControl)
+		return nil, scopeRefusal(id, protocol.MethodRunReview+" complete of a session with no reported success awaiting review", scopeControl)
 	}
 	if err != nil {
 		return nil, rpcError(err)
@@ -593,7 +619,7 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	}
 	recipientActor := permissions.Actor{ID: recipient.ID, Role: recipient.Role}
 	if derr := permissions.Check(permissions.Launch, recipientActor, permissions.Target{}); derr != nil {
-		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own runs", recipient.DisplayName))
+		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own sessions", recipient.DisplayName))
 	}
 	from := run.MemberID
 	outbox, ok := s.cfg.Store.(store.HandoffOutboxStore)
@@ -826,7 +852,7 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	if p.Repo != "" && domain.WorkspaceID(p.Repo) != run.WorkspaceID {
 		extra, ok := run.ExtraRepo(domain.WorkspaceID(p.Repo))
 		if !ok {
-			return nil, invalidParams("repo " + p.Repo + " is not one of the run's repos")
+			return nil, invalidParams("repo " + p.Repo + " is not one of the session's repos")
 		}
 		workspace, branch = extra.WorkspaceID, extra.Branch
 	}
@@ -838,7 +864,7 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	}, nil
 }
 
-// ValidateExtraWorkspaces checks the extra_workspace_ids of a run or swarm launch.
+// ValidateExtraWorkspaces checks the extra_workspace_ids of a run launch.
 func ValidateExtraWorkspaces(primary string, extras []string) error {
 	seen := map[string]bool{primary: true}
 	for _, id := range extras {

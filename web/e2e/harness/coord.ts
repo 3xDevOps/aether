@@ -1,6 +1,6 @@
 // The coordination CLI mounted in every real run container. Calling it over
 // docker exec drives the same socket and admission path as an installed
-// integrator or worker skill, without pretending to be one.
+// agent skill, without pretending to be one.
 
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'

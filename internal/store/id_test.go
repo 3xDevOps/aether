@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -105,46 +104,5 @@ func TestInboxDeliversInCreationOrderAcrossIDFormats(t *testing.T) {
 	}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("delivered ids = %v, want %v", got, want)
-	}
-}
-
-// The missions cursor is still a mission ID, but pages follow creation.
-func TestMissionPagesFollowCreationNotIDOrder(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	db := openTestDB(t)
-	w := mustCreateWorkspace(t, db)
-	m := mustCreateMember(t, db)
-	var ids []string
-	for _, key := range []string{"page-1", "page-2", "page-3"} {
-		ids = append(ids, string(mustCreatePlanningMission(t, db, w.ID, m.ID, key).ID))
-	}
-	// Make the lowest ID the newest so ORDER BY id DESC would reverse pages.
-	slices.Sort(ids)
-	base := time.Now().Add(-time.Hour).UnixNano()
-	for i, id := range ids {
-		if _, err := db.db.ExecContext(ctx, `UPDATE missions SET created_at = ? WHERE id = ?`, base-int64(i), id); err != nil {
-			t.Fatalf("age mission %s: %v", id, err)
-		}
-	}
-
-	var got []string
-	cursor := ""
-	for range ids {
-		page, next, err := db.ListMissionsPage(ctx, w.ID, 1, cursor)
-		if err != nil {
-			t.Fatalf("ListMissionsPage(%q): %v", cursor, err)
-		}
-		if len(page) != 1 {
-			t.Fatalf("page after %q = %d missions, want 1", cursor, len(page))
-		}
-		got = append(got, string(page[0].ID))
-		cursor = next
-	}
-	if cursor != "" {
-		t.Fatalf("cursor after the last page = %q, want none", cursor)
-	}
-	if strings.Join(got, " ") != strings.Join(ids, " ") {
-		t.Fatalf("pages = %v, want newest first %v", got, ids)
 	}
 }

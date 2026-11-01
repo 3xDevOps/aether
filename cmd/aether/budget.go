@@ -46,9 +46,9 @@ func runBudget(args []string) error {
 func budgetSet(args []string) error {
 	fs := newFlagSet("budget set")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	limit := fs.Float64("limit", 0, "hard cap in USD; new runs are refused at it (0 clears the budget, omitted keeps the current cap)")
+	limit := fs.Float64("limit", 0, "hard cap in USD; new sessions are refused at it (0 clears the budget, omitted keeps the current cap)")
 	warn := fs.Float64("warn", 0, "soft warning threshold in USD (0 for none, omitted keeps the current one)")
-	override := fs.Bool("override", false, "admit new runs past the cap until this is turned off again with -override=false")
+	override := fs.Bool("override", false, "admit new sessions past the cap until this is turned off again with -override=false")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -117,9 +117,9 @@ func printBudget(res protocol.BudgetResult) {
 		fmt.Printf("warning threshold %s\n", usd(res.Budget.WarnUSD))
 	}
 	if res.Budget.Override {
-		fmt.Println("override ON: new runs start past the cap until an admin turns it off")
+		fmt.Println("override ON: new sessions start past the cap until an admin turns it off")
 	} else if res.State == "exceeded" {
-		fmt.Println("new runs are refused; raise the cap or set --override to admit them")
+		fmt.Println("new sessions are refused; raise the cap or set --override to admit them")
 	}
 	fmt.Println(meteringNote(res))
 }
@@ -129,8 +129,8 @@ func printBudget(res protocol.BudgetResult) {
 // is advisory.
 func meteringNote(res protocol.BudgetResult) string {
 	if !res.Advisory {
-		return fmt.Sprintf("all %d runs metered", res.Spend.Runs)
+		return fmt.Sprintf("all %d sessions metered", res.Spend.Runs)
 	}
-	return fmt.Sprintf("advisory: %d of %d runs are unmetered, so real spend is higher than the number above",
+	return fmt.Sprintf("advisory: %d of %d sessions are unmetered, so real spend is higher than the number above",
 		res.Spend.Unmetered, res.Spend.Runs)
 }

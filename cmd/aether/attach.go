@@ -16,8 +16,8 @@ import (
 func init() {
 	register(command{
 		name:  "attach",
-		short: "attach to a run's PTY",
-		usage: "aether attach <run-id> [--read-only] [--shell <tab>]",
+		short: "attach to a session's PTY",
+		usage: "aether attach <session-id> [--read-only] [--shell <tab>]",
 		example: "aether attach run-d6ay38tj8j\n" +
 			"aether attach run-d6ay38tj8j --read-only",
 		flags: true,
@@ -28,13 +28,13 @@ func init() {
 func runAttach(args []string) error {
 	fs := newFlagSet("attach")
 	readOnly := fs.Bool("read-only", false, "watch the terminal without being able to type into it")
-	shell := fs.String("shell", "", "open a writable shell tab inside the run")
+	shell := fs.String("shell", "", "open a writable shell tab inside the session")
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether attach [--read-only] [--shell <tab>] <run>", err)
+		return fmt.Errorf("%w\nusage: aether attach [--read-only] [--shell <tab>] <session>", err)
 	}
 	if runID == "" {
-		return fmt.Errorf("usage: aether attach [--read-only] [--shell <tab>] <run>")
+		return fmt.Errorf("usage: aether attach [--read-only] [--shell <tab>] <session>")
 	}
 	cfg, err := cli.Load()
 	if err != nil {
@@ -82,7 +82,7 @@ func openAttach(conn *cli.Conn, runID string, cols, rows uint, readOnly bool, sh
 	if err != nil {
 		return nil, 0, err
 	}
-	fmt.Fprintln(os.Stderr, "aether: you cannot control this run; attached read-only, keystrokes are ignored")
+	fmt.Fprintln(os.Stderr, "aether: you cannot control this session; attached read-only, keystrokes are ignored")
 	return stream, ack.Replay, nil
 }
 
@@ -95,7 +95,7 @@ func describeAttachEnd(err error) error {
 	}
 	switch exit.Status {
 	case protocol.AttachExitSteerRevoked:
-		return errors.New("detached: you can no longer control this run (its owner, protection, the workspace policy, or your role changed); aether attach --read-only still shows it")
+		return errors.New("detached: you can no longer control this session (its owner, protection, the workspace policy, or your role changed); aether attach --read-only still shows it")
 	case protocol.AttachExitMembershipRevoked:
 		return errors.New("detached: your membership was removed or is pending approval again")
 	}

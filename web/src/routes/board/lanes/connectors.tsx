@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { Check, TriangleAlert, X } from '@/components/icons'
+import { TriangleAlert } from '@/components/icons'
 import { MessageKindGlyph } from '@/components/messages/message-row'
 import { cn } from '@/lib/utils'
 import { xOf } from '@/routes/board/lanes/axis'
@@ -13,21 +13,9 @@ export interface EdgeAnchor {
   half: number
 }
 
-const handle = 16
-
 export const edgeTone: Record<LaneEdge['kind'], string> = {
-  orchestration: 'text-series-7',
   message: 'text-series-5',
-  submission: 'text-muted',
-  dependency: 'text-muted',
   overlap: 'text-state-needs-you',
-}
-
-function toneOf(edge: LaneEdge): string {
-  if (edge.kind !== 'submission') return edgeTone[edge.kind]
-  if (edge.submission?.state === 'accepted') return 'text-state-done'
-  if (edge.submission?.state === 'rejected') return 'text-state-failed'
-  return 'text-muted'
 }
 
 function arrow(x: number, y: number, ux: number, uy: number): string {
@@ -39,7 +27,7 @@ function arrow(x: number, y: number, ux: number, uy: number): string {
 interface Shape {
   d: string
   head?: { points: string; hollow: boolean }
-  tail?: { x: number; y: number; open: boolean }
+  tail?: { x: number; y: number }
   mid: { x: number; y: number }
 }
 
@@ -47,37 +35,26 @@ interface Shape {
 export function edgeShape(edge: LaneEdge, a: EdgeAnchor, b: EdgeAnchor, g: LaneGeometry): Shape {
   const clamp = (x: number) => Math.min(g.width, Math.max(0, x))
   const x1 = clamp(xOf(edge.from.t, g.window, g.width))
-  const x2 = clamp(xOf(edge.to.t, g.window, g.width))
   const y1 = a.top + a.height / 2
   const y2 = b.top + b.height / 2
   const dir = Math.sign(y2 - y1) || 1
   switch (edge.kind) {
-    case 'dependency':
-      return { d: `M${x1} ${y1}C${x1 + handle} ${y1} ${x2 - handle} ${y2} ${x2} ${y2}`, mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 } }
     case 'overlap':
       return { d: `M${x1 - 4} ${y1}H${x1}V${y2}H${x1 - 4}`, mid: { x: x1, y: (y1 + y2) / 2 } }
-    case 'orchestration': {
-      const start = y1 + dir * a.half
-      if (x2 - x1 > 8) {
-        return { d: `M${x1} ${start}C${x1} ${y2} ${x1} ${y2} ${x2} ${y2}`, head: { points: arrow(x2, y2, 1, 0), hollow: false }, mid: { x: x1, y: (start + y2) / 2 } }
-      }
-      const stop = y2 - dir * b.half
-      return { d: `M${x1} ${start}L${x2} ${stop}`, head: { points: arrow(x2, stop, 0, dir), hollow: false }, mid: { x: x1, y: (start + stop) / 2 } }
-    }
     default: {
       const from = y1 + dir * a.half
       const stop = y2 - dir * b.half
       return {
         d: `M${x1} ${from}V${stop}`,
-        head: { points: arrow(x1, stop, 0, dir), hollow: edge.kind === 'message' && !edge.messages?.acked },
-        tail: { x: x1, y: from, open: edge.kind === 'submission' },
+        head: { points: arrow(x1, stop, 0, dir), hollow: !edge.messages?.acked },
+        tail: { x: x1, y: from },
         mid: { x: x1, y: (from + stop) / 2 },
       }
     }
   }
 }
 
-const dash: Partial<Record<LaneEdge['kind'], string>> = { dependency: '2 2', message: '0.5 3', overlap: '4 2' }
+const dash: Partial<Record<LaneEdge['kind'], string>> = { message: '0.5 3', overlap: '4 2' }
 
 export interface DrawnEdge {
   edge: LaneEdge
@@ -93,7 +70,7 @@ export function drawEdges(edges: LaneEdge[], anchors: Map<string, EdgeAnchor>, g
     const b = anchors.get(edge.to.lane)
     if (!a || !b) return []
     const near = !focus || edge.from.lane === focus || edge.to.lane === focus
-    return [{ edge, shape: edgeShape(edge, a, b, g), tone: near ? toneOf(edge) : 'text-icon-faint', near }]
+    return [{ edge, shape: edgeShape(edge, a, b, g), tone: near ? edgeTone[edge.kind] : 'text-icon-faint', near }]
   })
   return out.sort((x, y) => Number(x.near) - Number(y.near))
 }
@@ -109,12 +86,12 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
               d={shape.d}
               fill="none"
               stroke="currentColor"
-              strokeWidth={edge.kind === 'orchestration' || edge.kind === 'message' ? 1.5 : 1.25}
-              strokeDasharray={edge.kind === 'orchestration' && edge.crossOwner ? '5 3' : dash[edge.kind]}
+              strokeWidth={edge.kind === 'message' ? 1.5 : 1.25}
+              strokeDasharray={dash[edge.kind]}
               strokeLinecap={edge.kind === 'message' ? 'round' : undefined}
               vectorEffect="non-scaling-stroke"
             />
-            {shape.tail && <circle cx={shape.tail.x} cy={shape.tail.y} r={shape.tail.open ? 2.5 : 2} fill={shape.tail.open ? 'var(--canvas)' : 'currentColor'} stroke="currentColor" strokeWidth={1.25} />}
+            {shape.tail && <circle cx={shape.tail.x} cy={shape.tail.y} r={2} fill="currentColor" stroke="currentColor" strokeWidth={1.25} />}
             {shape.head && <polygon points={shape.head.points} fill={shape.head.hollow ? 'var(--canvas)' : 'currentColor'} stroke="currentColor" strokeWidth={1} strokeLinejoin="round" />}
           </g>
         ))}
@@ -122,10 +99,8 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
       {shapes.map(({ edge, shape, tone }) => {
         const count = edge.messages && edge.messages.ids.length > 1 ? edge.messages.ids.length : undefined
         const kind = edge.messages?.kind && edge.messages.kind !== 'message' ? edge.messages.kind : undefined
-        const decided = edge.submission?.state === 'accepted' ? Check : edge.submission?.state === 'rejected' ? X : undefined
         const files = edge.kind === 'overlap' ? edge.files?.length : undefined
-        if (!count && !kind && !decided && !files) return null
-        const Decided = decided
+        if (!count && !kind && !files) return null
         return (
           <span
             key={`${edge.key}:mark`}
@@ -134,7 +109,6 @@ export const EdgeStrokes = memo(function EdgeStrokes({ shapes, g, height }: { sh
             style={{ left: g.labelWidth + shape.mid.x, top: shape.mid.y }}
           >
             {kind && <MessageKindGlyph kind={kind} />}
-            {Decided && <Decided className="size-3" />}
             {files !== undefined && <TriangleAlert className="size-3" />}
             {count ?? files}
           </span>

@@ -226,8 +226,8 @@ func TestUniversalSignInAcrossVersions(t *testing.T) {
 	al := h.login(alice)[0]
 	h.claimServer(al, s)
 	base := h.relayURL + edgeproto.PathUniversalMCP
-	if code := call[protocol.ConnectorCodeResult](t, h.control(al, s), protocol.MethodConnectorCode, struct{}{}); code.URL != base {
-		t.Fatalf("connector.code behind a protocol 3 edge = %+v, want %s", code, base)
+	if list := call[protocol.ConnectorListResult](t, h.control(al, s), protocol.MethodConnectorList, struct{}{}); list.URL != base || !list.SignIn {
+		t.Fatalf("connector.list behind a protocol 3 edge = %+v, want %s without a code", list, base)
 	}
 	b, err := h.signIn(alice)
 	if err != nil {

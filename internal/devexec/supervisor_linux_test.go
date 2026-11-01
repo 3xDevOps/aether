@@ -46,6 +46,16 @@ func TestSupervisorSubprocess(t *testing.T) {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 		}
 		os.Exit(code)
+	case Attached:
+		n, err := strconv.Atoi(args[1])
+		if err != nil {
+			os.Exit(125)
+		}
+		code, err := RunAttached(n, args[2:])
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+		}
+		os.Exit(code)
 	case "pipe-input":
 		if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
 			_ = tty.Close()

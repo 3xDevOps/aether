@@ -5,6 +5,7 @@ package harness
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"path"
@@ -23,6 +24,9 @@ const TaskPlaceholder = "{task}"
 
 // ModelPlaceholder is replaced by the run's model in ModelArgs and ModelEnv.
 const ModelPlaceholder = "{model}"
+
+// EffortPlaceholder is replaced by the run's effort level in EffortArgs.
+const EffortPlaceholder = "{effort}"
 
 // InstructionsPlaceholder is replaced by the run's instructions in
 // InstructionArgs; QuotedInstructionsPlaceholder by them as a quoted string.
@@ -222,7 +226,8 @@ func isPathWithin(candidate, root string) bool {
 
 // Profile converts a generic definition to a launch profile. The registry
 // entry of the same name still supplies what is not part of the argv:
-// EnvPassthrough, Env, PermissionEnv, ACPMode, ModelArgs and ModelEnv.
+// EnvPassthrough, Env, PermissionEnv, ACPMode, ModelArgs, ModelEnv and the
+// effort settings.
 func (d Definition) Profile() Profile {
 	p := Profile{
 		Name:            d.Name,
@@ -243,6 +248,9 @@ func (d Definition) Profile() Profile {
 		}
 		p.ModelArgs = slices.Clone(registered.ModelArgs)
 		p.ModelEnv = maps.Clone(registered.ModelEnv)
+		p.EffortArgs = slices.Clone(registered.EffortArgs)
+		p.EffortLevels = slices.Clone(registered.EffortLevels)
+		p.ACPEffortArgs = registered.ACPEffortArgs
 	}
 	return p
 }
@@ -320,6 +328,14 @@ type Profile struct {
 	// ModelEnv carries the model in JSON configuration variables, where
 	// ModelPlaceholder is substituted JSON-escaped.
 	ModelEnv map[string]string
+	// EffortArgs is the CLI's effort or thinking flag with EffortPlaceholder;
+	// EffortLevels are the values it accepts, in increasing effort. Empty
+	// EffortArgs refuses an effort outside an Enhanced run.
+	EffortArgs   []string
+	EffortLevels []string
+	// ACPEffortArgs marks an ACP command that reads EffortArgs itself, so an
+	// Enhanced run passes the flag instead of setting the session option.
+	ACPEffortArgs bool
 	// InstructionArgs append the run's instructions to the agent's system
 	// prompt, so they survive compaction and need no prompt of their own.
 	InstructionArgs []string
@@ -405,6 +421,8 @@ var profiles = map[string]Profile{
 		ACPSystemPrompt: true,
 		ModelArgs:       []string{"--model", ModelPlaceholder},
 		ResumeArgs:      []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
+		EffortArgs:      []string{"--effort", EffortPlaceholder},
+		EffortLevels:    []string{"low", "medium", "high", "xhigh", "max"},
 		HeadlessResumeArgs: []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
 			"--resume", SessionPlaceholder, TaskPlaceholder},
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"},
@@ -443,6 +461,10 @@ var profiles = map[string]Profile{
 		ACPInstall:   codexACP,
 		ACPMode:      "agent-full-access",
 		ModelArgs:    []string{"--model", ModelPlaceholder},
+		// Not every model takes every level; codex debug models lists each
+		// model's supported_reasoning_levels.
+		EffortArgs:   []string{"-c", "model_reasoning_effort=" + EffortPlaceholder},
+		EffortLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
 		// A terminal resuming through the app-server keeps the session's
 		// permissions and refuses permission flags.
 		ResumeArgs:      []string{"codex", "resume", SessionPlaceholder},
@@ -470,6 +492,8 @@ var profiles = map[string]Profile{
 		ACPArgs:            []string{piACP.Binary},
 		ACPInstall:         piACP,
 		ModelArgs:          []string{"--model", ModelPlaceholder},
+		EffortArgs:         []string{"--thinking", EffortPlaceholder},
+		EffortLevels:       []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"},
 		NoPermissionPrompt: true,
 		EnvPassthrough:     []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths:    []string{".pi/agent/auth.json"},
@@ -499,6 +523,8 @@ var profiles = map[string]Profile{
 			EnhancedDefault: true, ModeSwitch: true},
 		ModelArgs:      []string{"--model=" + ModelPlaceholder},
 		ResumeArgs:     []string{"omp", "--auto-approve", "--resume=" + SessionPlaceholder},
+		EffortArgs:     []string{"--thinking=" + EffortPlaceholder},
+		EffortLevels:   []string{"off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"},
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY"},
 		// omp keeps its login in a SQLite WAL database beside its config,
 		// and a WAL database cannot be shared file by file.
@@ -554,13 +580,16 @@ var profiles = map[string]Profile{
 	// Copilot and Gemini take the task as --flag={task}, so the model flag,
 	// which goes before the task, cannot become a prompt flag's value.
 	"copilot": {
-		Name:         "copilot",
-		DisplayName:  "GitHub Copilot CLI",
-		TUIArgs:      []string{"copilot", "--allow-all", "--interactive=" + TaskPlaceholder},
-		HeadlessArgs: []string{"copilot", "--allow-all", "--prompt=" + TaskPlaceholder},
-		ACPArgs:      []string{"copilot", "--acp", "--allow-all"},
-		Capabilities: Capabilities{Hooks: HooksManaged, EnhancedDefault: true},
-		ModelArgs:    []string{"--model", ModelPlaceholder},
+		Name:          "copilot",
+		DisplayName:   "GitHub Copilot CLI",
+		TUIArgs:       []string{"copilot", "--allow-all", "--interactive=" + TaskPlaceholder},
+		HeadlessArgs:  []string{"copilot", "--allow-all", "--prompt=" + TaskPlaceholder},
+		ACPArgs:       []string{"copilot", "--acp", "--allow-all"},
+		Capabilities:  Capabilities{Hooks: HooksManaged, EnhancedDefault: true},
+		ModelArgs:     []string{"--model", ModelPlaceholder},
+		EffortArgs:    []string{"--reasoning-effort", EffortPlaceholder},
+		EffortLevels:  []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"},
+		ACPEffortArgs: true,
 		// --allow-all leaves the TUI's folder trust dialog up; exactly "true"
 		// here trusts the working directory as well.
 		Env: map[string]string{"COPILOT_ALLOW_ALL": "true"},
@@ -698,13 +727,38 @@ func Argv(template []string, task string, model []string) []string {
 	return append(out, model...)
 }
 
-func (p Profile) ModelLaunchArgs(model string) []string {
-	if len(p.ModelArgs) == 0 || model == "" {
+// LaunchArgs are the model and effort flags for one launch.
+func (p Profile) LaunchArgs(model, effort string) []string {
+	return append(expand(p.ModelArgs, ModelPlaceholder, model), p.EffortLaunchArgs(effort)...)
+}
+
+// CheckEffort refuses an effort the agent does not take, with an error that
+// follows the agent's name: a server override may leave Name empty. Outside
+// an Enhanced run the agent needs an effort flag; an Enhanced run of an agent
+// with no listed levels leaves the value to the agent's session option.
+func (p Profile) CheckEffort(effort string, acp bool) error {
+	switch {
+	case effort == "":
+		return nil
+	case len(p.EffortLevels) > 0 && !slices.Contains(p.EffortLevels, effort):
+		return fmt.Errorf("takes effort %s, not %q", strings.Join(p.EffortLevels, ", "), effort)
+	case !acp && len(p.EffortArgs) == 0:
+		return errors.New("has no effort flag; launch it without an effort")
+	}
+	return nil
+}
+
+func (p Profile) EffortLaunchArgs(effort string) []string {
+	return expand(p.EffortArgs, EffortPlaceholder, effort)
+}
+
+func expand(args []string, placeholder, value string) []string {
+	if len(args) == 0 || value == "" {
 		return nil
 	}
-	out := make([]string, 0, len(p.ModelArgs))
-	for _, a := range p.ModelArgs {
-		out = append(out, strings.ReplaceAll(a, ModelPlaceholder, model))
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		out = append(out, strings.ReplaceAll(a, placeholder, value))
 	}
 	return out
 }

@@ -33,7 +33,7 @@ Contact for this policy: [team@onaether.dev]. Issues:
 
 ## What the connector receives from ChatGPT or Claude
 
-- Tool arguments the assistant chooses to send: workspace, run and swarm
+- Tool arguments the assistant chooses to send: workspace and run
   ids, task and message text, answers to agent questions, search words,
   filters such as a time range, and optional idempotency keys.
 - During sign-in: the app's client id URL (only `https://chatgpt.com/...`
@@ -51,7 +51,7 @@ files, location, or any OpenAI or Anthropic user id.
 - Text written by you, your teammates, agents and GitHub users: run titles,
   tasks, reports, agent conversations and terminal output, diffs, commit
   subjects and git author names, pull request reviews and comments with the
-  GitHub usernames that wrote them, swarm tasks, questions and messages, and
+  GitHub usernames that wrote them, questions and messages, and
   team memory notes with their author's name.
 
 No tool returns member email addresses or logins. Every member of an Aether
@@ -70,7 +70,7 @@ by their policies, not this one.
 | Your Aether server, connectors table | Your member id, device, app client id and name, redirect host, granted scopes, created and last-used times, and SHA-256 hashes of the tokens | Until revoked, or your member or device is removed |
 | Your Aether server, tokens | Access tokens valid 1 hour; refresh tokens valid 30 days and replaced on every use | Hashes only |
 | Your Aether server, log | One line per write call: connector id, member id, method, target id and result. A line when a connector is authorized, created or revoked. Read calls are not logged | The server administrator's log retention |
-| Your Aether server, audit history | Not yet implemented (#592). Planned: each call that changes something made through a connector or the built-in assistant, including refused calls; and, from any client including the dashboard and CLI, connectors created or revoked, account shares and revocations, role changes and accepted member merges. Each entry: time, member, how the call arrived (connector with its client and id, assistant, dashboard or CLI), method, workspace, target id and outcome. Never tokens, parameters or message bodies. Read calls are not recorded. [TODO: confirm against #592 as merged] | Planned: each member's newest 10,000 entries |
+| Your Aether server, audit history | Each call that changes something made through a connector or the built-in assistant, including refused calls; connectors created, revoked, or removed with your member, device or edge sign-in; and, from any client including the dashboard and CLI, account shares and revocations, member approvals, removals and role changes, device and sign-in removals, member merges, and Slack link codes and unlinks. Each entry: time, member, how the call arrived (connector with its client and id, assistant, dashboard or CLI), method, workspace, target id and outcome. Never tokens, parameters or message bodies. Read calls are not recorded | For each member, the newest 10,000 call entries and, separately, the newest 10,000 changes that took effect. Entries outlive the member and connector they name |
 | Your Aether server, runs and messages | Runs launched and messages sent through the connector, marked `via ChatGPT` or `via Claude` | With the run, under the server's retention |
 
 ## Why

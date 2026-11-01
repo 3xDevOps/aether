@@ -14,8 +14,8 @@ import (
 func init() {
 	register(command{
 		name:    "handoff",
-		short:   "transfer a run to another member",
-		usage:   "aether handoff <run-id> <member>",
+		short:   "transfer a session to another member",
+		usage:   "aether handoff <session-id> <member>",
 		example: "aether handoff run-d6ay38tj8j alice",
 		run:     runHandoff,
 	})
@@ -23,7 +23,7 @@ func init() {
 
 func runHandoff(args []string) error {
 	if len(args) != 2 {
-		return fmt.Errorf("usage: aether handoff <run-id> <member>")
+		return fmt.Errorf("usage: aether handoff <session-id> <member>")
 	}
 	runID, who := args[0], args[1]
 	return withControl(func(c *protocol.Client) error {

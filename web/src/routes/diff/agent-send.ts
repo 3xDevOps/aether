@@ -23,7 +23,7 @@ export function useAgentSend(run: RunRecord, agent: AgentTerminal) {
   const blocked = run.switching
     ? `Switching to ${modeLabel[run.switching] ?? run.switching}…`
     : run.acp && run.mode === 'headless'
-      ? 'Background runs take no input.'
+      ? 'Background sessions take no input.'
       : composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
 
   return {
@@ -42,7 +42,7 @@ export function useAgentSend(run: RunRecord, agent: AgentTerminal) {
 }
 
 export function refusal(sent: RoomMessage): string {
-  if (sent.state === 'uncertain') return 'Delivery uncertain: the message may have reached the agent. Check the session before sending again.'
+  if (sent.state === 'uncertain') return 'Delivery uncertain: the message may have reached the agent. Check the chat before sending again.'
   return `Not sent: ${sent.failure?.message ?? sent.state}.`
 }
 
@@ -52,13 +52,13 @@ export function receipt(sent: RoomMessage, what: string, agentName: string): { t
     case 'queued':
       return { text: `${what} queued for ${agentName}. Delivers in 45 s unless the controller decides sooner.` }
     case 'not_sent':
-      return { text: `${agentName} did not get your ${what}: ${sent.failure?.message ?? 'not sent'}. The text is in the session.`, tone: 'failed' }
+      return { text: `${agentName} did not get your ${what}: ${sent.failure?.message ?? 'not sent'}. The text is in the chat.`, tone: 'failed' }
     case 'uncertain':
-      return { text: `Your ${what} may not have reached ${agentName}. The text is in the session.`, tone: 'failed' }
+      return { text: `Your ${what} may not have reached ${agentName}. The text is in the chat.`, tone: 'failed' }
     case 'denied':
-      return { text: `The controller declined your ${what}. The text is in the session.`, tone: 'failed' }
+      return { text: `The controller declined your ${what}. The text is in the chat.`, tone: 'failed' }
     case 'cancelled':
-      return { text: `Delivery of your ${what} was cancelled. The text is in the session.`, tone: 'failed' }
+      return { text: `Delivery of your ${what} was cancelled. The text is in the chat.`, tone: 'failed' }
     default:
       return { text: `Sent ${what} to ${agentName}${sent.agent_delivery === 'queued' ? ', queued behind its current turn' : ''}.`, tone: 'done' }
   }

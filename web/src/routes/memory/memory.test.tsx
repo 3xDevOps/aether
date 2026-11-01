@@ -25,6 +25,20 @@ function openSearch(words: string) {
 }
 
 describe('memory page', () => {
+  it('points to the private preferences in Settings only where the server keeps them', async () => {
+    seed()
+    const client = fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })
+    render(<MemoryRoute params={{}} client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings → Memory' }))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'memory' } })
+    cleanup()
+
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['memory.search'], ws: [] } })
+    render(<MemoryRoute params={{}} client={client} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    expect(screen.queryByRole('button', { name: 'Settings → Memory' })).toBeNull()
+  })
+
   it('lists pinned notes first, then the newest, with kind, source, author, agent, one link and age', async () => {
     seed()
     const client = fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })
@@ -203,7 +217,7 @@ describe('memory page', () => {
 
   it('lists agent notes, answers and superseded notes older than the newest 100 notes', async () => {
     seed()
-    const outcomes = Array.from({ length: 100 }, (_, i) => memoryItem({ id: `note-out${String(i).padStart(7, '0')}`, kind: 'outcome', source: 'report', title: `success: run ${i}` }))
+    const outcomes = Array.from({ length: 100 }, (_, i) => memoryItem({ id: `note-out${String(i).padStart(7, '0')}`, kind: 'outcome', source: 'report', title: `success: session ${i}` }))
     const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? [] : params.source || params.replaced ? search(params).items : outcomes }))
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
     await screen.findByRole('list', { name: 'Notes' })
@@ -218,11 +232,11 @@ describe('memory page', () => {
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })} />)
     await screen.findByRole('list', { name: 'Notes' })
     fireEvent.pointerEnter(rowOf(workspacePin.title), { pointerType: 'mouse' })
-    await waitFor(() => expect(footer()).toBe("Pinned by Bob · in every new run's brief"))
+    await waitFor(() => expect(footer()).toBe("Pinned by Bob · in every new session's brief"))
     fireEvent.pointerEnter(rowOf(myPin.title), { pointerType: 'mouse' })
-    await waitFor(() => expect(footer()).toBe("Pinned for you · in your new runs' briefs"))
+    await waitFor(() => expect(footer()).toBe("Pinned for you · in your new sessions' briefs"))
     fireEvent.focus(screen.getByRole('button', { name: agentNote.title }))
-    await waitFor(() => expect(footer()).toBe('Not pinned · runs find it by searching'))
+    await waitFor(() => expect(footer()).toBe('Not pinned · sessions find it by searching'))
     fireEvent.pointerLeave(rowOf(agentNote.title))
     await waitFor(() => expect(footer()).toBe('5 notes · 2 pinned'))
   })
@@ -345,6 +359,6 @@ describe('memory.change in the activity feed', () => {
     expect(words({ action: 'rm', note_id: 'note-a', actor_id: alice.id })).toBe('You removed a team memory note')
     expect(words({ action: 'add', note_id: 'note-a', actor_id: alice.id }, 'run_1')).toBe('The agent added a team memory note')
     expect(words({ action: 'rewrite', note_id: 'note-a', actor_id: alice.id }, 'run_1')).toBe('The agent rewrote a team memory note')
-    expect(words({ action: 'answer', note_id: 'note-a', actor_id: bob.id }, 'run_1')).toBe('Bob recorded a swarm answer in team memory')
+    expect(words({ action: 'answer', note_id: 'note-a', actor_id: bob.id }, 'run_1')).toBe('Bob recorded an answer in team memory')
   })
 })

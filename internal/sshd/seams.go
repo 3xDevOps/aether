@@ -46,16 +46,16 @@ type RunLauncherWithOptions interface {
 // LaunchValidator is implemented by schedulers that can resolve a launch
 // without starting it.
 type LaunchValidator interface {
-	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model string) error
+	ValidateLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model, effort string) error
 }
 
-var errLaunchOptionsUnsupported = errors.New("sshd: launch options (a cached base or a model) are not supported")
+var errLaunchOptionsUnsupported = errors.New("sshd: launch options (a cached base, a model or an effort) are not supported")
 
 func launchWithOptions(ctx context.Context, runs RunController, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	if launcher, ok := runs.(RunLauncherWithOptions); ok {
 		return launcher.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 	}
-	if opts.CachedBase != "" || opts.Model != "" || len(opts.ExtraWorkspaces) > 0 || opts.Limits != (domain.RunLimits{}) {
+	if opts.CachedBase != "" || opts.Model != "" || opts.Effort != "" || len(opts.ExtraWorkspaces) > 0 || opts.Limits != (domain.RunLimits{}) || (opts.Permission != "" && opts.Permission != domain.PermissionDefault) {
 		return nil, errLaunchOptionsUnsupported
 	}
 	return runs.Launch(ctx, workspace, member, account, task, harness, mode)
@@ -115,6 +115,9 @@ type RunController interface {
 	// ACPAnswer resolves a pending request of an enhanced run's agent; the
 	// first answer wins. values is the form answer for an accepted question.
 	ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error
+	// DecideSudo answers a Default run's sudo request for member; the first
+	// decision wins, and a later one is scheduler.ErrSudoNotPending.
+	DecideSudo(ctx context.Context, run domain.RunID, request string, allow bool, member domain.MemberID) error
 	ACPCancel(ctx context.Context, run domain.RunID) error
 	ACPSetOption(ctx context.Context, run domain.RunID, optionID string, value any) error
 	// ACPHistory reads up to limit items before beforeSeq, oldest first;
@@ -122,9 +125,9 @@ type RunController interface {
 	ACPHistory(run domain.RunID, beforeSeq int64, limit int) (acphost.HistoryPage, error)
 	ACPItem(run domain.RunID, seq int64) (acphost.Item, error)
 	AgentSwitchable(ctx context.Context, member, account domain.MemberID, harness string) (bool, error)
-	// SwarmRefusal is why a swarm integrator or worker of agent cannot run in
+	// WakeRefusal is why a run of agent that waits for mail cannot run in
 	// mode: Aether could not wake it when mail arrives.
-	SwarmRefusal(agent string, mode domain.LaunchMode) error
+	WakeRefusal(agent string, mode domain.LaunchMode) error
 	SwitchMode(ctx context.Context, run domain.RunID, actor domain.MemberID, mode domain.LaunchMode, admit func(begin func() error) error) error
 	Switching(run domain.RunID) domain.LaunchMode
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
@@ -148,6 +151,11 @@ type RunController interface {
 	EnsureRunShellTabReserved(ctx context.Context, run domain.RunID, tab string, cols, rows uint) (ptyhost.ShellTabReservation, error)
 	EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
 	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
+	// StartAssistantLogin runs agent's sign-in for the member's assistant
+	// and returns the PTY session that streams it.
+	StartAssistantLogin(ctx context.Context, member domain.MemberID, agent string, cols, rows uint) (ptyhost.SessionKey, error)
+	// EndAssistantLogin removes the transcript of a sign-in that exited.
+	EndAssistantLogin(ctx context.Context, member domain.MemberID, agent string) error
 	StopTerminal(ctx context.Context, member domain.MemberID) error
 	// WithStoppedTerminal excludes terminal recreation through afterStop.
 	// The callback may lock member caches but must not reenter terminal lifecycle.

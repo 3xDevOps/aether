@@ -75,7 +75,7 @@ test('a phone is served everything it needs to install the dashboard', async ({
   const bar = page.getByRole('banner')
   await expect(bar).toBeInViewport({ ratio: 1 })
   await expect(bar.getByRole('button', { name: /^Open sidebar/ })).toBeVisible()
-  await expect(bar.getByRole('button', { name: 'New run' })).toBeVisible()
+  await expect(bar.getByRole('button', { name: 'New session' })).toBeVisible()
   const overflow = await page.evaluate(() =>
     Math.max(
       document.documentElement.scrollWidth - document.documentElement.clientWidth,

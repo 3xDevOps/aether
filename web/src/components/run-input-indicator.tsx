@@ -21,7 +21,7 @@ export function RunInputIndicator({ run, compact = false }: { run: Run; compact?
     )
   }
   return (
-    <Tooltip content={<>{description}. Open the run to respond.</>}>
+    <Tooltip content={<>{description}. Open the session to respond.</>}>
       <button
         type="button"
         aria-label={description}

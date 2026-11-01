@@ -18,7 +18,7 @@ type developmentAuthorityStub struct {
 }
 
 func (d *developmentAuthorityStub) Capabilities(context.Context, domain.RunID) ([]string, error) {
-	return []string{protocol.MethodDevTerminalList, protocol.MethodDevTerminalList, "dev.terminal.unknown", protocol.MethodTaskAccept}, nil
+	return []string{protocol.MethodDevTerminalList, protocol.MethodDevTerminalList, "dev.terminal.unknown"}, nil
 }
 
 func (d *developmentAuthorityStub) HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error) {
@@ -26,18 +26,12 @@ func (d *developmentAuthorityStub) HandleAgent(context.Context, domain.RunID, st
 	return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "human holds control"}
 }
 
-type developmentMissionStub struct{ missionTransportStub }
-
-func (developmentMissionStub) Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error) {
-	return protocol.CoordMissionAssignment{MissionID: "mission", Capabilities: []string{protocol.MethodCoordStatus, protocol.MethodTaskShow, protocol.MethodDevBrowserOpen, "run.git.push"}}, nil
-}
-
-func TestStatusCombinesIndependentDevelopmentAndMissionAuthority(t *testing.T) {
+func TestStatusCombinesDevelopmentAuthorityWithMailbox(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "enabled", true: "disabled"}[disabled], func(t *testing.T) {
 			dev := &developmentAuthorityStub{}
 			h := newHarness(t, 1, func(c *Config) {
-				c.Disabled, c.Development, c.Mission = disabled, dev, developmentMissionStub{}
+				c.Disabled, c.Development = disabled, dev
 			})
 			status, err := h.svc.Status(t.Context(), h.run(0))
 			if err != nil {
@@ -46,20 +40,20 @@ func TestStatusCombinesIndependentDevelopmentAndMissionAuthority(t *testing.T) {
 			for _, capability := range []string{
 				protocol.MethodCoordStatus, protocol.MethodDevTerminalList,
 				protocol.MethodCoordSend, protocol.MethodCoordInbox, protocol.MethodCoordAsk,
-				protocol.MethodCoordReply, protocol.MethodCoordReport, protocol.MethodTaskShow,
+				protocol.MethodCoordReply, protocol.MethodCoordReport,
 			} {
 				want := !disabled || capability == protocol.MethodCoordStatus || capability == protocol.MethodDevTerminalList
 				if slices.Contains(status.Capabilities, capability) != want {
 					t.Errorf("capability %s advertised=%t, want %t", capability, !want, want)
 				}
 			}
-			for _, forbidden := range []string{protocol.MethodTaskAccept, protocol.MethodDevBrowserOpen, "dev.terminal.unknown", "run.git.push"} {
+			for _, forbidden := range []string{protocol.MethodDevBrowserOpen, "dev.terminal.unknown", "run.git.push"} {
 				if slices.Contains(status.Capabilities, forbidden) {
 					t.Errorf("unavailable authority advertised: %s", forbidden)
 				}
 			}
-			if disabled && (status.Assignment != nil || len(status.Peers) != 0 || status.Unread != 0) {
-				t.Fatalf("disabled status leaked mission/mailbox authority: %+v", status)
+			if disabled && (len(status.Peers) != 0 || status.Unread != 0) {
+				t.Fatalf("disabled status leaked mailbox authority: %+v", status)
 			}
 		})
 	}
@@ -109,11 +103,11 @@ func TestDevelopmentSocketRejectsIdentityAndLifetimeEscapes(t *testing.T) {
 	}
 	err = client.Call(protocol.MethodDevTerminalList, nil, nil)
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeUnavailable || dev.calls.Load() != 1 {
-		t.Fatalf("finished run dispatch = %v, calls=%d", err, dev.calls.Load())
+		t.Fatalf("finished session dispatch = %v, calls=%d", err, dev.calls.Load())
 	}
 	status, statusErr := h.svc.Status(t.Context(), h.run(0))
 	if statusErr != nil || slices.Contains(status.Capabilities, protocol.MethodDevTerminalList) {
-		t.Fatalf("finished run capabilities = %+v, %v", status, statusErr)
+		t.Fatalf("finished session capabilities = %+v, %v", status, statusErr)
 	}
 	if _, err := h.svc.Status(t.Context(), "unknown-run"); err == nil || err.Code != protocol.CodeNotFound {
 		t.Fatalf("unknown identity = %v", err)

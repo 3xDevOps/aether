@@ -61,7 +61,7 @@ export function paramRows(params: unknown): [string, string][] {
     return params === undefined || params === null ? [] : [['Params', JSON.stringify(params)]]
   }
   return Object.entries(params).map(([key, value]) => {
-    const words = key.replace(/_id$/, '').replace(/_/g, ' ')
+    const words = key.replace(/_id$/, '').replace(/_/g, ' ').replace(/\bchild runs?\b|\bruns?\b/g, (m) => (m.startsWith('child') ? 'subsession' : 'session') + (m.endsWith('s') ? 's' : ''))
     return [words.charAt(0).toUpperCase() + words.slice(1), typeof value === 'string' ? value : JSON.stringify(value)]
   })
 }
@@ -70,8 +70,10 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const { busy, error, run } = useAction()
   const { harness } = useAssistantAgent()
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
-  const launch = useLaunchRows(confirmation.method, confirmation.params)
-  const params = paramRows(confirmation.params)
+  const reason: [string, string][] = confirmation.reason ? [['Reason', confirmation.reason]] : []
+  const rows = useLaunchRows(confirmation.method, confirmation.params, confirmation.defaults)
+  const launch = rows && [...reason, ...rows]
+  const params: [string, string][] = rows ? [] : [...reason, ...(confirmation.task ? [['Task', confirmation.task] as [string, string]] : []), ...paramRows(confirmation.params)]
   const autoApprove = useStore((s) => s.assistantStatus?.auto_approve ?? false)
   const remaining = useSecondsUntil(confirmation.expires_at)
   const total = Date.parse(confirmation.expires_at) - Date.parse(confirmation.created_at)
@@ -79,7 +81,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
     <RequestCard
       aria-label={`Approve this action? ${confirmation.summary}`}
       avatar={<IconTile aria-hidden><AgentGlyph agent={harness} className="size-4" /></IconTile>}
-      title={launch ? launchTitle(confirmation.summary) : confirmation.summary}
+      title={launch || confirmation.task ? launchTitle(confirmation.summary) : confirmation.summary}
       source={<Code>{confirmation.method}</Code>}
       meta={<>expires <RelativeTime at={confirmation.expires_at} /></>}
       timeBar={remaining > 0 && total > 0 && <RequestTimeBar left={remaining * 1000} total={total} />}
@@ -94,7 +96,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
             <p className="text-ui-xs text-muted">
               {isLaunch(confirmation.method)
                 ? `${confirmation.other_owner}'s account pays for this launch, so this asks even with auto-approval on.`
-                : `${confirmation.other_owner} owns this run, so this asks even with auto-approval on.`}
+                : `${confirmation.other_owner} owns this session, so this asks even with auto-approval on.`}
             </p>
           ) : !autoApprove && (
             <p className="text-ui-xs"><AssistantSettingsLink>Skip these cards…</AssistantSettingsLink></p>

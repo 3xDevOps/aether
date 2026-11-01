@@ -30,7 +30,7 @@ const (
 
 var (
 	errAppServerPaused      = errors.New("the container is paused")
-	errAppServerUnavailable = errors.New("scheduler: the run's Codex app-server is not connected")
+	errAppServerUnavailable = errors.New("scheduler: the session's Codex app-server is not connected")
 )
 
 // appServerDriver hosts a Standard Codex run. The primary PTY runs Codex's
@@ -257,10 +257,8 @@ func (d *appServerDriver) serve(entry *supervised, r *appServerRun) {
 		d.close(r)
 		return
 	}
-	// The swarm's state now is the baseline a change during the first turn
-	// is told against.
 	if c := d.s.coordinationSeam(); c != nil && c.enabled {
-		c.svc.EnhancedSessionOpened(context.Background(), entry.runID)
+		c.svc.EnhancedSessionOpened(entry.runID)
 	}
 	<-client.Done()
 	d.mu.Lock()

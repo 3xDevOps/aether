@@ -1,9 +1,12 @@
 package sshd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	githubservice "github.com/3xDevOps/Aether/internal/github"
@@ -70,6 +73,61 @@ type GitHubService interface {
 	Repositories(context.Context, domain.MemberID, int) (githubservice.RepositoryPage, error)
 	Repository(context.Context, domain.MemberID, string) (githubservice.Account, githubservice.Repository, error)
 	PullRequest(context.Context, domain.MemberID, string, int) (githubservice.Account, githubservice.PullRequest, error)
+	MemberPullRequestSnapshot(context.Context, domain.MemberID, string, int, func(context.Context) error) (githubservice.Account, githubservice.Snapshot, error)
+}
+
+// snapshotFeedback is run.pr.feedback's checks and reviews from a snapshot,
+// spelled and bounded as the live path's: the check runs and waiting suites
+// Checks counts, then the commit statuses, at most limit checks and limit
+// reviews within MaxRunRepoOutputBytes. truncated is set when any row or
+// review body was cut.
+func snapshotFeedback(snap githubservice.Snapshot, limit int) (checks []protocol.RunPRCheck, reviews []protocol.RunPRReview, truncated bool) {
+	checks, reviews = []protocol.RunPRCheck{}, []protocol.RunPRReview{}
+	budget := protocol.MaxRunRepoOutputBytes
+	fits := func(v any) bool {
+		b, _ := json.Marshal(v)
+		if len(b) > budget {
+			truncated = true
+			return false
+		}
+		budget -= len(b)
+		return true
+	}
+	var all []protocol.RunPRCheck
+	for _, run := range snap.CurrentRuns() {
+		all = append(all, protocol.RunPRCheck{Name: run.Name, Status: strings.ToUpper(run.Status), Conclusion: strings.ToUpper(run.Conclusion), URL: run.URL})
+	}
+	for _, suite := range snap.WaitingSuites() {
+		all = append(all, protocol.RunPRCheck{Name: cmp.Or(suite.App, suite.AppSlug), Status: strings.ToUpper(suite.Status)})
+	}
+	for _, status := range snap.Statuses {
+		check := protocol.RunPRCheck{Name: status.Context, Status: "COMPLETED", Conclusion: strings.ToUpper(status.State), URL: status.TargetURL}
+		if status.State == "pending" {
+			check.Status, check.Conclusion = "IN_PROGRESS", ""
+		}
+		all = append(all, check)
+	}
+	for i, check := range all {
+		if i == limit || !fits(check) {
+			truncated = true
+			break
+		}
+		checks = append(checks, check)
+	}
+	for i, review := range snap.Reviews {
+		submitted := ""
+		if review.SubmittedAt != nil {
+			submitted = review.SubmittedAt.UTC().Format(time.RFC3339)
+		}
+		row := protocol.RunPRReview{ID: strconv.FormatInt(review.ID, 10), Author: review.User, Body: review.Body, State: review.State, SubmittedAt: submitted}
+		if i == limit || !fits(row) {
+			truncated = true
+			break
+		}
+		truncated = truncated || review.Clipped
+		reviews = append(reviews, row)
+	}
+	return checks, reviews, truncated
 }
 
 func (s *Server) githubOAuthStart(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

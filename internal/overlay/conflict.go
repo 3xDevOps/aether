@@ -30,7 +30,7 @@ var ErrConflict = errors.New("overlay: sync conflict")
 
 // ErrHalted is returned by Run when mutagen halts the session on a
 // safety check (root emptied, deleted, or type-changed).
-var ErrHalted = errors.New("overlay: session halted by safety check")
+var ErrHalted = errors.New("overlay: sync halted by safety check")
 
 // Conflict describes a paused overlay: the conflicted paths (relative to
 // the sync roots, slash-separated) and the mutagen session that was
@@ -60,11 +60,11 @@ func (s *Session) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return fmt.Errorf("overlay: session state: %w", err)
+			return fmt.Errorf("overlay: sync state: %w", err)
 		}
 		s.stateIndex = index
 		if len(states) == 0 {
-			return errors.New("overlay: session disappeared")
+			return errors.New("overlay: sync disappeared")
 		}
 		state := states[0]
 		switch state.Status {

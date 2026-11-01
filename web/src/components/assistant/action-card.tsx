@@ -1,5 +1,6 @@
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { paramRows } from '@/components/assistant/cards'
+import { PreferenceDetail, PreferenceUndo, UsedPreferences } from '@/components/assistant/preference-notice'
 import { hearBack } from '@/components/assistant/launch-summary'
 import { AssistantSheet } from '@/components/assistant/suggestion'
 import { ChevronRight, ExternalLink, RotateCcw } from '@/components/icons'
@@ -8,14 +9,13 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { ToolValue } from '@/components/ui/session-blocks'
 import { StatusDot, type Tone, toneClasses } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
-import { actionSummary, isKnownAction, launchLine, readNoun, readSummary, watchLine, type ActionNames, type ActionState, type ActionTarget, type AssistantAction } from '@/lib/assistant-actions'
+import { actionSummary, isKnownAction, launchLine, preferenceFacts, readNoun, readSummary, watchLine, type ActionNames, type ActionState, type ActionTarget, type AssistantAction } from '@/lib/assistant-actions'
 import { message } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 import { isTerminal } from '@/store/runs'
-import { missionSeqOf } from '@/store/workflow-signals'
 import { loadWholeItem } from '@/store/session-stream'
 
 export const actionTone: Record<ActionState, Tone> = {
@@ -43,25 +43,25 @@ export const actionStateWord: Record<ActionState, string> = {
 }
 
 const targetWord: Record<ActionTarget['kind'], string> = {
-  run: 'Open run',
-  swarm: 'Open swarm',
+  run: 'Open session',
   pr: 'Open pull request',
   workspace: 'Open workspace',
   environment: 'Open environment',
   watch: 'Open watch',
+  preference: 'Edit',
   link: 'Open link',
 }
 
 const goneWord: Partial<Record<ActionTarget['kind'], string>> = {
-  run: 'This run no longer exists',
+  run: 'This session no longer exists',
   workspace: 'This workspace no longer exists',
 }
 
-const launchTools = new Set(['aether_launch_run', 'aether_launch_swarm', 'aether_relaunch_run'])
+const launchTools = new Set(['aether_launch_session', 'aether_relaunch_session'])
 
-/** Whether the call starts a run or swarm, whose target can reach the transcript before the store. */
+/** Whether the call starts a run, whose target can reach the transcript before the store. */
 function startsWork(action: AssistantAction): boolean {
-  return launchTools.has(action.tool) || (action.tool === 'aether_run_lifecycle' && action.input.action === 'relaunch')
+  return launchTools.has(action.tool) || (action.tool === 'aether_session_lifecycle' && action.input.action === 'relaunch')
 }
 
 /** States the member chose or let lapse: said quietly, with any error kept for the details. */
@@ -90,9 +90,8 @@ export function useActionNames(): ActionNames {
 }
 
 /**
- * Whether the store, once loaded, no longer holds the target. Swarms load on
- * demand, so only runs and workspaces can tell; a launch's own run can reach
- * the transcript before the store hears of it, so it never reads as gone.
+ * Whether the store, once loaded, no longer holds the target. Only runs and
+ * workspaces can tell; a launch's own run can reach the transcript before the store hears of it, so it never reads as gone.
  */
 export function useTargetGone(action: AssistantAction): boolean {
   const target = action.target
@@ -117,43 +116,13 @@ export function useOpenTarget(): (target: ActionTarget) => void {
   }
 }
 
-/**
- * Whether a launched run or swarm still works in the background after the
- * panel closes, and why a launched swarm could not be read. The store keeps
- * runs current but refreshes swarms only for the active workspace, so a
- * launched swarm is read here, then again on each of its changes; until read
- * it counts as working. The phase read is kept, since another workspace's
- * list can replace the store's swarms.
- */
-export function useBackground(action: AssistantAction): { background: boolean; swarmError?: string } {
-  const swarm = action.state === 'done' && startsWork(action) && action.target?.kind === 'swarm' ? action.target.id : undefined
-  const seq = useStore((s) => (swarm ? missionSeqOf(swarm)(s) : 0))
-  const [error, setError] = useState<string>()
-  const [phase, setPhase] = useState<string>()
-  useEffect(() => {
-    if (!swarm) return
-    let live = true
-    api.missionShow(swarm).then((result) => {
-      if (!live) return
-      setError(undefined)
-      setPhase(result.mission.phase)
-      useStore.getState().upsertMission(result.mission)
-    }, (err) => live && setError(`Could not read swarm ${swarm}: ${message(err)}`))
-    return () => {
-      live = false
-    }
-  }, [swarm, seq])
-  const background = useStore((s) => {
-    if (action.state !== 'done' || !startsWork(action) || !action.target) return false
-    if (action.target.kind === 'run') {
-      const run = s.runs[action.target.id]
-      return run !== undefined && !isTerminal(run.status)
-    }
-    if (action.target.kind !== 'swarm') return false
-    const shown = s.missions[action.target.id]?.phase ?? phase
-    return shown !== 'completed' && shown !== 'cancelled'
+/** Whether a launched run still works in the background after the panel closes. */
+export function useBackground(action: AssistantAction): boolean {
+  return useStore((s) => {
+    if (action.state !== 'done' || !startsWork(action) || action.target?.kind !== 'run') return false
+    const run = s.runs[action.target.id]
+    return run !== undefined && !isTerminal(run.status)
   })
-  return { background: background && !error, swarmError: error }
 }
 
 export function retryDraft(action: AssistantAction, names: ActionNames): void {
@@ -167,7 +136,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
   const names = useActionNames()
   const open = useOpenTarget()
   const gone = useTargetGone(action)
-  const { background, swarmError } = useBackground(action)
+  const background = useBackground(action)
   const details = useStore((s) => s.expandedRows[assistantSessionID]?.[action.id] ?? false)
   const setRow = useStore((s) => s.setSessionRow)
   const summary = actionSummary(action, names)
@@ -183,6 +152,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
   }
   const known = isKnownAction(action.tool)
   const facts = launchLine(action, names) ?? watchLine(action)
+  const preference = preferenceFacts(action)
   const retry = action.state === 'failed' || action.state === 'declined' || action.state === 'expired' || action.state === 'unfinished'
   const link = action.target && !gone && (action.target.route || action.target.url) ? action.target : undefined
   const shownError = action.error && !quiet.has(action.state) ? action.error : undefined
@@ -201,14 +171,15 @@ export function ActionCard({ action }: { action: AssistantAction }) {
       </div>
       <p className={cn('pl-5 text-ui-sm', toneClasses(tone).text)}>{state}</p>
       {facts && <p className="pl-5 text-ui-sm break-words text-muted">{facts}</p>}
-      {background && <p className="pl-5 text-ui-sm break-words text-muted">{action.target?.kind === 'swarm' ? hearBack.swarm : hearBack.run}</p>}
+      {preference && <PreferenceDetail facts={preference} />}
+      {preference?.kind === 'used' && <UsedPreferences action={action} items={preference.items} />}
+      {background && <p className="pl-5 text-ui-sm break-words text-muted">{hearBack.run}</p>}
       {!known && <InputRows input={action.input} />}
       {shownError && (
         <p role="alert" className="ml-5 rounded-control bg-state-failed-soft px-2 py-1 font-code text-ui-sm break-words whitespace-pre-wrap text-text">
           {shownError}
         </p>
       )}
-      {swarmError && <p className="pl-5 text-ui-sm break-words text-muted">{swarmError}</p>}
       {gone && goneWord[action.target!.kind] && <p className="pl-5 text-ui-sm text-muted">{goneWord[action.target!.kind]}</p>}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-5">
         {link && (
@@ -217,6 +188,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
             {link.url && <ExternalLink aria-hidden className="size-3.5" />}
           </Button>
         )}
+        {preference && <PreferenceUndo facts={preference} />}
         {retry && (
           <Button variant="secondary" size="sm" onClick={() => retryDraft(action, names)}>
             <RotateCcw aria-hidden />

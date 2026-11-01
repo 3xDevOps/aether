@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func TestExpiredPrefixCaptureSurvivesRestartAndHistoryRemoval(t *testing.T) {
@@ -45,7 +44,7 @@ func TestExpiredPrefixCaptureSurvivesRestartAndHistoryRemoval(t *testing.T) {
 	if err != nil || retry.ID != packet.ID {
 		t.Fatalf("retry = %+v, %v", retry, err)
 	}
-	assertSubmissionTranscript(t, restarted, packet.ID, true, true)
+	assertTranscriptSource(t, restarted, packet.ID, true, true)
 	if _, _, readErr := restarted.ReadTranscript(ctx, "other-workspace", packet.ID, 0); readErr == nil {
 		t.Fatal("retained history escaped workspace authorization")
 	}
@@ -60,28 +59,26 @@ func TestExpiredPrefixCaptureSurvivesRestartAndHistoryRemoval(t *testing.T) {
 	if truncateErr := os.Truncate(path, 2); truncateErr != nil {
 		t.Fatal(truncateErr)
 	}
-	assertSubmissionTranscript(t, restarted, packet.ID, false, true)
 	if _, _, _, retainErr := restarted.retainTranscript(ctx, req.RunID, key); retainErr == nil {
 		t.Fatal("retry accepted a damaged artifact as a shorter prefix capture")
 	}
 }
 
-func assertSubmissionTranscript(t *testing.T, svc *Service, id string, available, truncated bool) {
+func assertTranscriptSource(t *testing.T, svc *Service, id string, available, truncated bool) {
 	t.Helper()
-	err := svc.WithSubmissionSources(context.Background(), "workspace-1", []string{id}, func(packets []protocol.EvidencePacket) error {
-		for _, source := range packets[0].Sources {
-			if source.Name == "transcript" {
-				if source.Available != available || source.Truncated != truncated {
-					t.Fatalf("submission transcript = %+v, want available=%v truncated=%v", source, available, truncated)
-				}
-				return nil
-			}
-		}
-		return errors.New("missing transcript fact")
-	})
+	packet, err := svc.Get(context.Background(), "workspace-1", id)
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, source := range packet.Sources {
+		if source.Name == "transcript" {
+			if source.Available != available || source.Truncated != truncated {
+				t.Fatalf("transcript source = %+v, want available=%v truncated=%v", source, available, truncated)
+			}
+			return
+		}
+	}
+	t.Fatal("missing transcript fact")
 }
 
 func TestTranscriptCaptureDistinguishesPrefixAndCopyCap(t *testing.T) {
@@ -107,7 +104,7 @@ func TestTranscriptCaptureDistinguishesPrefixAndCopyCap(t *testing.T) {
 					t.Fatalf("capture causes = %+v", source)
 				}
 			}
-			assertSubmissionTranscript(t, svc, packet.ID, true, tc.prefix || tc.cap)
+			assertTranscriptSource(t, svc, packet.ID, true, tc.prefix || tc.cap)
 		})
 	}
 }

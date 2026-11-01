@@ -83,7 +83,7 @@ function PublishPanel({ run, client = api, quiet, repoName }: { run: ScopedRun; 
         <DialogHeader>
           <DialogTitle>{repoName ? `Publish ${repoName}` : 'Publish'}</DialogTitle>
           <DialogDescription>
-            Commit, push and open a pull request from the run's checkout with native Git, as the run's account.
+            Commit, push and open a pull request from the session's checkout with native Git, as the session's account.
           </DialogDescription>
         </DialogHeader>
         <Checkout p={p} />
@@ -112,7 +112,7 @@ function PublishPanel({ run, client = api, quiet, repoName }: { run: ScopedRun; 
 function Checkout({ p }: { p: Publish }) {
   const status = p.status
   return (
-    <section aria-label="Run checkout" className="grid min-w-0 gap-1">
+    <section aria-label="Session checkout" className="grid min-w-0 gap-1">
       <div className="flex min-w-0 items-center gap-2 text-ui-sm text-muted">
         {status ? (
           <p className="min-w-0 flex-1 break-words">
@@ -138,7 +138,7 @@ function Checkout({ p }: { p: Publish }) {
         <>
           <InlineError>{status.identity_error}</InlineError>
           <p className="text-ui-sm text-muted">
-            A pull request is opened with this account’s GitHub login. Run <Code>gh auth login</Code> in the run’s terminal, then refresh the
+            A pull request is opened with this account’s GitHub login. Run <Code>gh auth login</Code> in the session’s terminal, then refresh the
             status.
           </p>
         </>

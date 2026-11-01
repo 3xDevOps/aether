@@ -522,6 +522,21 @@ func TestPullRequestSnapshotTypedErrorsCarryGitHubMessage(t *testing.T) {
 	}
 }
 
+// A failed reviews read returns the pull request and checks read before it.
+func TestPullRequestSnapshotKeepsChecksWhenReviewsFail(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	delete(f.bodies, reviewsPage1)
+	snap, err := snapshotService(t, f).PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	var reviewsErr *ReviewsError
+	if !errors.As(err, &reviewsErr) || !errors.Is(err, ErrNotFound) || !strings.HasPrefix(err.Error(), "read reviews: github: API request: HTTP 404") {
+		t.Fatalf("snapshot whose reviews read failed: error = %v, want a ReviewsError wrapping the 404", err)
+	}
+	if snap.HeadSHA != headSHA || len(snap.CheckRuns) != 1 || snap.CheckRuns[0].Name != "build" || snap.Reviews != nil {
+		t.Fatalf("snapshot whose reviews read failed = %+v, want the pull request and its checks", snap)
+	}
+}
+
 func TestPullRequestSnapshotBoundsPagination(t *testing.T) {
 	f := newFakeGitHub(t)
 	standardPR(f)
@@ -548,5 +563,41 @@ func TestPullRequestSnapshotRejectsUnsafeInput(t *testing.T) {
 	}
 	if _, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 0, nil); err == nil {
 		t.Fatal("accepted pull request 0")
+	}
+}
+
+// A check that fails partway, as when access is revoked mid-read, stops the
+// snapshot before its next request.
+func TestPullRequestSnapshotChecksBeforeEveryRequest(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	revoked := errors.New("access revoked")
+	checks := 0
+	_, err := snapshotService(t, f).pullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil, func(context.Context) error {
+		checks++
+		if checks == 3 {
+			return revoked
+		}
+		return nil
+	})
+	if !errors.Is(err, revoked) || checks != 3 || len(f.requests) != 2 {
+		t.Fatalf("snapshot = %v after %d checks and requests %v; want the check's error after two requests", err, checks, f.requests)
+	}
+}
+
+// A draft pull request reads as a draft, also when an unchanged poll
+// reuses the previous read.
+func TestPullRequestSnapshotDraft(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	f.bodies[pullPath] = strings.Replace(pullBody("open", "null"), `"state"`, `"draft":true,"state"`, 1)
+	s := snapshotService(t, f)
+	first, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	if err != nil || !first.Draft {
+		t.Fatalf("draft pull request = %+v, %v; want draft", first, err)
+	}
+	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
+	if err != nil || !second.Draft || f.notMod == 0 {
+		t.Fatalf("unchanged draft = %+v, %v after %d not-modified; want draft", second, err, f.notMod)
 	}
 }

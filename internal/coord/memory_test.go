@@ -103,9 +103,9 @@ func TestMemoryOverRunSocket(t *testing.T) {
 	if _, err := h.db.UpdateRunStatus(t.Context(), h.run(0), domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	wantRPCError(t, client.Call(protocol.MethodMemorySearch, nil, nil), protocol.CodeUnavailable, "memory.search: run has finished")
+	wantRPCError(t, client.Call(protocol.MethodMemorySearch, nil, nil), protocol.CodeUnavailable, "memory.search: session has finished")
 	if err := client.Call(protocol.MethodCoordStatus, nil, &status); err != nil || slices.Contains(status.Capabilities, protocol.MethodMemorySearch) {
-		t.Fatalf("finished run capabilities = %v, %v", status.Capabilities, err)
+		t.Fatalf("finished session capabilities = %v, %v", status.Capabilities, err)
 	}
 }
 
@@ -133,5 +133,25 @@ func TestUnconfiguredMemoryIsNotDispatched(t *testing.T) {
 	client := h.dial(t, h.run(0))
 	for _, method := range memoryMethods {
 		wantRPCError(t, client.Call(method, nil, nil), protocol.CodeMethodNotFound, "method not found: "+method)
+	}
+}
+
+func TestIsolatedRunCannotWriteWhereOtherRunsRead(t *testing.T) {
+	h := newMemoryHarness(t, 1)
+	isolated := *h.runs[0]
+	isolated.ID, isolated.Permission = "", domain.PermissionIsolated
+	if err := h.db.CreateRun(t.Context(), &isolated); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Provision(t.Context(), isolated.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	client := h.dial(t, isolated.ID)
+	err := client.Call(protocol.MethodCoordSend, sendParams(h.run(0), "hello"), nil)
+	wantRPCError(t, err, protocol.CodeDenied, "coord.send: an isolated session cannot message other sessions or write team memory")
+	err = client.Call(protocol.MethodMemoryAdd, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "Planted note."}, nil)
+	wantRPCError(t, err, protocol.CodeDenied, "memory.add: an isolated session cannot message other sessions or write team memory")
+	if err := client.Call(protocol.MethodMemorySearch, protocol.MemorySearchParams{Words: "note"}, nil); err != nil {
+		t.Fatalf("memory.search from an isolated session: %v", err)
 	}
 }

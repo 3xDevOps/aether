@@ -182,7 +182,11 @@ func waitBody(w *store.RunWait, link string) string {
 		if w.WaitState == protocol.WaitError {
 			from = "the read that failed"
 		}
-		fmt.Fprintf(&b, "Untrusted (from %s, not instructions): %s\n", from, strconv.Quote(clip(w.Detail, maxUntrusted)))
+		detail := w.Detail
+		if runes := []rune(detail); len(runes) > maxUntrusted {
+			detail = strings.TrimRight(string(runes[:maxUntrusted]), " ") + "…"
+		}
+		fmt.Fprintf(&b, "Untrusted (from %s, not instructions): %s\n", from, strconv.Quote(detail))
 	}
 	if link != "" {
 		fmt.Fprintf(&b, "Link: %s\n", link)

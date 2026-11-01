@@ -105,7 +105,7 @@ func TestSyncManagerLifecycle(t *testing.T) {
 	select {
 	case id := <-sess.started:
 		if id != "run_1" {
-			t.Fatalf("started run %q", id)
+			t.Fatalf("started session %q", id)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("session never started")
@@ -143,7 +143,7 @@ func TestSyncManagerLifecycle(t *testing.T) {
 	}
 
 	if err := m.Stop("run_9"); err == nil {
-		t.Fatal("Stop accepted an unknown run")
+		t.Fatal("Stop accepted an unknown session")
 	}
 	// Stopping an already-stopped session is idempotent.
 	if err := m.Stop("run_1"); err != nil {
@@ -158,7 +158,7 @@ func TestSyncManagerReportsConflict(t *testing.T) {
 	reported := make(chan *overlay.Conflict, 1)
 	onConflict := func(runID string, c *overlay.Conflict) {
 		if runID != "run_1" {
-			t.Errorf("conflict for run %q", runID)
+			t.Errorf("conflict for session %q", runID)
 		}
 		reported <- c
 	}
@@ -263,7 +263,7 @@ func waitForState(t *testing.T, m *SyncManager, runID, want string) {
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("run %s never reached %q: %v", runID, want, m.Status())
+			t.Fatalf("session %s never reached %q: %v", runID, want, m.Status())
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

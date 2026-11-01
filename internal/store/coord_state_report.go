@@ -70,7 +70,7 @@ func recordCoordStateReport(ctx context.Context, db queryExecer, report *CoordSt
 	}
 	if prior.Outcome != report.Outcome || prior.WaitingFor != report.WaitingFor || prior.Summary != report.Summary ||
 		!slices.Equal(prior.Until, report.Until) {
-		return false, fmt.Errorf("%w: run %s", ErrCoordReportIdempotencyConflict, report.RunID)
+		return false, fmt.Errorf("%w: session %s", ErrCoordReportIdempotencyConflict, report.RunID)
 	}
 	*report = *prior
 	return false, nil

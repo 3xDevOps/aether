@@ -12,7 +12,7 @@ import (
 
 // ErrRunPaused refuses a new process in a frozen container. Unlike the
 // other ways a run has no live environment, it ends when the run resumes.
-var ErrRunPaused = fmt.Errorf("%w: the run is paused", ErrNoLiveEnvironment)
+var ErrRunPaused = fmt.Errorf("%w: the session is paused", ErrNoLiveEnvironment)
 
 // RunExec is one process a member's SSH connection starts in a run's
 // container. It runs as the container's user, with its environment, in the

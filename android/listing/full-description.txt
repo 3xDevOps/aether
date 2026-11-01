@@ -2,12 +2,12 @@ Aether is a self-hosted development environment for AI coding agents. The agents
 
 From the phone you can:
 
-• See every run on the board, sorted by what needs attention.
-• Watch a run's terminal live, and take control to type into it.
+• See every session on the board, sorted by what needs attention.
+• Watch a session's terminal live, and take control to type into it.
 • Approve or refuse what an agent asks permission for.
-• Read the diff a run has produced; launch, pause, kill and relaunch runs.
+• Read the diff a session has produced; launch, pause, kill and relaunch sessions.
 • Edit the files in your member home.
-• Open a run straight from an aether://run link.
+• Open a session straight from an aether://run link.
 
 Two ways to connect. Tailscale: an Aether server on your Tailscale network with its dashboard turned on, and this phone signed in to the same tailnet; Tailscale identifies the phone. Aether Edge: no Tailscale needed; sign in with GitHub, pick your server, and approve the device where your server requires it. Either way the server decides what the phone may do.
 

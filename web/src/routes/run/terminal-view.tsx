@@ -19,7 +19,7 @@ function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const ended = endedStatuses.includes(run.status)
   const showConnection = !agent.starting && !ended && state.connection !== 'live'
   return (
-    <div role="group" aria-label="Run presence" className="control-matrix-clear flex min-w-0 items-center gap-2">
+    <div role="group" aria-label="Session presence" className="control-matrix-clear flex min-w-0 items-center gap-2">
       {ended && <span className="shrink-0 text-ui-sm text-muted">{isRetainedRun(run) ? 'Container stopped' : 'Container removed'} · read-only</span>}
       {showConnection && <span className="shrink-0 text-ui-sm text-state-needs-you">{connectionLabel[state.connection]}</span>}
       {agent.steerable && <span className="min-w-0 truncate text-ui-sm text-muted">{summary}</span>}
@@ -41,9 +41,9 @@ function Notice({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const { state, sessionMissing, retry } = agent.session
   const ended = endedStatuses.includes(run.status)
   const lines = [
-    state.steerDenied && 'You can watch this run but not type in it.',
+    state.steerDenied && 'You can watch this session but not type in it.',
     state.message && (state.refused && sessionMissing && ended
-      ? 'This run has ended and left no recorded terminal to replay.'
+      ? 'This session has ended and left no recorded terminal to replay.'
       : state.message),
     roomStatusError && `Presence unavailable: ${roomStatusError}`,
   ].filter(Boolean)
@@ -122,7 +122,7 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
             imageUploadEnabled={!agent.starting && state.connection === 'live' && state.write && !state.steerDenied}
             replaying={replaying}
           >
-            {agent.starting && <TerminalSpinner label="Starting the run's container" />}
+            {agent.starting && <TerminalSpinner label="Starting the session's container" />}
           </TerminalPane>
         </div>
       ) : !shellShown && (
@@ -131,7 +131,7 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
             {tabs}
           </div>
           <EmptyState title="No agent terminal">
-            An Enhanced run talks to its agent in the Session view. Open a shell to work in the run’s container.
+            An Enhanced session talks to its agent in the Chat view. Open a shell to work in the session’s container.
           </EmptyState>
         </div>
       )}

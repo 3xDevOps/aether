@@ -72,7 +72,7 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 		return EvidenceRevision{}, err
 	}
 	if err := validateID(string(run)); err != nil {
-		return EvidenceRevision{}, fmt.Errorf("gitengine: run id %q: %w", run, err)
+		return EvidenceRevision{}, fmt.Errorf("gitengine: session id %q: %w", run, err)
 	}
 	if err := validateID(packetID); err != nil {
 		return EvidenceRevision{}, fmt.Errorf("%w: packet id %q: %v", ErrInvalidEvidenceID, packetID, err)
@@ -106,14 +106,14 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	}
 
 	if !validObjectID(meta.Base) {
-		return EvidenceRevision{}, fmt.Errorf("gitengine: run %s has invalid base commit", run)
+		return EvidenceRevision{}, fmt.Errorf("gitengine: session %s has invalid base commit", run)
 	}
 	base, err := e.git(ctx, repo, "rev-parse", "--verify", "--quiet", meta.Base+"^{commit}")
 	if err != nil || base != meta.Base {
 		if err == nil {
 			err = errors.New("resolved object differs")
 		}
-		return EvidenceRevision{}, fmt.Errorf("gitengine: evidence base for run %s is unavailable: %w", run, err)
+		return EvidenceRevision{}, fmt.Errorf("gitengine: evidence base for session %s is unavailable: %w", run, err)
 	}
 	if boundsErr := e.checkEvidenceCaptureBounds(ctx, run, checkout); boundsErr != nil {
 		return EvidenceRevision{}, boundsErr
@@ -125,7 +125,7 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	defer lock.Unlock()
 	tree, err := e.writeSnapshotTreeLocked(ctx, run, checkout)
 	if err != nil {
-		return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for run %s: %w", run, err)
+		return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for session %s: %w", run, err)
 	}
 	if boundsErr := e.checkEvidenceSnapshotBounds(ctx, run, checkout, tree); boundsErr != nil {
 		return EvidenceRevision{}, boundsErr
@@ -513,7 +513,7 @@ func (e *Engine) commitEvidence(ctx context.Context, repo, tree, base string, ru
 		"GIT_COMMITTER_EMAIL=aether@localhost",
 	)
 	commit, err := e.gitIn(ctx, repo, env, "commit-tree", tree, "-p", base,
-		"-m", fmt.Sprintf("aether evidence %s for run %s", packetID, run))
+		"-m", fmt.Sprintf("aether evidence %s for session %s", packetID, run))
 	if err != nil {
 		return "", fmt.Errorf("gitengine: create evidence commit: %w", err)
 	}

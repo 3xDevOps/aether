@@ -52,7 +52,7 @@ func TestKillDuringProvisioning(t *testing.T) {
 	}
 	r := e.waitStoreStatus(t, runID, domain.RunAbandoned)
 	if r.FinishedAt == nil {
-		t.Fatal("abandoned run must have FinishedAt")
+		t.Fatal("abandoned session must have FinishedAt")
 	}
 	if r.Worktree == "" {
 		t.Fatal("kill must preserve the worktree")
@@ -112,7 +112,7 @@ func TestConcurrentCloseAndKill(t *testing.T) {
 		t.Fatalf("terminal status = %s, want merged or abandoned", r.Status)
 	}
 	if r.FinishedAt == nil {
-		t.Fatal("terminal run must have FinishedAt")
+		t.Fatal("terminal session must have FinishedAt")
 	}
 }
 
@@ -317,14 +317,14 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 	e.sched.sweepCheckouts(ctx, time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 
 	if _, serr := os.Stat(path); serr != nil {
-		t.Fatalf("shared checkout removed under the live run: %v", serr)
+		t.Fatalf("shared checkout removed under the live session: %v", serr)
 	}
 	oldAgain, err := e.db.GetRun(ctx, old.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
 	if oldAgain.Worktree == "" {
-		t.Fatal("old run's worktree cleared while the checkout is still in use")
+		t.Fatal("old session's worktree cleared while the checkout is still in use")
 	}
 }
 

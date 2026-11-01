@@ -127,6 +127,7 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 			}
 		}
 	}
+	noteChange(ctx)
 	s.notifyDirectory()
 	slog.Info("sshd: member role changed",
 		"actor", member, "member", m.ID, "from", was, "to", role)

@@ -92,11 +92,10 @@ export function onPullRequestPoll(listener: (runID: string) => void): () => void
 }
 
 useStore.subscribe((state, previous) => {
-  if (state.prSeq === previous.prSeq && state.gitSeq === previous.gitSeq && state.integrationSeq === previous.integrationSeq) return
+  if (state.prSeq === previous.prSeq && state.gitSeq === previous.gitSeq) return
   for (const [key, poll] of polls) {
     const runID = poll.run.id
-    const mission = poll.run.mission_id
-    if (state.prSeq[runID] !== previous.prSeq[runID] || state.gitSeq[runID] !== previous.gitSeq[runID] || (mission && state.integrationSeq[mission] !== previous.integrationSeq[mission])) {
+    if (state.prSeq[runID] !== previous.prSeq[runID] || state.gitSeq[runID] !== previous.gitSeq[runID]) {
       coalesce(polls, key, () => refreshPullRequest(poll.run))
     }
   }

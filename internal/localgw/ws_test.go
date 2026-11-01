@@ -470,8 +470,8 @@ func TestAttachForwardsOutputInputAndResize(t *testing.T) {
 // ack frame verbatim, then closes 1008.
 func TestAttachRefusalForwardsAck(t *testing.T) {
 	b := &wsStubBackend{
-		attachAck: protocol.AttachResponse{OK: false, Code: protocol.CodeNotFound, Error: "run not found"},
-		attachErr: errors.New("cli: attach: run not found"),
+		attachAck: protocol.AttachResponse{OK: false, Code: protocol.CodeNotFound, Error: "session not found"},
+		attachErr: errors.New("cli: attach: session not found"),
 	}
 
 	g, base := newWSGateway(t, b)
@@ -479,7 +479,7 @@ func TestAttachRefusalForwardsAck(t *testing.T) {
 
 	writeWSJSON(t, conn, protocol.DashAttachRequest{Write: true})
 	ack := readWSJSON[protocol.AttachResponse](t, conn)
-	if ack.OK || ack.Code != protocol.CodeNotFound || ack.Error != "run not found" {
+	if ack.OK || ack.Code != protocol.CodeNotFound || ack.Error != "session not found" {
 		t.Fatalf("ack = %+v", ack)
 	}
 	if reason := expectClose(t, conn, websocket.StatusPolicyViolation); reason != "attach refused" {

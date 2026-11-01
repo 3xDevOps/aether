@@ -287,25 +287,6 @@ describe('inspecting what is shared', () => {
     expect(sent()).toEqual(raw)
   })
 
-  it('sends the remembered launch choices with the page, newest first, and only with it', async () => {
-    useStore.setState({ launchDefaults: { codex: { mode: 'tui', model: 'me:ghp_x@github.com', at: 1 }, claude: { mode: 'acp', model: 'opus', at: 2 }, 'Bad Name': { mode: 'acp', at: 3 } } })
-    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
-    await userEvent.click(within(aside).getByRole('button', { name: 'Inspect what is shared' }))
-    const shared = await screen.findByRole('dialog', { name: 'What is shared' })
-    expect(within(shared).getByRole('region', { name: 'Sent with the next message' }).textContent).toContain('claude opus Enhanced, codex Standard')
-    await userEvent.keyboard('{Escape}')
-    await userEvent.type(box(aside), 'Build the export{Enter}')
-    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
-    expect(sent()?.launch_defaults).toEqual([{ agent: 'claude', mode: 'acp', model: 'opus' }, { agent: 'codex', mode: 'tui' }])
-
-    await userEvent.click(within(aside).getByRole('button', { name: /^Remove page / }))
-    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
-    await userEvent.type(box(aside), '{Enter}')
-    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
-    expect(sent(1)).toMatchObject({ attachments: [{ kind: 'check', check: 'lint' }] })
-    expect(sent(1)?.launch_defaults).toBeUndefined()
-  })
-
   it('stops sharing the page from the same place', async () => {
     vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: false })
     const aside = await openPanel()
@@ -433,7 +414,7 @@ describe('the composer', () => {
     const aside = await openPanel()
     const runs = Array.from({ length: 7 }, (_, i) => ({ kind: 'run' as const, workspace_id: workspace.id, run_id: `run-${i}`, label: `run-${i}` }))
     act(() => useStore.getState().askAssistant({ draft: 'compare these', attachments: runs }))
-    expect(within(aside).getByRole('alert').textContent).toBe('A message carries at most 6 attachments; removed run run-0.')
+    expect(within(aside).getByRole('alert').textContent).toBe('A message carries at most 6 attachments; removed session run-0.')
     expect(useStore.getState().assistantAttachments.map((a) => a.run_id)).toEqual(runs.slice(1).map((r) => r.run_id))
   })
 
@@ -450,7 +431,7 @@ describe('one chip per target', () => {
     act(() => useStore.getState().askAssistant({ draft: 'Fix this', attachments: [{ kind: 'run', workspace_id: workspace.id, run_id: login.id, label: login.id }] }))
     const chips = within(aside).getByRole('list', { name: 'Sent with this message' })
     expect(within(chips).getAllByText('Fix login test')).toHaveLength(1)
-    expect(within(chips).getByRole('button', { name: 'Remove run Fix login test from the message' })).toBeDefined()
+    expect(within(chips).getByRole('button', { name: 'Remove session Fix login test from the message' })).toBeDefined()
     await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
     expect(sent()).toMatchObject({ route: { run_id: login.id }, attachments: [{ kind: 'run', run_id: login.id }] })
@@ -460,7 +441,7 @@ describe('one chip per target', () => {
     const aside = await openPanel()
     act(() => useStore.getState().askAssistant({ draft: 'Fix this', attachments: [{ kind: 'run', workspace_id: workspace.id, run_id: login.id, label: login.id }] }))
     const chips = within(aside).getByRole('list', { name: 'Sent with this message' })
-    await userEvent.click(within(chips).getByRole('button', { name: 'Remove run Fix login test from the message' }))
+    await userEvent.click(within(chips).getByRole('button', { name: 'Remove session Fix login test from the message' }))
     expect(within(chips).queryByText('Fix login test')).toBeNull()
     expect(within(aside).getByRole('button', { name: 'Add this page' })).toBeDefined()
     await userEvent.type(box(aside), '{Enter}')

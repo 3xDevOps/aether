@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -102,6 +103,7 @@ func (h *handler) exchangeCode(ctx context.Context, w http.ResponseWriter, r *ht
 		tokenFail(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
 	}
+	h.ssh.RecordConnectorEvent(ctx, sshd.MethodConnectorCreate, conn.Member, conn.ID, conn.ClientName)
 	slog.Info("connector: created", "connector", conn.ID, "member", conn.Member, "device", conn.Device, "subject", conn.Subject,
 		"resource", conn.Resource, "redirect_host", conn.RedirectHost, "scopes", conn.Scopes)
 	writeTokens(w, access, refresh)
@@ -117,7 +119,7 @@ func (h *handler) refresh(ctx context.Context, w http.ResponseWriter, r *http.Re
 	hash := tokenHash(presented)
 	c, err := h.store.ConnectorByRefresh(ctx, hash, now)
 	if err != nil {
-		refreshFail(w, err)
+		h.refreshFail(ctx, w, err)
 		return
 	}
 	switch {
@@ -141,18 +143,20 @@ func (h *handler) refresh(ctx context.Context, w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err = h.store.RotateConnector(ctx, c.ID, hash, tokens, now); err != nil {
-		refreshFail(w, err)
+		h.refreshFail(ctx, w, err)
 		return
 	}
 	writeTokens(w, access, refresh)
 }
 
-func refreshFail(w http.ResponseWriter, err error) {
+func (h *handler) refreshFail(ctx context.Context, w http.ResponseWriter, err error) {
+	var reused *store.RefreshReusedError
 	switch {
 	case errors.Is(err, store.ErrRefreshJustRotated):
 		tokenFail(w, http.StatusBadRequest, "invalid_grant", "another refresh rotated this refresh token less than a minute ago; use the refresh token it returned")
-	case errors.Is(err, store.ErrRefreshReused):
-		slog.Warn("connector: a rotated refresh token was used again; connector revoked")
+	case errors.As(err, &reused):
+		h.ssh.RecordConnectorEvent(ctx, sshd.MethodConnectorReused, reused.Member, reused.Connector, reused.Client)
+		slog.Warn("connector: a rotated refresh token was used again; connector revoked", "connector", reused.Connector, "member", reused.Member)
 		tokenFail(w, http.StatusBadRequest, "invalid_grant", "this refresh token was already used, so its connector was revoked"+reconnect)
 	case errors.Is(err, store.ErrNotFound):
 		tokenFail(w, http.StatusBadRequest, "invalid_grant", "no connector holds this refresh token; it lapsed, or the connector was revoked"+reconnect)

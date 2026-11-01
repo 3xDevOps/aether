@@ -42,7 +42,7 @@ func TestCleanViewContextDropsMalformedFieldsAndTrimsToFit(t *testing.T) {
 	in.OpenFile = &protocol.AssistantViewFile{Kind: "workspace", Path: strings.Repeat("p", maxViewPath)}
 	in.Recent = nil
 	for range maxViewRecent {
-		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), MissionID: strings.Repeat("m", 128), Subagent: strings.Repeat("s", 128)})
+		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), WorkspaceID: strings.Repeat("w", 128), Subagent: strings.Repeat("s", 128)})
 	}
 	got, err = CleanViewContext(in)
 	b, _ := json.Marshal(got)
@@ -195,10 +195,9 @@ func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
 	in := &protocol.AssistantViewContext{Version: 1, Attachments: []protocol.AssistantViewAttachment{
 		{Kind: "check", RunID: "run-1", PR: 42, Repository: "acme/api", Check: "test (ubuntu-latest)"},
 		{Kind: "failure", RunID: "run-1", Failure: "adapter", Seq: 17},
-		{Kind: "task", MissionID: "mis-1", TaskID: "task-1", AttemptID: "att-1"},
 		{Kind: "secret", RunID: "run-1"},
 		{Kind: "run"},
-		{Kind: "pr", RunID: "run 1", PR: -3, Repository: "https://github.com/acme/api", Check: "a\nb", Failure: "Bad Word"},
+		{Kind: "pr", RunID: "session 1", PR: -3, Repository: "https://github.com/acme/api", Check: "a\nb", Failure: "Bad Word"},
 		{Kind: "run", RunID: "run-2", Check: strings.Repeat("c", maxViewCheck+1)},
 		{Kind: "check", RunID: "run-3", Check: "lint\u202e"},
 		{Kind: "check", RunID: "run-4", Check: "li\u200bnt"},
@@ -210,7 +209,6 @@ func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
 	want := []protocol.AssistantViewAttachment{
 		{Kind: "check", RunID: "run-1", PR: 42, Repository: "acme/api", Check: "test (ubuntu-latest)"},
 		{Kind: "failure", RunID: "run-1", Failure: "adapter", Seq: 17},
-		{Kind: "task", MissionID: "mis-1", TaskID: "task-1", AttemptID: "att-1"},
 		{Kind: "run", RunID: "run-2"},
 		{Kind: "check", RunID: "run-3"},
 		{Kind: "check", RunID: "run-4"},
@@ -236,46 +234,12 @@ func TestCleanViewContextKeepsWellFormedAttachmentsWithinCaps(t *testing.T) {
 		in.Attachments = append(in.Attachments, protocol.AssistantViewAttachment{Kind: "check", RunID: strings.Repeat("r", 128), Check: strings.Repeat("c", maxViewCheck)})
 	}
 	for range maxViewRecent {
-		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), MissionID: strings.Repeat("m", 128)})
+		in.Recent = append(in.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), WorkspaceID: strings.Repeat("w", 128), Subagent: strings.Repeat("s", 128)})
 	}
 	got, err = CleanViewContext(in)
 	b, _ := json.Marshal(got)
 	if err != nil || len(b) > maxViewContextBytes || len(got.Recent) == maxViewRecent || len(got.Attachments) != maxViewAttachments {
 		t.Fatalf("oversized context = %d bytes, %d recent, %d attachments, %v, want recent pages dropped before attachments", len(b), len(got.Recent), len(got.Attachments), err)
-	}
-}
-
-func TestCleanViewContextKeepsWellFormedLaunchDefaults(t *testing.T) {
-	in := &protocol.AssistantViewContext{Version: 1, Route: protocol.AssistantViewEntry{Name: "board"}, LaunchDefaults: []protocol.AssistantLaunchDefault{
-		{Agent: "claude", Mode: "acp", Model: "opus[1m]"},
-		{Agent: "opencode", Mode: "tui", Model: "anthropic/claude-sonnet-5-5"},
-		{Agent: "codex", Mode: "acp", Model: "gpt 5\n"},
-		{Agent: "goose", Mode: "acp", Model: "user:ghp_x@github.com"},
-		{Agent: "Claude Code", Mode: "acp"},
-		{Agent: "gemini", Mode: "yolo"},
-		{Agent: "a", Mode: "tui"},
-		{Agent: "b", Mode: "tui"},
-		{Agent: "c", Mode: "tui"},
-	}}
-	got, err := CleanViewContext(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []protocol.AssistantLaunchDefault{
-		{Agent: "claude", Mode: "acp", Model: "opus[1m]"},
-		{Agent: "opencode", Mode: "tui", Model: "anthropic/claude-sonnet-5-5"},
-		{Agent: "codex", Mode: "acp"},
-		{Agent: "goose", Mode: "acp"},
-	}
-	if !reflect.DeepEqual(got.LaunchDefaults, want) {
-		t.Fatalf("launch defaults = %+v, want malformed and credential-shaped models dropped, malformed agents and modes dropped whole, and the first %d kept", got.LaunchDefaults, maxViewDefaults)
-	}
-
-	in.Attachments = []protocol.AssistantViewAttachment{{Kind: "run", RunID: "run-1"}}
-	m := &member{}
-	m.holdView(&protocol.AssistantViewContext{Version: 1, Attachments: in.Attachments, LaunchDefaults: want}, viewFromPrompt, time.Now())
-	if m.view != nil {
-		t.Fatalf("held view = %+v, want launch defaults without a page never held", m.view)
 	}
 }
 

@@ -4,7 +4,7 @@ How to build Aether from source, run your build beside an installed release,
 test it, put it on a test server, and get it merged. Aether has a Linux
 server (`aether-server`) that runs coding agents in containers, a client CLI
 (`aether`) for Linux, macOS and Windows, and a web dashboard built into both
-binaries. Terms such as run, workspace and environment are explained in the
+binaries. Terms such as session, workspace and environment are explained in the
 [glossary](docs/README.md#concepts).
 
 ```mermaid
@@ -184,9 +184,9 @@ CI runs on every pull request. One that changes only `docs/` or root-level
 `*.md` files runs the public audit and nothing else, and the edge image and
 Windows desktop jobs run only when their paths change
 ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)). Inside an
-Aether run, unset the run's `AETHER_*` variables before testing, or some
+Aether run, unset the session's `AETHER_*` variables before testing, or some
 tests fail
-([how](docs/testing.md#running-the-docker-suites-inside-a-run)).
+([how](docs/testing.md#running-the-docker-suites-inside-a-session)).
 
 ## Deploy a development build to a test server
 
@@ -212,7 +212,7 @@ It leaves alone the `aether` CLI on the target, `/etc/aether/`, the data
 directory (`/var/lib/aether` by default) and Docker images. Environments
 without a saved image start from the standard image of the release the build
 descends from (`ghcr.io/3xdevops/aether-standard:v0.7.1-beta.1` for
-`v0.7.1-beta.1-12-gabc1234`), or `:latest` without a release tag. A run's
+`v0.7.1-beta.1-12-gabc1234`), or `:latest` without a release tag. A session's
 Browser tab needs `aether/browser:test`, which the server never pulls, and
 fails with `runtime: image aether/browser:test is built locally and is
 missing from the daemon` until you run `make browser-image` on the target or
@@ -284,7 +284,7 @@ come with no checksums, and nothing installs them for you:
 
 ```sh
 gh run list --workflow ci.yml --branch main --event push --status success --limit 1
-gh run download <run-id> --name binaries-go --dir aether-main
+gh run download <session-id> --name binaries-go --dir aether-main
 ```
 
 ## Go back to a release
@@ -443,7 +443,7 @@ has the local check and how to force the CI jobs on a branch.
 Commit messages, pull request titles and code style follow
 [AGENTS.md](AGENTS.md#commits). Update the guide in `docs/` that a change
 affects in the same pull request. An agent working inside an Aether run ends
-every pull request description with `Opened from Aether run <run id>`, using
+every pull request description with `Opened from Aether session <session id>`, using
 the `run_id` that `aether-internal status` reports.
 
 AI tools are welcome under the [AI contributions policy](AI_POLICY.md): you
@@ -461,7 +461,7 @@ never put live credentials in a report.
 Maintainers release by pushing a tag: `vMAJOR.MINOR.PATCH` with an optional
 `-alpha.N`, `-beta.N` or `-rc.N`. The tag's exact commit needs a successful
 `CI` run from a push to `main`; a pull request run, a merge queue run or
-another commit's run does not count. From a `main` checkout with `gh` and
+another commit's session does not count. From a `main` checkout with `gh` and
 `jq`:
 
 ```sh
@@ -489,7 +489,7 @@ installer too when OpenSSL 3 is present. Images carry Sigstore build
 attestations. Windows and macOS binaries are not code-signed.
 
 A failure before publishing leaves at most a draft: fix the cause and run
-`gh run rerun <run-id> --failed`. Published assets are never replaced, so a
+`gh run rerun <session-id> --failed`. Published assets are never replaced, so a
 bad published release needs a new tag.
 
 <details>

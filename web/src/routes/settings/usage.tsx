@@ -30,7 +30,7 @@ const statusText: Record<UsageProviderStatus, string> = {
 
 function failureOf(error: unknown): Failure {
   if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-    return { kind: 'unauthenticated', message: 'Your dashboard session is no longer authorized.' }
+    return { kind: 'unauthenticated', message: 'Your dashboard sign-in is no longer authorized.' }
   }
   if (error instanceof ApiError && (error.status === 404 || error.code === METHOD_NOT_FOUND)) {
     return { kind: 'unsupported', message: 'This server does not report account usage. Update the server to see it.' }

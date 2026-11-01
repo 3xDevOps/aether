@@ -35,7 +35,7 @@ export function Confirm({
   action: string
   pending?: string
   onConfirm: () => Promise<unknown>
-  onDone: (open: boolean) => void
+  onDone?: (open: boolean) => void
   onClose: () => void
   children?: ReactNode
 }) {
@@ -53,7 +53,7 @@ export function Confirm({
     setError(null)
     try {
       await onConfirm()
-      onDone(!closed.current)
+      onDone?.(!closed.current)
       if (!closed.current) onClose()
     } catch (err) {
       if (closed.current) toast.error(`${action} failed: ${message(err)}`)

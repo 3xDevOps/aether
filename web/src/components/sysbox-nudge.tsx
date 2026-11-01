@@ -18,7 +18,7 @@ export function SysboxNudge({ client = api }: { client?: Api } = {}) {
   return (
     <Callout
       tone="neutral"
-      title={state === 'on' ? 'Docker is on' : 'Let agents use Docker in their runs'}
+      title={state === 'on' ? 'Docker is on' : 'Let agents use Docker in their sessions'}
       actions={(
         <>
           {((state === 'off' && !command) || state === 'failed') && (
@@ -30,9 +30,9 @@ export function SysboxNudge({ client = api }: { client?: Api } = {}) {
     >
       <p role="status" className="flex items-center gap-2 text-muted empty:hidden">
         {state === 'installing' && <><Spinner />Installing… this takes a minute or two</>}
-        {justInstalled && state === 'on' && 'New runs get it now. Reopen your Environment to use it there.'}
+        {justInstalled && state === 'on' && 'New sessions get it now. Reopen your Environment to use it there.'}
       </p>
-      {state === 'off' && <p className="whitespace-pre-wrap break-words text-muted">{reason || 'Agents can build and run containers inside their own runs, isolated from this server.'}</p>}
+      {state === 'off' && <p className="whitespace-pre-wrap break-words text-muted">{reason || 'Agents can build and run containers inside their own sessions, isolated from this server.'}</p>}
       {command && <CopyableCommand command={command} />}
       {state === 'unsupported' && <p className="whitespace-pre-wrap break-words text-muted">{reason}</p>}
       {(state === 'failed' || error) && (

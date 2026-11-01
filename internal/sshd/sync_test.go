@@ -58,7 +58,7 @@ func TestSyncRefusesInvalidRequests(t *testing.T) {
 		t.Fatalf("empty run_id ack = %+v, want invalid params", ack)
 	}
 	if ack := syncAck(t, e, e.signer, "run_missing", false); ack.OK || ack.Code != protocol.CodeNotFound {
-		t.Fatalf("unknown run ack = %+v, want not found", ack)
+		t.Fatalf("unknown session ack = %+v, want not found", ack)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestSyncRefusesTerminalRunAndMissingWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	if ack := syncAck(t, e, e.signer, e.run.ID, true); ack.OK || ack.Code != protocol.CodeInvalidState {
-		t.Fatalf("terminal run ack = %+v, want invalid state", ack)
+		t.Fatalf("terminal session ack = %+v, want invalid state", ack)
 	}
 
 	e2 := newTestEnv(t, nil) // seeded run has no worktree

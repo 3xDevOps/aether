@@ -24,7 +24,7 @@ func TestRunLaunchStopsARunWhoseChildSettingWasNotRecorded(t *testing.T) {
 		WorkspaceID: string(e.ws.ID), Task: "build it", Harness: "claude", Children: domain.ChildrenOff,
 	})
 	if perr == nil || !strings.Contains(perr.Message, "disk full") || !strings.Contains(perr.Message, "was stopped") {
-		t.Fatalf("launch = %v, want the setting's error and the run stopped", perr)
+		t.Fatalf("launch = %v, want the setting's error and the session stopped", perr)
 	}
 	killed := 0
 	for _, call := range e.runs.Calls() {
@@ -33,6 +33,6 @@ func TestRunLaunchStopsARunWhoseChildSettingWasNotRecorded(t *testing.T) {
 		}
 	}
 	if killed != 1 {
-		t.Fatalf("calls = %v, want the launched run killed once", e.runs.Calls())
+		t.Fatalf("calls = %v, want the launched session killed once", e.runs.Calls())
 	}
 }

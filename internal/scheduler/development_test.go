@@ -124,7 +124,7 @@ func TestDevelopmentRunCloseRequiresExplicitReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err = e.sched.ResolveLiveRun(t.Context(), run.ID, false); err == nil {
-		t.Fatal("closed run admitted new development effects")
+		t.Fatal("closed session admitted new development effects")
 	}
 	if _, err = e.sched.ResolveLiveRun(t.Context(), run.ID, true); err != nil {
 		t.Fatalf("closed observations inaccessible: %v", err)
@@ -139,7 +139,7 @@ func TestDevelopmentRunCloseRequiresExplicitReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err = e.sched.ResolveLiveRun(t.Context(), run.ID, false); err == nil {
-		t.Fatal("paused run admitted effects")
+		t.Fatal("paused session admitted effects")
 	}
 	if _, err = e.sched.ResolveLiveRun(t.Context(), run.ID, true); err != nil {
 		t.Fatalf("paused observation: %v", err)
@@ -151,8 +151,8 @@ func TestDevelopmentOnAFinishedRunSaysTheEnvironmentIsGone(t *testing.T) {
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	_, err := e.sched.CallDevelopment(t.Context(), run.ID, control.Principal{Kind: control.PrincipalMember, MemberID: e.member.ID}, protocol.MethodDevBrowserStatus, json.RawMessage(`{"run_id":"`+string(run.ID)+`"}`), func() error { return nil })
-	if !errors.Is(err, ErrNoLiveEnvironment) || err.Error() != "scheduler: the run has no live environment: the run is completed and its container is gone" {
-		t.Fatalf("browser status on a finished run: %v", err)
+	if !errors.Is(err, ErrNoLiveEnvironment) || err.Error() != "scheduler: the session has no live environment: the session is completed and its container is gone" {
+		t.Fatalf("browser status on a finished session: %v", err)
 	}
 }
 func TestDevelopmentCapturesAreBoundedAndRunScoped(t *testing.T) {

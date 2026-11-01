@@ -69,18 +69,23 @@ func TestConnectorProtocolThroughTheEdge(t *testing.T) {
 
 	resp, out := rpc(t, base, token.AccessToken, "tools/list", map[string]any{})
 	tools, _ := out["result"].(map[string]any)["tools"].([]any)
-	if resp.StatusCode != http.StatusOK || len(tools) != 34 || resp.Header.Get("Mcp-Session-Id") != "" {
+	if resp.StatusCode != http.StatusOK || len(tools) != 32 || resp.Header.Get("Mcp-Session-Id") != "" {
 		t.Fatalf("tools/list without initialize: %s %v", resp.Status, out)
 	}
-	raw, err := json.Marshal(tools)
-	if err != nil {
-		t.Fatal(err)
+	// The budget of docs/chatgpt-plugin.md#tool-list-budget, as a client
+	// receives the list: names, descriptions and input schemas.
+	counted := 0
+	for _, tool := range tools {
+		tool := tool.(map[string]any)
+		schema, err := json.Marshal(tool["inputSchema"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		counted += len(tool["name"].(string)) + len(tool["description"].(string)) + len(schema)
 	}
-	// ChatGPT budgets about 5000 tokens for a connector's tool
-	// definitions; JSON runs about 4 bytes a token.
-	t.Logf("tools/list: %d tools, %d bytes of definitions, about %d tokens", len(tools), len(raw), len(raw)/4)
-	if len(raw) > 5000*4 {
-		t.Errorf("tools/list is %d bytes, over ChatGPT's budget of about %d", len(raw), 5000*4)
+	t.Logf("tools/list: %d tools, %d bytes of names, descriptions and schemas", len(tools), counted)
+	if counted > 15000 {
+		t.Errorf("tools/list has %d bytes of names, descriptions and schemas, want at most 15000", counted)
 	}
 
 	resp, out = rpc(t, base, token.AccessToken, "tools/call", map[string]any{"name": "aether_list_workspaces", "arguments": map[string]any{}})
@@ -98,7 +103,7 @@ func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 	h := newHarness(t)
 	client := newConnectorClient(t)
 	rooms := &fakeRooms{}
-	s := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{Rooms: rooms, Missions: &fakeMissions{}})
+	s := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{Rooms: rooms})
 	other := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{})
 	clients := h.login(alice, bob)
 	al, bo := clients[0], clients[1]
@@ -121,8 +126,8 @@ func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 	session, token := connectWithToken(t, bctl, client, base, "write", "control")
 	run := string(alicesRun.ID)
 
-	if failed, text := toolText(t, session, "aether_message_run", map[string]any{"run_id": run, "message": "use postgres", "idempotency_key": "m-1"}); failed {
-		t.Fatalf("bob messaging alice's run in an open workspace: %s", text)
+	if failed, text := toolText(t, session, "aether_message_session", map[string]any{"run_id": run, "message": "use postgres", "idempotency_key": "m-1"}); failed {
+		t.Fatalf("bob messaging alice's session in an open workspace: %s", text)
 	}
 	if posts, _ := rooms.recorded(); len(posts) != 1 || posts[0].ActorID != s.memberOf(t, bob).ID {
 		t.Fatalf("room posts = %+v, want bob's message", posts)
@@ -132,31 +137,38 @@ func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, args := range map[string]map[string]any{
-		"aether_message_run": {"run_id": run, "message": "use mysql", "idempotency_key": "m-2"},
-		"aether_stop_run":    {"run_id": run},
-		"aether_pause_run":   {"run_id": run},
+		"aether_message_session": {"run_id": run, "message": "use mysql", "idempotency_key": "m-2"},
+		"aether_stop_session":    {"run_id": run},
+		"aether_pause_session":   {"run_id": run},
 	} {
 		if failed, text := toolText(t, session, name, args); !failed || !strings.Contains(text, "permission denied") {
-			t.Errorf("%s on alice's run in an owners-only workspace = %v %s, want refused", name, failed, text)
+			t.Errorf("%s on alice's session in an owners-only workspace = %v %s, want refused", name, failed, text)
 		}
 	}
 	if got, err := s.db.GetRun(t.Context(), alicesRun.ID); err != nil || got.Status != domain.RunRunning {
-		t.Fatalf("alice's run = %+v %v, want it still running", got, err)
+		t.Fatalf("alice's session = %+v %v, want it still running", got, err)
 	}
 
 	for name, args := range map[string]map[string]any{
-		"aether_launch_run":   {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "member_id": string(s.memberOf(t, alice).ID)},
-		"aether_list_runs":    {"member_id": string(s.memberOf(t, alice).ID)},
-		"aether_launch_swarm": {"workspace_id": string(ws.ID), "objective": "o", "harness": "claude", "workers": []any{map[string]any{"harness": "codex", "account_member_id": string(s.memberOf(t, alice).ID)}}},
+		"aether_launch_session": {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "member_id": string(s.memberOf(t, alice).ID)},
+		"aether_list_sessions":  {"member_id": string(s.memberOf(t, alice).ID)},
 	} {
 		if failed, text := toolText(t, session, name, args); !failed || !strings.Contains(text, "member_id") {
 			t.Errorf("%s with a member id = %v %s, want refused", name, failed, text)
 		}
 	}
+	// Alice has not shared her agent account with bob.
+	for name, args := range map[string]map[string]any{
+		"aether_launch_session": {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "account_member_id": string(s.memberOf(t, alice).ID)},
+	} {
+		if failed, text := toolText(t, session, name, args); !failed || !strings.Contains(text, "not shared") {
+			t.Errorf("%s on an account not shared with bob = %v %s, want refused", name, failed, text)
+		}
+	}
 
 	call[protocol.MemberRoleResult](t, actl, protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(s.memberOf(t, bob).ID), Role: string(domain.RoleViewer)})
-	if failed, text := toolText(t, session, "aether_launch_run", map[string]any{"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "idempotency_key": "l-1"}); !failed ||
-		!strings.Contains(text, "permission denied: launching runs requires the collaborator role") {
+	if failed, text := toolText(t, session, "aether_launch_session", map[string]any{"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "idempotency_key": "l-1"}); !failed ||
+		!strings.Contains(text, "permission denied: launching sessions requires the collaborator role") {
 		t.Fatalf("a demoted member's launch = %v %s, want refused for the role", failed, text)
 	}
 

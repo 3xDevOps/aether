@@ -78,7 +78,7 @@ export interface OnboardingRepo {
 
 /** The resume point is persisted by name, not position, so inserting a step
  * never relocates someone mid-wizard. */
-export const onboardingSteps = ['Connect', 'Repository', 'Agent', 'First run'] as const
+export const onboardingSteps = ['Connect', 'Repository', 'Agent', 'First session'] as const
 
 export type OnboardingStep = (typeof onboardingSteps)[number]
 
@@ -86,6 +86,7 @@ export interface OnboardingFirstRun {
   harness: string
   task: string
   model?: string
+  effort?: string
 }
 
 const emptyFirstRun: OnboardingFirstRun = { harness: '', task: '' }
@@ -151,7 +152,7 @@ export interface UiSlice {
   boardViews: Record<string, BoardView>
   boardMapAllWorkspaces: boolean
   boardMapViewports: Record<string, BoardMapViewport>
-  /** Folded swarms on the Map, keyed by the integrator's map key. */
+  /** Folded families on the Map, keyed by the parent run's map key. */
   boardMapFolded: Record<string, true>
   /** The signed-in member's, keyed by agent name; the newest `at` is the agent a launch preselects. */
   launchDefaults: LaunchDefaults

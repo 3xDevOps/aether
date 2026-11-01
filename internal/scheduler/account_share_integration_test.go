@@ -4,6 +4,8 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,7 +63,7 @@ func launchShareRun(t *testing.T, e *testEnv, docker *runtime.Docker, cli *clien
 	id := runtime.ID(sc.ContainerID)
 	info, err := cli.ContainerInspect(ctx, sc.ContainerID, client.ContainerInspectOptions{})
 	if err != nil {
-		t.Fatalf("inspect run container: %v", err)
+		t.Fatalf("inspect session container: %v", err)
 	}
 	var volumes []string
 	for _, m := range info.Container.Mounts {
@@ -114,14 +116,16 @@ func (r shareRun) want(t *testing.T, script, want string) {
 	}
 }
 
-// engineMounts lists the engine's view of the container's volume mounts,
-// and its bind mounts whose source lies in home, as "type source at
-// destination".
+// engineMounts lists the engine's view of the container's volume mounts of
+// home (a subpath volume is named for its base), and its bind mounts whose
+// source lies in home, as "type source at destination".
 func (r shareRun) engineMounts(home string) (volumes, binds []string) {
+	volume := sha256.Sum256([]byte(home))
+	name := "aether-home-" + hex.EncodeToString(volume[:])[:32]
 	for _, m := range r.mounts {
 		desc := string(m.Type) + " " + m.Name + m.Source + " at " + m.Destination
 		switch {
-		case m.Type == mount.TypeVolume:
+		case m.Type == mount.TypeVolume && m.Name == name:
 			volumes = append(volumes, desc)
 		case m.Source == home || strings.HasPrefix(m.Source, home+"/"):
 			binds = append(binds, desc)
@@ -267,10 +271,10 @@ func TestIntegrationSharedAccountRunDocker(t *testing.T) {
 
 	own := launchShareRun(t, e, docker, cli, e.member.ID, e.member.ID, "own smoke", "")
 	if volumes, binds := own.engineMounts(ownerHome); len(volumes) > 0 || len(binds) > 0 {
-		t.Fatalf("Ada's own run engine mounts: volumes %v, binds from Grace's home %v; want neither", volumes, binds)
+		t.Fatalf("Ada's own session engine mounts: volumes %v, binds from Grace's home %v; want neither", volumes, binds)
 	}
 	if mounts := own.ownerMounts(t, ownerHome); len(mounts) > 0 {
-		t.Fatalf("Ada's own run mounts Grace's home: %v", mounts)
+		t.Fatalf("Ada's own session mounts Grace's home: %v", mounts)
 	}
 	own.want(t, "cat /root/.claude/.credentials.json", "")
 	own.want(t, "cat /root/.gitconfig", adaGitconfig)
@@ -285,7 +289,7 @@ func TestIntegrationSharedAccountRunDocker(t *testing.T) {
 func TestIntegrationSharerPinDocker(t *testing.T) {
 	e, docker, cli, owner := newShareDockerEnv(t, printLogin)
 	ctx := t.Context()
-	if err := e.db.ShareAccount(ctx, owner.ID, e.member.ID); err != nil {
+	if _, err := e.db.ShareAccount(ctx, owner.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	ownerHome, err := e.cfg.Homes.Path(owner.ID)
@@ -310,7 +314,7 @@ func TestIntegrationSharerPinDocker(t *testing.T) {
 	if !slices.ContainsFunc(mounts, func(m string) bool {
 		return strings.HasSuffix(m, "/.claude/.credentials.json at /root/.claude/.credentials.json")
 	}) {
-		t.Fatalf("Grace's own run does not mount her login in place: %v", mounts)
+		t.Fatalf("Grace's own session does not mount her login in place: %v", mounts)
 	}
 	code, out := own.sh(t, "printf replaced > /root/.claude/.new && mv -f /root/.claude/.new /root/.claude/.credentials.json")
 	if code == 0 || !strings.Contains(strings.ToLower(out), "busy") {

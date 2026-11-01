@@ -2,12 +2,12 @@
 
 This guide is for a coding agent, such as Claude Code, Codex or opencode,
 working in a shell on a developer's computer. With it the agent installs
-Aether, sets up the server over ssh, and launches and follows runs through the
+Aether, sets up the server over ssh, and launches and follows sessions through the
 `aether` CLI. The human keeps every sign-in, approval and secret.
 
 Aether's terms: the **server** is the Linux machine where agents run
 (`aether-server`); this computer is a **client** (`aether`). A **workspace** is
-one repository on the server. A **run** is one agent working on one task in its
+one repository on the server. A **session** is one agent working on one task in its
 own container, on its own git branch. The **edge** is a relay at
 `https://edge.onaether.dev` that the server and clients dial out to, so neither
 needs an open port. The [glossary](README.md#concepts) has the rest.
@@ -36,13 +36,13 @@ Rules:
    - which coding agent, and whether it signs in with a subscription or an
      API key
    - which repository: a path on this computer or a GitHub URL
-   - whether runs may use Docker inside them, which installs Sysbox and
+   - whether sessions may use Docker inside them, which installs Sysbox and
      changes /etc/docker/daemon.json on the server
    - CLI only, or the desktop app too
 3. Never ask me for a password, sudo password, token or key in chat.
 4. Hand every sign-in to me as "open this URL and enter this code", then wait
    for it to finish.
-5. Never approve devices, members, invites or run permission requests
+5. Never approve devices, members, invites or session permission requests
    yourself. Tell me the command and let me run it.
 6. Ask before anything that costs money or publishes: firewall changes,
    deploy keys, pushes to GitHub, pull requests.
@@ -58,7 +58,7 @@ Rules:
   print a URL and a code, then wait until the human finishes or the code
   expires after 10 to 15 minutes. Run them in the background with output to a
   file, give the human the URL and code, and wait for the command to exit 0.
-- `aether wait` runs until the run needs something or its `--timeout`. Run it
+- `aether wait` runs until the session needs something or its `--timeout`. Run it
   in the background too, or give it a `--timeout` shorter than your shell
   tool's limit and repeat it.
 - `aether status` prints what this computer is linked to and a `next` line with
@@ -98,7 +98,7 @@ key. **Human:** ssh to it once and check the key. Never pass
 `StrictHostKeyChecking=no` or `accept-new`.
 
 Add `--sysbox=false` to the `aether-server install` commands below unless the
-human allowed Docker inside runs.
+human allowed Docker inside sessions.
 
 ```sh
 ssh <user>@<host> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role none'
@@ -191,16 +191,16 @@ writes none, so `login_found` stays false, `account usage` reports the agent
 unauthenticated, and `aether status` keeps naming `aether agent login`; go on
 to step 6.
 
-### 6. Launch the first run
+### 6. Launch the first session
 
 ```sh
-aether run "add a health check endpoint" --workspace app --agent claude
+aether session "add a health check endpoint" --workspace app --agent claude
 aether wait run-d6ay38tj8j --timeout 30m
 ```
 
-`aether run` prints `run <run-id> running`. If it fails or is interrupted, it
-prints the retry with `--idempotency-key`; that retry returns the same run
-instead of starting another. `aether run - < task.md` reads the task from
+`aether session` prints `session <session-id> running`. If it fails or is interrupted, it
+prints the retry with `--idempotency-key`; that retry returns the same session
+instead of starting another. `aether session - < task.md` reads the task from
 stdin.
 
 ## Add a repository
@@ -215,11 +215,11 @@ clone to its workspace.
 ## Work across repos
 
 ```sh
-aether run "rename the /users endpoint in the API and the web client" --workspace web --repo api --agent claude
+aether session "rename the /users endpoint in the API and the web client" --workspace web --repo api --agent claude
 ```
 
 Each `--repo` workspace is checked out at `/repos/<name>` on its own branch.
-`aether pull <run-id>` fetches every repo's branch into the clone linked for
+`aether pull <session-id>` fetches every repo's branch into the clone linked for
 its workspace.
 
 ## Add another laptop
@@ -267,49 +267,49 @@ Sign-in works as in step 5. Agent names: `claude`, `codex`, `opencode`, `pi`,
 `omp`, `copilot`, `gemini`, `cursor`, `antigravity`
 ([harnesses.md](harnesses.md)).
 
-## Follow and answer runs
+## Follow and answer sessions
 
 ```sh
-aether runs --needs-you
-aether runs <run-id> --json
-aether wait <run-id> --timeout 30m
-aether logs <run-id>
-aether message <run-id> "<reply>"
+aether sessions --needs-you
+aether sessions <session-id> --json
+aether wait <session-id> --timeout 30m
+aether logs <session-id>
+aether message <session-id> "<reply>"
 ```
 
-`aether wait` exits 0 when the run finished, 1 when it failed, 3 when it needs
+`aether wait` exits 0 when the session finished, 1 when it failed, 3 when it needs
 you, 4 when it is parked with nothing pending (its turn ended without a
 report, or it went silent) and a message continues it, 5 when its wait broke
 (a condition resolved and the wake never reached the agent, or its source
 went unread for an hour), and 124 on
-timeout. `aether runs <run-id>` shows what a run needs, each
+timeout. `aether sessions <session-id>` shows what a session needs, each
 with the command that answers it.
 
 A permission request is the human's: show it with its options, and run the
-`aether answer <run-id> <request-id> <option-id>` they pick. It allows or
-rejects once, never always. Relay a run's question to the human unless the
+`aether answer <session-id> <request-id> <option-id>` they pick. It allows or
+rejects once, never always. Relay a session's question to the human unless the
 task they gave you already answers it.
 
 ## Bring results back and publish
 
 ```sh
 aether github connect
-aether publish <run-id>
-aether close <run-id> --outcome merged
-aether pull <run-id>
+aether publish <session-id>
+aether close <session-id> --outcome merged
+aether pull <session-id>
 ```
 
-Publish before you close: a finished run needs `aether reopen <run-id>` first.
+Publish before you close: a finished session needs `aether reopen <session-id>` first.
 Publish pushes commits only; if it reports uncommitted changes, ask the agent
-to commit with `aether message <run-id> "commit your changes"`, then publish
+to commit with `aether message <session-id> "commit your changes"`, then publish
 again.
 
-`aether pull` fetches the run's branch into the linked clone without merging.
-The branch gets the agent's work when the run closes, so pull after close.
+`aether pull` fetches the session's branch into the linked clone without merging.
+The branch gets the agent's work when the session closes, so pull after close.
 Ask the human before `aether github connect`: it grants `repo`, `read:org`,
 `gist` and `admin:ssh_signing_key`. **Human:** open the URL and enter the code.
 Ask before `aether publish`: it pushes the branch and opens a pull request.
-`--outcome abandoned` closes a run without its result.
+`--outcome abandoned` closes a session without its result.
 
 ## Update
 
@@ -320,7 +320,7 @@ aether update --check --json
 
 Update the server before the clients. Ask the human first: `aether server
 update` (admin only) restarts the server, and `aether update` replaces this
-CLI. Runs keep going through a server update.
+CLI. Sessions keep going through a server update.
 
 ## Remember Aether
 

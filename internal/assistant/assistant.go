@@ -1,6 +1,6 @@
 // Package assistant hosts each member's Aether assistant: an Enhanced session
-// of the member's own agent, run in their environment terminal and wired to a
-// member-scoped tool socket.
+// of the member's own agent, run in a container of its own with a
+// server-owned home and wired to a member-scoped tool socket.
 package assistant
 
 import (
@@ -26,7 +26,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -36,9 +36,8 @@ import (
 const (
 	// EpochStride separates conversation generations in the epoch viewers see.
 	EpochStride  = 1 << 20
-	workDir      = ".aether/assistant"
 	socketName   = "assistant.sock"
-	startTimeout = 2 * time.Minute
+	startTimeout = protocol.AssistantStartTimeout
 	stopGrace    = 3 * time.Second
 	stderrTail   = 4 << 10
 	maxKeys      = 128
@@ -56,14 +55,30 @@ var (
 )
 
 type Config struct {
-	// Dir is the host directory holding <member>/items.jsonl and
+	// Dir is the host directory holding <member>/items.jsonl and the
+	// assistant container's <member>/home, <member>/instructions and
 	// <member>/sock.
-	Dir    string
-	Store  store.AssistantStore
-	Homes  *memberhome.Manager
-	Runs   *scheduler.Scheduler
+	Dir   string
+	Store store.AssistantStore
+	Runs  *scheduler.Scheduler
+	// Host runs the assistant's container and adapter.
+	Host   Host
 	Caller func(domain.MemberID) tools.Caller
 	Bus    events.Bus
+	// Preferences are the members' private preferences the assistant reads
+	// and saves.
+	Preferences *preference.Service
+}
+
+// Host is the scheduler's side of the assistant: its container and the
+// adapter in it.
+type Host interface {
+	AssistantAdapter(agent string) (scheduler.AssistantLaunch, error)
+	StartAssistantExec(ctx context.Context, member domain.MemberID, agent string, spec runtime.ExecSpec, installing func()) (runtime.ManagedExec, error)
+	StopAssistantExec(ctx context.Context, identity runtime.ExecIdentity) error
+	DiscardAssistantState(ctx context.Context, member domain.MemberID) error
+	RemoveAssistant(ctx context.Context, member domain.MemberID) error
+	AssistantLoginFound(member domain.MemberID, agent string) (bool, error)
 }
 
 type Service struct {
@@ -87,6 +102,9 @@ type member struct {
 	id       domain.MemberID
 	confirms *confirmations
 	actions  heldActions
+	// notesSettled closes once the agent has answered the last prompt that
+	// carried preference notes, so the next prompt takes any it refused.
+	notesSettled chan struct{}
 	// conv is cancelled when a reset discards the conversation, so an
 	// action record that outlived it is dropped. Read it under mu.
 	conv    context.Context
@@ -109,7 +127,9 @@ type member struct {
 	mu       sync.Mutex
 	sess     *session
 	starting bool
-	err      string
+	// installing is set while a start installs the agent.
+	installing bool
+	err        string
 	// changed is closed when the live session starts or ends, or the
 	// conversation is reset, so a viewer resubscribes.
 	changed chan struct{}
@@ -235,7 +255,7 @@ func (s *Service) agents(ctx context.Context, id domain.MemberID) ([]protocol.As
 	if err := json.Unmarshal(raw, &listed); err != nil {
 		return nil, fmt.Errorf("assistant: decode the agent list: %w", err)
 	}
-	return readiness(listed.Agents), nil
+	return readiness(listed.Agents, func(agent string) (bool, error) { return s.cfg.Host.AssistantLoginFound(id, agent) })
 }
 
 func (s *Service) stored(ctx context.Context, id domain.MemberID) (*store.AssistantSession, error) {
@@ -260,7 +280,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	}
 	m := s.member(id)
 	m.mu.Lock()
-	live, starting, failure := m.liveLocked(), m.starting, m.err
+	live, starting, installing, failure := m.liveLocked(), m.starting, m.installing, m.err
 	m.mu.Unlock()
 	settings, err := s.Settings(ctx, id)
 	if err != nil {
@@ -269,6 +289,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	status := protocol.AssistantStatus{
 		Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(),
 		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove, ShareView: settings.ShareView,
+		PreferencesEnabled: settings.PreferencesEnabled, Temporary: settings.Temporary,
 	}
 	switch {
 	case live != nil:
@@ -277,6 +298,9 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 		if live.acp.State().TurnInFlight {
 			status.State = protocol.AssistantStateRunning
 		}
+		return status, nil
+	case installing:
+		status.State = protocol.AssistantStateInstalling
 		return status, nil
 	case starting:
 		status.State = protocol.AssistantStateStarting
@@ -293,17 +317,9 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	} else if err != nil {
 		return protocol.AssistantStatus{}, err
 	}
-	stale := false
-	if status.Agent != "" && status.Error == "" {
-		if stale, err = s.cfg.Runs.AssistantTerminalStale(ctx, id); err != nil {
-			return protocol.AssistantStatus{}, fmt.Errorf("assistant: %w", err)
-		}
-	}
 	switch {
 	case status.Agent == "":
 		status.State = protocol.AssistantStateSetup
-	case stale:
-		status.State = protocol.AssistantStateNeedsRestart
 	case failure != "" || status.Error != "":
 		status.State = protocol.AssistantStateFailed
 	default:
@@ -313,21 +329,9 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 }
 
 func (s *Service) Start(ctx context.Context, id domain.MemberID, p protocol.AssistantStartParams) (protocol.AssistantStatus, error) {
-	m := s.member(id)
-	if p.RestartEnvironment {
-		m.op.Lock()
-		err := s.stop(ctx, m)
-		m.op.Unlock()
-		if err != nil {
-			return protocol.AssistantStatus{}, err
-		}
-		if err = s.cfg.Runs.StopTerminal(ctx, id); err != nil {
-			return protocol.AssistantStatus{}, fmt.Errorf("assistant: restart the environment: %w", err)
-		}
-	}
 	_, err := s.ensure(ctx, id, p.Agent)
 	var notReady *AgentNotReadyError
-	if err != nil && !errors.Is(err, scheduler.ErrAssistantNeedsRestart) && !errors.Is(err, ErrNoAgent) && !errors.As(err, &notReady) {
+	if err != nil && !errors.Is(err, ErrNoAgent) && !errors.As(err, &notReady) {
 		return protocol.AssistantStatus{}, err
 	}
 	return s.Status(ctx, id)
@@ -403,11 +407,9 @@ func (s *Service) ensureLocked(ctx context.Context, m *member, requested string)
 	live, err := s.open(openCtx, m, agent, row)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.starting = false
+	m.starting, m.installing = false, false
 	if err != nil {
-		if !errors.Is(err, scheduler.ErrAssistantNeedsRestart) {
-			m.err = err.Error()
-		}
+		m.err = err.Error()
 		m.notify()
 		return nil, err
 	}
@@ -417,13 +419,16 @@ func (s *Service) ensureLocked(ctx context.Context, m *member, requested string)
 }
 
 func (s *Service) open(ctx context.Context, m *member, agent string, row *store.AssistantSession) (*session, error) {
-	launch, err := s.cfg.Runs.AssistantAdapter(ctx, m.id, agent)
+	launch, err := s.cfg.Host.AssistantAdapter(agent)
 	if err != nil {
 		return nil, fmt.Errorf("assistant: %w", err)
 	}
-	files := map[string]string{"AGENTS.md": Instructions, "CLAUDE.md": Instructions}
-	for name, content := range files {
-		if err = s.cfg.Homes.HomeUpload(m.id, workDir+"/"+name, []byte(content), true); err != nil {
+	dir := scheduler.AssistantInstructionsDir(s.cfg.Dir, m.id)
+	if err = os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("assistant: create the instructions directory: %w", err)
+	}
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if err = os.WriteFile(filepath.Join(dir, name), []byte(Instructions), 0o644); err != nil {
 			return nil, fmt.Errorf("assistant: write %s: %w", name, err)
 		}
 	}
@@ -433,14 +438,14 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		cancel()
 		return nil, err
 	}
-	srv := &tools.Server{Caller: actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}, Confirm: s.approver(m), Member: string(m.id),
+	srv := &tools.Server{Caller: s.preferenceCaller(m, actionCaller{Caller: s.cfg.Caller(m.id), s: s, m: m}), Confirm: s.approver(m), Member: string(m.id),
 		View: func() protocol.AssistantViewContextResult { return s.View(m.id, time.Now()) }}
 	if s.watches != nil {
 		srv.Follow = func(ctx context.Context, run string) {
 			if _, followErr := s.watches.Follow(ctx, m.id, domain.RunID(run)); followErr != nil {
 				body := "Watching it failed: " + followErr.Error() + "\n\nYou will not be notified when it needs you or finishes."
-				if noteErr := s.note(ctx, m, acphost.Notice{Severity: "warning", Title: "Run " + run + " is not watched", Description: body}); noteErr != nil {
-					slog.Warn("assistant: watch the run", "run", run, "member", m.id, "error", errors.Join(followErr, noteErr))
+				if noteErr := s.note(ctx, m, acphost.Notice{Severity: "warning", Title: "Session " + run + " is not watched", Description: body}); noteErr != nil {
+					slog.Warn("assistant: watch the session", "run", run, "member", m.id, "error", errors.Join(followErr, noteErr))
 				}
 			}
 		}
@@ -469,9 +474,14 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 	if row.Agent == agent {
 		resume = row.HarnessSessionID
 	}
-	exec, cwd, err := s.cfg.Runs.StartAssistantExec(ctx, m.id, runtime.ExecSpec{
-		Argv: argv, WorkingDir: workDir, CreationKey: "assistant-" + rand.Text(),
+	exec, err := s.cfg.Host.StartAssistantExec(ctx, m.id, agent, runtime.ExecSpec{
+		Argv: argv, CreationKey: "assistant-" + rand.Text(),
 		Env: append([]string{"AETHER_ASSISTANT=1", "NO_BROWSER=1"}, launch.Env...),
+	}, func() {
+		m.mu.Lock()
+		m.installing = true
+		m.mu.Unlock()
+		m.notify()
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assistant: start %s: %w", argv[0], err)
@@ -489,7 +499,7 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 	go func() { _, _ = io.Copy(stderr, att.Stderr()) }()
 	acpSess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath: s.logPath(m.id),
-		Cwd:     cwd,
+		Cwd:     scheduler.AssistantCwd,
 		MCPServers: []acp.McpServer{{Stdio: &acp.McpServerStdio{
 			Name: "aether", Command: coordtransport.BinaryPath, Args: []string{"mcp", "--assistant"}, Env: []acp.EnvVariable{},
 		}}},
@@ -529,7 +539,7 @@ func (s *Service) stopStale(ctx context.Context, m *member, row *store.Assistant
 	if err := json.Unmarshal([]byte(row.ExecIdentity), &identity); err != nil {
 		return fmt.Errorf("assistant: decode the recorded adapter: %w", err)
 	}
-	if err := s.cfg.Runs.StopAssistantExec(ctx, identity); err != nil {
+	if err := s.cfg.Host.StopAssistantExec(ctx, identity); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}
 	return s.cfg.Store.ClearAssistantExec(ctx, m.id, row.Generation, row.ExecIdentity)
@@ -663,6 +673,9 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	if err = s.stopStale(ctx, m, row); err != nil {
 		return err
 	}
+	if err = s.cfg.Host.DiscardAssistantState(ctx, m.id); err != nil {
+		return fmt.Errorf("assistant: %w", err)
+	}
 	if _, err := s.cfg.Store.ResetAssistantSession(ctx, m.id); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}
@@ -674,6 +687,7 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	m.conv, m.endConv = context.WithCancel(context.Background())
 	m.err = ""
 	m.attempts, m.done = make(map[string]*attempt), nil
+	m.notesSettled = nil
 	m.signalLocked()
 	m.mu.Unlock()
 	return nil
@@ -718,8 +732,8 @@ func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {
 	s.mu.Lock()
 	delete(s.members, id)
 	s.mu.Unlock()
-	if err := os.RemoveAll(filepath.Join(s.cfg.Dir, string(id))); err != nil {
-		return fmt.Errorf("assistant: remove the member's files: %w", err)
+	if err := s.cfg.Host.RemoveAssistant(ctx, id); err != nil {
+		return fmt.Errorf("assistant: %w", err)
 	}
 	return nil
 }
@@ -755,8 +769,13 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 			return ctx.Err()
 		}
 	}
+	conv := m.conversation()
+	if err := m.waitForNotes(ctx, conv); err != nil {
+		m.finish(key, a, err)
+		return err
+	}
 	m.share.RLock()
-	dispatched, err := s.send(ctx, m, text, key, view)
+	dispatched, err := s.send(ctx, m, conv, text, key, view)
 	m.share.RUnlock()
 	if err != nil && !dispatched {
 		m.finish(key, a, err)
@@ -770,9 +789,12 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 // check, the dispatch and saving the key under the generation it ran in.
 // dispatched is true once the agent may have the prompt; its key then stays
 // reserved even if the caller left or saving it failed.
-func (s *Service) send(ctx context.Context, m *member, text, key string, view *protocol.AssistantViewContext) (dispatched bool, err error) {
+func (s *Service) send(ctx context.Context, m *member, conv context.Context, text, key string, view *protocol.AssistantViewContext) (dispatched bool, err error) {
 	m.op.Lock()
 	defer m.op.Unlock()
+	if conv.Err() != nil {
+		return false, fmt.Errorf("assistant: %w while the prompt waited; send it again in the new conversation", errConversationEnded)
+	}
 	row, err := s.stored(ctx, m.id)
 	if err != nil {
 		return false, err
@@ -791,7 +813,43 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if err != nil {
 		return false, err
 	}
-	started, err := promptLive(ctx, live, text, view)
+	m.mu.Lock()
+	wait := m.notesSettled
+	m.mu.Unlock()
+	if wait != nil {
+		select {
+		case <-wait:
+		default:
+			return false, ErrTurnRunning
+		}
+	}
+	notes, restore, err := s.preferenceNotes(ctx, m.id)
+	if err != nil {
+		return false, err
+	}
+	// A caller that left before the agent answered took the prompt as
+	// dispatched; the agent may still refuse it.
+	settled := make(chan struct{})
+	if len(notes) > 0 {
+		m.mu.Lock()
+		m.notesSettled = settled
+		m.mu.Unlock()
+	}
+	settle := sync.OnceFunc(func() { close(settled) })
+	restore = sync.OnceFunc(restore)
+	refused := func(err error) {
+		if err != nil {
+			restore()
+		}
+		settle()
+	}
+	defer func() {
+		if !dispatched {
+			restore()
+			settle()
+		}
+	}()
+	started, err := promptLive(ctx, live, text, view, notes, refused)
 	if errors.Is(err, acphost.ErrPromptUnsent) {
 		// The adapter died after ensure saw it alive and before the prompt
 		// left: once its session has ended, start a new one and send there.
@@ -803,7 +861,7 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
 			return false, err
 		}
-		started, err = promptLive(ctx, live, text, view)
+		started, err = promptLive(ctx, live, text, view, notes, refused)
 	}
 	switch {
 	case err == nil && !started:
@@ -822,12 +880,32 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	return true, err
 }
 
-func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext) (bool, error) {
+func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext, notes []acp.ContentBlock,
+	delivered func(error)) (bool, error) {
 	blocks, err := promptBlocks(text, view, live.acp.Info().PromptEmbedded)
 	if err != nil {
 		return false, err
 	}
-	return live.acp.PromptIdle(ctx, blocks, nil)
+	return live.acp.PromptIdle(ctx, append(blocks, notes...), delivered)
+}
+
+// waitForNotes waits, outside the member's lock so a reset is not held up by
+// a silent agent, for the last prompt's preference notes to settle, or for the
+// conversation to be discarded.
+func (m *member) waitForNotes(ctx, conv context.Context) error {
+	m.mu.Lock()
+	wait := m.notesSettled
+	m.mu.Unlock()
+	if wait == nil {
+		return nil
+	}
+	select {
+	case <-wait:
+	case <-conv.Done():
+	case <-ctx.Done():
+		return fmt.Errorf("assistant: wait for the last prompt's answer: %w", ctx.Err())
+	}
+	return nil
 }
 
 func (m *member) begin(key string) (*attempt, bool) {

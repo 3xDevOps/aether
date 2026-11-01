@@ -146,12 +146,15 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
 	writeHomeFiles(t, e.ownerHome, append([]string{".claude/.credentials.json", ".omp/agent/agent.db"}, ownerState...)...)
+	// Ada's own Claude and Gemini logins stay pinned except where the
+	// borrowed login takes the Claude one's place.
 	for _, tc := range []struct {
 		harness, login string
 		dir            bool
+		mounts         int
 	}{
-		{"claude", ".claude/.credentials.json", false},
-		{"omp", ".omp/agent", true},
+		{"claude", ".claude/.credentials.json", false, 5},
+		{"omp", ".omp/agent", true, 6},
 	} {
 		run, err := e.launch(t, tc.harness)
 		if err != nil {
@@ -165,8 +168,8 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 		if spec.Image != launcherImage {
 			t.Fatalf("%s: image = %q, want the launcher's %q", tc.harness, spec.Image, launcherImage)
 		}
-		if len(spec.Mounts) != 4 {
-			t.Fatalf("%s: mounts = %+v, want launcher's home/cache and one borrowed login", tc.harness, spec.Mounts)
+		if len(spec.Mounts) != tc.mounts {
+			t.Fatalf("%s: mounts = %+v, want launcher's home/cache/scratch, its pins and one borrowed login", tc.harness, spec.Mounts)
 		}
 		if home := spec.Mounts[0]; home != (runtime.Mount{HostPath: e.adaHome, ContainerPath: "/root"}) {
 			t.Fatalf("%s: home mount = %+v, want the launcher's home %q at /root", tc.harness, home, e.adaHome)
@@ -196,7 +199,7 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 			t.Fatalf("%s: launcher mountpoint = %v, %v; want dir=%v", tc.harness, info, err, tc.dir)
 		}
 		if run.HomeMemberID != e.member.ID {
-			t.Fatalf("%s: run home member = %q, want the launcher %s", tc.harness, run.HomeMemberID, e.member.ID)
+			t.Fatalf("%s: session home member = %q, want the launcher %s", tc.harness, run.HomeMemberID, e.member.ID)
 		}
 		sc, err := e.sched.readSidecar(run.ID)
 		if err != nil || sc.LoginMember != string(e.owner.ID) {
@@ -205,15 +208,16 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 	}
 
 	// The owner's own launch is unchanged: their image, their whole home,
-	// nothing mounted by subpath.
+	// and by subpath only their own logins, pinned.
 	own, err := e.sched.Launch(t.Context(), e.ws.ID, e.owner.ID, e.owner.ID, "own", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("owner Launch: %v", err)
 	}
 	spec := e.rt.byName(string(own.ID)).spec
-	if spec.Image != ownerImage || len(spec.Mounts) != 3 ||
-		spec.Mounts[0] != (runtime.Mount{HostPath: e.ownerHome, ContainerPath: "/root"}) {
-		t.Fatalf("own launch = image %q mounts %+v, want %q and owner's home/cache", spec.Image, spec.Mounts, ownerImage)
+	if spec.Image != ownerImage || len(spec.Mounts) != 5 ||
+		spec.Mounts[0] != (runtime.Mount{HostPath: e.ownerHome, ContainerPath: "/root"}) ||
+		slices.ContainsFunc(subpathMounts(spec), func(m runtime.Mount) bool { return m.HostPath != e.ownerHome }) {
+		t.Fatalf("own launch = image %q mounts %+v, want %q and only the owner's home, pins and cache", spec.Image, spec.Mounts, ownerImage)
 	}
 }
 
@@ -229,8 +233,8 @@ func TestSharedLaunchWithoutOwnerLogin(t *testing.T) {
 		t.Fatalf("fake Launch: %v", err)
 	}
 	spec := e.rt.byName(string(run.ID)).spec
-	if len(spec.Mounts) != 3 || spec.Mounts[0].HostPath != e.adaHome {
-		t.Fatalf("fake mounts = %+v, want only launcher's home/cache", spec.Mounts)
+	if len(spec.Mounts) != 5 || spec.Mounts[0].HostPath != e.adaHome {
+		t.Fatalf("fake mounts = %+v, want only launcher's home, its pinned logins and cache", spec.Mounts)
 	}
 	e.assertOwnerExposedOnlyAt(t, spec)
 
@@ -259,16 +263,16 @@ func (e *shareEnv) assertFailedRun(t *testing.T, task string) {
 	for _, r := range runs {
 		if r.Task == task {
 			if r.Status != domain.RunFailed {
-				t.Fatalf("refused run %s = %s, want failed", r.ID, r.Status)
+				t.Fatalf("refused session %s = %s, want failed", r.ID, r.Status)
 			}
 			return
 		}
 	}
-	t.Fatalf("no run row for %q", task)
+	t.Fatalf("no session row for %q", task)
 }
 
 // A member's own harness definition runs only on their own account: on a
-// shared account it is refused before any container exists, and a mission
+// A server-wide definition of the same shape shares
 // cannot record it. A server-wide definition of the same shape shares
 // exactly its declared login path.
 func TestSharedLaunchCustomHarness(t *testing.T) {
@@ -289,11 +293,11 @@ func TestSharedLaunchCustomHarness(t *testing.T) {
 	if e.containerCount() != 0 {
 		t.Fatal("a container was created for the refused launch")
 	}
-	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.owner.ID, "aider", domain.LaunchHeadless, ""); err == nil || !strings.Contains(err.Error(), "runs only on your own account") {
-		t.Fatalf("ValidateMissionLaunch = %v, want refusal", err)
+	if err = e.sched.ValidateLaunch(t.Context(), e.member.ID, e.owner.ID, "aider", domain.LaunchHeadless, "", ""); err == nil || !strings.Contains(err.Error(), "runs only on your own account") {
+		t.Fatalf("ValidateLaunch = %v, want refusal", err)
 	}
-	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, ""); err != nil {
-		t.Fatalf("ValidateMissionLaunch on the member's own account: %v", err)
+	if err = e.sched.ValidateLaunch(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "", ""); err != nil {
+		t.Fatalf("ValidateLaunch on the member's own account: %v", err)
 	}
 
 	admin := newShareEnv(t, func(cfg *Config) {
@@ -460,11 +464,11 @@ func TestSharedLaunchNonRootOwnershipAndReservation(t *testing.T) {
 	}
 	spec := e.rt.byName(string(run.ID)).spec
 	want := runtime.Mount{HostPath: e.ownerHome, Subpath: ".claude/.credentials.json", ContainerPath: "/home/aether/.claude/.credentials.json"}
-	if spec.User != "1000:1000" || len(spec.Mounts) != 4 || spec.Mounts[1] != want {
+	if spec.User != "1000:1000" || len(spec.Mounts) != 5 || spec.Mounts[1] != want {
 		t.Fatalf("spec user %q mounts %+v, want 1000:1000 and login %+v", spec.User, spec.Mounts, want)
 	}
 	if got := ownerOf(t, filepath.Join(e.ownerHome, ".claude", ".credentials.json")); got != 1000 {
-		t.Fatalf("owner's login owned by %d, want the run user 1000", got)
+		t.Fatalf("owner's login owned by %d, want the session user 1000", got)
 	}
 	for _, rel := range append([]string{".", ".claude"}, ownerState...) {
 		if got := ownerOf(t, filepath.Join(e.ownerHome, filepath.FromSlash(rel))); got != 0 {
@@ -482,7 +486,7 @@ func TestSharedLaunchNonRootOwnershipAndReservation(t *testing.T) {
 		t.Fatalf("owner launch beside the shared run: %v", err)
 	}
 	if got := ownerOf(t, filepath.Join(e.ownerHome, ".claude", ".credentials.json")); got != 2000 {
-		t.Fatalf("owner's login owned by %d after the owner's own run, want 2000", got)
+		t.Fatalf("owner's login owned by %d after the owner's own session, want 2000", got)
 	}
 
 	f := newShareEnv(t, users)
@@ -493,7 +497,7 @@ func TestSharedLaunchNonRootOwnershipAndReservation(t *testing.T) {
 	// The public reason elides the middle of a long error, so this checks
 	// the login it names and the conflicting mapping.
 	_, err = f.launch(t, "claude")
-	if err == nil || !strings.Contains(err.Error(), "login "+string(f.owner.ID)+" shares is held by live run") ||
+	if err == nil || !strings.Contains(err.Error(), "login "+string(f.owner.ID)+" shares is held by live session") ||
 		!strings.Contains(err.Error(), "resolved user 1000:1000") {
 		t.Fatalf("shared launch with another uid beside the owner's run = %v, want reservation refusal", err)
 	}
@@ -528,7 +532,7 @@ func TestSharedLoginChownAfterTheOwnerReservesIsRefused(t *testing.T) {
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
 	err = e.sched.applyLoginOwnership(entry, e.owner.ID, e.rt.byName(string(run.ID)).spec.Mounts, "1000:1000")
-	if err == nil || !strings.Contains(err.Error(), "the login "+string(e.owner.ID)+" shares is held by live run") {
+	if err == nil || !strings.Contains(err.Error(), "the login "+string(e.owner.ID)+" shares is held by live session") {
 		t.Fatalf("late login chown = %v, want the login conflict", err)
 	}
 	if got := ownerOf(t, login); got != 2000 {
@@ -648,7 +652,7 @@ func TestOwnerTerminalIsNotBlockedByARecipientsLogin(t *testing.T) {
 	e := newShareEnv(t, nil)
 	e.sched.mu.Lock()
 	e.sched.syncRunUserReservationsLocked()
-	e.sched.credentialUsers[&credentialUserReservation{home: e.member.ID, login: e.owner.ID, user: "1000:1000", owner: "live run recipient"}] = struct{}{}
+	e.sched.credentialUsers[&credentialUserReservation{home: e.member.ID, login: e.owner.ID, user: "1000:1000", owner: "live session recipient"}] = struct{}{}
 	e.sched.mu.Unlock()
 	owner := &terminalSupervision{member: e.owner.ID}
 	if err := e.sched.resolveTerminalMetadata(owner, "2000:2000", "/home/aether"); err != nil || owner.ownershipBlocked {
@@ -689,7 +693,7 @@ func TestSharedLaunchRecipientsShareOneMapping(t *testing.T) {
 			if tc.allowed && err != nil {
 				t.Fatalf("second recipient with the same mapping: %v", err)
 			}
-			if !tc.allowed && (err == nil || !strings.Contains(err.Error(), "shares is held by live run")) {
+			if !tc.allowed && (err == nil || !strings.Contains(err.Error(), "shares is held by live session")) {
 				t.Fatalf("second recipient with another mapping = %v, want reservation refusal", err)
 			}
 			if got := ownerOf(t, filepath.Join(e.ownerHome, ".claude", ".credentials.json")); got != 1000 {
@@ -720,12 +724,12 @@ func TestRecoveredSharedRunReservations(t *testing.T) {
 	if err := s2.recoverRuns(t.Context()); err != nil {
 		t.Fatalf("recoverRuns: %v", err)
 	}
-	held := "is held by live run " + string(run.ID)
+	held := "is held by live session " + string(run.ID)
 	for name, tc := range map[string]struct {
 		entry *supervised
 		want  string
 	}{
-		"launcher's home":  {&supervised{runID: "run-home", memberID: e.member.ID}, "home " + string(e.member.ID) + " is reserved by live run " + string(run.ID)},
+		"launcher's home":  {&supervised{runID: "run-home", memberID: e.member.ID}, "home " + string(e.member.ID) + " is reserved by live session " + string(run.ID)},
 		"other recipient":  {&supervised{runID: "run-login", memberID: "lin", loginMember: e.owner.ID}, held},
 		"owner's own home": {&supervised{runID: "run-owner", memberID: e.owner.ID}, ""},
 	} {
@@ -838,7 +842,7 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheOwnersLogin(t *testing.T) {
 	}
 
 	_, err = s2.Launch(ctx, e.ws.ID, lin.ID, e.owner.ID, "second", "claude", domain.LaunchTUI)
-	if err == nil || !strings.Contains(err.Error(), "shares is held by live run") {
+	if err == nil || !strings.Contains(err.Error(), "shares is held by live session") {
 		t.Fatalf("second recipient beside the recovered runs = %v, want reservation refusal", err)
 	}
 	// The probe uses the owner's mapping, so once the owner's containers run
@@ -846,7 +850,7 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheOwnersLogin(t *testing.T) {
 	probe := func() error {
 		return s2.reserveRunUser(&supervised{runID: "run-probe", memberID: lin.ID, loginMember: e.owner.ID}, "2000:2000", true)
 	}
-	if err = probe(); err == nil || !strings.Contains(err.Error(), "shares is held by live run") {
+	if err = probe(); err == nil || !strings.Contains(err.Error(), "shares is held by live session") {
 		t.Fatalf("login beside the recovered runs = %v, want reservation refusal", err)
 	}
 

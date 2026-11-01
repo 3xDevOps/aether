@@ -38,7 +38,7 @@ type guardedRuns struct{ ssh *sshd.Config }
 func (g guardedRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	runs, ok := g.ssh.Runs.(sshd.RunLauncherWithOptions)
 	if !ok {
-		return nil, errors.New("templates: the run controller cannot launch with options")
+		return nil, errors.New("templates: the session controller cannot launch with options")
 	}
 	return runs.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 }

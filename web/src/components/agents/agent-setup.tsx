@@ -13,6 +13,7 @@ import { message } from '@/lib/format'
 import type { AgentInfo, AgentInstallResult } from '@/lib/types'
 import { TerminalDock } from '@/routes/environment/terminal-dock'
 import { useStore } from '@/store'
+import { rememberChoice } from '@/store/launch-defaults'
 import { useCapability } from '@/store/hooks'
 
 function SetupStep({ number, title, children }: { number: number; title: string; children: ReactNode }) {
@@ -51,7 +52,6 @@ export function AgentSetup({
   requireEnhanced?: boolean
 }) {
   const caps = useCapability()
-  const rememberLaunch = useStore((s) => s.rememberLaunch)
   const [agent, setAgent] = useState(initial)
   const [mode, setMode] = useState<SetupMode>(() => requireEnhanced ? 'acp' : setupMode(initial, useStore.getState().launchDefaults[initial.name]?.mode))
   const [installing, setInstalling] = useState(false)
@@ -103,7 +103,7 @@ export function AgentSetup({
   }
 
   const finish = () => {
-    if (!requireEnhanced) rememberLaunch(agent.name, enhanced && agent.enhanced_installed ? 'acp' : 'tui')
+    if (!requireEnhanced) rememberChoice(agent.name, enhanced && agent.enhanced_installed ? 'acp' : 'tui')
     onDone(agent)
   }
 
@@ -119,9 +119,9 @@ export function AgentSetup({
       {requireEnhanced ? (
         <p className="text-ui text-text">The assistant uses {name} in Enhanced mode, so its Enhanced adapter is installed too.</p>
       ) : (
-        <SetupStep number={1} title="Choose how runs show it">
+        <SetupStep number={1} title="Choose how sessions show it">
           <ModeComparison agent={agent} value={mode} onChange={setMode} />
-          {!enhancedSupported(agent) && <p className="text-ui-sm text-muted">Runs of {name} use Standard.</p>}
+          {!enhancedSupported(agent) && <p className="text-ui-sm text-muted">Sessions of {name} use Standard.</p>}
         </SetupStep>
       )}
 

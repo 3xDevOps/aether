@@ -108,24 +108,6 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 		return
 	}
 	if retained {
-		s.mu.Lock()
-		keep := entry.missionAssigned && !entry.destroyPending && s.cfg.RunContainerTTL >= 0 &&
-			entry.retainedUntil != nil && time.Now().UTC().Before(*entry.retainedUntil) && err == nil
-		if keep {
-			entry.exitObserved = true
-			entry.exitCode = st.Code
-			entry.paused = false
-			if persistErr := s.persistRetainedSidecar(entry.sidecar()); persistErr != nil {
-				entry.evidencePending = true
-				s.recordCleanupErrorLocked(entry, cleanupStateError)
-				slog.Warn("scheduler: persist retained worker exit", "run", entry.runID, "error", persistErr)
-			}
-		}
-		s.mu.Unlock()
-		if keep {
-			entry.lifecycleMu.Unlock()
-			return
-		}
 		if err := s.expireRetainedLocked(context.Background(), entry, ""); err != nil {
 			slog.Warn("scheduler: expire retained container after exit", "run", entry.runID, "error", err)
 		}
@@ -175,7 +157,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	s.cfg.Git.StopDiffWatch(entry.runID)
 
 	s.mu.Lock()
-	killed, killActor := entry.killRequested, entry.killActor
+	killed, killActor, killBy := entry.killRequested, entry.killActor, entry.killBy
 	// The agent's terminal report outranks its exit code. A run a human
 	// already closed keeps that close.
 	reported := entry.reported
@@ -215,7 +197,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	)
 	switch {
 	case killed:
-		to, reason, actor, cause = domain.RunAbandoned, "killed", killActor, memberCause(killActor)
+		to, reason, actor, cause = killedOutcome(killBy), killedReason(killBy), killActor, memberCause(killActor)
 	case reported != "":
 		to, reason, cause = reported, reportedClose(reported).reason, causeReported
 	case code == 0:
@@ -234,30 +216,9 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	// were committing still outranks the exit code.
 	switch {
 	case entry.killRequested:
-		to, reason, actor, cause = domain.RunAbandoned, "killed", entry.killActor, memberCause(entry.killActor)
+		to, reason, actor, cause = killedOutcome(entry.killBy), killedReason(entry.killBy), entry.killActor, memberCause(entry.killActor)
 	case reported == "" && entry.reported != "" && !entry.status.Terminal():
 		to, reason, cause = entry.reported, reportedClose(entry.reported).reason, causeReported
-	}
-	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0 && !entry.noRetain
-	if retain {
-		deadline := time.Now().UTC().Add(s.cfg.RunContainerTTL)
-		entry.evidenceIdentity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
-		sc := entry.sidecar()
-		sc.Retained = true
-		sc.RetainedUntil = &deadline
-		sc.EvidencePending = true
-		if persistErr := s.persistRetainedSidecar(sc); persistErr != nil {
-			entry.finalizing = false
-			s.recordCleanupErrorLocked(entry, cleanupStateError)
-			s.mu.Unlock()
-			slog.Warn("scheduler: persist completed worker retention", "run", entry.runID, "error", persistErr)
-			entry.lifecycleMu.Unlock()
-			return
-		}
-		entry.retained = true
-		entry.retainedUntil = &deadline
-		entry.evidencePending = true
-		reason = retainedCompletionReason
 	}
 	err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor, cause)
 	s.mu.Unlock()
@@ -279,7 +240,6 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if s.runs[entry.runID] == entry {
 		identity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
 		entry.evidenceIdentity = identity
-		entry.evidencePending = retain
 		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
 			slog.Warn("scheduler: persist evidence identity", "run", entry.runID, "error", sidecarErr)
 		}
@@ -287,15 +247,6 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	s.mu.Unlock()
 	if identity == "" {
 		identity = finishCaptureIdentity("", published, committed, code)
-	}
-	if retain {
-		defer entry.lifecycleMu.Unlock()
-		if settleErr := s.settleRetainedCompletion(ctx, entry); settleErr != nil {
-			slog.Warn("scheduler: settle completed worker retention", "run", entry.runID, "error", settleErr)
-		}
-		_ = s.entryDriver(entry).Stop(ctx, entry.runID)
-		s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
-		return
 	}
 	entry.lifecycleMu.Unlock()
 	if captureErr := s.captureFinishEvidence(ctx, entry.runID, to, identity); captureErr != nil {
@@ -530,7 +481,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised,
 	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
 		s.recordCleanupError(entry, cleanupLookupError)
-		return fmt.Errorf("scheduler: load retained run: %w", err)
+		return fmt.Errorf("scheduler: load retained session: %w", err)
 	}
 	if !run.Status.Terminal() {
 		// A reopened row, including one ahead of a stale retained sidecar,
@@ -617,8 +568,19 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		}
 		liveness, enhanced := s.Liveness(e.runID)
 		reminder := enhanced && s.acp.reminding(e.runID)
+		var turnAt time.Time
+		if enhanced {
+			if sess := s.acp.session(e.runID); sess != nil {
+				turnAt = sess.State().TurnStartedAt
+			}
+		}
 		if liveness.Since.After(started) {
 			started = liveness.Since
+		}
+		// A turn starts the clock over, also before its start notice, which
+		// the session queues behind its other callbacks, arrives.
+		if turnAt.After(started) {
+			started = turnAt
 		}
 		activity, observed := started, false
 		if t := s.driver(acp).LastActivity(e.runID); t.After(activity) {
@@ -658,6 +620,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				if showsIdle {
 					err = s.parkIdleReportLocked(ctx, e)
 				} else {
+					e.stallTurnAt = turnAt
 					err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
 				}
 			case e.status == domain.RunNeedsAttention && e.waitExpires() && idle > waitedFactor*s.cfg.StallThreshold:
@@ -821,7 +784,7 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 					return err
 				}
 				if err := s.cfg.Git.RemoveRunCheckout(cleanupCtx, r.ID); err != nil {
-					return fmt.Errorf("scheduler: checkout gc: remove run checkout: %w", err)
+					return fmt.Errorf("scheduler: checkout gc: remove session checkout: %w", err)
 				}
 				return nil
 			}

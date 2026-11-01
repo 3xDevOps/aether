@@ -101,7 +101,7 @@ func TestLocalAttachRunsTheAttachHandler(t *testing.T) {
 
 	_, ack, err = l.Attach(ctx, protocol.AttachRequest{RunID: "run_missing"})
 	if err == nil || ack.OK || ack.Code != protocol.CodeNotFound {
-		t.Fatalf("missing run: ack=%+v err=%v, want a not-found refusal", ack, err)
+		t.Fatalf("missing session: ack=%+v err=%v, want a not-found refusal", ack, err)
 	}
 }
 

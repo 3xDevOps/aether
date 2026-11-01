@@ -119,7 +119,7 @@ func TestRoomImageRejectsForeignMissingAndMixedSelectors(t *testing.T) {
 		{"foreign message", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, foreign.ID, 0) }, protocol.CodeNotFound},
 		{"mismatched workspace", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, mismatched.ID, 0) }, protocol.CodeNotFound},
 		{"missing message", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, "missing", 0) }, protocol.CodeNotFound},
-		{"missing run", func(r *protocol.DevArtifactDownloadRequest) { r.RunID = "missing" }, protocol.CodeNotFound},
+		{"missing session", func(r *protocol.DevArtifactDownloadRequest) { r.RunID = "missing" }, protocol.CodeNotFound},
 		{"foreign index", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, message.ID, 1) }, protocol.CodeNotFound},
 		{"negative index", func(r *protocol.DevArtifactDownloadRequest) { *r = roomImageRequest(e.run.ID, message.ID, -1) }, protocol.CodeInvalidParams},
 		{"missing index", func(r *protocol.DevArtifactDownloadRequest) { r.AttachmentIndex = nil }, protocol.CodeInvalidParams},
@@ -173,7 +173,7 @@ func TestRoomImageRevocationAndDeletionStopOpenStream(t *testing.T) {
 					t.Fatal(deleteErr)
 				}
 				if _, lookupErr := e.store.GetRoomMessage(t.Context(), message.ID); !errors.Is(lookupErr, store.ErrNotFound) {
-					t.Fatalf("deleted run retained room message: %v", lookupErr)
+					t.Fatalf("deleted session retained room message: %v", lookupErr)
 				}
 			}
 			got, err := io.ReadAll(stream)

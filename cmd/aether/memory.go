@@ -28,11 +28,11 @@ commands:
   show    ID                                               print a note, its provenance and supersede chain
   add     --kind K [--pin] [--me] [--file P]... [--supersedes ID] TEXT
                                                            add a decision, convention, gotcha or preference
-  pin     [--me] ID                                        put a note in every new run's brief; --me, or a member-scope
+  pin     [--me] ID                                        put a note in every new session's brief; --me, or a member-scope
                                                            note, puts it in yours only
   unpin   ID                                               take a note out of briefs
-  rm      ID | --run RUN                                   delete a note, or every note a run wrote
-  brief   [--member M]                                     print the brief a new run gets, byte for byte; --member is
+  rm      ID | --run RUN                                   delete a note, or every note a session wrote
+  brief   [--member M]                                     print the brief a new session gets, byte for byte; --member is
                                                            admin only`
 
 // memoryCall is a parsed memory command, run once connected.
@@ -41,7 +41,7 @@ type memoryCall func(c *protocol.Client, w io.Writer) error
 func init() {
 	register(command{
 		name:  "memory",
-		short: "search, add, pin and remove the team memory notes runs read",
+		short: "search, add, pin and remove the team memory notes sessions read",
 		usage: "aether memory ls [--workspace <name>] [--kind <kind>] [--file <path>] [--all] [--limit <n>]\n" +
 			"aether memory search [--workspace <name>] [--kind <kind>] [--file <path>] [--all] [--limit <n>] <words...>\n" +
 			"aether memory show [--workspace <name>] <id>\n" +
@@ -49,7 +49,7 @@ func init() {
 			"aether memory pin [--workspace <name>] [--me] <id>\n" +
 			"aether memory unpin [--workspace <name>] <id>\n" +
 			"aether memory rm [--workspace <name>] <id>\n" +
-			"aether memory rm [--workspace <name>] --run <run-id>\n" +
+			"aether memory rm [--workspace <name>] --run <session-id>\n" +
 			"aether memory brief [--workspace <name>] [--member <member>]",
 		example: "aether memory ls\n" +
 			"aether memory search --workspace app migrations\n" +
@@ -138,7 +138,7 @@ func parseMemory(args []string) (memoryCall, error) {
 		p := protocol.MemoryAddParams{}
 		fs.StringVar(&p.Kind, "kind", "", "decision, convention, gotcha or preference")
 		fs.BoolVar(&p.Pin, "pin", false, "pin the note into briefs")
-		me := fs.Bool("me", false, "a pin on the note enters only your own runs' briefs")
+		me := fs.Bool("me", false, "a pin on the note enters only your own sessions' briefs")
 		fs.Var((*stringList)(&p.Files), "file", "repository path the note cites (repeatable)")
 		fs.StringVar(&p.Supersedes, "supersedes", "", "ID of the note this one replaces")
 		words, err := memoryArgs(fs, args[1:])
@@ -167,7 +167,7 @@ func parseMemory(args []string) (memoryCall, error) {
 			return printMemoryAdded(w, p, res, time.Now())
 		}, nil
 	case "pin":
-		me := fs.Bool("me", false, "pin into your own runs' briefs only (default: the note's own scope)")
+		me := fs.Bool("me", false, "pin into your own sessions' briefs only (default: the note's own scope)")
 		id, err := memoryID(fs, args[1:])
 		if err != nil {
 			return nil, usage(err)
@@ -186,9 +186,9 @@ func parseMemory(args []string) (memoryCall, error) {
 			if err = c.Call(protocol.MethodMemoryPin, p, &res); err != nil {
 				return err
 			}
-			done := "every new run's brief lists it"
+			done := "every new session's brief lists it"
 			if res.Item.Scope == protocol.MemoryScopeMember {
-				done = "your new runs' briefs list it"
+				done = "your new sessions' briefs list it"
 			}
 			_, err = fmt.Fprintf(w, "pinned %s: %s\n", id, done)
 			return err
@@ -210,7 +210,7 @@ func parseMemory(args []string) (memoryCall, error) {
 			return err
 		}, nil
 	case "rm":
-		run := fs.String("run", "", "delete every note this run wrote")
+		run := fs.String("run", "", "delete every note this session wrote")
 		words, err := memoryArgs(fs, args[1:])
 		if err != nil {
 			return nil, usage(err)
@@ -233,7 +233,7 @@ func parseMemory(args []string) (memoryCall, error) {
 				return err
 			}
 			if len(res.IDs) == 0 {
-				_, err = fmt.Fprintf(w, "run %s wrote no notes\n", p.RunID)
+				_, err = fmt.Fprintf(w, "session %s wrote no notes\n", p.RunID)
 				return err
 			}
 			for _, id := range res.IDs {
@@ -266,7 +266,7 @@ func parseMemory(args []string) (memoryCall, error) {
 				return err
 			}
 			if res.Text == "" {
-				_, err = fmt.Fprintln(os.Stderr, "no brief: the workspace has no notes and no run finished in the last 48h")
+				_, err = fmt.Fprintln(os.Stderr, "no brief: the workspace has no notes and no session finished in the last 48h")
 				return err
 			}
 			if _, err = io.WriteString(w, res.Text); err != nil {
@@ -334,7 +334,7 @@ func printMemoryNote(w io.Writer, res protocol.MemoryShowResult, now time.Time) 
 		author = item.AuthorName + " (" + item.AuthorID + ")"
 	}
 	field("Author", author)
-	field("Run", item.RunID)
+	field("Session", item.RunID)
 	field("Harness", item.Harness)
 	field("Commit", item.Commit)
 	field("Files", strings.Join(item.Files, ", "))

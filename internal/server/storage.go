@@ -166,7 +166,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 		e := &u.Entries[i]
 		switch e.Kind {
 		case "database":
-			e.Reason = "Persistent database and event history; a run's events go when the run is deleted"
+			e.Reason = "Persistent database and event history; a session's events go when the session is deleted"
 		case "other":
 			e.Reason = "Other server state, profiles and caches; no general deletion policy"
 		case "cache":
@@ -199,7 +199,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 				continue
 			}
 			e.OwnerKind, e.OwnerID = "run", string(run.ID)
-			e.Reason = "Run /tmp; removed when the run's container is removed"
+			e.Reason = "Session /tmp; removed when the session's container is removed"
 		case "repo":
 			workspace, err := d.Store.GetWorkspace(ctx, domain.WorkspaceID(e.Key))
 			if err != nil {
@@ -207,7 +207,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 				continue
 			}
 			e.OwnerKind, e.OwnerID = "workspace", string(workspace.ID)
-			e.Reason = "Persistent repository, run branches and shared clone objects; no automatic expiry"
+			e.Reason = "Persistent repository, session branches and shared clone objects; no automatic expiry"
 		case "checkout", "snapshot", "transcript", "coord":
 			owner, _ := domain.ParentRun(domain.RunID(e.Key))
 			run, err := d.Store.GetRun(ctx, owner)
@@ -217,7 +217,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			}
 			e.OwnerKind, e.OwnerID = "run", string(run.ID)
 			if e.Kind == "snapshot" || e.Kind == "transcript" {
-				e.Reason = "Run history retained until explicit deletion"
+				e.Reason = "Session history retained until explicit deletion"
 				continue
 			}
 			if e.Kind == "checkout" {
@@ -232,16 +232,16 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 					}
 				}
 				if worktree == "" || filepath.Clean(worktree) != filepath.Clean(expected) {
-					e.Reason = "Run does not own this checkout in durable state; cleanup eligibility unknown"
+					e.Reason = "Session does not own this checkout in durable state; cleanup eligibility unknown"
 					continue
 				}
 				if activeErr != nil {
 					e.Reason = "Active checkout ownership could not be checked"
-					e.Error = "Run ownership lookup failed"
+					e.Error = "Session ownership lookup failed"
 					continue
 				}
 				if inUse[filepath.Clean(worktree)] {
-					e.Reason = "Checkout is in use by an active run"
+					e.Reason = "Checkout is in use by an active session"
 					continue
 				}
 			}
@@ -251,7 +251,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			}
 			until, reason, err := d.Runs.StorageRetention(ctx, run.ID)
 			if err != nil {
-				e.Reason, e.Error = "Lifecycle ownership could not be checked", "Run retention lookup failed"
+				e.Reason, e.Error = "Lifecycle ownership could not be checked", "Session retention lookup failed"
 				continue
 			}
 			e.RetainedUntil = until
@@ -260,7 +260,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 				continue
 			}
 			if e.Kind == "coord" {
-				e.Reason = "Run coordination assets await owned lifecycle cleanup"
+				e.Reason = "Session coordination assets await owned lifecycle cleanup"
 				continue
 			}
 			ttl := d.Config.CheckoutTTL

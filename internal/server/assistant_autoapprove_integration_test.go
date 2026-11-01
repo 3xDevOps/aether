@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
 // TestIntegrationAssistantAutoApprove drives auto-approval through the wired
@@ -49,7 +50,7 @@ func TestIntegrationAssistantAutoApprove(t *testing.T) {
 		t.Fatalf("assistant.start: %v", perr)
 	}
 	frames := env.watch(ctx, 0)
-	conn, err := net.Dial("unix", filepath.Join(env.data, "assistant", string(env.member.ID), "sock", "assistant.sock"))
+	conn, err := net.Dial("unix", filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -311,7 +311,7 @@ func TestCreateRunCheckoutAtPinsCapturedCommit(t *testing.T) {
 		t.Fatalf("readRunMeta: %v", err)
 	}
 	if meta.Base != first {
-		t.Fatalf("run metadata base = %q, want captured commit %q", meta.Base, first)
+		t.Fatalf("session metadata base = %q, want captured commit %q", meta.Base, first)
 	}
 
 	for _, invalid := range []string{first[:7], strings.Repeat("a", 40)} {

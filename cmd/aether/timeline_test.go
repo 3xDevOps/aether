@@ -59,8 +59,8 @@ func TestTimelineDetailNamesAgentMail(t *testing.T) {
 func TestTimelineTakesTheRunAsAnArgument(t *testing.T) {
 	testhome.Isolate(t)
 	for _, args := range [][]string{{"timeline", "run-1", "run-2"}, {"timeline", "run-1", "--run", "run-2"}} {
-		if err := dispatch(args); err == nil || !strings.Contains(err.Error(), "name the run once") {
-			t.Errorf("aether %s = %v, want the run named once", strings.Join(args, " "), err)
+		if err := dispatch(args); err == nil || !strings.Contains(err.Error(), "name the session once") {
+			t.Errorf("aether %s = %v, want the session named once", strings.Join(args, " "), err)
 		}
 	}
 	if err := dispatch([]string{"timeline", "run-1", "--jsonl"}); !errors.Is(err, cli.ErrNotLinked) {

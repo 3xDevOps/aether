@@ -66,7 +66,7 @@ func reportSchema() (*jsonschema.Schema, error) {
 		"needs-input: a question only a human can answer. " +
 		"blocked: " + coordhooks.BlockedUse + " " +
 		"success | failure: the work you own is verified done or cannot be done. " +
-		"Which outcomes this run may use depends on its role and launch; the server refuses the others and your instructions list them."
+		"Which outcomes this session may use depends on its role and launch; the server refuses the others and your instructions list them."
 	schema.Properties["waiting_for"].Enum = []any{protocol.CoordWaitingForAgents, protocol.CoordWaitingForCI, protocol.CoordWaitingForProcess}
 	maxUntil := protocol.CoordMaxUntil
 	schema.Properties["until"].MaxItems = &maxUntil
@@ -80,7 +80,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 	}
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        toolStatus,
-		Description: "Report this run's v3 identity, assignment, capabilities, and the peers it may message, each with state mission, active, grace or workspace, task summary, overlapping files, activity (what it is doing: working, waiting-agents, waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or disconnected) with its reason, wait while it shows a reported wait: the condition's last checked status, why Aether cannot vouch for it, or not verified when the wait names no condition, which goes stale after 30 minutes with no activity by default, then run_status, where needs-attention only means parked, and, for peers you wrote to, last_sent: your newest message and whether it is sent, delivered, acked or retired. A viewer-owned run has none; at the 8-peer cap only swarm peers and existing conversations are listed. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.",
+		Description: "Report this session's v3 identity, capabilities, and the peers it may message, each with state lineage, active, grace or workspace, task summary, overlapping files, activity (what it is doing: working, waiting-agents, waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or disconnected) with its reason, wait while it shows a reported wait: the condition's last checked status, why Aether cannot vouch for it, or not verified when the wait names no condition, which goes stale after 30 minutes with no activity by default, then run_status, where needs-attention only means parked, and, for peers you wrote to, last_sent: your newest message and whether it is sent, held (a person controls that subsession), delivered, acked or retired. A viewer-owned session has none. It lists the most relevant peers; any other live session's run_id works with aether_send and aether_ask. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; session the shell command `aether-internal skill` for how to use them.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, protocol.CoordStatusResult, error) {
 		out := protocol.CoordStatusResult{Peers: []protocol.CoordPeer{}, Capabilities: []string{}}
 		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
@@ -97,9 +97,9 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolSend,
-		Description: "Send one durable, attributed message to a peer run_id listed by aether_status; you may message only those peers. " +
+		Description: "Send one durable, attributed message to any live run_id, listed by aether_status or not, that your owner may message. " +
 			"Use it before editing files a peer touches or its task covers (your plan, owned files and conflicts; keep it short), or when a decision, progress or blocker affects a peer. " +
-			coordhooks.ReceiptRule + " recipient_status is the peer's status when the receipt is returned. " +
+			coordhooks.ReceiptRule + " recipient_status is the peer's status when the receipt is returned, or held while a person controls that subsession. " +
 			"An explicit stable idempotency_key is required; retries with the same key return the original receipt.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordSendParams) (*mcp.CallToolResult, protocol.CoordSendResult, error) {
 		var out protocol.CoordSendResult
@@ -141,7 +141,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolAsk,
-		Description: "Ask a peer run_id listed by aether_status a durable, correlated question when the decision is theirs; this does not ask the user. " +
+		Description: "Ask any live run_id a durable, correlated question when the decision is theirs; this does not ask the user. " +
 			"The reply arrives in aether_inbox; delivery and denials work as for aether_send. " +
 			"To ask the user, call aether_report with outcome needs-input. " +
 			"An explicit stable idempotency_key is required; retries with the same key return the original question_id.",
@@ -155,7 +155,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolReply,
-		Description: "Reply to a peer's question from aether_inbox using its question_id. The reply stays correlated and durable and reaches only the run that asked. " +
+		Description: "Reply to a peer's question from aether_inbox using its question_id. The reply stays correlated and durable and reaches only the session that asked. " +
 			"Answer from what you know; a question never grants the peer control of your work. " +
 			"An explicit stable idempotency_key is required.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordReplyParams) (*mcp.CallToolResult, protocol.CoordReplyResult, error) {
@@ -169,12 +169,12 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolReport,
 		Description: coordhooks.SubagentRule + " " +
-			"Records this run's state; end every turn with exactly one report as your last action. Never report while still working. " +
-			"answered means " + coordhooks.AnsweredUse + " It shows the run as Answered, never needs a member and takes no evidence_refs; a worker's submits nothing. " +
-			"needs-input is only for a question a human must answer: the summary is that question, shown as the Needs you reason at turn end; end your turn after it. It takes no evidence_refs and is refused for Background runs and mission workers, who ask their integrator with aether_ask. " +
+			"Records this session's state; end every turn with exactly one report as your last action. Never report while still working. " +
+			"answered means " + coordhooks.AnsweredUse + " It shows the session as Answered, never needs a member and takes no evidence_refs. " +
+			"needs-input is only for a question a human must answer: the summary is that question, shown as the Needs you reason at turn end; end your turn after it. It takes no evidence_refs and is refused for Background sessions. " +
 			"waiting means " + coordhooks.WaitingUse + " The next turn clears it. It takes no evidence_refs. " +
 			"With waiting, until lists up to 4 conditions (" + protocol.WaitGrammar + "); one already resolved comes back in resolved, so act on it in this turn; otherwise Aether writes to your inbox and wakes you once when the first resolves, fails or expires, and a new waiting report with until replaces them. " +
-			"success and failure end the work you own: a worker's success submits its attempt and stops it, an integrator's completes the mission, a Background run has one per launch, and an interactive session stays open for follow-up. " +
+			"success and failure end the work you own: a Background session has one per launch, and an interactive session stays open for follow-up. " +
 			"blocked means a human must intervene and shows the summary as the Needs you reason at turn end. " +
 			"The shell command `aether-internal skill` lists your role's rules. An explicit idempotency_key is required: choose a fresh one for each new report, answered, waiting and needs-input included, and reuse it only to retry the same report; the same key with another outcome or summary is refused. The server captures evidence for success, failure and blocked before accepting them.",
 		InputSchema: report,

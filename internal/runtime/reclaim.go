@@ -41,7 +41,16 @@ func Remover(rt Runtime, image string) func(ctx context.Context, path string) er
 	}
 }
 
+// emptyAsRoot mounts path itself, so it must not be a symlink: the bind mount
+// would follow it and empty its target as root.
 func emptyAsRoot(ctx context.Context, rt Runtime, image, path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("runtime: %s is not a directory (%s)", path, info.Mode().Type())
+	}
 	ctx, cancel := context.WithTimeout(ctx, reclaimTimeout)
 	defer cancel()
 	id, err := rt.Create(ctx, Spec{

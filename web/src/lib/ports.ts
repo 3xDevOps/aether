@@ -8,7 +8,7 @@ export function runOnly(port: DevPort): boolean {
 }
 
 export function runOnlyReason(port: DevPort): string {
-  return `Port ${port.port} is bound to ${port.address} inside the run, so only the run can reach it. Start the server on 0.0.0.0 to open it on this computer.`
+  return `Port ${port.port} is bound to ${port.address} inside the session, so only the session can reach it. Start the server on 0.0.0.0 to open it on this computer.`
 }
 
 /** The address that reaches the port from inside the run. */
@@ -34,7 +34,7 @@ export async function openOnThisComputer(client: Pick<Api, 'devPortList' | 'loca
   try {
     const { ports } = await client.devPortList({ run_id: runID })
     const found = ports.find((item) => item.port === port)
-    if (!found) throw new Error(`Nothing in the run is listening on port ${port}.`)
+    if (!found) throw new Error(`Nothing in the session is listening on port ${port}.`)
     if (runOnly(found)) throw new Error(runOnlyReason(found))
     await client.localForwardStart(`run:${runID}`, port)
   } catch (cause) {

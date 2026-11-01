@@ -92,7 +92,7 @@ func roomTarget(s *Server, ctx context.Context, raw json.RawMessage) (permission
 		return permissions.Target{}, rpcError(err)
 	}
 	if target.Workspace != domain.WorkspaceID(p.WorkspaceID) {
-		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "run is not in workspace"}
+		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "session is not in workspace"}
 	}
 	return target, nil
 }
@@ -202,7 +202,7 @@ func (s *Server) runRoomStatus(ctx context.Context, member domain.MemberID, raw 
 	}
 	if status.HasController {
 		controller := &protocol.RoomController{
-			MemberID: string(status.Controller.MemberID), Connected: status.Controller.Connected,
+			MemberID: string(status.Controller.MemberID), ControlSessionID: status.Controller.SessionID, Connected: status.Controller.Connected,
 			AcquiredAt: collaborationTime(status.Controller.AcquiredAt),
 		}
 		if !status.Controller.ExpiresAt.IsZero() {

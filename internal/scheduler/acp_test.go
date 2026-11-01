@@ -693,7 +693,7 @@ func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	first := rt.all()[0]
 	waitFor(t, "adapter stopped", first.exited)
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "closed"}, false, nil); err == nil {
-		t.Fatal("a closed run took input")
+		t.Fatal("a closed session took input")
 	}
 	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
 		t.Fatal(err)
@@ -734,7 +734,7 @@ func TestEnhancedRunReopensASessionTheAgentLost(t *testing.T) {
 	}
 	items := waitItems(t, e.sched, run.ID, "the wake's turn", turnEnded("end_turn", 2))
 	if !slices.ContainsFunc(items, func(it acphost.Item) bool {
-		return it.Kind == acphost.KindNotice && it.Notice.Title == "Agent session lost"
+		return it.Kind == acphost.KindNotice && it.Notice.Title == "Agent conversation lost"
 	}) {
 		t.Fatal("the reopen left no notice")
 	}
@@ -1019,7 +1019,7 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 		return slices.Contains(coord.idleWakeRuns(), run.ID)
 	})
 	if !e.sched.IdleEnhanced(run.ID) {
-		t.Fatal("an enhanced run at turn end is not idle")
+		t.Fatal("an enhanced session at turn end is not idle")
 	}
 	offered := len(coord.idleWakeRuns())
 	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); err != nil {
@@ -1041,7 +1041,7 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.sched.IdleEnhanced(run.ID) {
-		t.Fatal("a paused run is idle")
+		t.Fatal("a paused session is idle")
 	}
 	wakes := len(coord.idleWakeRuns())
 	if err := e.sched.Resume(t.Context(), run.ID, e.member.ID); err != nil {
@@ -1067,7 +1067,7 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.sched.IdleEnhanced(standard.ID) || e.rt.byName(string(standard.ID)).spec.Env[coordtransport.EnhancedEnv] != "" {
-		t.Fatal("a standard run is treated as enhanced")
+		t.Fatal("a standard session is treated as enhanced")
 	}
 }
 
@@ -1336,7 +1336,7 @@ func TestEnhancedRunSendsInstructionsAsSystemPromptWhenTheAgentTakesOne(t *testi
 	meta, mcpEnv := wire.sessionNew(t)
 	system, _ := meta["systemPrompt"].(map[string]any)
 	if got := system["append"]; got != e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}) || got == "" {
-		t.Fatalf("session/new systemPrompt.append %q, want the run instructions", got)
+		t.Fatalf("session/new systemPrompt.append %q, want the session instructions", got)
 	}
 	if mcpEnv[coordtransport.RoleCardEnv] != "1" {
 		t.Fatalf("aether MCP env %v, want the bridge told the system prompt carries the card", mcpEnv)
@@ -1557,7 +1557,7 @@ func TestEnhancedTasklessRunGetsInstructionsBackFromABusyWake(t *testing.T) {
 	sess := e.sched.acp.session(run.ID)
 	instructions, settle := e.sched.acp.claimInstructions(run.ID, sess)
 	if instructions != e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}) {
-		t.Fatalf("claimed %q, want the run instructions", instructions)
+		t.Fatalf("claimed %q, want the session instructions", instructions)
 	}
 	if again, _ := e.sched.acp.claimInstructions(run.ID, sess); again != "" {
 		t.Fatalf("a second claim got %q, want none while the first is out", again)

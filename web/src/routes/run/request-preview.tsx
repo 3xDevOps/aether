@@ -119,7 +119,7 @@ export function PermissionSections({ call, whole }: { call: SessionToolCall | un
     <>
       {whole.loading && <p className="border-t border-seam px-4 py-3 text-ui-sm text-muted">Loading the full change…</p>}
       {whole.error && <p role="alert" className="border-t border-seam px-4 py-3 text-ui-sm text-state-failed">The full change could not be read: {whole.error}</p>}
-      {whole.cut && <p className="border-t border-seam px-4 py-3 text-ui-sm text-muted">This call is longer than the session log keeps, so the preview may be incomplete.</p>}
+      {whole.cut && <p className="border-t border-seam px-4 py-3 text-ui-sm text-muted">This call is longer than the conversation log keeps, so the preview may be incomplete.</p>}
       {call && !whole.loading && <CallSection call={call} />}
     </>
   )

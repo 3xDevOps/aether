@@ -5,7 +5,7 @@ export const runViews = ['session', 'trace', 'terminal', 'changes', 'files', 'br
 export type RunView = (typeof runViews)[number]
 
 export const runViewLabel: Record<RunView, string> = {
-  session: 'Session',
+  session: 'Chat',
   trace: 'Trace',
   terminal: 'Terminal',
   changes: 'Changes',

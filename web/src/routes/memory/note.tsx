@@ -42,7 +42,7 @@ export function RunLink({ id, className }: { id: string; className?: string }) {
   const title = useStore((s) => s.runs[id]?.title)
   return (
     <Button variant="link" className={cn('text-ui-sm', className)} onClick={() => navigate('run', { runId: id })}>
-      {title || 'Open run'}
+      {title || 'Open session'}
     </Button>
   )
 }
@@ -57,7 +57,7 @@ export function PRLink({ item, className }: { item: MemoryItem; className?: stri
 
 function Provenance({ item, agents, onOpen }: { item: MemoryItem; agents: Record<string, string>; onOpen: (id: string) => void }) {
   const rows: [string, ReactNode][] = [['Author', <Byline key="author" item={item} agents={agents} />]]
-  if (item.run_id) rows.push(['Run', <span key="run" className="inline-flex flex-wrap items-center gap-2"><RunLink id={item.run_id} /><Code>{item.run_id}</Code></span>])
+  if (item.run_id) rows.push(['Session', <span key="run" className="inline-flex flex-wrap items-center gap-2"><RunLink id={item.run_id} /><Code>{item.run_id}</Code></span>])
   if (item.commit) rows.push(['Commit', <Code key="commit">{item.commit.slice(0, 12)}</Code>])
   if (item.pr_url) rows.push(['Pull request', <PRLink key="pr" item={item} />])
   if (item.files?.length) {

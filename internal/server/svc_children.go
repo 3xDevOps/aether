@@ -17,7 +17,7 @@ func init() {
 	registerService("children", func(d Deps) (Service, error) {
 		st, ok := d.Store.(children.Store)
 		if !ok {
-			return nil, errors.New("children: store does not implement the child run store")
+			return nil, errors.New("children: store does not implement the subsession store")
 		}
 		if d.Runs == nil || d.Git == nil {
 			return nil, nil

@@ -104,7 +104,7 @@ func TestHarnessStatusReporterRegistration(t *testing.T) {
 		t.Fatalf("interactive claude argv = %v, want --settings %s in it", argv, settingsPath)
 	}
 	if got := coord.file(tui.ID, agentstatus.ClaudeSettingsName); !bytes.Equal(got, claudeNativeSettings(t)) {
-		t.Fatalf("settings written for the run = %s, want the merged status and inbox document", got)
+		t.Fatalf("settings written for the session = %s, want the merged status and inbox document", got)
 	}
 	if got := e.reporterOf(t, tui.ID); got != harness.ReporterFull {
 		t.Fatalf("interactive claude run recorded reporter %s, want %s", got, harness.ReporterFull)
@@ -148,7 +148,7 @@ func (e *testEnv) reporterOf(t *testing.T, run domain.RunID) harness.Reporter {
 	defer e.sched.mu.Unlock()
 	entry := e.sched.runs[run]
 	if entry == nil {
-		t.Fatalf("run %s is not supervised", run)
+		t.Fatalf("session %s is not supervised", run)
 	}
 	return entry.reporter
 }
@@ -211,14 +211,14 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 		t.Fatalf("launch opencode run: %v", err)
 	}
 	if got := coord.file(tui.ID, agentstatus.OpenCodePluginName); !bytes.Equal(got, agentstatus.OpenCodePlugin) {
-		t.Fatalf("plugin written for the run = %s, want the embedded asset", got)
+		t.Fatalf("plugin written for the session = %s, want the embedded asset", got)
 	}
 	spec := e.rt.byName(string(tui.ID)).spec
 	if got := spec.Env["OPENCODE_CONFIG_CONTENT"]; got != launchConfig {
 		t.Fatalf("inline config before version selection = %q, want the workspace value with permissions allowed %q", got, launchConfig)
 	}
 	if got := string(coord.file(tui.ID, "opencode-native-v1.json")); !strings.Contains(got, `"permission":"allow"`) || !strings.Contains(got, `"/run/aether/instructions.md"`) {
-		t.Fatalf("V1 inline config %s lost the permission setting or the run instructions", got)
+		t.Fatalf("V1 inline config %s lost the permission setting or the session instructions", got)
 	}
 	for id, file := range map[string]string{
 		"aether-mailbox": "opencode-v2.js",
@@ -238,7 +238,7 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 		}
 	}
 	if got := spec.Env[coordtransport.ManagedHooksEnv]; got != "1" {
-		t.Fatalf("interactive opencode run %s = %q, want 1", coordtransport.ManagedHooksEnv, got)
+		t.Fatalf("interactive opencode session %s = %q, want 1", coordtransport.ManagedHooksEnv, got)
 	}
 	if got := e.reporterOf(t, tui.ID); got != harness.ReporterFull {
 		t.Fatalf("interactive opencode run recorded reporter %s, want %s", got, harness.ReporterFull)
@@ -300,7 +300,7 @@ func TestReporterRegistrationPerHarness(t *testing.T) {
 			t.Fatalf("interactive %s argv = %v, want -e %s in it", name, argv, extension)
 		}
 		if got := coord.file(run.ID, agentstatus.PiExtensionName); !bytes.Equal(got, agentstatus.PiExtension) {
-			t.Fatalf("%s extension written for the run = %s, want the embedded asset", name, got)
+			t.Fatalf("%s extension written for the session = %s, want the embedded asset", name, got)
 		}
 		if got := e.reporterOf(t, run.ID); got != harness.ReporterFull {
 			t.Fatalf("interactive %s run recorded reporter %s, want %s", name, got, harness.ReporterFull)

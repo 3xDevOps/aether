@@ -39,11 +39,23 @@ func TestAnswerAllowsAPermissionOnlyOnce(t *testing.T) {
 	if got, want := string(respond.params()), `{"run_id":"r1","request_id":"req-1","option_id":"allow-1"}`; got != want {
 		t.Fatalf("run.input.respond params = %s, want %s", got, want)
 	}
-	if got, want := out.String(), "run r1 permission req-1: answered allow-1 (Allow once)\n"; got != want {
+	if got, want := out.String(), "session r1 permission req-1: answered allow-1 (Allow once)\n"; got != want {
 		t.Fatalf("answer printed %q, want %q", got, want)
 	}
-	if err := answer(c, &out, nil, "r1", "req-9", "allow-1", nil); err == nil || !strings.Contains(err.Error(), "aether runs r1 lists what is pending") {
+	if err := answer(c, &out, nil, "r1", "req-9", "allow-1", nil); err == nil || !strings.Contains(err.Error(), "aether sessions r1 lists what is pending") {
 		t.Fatalf("answer to nothing pending = %v", err)
+	}
+}
+
+func TestAnswerShowsTheServersSudoRefusal(t *testing.T) {
+	refusal := "run.input.respond: permission denied: allowing a command to run as root requires the session's owner or an admin"
+	respond := &fakeReply{err: &protocol.Error{Code: protocol.CodeDenied, Message: refusal}}
+	c, _ := answerControl(t, nil, respond)
+	if err := answer(c, &bytes.Buffer{}, nil, "r1", "sudo-abc", domain.SudoAllow, nil); err == nil || !strings.Contains(err.Error(), refusal) {
+		t.Fatalf("answer to a sudo request listed for someone else = %v", err)
+	}
+	if got, want := string(respond.params()), `{"run_id":"r1","request_id":"sudo-abc","option_id":"allow-once"}`; got != want {
+		t.Fatalf("run.input.respond params = %s, want %s", got, want)
 	}
 }
 
@@ -54,7 +66,7 @@ func TestAnswerNamesAQueuedRequest(t *testing.T) {
 		protocol.MethodAttentionList: {result: protocol.AttentionListResult{Items: []protocol.AttentionItem{permissionItem()}}},
 	})
 	err := answer(c, &bytes.Buffer{}, nil, "r1", "req-2", "allow-1", nil)
-	if err == nil || !strings.Contains(err.Error(), "request req-2 on run r1 is queued behind") || !strings.Contains(err.Error(), "aether runs r1") {
+	if err == nil || !strings.Contains(err.Error(), "request req-2 on session r1 is queued behind") || !strings.Contains(err.Error(), "aether sessions r1") {
 		t.Fatalf("answer to a queued request = %v", err)
 	}
 }
@@ -91,7 +103,7 @@ func TestAnswerRepliesToATeammatesQuestion(t *testing.T) {
 	if got := string(post.params()); got != want {
 		t.Fatalf("run.room.post params = %s, want %s", got, want)
 	}
-	if got := out.String(); got != "replied to question msg-q on run r1\n" {
+	if got := out.String(); got != "replied to question msg-q on session r1\n" {
 		t.Fatalf("answer printed %q", got)
 	}
 }
@@ -99,20 +111,16 @@ func TestAnswerRepliesToATeammatesQuestion(t *testing.T) {
 func TestNeedLinesNameTheAnswer(t *testing.T) {
 	standard := protocol.AttentionItem{Kind: protocol.AttentionKindQuestion, RunID: "r2", Reason: "Question: answer in the terminal",
 		Request: &protocol.AttentionRequest{ID: "q-2", Kind: "question"}}
-	swarm := protocol.AttentionItem{Kind: protocol.AttentionKindSwarmQuestion, RunID: "r3", MissionID: "m1",
-		Message: &protocol.AttentionMessage{ID: "mq-1", Body: "which branch?"}}
 	waiting := protocol.AttentionItem{Kind: protocol.AttentionKindNeedsInput, RunID: "r4", Reason: "which database?"}
 	var lines []string
-	for _, it := range []protocol.AttentionItem{permissionItem(), standard, swarm, waiting} {
+	for _, it := range []protocol.AttentionItem{permissionItem(), standard, waiting} {
 		lines = append(lines, needLines(it)...)
 	}
 	want := "r1 permission req-1: Run rm -rf build\n" +
 		"  aether answer r1 req-1 allow-1    # Allow once\n" +
 		"  aether answer r1 req-1 reject-1    # Reject\n" +
 		"r2 question q-2: Question: answer in the terminal\n" +
-		"  answer it in the run's terminal: aether attach r2\n" +
-		"r3 swarm-question mq-1: which branch?\n" +
-		"  aether answer r3 mq-1 \"<answer>\"\n" +
+		"  answer it in the session's terminal: aether attach r2\n" +
 		"r4 needs-input: which database?\n" +
 		"  aether message r4 \"<reply>\""
 	if got := strings.Join(lines, "\n"); got != want {

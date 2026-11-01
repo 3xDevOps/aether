@@ -156,6 +156,7 @@ const pairs: [fg: string, bg: string, min: number][] = [
   ['accent-text', 'chrome', 4.5],
   ['on-accent', 'accent-fill', 4.5],
   ['on-failed', 'state-failed', 4.5],
+  ['on-done', 'state-done', 4.5],
   ...[...states, 'diff-add', 'diff-del'].map((fg): [string, string, number] => [fg, 'canvas', 4.5]),
   ['control-border', 'canvas', 3],
   ['icon-faint', 'canvas', 3],

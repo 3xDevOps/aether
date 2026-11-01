@@ -19,7 +19,6 @@ import {
   MessageSquarePlus,
   Monitor,
   Moon,
-  Waypoints,
   PackageX,
   Pause,
   Play,
@@ -139,8 +138,6 @@ export function isRetainedRun(run: RunRecord): boolean {
   switch (run.reason) {
     case 'closed; retained container':
       return run.status === 'merged' || run.status === 'abandoned'
-    case 'worker finished; retained container':
-      return true
     case 'agent reported success; retained container':
       return run.status === 'completed'
     case 'agent reported failure; retained container':
@@ -153,12 +150,10 @@ export function isRetainedRun(run: RunRecord): boolean {
 /**
  * Relaunch needs an interactive run whose container is still kept. The server
  * reports the grace deadline only while it keeps the container, so its presence
- * is the evidence; the reason strings cover a snapshot read before it arrived. A finished swarm worker's
- * container is kept but never relaunchable.
+ * is the evidence; the reason strings cover a snapshot read before it arrived.
  */
 export function canReopenRun(run: Pick<Run, 'mode' | 'acp' | 'status' | 'reason' | 'container_retained_until' | 'cleanup_pending'>): boolean {
   if (!(run.mode === 'tui' || run.mode === 'acp' || run.acp) || !isTerminal(run.status) || run.cleanup_pending) return false
-  if (run.reason === 'worker finished; retained container') return false
   if (run.container_retained_until) return true
   return run.reason === 'closed; retained container'
     ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'
@@ -241,7 +236,7 @@ export async function runClearDone(
   if (failures.length > 0) {
     toast.error(`Archived ${archived}, ${failures.length} failed: ${failures[0]}`)
   } else {
-    toast.success(`Archived ${archived} ${archived === 1 ? 'run' : 'runs'}`)
+    toast.success(`Archived ${archived} ${archived === 1 ? 'session' : 'sessions'}`)
   }
 }
 
@@ -270,7 +265,7 @@ export async function runReleaseFinished(
   if (failures.length > 0) {
     toast.error(`Freed ${released}, ${failures.length} failed: ${failures[0]}`)
   } else {
-    toast.success(`Freed the containers of ${released} ${released === 1 ? 'run' : 'runs'}`)
+    toast.success(`Freed the containers of ${released} ${released === 1 ? 'session' : 'sessions'}`)
   }
 }
 
@@ -300,7 +295,7 @@ const stuckStates = new Set(['needs-you', 'waiting', 'waiting-agents', 'waiting-
 
 /** What a failed or stuck run asks the assistant; a run doing fine asks nothing. */
 export function assistantAsk(run: RunRecord): { label: string; draft: string } | null {
-  if (run.status === 'failed') return { label: 'Ask the assistant to fix this run', draft: 'Fix this' }
+  if (run.status === 'failed') return { label: 'Ask the assistant to fix this session', draft: 'Fix this' }
   const live = run.status === 'running' || run.status === 'needs-attention'
   if (live && (run.status === 'needs-attention' || stuckStates.has(run.state ?? ''))) return { label: 'Ask the assistant why this is stuck', draft: 'Why is this stuck?' }
   return null
@@ -322,7 +317,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     if (paused === true) {
       list.push({
         id: 'resume',
-        label: 'Resume run',
+        label: 'Resume session',
         short: 'Resume',
         Icon: Play,
         done: 'Resumed',
@@ -333,7 +328,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     if (paused === false) {
       list.push({
         id: 'pause',
-        label: 'Pause run',
+        label: 'Pause session',
         short: 'Pause',
         Icon: Pause,
         done: 'Paused',
@@ -398,7 +393,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     if (run.review === 'ready') {
       list.push({
         id: 'not-yet',
-        label: 'Not yet: keep the run open',
+        label: 'Not yet: keep the session open',
         short: 'Not yet',
         Icon: Hourglass,
         done: 'Kept open',
@@ -412,7 +407,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (run.status !== 'queued' && mayKill) {
     list.push({
       id: 'close',
-      label: 'Close run…',
+      label: 'Close session…',
       short: 'Close',
       Icon: CircleCheck,
       perform: (d) => d.openDialog('close', id),
@@ -422,14 +417,14 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (!finished && run.status !== 'needs-attention' && mayKill) {
     list.push({
       id: 'kill',
-      label: 'Kill run',
+      label: 'Kill session',
       short: 'Kill',
       Icon: Square,
       done: 'Killed',
       confirm: {
-        title: 'Kill this run?',
-        body: 'The agent stops immediately. Work already committed to the run branch stays.',
-        action: 'Kill run',
+        title: 'Kill this session?',
+        body: 'The agent stops immediately. Work already committed to the session branch stays.',
+        action: 'Kill session',
         stopsChildren: true,
       },
       predict: () => ({ runID: id, record: { status: 'abandoned', reason: 'killed', ...finishedNow() } }),
@@ -441,14 +436,14 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (mayKill) {
     list.push({
       id: 'delete',
-      label: 'Delete run',
+      label: 'Delete session',
       short: 'Delete',
       Icon: Trash2,
       done: 'Deleted',
       confirm: {
-        title: 'Delete this run?',
-        body: 'The run, transcript, and coordination records will be removed from Aether.',
-        action: 'Delete run',
+        title: 'Delete this session?',
+        body: 'The session, transcript, and coordination records will be removed from Aether.',
+        action: 'Delete session',
         stopsChildren: true,
       },
       // Over another verb's pending prediction it waits for the server instead.
@@ -473,8 +468,8 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       Icon: PackageX,
       done: 'Freed container',
       confirm: {
-        title: 'Free this run’s container?',
-        body: 'Its compute is released and the exact process cannot be reopened. Files, result branches and history have separate lifetimes; this does not delete all run data or archive it.',
+        title: 'Free this session’s container?',
+        body: 'Its compute is released and the exact process cannot be reopened. Files, result branches and history have separate lifetimes; this does not delete all session data or archive it.',
         action: 'Free container',
       },
       predict: () => ({ runID: id, record: { container_retained_until: undefined, cleanup_pending: undefined } }),
@@ -487,7 +482,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     if (run.archived_at) {
       list.push({
         id: 'restore',
-        label: 'Restore run',
+        label: 'Restore session',
         short: 'Restore',
         Icon: ArchiveRestore,
         done: 'Restored',
@@ -497,7 +492,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     } else {
       list.push({
         id: 'archive',
-        label: 'Archive run',
+        label: 'Archive session',
         short: 'Archive',
         Icon: Archive,
         done: 'Archived',
@@ -510,7 +505,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (cap.hasMethod('run.protect') && mayProtect) {
     list.push({
       id: 'protect',
-      label: run.protected ? 'Unprotect run' : 'Protect run',
+      label: run.protected ? 'Unprotect session' : 'Protect session',
       short: run.protected ? 'Unprotect' : 'Protect',
       Icon: run.protected ? ShieldOff : Shield,
       done: run.protected ? 'Unprotected' : 'Protected',
@@ -676,17 +671,9 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (canLaunch({ cap: ctx.cap, role })) {
     list.push({
       id: 'launch',
-      label: 'New run…',
+      label: 'New session…',
       Icon: Rocket,
       perform: (d) => d.openDialog('launch'),
-    })
-  }
-  if (ctx.cap.hasMethod('mission.create') && allowed('launch', { id: null, role })) {
-    list.push({
-      id: 'swarm',
-      label: 'New swarm…',
-      Icon: Waypoints,
-      perform: (d) => d.openDialog('swarm'),
     })
   }
   if (ctx.cap.hasMethod('template.launch') && allowed('launch', { id: null, role })) {
@@ -701,7 +688,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('run.archive')) {
     list.push({
       id: 'clear-done',
-      label: 'Archive closed runs…',
+      label: 'Archive closed sessions…',
       Icon: Archive,
       perform: (d) => d.openDialog('clear-done'),
     })
@@ -994,7 +981,7 @@ async function settle(done: string, runID: string, attempt: () => Attempt, press
           if (!press.same()) return
           if (!useStore.getState().predicting[runID]) return void settle(done, runID, attempt, press)
           event.preventDefault()
-          toast.error(`${done} not retried: another action on this run is still waiting for the server.`)
+          toast.error(`${done} not retried: another action on this session is still waiting for the server.`)
         },
       },
     })

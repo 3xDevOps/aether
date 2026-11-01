@@ -287,7 +287,7 @@ func filesReadError(method, run string, err error) *protocol.Error {
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": current diff input exceeds 128 MiB or available disk headroom"}
 	}
 	if run != "" {
-		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": this run's checkout was removed; pull the branch to see its files"}
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": this session's checkout was removed; pull the branch to see its files"}
 	}
 	if method == protocol.MethodFilesTree {
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": workspace has no repository yet"}
@@ -305,7 +305,7 @@ func filesWriteError(method, run string, err error) *protocol.Error {
 		return &protocol.Error{Code: protocol.CodeConflict, Message: method + ": file changed; reload before saving"}
 	}
 	if run != "" {
-		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": this run's checkout was removed; pull the branch to edit its files"}
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": this session's checkout was removed; pull the branch to edit its files"}
 	}
 	return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": workspace repository is unavailable"}
 }

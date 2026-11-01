@@ -14,7 +14,7 @@ import { OnboardingWizard } from './pages/wizard'
 const agentShim = 'sh /workspace/agent.sh'
 
 test('the first run completes', async ({ page, aether }) => {
-  test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+  test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
@@ -35,7 +35,7 @@ test('the first run completes', async ({ page, aether }) => {
   aether.installAgent(await memberID(alice), 'claude', agentShim)
   await wizard.agent.skip().click()
 
-  await wizard.expectStep('First run')
+  await wizard.expectStep('First session')
   // The launch dialog's own form, with the same mode rules.
   await expect(wizard.firstRun.section.getByRole('radiogroup', { name: 'Mode' })).toBeVisible()
   await wizard.firstRun.launch('Claude Code', 'write the result file')
@@ -45,7 +45,7 @@ test('the first run completes', async ({ page, aether }) => {
   await expect(
     page.getByRole('heading', { name: 'write the result file', exact: true }),
   ).toBeVisible()
-  const tabs = page.getByRole('tablist', { name: 'Run views' })
+  const tabs = page.getByRole('tablist', { name: 'Session views' })
   await expect(tabs.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -72,12 +72,12 @@ test('the first run completes', async ({ page, aether }) => {
   // Closing is an explicit user action for an interactive run. The agent
   // committed its work, so record the successful outcome through the real UI.
   await header.getByRole('button', { name: 'More', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Close run…', exact: true }).click()
-  const closeDialog = page.getByRole('dialog', { name: 'Close this run?' })
+  await page.getByRole('menuitem', { name: 'Close session…', exact: true }).click()
+  const closeDialog = page.getByRole('dialog', { name: 'Close this session?' })
   await expect(closeDialog).toBeVisible()
   await closeDialog.getByRole('button', { name: 'Merged', exact: true }).click()
   await expect(header).toContainText('Merged')
-  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('Last reasonClosed')
+  await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText('Last reasonClosed')
 })
 
 test('with no agent installed the first run sends you back to Agent', async ({
@@ -97,7 +97,7 @@ test('with no agent installed the first run sends you back to Agent', async ({
   // installed, which used to offer `claude` and fail after the launch.
   await wizard.agent.skip().click()
 
-  await wizard.expectStep('First run')
+  await wizard.expectStep('First session')
   await expect(wizard.firstRun.section).toContainText('No agent is installed yet')
   await expect(
     wizard.firstRun.section.getByRole('radiogroup', { name: 'Agent' }),

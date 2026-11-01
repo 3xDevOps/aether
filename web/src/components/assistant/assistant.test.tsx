@@ -11,7 +11,7 @@ import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
 import { viewSyncDelay } from '@/store/view-context'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
-import { agentInfo, alice, bob, serverInfo, workspace } from '@/test/fixtures'
+import { alice, bob, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 import { atViewport } from '@/test/viewport'
 
@@ -51,7 +51,7 @@ function status(over: Partial<AssistantStatus> = {}): AssistantStatus {
 const stop: AssistantConfirmation = {
   id: 'c1',
   method: 'run.kill',
-  summary: 'Stop run run-8x2 ("Fix flaky login test")',
+  summary: 'Stop session run-8x2 ("Fix flaky login test")',
   params: { run_id: 'run-8x2' },
   created_at: '2026-10-14T10:00:00Z',
   expires_at: '2099-10-14T10:10:00Z',
@@ -118,7 +118,7 @@ describe('opening the assistant', () => {
     render(<AppShell />)
     const sidebar = within(screen.getByRole('navigation', { name: 'Aether' }))
     const assistant = sidebar.getByRole('button', { name: 'Assistant' })
-    expect(assistant.parentElement?.parentElement).toBe(sidebar.getByRole('button', { name: /New run/ }).parentElement)
+    expect(assistant.parentElement?.parentElement).toBe(sidebar.getByRole('group', { name: 'New session' }).parentElement)
     expect(assistant.parentElement?.parentElement).not.toBe(sidebar.getByRole('button', { name: 'Search' }).parentElement)
     const header = screen.getAllByRole('banner')[0]!
     expect(within(header).queryByRole('button', { name: 'Assistant' })).toBeNull()
@@ -221,59 +221,43 @@ describe('states', () => {
       ],
     }))
     const aside = await openPanel()
-    expect(await within(aside).findByText(/runs on your own agent/)).toBeDefined()
+    expect(await within(aside).findByText(/with a sign-in of its own/)).toBeDefined()
     const agents = within(within(aside).getByRole('list', { name: 'Agents' }))
     expect(agents.getByText('No login was found')).toBeDefined()
     expect(agents.getByText('The Enhanced adapter is not installed')).toBeDefined()
     expect(StubSocket.opened).toHaveLength(0)
   })
 
-  it('sets an agent up in Enhanced mode only and leaves setup once it is ready', async () => {
+  it('signs an agent in for the assistant alone and leaves setup once it is ready', async () => {
     const setup = status({
       state: 'setup',
       agent: undefined,
       agents: [
-        { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Enhanced adapter not installed' },
-        { name: 'codex', display_name: 'Codex', ready: false, reason: 'Not installed' },
+        { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' },
+        { name: 'codex', display_name: 'Codex', ready: true },
       ],
     })
     vi.mocked(api.assistantStatus).mockResolvedValue(setup)
-    const claude = agentInfo({ display_name: 'Claude Code', enhanced: 'adapter', installed: true, enhanced_installed: false, login_found: true })
-    vi.mocked(api.agentList).mockResolvedValue([claude, agentInfo({ name: 'codex', enhanced: 'none', installed: false })])
     const aside = await openPanel()
-    const buttons = await within(aside).findAllByRole('button', { name: 'Set up' })
+    const buttons = await within(aside).findAllByRole('button', { name: 'Sign in' })
     expect(buttons).toHaveLength(1)
     await userEvent.click(buttons[0]!)
-    expect(await within(aside).findByText(/uses Claude Code in Enhanced mode/)).toBeDefined()
-    expect(within(aside).queryByText('Choose how runs show it')).toBeNull()
-    expect(within(aside).getByRole('region', { name: 'Install and log in' })).toBeDefined()
-    expect(within(aside).getByRole('region', { name: 'Check' })).toBeDefined()
+    expect(within(aside).getByRole('region', { name: 'Sign in to Claude Code' })).toBeDefined()
+    await waitFor(() => expect(StubSocket.opened.some((socket) => socket.url.endsWith('/ws/terminal?assistant_login=claude'))).toBe(true))
+    expect(StubSocket.opened.some((socket) => socket.url.includes('tab='))).toBe(false)
 
-    vi.mocked(api.agentList).mockResolvedValue([{ ...claude, enhanced_installed: true }])
     const reads = vi.mocked(api.assistantStatus).mock.calls.length
     vi.mocked(api.assistantStatus).mockResolvedValue(status())
-    await userEvent.click(within(aside).getByRole('button', { name: 'Check' }))
-    await userEvent.click(await within(aside).findByRole('button', { name: 'Done' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(vi.mocked(api.assistantStatus).mock.calls.length).toBeGreaterThan(reads))
     await waitFor(() => expect(useStore.getState().assistantStatus?.state).toBe('idle'))
-    expect(useStore.getState().launchDefaults).toEqual({})
   })
 
   it('hides New conversation until there is a conversation', async () => {
-    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'needs_restart' }))
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'setup', agent: undefined }))
     const aside = await openPanel()
-    await within(aside).findByText(/closes any shells/)
+    await within(aside).findByText(/with a sign-in of its own/)
     expect(within(aside).queryByRole('button', { name: 'New conversation' })).toBeNull()
-  })
-
-  it('asks before restarting the environment', async () => {
-    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'needs_restart' }))
-    vi.mocked(api.assistantStart).mockResolvedValue(status({ state: 'starting' }))
-    const aside = await openPanel()
-    expect(await within(aside).findByText(/closes any shells open in it/)).toBeDefined()
-    await userEvent.click(within(aside).getByRole('button', { name: 'Restart environment' }))
-    expect(api.assistantStart).toHaveBeenCalledWith({ restart_environment: true })
-    await waitFor(() => expect(useStore.getState().assistantStatus?.state).toBe('starting'))
   })
 
   it('shows the real error of a failed assistant and retries', async () => {
@@ -291,7 +275,7 @@ describe('states', () => {
     acpOpen()
     assistantSocket().send({ status: status({ auto_approve: true }) })
     expect(await within(aside).findByText(/Acts without asking/)).toBeDefined()
-    expect(within(aside).getByText(/launches, messages and stops your runs and saves your environment without asking/)).toBeDefined()
+    expect(within(aside).getByText(/launches, messages and stops your sessions and saves your environment without asking/)).toBeDefined()
     await userEvent.click(within(aside).getByRole('button', { name: 'Change in Settings' }))
     expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'auto-approve' } })
     expect(useStore.getState().assistantOpen).toBe(true)
@@ -300,8 +284,8 @@ describe('states', () => {
   it('offers example prompts that fill the composer', async () => {
     const aside = await openPanel()
     acpOpen()
-    await userEvent.click(await within(aside).findByRole('button', { name: 'Launch a run to …' }))
-    expect((within(aside).getByRole('textbox', { name: 'Message the assistant' }) as HTMLTextAreaElement).value).toBe('Launch a run to ')
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Launch a session to …' }))
+    expect((within(aside).getByRole('textbox', { name: 'Message the assistant' }) as HTMLTextAreaElement).value).toBe('Launch a session to ')
   })
 })
 
@@ -311,7 +295,7 @@ describe('the conversation', () => {
     acpOpen([
       item('turn_start', 1),
       say(1, 'user', 'What is running?'),
-      say(1, 'assistant', 'Two runs are **working**.'),
+      say(1, 'assistant', 'Two sessions are **working**.'),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const log = await within(aside).findByRole('log', { name: 'Assistant conversation' })
@@ -424,14 +408,14 @@ describe('confirmations', () => {
     acpOpen()
     assistantSocket().send({ status: status({ confirmations: [
       { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in api on "Bob"\'s account, falling back to "mem_carol"\'s account in order: "Fix the flaky login test"', other_member: true, other_owner: 'Bob', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', model: 'opus', account_member_id: 'mem_bob', fallback_account_member_ids: ['mem_carol'], task: 'Fix the flaky login test\nthen open a PR' } },
-      { ...stop, id: 'm', method: 'run.inject', summary: 'Message a run', params: { run_id: 'run_9', message: 'Please stop and summarise' } },
+      { ...stop, id: 'm', method: 'run.inject', summary: 'Message a session', params: { run_id: 'run_9', message: 'Please stop and summarise' } },
     ] }) })
     const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude \(acp\) in api on "Bob"'s account/ })
     expect(within(launch).getByText('Launch claude (acp) in api on "Bob"\'s account, falling back to "mem_carol"\'s account in order')).toBeDefined()
     expect(within(launch).getByText("Bob's account pays for this launch, so this asks even with auto-approval on.")).toBeDefined()
     const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
     expect(rows).toEqual({
-      Kind: 'Run: one agent on one task',
+      Kind: 'Session: one agent on one task',
       Workspace: 'ws_1',
       Agent: 'Claude Code opus (Enhanced)',
       Account: "Bob's account, shared with you",
@@ -439,9 +423,46 @@ describe('confirmations', () => {
       Task: 'Fix the flaky login test\nthen open a PR',
       'You hear back': hearBack.run,
     })
-    const inject = within(aside).getByRole('group', { name: 'Approve this action? Message a run' })
+    const inject = within(aside).getByRole('group', { name: 'Approve this action? Message a session' })
     expect(within(inject).getByText('Message')).toBeDefined()
     expect(within(inject).getByText('Please stop and summarise')).toBeDefined()
+  })
+
+  it('says which launch choices came from saved defaults, which saved ones were skipped or unchecked, and why', async () => {
+    useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [
+      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in api on "Bob"\'s account (your saved default), no fallback: "Add the export"',
+        params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', account_member_id: 'mem_bob', no_fallback: true, task: 'Add the export' },
+        defaults: { applied: ['harness', 'mode', 'account_member_id', 'fallback', 'model'], skipped: [{ field: 'mode', reason: 'enhanced mode is not installed' },
+          { field: 'fallback_account_member_ids', reason: 'mem_ada: not shared' }, { field: 'fallback_account_member_ids', reason: 'mem_cy: not shared' }],
+          unchecked: [{ field: 'model', reason: 'no current model list' }] } },
+    ] }) })
+    const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude/ })
+    const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
+    expect(rows['From your saved defaults']).toBe('agent, mode, account, fallback, model')
+    expect(rows['Saved mode not used']).toBe('enhanced mode is not installed')
+    expect(Object.values(rows).filter((v) => v?.includes('not shared'))).toEqual(['mem_ada: not shared; mem_cy: not shared'])
+    expect(rows['Saved model not checked']).toBe('no current model list')
+    expect(rows.Account).toBe("Bob's account, shared with you")
+  })
+
+  it("shows the assistant's reason and a template's whole task as their own rows", async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [
+      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in api: "Fix it". The assistant\'s reason: "you asked"', reason: 'you asked', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', task: 'Fix it' } },
+      { ...stop, id: 't', method: 'template.launch', summary: 'Launch template "triage" in api: claude (acp) on your account: "triage issue 42…". The assistant\'s reason: "you asked for 42"', reason: 'you asked for 42', task: 'triage issue 42\nthen label it', params: { workspace_id: 'ws_1', name: 'triage', params: { issue: '42' } } },
+    ] }) })
+    const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude/ })
+    expect(within(launch).getByText('Launch claude (acp) in api')).toBeDefined()
+    const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
+    expect(rows.Reason).toBe('you asked')
+    const template = within(aside).getByRole('group', { name: /^Approve this action\? Launch template/ })
+    expect(within(template).getByText('Launch template "triage" in api: claude (acp) on your account')).toBeDefined()
+    expect(within(template).getByText('you asked for 42')).toBeDefined()
+    expect(within(template).getByText((_, el) => el?.textContent === 'triage issue 42\nthen label it')).toBeDefined()
   })
 
   it('approves and declines through assistant.confirm and clears on a status frame', async () => {
@@ -451,7 +472,7 @@ describe('confirmations', () => {
     assistantSocket().send({ status: status({ confirmations: [stop, { ...stop, id: 'c2', summary: 'Save your environment' }] }) })
     const card = await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })
     expect(within(card).getByText('run.kill')).toBeDefined()
-    expect(within(card).getByText('Run')).toBeDefined()
+    expect(within(card).getByText('Session')).toBeDefined()
     expect(within(card).getByText('run-8x2')).toBeDefined()
     expect(within(card).getByText(/expires/)).toBeDefined()
 
@@ -483,21 +504,77 @@ describe('confirmations', () => {
   })
 })
 
+describe('temporary chat', () => {
+  beforeEach(() => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ temporary: false }))
+  })
+
+  it('switches on from the header, says what it means in the composer and clears on a new conversation', async () => {
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, temporary: true })
+    vi.mocked(api.assistantReset).mockResolvedValue(status({ temporary: false }))
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'old question'), item('turn_end', 1)])
+    const toggle = await within(aside).findByRole('button', { name: 'Temporary chat' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect(within(aside).queryByText(/Temporary: the assistant won't read or save your preferences/)).toBeNull()
+
+    await userEvent.click(toggle)
+    expect(api.assistantSettings).toHaveBeenCalledWith({ temporary: true })
+    expect(await within(aside).findByText("Temporary: the assistant won't read or save your preferences until New conversation.")).toBeDefined()
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+
+    await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
+    await waitFor(() => expect(within(aside).queryByText(/Temporary: the assistant won't read/)).toBeNull())
+  })
+
+  it('offers no toggle on a server whose status has no temporary chat', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status())
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'hello'), item('turn_end', 1)])
+    await within(aside).findByRole('button', { name: 'New conversation' })
+    expect(within(aside).queryByRole('button', { name: 'Temporary chat' })).toBeNull()
+  })
+
+  it('drops a reply that arrives after New conversation', async () => {
+    let finish: (value: AssistantSettings) => void = () => {}
+    vi.mocked(api.assistantSettings).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    vi.mocked(api.assistantReset).mockResolvedValue(status({ temporary: false }))
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'old question'), item('turn_end', 1)])
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Temporary chat' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
+    await waitFor(() => expect(api.assistantReset).toHaveBeenCalled())
+    await act(async () => finish({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, temporary: true }))
+    expect(within(aside).queryByText(/Temporary: the assistant won't read/)).toBeNull()
+    expect(useStore.getState().assistantStatus?.temporary).not.toBe(true)
+  })
+
+  it('shows the server refusal as it came', async () => {
+    vi.mocked(api.assistantSettings).mockRejectedValue(new Error('assistant.settings: memory is off: the owner turned memory off'))
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'hello'), item('turn_end', 1)])
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Temporary chat' }))
+    expect((await within(aside).findByRole('alert')).textContent).toContain('memory is off: the owner turned memory off')
+  })
+})
+
 describe('the auto-approval suggestion', () => {
   const title = 'Skip approval cards for the assistant?'
-  const conversation = () => [item('turn_start', 1), say(1, 'user', 'Stop the flaky run'), item('turn_end', 1, { stop_reason: 'end_turn' })]
+  const conversation = () => [item('turn_start', 1), say(1, 'user', 'Stop the flaky session'), item('turn_end', 1, { stop_reason: 'end_turn' })]
 
   it('shows only while the assistant is idle with a conversation and nothing waiting', async () => {
     const aside = await openPanel()
     acpOpen()
     assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
-    await within(aside).findByRole('button', { name: 'Launch a run to …' })
+    await within(aside).findByRole('button', { name: 'Launch a session to …' })
     expect(within(aside).queryByRole('group', { name: title })).toBeNull()
 
     assistantSocket().items(...conversation())
     const notice = await within(aside).findByRole('group', { name: title })
     expect(within(notice).getByText(/Each action is still noted here before it runs/)).toBeDefined()
-    expect(within(notice).getByText("Still asks: messaging or stopping another member's run.")).toBeDefined()
+    expect(within(notice).getByText("Still asks: messaging or stopping another member's session.")).toBeDefined()
     for (const name of ['Turn on auto-approval', 'Not now', "Don't suggest again"]) {
       expect(within(notice).getByRole('button', { name }).className).toBe(within(notice).getByRole('button', { name: 'Not now' }).className)
     }
@@ -616,7 +693,7 @@ describe('the approval card', () => {
     acpOpen()
     assistantSocket().send({ status: status({ auto_approve: true, confirmations: [{ ...stop, summary: `${stop.summary}, owned by Grace`, other_member: true, other_owner: 'Grace' }] }) })
     const card = await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}, owned by Grace` })
-    expect(within(card).getByText('Grace owns this run, so this asks even with auto-approval on.')).toBeDefined()
+    expect(within(card).getByText('Grace owns this session, so this asks even with auto-approval on.')).toBeDefined()
     expect(within(card).queryByRole('button', { name: 'Skip these cards…' })).toBeNull()
   })
 })

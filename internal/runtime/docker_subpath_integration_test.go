@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -385,6 +386,114 @@ func TestDockerSubpathLoginFile(t *testing.T) {
 	wantHostTree(t, h.owner, ownerFiles)
 	removeVolume(t, d, volume)
 	wantHostTree(t, h.owner, ownerFiles)
+}
+
+// TestDockerSubpathLoginNotSeenIsRefused: the engine reuses a volume that
+// already has the owner's volume name but binds the launcher's home, so the
+// container would see the launcher's own login where the owner's belongs.
+// Start refuses it before the agent's command runs, and says Docker made the
+// mount.
+func TestDockerSubpathLoginNotSeenIsRefused(t *testing.T) {
+	t.Parallel()
+	d := newSubpathDocker(t)
+	h := newSubpathHomes(t)
+	writeTree(t, h.owner, map[string]string{loginRel: "owner-login"})
+	writeTree(t, h.launcher, map[string]string{loginRel: "launcher-login"})
+	volume := subpathVolume(t, d, h.owner)
+	if _, err := d.cli.VolumeCreate(t.Context(), client.VolumeCreateOptions{
+		Name: volume, Driver: "local",
+		DriverOpts: map[string]string{"type": "none", "o": "bind", "device": h.launcher},
+	}); err != nil {
+		t.Fatalf("VolumeCreate(%s) error: %v", volume, err)
+	}
+	spec := subpathSpec("unseen", h.home(), h.login())
+	spec.Command = []string{"/bin/sh", "-c", "touch /root/agent-started; exec sleep 300"}
+	id := createContainer(t, d, spec)
+
+	err := d.Start(t.Context(), id)
+	want := fmt.Sprintf("%s in the container is inode %d, not %s in %s (inode %d); Docker lists the mount",
+		loginTarget, inode(t, filepath.Join(h.launcher, loginRel)), loginRel, h.owner, inode(t, filepath.Join(h.owner, loginRel)))
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Start() = %v, want an error containing %q", err, want)
+	}
+	if _, err := os.Lstat(filepath.Join(h.launcher, "agent-started")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the agent's command ran before the login was checked: %v", err)
+	}
+	info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Container.State.Running {
+		t.Fatal("the refused container is still running")
+	}
+}
+
+// TestDockerSubpathLoginBehindALinkIsSeen: the image's /lib64 links to lib,
+// so the engine mounts the login at /lib/aether-login and the mount table
+// lists that path. Start finds the mount there.
+func TestDockerSubpathLoginBehindALinkIsSeen(t *testing.T) {
+	t.Parallel()
+	d := newSubpathDocker(t)
+	h := newSubpathHomes(t)
+	writeTree(t, h.owner, map[string]string{loginRel: "owner-login"})
+	subpathVolume(t, d, h.owner)
+	id := createContainer(t, d, subpathSpec("linked", Mount{HostPath: h.owner, Subpath: loginRel, ContainerPath: "/lib64/aether-login"}))
+	if err := d.Start(t.Context(), id); err != nil {
+		t.Fatalf("Start() with the login behind an image link: %v", err)
+	}
+	wantContent(t, d, id, "/lib/aether-login", "owner-login")
+}
+
+// TestDockerSubpathLoginSurvivesOnlyPinnedRefreshes: a run on the owner's
+// account mounts the owner's login over the launcher's own. Another container
+// of the launcher's that refreshes its login by rename replaces the file
+// under that mount, and the kernel detaches the mount: the run then reads the
+// launcher's login. Pinned in place there, the rename fails busy and the run
+// keeps the owner's login.
+func TestDockerSubpathLoginSurvivesOnlyPinnedRefreshes(t *testing.T) {
+	t.Parallel()
+	d := newSubpathDocker(t)
+	for _, pinned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pinned=%v", pinned), func(t *testing.T) {
+			h := newSubpathHomes(t)
+			writeTree(t, h.owner, map[string]string{loginRel: "owner-login"})
+			writeTree(t, h.launcher, map[string]string{loginRel: "launcher-login"})
+			subpathVolume(t, d, h.owner)
+			shared := createContainer(t, d, subpathSpec("shared", h.home(), h.login()))
+			if err := d.Start(t.Context(), shared); err != nil {
+				t.Fatalf("Start() the shared run: %v", err)
+			}
+			mounts := []Mount{h.home()}
+			if pinned {
+				subpathVolume(t, d, h.launcher)
+				mounts = append(mounts, Mount{HostPath: h.launcher, Subpath: loginRel, ContainerPath: loginTarget})
+			}
+			own := createContainer(t, d, subpathSpec("own", mounts...))
+			if err := d.Start(t.Context(), own); err != nil {
+				t.Fatalf("Start() the launcher's own run: %v", err)
+			}
+			code, out := sh(t, d, own, "printf launcher-refreshed > "+loginTarget+".tmp && mv -f "+loginTarget+".tmp "+loginTarget)
+			if pinned {
+				if code == 0 || !strings.Contains(strings.ToLower(out), "busy") {
+					t.Fatalf("rename over the pinned login = exit %d, %q; want it refused busy", code, out)
+				}
+				wantContent(t, d, shared, loginTarget, "owner-login")
+				return
+			}
+			if code != 0 {
+				t.Fatalf("rename over the unpinned login = exit %d, %q", code, out)
+			}
+			wantContent(t, d, shared, loginTarget, "launcher-refreshed")
+			info, err := d.cli.ContainerInspect(t.Context(), string(shared), client.ContainerInspectOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := loginTarget + " is not a mount point in the container; Docker lists the mount"
+			if err := d.checkSubpathMounts(t.Context(), shared, info.Container.HostConfig.Mounts); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("check after the login was detached = %v, want an error containing %q", err, want)
+			}
+		})
+	}
 }
 
 // TestDockerSubpathLoginDirectory mounts a login directory (omp's

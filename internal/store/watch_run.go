@@ -227,12 +227,12 @@ func insertRunWait(ctx context.Context, tx *sql.Tx, w *RunWait) error {
 		return fmt.Errorf("store: record wait: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO watches (id, member_id, workspace_id, target_kind, repo, pr_number, source, created_at,
+		`INSERT INTO watches (id, member_id, workspace_id, target_kind, repo, pr_number, created_at,
 		   target_title, conditions, label, state, error, failures, observed, fired, updated_at, expires_at,
-		   last_check_at, next_check_at, ended_at,
+		   last_check_at, next_check_at, ended_at, source,
 		   owner_run_id, wait_revision, wait_report_key, wait_spec, wait_kind, wait_target_run, wait_state, wait_head_sha)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		append(append([]any{id, w.MemberID, w.WorkspaceID, w.TargetKind, w.Repo, w.Number, w.Source, created}, args...),
+		append(append([]any{id, w.MemberID, w.WorkspaceID, w.TargetKind, w.Repo, w.Number, created}, args...),
 			w.OwnerRunID, w.Revision, w.ReportKey, w.Spec, w.Kind, w.TargetRun, w.WaitState, w.HeadSHA)...); err != nil {
 		return fmt.Errorf("store: record wait: %w", mapConstraint(err, ErrNotFound))
 	}

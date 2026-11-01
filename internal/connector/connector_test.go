@@ -94,7 +94,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if len(got) > 512 {
 		t.Errorf("the instructions are %d characters, over 512: %q", len(got), got)
 	}
-	for _, want := range []string{"aether_list_workspaces", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted", "not questions", "every must-not", "no added scope", "Assumption:"} {
+	for _, want := range []string{"aether_launch_options", "aether_get_session", "aether_list_sessions query", "aether_message_session", "aether_needs_attention", "untrusted", "not questions", "every must-not", "no added scope", "Assumption:"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions lack %q: %q", want, got)
 		}
@@ -117,7 +117,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if out := e.callTool(t, first.session, "aether_list_workspaces", nil); !strings.Contains(out, string(e.ws.ID)) {
 		t.Fatalf("aether_list_workspaces = %s", out)
 	}
-	e.callTool(t, first.session, "aether_launch_run", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "fix the flaky test"})
+	e.callTool(t, first.session, "aether_launch_session", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "fix the flaky test"})
 	if got := e.runs.launches(); !slices.Equal(got, []string{string(e.ws.ID) + " claude fix the flaky test via Test client"}) {
 		t.Fatalf("launches = %v", got)
 	}
@@ -164,6 +164,14 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("connector after a reused refresh token = %d %s, want revoked", status, body)
 	}
 	e.refresh(t, second, next.RefreshToken, http.StatusBadRequest)
+	var audit protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{Limit: 1}, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit.Entries) != 1 || audit.Entries[0].Method != "connector.reused" || audit.Entries[0].Client != "Test client" ||
+		audit.Entries[0].ConnectorID == "" || audit.Entries[0].Target != audit.Entries[0].ConnectorID {
+		t.Fatalf("newest audit entry = %+v, want the reused connector's revocation", audit.Entries)
+	}
 
 	third := e.connect(t, allScopes...)
 	if err := e.db.RevokeDevice(ctx, e.deviceID); err != nil {
@@ -198,10 +206,10 @@ func TestConnectorScopes(t *testing.T) {
 		t.Fatalf("tools with no box checked = %v, want %v", got, want)
 	}
 	for name, args := range map[string]map[string]any{
-		"aether_launch_run":  {"workspace_id": e.ws.ID, "harness": "claude", "task": "t"},
-		"aether_message_run": {"run_id": "run-1", "message": "m"},
-		"aether_stop_run":    {"run_id": "run-1"},
-		"aether_answer":      {"run_id": "run-1", "answer_id": "q-1", "answer": "a"},
+		"aether_launch_session":  {"workspace_id": e.ws.ID, "harness": "claude", "task": "t"},
+		"aether_message_session": {"run_id": "run-1", "message": "m"},
+		"aether_stop_session":    {"run_id": "run-1"},
+		"aether_answer":          {"run_id": "run-1", "answer_id": "q-1", "answer": "a"},
 	} {
 		res, err := reader.session.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
 		if err == nil && !res.IsError {
@@ -229,9 +237,9 @@ func TestConnectorScopes(t *testing.T) {
 
 	launch := map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t"}
 	for range writeBurst {
-		e.callTool(t, writer.session, "aether_launch_run", launch)
+		e.callTool(t, writer.session, "aether_launch_session", launch)
 	}
-	res, err := writer.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_launch_run", Arguments: launch})
+	res, err := writer.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_launch_session", Arguments: launch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,9 +247,59 @@ func TestConnectorScopes(t *testing.T) {
 		!strings.Contains(text, fmt.Sprintf("used its %d write calls and gets one more every 2s; retry in 2s", writeBurst)) {
 		t.Fatalf("write call over the limit = %v %s", res.IsError, text)
 	}
-	e.callTool(t, writer.session, "aether_list_runs", nil)
+	e.callTool(t, writer.session, "aether_list_sessions", nil)
 	e.skew.Store(int64(2 * time.Second))
-	e.callTool(t, writer.session, "aether_launch_run", launch)
+	e.callTool(t, writer.session, "aether_launch_session", launch)
+}
+
+// A launch through the connector on an account shared with the member runs
+// on that account and its receipt says so; the server refuses an account
+// not shared with them, with its own error.
+func TestConnectorLaunchOnSharedAccount(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	var info protocol.ServerInfoResult
+	if err := e.admin.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+		t.Fatal(err)
+	}
+	grace := &domain.Member{DisplayName: "Grace", PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#3cb44b",
+		Role: domain.RoleCollaborator}
+	bo := &domain.Member{DisplayName: "Bo", PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#ffe119",
+		Role: domain.RoleCollaborator}
+	for _, m := range []*domain.Member{grace, bo} {
+		if err := e.db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.db.ShareAccount(ctx, grace.ID, domain.MemberID(info.Member.ID)); err != nil {
+		t.Fatal(err)
+	}
+	writer := e.connect(t, "write")
+	out := e.callTool(t, writer.session, "aether_launch_session", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t",
+		"account_member_id": string(grace.ID), "no_fallback": true})
+	var res struct {
+		Launch struct {
+			Account  map[string]string `json:"account"`
+			Fallback map[string]string `json:"fallback"`
+		} `json:"launch"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.runs.launches(); !slices.Equal(got, []string{string(e.ws.ID) + " claude t via Test client on " + string(grace.ID)}) {
+		t.Fatalf("launches = %v", got)
+	}
+	if a := res.Launch.Account; a["member_id"] != string(grace.ID) || a["name"] != "Grace" || a["access"] != "shared" || res.Launch.Fallback["policy"] != "off" {
+		t.Fatalf("receipt = %s", out)
+	}
+	r, err := writer.session.CallTool(ctx, &mcp.CallToolParams{Name: "aether_launch_session", Arguments: map[string]any{"workspace_id": e.ws.ID,
+		"harness": "claude", "task": "t2", "account_member_id": string(bo.ID)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := r.Content[0].(*mcp.TextContent).Text; !r.IsError || !strings.Contains(text, "member "+string(bo.ID)+" has not shared their account with you") {
+		t.Fatalf("launch on an unshared account = %v %s", r.IsError, text)
+	}
 }
 
 // A connector granted an op's scope, and read, can make every call the op
@@ -267,11 +325,12 @@ func TestOpsMethodsFitTheirConnectorScope(t *testing.T) {
 }
 
 // connector.revoke ends a connector at once: its open session, its
-// access token and its refresh token all fail on their next use.
+// access token and its refresh token all fail on their next use, and
+// audit history keeps its creation, its write calls and its revocation.
 func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 	e := newEnv(t)
 	c := e.connect(t, allScopes...)
-	e.callTool(t, c.session, "aether_launch_run", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t"})
+	e.callTool(t, c.session, "aether_launch_session", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t"})
 	var list protocol.ConnectorListResult
 	if err := e.admin.Call(protocol.MethodConnectorList, struct{}{}, &list); err != nil || len(list.Connectors) != 1 {
 		t.Fatalf("connector.list = %+v %v", list, err)
@@ -281,7 +340,7 @@ func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if res, err := c.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_list_runs"}); err == nil && !res.IsError {
+	if res, err := c.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_list_sessions"}); err == nil && !res.IsError {
 		t.Fatalf("the open session's call after revoke = %+v, want refused", res)
 	}
 	if status, _, body := e.bearer(c.token.AccessToken); status != http.StatusUnauthorized || !strings.Contains(body, "revoked") {
@@ -294,6 +353,30 @@ func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 		t.Fatalf("launches = %v, want only the one before revoke", got)
 	}
 
+	var audit protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{}, &audit); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, a := range audit.Entries {
+		got = append(got, a.Via+" "+a.Method+" "+a.ConnectorID+" "+a.Target+" "+a.Outcome)
+	}
+	run := ""
+	if len(audit.Entries) == 3 {
+		run = audit.Entries[1].Target
+	}
+	want := []string{
+		"cli connector.revoke  " + id + " ok",
+		"connector run.launch " + id + " " + run + " ok",
+		"connector connector.create " + id + " " + id + " ok",
+	}
+	if !slices.Equal(got, want) || !strings.HasPrefix(run, "run-") {
+		t.Fatalf("audit.list = %q, want %q", got, want)
+	}
+	var filtered protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{ConnectorID: id}, &filtered); err != nil || len(filtered.Entries) != 3 {
+		t.Fatalf("audit.list for %s = %+v %v, want its calls and its revocation", id, filtered.Entries, err)
+	}
 }
 
 // Refreshes racing with one refresh token must rotate it once and keep
@@ -650,13 +733,14 @@ type connection struct {
 
 // The connector's tools by scope.
 var (
-	readTools = []string{"aether_list_workspaces", "aether_list_runs", "aether_get_run", "aether_run_history",
-		"aether_needs_attention", "aether_activity_summary", "aether_get_swarm", "aether_run_changes",
-		"aether_pr_status", "aether_overlaps", "aether_memory_search", "aether_integration", "search", "fetch"}
-	writeTools = []string{"aether_launch_run", "aether_launch_swarm", "aether_message_run", "aether_answer", "aether_pause_run",
-		"aether_resume_run", "aether_mark_reviewed", "aether_run_lifecycle", "aether_memory_add", "aether_memory_pin"}
-	controlTools = []string{"aether_decide_approval", "aether_stop_run", "aether_cancel_swarm", "aether_handoff_run",
-		"aether_replace_integrator", "aether_integration_decide", "aether_pr_create", "aether_pr_merge", "aether_swarm_manage", "aether_switch_run_mode"}
+	readTools = []string{"aether_list_workspaces", "aether_list_sessions", "aether_get_session", "aether_session_history",
+		"aether_needs_attention", "aether_activity_summary", "aether_session_changes",
+		"aether_pr_status", "aether_overlaps", "aether_memory_search", "search", "fetch", "aether_launch_options", "aether_changes", "aether_watches"}
+	writeTools = []string{"aether_launch_session", "aether_message_session", "aether_answer", "aether_pause_session",
+		"aether_resume_session", "aether_mark_reviewed", "aether_session_lifecycle", "aether_memory_add", "aether_memory_pin",
+		"aether_watch", "aether_unwatch"}
+	controlTools = []string{"aether_decide_approval", "aether_stop_session", "aether_handoff_session",
+		"aether_pr_create", "aether_pr_merge", "aether_switch_session_mode"}
 )
 
 func sorted(lists ...[]string) []string {
@@ -909,14 +993,28 @@ type fakeRuns struct {
 	launched []string
 }
 
-func (f *fakeRuns) Launch(ctx context.Context, ws domain.WorkspaceID, member, _ domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (f *fakeRuns) Launch(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.launched = append(f.launched, fmt.Sprintf("%s %s %s via %s", ws, harness, task, domain.ViaFrom(ctx)))
-	return &domain.Run{ID: "run-launched", WorkspaceID: ws, MemberID: member, Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued}, nil
+	launch := fmt.Sprintf("%s %s %s via %s", ws, harness, task, domain.ViaFrom(ctx))
+	if account != member {
+		launch += " on " + string(account)
+	}
+	f.launched = append(f.launched, launch)
+	return &domain.Run{ID: "run-launched", WorkspaceID: ws, MemberID: member, AccountMemberID: account, Task: task, Harness: harness, Mode: mode,
+		Status: domain.RunQueued}, nil
 }
 
-func (*fakeRuns) SwarmRefusal(string, domain.LaunchMode) error { return nil }
+func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode,
+	opts domain.LaunchOptions) (*domain.Run, error) {
+	r, err := f.Launch(ctx, ws, member, account, task, harness, mode)
+	if err == nil {
+		r.Fallback = opts.Fallback
+	}
+	return r, err
+}
+
+func (*fakeRuns) WakeRefusal(string, domain.LaunchMode) error { return nil }
 
 func (*fakeRuns) AgentSwitchable(context.Context, domain.MemberID, domain.MemberID, string) (bool, error) {
 	return false, nil

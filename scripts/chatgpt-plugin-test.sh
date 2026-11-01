@@ -49,20 +49,18 @@ refuse "top-level reviewer credentials" "test_credentials must be entered in the
 refuse "MCP server headers" "must not set headers" . '.mcpServers.aether.headers = {"Authorization": "x"}'
 refuse "an http demo recording" "demo_recording_url is not an https URL" '.extensions["com.openai"].review.demo_recording_url = "http://example.com/demo"' .
 
-# A planned tool may warn; a registered one never does.
-for tool in $(sed -n 's/^chatgpt-plugin: warning: a test case triggers \([^ ,]*\), which.*/\1/p' "$tmp/built"); do
-	[ "$tool" = aether_changes ] || {
-		echo "chatgpt-plugin-test: the shipped package warns that $tool is not registered" >&2
-		exit 1
-	}
-done
+if grep -q '^chatgpt-plugin: warning: a test case triggers' "$tmp/built"; then
+	echo "chatgpt-plugin-test: the shipped package triggers a tool no connector registers:" >&2
+	cat "$tmp/built" >&2
+	exit 1
+fi
 mkdir "$tmp/unknown"
-jq '.extensions["com.openai"].review.test_cases.positive[0].tools_triggered = "aether_list_runs, aether_no_such_tool"' \
+jq '.extensions["com.openai"].review.test_cases.positive[0].tools_triggered = "aether_list_sessions, aether_no_such_tool"' \
 	"$src/plugin.json" >"$tmp/unknown/plugin.json"
 cp "$src/mcp.json" "$tmp/unknown/"
 sh "$script_dir/chatgpt-plugin.sh" "$tmp/unknown.zip" "$tmp/unknown" 2>"$tmp/err"
 if ! grep -qF "triggers aether_no_such_tool, which no connector tool registers yet" "$tmp/err" ||
-	grep -qF "triggers aether_list_runs," "$tmp/err"; then
+	grep -qF "triggers aether_list_sessions," "$tmp/err"; then
 	echo "chatgpt-plugin-test: an unregistered test-case tool did not warn, or a registered one did:" >&2
 	cat "$tmp/err" >&2
 	exit 1

@@ -58,7 +58,7 @@ func (s *Server) admitControl(ctx context.Context, member domain.MemberID, run d
 	}
 	return s.cfg.Control.AdmitSnapshot(string(run), func(holder control.Snapshot, held bool) error {
 		if held {
-			return fmt.Errorf("%w: member %s holds the run's control; switch from that session, or take control first", control.ErrOccupied, holder.MemberID)
+			return fmt.Errorf("%w: member %s holds the session's control; switch from that session, or take control first", control.ErrOccupied, holder.MemberID)
 		}
 		return admitted()
 	})

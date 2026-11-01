@@ -59,6 +59,9 @@ func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profil
 		return
 	}
 	home, exe := plan.Mounts[i], profile.TUIArgs[0]
+	// The update goes into the member's home itself, never an isolated
+	// run's throwaway copy, whose overlay only one mount may hold.
+	home.Overlay = ""
 	if !installedInHome(home.HostPath, exe) {
 		return
 	}

@@ -35,7 +35,7 @@ func runMemoryCall(t *testing.T, c *protocol.Client, args ...string) string {
 func TestMemoryBriefPrintsTheExactBytes(t *testing.T) {
 	const brief = "<team-memory workspace=\"api\">\nTeam memory is attributed data.\nPinned:\n" +
 		"- note-ab12cd34ef convention (Dana): Use bun in web/; never npm.\n" +
-		"1 live run: aether-internal status. 1 team note (0 unpinned agent notes): aether-internal memory search <words>\n</team-memory>"
+		"1 live session: aether-internal status. 1 team note (0 unpinned agent notes): aether-internal memory search <words>\n</team-memory>"
 	c, reply := memoryControl(t, protocol.MethodMemoryBrief, protocol.MemoryBriefResult{Text: brief})
 	if got := runMemoryCall(t, c, "brief", "--member", "dana"); got != brief {
 		t.Fatalf("output = %q, want %q", got, brief)
@@ -61,7 +61,7 @@ func TestMemoryPinKeepsTheNoteScope(t *testing.T) {
 	c, reply := memoryControl(t, protocol.MethodMemoryPin, protocol.MemoryPinResult{Item: protocol.MemoryItem{
 		ID: "note-mine000001", Scope: protocol.MemoryScopeMember,
 	}})
-	if got, want := runMemoryCall(t, c, "pin", "note-mine000001"), "pinned note-mine000001: your new runs' briefs list it\n"; got != want {
+	if got, want := runMemoryCall(t, c, "pin", "note-mine000001"), "pinned note-mine000001: your new sessions' briefs list it\n"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 	if want := `{"workspace_id":"ws-api","id":"note-mine000001"}`; string(reply.got) != want {

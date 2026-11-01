@@ -82,10 +82,7 @@ func TestTheSchedulerReadsTheRunsWaitConditions(t *testing.T) {
 	}
 	var offset atomic.Int64
 	now := func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
-	svc, err := watch.New(watch.Config{Store: db, Bus: bus, Runs: quietRuns{}, Tick: 20 * time.Millisecond, Now: now,
-		Swarm: func(context.Context, *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-			return nil, "", nil
-		}})
+	svc, err := watch.New(watch.Config{Store: db, Bus: bus, Runs: quietRuns{}, Tick: 20 * time.Millisecond, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

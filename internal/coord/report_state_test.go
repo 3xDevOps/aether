@@ -144,7 +144,7 @@ func TestStateReportThatDoesNotTakeEffectIsAnError(t *testing.T) {
 	}{
 		{ErrReportSuperseded, protocol.CodeConflict},
 		{ErrRunFinished, protocol.CodeInvalidParams},
-		{errors.New("the run is provisioning and has no live container yet"), protocol.CodeInternal},
+		{errors.New("the session is provisioning and has no live container yet"), protocol.CodeInternal},
 	} {
 		outcomes.fail(tc.err)
 		if rpcErr := stateReport(h, run, protocol.CoordOutcomeWaiting, "", "on 3 workers", "wait"); rpcErr == nil || rpcErr.Code != tc.code {
@@ -170,7 +170,7 @@ func TestRefusedStateReportReleasesItsKey(t *testing.T) {
 	h, _ := newStateReportHarness(t, outcomes)
 	run := h.run(0)
 
-	outcomes.fail(errors.New("the run is provisioning and has no live container yet"))
+	outcomes.fail(errors.New("the session is provisioning and has no live container yet"))
 	if rpcErr := stateReport(h, run, protocol.CoordOutcomeNeedsInput, "", "which region?", "k"); rpcErr == nil || rpcErr.Code != protocol.CodeInternal {
 		t.Fatalf("needs-input = %+v, want an internal error", rpcErr)
 	}
@@ -186,7 +186,7 @@ func TestRefusedStateReportReleasesItsKey(t *testing.T) {
 	}
 	outcomes.fail(ErrRunFinished)
 	if rpcErr := stateReport(h, run, protocol.CoordOutcomeWaiting, "", "on 3 workers", "wait"); rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams {
-		t.Fatalf("retry on a finished run = %+v, want invalid params", rpcErr)
+		t.Fatalf("retry on a finished session = %+v, want invalid params", rpcErr)
 	}
 	outcomes.fail(nil)
 	if rpcErr := stateReport(h, run, protocol.CoordOutcomeNeedsInput, "", "which region?", "wait"); rpcErr == nil || rpcErr.Code != protocol.CodeConflict {

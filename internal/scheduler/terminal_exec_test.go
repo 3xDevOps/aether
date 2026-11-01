@@ -85,7 +85,7 @@ func TestTerminalExecScriptMarksOnlyACommandStoppedAtTheLimit(t *testing.T) {
 		err := cmd.Run()
 		var exit *exec.ExitError
 		if err != nil && !errors.As(err, &exit) {
-			t.Fatalf("run %q: %v", command, err)
+			t.Fatalf("session %q: %v", command, err)
 		}
 		return cmd.ProcessState.ExitCode(), stdout.String(), stderr.String()
 	}

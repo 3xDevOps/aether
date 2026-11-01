@@ -25,7 +25,7 @@ done
 const geometrySessionID = 'terminal-geometry-writer'
 const historySessionID = 'terminal-history-writer'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('new runs keep desktop viewers on the shared grid through resize and reattach', async ({ page, aether }) => {
   const alice = await aether.member('alice')
@@ -69,7 +69,7 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await page.setViewportSize({ width: 1568, height: 1000 })
     await page.goto(alice.url)
     await page
-      .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+      .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
       .getByRole('button', { name: /shared geometry regression/ })
       .click()
     const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible > div')
@@ -137,7 +137,7 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     }
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)
-    await page.getByRole('tab', { name: 'Session', exact: true }).click()
+    await page.getByRole('tab', { name: 'Chat', exact: true }).click()
     await page.getByRole('tab', { name: 'Terminal', exact: true }).click()
     await assertGrid(72, 22)
   } finally {
@@ -295,7 +295,7 @@ done
   await page.setViewportSize({ width: 1568, height: 1000 })
   await page.goto(alice.url)
   await page
-    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
     .getByRole('button', { name: /snapshot current prompt/ })
     .click()
 

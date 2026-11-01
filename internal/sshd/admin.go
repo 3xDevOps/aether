@@ -81,7 +81,7 @@ func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, pa
 	}
 	defer lock.Unlock()
 	if !s.authorizationMu.TryLock() {
-		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "run or mission admission is in progress; retry workspace deletion when it finishes"}
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "session admission is in progress; retry workspace deletion when it finishes"}
 	}
 	defer s.authorizationMu.Unlock()
 	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
@@ -202,10 +202,17 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 					return &protocol.Error{Code: protocol.CodeUnavailable, Message: "member.remove: cleanup ownership could not be preserved; member was not removed"}
 				}
 			}
-			if err := s.cfg.Store.DeleteMember(ctx, id); err != nil {
+			// The cascade alone would leave preferences in a restored copy of
+			// the database.
+			deleteMember := s.cfg.Store.DeleteMember
+			if prefs := s.cfg.Services.Preferences; prefs != nil {
+				deleteMember = prefs.DeleteMember
+			}
+			if err := deleteMember(ctx, id); err != nil {
 				return err
 			}
 			deleted = true
+			noteChange(ctx)
 			if err := s.removeAssistant(ctx, id); err != nil {
 				slog.Warn("sshd: member assistant cleanup failed", "member", id, "error", err)
 			}

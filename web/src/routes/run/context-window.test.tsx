@@ -40,14 +40,14 @@ describe('the context window trigger', () => {
     expect(within(panel).getByText('Used').nextSibling?.textContent).toBe('86K')
     expect(within(panel).getByText('Free').nextSibling?.textContent).toBe('114K')
     expect(within(panel).getByText('114K left')).toBeDefined()
-    expect(within(panel).queryByText('Session cost')).toBeNull()
+    expect(within(panel).queryByText('Conversation cost')).toBeNull()
     expect(within(panel).queryByRole('button', { name: 'Compact' })).toBeNull()
   })
 
   it('shows the session cost only when the agent reported one', async () => {
     mount({ used: 86_000, size: 200_000, cost: 1.42, currency: 'USD' })
     await userEvent.click(trigger(/^Context window/))
-    const row = (await screen.findByText('Session cost')).parentElement!
+    const row = (await screen.findByText('Conversation cost')).parentElement!
     expect(row.textContent).toContain('1.42')
   })
 

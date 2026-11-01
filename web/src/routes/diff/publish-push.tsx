@@ -16,8 +16,8 @@ import { githubRepository } from '@/routes/diff/publish-target'
 /** Why no push sentence can be written, which also holds the push back. */
 function undetermined(p: Publish): string | null {
   const push = p.pushTarget
-  if (!p.status?.remotes?.length) return 'This checkout has no remote. Add one with git in the run’s terminal, then refresh the status.'
-  if (!push.remote) return 'This workspace sets no checkout Origin, so no destination is chosen for you. Pick a remote, or add one with git in the run’s terminal.'
+  if (!p.status?.remotes?.length) return 'This checkout has no remote. Add one with git in the session’s terminal, then refresh the status.'
+  if (!push.remote) return 'This workspace sets no checkout Origin, so no destination is chosen for you. Pick a remote, or add one with git in the session’s terminal.'
   if (!push.repository) return `Remote ${push.remote} has more than one push URL. Choose the exact one.`
   if (!push.head_branch.trim()) return p.status.detached ? 'The checkout is on a detached HEAD. Name the branch to push this commit as.' : 'Name the branch to push to.'
   return null
@@ -88,7 +88,7 @@ export function PushStep({ p }: { p: Publish }) {
             </a>
             <p className="text-ui-sm text-muted">
               {stateLabel(pr)} · {pr.head_repository}:{pr.head_branch} → {pr.repository}:{pr.base_branch}. Its checks and review comments are
-              under #{pr.number} in the run’s header.
+              under #{pr.number} in the session’s header.
             </p>
           </div>
         ) : p.targetComplete ? (

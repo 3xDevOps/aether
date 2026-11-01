@@ -1,20 +1,79 @@
 # Assistant
 
 The assistant is a chat panel in the dashboard where you ask Aether for things
-in plain language: "what's the status of my runs?", "launch a run to fix the
+in plain language: "what's the status of my sessions?", "launch a session to fix the
 flaky login test", "install Rust in my environment". It acts with your
-permissions and asks before it launches, messages or stops a run, or saves your
+permissions and asks before it launches, messages or stops a session, or saves your
 environment, unless you turn on [auto-approval](#auto-approval).
 
-The assistant is not a run. It is an [Enhanced](enhanced-runs.md) session of
-your own Claude Code or Codex, started in your
-[environment](environments.md) (the persistent container `aether terminal` opens,
-with your home at `$HOME`). It uses the login in that home, so its usage counts
-against your own subscription. It works before you have a workspace.
+The assistant is not a session. It is an [Enhanced](enhanced-sessions.md) session of
+Claude Code or Codex with a sign-in of its own, which you make once for it. Its
+usage counts against the account you sign it in to. It works before you have a
+workspace.
+
+## Where it runs
+
+Each member's assistant runs in a container of its own,
+`aether-assistant-<member>`, created from the server's standard image. Your
+sessions and your [environment](environments.md) (the persistent container
+`aether terminal` opens) cannot see it:
+
+- Its home is `<data>/assistant/<member>/home` on the server. It mounts
+  nothing from your home or any other member's: no `CLAUDE.md`, `AGENTS.md`,
+  `~/.claude`, `~/.codex`, `~/.local/bin` and no agent login.
+- Its working directory is `/assistant`, which holds the server's
+  instructions and is read-only.
+- Its Enhanced adapter is in `<data>/assistant/<member>/install/<agent>`,
+  mounted read-only under `/opt/aether-assistant` and first in its `PATH`.
+- `/etc/claude-code` and `/etc/codex`, where the agents read managed
+  settings, are empty and read-only.
+- Claude Code's auto-memory is off for it.
+
+Each start of the assistant replaces its container, so nothing the agent
+changed outside its home survives. In the home it keeps only the sign-in file
+and the files that resume the conversation: `~/.claude/projects` for Claude
+Code; `~/.codex/sessions` and `archived_sessions` for Codex. Settings, hooks,
+instructions, MCP servers, skills, memories and Codex's `session_index.jsonl`
+and `state_*.sqlite` files are deleted, and `~/.claude.json` is written again
+with only the onboarding flag.
+
+The sign-in file must hold only what a sign-in writes. Claude Code's
+`.credentials.json` keeps `claudeAiOauth`; Codex's `auth.json` keeps
+`auth_mode` (`chatgpt` or `apikey`), `OPENAI_API_KEY`, `tokens` and
+`last_refresh`. Anything else, such as a gateway URL that would receive your
+prompts, is removed, and that start fails with the keys it removed. **Retry**
+starts with the rest. A sign-in file over 64 KiB is deleted.
+
+On every start the server itself checks the sign-in with the vendor before
+the container starts. It refreshes the token at the vendor's sign-in service
+(`platform.claude.com` for Claude Code, `auth.openai.com` for Codex), writes the
+new tokens back into the home, and asks which account they belong to: Claude
+Code's profile endpoint at `api.anthropic.com` names the account and
+organization, and Codex's new tokens name the ChatGPT account. A Codex API-key
+sign-in is not refreshed; its key is the identity. The first start of either
+agent after you sign in records that account outside the home, before any
+agent runs; one that cannot be verified then leaves that agent not signed in.
+Every later start must find the same account, or fails with `the assistant's sign-in changed since you signed in.
+Sign in again`.
+
+So the assistant cannot start without reaching the vendor: when it is
+unreachable or answers with an error, the start fails with `couldn't verify
+the assistant's sign-in with <vendor>: ...` and the sign-in stays. When the
+vendor refuses the refresh token, the agent is no longer signed in. A server
+that stops between refreshing and writing the new tokens back leaves a used
+refresh token, so the next start asks you to sign in again.
+
+On the first start, and after a server upgrade that pins a newer adapter, the
+panel shows **Installing** while a short-lived container,
+`aether-assistant-install-<member>`, runs `npm install` of the pinned adapter
+into that directory. It needs network access to the npm registry. The adapter
+carries the agent itself: the Claude Code binary of its Agent SDK, or Codex,
+which the install pins to 0.159.3. Neither updates on its own; both move when a
+server upgrade pins a newer version.
 
 ## Open it
 
-- Select **Assistant** in the sidebar next to **New run**, in the top bar when
+- Select **Assistant** in the sidebar next to **New session**, in the top bar when
   the sidebar is hidden, or in the phone toolbar. A dot on it means an action
   waits for your approval.
 - Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS), even while a text field or
@@ -28,34 +87,31 @@ it. On a phone it is a side sheet. Closing it keeps your unsent message.
 ## First use
 
 With no ready agent the panel shows **Needs setup** and lists Claude Code and
-Codex. An agent is ready when it is installed in your home, its Enhanced adapter
-is installed and a login file exists. Each row that is not ready says which
-piece is missing (`Not installed`, `Enhanced adapter not installed`,
-`No sign-in found`) and has **Set up**, which runs the same flow as the
-**Agents** page. From the CLI:
+Codex. An agent is ready when you signed it in for the assistant; a sign-in in
+your environment does not count, because your sessions can change it. A row that
+is not ready says `Not signed in for the assistant` and has **Sign in**.
 
-```sh
-aether agent add claude --enhanced
-aether terminal
-```
+**Sign in** opens a terminal running the agent's sign-in in the assistant's
+container: `claude-agent-acp --cli auth login` for Claude Code, which prints a
+URL and asks for the code the page shows, or `codex login --device-auth` for
+Codex, which prints a URL and a code to enter there. It installs the adapter
+first if needed. Starting a sign-in deletes that agent's earlier sign-in, so
+what the server records is what the sign-in writes. The sign-in is written to
+the assistant's home only. Starting
+it stops a running assistant; the next prompt starts it again, and a
+prompt sent while the sign-in runs fails until it exits. Select **Done** when
+it exits.
 
-Sign in to the agent inside `aether terminal`. The full flow is in
-[quickstart.md](quickstart.md#5-set-up-your-agent). The panel updates when
-setup finishes.
+Aether checks only that the sign-in file exists, not that it still works. When
+the sign-in expires or you want another account, use **Settings > Assistant >
+Sign-in > Sign in again**.
 
 The first conversation uses the first ready agent, Claude Code before Codex. A
 conversation keeps its agent, because another agent cannot continue it. If that
 agent stops being ready, a prompt fails with, for example, `Claude Code is not
-ready: No sign-in found; sign in again or start with another agent`. Sign in
-again, or select **New conversation**, which picks the first ready agent.
-
-### Restart the environment
-
-An environment created before the assistant existed cannot be given the mounts
-the assistant needs, so the panel shows **Restart your environment** with
-**Restart environment**. Restarting closes any shell open in it. Files in
-`$HOME` are kept. Anything installed outside `$HOME` is lost unless you
-[saved the environment](environments.md#save-the-environment).
+ready: Not signed in for the assistant; sign in again or start with another
+agent`. Sign in again, or select **New conversation**, which picks the first
+ready agent.
 
 ## What it can do
 
@@ -65,22 +121,29 @@ run.
 
 | What | Examples | Asks first? |
 | --- | --- | --- |
-| Read | List runs, workspaces and agents. Read one run and its conversation. See your remaining agent quota and your environment's state. Search and show [team memory](memory.md) notes. List integration candidates. | No |
-| Pause and resume | Pause or resume a run | No |
-| Launch a run | Start a run with a workspace, agent and task | Yes |
-| Message a run | Send a message to a run's agent | Yes |
-| Stop or close a run | Stop a run, or close it as merged or abandoned | Yes |
-| Save your environment | Save it as the image new runs and terminals start from | Yes |
-| Run lifecycle | Relaunch a stopped run, switch its mode, protect or archive it, hand it to a teammate | Yes |
-| Swarms | Replace a stopped integrator, release your control of a worker, archive or unarchive a swarm | Yes |
-| Deliver and merge | Approve, reject or deliver an integration candidate; open or merge a run's pull request | Yes |
+| Read | List sessions, workspaces and agents. Read one session and its conversation. See your remaining agent quota and your environment's state. Search and show [team memory](memory.md) notes. | No |
+| Pause and resume | Pause or resume a session | No |
+| Launch a session | Start a session with a workspace, agent and task | Yes |
+| Message a session | Send a message to a session's agent | Yes |
+| Stop or close a session | Stop a session, or close it as merged or abandoned | Yes |
+| Save your environment | Save it as the image new sessions and terminals start from | Yes |
+| Session lifecycle | Relaunch a stopped session, switch its mode, protect or archive it, hand it to a teammate | Yes |
+| Open and merge | Open or merge a session's pull request | Yes |
 | Team memory | Add a note, pin or unpin one; it cannot remove notes | Yes |
 
-Pausing and resuming run at once. The run's events name you as the actor.
-After each action the assistant says what it did, to which run, and the result.
+Asked "what is left", "continue this" or "did we ship?", the assistant reads
+the session with its [progress evidence](connectors.md#progress-evidence)
+and answers requested, implemented, reviewed, merged, released and deployed
+on separate lines, each with its source and time, or "unknown" when Aether has
+no source, as for releases and deployments. An agent's success report alone
+is not proof. "Continue" never repeats a launch, message or merge; the
+assistant proposes the next step and launches only when you ask.
 
-An approved message reaches the agent at once when you control the run, or
-when it is your own run and no one controls it. Otherwise it waits about 45
+Pausing and resuming a session take effect at once. The session's events name you as the actor.
+After each action the assistant says what it did, to which session, and the result.
+
+An approved message reaches the agent at once when you control the session, or
+when it is your own session and no one controls it. Otherwise it waits about 45
 seconds for the member in control to approve or deny it.
 
 Installing a toolchain or editing a file is not an Aether action. The assistant
@@ -92,9 +155,9 @@ environment.
 A question about how something works, an idea or pasted text never launches
 anything; the assistant answers or discusses it and offers a launch. "Can you
 fix the login test?" is a request for work, not a question. When you ask for
-work, the run's task is your request in your meaning: the goal, every
+work, the session's task is your request in your meaning: the goal, every
 constraint and must-not you gave ("do not touch billing", "research only"), the
-names, ids and numbers you used, the workspace, branch, run, pull request or
+names, ids and numbers you used, the workspace, branch, session, pull request or
 error you pointed at, and the style and review expectations you saved. It adds
 no features, tests, docs, merges, pushes or constraints you did not ask for; it
 suggests them in chat instead. Each guess it had to make, such as which branch
@@ -108,7 +171,7 @@ What you say in the message beats launch picks, which beat saved defaults,
 which beat what you used before. It uses the account you chose or saved,
 without asking again, while launch options still show it as usable (on a server
 without launch options, only an account you named, else your own), and says
-which account the run used and any fallback it took. When a saved agent, model
+which account the session used and any fallback it took. When a saved agent, model
 or account is no longer usable, it says why and asks instead of launching on
 another.
 
@@ -116,28 +179,28 @@ another.
 
 Each message carries a short description of what your dashboard shows, so "why
 is this stuck?" works without ids: the page you are on, the workspace and run,
-the open run view, the open file's path (never its contents), the last 8
+the open session view, the open file's path (never its contents), the last 8
 pages you visited, and the mode and model you last launched each agent with
 from this browser while signed in as you (up to 4, newest first). It never holds titles, file
 contents, drafts, terminal text or secrets. The assistant launches with those
 choices unless your message names others.
 
-The page is pinned when you start typing. If you move to another run or page
+The page is pinned when you start typing. If you move to another session or page
 before sending, the panel asks **You moved to Ship the docs. Ask about:** with
 both pages, and sends nothing until you pick one.
 
 To point a message at something specific, use **Fix this** on a failed session,
-the button beside a failing check or beside the pull request number in a run's
-header, **Ask the assistant** beside a swarm task's error, or the run menu's
-**Ask the assistant to fix this run** and **Ask the assistant why this is
-stuck**. Each opens the panel with that run, check, pull request, error or task
+the button beside a failing check or beside the pull request number in a session's
+header, or the session menu's
+**Ask the assistant to fix this session** and **Ask the assistant why this is
+stuck**. Each opens the panel with that session, check or pull request
 attached and a short draft to edit; nothing is sent until you press Send. The
 attachment holds only ids and names, such as `acme/api#42 · check lint`; the
 assistant reads the details with its tools.
 
 Above the message box, a chip names each thing the message is about. Remove
-one with its **x**, or Delete or Backspace. Removing the page also removes the
-launch choices, and stops the assistant reading the page between messages
+one with its **x**, or Delete or Backspace. Removing the page stops the
+assistant reading the page between messages
 until you send or add it back; a message sent right after waits until the
 server has forgotten it.
 **Inspect** lists every field the next message sends, and **Raw JSON** shows
@@ -145,9 +208,9 @@ the exact payload. Clear **Share the page I am on with the assistant** there
 to stop sending the page; things you attached are still sent. The choice is saved for you on every device.
 
 The view a message carries is the one the assistant uses for that turn until
-you open another page. Before acting on a run it resolves the target from ids
+you open another page. Before acting on a session it resolves the target from ids
 you wrote, then the page, then recent pages, and asks when more than one fits
-or you moved away from the run it last discussed. Only this assistant sees your
+or you moved away from the session it last discussed. Only this assistant sees your
 page; assistants connected from outside Aether, such as ChatGPT, do not.
 
 ## Approve an action
@@ -158,17 +221,37 @@ expires:
 
 ```text
 Launch claude (acp) in api: "Fix the flaky login test"
-Stop run run-8x2... ("Fix flaky login test")
-Save your environment as a new image; new runs and terminals start from it
+Stop session run-8x2... ("Fix flaky login test")
+Save your environment as a new image; new sessions and terminals start from it
 ```
 
 A launch card instead lists what starts: the kind, workspace, agent with model
 and mode, the account, the fallback when that account's usage runs out, the
-task, and how you hear back. The assistant launches on your own account, with
-automatic [usage fallback](teams.md#usage-fallback): if your account is nearly
-out of quota, the run starts on an account shared with you. With
-[auto-approval](#auto-approval) on, a launch passes without a card, fallback
-included.
+task, and how you hear back. A template launch's card shows the whole task its
+parameters fill in. When the assistant gives a one-line reason for a launch,
+the card shows it as a **Reason** row above the rest. The assistant fills what you did not say from
+your [saved launch choices](teams.md#saved-launch-choices): **From your saved
+defaults** names each choice that came from them, **Saved mode not used** (or
+agent, fallback account) gives the reason a saved one was skipped, such as an
+Enhanced mode not installed on that account, and **Saved model not checked**
+says why a saved model could not be checked on the launch's account. A saved account a
+teammate no longer shares with you fails the launch with the server's reason
+rather than starting it on your own. With nothing saved, the assistant
+launches on your own account with automatic [usage
+fallback](teams.md#usage-fallback): if your account is nearly out of quota, the
+session starts on an account shared with you. With [auto-approval](#auto-approval)
+on, such a launch still asks while any account is shared with you, even when
+you saved automatic fallback: it also covers accounts shared after you saved
+it. One that names its account or its fallback order or sets no fallback, in
+the request or in your saved choices, passes without a card. For automatic
+fallback on one launch while you saved an order or no fallback, ask for it:
+the assistant launches with `saved_defaults: "ignore"` and the other choices
+spelled out.
+
+When you ask it to keep a choice for next time ("from now on use codex"), the
+assistant saves it with `aether_save_launch_defaults`, behind a card that
+spells out every saved choice; a choice for one launch is never saved. The
+launch dialog and **Settings → Launch** show the same choices.
 
 **Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
 turn or session fails the action with the reason, for example `run.kill was
@@ -184,37 +267,36 @@ follows when the call returns:
 | `Approved: <summary>` | You approved the card |
 | `Auto-approved: <summary>` | [Auto-approval](#auto-approval) passed it |
 | `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer in 10 minutes, or the turn ended first. Nothing ran |
-| `Done: <summary>` | It succeeded, with the run it launched |
+| `Done: <summary>` | It succeeded, with the session it launched |
 | `Failed: <summary>` | The server refused it, or the approval could not be read or counted, with the exact error. In the second case nothing ran |
 
 Pausing and resuming are recorded as `Done` or `Failed` without an approval.
-Each record carries the target's run and workspace id, and the owner when the
-run is another member's; the [protocol reference](local-gateway.md) gives the
+Each record carries the target's session and workspace id, and the owner when the
+session is another member's; the [protocol reference](local-gateway.md) gives the
 fields. Resetting the conversation drops the records of actions still in
 flight instead of writing them into the new one.
 
 ## See what it did
 
 Each action appears in the conversation as a card. The card names the action
-and its target ("Launched run on api with Claude Code", "Merged PR #42") and
+and its target ("Launched session on api with Claude Code", "Merged PR #42") and
 shows its state: running, done, failed, declined by you, expired after 10
 minutes unanswered, withdrawn when the turn ended first, or did not finish. A
 call waiting for your approval is one line above the approval card. It also
-says whether you approved it or auto-approval passed it, and links to the run,
-swarm, pull request or environment. A failure shows the server's error as is.
+says whether you approved it or auto-approval passed it, and links to the session,
+pull request or environment. A failure shows the server's error as is.
 **Retry** adds `Retry: <what it tried>` to the message box for you to edit and
 send. A launch card adds what started, such as `run · api · Claude Code opus ·
-your account`. A run or swarm the assistant launched that is still going reads
+your account`. A session the assistant launched that is still going reads
 **Working in the background** with how you hear back; it keeps running after
-you close the panel. A launched swarm's state is read again on each change to
-it, so the card and the **Actions** list agree. Reads fold
-into one line, such as **Read 3 runs**, that expands. The **Actions** button in
+you close the panel. Reads fold
+into one line, such as **Read 3 sessions**, that expands. The **Actions** button in
 the panel header lists the conversation's actions, newest first.
 
 ## Auto-approval
 
 **Settings → Assistant → Let the assistant act without asking** lets the
-assistant launch runs, message and stop your own runs and save your environment
+assistant launch sessions, message and stop your own sessions and save your environment
 without a card. It is off by default and applies only to your assistant. While
 it is on, the panel says **Acts without asking**. The dashboard asks you to
 confirm before turning it on. The CLI does not ask:
@@ -227,16 +309,19 @@ aether member assistant --auto-approve off
 
 ```
 auto-approve  off: each action below waits for your approval on a card
-covers        launching runs, messaging and stopping your own runs, saving your environment
-always asks   messaging or stopping another member's run
+covers        launching sessions, messaging and stopping your own sessions, saving your environment
+always asks   messaging or stopping another member's session
 not covered   the assistant's own shell and file tools, which never ask
 ```
 
-- Messaging or stopping another member's run always asks, with the owner named
+- Messaging or stopping another member's session always asks, with the owner named
   on the card.
-- An auto-approved launch may still use automatic
-  [usage fallback](teams.md#usage-fallback), which can pick an account shared
-  with you.
+- A launch that names a teammate's shared account itself, to run on or in its
+  fallback order, or uses the shared account you saved as your default, passes
+  without a card; the transcript note names the account and its owner.
+- A launch with automatic [usage fallback](teams.md#usage-fallback) while any
+  account is shared with you always asks, since it may move to an account
+  nobody chose, even when automatic is the fallback you saved.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as
@@ -244,8 +329,8 @@ not covered   the assistant's own shell and file tools, which never ask
   run.
 
 > [!WARNING]
-> With auto-approval on, nothing checks a launch, a message to your own run or
-> a save before it happens. Text the assistant reads from runs, files and web
+> With auto-approval on, nothing checks a launch, a message to your own session or
+> a save before it happens. Text the assistant reads from sessions, files and web
 > pages can carry injected instructions. The assistant is told to treat it as
 > data, and nothing enforces that. Any program in your environment can also
 > call the assistant's tools and gets the same pass. See
@@ -259,33 +344,34 @@ then never. **Don't suggest again** stops it.
 ### Shell and file tools never ask
 
 The assistant's own shell and file tools run without asking, with or without
-auto-approval. The session starts in the same mode Enhanced runs use: Claude
+auto-approval. The session starts in the same mode Enhanced sessions use: Claude
 Code `bypassPermissions`, Codex `agent-full-access`. Installing a tool, editing
 a file or running a command in your environment needs no click. A question the
 agent asks you still appears as a card.
 
 ## Notifications
 
-Aether watches every run the assistant launches or messages for you: it
+Aether watches every session the assistant launches, relaunches or messages for
+you: it
 creates a [watch](watches.md#assistant-watches) with source `assistant`,
 listed in **Settings > Watches**, where you pause it to stop the notices. If
 the watch cannot be created, the conversation says so with the error. You do
-not ask for updates. You are told when the run:
+not ask for updates. You are told when the session:
 
 | Notice | When |
 | --- | --- |
-| Finished | The run's agent reported done, the run completed, failed or was stopped, or a member closed it as merged or abandoned |
-| Needs input | The agent asks for a permission, or asks a question or a form in a run that is not Background |
-| Needs attention | The run [needs you](failure-handling.md#needs-you) with no question pending: it reports `needs-input` or `blocked`, hit a usage limit, had its turn interrupted, disconnected, or failed and you have not seen it. Waiting on agents, CI or a process never notifies. The reason is worded as in [push notifications](networking.md#notifications) |
+| Finished | The session's agent reported done, the session completed, failed or was stopped, or a member closed it as merged or abandoned |
+| Needs input | The agent asks for a permission, or asks a question or a form in a session that is not Background |
+| Needs attention | The session [needs you](failure-handling.md#needs-you) with no question pending: it reports `needs-input` or `blocked`, hit a usage limit, had its turn interrupted, disconnected, or failed and you have not seen it. Waiting on agents, CI or a process never notifies. The reason is worded as in [push notifications](networking.md#notifications) |
 
 A notice appears in the assistant's transcript with a link to its watch, as a
 toast with a badge on the **Assistant** button, as an OS notification in the
-desktop app, and as a phone push. Your own runs already push you when they need
+desktop app, and as a phone push. Your own sessions already push you when they need
 you, so the watch does not push those again
 ([no double pushes](watches.md#no-double-pushes)). Each state is announced
-once; a need the run stood in when the assistant acted on it is not
-announced. The watch ends when the run reaches its final state, expires after
-14 days, or goes with the run when it is deleted.
+once; a need the session stood in when the assistant acted on it is not
+announced. The watch ends when the session reaches its final state, expires after
+14 days, or goes with the session when it is deleted.
 
 ## Conversations
 
@@ -298,19 +384,92 @@ in the box; **Send** retries it under the same idempotency key, so it runs at
 most once. While a turn runs you cannot send another prompt.
 
 There is one conversation per member. It survives page reloads and server
-restarts. If the environment stops, the agent stops with it and the next prompt
-starts it again. **New conversation** asks **Start a new conversation?** and
-discards the transcript and the agent's session. What the assistant already did
-stays done.
+restarts. If the agent stops, the next prompt starts it again. **New
+conversation** asks **Start a new conversation?**, then deletes the transcript,
+removes the assistant's container and deletes everything in its home but the
+sign-in files: sessions, history, todos, file history, shell snapshots and
+logs. The installed adapter is outside the home and stays. What the assistant
+already did stays done.
+
+### Earlier assistant state in your home
+
+Before the assistant had its own container it ran in your environment, in
+`~/.aether/assistant`, and kept its sessions in your home. That state, and the
+login it borrowed from your home, are not moved, because any session could have
+changed them. Delete the old state from `aether terminal`; the session
+directory is named after your home's path, `-root--aether-assistant` when it
+is `/root`:
+
+```sh
+rm -rf ~/.aether/assistant ~/.claude/projects/*--aether-assistant
+```
+
+Codex sessions from that time are in `~/.codex/sessions` together with your
+sessions' sessions.
+
+## Preferences
+
+A **preference** is a short instruction about how you work that you ask the
+assistant to remember, such as "remember that I prefer table output". Only
+you can read, change or forget your preferences; teammates, admins, your sessions
+and connected apps such as ChatGPT cannot reach them.
+
+- **Save one:** say "remember", "from now on" or "always". The assistant
+  saves your own words from that message without a card, and the transcript
+  shows **Saved** or **Updated** with the text. A preference is at least 3
+  words and 12 characters and at most 500 characters; the assistant saves at
+  most 3 per message and you keep at most 200. Saving text you already keep
+  for the same workspace, or for all of them, fails with
+  `already remembered as preference <id>`.
+- **What it can quote:** only a session of whole words you typed in your latest
+  message, stored as you wrote them. It refuses paraphrases, anything
+  gitleaks flags as a secret, and text it treats as pasted: lines starting
+  with `>` and the lines after them up to a blank line, fenced code blocks
+  (up to a fence at least as long as the opening one, or to the end of the
+  message), and lines indented by four columns or more, where a tab
+  reaches the next multiple of four; an indented fence is such a line, not
+  a fence.
+- **See, edit and forget:** **Settings → Memory** lists them. The assistant
+  can also forget one after you approve its card, even while preferences are
+  off or the conversation is temporary. Forgetting deletes the preference;
+  the assistant's next prompt tells it not to use the old text. If the
+  preference changes while its card waits, approving the card forgets
+  nothing and the call fails with `changed since you saw it`.
+  **Undo** on a Saved, Updated or Forgotten card restores the earlier text
+  through Settings, so the preference then reads **Added in Settings**. It
+  refuses, and says why, when the preference changed since the card. The
+  **Temporary chat** switch appears only on servers that support it.
+- **Turn off:** switch off preferences in **Settings → Memory**
+  (`assistant.settings` with `preferences_enabled: false`). The assistant
+  then neither reads nor saves them, and each of your messages tells it not
+  to use the preferences it read earlier in the conversation. A
+  **temporary** conversation (`assistant.settings` with `temporary: true`)
+  does the same until **New conversation**, which also deletes the agent's
+  session files in the assistant's home, as it does for every
+  conversation.
+- **Precedence:** your current message overrides a saved preference. A
+  preference never changes a setting and never chooses an account, a
+  fallback, a merge, a push or auto-approval. With auto-approval on, a launch
+  or message whose text contains a saved preference still shows its card.
+- **Scope:** a preference applies in all workspaces, or in one. A
+  preference for one workspace takes the workspace of the page your message
+  was sent from, which the message carries only while **Share the page I am
+  on with the assistant** is on. It belongs to you on this server and is not
+  synced to other servers.
+
+The assistant never saves anything you did not ask it to, never imports your
+agent's own memory files or past conversations, and never stores pull
+request, CI or session state. What forgetting does not remove is listed in
+[Privacy](privacy.md#assistant-preferences).
 
 ## Limits
 
 - One assistant per member, acting only for that member.
-- It uses your own agent account. [Account sharing](security.md#account-sharing)
-  does not apply to it.
-- Sending a prompt needs the permission to launch runs (collaborator or
+- It uses the account you signed it in to.
+  [Account sharing](security.md#account-sharing) does not apply to it.
+- Sending a prompt needs the permission to launch sessions (collaborator or
   admin).
-- Nothing enforces that it treats text from runs, files and web pages as data.
+- Nothing enforces that it treats text from sessions, files and web pages as data.
 
 ## Troubleshooting
 
@@ -318,10 +477,15 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 
 | Message | Fix |
 | --- | --- |
-| `assistant: no agent is ready; install Claude Code or Codex with its Enhanced adapter and sign in` | [Set up an agent](#first-use) |
-| `scheduler: the environment was created before the assistant existed; restart it to add the assistant's mounts` | [Restart the environment](#restart-the-environment) |
+| `assistant: no agent is ready; sign in to Claude Code or Codex for the assistant` | [Sign in for the assistant](#first-use) |
+| `scheduler: couldn't verify the assistant's sign-in with Anthropic: ...` (or `OpenAI`) | The server could not reach the vendor's sign-in service, or it answered with an error; the detail follows. Check the server's network access, then **Retry** |
+| `scheduler: Anthropic answered 400 Bad Request: the sign-in service refused the assistant's sign-in. Sign in again` | The vendor refused the refresh token. [Sign in again](#first-use) |
+| `scheduler: not signed in for the assistant. Sign in for the assistant first` | No sign-in was recorded, or the sign-in wrote no usable file. [Sign in](#first-use) |
+| `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
+| `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
+| `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
-| `assistant: open the claude session; stderr: ...` | The adapter failed to start. Fix the agent in `aether terminal`, then **Retry** |
+| `assistant: open the claude session; stderr: ...` | The adapter failed to start. Read stderr, then **Retry** |
 | `the member did not answer within 10m0s` | The card timed out. Ask again |
 | `<method> was not approved: record the approval: <error>` | The approval could not be saved, so the action did not run. Try again |
 | `the assistant is not configured on this server` | The server runs without the assistant |

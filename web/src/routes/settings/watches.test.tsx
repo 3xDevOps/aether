@@ -90,7 +90,7 @@ describe('watches in settings', () => {
     showSettings([
       watch({ last_notification: notice, source: 'assistant' }),
       watch({ id: 'wat-2', target: { kind: 'pr', repo: 'acme/app', number: 12 }, target_title: 'Fix login', conditions: ['ci'], state: 'error', error: 'GitHub refused the token: 401 Bad credentials' }),
-      watch({ id: 'wat-3', target_title: 'old run', state: 'done' }),
+      watch({ id: 'wat-3', target_title: 'old session', state: 'done' }),
     ])
     const list = await screen.findByRole('list', { name: 'Active watches' })
     const rows = within(list).getAllByRole('listitem')
@@ -100,13 +100,13 @@ describe('watches in settings', () => {
     expect(rows[0]!.textContent).toContain('PR #12 · acme/app')
     expect(rows[1]!.textContent).toContain('Watching · Needs you, Finished')
     expect(rows[1]!.textContent).toContain('Last notice: fix the login redirect needs you')
-    expect(rows[1]!.textContent).toContain('Run · Kept by the assistant')
+    expect(rows[1]!.textContent).toContain('Session · Kept by the assistant')
     expect(rows[0]!.textContent).not.toContain('Kept by')
-    expect(screen.queryByText('old run')).toBeNull()
+    expect(screen.queryByText('old session')).toBeNull()
 
     await user.click(screen.getByRole('radio', { name: 'All' }))
     expect(within(screen.getByRole('list', { name: 'All watches' })).getAllByRole('listitem')).toHaveLength(3)
-    expect(screen.getByText('old run')).toBeDefined()
+    expect(screen.getByText('old session')).toBeDefined()
   })
 
   it('explains what a watch is when there are none', async () => {
@@ -132,7 +132,7 @@ describe('watches in settings', () => {
           { ...notice, id: 'not-b', title: 'Off', deliveries: [at('push', 'disabled', 'Push is off in your notification settings')] },
           { ...notice, id: 'not-d', title: 'Waiting', deliveries: [at('push', 'pending', 'you are active at a dashboard')] },
           { ...notice, id: 'not-c', title: 'Broken', deliveries: [at('push', 'failed', '410 Gone from fcm.googleapis.com')] },
-          { ...notice, id: 'not-e', title: 'Skipped', deliveries: [at('push', 'skipped', 'The run notification already sent it'), at('assistant', 'delivered')] },
+          { ...notice, id: 'not-e', title: 'Skipped', deliveries: [at('push', 'skipped', 'The session notification already sent it'), at('assistant', 'delivered')] },
           { ...notice, id: 'not-f', title: 'Withdrawn', deliveries: [at('push', 'withdrawn')] },
         ],
       })),
@@ -150,10 +150,10 @@ describe('watches in settings', () => {
     expect(within(dialog).getByText('Push off: Push is off in your notification settings')).toBeDefined()
     expect(within(dialog).getByText('Push pending: you are active at a dashboard')).toBeDefined()
     expect(within(dialog).getByText('Push failed: 410 Gone from fcm.googleapis.com')).toBeDefined()
-    expect(within(dialog).getByText('Push skipped: The run notification already sent it')).toBeDefined()
+    expect(within(dialog).getByText('Push skipped: The session notification already sent it')).toBeDefined()
     expect(within(dialog).getByText('In the assistant chat')).toBeDefined()
     expect(within(dialog).getByText('Push withdrawn from your devices: the need ended')).toBeDefined()
-    await user.click(within(dialog).getByRole('button', { name: 'Open run' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: fixRun.id } })
   })
 
@@ -165,14 +165,14 @@ describe('watches in settings', () => {
       watchGet: vi.fn(async () => ({ watch: current, notifications: [] })),
       watchUpdate: vi.fn(async (params) => {
         current = { ...current, state: params.paused ? 'paused' : 'active' }
-        return { watch: current, receipt: params.paused ? 'Paused watching run fix-login.' : 'Watching run fix-login for: needs you, finished. Push: 2 devices.' }
+        return { watch: current, receipt: params.paused ? 'Paused watching session fix-login.' : 'Watching session fix-login for: needs you, finished. Push: 2 devices.' }
       }),
       watchDelete: vi.fn(async () => ({})),
     })
     const dialog = await screen.findByRole('dialog')
     await user.click(await within(dialog).findByRole('button', { name: 'Pause' }))
     expect(client.watchUpdate).toHaveBeenCalledWith({ watch_id: 'wat-1', paused: true })
-    expect(toast.success).toHaveBeenCalledWith('Paused watching run fix-login.')
+    expect(toast.success).toHaveBeenCalledWith('Paused watching session fix-login.')
     await user.click(await within(dialog).findByRole('button', { name: 'Resume' }))
     expect(client.watchUpdate).toHaveBeenLastCalledWith({ watch_id: 'wat-1', paused: false })
 
@@ -189,7 +189,7 @@ describe('watches in settings', () => {
     const expired = watch({ state: 'expired', created_at: '2026-01-01T10:00:00Z', expires_at: '2026-01-15T10:00:00Z' })
     const { client } = showSettings([expired], {
       watchGet: vi.fn(async () => ({ watch: expired, notifications: [] })),
-      watchUpdate: vi.fn(async (params) => ({ watch: { ...expired, state: 'active' as const, expires_at: params.expires_at!, updated_at: new Date().toISOString() }, receipt: 'Watching run fix-login for: needs you, finished.' })),
+      watchUpdate: vi.fn(async (params) => ({ watch: { ...expired, state: 'active' as const, expires_at: params.expires_at!, updated_at: new Date().toISOString() }, receipt: 'Watching session fix-login for: needs you, finished.' })),
     })
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('Ended')).toBeDefined()
@@ -222,7 +222,7 @@ describe('watches in settings', () => {
     seed({ route: { name: 'settings', params: { section: 'watches', watch: 'wat-1' } } })
     const { client } = showSettings([watch()], {
       watchGet: vi.fn(async () => ({ watch: watch(), notifications: [] })),
-      watchUpdate: vi.fn(async () => ({ watch: watch({ label: 'login', conditions: ['needs_you'], updated_at: '2026-10-26T10:02:00Z' }), receipt: 'Watching run login for: needs you.' })),
+      watchUpdate: vi.fn(async () => ({ watch: watch({ label: 'login', conditions: ['needs_you'], updated_at: '2026-10-26T10:02:00Z' }), receipt: 'Watching session login for: needs you.' })),
     })
     const dialog = await screen.findByRole('dialog')
     const label = await within(dialog).findByLabelText('Label')
@@ -262,7 +262,7 @@ describe('creating a watch', () => {
   it('pre-checks the defaults, says what each condition means, and shows the receipt', async () => {
     const user = userEvent.setup()
     const client = fakeApi({
-      watchCreate: vi.fn(async () => ({ watch: watch(), receipt: 'Watching run fix-login for: needs you, finished. Push: 2 devices. Expires Nov 9.' })),
+      watchCreate: vi.fn(async () => ({ watch: watch(), receipt: 'Watching session fix-login for: needs you, finished. Push: 2 devices. Expires Nov 9.' })),
     })
     render(<WatchDialog client={client} />)
     expect(screen.getByRole('dialog', { name: 'Watch “fix the login redirect”' })).toBeDefined()
@@ -279,7 +279,7 @@ describe('creating a watch', () => {
     expect(params.idempotency_key).toBeTruthy()
     await waitFor(() => expect(toast.success).toHaveBeenCalled())
     const [receipt, options] = vi.mocked(toast.success).mock.calls[0]!
-    expect(receipt).toBe('Watching run fix-login for: needs you, finished. Push: 2 devices. Expires Nov 9.')
+    expect(receipt).toBe('Watching session fix-login for: needs you, finished. Push: 2 devices. Expires Nov 9.')
     ;(options as unknown as { action: { onClick: () => void } }).action.onClick()
     expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'watches', watch: 'wat-1' } })
     expect(useStore.getState().watches['wat-1']).toBeDefined()
@@ -315,7 +315,7 @@ describe('watch answers that arrive late', () => {
     vi.stubGlobal('crypto', {})
     seed({ paletteDialog: 'watch', paletteRunID: fixRun.id })
     const user = userEvent.setup()
-    const client = fakeApi({ watchCreate: vi.fn(async () => ({ watch: watch(), receipt: 'Watching run fix-login.' })) })
+    const client = fakeApi({ watchCreate: vi.fn(async () => ({ watch: watch(), receipt: 'Watching session fix-login.' })) })
     render(<WatchDialog client={client} />)
     await user.click(screen.getByRole('checkbox', { name: 'CI finished' }))
     await user.click(screen.getByRole('button', { name: 'Watch' }))
@@ -329,7 +329,7 @@ describe('watch answers that arrive late', () => {
     render(<WatchDialog client={client} />)
     await userEvent.setup().click(screen.getByRole('button', { name: 'Watch' }))
     useStore.setState({ identityKey: 'other', watches: {}, watchesFor: 'other' })
-    created.release({ watch: watch(), receipt: 'Watching run fix-login.' })
+    created.release({ watch: watch(), receipt: 'Watching session fix-login.' })
     await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
     expect(useStore.getState().watches).toEqual({})
     expect(toast.success).not.toHaveBeenCalled()
@@ -382,7 +382,7 @@ describe('watch answers that arrive late', () => {
     const racing = fakeApi({ watchUpdate: vi.fn(() => updated.promise), watchDelete: vi.fn(async () => ({})) })
     const update = updateWatch(useStore, racing, { watch_id: 'wat-1', label: 'login' })
     await deleteWatch(useStore, racing, 'wat-1')
-    updated.release({ watch: watch({ label: 'login' }), receipt: 'Watching run login.' })
+    updated.release({ watch: watch({ label: 'login' }), receipt: 'Watching session login.' })
     await update
     expect(useStore.getState().watches['wat-1']).toBeUndefined()
   })
@@ -538,6 +538,6 @@ describe('the run header hint', () => {
       'Notifies you on: Needs you, CI finished. Notices appear in the dashboard, and on your push devices when push is on.',
     )
     expect(watchHint(watch({ state: 'paused' }))).toBe('Watch paused: no notices until you resume it.')
-    expect(watchHint(watch({ state: 'error', error: 'run is gone' }))).toContain('run is gone')
+    expect(watchHint(watch({ state: 'error', error: 'session is gone' }))).toContain('session is gone')
   })
 })

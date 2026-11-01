@@ -52,8 +52,8 @@ func (s *Scheduler) reclaimDiskLocked(ctx context.Context, keep domain.MemberID)
 			continue
 		}
 		s.publishTimeline(ctx, entry.workspaceID, entry.runID, "", events.TimelineNote,
-			"Removed this closed run's container early because disk space was low; the run can no longer be reopened, and its branch and history are kept")
-		if recovered("closed run container") {
+			"Removed this closed session's container early because disk space was low; the session can no longer be reopened, and its branch and history are kept")
+		if recovered("closed session container") {
 			return
 		}
 	}

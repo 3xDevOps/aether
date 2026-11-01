@@ -53,7 +53,7 @@ func (g *Gateway) handleDevelopmentBrowser(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if req.RunID != "" && req.RunID != r.PathValue("run") {
-		refuse(&protocol.Error{Code: protocol.CodeDenied, Message: "stream run does not match route"})
+		refuse(&protocol.Error{Code: protocol.CodeDenied, Message: "stream session does not match route"})
 		return
 	}
 	req.RunID = r.PathValue("run")

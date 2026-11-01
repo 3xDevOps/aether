@@ -17,7 +17,7 @@ func init() {
 			"aether workspace import <path|url> [--name <name>]\n" +
 			"aether workspace delete <name> --yes\n" +
 			"aether workspace list\n" +
-			"aether workspace settings [--workspace <name>] [--message-others everyone|admins-only] [--child-max-live <n>] [--child-max-depth <n>] [--child-max-total <n>]\n" +
+			"aether workspace settings [--workspace <name>] [--message-others everyone|admins-only] [--child-max-live <n>]\n" +
 			"aether workspace origin [--workspace <name>] [<url>|--clear]\n" +
 			"aether workspace env list [--workspace <name>]\n" +
 			"aether workspace env set [--workspace <name>] <NAME>=<value>...\n" +
@@ -104,7 +104,7 @@ type workspaceCreateOptions struct {
 
 func workspaceInit(args []string) error {
 	fs := newFlagSet("workspace init")
-	base := fs.String("base", "", "branch new run worktrees are cut from (default main)")
+	base := fs.String("base", "", "branch new session worktrees are cut from (default main)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
 		return fmt.Errorf("%w\nusage: aether workspace init <name> [--base <branch>]", err)
@@ -117,7 +117,7 @@ func workspaceInit(args []string) error {
 
 func workspaceAdd(args []string) error {
 	fs := newFlagSet("workspace add")
-	base := fs.String("base", "", "branch new run worktrees are cut from (default main)")
+	base := fs.String("base", "", "branch new session worktrees are cut from (default main)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
 		return fmt.Errorf("%w\nusage: aether workspace add <name> [--base <branch>]", err)
@@ -171,7 +171,7 @@ func workspaceDelete(args []string) error {
 		return fmt.Errorf("usage: aether workspace delete <name-or-id> --yes")
 	}
 	if !*yes {
-		return fmt.Errorf("--yes is required because workspace deletion permanently removes its runs, repository and data")
+		return fmt.Errorf("--yes is required because workspace deletion permanently removes its sessions, repository and data")
 	}
 	return withControl(func(c *protocol.Client) error {
 		ws, err := resolveMirrorWorkspace(c, name, false)

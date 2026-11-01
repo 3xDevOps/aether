@@ -219,7 +219,7 @@ func TestAdoptLoginPathShellFailureStillAppliesFallbacks(t *testing.T) {
 	// The interactive run is the one reported: it is the one the user
 	// has to fix.
 	if !strings.Contains(err.Error(), "read PATH from the login shell") || !strings.Contains(err.Error(), "-l -i -c: exit status 1") {
-		t.Fatalf("error = %v, want the -l -i run named", err)
+		t.Fatalf("error = %v, want the -l -i session named", err)
 	}
 	want := []string{filepath.Join(home, ".local", "bin")}
 	if !reflect.DeepEqual(added, want) {

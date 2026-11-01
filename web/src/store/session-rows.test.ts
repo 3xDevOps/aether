@@ -26,7 +26,7 @@ describe('session rows from the item log', () => {
     ]))
     expect(rows.map((row) => row.kind)).toEqual(['user', 'steps', 'assistant'])
     expect(rows[1]).toMatchObject({
-      id: 'steps:1:message:1:m2',
+      id: 'steps:1:thought:1:t1',
       summary: 'Read 1 file, ran 1 command and edited 1 file',
       icons: ['think', 'plan', 'read'],
       plan: { done: 1, total: 1 },
@@ -51,24 +51,62 @@ describe('session rows from the item log', () => {
       item('message', 1, { message: { role: 'assistant', message_id: 'a', text: 'lo', complete: true } }),
       tool(1, 'x', 'execute', 'make', 'failed', { output: 'two\n', exit_code: 2 }),
     ], false))
-    expect(rows).toMatchObject([{
-      kind: 'steps',
-      current: true,
-      failed: 1,
-      steps: [
-        { kind: 'narration', text: 'Hello', streaming: false },
-        { kind: 'tool', entry: { output: 'one\ntwo\n', status: 'failed', exitCode: 2 } },
-      ],
-    }])
+    expect(rows).toMatchObject([
+      { kind: 'assistant', text: 'Hello', streaming: false },
+      { kind: 'steps', current: true, failed: 1, steps: [{ kind: 'tool', entry: { output: 'one\ntwo\n', status: 'failed', exitCode: 2 } }] },
+    ])
   })
 
-  it('keeps the prose after the last step as the answer and moves it into the block once a step follows', () => {
+  it('keeps the agent prose in the conversation and blocks only the work between it', () => {
     const start = [item('turn_start', 1), say(1, 'user', 'go'), tool(1, 'x', 'execute', 'make', 'completed'), say(1, 'assistant', 'Built.')]
     expect(kinds(turnOf(start, false))).toEqual(['user', 'steps', 'assistant'])
     const more = turnRows(turnOf([...start, tool(1, 'y', 'execute', 'make test', 'in_progress')], false))
-    expect(more.map((row) => row.kind)).toEqual(['user', 'steps'])
-    expect(more[1]).toMatchObject({ running: 1, steps: [{ kind: 'tool' }, { kind: 'narration', text: 'Built.' }, { kind: 'tool' }] })
+    expect(more).toMatchObject([
+      { kind: 'user' },
+      { kind: 'steps', id: 'steps:1:1:x', current: false, steps: [{ kind: 'tool', entry: { command: 'make' } }] },
+      { kind: 'assistant', text: 'Built.' },
+      { kind: 'steps', id: 'steps:1:1:y', current: true, running: 1, steps: [{ kind: 'tool', entry: { command: 'make test' } }] },
+    ])
     expect(kinds(turnOf([item('turn_start', 1), say(1, 'user', 'ping'), say(1, 'assistant', 'pong'), item('turn_end', 1, { stop_reason: 'end_turn' })]))).toEqual(['user', 'assistant'])
+  })
+
+  it('keeps the reply last when the agent reports after it', () => {
+    const end = item('turn_end', 1, { stop_reason: 'end_turn' })
+    const rows = turnRows(turnOf([
+      item('turn_start', 1),
+      say(1, 'user', 'go'),
+      tool(1, 'x', 'execute', 'make', 'completed'),
+      say(1, 'assistant', 'Built.'),
+      tool(1, 'r', 'execute', 'cd /workspace && /usr/local/bin/aether-internal report --outcome answered --summary "Built"', 'completed'),
+      end,
+    ]))
+    expect(rows).toMatchObject([
+      { kind: 'user' },
+      { kind: 'steps', summary: 'Ran 2 commands', steps: [{ kind: 'tool', entry: { command: 'make' } }, { kind: 'tool', entry: { id: '1:r' } }] },
+      { kind: 'assistant', text: 'Built.', outcome: { tone: 'done' } },
+    ])
+    const mcp = turnRows(turnOf([
+      item('turn_start', 1),
+      say(1, 'user', 'ping'),
+      say(1, 'assistant', 'pong'),
+      tool(1, 'r', 'other', 'aether_report', 'completed', { tool_name: 'mcp__aether__aether_report' }),
+      end,
+    ]))
+    expect(mcp).toMatchObject([{ kind: 'user' }, { kind: 'steps', steps: [{ kind: 'tool', entry: { name: 'mcp__aether__aether_report' } }] }, { kind: 'assistant', text: 'pong', outcome: { tone: 'done' } }])
+    const thought = turnRows(turnOf([
+      item('turn_start', 1),
+      say(1, 'user', 'go'),
+      tool(1, 'x', 'execute', 'make', 'completed'),
+      say(1, 'assistant', 'Built.'),
+      item('thought', 1, { message: { role: 'assistant', message_id: 't', text: 'report it', complete: true } }),
+      tool(1, 'r', 'execute', 'aether-internal report --outcome answered --summary "Built"', 'completed'),
+      end,
+    ]))
+    expect(thought).toMatchObject([
+      { kind: 'user' },
+      { kind: 'steps', steps: [{ kind: 'tool' }, { kind: 'thought', text: 'report it' }, { kind: 'tool', entry: { id: '1:r' } }] },
+      { kind: 'assistant', text: 'Built.', outcome: { tone: 'done' } },
+    ])
   })
 
   it('starts a segment at each message from a person, each with its own block', () => {
@@ -83,9 +121,9 @@ describe('session rows from the item log', () => {
     ]))
     expect(rows.map((row) => [row.kind, row.id])).toEqual([
       ['user', 'message:1:u1'],
-      ['steps', 'steps:1:message:1:u1'],
+      ['steps', 'steps:1:1:x'],
       ['user', 'message:1:u2'],
-      ['steps', 'steps:1:message:1:u2'],
+      ['steps', 'steps:1:1:y'],
       ['assistant', 'message:1:m6'],
       ['finished', 'end:1'],
     ])
@@ -143,20 +181,8 @@ describe('session rows from the item log', () => {
     expect(rows).toMatchObject([
       { kind: 'event', text: 'Woken by new agent messages' },
       { kind: 'event', text: 'Turn interrupted', detail: 'The agent connection ended.', tone: 'failed' },
-      { kind: 'event', text: 'New agent session' },
+      { kind: 'event', text: 'New agent conversation' },
       { kind: 'finished', text: 'Cancelled', tone: 'paused' },
-    ])
-  })
-
-  it('labels a swarm wake whether or not it lists what changed', () => {
-    const wake = (what: string) => `Mission update${what}: run /usr/local/bin/aether-internal mission plan show and /usr/local/bin/aether-internal worker list --mission-id m1 before waiting or declaring completion.`
-    const rows = turnRows(turnOf([
-      say(2, 'user', wake('')),
-      say(3, 'user', wake(' (question answered, worker finished)')),
-    ]))
-    expect(rows).toMatchObject([
-      { kind: 'event', text: 'Woken by a swarm update' },
-      { kind: 'event', text: 'Woken by a swarm update' },
     ])
   })
 
@@ -278,10 +304,11 @@ describe('subagent rows', () => {
       tool(1, 'r', 'read', 'Read x', 'completed'),
       launch('d'),
     ], false))
-    expect(rows).toMatchObject([{ kind: 'steps', summary: 'Delegated 4 tasks and read 1 file', agents: ['a', 'b', 'c', 'd'] }])
-    const [block] = rows
-    expect(block?.kind === 'steps' && block.steps.map((step) => step.kind)).toEqual(['subagents', 'narration', 'subagents', 'tool', 'subagents'])
-    expect(block).toMatchObject({ steps: [{ id: 'agents:1:a', ids: ['a', 'b'] }, {}, { id: 'agents:1:c', ids: ['c'] }, {}, { ids: ['d'] }] })
+    expect(rows).toMatchObject([
+      { kind: 'steps', summary: 'Delegated 2 tasks', agents: ['a', 'b'], steps: [{ id: 'agents:1:a', ids: ['a', 'b'] }] },
+      { kind: 'assistant', text: 'waiting' },
+      { kind: 'steps', summary: 'Delegated 2 tasks and read 1 file', agents: ['c', 'd'], steps: [{ id: 'agents:1:c', ids: ['c'] }, { kind: 'tool' }, { ids: ['d'] }] },
+    ])
   })
 
   it('renders items without parent metadata exactly as before', () => {

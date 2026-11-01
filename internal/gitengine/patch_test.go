@@ -149,7 +149,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 	}
 
 	if _, err := e.RunPatch(ctx, "run-unknown", PatchRequest{}); err == nil {
-		t.Error("RunPatch on a run with no checkout should fail")
+		t.Error("RunPatch on a session with no checkout should fail")
 	}
 }
 

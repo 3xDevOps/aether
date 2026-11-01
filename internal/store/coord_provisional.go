@@ -9,7 +9,7 @@ import (
 )
 
 // ProvisionalReportPrefix starts the correlation ID of a provisional report:
-// the last message of a swarm worker whose turn ended without a report.
+// the last message of a child run whose turn ended without a report.
 const ProvisionalReportPrefix = "provisional:"
 
 // CoordReportedSince reports whether run reserved a report at or after since;

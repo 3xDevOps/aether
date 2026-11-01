@@ -31,9 +31,13 @@ type Template struct {
 	Harness     string            `json:"harness"`
 	Mode        string            `json:"mode"`
 	Model       string            `json:"model,omitempty"`
+	Effort      string            `json:"effort,omitempty"`
 	Params      map[string]string `json:"params,omitempty"`
 	BudgetUSD   float64           `json:"budget_usd,omitempty"`
 	CreatedAt   string            `json:"created_at"`
+	// Version changes whenever the task, agent, mode, model or parameter
+	// defaults do; template.launch's expected_version pins it.
+	Version string `json:"version"`
 }
 
 // Schedule is the wire form of a cron schedule. NextFire is empty when the
@@ -68,6 +72,7 @@ type TemplateSaveParams struct {
 	Harness     string            `json:"harness"`
 	Mode        string            `json:"mode,omitempty"`
 	Model       string            `json:"model,omitempty"`
+	Effort      string            `json:"effort,omitempty"`
 	Params      map[string]string `json:"params,omitempty"`
 	BudgetUSD   float64           `json:"budget_usd,omitempty"`
 }
@@ -88,6 +93,12 @@ type TemplateLaunchParams struct {
 	WorkspaceID string            `json:"workspace_id"`
 	Name        string            `json:"name"`
 	Params      map[string]string `json:"params,omitempty"`
+	// ExpectedVersion, when set, refuses the launch with CodeConflict
+	// unless it is the template's current Version.
+	ExpectedVersion string `json:"expected_version,omitempty"`
+	// ReplayOnly launches nothing: it returns the run IdempotencyKey's
+	// launch started, replayed, or fails with CodeNotFound when none did.
+	ReplayOnly bool `json:"replay_only,omitempty"`
 	// IdempotencyKey is RunLaunchParams.IdempotencyKey; one key names one
 	// launch across run.launch and template.launch.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`

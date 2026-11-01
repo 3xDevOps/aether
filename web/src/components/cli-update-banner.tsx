@@ -136,7 +136,7 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
           <p>
             Updating replaces the aether binary on this machine and restarts the
             dashboard. Attached terminals and any running file sync stop with it;
-            the runs themselves keep going on the server.
+            the sessions themselves keep going on the server.
           </p>
           {method === 'admin-prompt' && (
             // The dialog carries osascript's name, not Aether's, and a member

@@ -31,12 +31,6 @@ export function modeRefusal(agent: AgentInfo | undefined, name: string, mode: La
   return null
 }
 
-/** modeRefusal for a swarm integrator or worker, which must also be one Aether can wake when mail arrives. */
-export function swarmRefusal(agent: AgentInfo | undefined, name: string, mode: LaunchMode): Refusal | null {
-  if (mode === 'tui' && agent?.swarm_standard_refusal) return { reason: agent.swarm_standard_refusal, short: 'no idle wake in Standard', setUp: false }
-  return modeRefusal(agent, name, mode)
-}
-
 export function refusals(agent: AgentInfo | undefined, name: string, refuse = modeRefusal): Partial<Record<LaunchMode, Refusal>> {
   return Object.fromEntries(
     modes.flatMap(({ value }) => {
@@ -44,18 +38,6 @@ export function refusals(agent: AgentInfo | undefined, name: string, refuse = mo
       return refusal ? [[value, refusal]] : []
     }),
   )
-}
-
-export const backgroundIntegrator: Refusal = {
-  reason: 'Background is not offered: it exits after one turn, so the integrator could not be asked or told.',
-  short: 'exits after one turn',
-  setUp: false,
-}
-
-/** The modes a swarm integrator of `agent` is refused, and the one it starts in: `preferred` if allowed, else Enhanced, else Standard. */
-export function integratorModes(agent: AgentInfo | undefined, name: string, preferred: LaunchMode) {
-  const refused = { ...refusals(agent, name, swarmRefusal), headless: backgroundIntegrator }
-  return { refused, mode: ([preferred, 'acp', 'tui'] as const).find((mode) => !refused[mode]) }
 }
 
 export function initialMode(agent: AgentInfo | undefined, name: string, remembered: LaunchMode | undefined): LaunchMode {

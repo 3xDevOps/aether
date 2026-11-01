@@ -58,6 +58,38 @@ describe('templates view', () => {
     })
   })
 
+  it('saves the effort its agent offers and forgets it on an agent without effort levels', async () => {
+    const client = fakeApi({ scheduleList: vi.fn(async () => []), templateSave: vi.fn(async () => template) })
+    seed()
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ display_name: 'Claude Code', effort_levels: ['low', 'high'] }), agentInfo({ name: 'copilot', display_name: 'GitHub Copilot CLI' })])
+    render(<Templates client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText(/^Name/), { target: { value: 'weekly sweep' } })
+    fireEvent.change(dialog.getByLabelText(/^Task/), { target: { value: 'sweep the flaky tests' } })
+    const agent = dialog.getByLabelText(/^Agent/)
+    await pickOption(await dialog.findByRole('combobox', { name: 'Effort' }), 'high')
+    await waitFor(() => expect(document.activeElement).toBe(dialog.getByRole('combobox', { name: 'Effort' })))
+    await pickOption(agent, 'GitHub Copilot CLI')
+    expect(dialog.queryByRole('combobox', { name: 'Effort' })).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(agent))
+    await pickOption(agent, 'Claude Code')
+    expect(dialog.getByRole('combobox', { name: 'Effort' }).textContent).toBe('Agent default')
+    await waitFor(() => expect(document.activeElement).toBe(agent))
+    await pickOption(dialog.getByRole('combobox', { name: 'Effort' }), 'low')
+    fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+
+    expect(client.templateSave).toHaveBeenCalledWith({
+      workspace_id: workspace.id,
+      name: 'weekly sweep',
+      task: 'sweep the flaky tests',
+      harness: 'claude',
+      mode: 'headless',
+      effort: 'low',
+    })
+  })
+
   it('lists a saved template at once and keeps one row once the server answers', async () => {
     let answer: (saved: Template) => void = () => {}
     const client = fakeApi({

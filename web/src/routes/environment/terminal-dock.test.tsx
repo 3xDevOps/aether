@@ -456,7 +456,7 @@ describe('environment terminal dock', () => {
 
     save.resolve({ image: 'aether/member-1:123' })
     await waitFor(() =>
-      expect(screen.getByText('Saved - new runs use this environment')).toBeDefined(),
+      expect(screen.getByText('Saved - new sessions use this environment')).toBeDefined(),
     )
     expect(screen.queryByText('Installs here reach agents after you save.')).toBeNull()
     expect(api.envSave).toHaveBeenCalledTimes(1)

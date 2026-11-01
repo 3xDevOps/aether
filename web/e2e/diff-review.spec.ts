@@ -14,7 +14,7 @@ while IFS= read -r line; do
   echo "agent read: $line"
 done`
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('comments on the diff reach the agent as one message', async ({ page, aether }) => {
   const alice = await aether.member('alice')
@@ -85,9 +85,9 @@ test('comments on the diff reach the agent as one message', async ({ page, aethe
     ].join('\n'),
   })])
 
-  await bar.getByRole('button', { name: 'Open the session', exact: true }).click()
-  await expect(page.getByRole('tab', { name: 'Session', selected: true })).toBeVisible()
-  await expect(page.getByRole('log', { name: 'Session' })).toContainText('tighten these')
+  await bar.getByRole('button', { name: 'Open the chat', exact: true }).click()
+  await expect(page.getByRole('tab', { name: 'Chat', selected: true })).toBeVisible()
+  await expect(page.getByRole('log', { name: 'Chat' })).toContainText('tighten these')
 
   await page.getByRole('tab', { name: 'Terminal', exact: true }).click()
   await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent read: say why')

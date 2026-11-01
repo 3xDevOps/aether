@@ -34,11 +34,11 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-var ErrInvalidTransition = errors.New("scheduler: invalid run state transition")
+var ErrInvalidTransition = errors.New("scheduler: invalid session state transition")
 
 // ErrReviewNotReported refuses a reportedOnly complete of a live run whose
 // reported success does not await review.
-var ErrReviewNotReported = errors.New("scheduler: the run has no reported success awaiting review")
+var ErrReviewNotReported = errors.New("scheduler: the session has no reported success awaiting review")
 
 type BaseCapture interface {
 	Capture(context.Context, domain.WorkspaceID, string) (mirror.CaptureResult, error)
@@ -95,14 +95,13 @@ type Config struct {
 	Memory TeamMemory
 	// RemoveAll deletes a directory container processes wrote into; nil
 	// uses os.RemoveAll.
-	RemoveAll                   func(ctx context.Context, path string) error
-	Profiles                    profileService
-	ReposDir                    string
-	WorktreeMount               string
-	StandardImage               string
-	BrowserImage                string
-	Control                     *control.Service
-	DevelopmentTerminalTakeover func(context.Context, domain.RunID, domain.MemberID) error
+	RemoveAll     func(ctx context.Context, path string) error
+	Profiles      profileService
+	ReposDir      string
+	WorktreeMount string
+	StandardImage string
+	BrowserImage  string
+	Control       *control.Service
 	// Secrets holds workspace secret variables; nil runs without any.
 	Secrets *secretstore.Store
 	// Egress points a run of a workspace with egress control on at the egress
@@ -139,10 +138,13 @@ type Config struct {
 	// ServerBinary is staged into run and terminal containers for the
 	// coordination CLI; empty means DefaultServerBinary.
 	ServerBinary string
-	// AssistantDir holds each member's assistant directory. A new terminal
-	// mounts its sock subdirectory and the server binary for the assistant;
-	// empty creates terminals without them.
+	// AssistantDir holds each member's assistant directory: the home,
+	// instructions and tool socket of their assistant container. Empty
+	// leaves the assistant unable to start.
 	AssistantDir string
+	// AssistantIssuer is where assistant sign-ins are checked; the zero
+	// value is the vendors' own sign-in services.
+	AssistantIssuer AssistantIssuer
 	// HarnessUpdateDisabled stops pre-launch updates of shipped harnesses
 	// installed in the member home.
 	HarnessUpdateDisabled bool
@@ -228,6 +230,8 @@ type Scheduler struct {
 	developmentMu         sync.Mutex
 	development           *developmentState
 	terminalLocks         map[domain.MemberID]*sync.Mutex
+	assistantLocks        map[domain.MemberID]*sync.Mutex
+	assistantLoginLocks   map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
 	titleMu               sync.Mutex
@@ -259,6 +263,8 @@ type Scheduler struct {
 	appServer         *appServerDriver
 	itemLogs          acphost.ReadOnlyLogCache
 	usageFallback     *UsageFallback
+	// sudoWait is sudoTimeout outside tests.
+	sudoWait time.Duration
 }
 
 // credentialUserReservation stops ownership changes to the member home and
@@ -273,9 +279,6 @@ type credentialUserReservation struct {
 	owner    string
 	run      *supervised
 	terminal *terminalSupervision
-	// verificationKey keeps a durable verification's reservation until its
-	// creation key has been confirmed absent and its journal released.
-	verificationKey string
 	// pending covers reserveTerminalUser to registerTerminal; the reservation
 	// must survive registry sync then, or a concurrent run could chown the home.
 	pending bool
@@ -308,6 +311,9 @@ type supervised struct {
 	// loginMember is the account owner whose login paths the container
 	// mounts; empty when none.
 	loginMember domain.MemberID
+	// verifiedLogins are the account owners whose own login a container of
+	// this run was started with, as the runtime confirmed at start.
+	verifiedLogins []domain.MemberID
 	// reporter is recovered from the sidecar, since only the launch or mode
 	// switch knew which command the container runs.
 	reporter harness.Reporter
@@ -327,9 +333,11 @@ type supervised struct {
 	waitsFailingSince time.Time
 	startedAt         time.Time
 	quietFrom         time.Time // a resume or restart; the stall clock starts no earlier
+	stallTurnAt       time.Time // when the Enhanced turn the last stall parked started
 	paused            bool
 	killRequested     bool
 	killActor         domain.MemberID
+	killBy            domain.RunID // the parent that stopped this child run
 	// agentReport is the last native execution report, independent of outcome
 	// presentation. Input deltas are never retained or replayed.
 	agentReport agentstatus.Report
@@ -338,6 +346,10 @@ type supervised struct {
 	// inputPublishPending keeps the current snapshot owed to the event log,
 	// including an empty set after the last request closes.
 	inputPublishPending bool
+	// sudo are the run's sudo commands waiting for a person, oldest first.
+	// They are published with pendingInputs but never saved: each waits on
+	// a shim connection, which a restart ends.
+	sudo []*sudoRequest
 	// lastWorking is when the agent last said it was working. The hook leaves
 	// no other trace, so the stall detector counts it as activity.
 	lastWorking time.Time
@@ -347,7 +359,6 @@ type supervised struct {
 	postParkActivity time.Time
 	launchMode       domain.LaunchMode
 	acp              bool
-	missionAssigned  bool
 	retained         bool
 	retainedUntil    *time.Time
 	destroyPending   bool
@@ -423,14 +434,14 @@ type supervised struct {
 	idleShown    bool
 	idleReportID string
 	idleReportAt time.Time
-	// workersReason is the reason Aether wrote for an integrator waiting on
-	// its swarm, so a hook's reason that reads the same is never rewritten.
+	// workersReason is the reason Aether wrote for a parent waiting on its
+	// child runs, so a hook's reason that reads the same is never rewritten.
 	workersReason string
 	// betweenTurns says an Enhanced agent works only on background tasks
 	// with no turn running, which settles a needs-input outcome's turn.
 	betweenTurns bool
-	// turnStartedAt is when the agent's last turn started; worker mail an
-	// integrator got before it is mail that turn could handle.
+	// turnStartedAt is when the agent's last turn started; child mail a
+	// parent got before it is mail that turn could handle.
 	turnStartedAt time.Time
 	// reportAsked is the turnStartedAt of the last turn whose end was held
 	// for a missing report (HoldTurnEnd), and stopHeld marks a Standard run
@@ -451,11 +462,9 @@ type supervised struct {
 	failReason string
 	// moving is set while a move holds the run's finalizing claim, and
 	// moveFrom is the container it replaces: once the entry has another, it
-	// is the replacement's. noRetain is set by a move that failed: a swarm
-	// keeps no container of it.
+	// is the replacement's.
 	moving   bool
 	moveFrom runtime.ID
-	noRetain bool
 	// reclaimed is set once disk reclaim picks the retained container, and
 	// stays through a failed removal so the retry says why.
 	reclaimed bool
@@ -469,6 +478,7 @@ type pendingRun struct {
 	done          chan struct{}
 	killRequested bool
 	killActor     domain.MemberID
+	killBy        domain.RunID
 }
 
 func (s *Scheduler) beginPending(run domain.RunID) *pendingRun {
@@ -633,16 +643,13 @@ func New(cfg Config) (*Scheduler, error) {
 		superCtx:             ctx,
 		superCancel:          cancel,
 		recoveryReady:        make(chan struct{}),
+		sudoWait:             sudoTimeout,
 		runs:                 make(map[domain.RunID]*supervised),
 		runShellLocks:        make(map[domain.RunID]*sync.Mutex),
 		runShellReservations: make(map[string]*shellTabState),
 		terminalLocks:        make(map[domain.MemberID]*sync.Mutex),
 		terminals:            make(map[domain.MemberID]*terminalSupervision),
 		credentialUsers:      make(map[*credentialUserReservation]struct{}),
-	}
-	if err := s.restoreVerificationUsers(); err != nil {
-		cancel()
-		return nil, fmt.Errorf("scheduler: restore verification users: %w", err)
 	}
 	s.acp = newACPDriver(s)
 	s.appServer = newAppServerDriver(s)
@@ -773,7 +780,7 @@ func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string
 	entry := s.runs[run]
 	if entry == nil {
 		s.mu.Unlock()
-		return "", errors.New("run has no live container")
+		return "", errors.New("session has no live container")
 	}
 	containerID := entry.containerID
 	s.mu.Unlock()
@@ -939,7 +946,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 
 // containerSpec converts one fully assembled environment plan into a runtime
 // spec. Callers must not assemble workspace mounts or environment fields here.
-func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, limits domain.RunLimits, persistSupervisor bool) runtime.Spec {
+func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, limits domain.RunLimits) runtime.Spec {
 	env := make(map[string]string, len(plan.Env)+8)
 	maps.Copy(env, plan.Env)
 	env[coordtransport.RunIDEnv] = string(run.ID)
@@ -962,7 +969,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	if run.Mode == domain.LaunchHeadless {
 		env[coordtransport.BackgroundEnv] = "1"
 	}
-	if run.Mode.Interactive() || persistSupervisor || run.ACP {
+	if run.Mode.Interactive() || run.ACP {
 		argv = wrapTUICommand(argv)
 	}
 	return runtime.Spec{
@@ -983,7 +990,8 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		MemoryLimitBytes:  limits.MemoryBytes,
 		PidsLimit:         limits.Pids,
 		CreationKey:       string(run.ID),
-		NestedDocker:      true,
+		NestedDocker:      run.Permission != domain.PermissionIsolated,
 		Egress:            plan.Egress,
+		Sudo:              plan.Sudo,
 	}
 }

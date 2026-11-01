@@ -447,7 +447,7 @@ func (e *Engine) checkoutRunID(checkout string) (domain.RunID, error) {
 		return "", ErrCheckoutNotFound
 	}
 	if err := validateID(rel); err != nil {
-		return "", fmt.Errorf("gitengine: checkout path has invalid run id: %w", err)
+		return "", fmt.Errorf("gitengine: checkout path has invalid session id: %w", err)
 	}
 	return domain.RunID(rel), nil
 }

@@ -1,17 +1,13 @@
 import { deviceNeeds, needsYou, needsYouConditions, waitingOn, type AttentionState, type NeedsYouID } from '@/lib/needs-you'
 import { presentRun } from '@/lib/status'
-import type { MissionAttempt, Run } from '@/lib/types'
-import type { MissionDetail } from '@/store/missions'
+import type { Run } from '@/lib/types'
 import { toRecord, type RunRecord } from '@/store/runs'
 import {
   alice,
   bob,
-  mission,
-  missionQuestion,
   pendingDevice,
   roomMessage,
   run,
-  runRecords,
   stateContext,
 } from '@/test/fixtures'
 
@@ -37,47 +33,6 @@ it.each(['tui', 'acp'] as const)('keeps actual requests ahead of a reported %s o
   expect(needsYou({ ...ready, pending_inputs: [{ id: 'question_1', session_id: 'session_1', kind: 'question' }] }, stateContext())?.id).toBe('question')
 })
 
-const integrator = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
-const worker = record({
-  id: 'run_worker',
-  mission_id: 'mission_1',
-  mission_role: 'worker',
-  integrator_run_id: integrator.id,
-  mode: 'headless',
-})
-
-function detail(over: Partial<MissionDetail> = {}): MissionDetail {
-  return {
-    mission: mission(),
-    tasks: [],
-    attempts: [],
-    submissions: [],
-    diagnostics: [],
-    questions: [],
-    ...over,
-  }
-}
-
-function attempt(over: Partial<MissionAttempt> = {}): MissionAttempt {
-  return {
-    id: 'attempt_1',
-    mission_id: 'mission_1',
-    task_id: 'task_1',
-    task_revision: 1,
-    number: 3,
-    dispatch_key: 'dispatch_1',
-    harness: 'claude',
-    mode: 'headless',
-    state: 'running',
-    run_id: worker.id,
-    authority_generation: 1,
-    integrator_generation: 1,
-    created_at: '2026-08-14T10:00:00Z',
-    reserved_at: '2026-08-14T10:00:00Z',
-    ...over,
-  } as MissionAttempt
-}
-
 const rows: {
   id: NeedsYouID
   run: RunRecord
@@ -85,6 +40,12 @@ const rows: {
   reason: string
   state?: AttentionState
 }[] = [
+  {
+    id: 'sudo',
+    run: record({ pending_inputs: [{ id: 'sudo-1', session_id: 'aether-sudo', kind: 'permission', title: 'Run as root in /workspace: apt-get install -y jq' }] }),
+    ctx: {},
+    reason: 'Permission requested',
+  },
   {
     id: 'permission',
     run: record({ pending_inputs: [{ id: 'request_1', session_id: 's', kind: 'permission' }] }),
@@ -124,30 +85,6 @@ const rows: {
     reason: 'Bob asked you: which port?',
   },
   {
-    id: 'swarm-question',
-    run: integrator,
-    ctx: {
-      missions: { mission_1: mission() },
-      missionDetails: { mission_1: detail({ questions: [missionQuestion()] }) },
-    },
-    reason: 'The integrator asks: which checkout flow?',
-  },
-  {
-    id: 'integrator-down',
-    run: record({ ...integrator, status: 'failed' }),
-    ctx: { missions: { mission_1: mission() } },
-    reason: 'Integrator stopped, replace it to continue',
-  },
-  {
-    id: 'control-hold',
-    run: worker,
-    ctx: {
-      runs: runRecords(integrator),
-      missionDetails: { mission_1: detail({ attempts: [attempt({ takeover_active: true, takeover_member_id: alice.id })] }) },
-    },
-    reason: 'You hold control of worker 3',
-  },
-  {
     id: 'disconnected',
     run: record({ status: 'needs-attention', state: 'disconnected', reason: 'enhanced session failed: acphost: initialize: EOF' }),
     ctx: {},
@@ -156,9 +93,9 @@ const rows: {
   },
   {
     id: 'blocked',
-    run: record({ ...worker, status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
-    ctx: { runs: runRecords(integrator), missions: { mission_1: mission() } },
-    reason: 'Worker blocked: no database access',
+    run: record({ status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
+    ctx: {},
+    reason: 'Blocked: no database access',
   },
   {
     id: 'needs-input',
@@ -218,10 +155,10 @@ describe('needs you conditions', () => {
     ['an unseen failure', { state: 'failed', outcome_unseen: true }, 'failed'],
     ['a seen failure', { state: 'failed' }, undefined],
     ['an unseen success', { state: 'finished', outcome_unseen: true }, undefined],
-    ['a working run', { status: 'running', state: 'working' }, undefined],
-    ['an idle run', { state: 'idle' }, undefined],
-    ['a run waiting on its agents', { state: 'waiting-agents' }, undefined],
-    ['a run waiting on a tool', { state: 'waiting-tools' }, undefined],
+    ['a working session', { status: 'running', state: 'working' }, undefined],
+    ['an idle session', { state: 'idle' }, undefined],
+    ['a session waiting on its agents', { state: 'waiting-agents' }, undefined],
+    ['a session waiting on a tool', { state: 'waiting-tools' }, undefined],
     ['a paused request', { state: 'needs-you', paused: true }, undefined],
     ['a paused disconnect', { state: 'disconnected', paused: true }, undefined],
     ['a usage limit Aether resumes', { state: 'idle', reason: "Usage limit reached on Alice's account; moving to Bob's account" }, undefined],
@@ -231,12 +168,10 @@ describe('needs you conditions', () => {
     ['a usage limit Aether cannot resume', { state: 'needs-you', reason: "Usage limit reached on Alice's account; no fallback has usage left" }, 'needs-input'],
     ['a Background request', { mode: 'headless', state: 'needs-you' }, 'needs-input'],
     ['a Background failure', { mode: 'headless', state: 'failed', outcome_unseen: true }, 'failed'],
-    ["a worker's request", { mission_role: 'worker', state: 'needs-you', reason: 'needs input: Which port?' }, undefined],
-    ["a worker's disconnect", { mission_role: 'worker', state: 'disconnected' }, undefined],
-    ["a worker's failure", { mission_role: 'worker', state: 'failed', outcome_unseen: true }, undefined],
-    ["a worker's blocked report", { mission_role: 'worker', state: 'needs-you', reason: 'blocked: no database access' }, 'blocked'],
-    ['a finished run with its outcome unseen', { status: 'failed', state: '', outcome_unseen: true }, undefined],
-    ['a live run with no state', { state: '' }, undefined],
+    ["a subsession's request", { parent_run_id: 'run_parent', state: 'needs-you', reason: 'needs input: Which port?' }, 'needs-input'],
+    ['a blocked report', { state: 'needs-you', reason: 'blocked: no database access' }, 'blocked'],
+    ['a finished session with its outcome unseen', { status: 'failed', state: '', outcome_unseen: true }, undefined],
+    ['a live session with no state', { state: '' }, undefined],
   ] satisfies [string, Partial<Run>, NeedsYouID | undefined][])('attention for %s: %s', (_, fields, want) => {
     expect(needsYou(record({ status: 'needs-attention', ...fields }), stateContext())?.id).toBe(want)
   })
@@ -245,18 +180,18 @@ describe('needs you conditions', () => {
     ['idle', 'agent idle', 'ended', 'Turn ended without a report'],
     ['waiting', 'turn ended without a report', 'ended', 'Turn ended without a report'],
     ['waiting', 'no update for 12m', 'ended', 'No update for 12m'],
-    ['waiting', 'no update for 30m: two workers on the parser', 'ended', 'No update for 30m: two workers on the parser'],
+    ['waiting', 'no update for 30m: two reviewers on the parser', 'ended', 'No update for 30m: two reviewers on the parser'],
     ['waiting-ci', 'no update for 30m: CI on PR 12', 'waiting-ci', 'No update for 30m: CI on PR 12'],
-    ['waiting-agents', 'waiting for 2 workers', 'waiting-agents', 'Waiting for 2 workers'],
-    ['waiting-agents', 'waiting for 1 child run', 'waiting-agents', 'Waiting for 1 child run'],
+    ['waiting-agents', 'waiting for 2 child runs', 'waiting-agents', 'Waiting for 2 subsessions'],
+    ['waiting-agents', 'waiting for 1 child run', 'waiting-agents', 'Waiting for 1 subsession'],
     ['idle', 'stalled: no output or file changes for 10m0s', 'ended', 'No output or file changes for 10m0s'],
     ['idle', 'turn cancelled', 'ended', 'Turn cancelled'],
-    ['waiting-agents', 'waiting on 3 workers', 'waiting-agents', 'waiting on 3 workers'],
+    ['waiting-agents', 'waiting on 3 child runs', 'waiting-agents', 'waiting on 3 child runs'],
     ['waiting-agents', 'working in background: 2 tasks', 'waiting-agents', 'Working in background: 2 tasks'],
     ['waiting-ci', 'waiting for the PR checks', 'waiting-ci', 'waiting for the PR checks'],
     ['waiting-tools', '', 'waiting-tools', 'Waiting for a background process'],
     ['answered', 'explained the retry policy', 'answered', 'explained the retry policy'],
-  ] as const)('never needs anyone for a %s run parked with %j', (state, reason, shownState, shown) => {
+  ] as const)('never needs anyone for a %s session parked with %j', (state, reason, shownState, shown) => {
     for (const acp of [false, true]) {
       const parked = record({ mode: acp ? 'acp' : 'tui', acp, status: 'needs-attention', state, reason: reason || undefined })
       expect(needsYou(parked, stateContext())).toBeUndefined()
@@ -272,11 +207,31 @@ describe('needs you conditions', () => {
       'wait broken: pr:o/r#12:checks resolved, but the agent was not woken',
       'Wait broken: pr:o/r#12:checks resolved, but the agent was not woken · reply to continue',
     ],
-  ])('asks for a reply to continue an Enhanced run parked with %j', (reason, shown) => {
+  ])('asks for a reply to continue an Enhanced session parked with %j', (reason, shown) => {
     const parked = record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason })
     const presented = presentRun(parked, stateContext())
     expect(presented).toMatchObject({ state: 'needs-you', reason: shown })
     expect(presented.needsYou?.action(parked)).toEqual({ kind: 'reply', label: 'Reply' })
+  })
+
+  it.each([
+    ['condition', 'pr:o/r#12:checks: open, 3 checks running'],
+    ['source_unknown', 'pr:o/r#12:checks: status unknown'],
+    ['system_fault', 'pr:o/r#12:checks: error, waking the agent'],
+    ['system_fault', 'cannot read pr:o/r#12:checks for over 1h, so the agent will not be woken'],
+    ['unverified', undefined],
+  ] as const)('leaves a %s wait out of Needs you until the server parks it there (%j)', (kind, detail) => {
+    for (const state of ['waiting-agents', 'waiting-ci', 'waiting-tools'] as const) {
+      const parked = record({ status: 'needs-attention', state, reason: 'CI on #12', wait: { kind, detail, error: 'gh: HTTP 502' } })
+      expect(needsYou(parked, stateContext())).toBeUndefined()
+      expect(presentRun(parked, stateContext()).state).toBe(state)
+    }
+    const broken = record({
+      status: 'needs-attention', state: 'needs-you', cause: 'wait-fault',
+      reason: 'wait broken: pr:o/r#12:checks resolved, but the agent was not woken',
+      wait: { kind: 'system_fault', detail: 'pr:o/r#12:checks resolved, but the agent was not woken', error: 'deliver wake: session closed' },
+    })
+    expect(needsYou(broken, stateContext())?.id).toBe('needs-input')
   })
 
   it("labels a disconnected agent with the server's reason", () => {
@@ -286,7 +241,7 @@ describe('needs you conditions', () => {
   })
 
   it.each(['agent idle', 'turn cancelled', 'turn interrupted', 'turn ended: refusal', 'needs input: Which database?'])(
-    'does not need anyone while an Enhanced run is running after %s',
+    'does not need anyone while an Enhanced session is running after %s',
     (reason) => {
       const running = record({ mode: 'acp', acp: true, status: 'running', state: 'working', reason })
       expect(needsYou(running, stateContext())).toBeUndefined()
@@ -309,7 +264,7 @@ describe('needs you conditions', () => {
   it.each([
     ['permission', 'Permission requested'],
     ['question', 'Question from the agent'],
-  ] as const)('gives no terminal instruction for an enhanced run\'s %s', (kind, reason) => {
+  ] as const)('gives no terminal instruction for an enhanced session\'s %s', (kind, reason) => {
     const enhanced = record({ mode: 'acp', acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind }] })
     expect(presentRun(enhanced, stateContext())).toMatchObject({ state: 'needs-you', reason })
   })
@@ -336,7 +291,7 @@ describe('needs you conditions', () => {
   it('shows a request that has not loaded as a plain Needs you', () => {
     const parked = record({ status: 'needs-attention', state: 'needs-you', reason: 'agent idle' })
     const shown = presentRun(parked, stateContext())
-    expect(shown).toMatchObject({ state: 'needs-you', reason: 'Open the run to see its request' })
+    expect(shown).toMatchObject({ state: 'needs-you', reason: 'Open the session to see its request' })
     expect(shown.needsYou?.action(parked)).toEqual({ kind: 'open', label: 'Open' })
   })
 })
@@ -429,79 +384,10 @@ describe('viewer scoping', () => {
     expect(header?.id).toBe(want)
   })
 
-  it('lets an admin resolve a swarm question for another accountable human', () => {
-    const ctx = {
-      missions: { mission_1: mission({ accountable_human_id: bob.id, open_questions: 1 }) },
-    }
-    const theirs = record({ ...integrator, member_id: bob.id })
-    expect(needsYou(theirs, stateContext(ctx))?.id).toBe('swarm-question')
-    expect(needsYou(theirs, stateContext({ ...ctx, viewerID: 'mem_carol', viewerRole: 'collaborator' }))).toBeUndefined()
-  })
-
-  it("shows a teammate's swarm question as waiting for them, with no cause the server gave for its workers", () => {
-    const ctx = stateContext({
-      missions: { mission_1: mission({ accountable_human_id: bob.id, open_questions: 1 }) },
-      viewerID: 'mem_carol',
-      viewerRole: 'collaborator',
-    })
-    const waiting = record({ ...integrator, status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers', cause: 'workers' })
-    const shown = presentRun(waiting, ctx)
-    expect(shown).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for Bob' })
-    expect(shown.cause).toBeUndefined()
-  })
-
-  it("keeps a paused integrator's open swarm question", () => {
-    const ctx = stateContext({
-      missions: { mission_1: mission() },
-      missionDetails: { mission_1: detail({ questions: [missionQuestion()] }) },
-      pausedRuns: { [integrator.id]: true },
-    })
-    expect(needsYou(integrator, ctx)?.id).toBe('swarm-question')
-    expect(needsYou(record({ ...integrator, status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which flow?' }), {
-      ...ctx, missionDetails: {},
-    })).toBeUndefined()
-  })
-
   it('needs nobody before the viewer is known', () => {
     const stopped = record({ status: 'needs-attention', state: 'needs-you' })
     expect(needsYou(stopped, stateContext({ viewerID: null, viewerRole: null }))).toBeUndefined()
     expect(presentRun(stopped, stateContext({ viewerID: null, viewerRole: null })).reason).not.toMatch(/^Waiting for/)
-  })
-})
-
-describe('swarm workers', () => {
-  const stoppedWorker = record({ ...worker, mode: 'tui', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' })
-
-  it('leaves a worker to its integrator, live or not', () => {
-    for (const status of ['running', 'failed'] as const) {
-      const ctx = stateContext({ runs: runRecords({ ...integrator, status }) })
-      expect(needsYou(stoppedWorker, ctx)).toBeUndefined()
-      expect(presentRun(stoppedWorker, ctx)).toEqual({
-        state: 'waiting-agents', reason: 'Waiting for the integrator', next: 'It continues when the integrator answers.',
-      })
-    }
-  })
-
-  it('needs only the member holding a worker', () => {
-    const held = stateContext({
-      runs: runRecords(integrator),
-      missionDetails: { mission_1: detail({ attempts: [attempt({ takeover_active: true, takeover_member_id: bob.id })] }) },
-    })
-    expect(needsYou(stoppedWorker, held)).toBeUndefined()
-    expect(needsYou(stoppedWorker, { ...held, viewerID: bob.id, viewerRole: bob.role })?.id).toBe('control-hold')
-  })
-})
-
-describe('stopped integrators', () => {
-  const failed = record({ ...integrator, status: 'failed' })
-
-  it('counts nothing until the swarm record loads', () => {
-    expect(needsYou(failed, stateContext())).toBeUndefined()
-  })
-
-  it('counts nothing for a replaced integrator', () => {
-    const replaced = stateContext({ missions: { mission_1: mission({ current_integrator_run_id: 'run_next' }) } })
-    expect(needsYou(failed, replaced)).toBeUndefined()
   })
 })
 

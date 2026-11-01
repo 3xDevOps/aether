@@ -3,12 +3,12 @@
 **Status:** In progress.
 
 **Goal:** A member asks Aether in plain language — "what's the status of my
-runs?", "launch a run to fix the flaky login test", "install Rust in my
+sessions?", "launch a session to fix the flaky login test", "install Rust in my
 environment" — and an agent does it with exactly that member's authority,
 asking before anything destructive. It works for a new member as soon as one
 agent is set up, before they have a workspace.
 
-A **run** is one agent working in one container on a workspace's code. A
+A **session** is one agent working in one container on a workspace's code. A
 member's **environment** is their own container, opened with
 `aether terminal`, with their home mounted at `$HOME`; their agent logins live
 in that home. An **Enhanced** session is an agent CLI driven over ACP (the
@@ -17,7 +17,7 @@ Agent Client Protocol) and rendered in the dashboard.
 ## 1. Decisions
 
 1. **The assistant is an Enhanced session of the member's own Claude Code or
-   Codex, not a run.** A run needs a workspace and a checkout; a new member
+   Codex, not a session.** A session needs a workspace and a checkout; a new member
    has neither. The session runs in the member's environment container, so it
    uses their login and account, and its shell changes the environment the
    member actually uses.
@@ -33,15 +33,15 @@ Agent Client Protocol) and rendered in the dashboard.
    - *Read* (status, runs, workspaces, agents, usage, docs): free.
    - *Reversible* (pause, resume): free; the resulting events carry the
      member as actor.
-   - *Confirmed* (launch a run, message a run, stop a run, save the
+   - *Confirmed* (launch a session, message a session, stop a session, save the
      environment): the tool call blocks
      until the member approves a confirmation card naming the exact action.
      Denial, a 10-minute timeout or a closed session fails the call.
 5. **Shell work uses the harness's own tools without prompts.** The session
-   starts in the mode Enhanced runs use (Claude Code `bypassPermissions`,
+   starts in the mode Enhanced sessions use (Claude Code `bypassPermissions`,
    Codex `agent-full-access`); only the confirmed Aether tools wait for the
    member.
-6. **Text from runs is data.** Transcripts and run output the assistant
+6. **Text from sessions is data.** Transcripts and run output the assistant
    reads are untrusted; the instructions say so, and the confirmed tier holds
    even if a transcript tries to steer the assistant.
 7. **Out of the box:** the panel is reachable from the top bar, the command
@@ -55,7 +55,7 @@ Agent Client Protocol) and rendered in the dashboard.
 `internal/assistant.Service`, one session per member:
 
 - Start: `EnsureTerminal(member)`, then `StartExecPipe` in the terminal
-  container running the agent's ACP adapter (the same argv an Enhanced run
+  container running the agent's ACP adapter (the same argv an Enhanced session
   uses), working directory `$HOME/.aether/assistant`, environment
   `AETHER_ASSISTANT=1`, `NO_BROWSER=1`. `acphost.Start` hosts the session with
   item log `<data>/assistant/<member>/items.jsonl` and one MCP server:
@@ -78,7 +78,7 @@ server binary is mounted read-only at `/opt/aether/aether-server`. Both are
 creation-time mounts; a terminal created by an older server reports
 `needs_restart`.
 
-Line-delimited JSON-RPC, the same framing as the run coordination socket
+Line-delimited JSON-RPC, the same framing as the session coordination socket
 (`coordtransport.Call`). Allowed methods:
 
 | Tier | Method |
@@ -110,7 +110,7 @@ reason}`), `error`, `confirmations`.
 
 `AssistantConfirmation`: `{id, method, summary, params, created_at,
 expires_at}`. `summary` is one plain sentence, for example
-`Stop run run-8x2… ("Fix flaky login test")`.
+`Stop session run-8x2… ("Fix flaky login test")`.
 
 ### Stream
 
@@ -124,7 +124,7 @@ refused with an invalid-state error; the member stops the turn first.
 
 - **Assistant panel:** a right-hand `aside` beside `main` on desktop (width
   persisted), a side sheet on phones. Header: agent, state, **New
-  conversation**. Body: the session transcript, reusing the run session's
+  conversation**. Body: the session transcript, reusing the session session's
   row renderer. Footer: composer with Send and Stop.
 - **Request cards** for harness permission prompts and questions, and
   **confirmation cards** for confirmed tools: the summary, the exact action,

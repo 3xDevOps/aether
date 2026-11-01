@@ -3,10 +3,10 @@ package tools
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -40,19 +40,15 @@ var actSummaries = map[string]summarizer{
 		}
 		return "Restore %s from the archive"
 	}),
-	protocol.MethodMissionWorkerRelease:     (*Server).summarizeWorkerRelease,
-	protocol.MethodRunHandoff:               (*Server).summarizeHandoff,
-	protocol.MethodMissionArchive:           swarmSummary("Archive, closing its completed runs,"),
-	protocol.MethodMissionUnarchive:         swarmSummary("Unarchive"),
-	protocol.MethodMissionReplaceIntegrator: (*Server).summarizeReplaceIntegrator,
-	protocol.MethodIntegrationDecide:        (*Server).summarizeDelivery,
-	protocol.MethodIntegrationDeliver:       (*Server).summarizeDelivery,
-	protocol.MethodRunPRCreate:              (*Server).summarizePRCreate,
-	protocol.MethodRunPRMerge:               (*Server).summarizePRMerge,
-	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
-	protocol.MethodMemoryPin:                (*Server).summarizeMemoryPin,
-	protocol.MethodMemoryUnpin:              (*Server).summarizeMemoryUnpin,
-	protocol.MethodLaunchDefaultsSet:        (*Server).summarizeLaunchDefaults,
+	protocol.MethodRunHandoff:        (*Server).summarizeHandoff,
+	protocol.MethodRunPRCreate:       (*Server).summarizePRCreate,
+	protocol.MethodRunPRMerge:        (*Server).summarizePRMerge,
+	protocol.MethodMemoryAdd:         (*Server).summarizeMemoryAdd,
+	protocol.MethodMemoryPin:         (*Server).summarizeMemoryPin,
+	protocol.MethodMemoryUnpin:       (*Server).summarizeMemoryUnpin,
+	protocol.MethodAssistantForget:   (*Server).summarizeForget,
+	protocol.MethodWatchDelete:       (*Server).summarizeWatchDelete,
+	protocol.MethodLaunchDefaultsSet: (*Server).summarizeLaunchDefaults,
 }
 
 type runParams interface {
@@ -75,7 +71,7 @@ func runSummary[P runParams](verb func(P) string) summarizer {
 		if rpcErr != nil {
 			return rpcErr
 		}
-		c.Summary = fmt.Sprintf(verb(p), fmt.Sprintf("run %s (%q)", id.RunID, runLabel(run))) + ownedBy(c)
+		c.Summary = fmt.Sprintf(verb(p), fmt.Sprintf("session %s (%q)", id.RunID, runLabel(run))) + ownedBy(c)
 		return nil
 	}
 }
@@ -93,42 +89,7 @@ func (s *Server) summarizeHandoff(ctx context.Context, req protocol.Request, c *
 	if rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary = fmt.Sprintf("Hand run %s (%q)%s to %s (%s), who then owns it", p.RunID, runLabel(run), commaAfter(ownedBy(c)), to, truncate(p.ToMemberID))
-	return nil
-}
-
-// summarizeWorkerRelease names the member whose control of the worker the
-// release ends, which need not be the caller's.
-func (s *Server) summarizeWorkerRelease(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-	p, err := protocol.DecodeParams[protocol.MissionWorkerReleaseParams](req.Params)
-	if err != nil || p.RunID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
-	}
-	params, _ := json.Marshal(protocol.RunIDParams{RunID: p.RunID})
-	run, rpcErr := s.getRun(ctx, params)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	if run.MissionID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf("%s: run %s is not a swarm worker", req.Method, p.RunID)}
-	}
-	var shown protocol.MissionShowResult
-	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: run.MissionID}, &shown); rpcErr != nil {
-		return rpcErr
-	}
-	i := slices.IndexFunc(shown.Attempts, func(a protocol.Attempt) bool { return a.RunID == p.RunID })
-	if i < 0 || !shown.Attempts[i].TakeoverActive {
-		return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("%s: nobody holds control of worker run %s; its integrator steers it", req.Method, p.RunID)}
-	}
-	worker := fmt.Sprintf("worker run %s (%q) of swarm %s (%q)", p.RunID, runLabel(run), shown.Mission.ID, truncate(shown.Mission.Objective))
-	if holder := shown.Attempts[i].TakeoverMemberID; holder != s.Member {
-		if rpcErr := s.owner(ctx, holder, c); rpcErr != nil {
-			return rpcErr
-		}
-		c.Summary = fmt.Sprintf("Release control of %s, held by %s, so its integrator steers it again", worker, truncate(c.OtherOwner))
-		return nil
-	}
-	c.Summary = fmt.Sprintf("Release your control of %s, so its integrator steers it again", worker)
+	c.Summary = fmt.Sprintf("Hand session %s (%q)%s to %s (%s), who then owns it", p.RunID, runLabel(run), commaAfter(ownedBy(c)), to, truncate(p.ToMemberID))
 	return nil
 }
 
@@ -143,84 +104,6 @@ func (s *Server) memberName(ctx context.Context, member string) (string, *protoc
 		}
 	}
 	return member, nil
-}
-
-func (s *Server) swarm(ctx context.Context, id string, c *protocol.AssistantConfirmation) (protocol.Mission, *protocol.Error) {
-	var shown protocol.MissionShowResult
-	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: id}, &shown); rpcErr != nil {
-		return protocol.Mission{}, rpcErr
-	}
-	return shown.Mission, s.owner(ctx, shown.Mission.AccountableHumanID, c)
-}
-
-func swarmSummary(verb string) summarizer {
-	return func(s *Server, ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-		p, err := protocol.DecodeParams[protocol.MissionIDParams](req.Params)
-		if err != nil || p.MissionID == "" {
-			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": mission_id is required"}
-		}
-		m, rpcErr := s.swarm(ctx, p.MissionID, c)
-		if rpcErr != nil {
-			return rpcErr
-		}
-		c.Summary = fmt.Sprintf("%s swarm %s (%q)%s", verb, m.ID, truncate(m.Objective), ownedBy(c))
-		return nil
-	}
-}
-
-func (s *Server) summarizeReplaceIntegrator(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-	p, err := protocol.DecodeParams[protocol.MissionReplaceIntegratorParams](req.Params)
-	if err != nil || p.MissionID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": mission_id is required"}
-	}
-	m, rpcErr := s.swarm(ctx, p.MissionID, c)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	account, rpcErr := s.memberName(ctx, p.Integrator.AccountMemberID)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	agent := p.Integrator.Harness
-	if p.Integrator.Model != "" {
-		agent += " " + p.Integrator.Model
-	}
-	c.Summary = fmt.Sprintf("Replace integrator run %s of swarm %s (%q)%s with %s (%s) on %s's (%s) account", cmp.Or(m.CurrentIntegratorRunID, "(none)"),
-		m.ID, truncate(m.Objective), commaAfter(ownedBy(c)), truncate(agent), p.Integrator.Mode, account, truncate(p.Integrator.AccountMemberID))
-	return nil
-}
-
-func (s *Server) summarizeDelivery(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-	p, err := protocol.DecodeParams[protocol.IntegrationDecideParams](req.Params)
-	if err != nil || p.WorkspaceID == "" || p.CandidateID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and candidate_id are required"}
-	}
-	var shown protocol.IntegrationShowResult
-	if rpcErr := s.call(ctx, protocol.MethodIntegrationShow, protocol.IntegrationShowParams{WorkspaceID: p.WorkspaceID, CandidateID: p.CandidateID}, &shown); rpcErr != nil {
-		return rpcErr
-	}
-	verb := "Deliver"
-	if req.Method == protocol.MethodIntegrationDecide {
-		verb = "Approve delivering"
-		if !p.Approve {
-			verb = "Reject delivering"
-		}
-	}
-	cd := shown.Candidate
-	effect := "moving " + truncate(cd.TargetRef)
-	if r := cd.DeliveryRequest; r != nil && r.Action == protocol.DeliveryActionProposal {
-		effect = "publishing a proposal ref for " + truncate(cd.TargetRef)
-	}
-	c.Summary = fmt.Sprintf("%s candidate %s, %s", verb, cd.CandidateID, effect)
-	if cd.MissionID == "" {
-		return nil
-	}
-	m, rpcErr := s.swarm(ctx, cd.MissionID, c)
-	if rpcErr != nil {
-		return rpcErr
-	}
-	c.Summary += fmt.Sprintf(", for swarm %s (%q)%s", m.ID, truncate(m.Objective), ownedBy(c))
-	return nil
 }
 
 func (s *Server) summarizePRCreate(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
@@ -244,7 +127,7 @@ func (s *Server) summarizePRCreate(ctx context.Context, req protocol.Request, c 
 	if p.Repo != "" {
 		repo = fmt.Sprintf(" (repo %s)", truncate(p.Repo))
 	}
-	c.Summary = fmt.Sprintf("Open %s from run %s (%q)%s%s, branch %s at %.7s, into %s: %q", kind, p.RunID, runLabel(run), ownedBy(c), repo,
+	c.Summary = fmt.Sprintf("Open %s from session %s (%q)%s%s, branch %s at %.7s, into %s: %q", kind, p.RunID, runLabel(run), ownedBy(c), repo,
 		truncate(p.Expected.Branch), p.Expected.Head, into, truncate(p.Title))
 	return nil
 }
@@ -276,7 +159,7 @@ func (s *Server) summarizePRMerge(ctx context.Context, req protocol.Request, c *
 	if fb.Error != "" {
 		blockers = "GitHub's checks and reviews could not be read: " + truncate(fb.Error)
 	}
-	c.Summary = fmt.Sprintf("Merge (%s) %s of run %s (%q)%s at %.7s into %s; %s", cmp.Or(p.Method, "default"), pr, p.RunID, runLabel(run), commaAfter(ownedBy(c)),
+	c.Summary = fmt.Sprintf("Merge (%s) %s of session %s (%q)%s at %.7s into %s; %s", cmp.Or(p.Method, "default"), pr, p.RunID, runLabel(run), commaAfter(ownedBy(c)),
 		p.ExpectedHead, cmp.Or(truncate(p.ExpectedBase), "its base"), blockers)
 	return nil
 }
@@ -299,7 +182,7 @@ func (s *Server) summarizeMemoryPin(ctx context.Context, req protocol.Request, c
 		return rpcErr
 	}
 	p, _ := protocol.DecodeParams[protocol.MemoryPinParams](req.Params)
-	c.Summary = fmt.Sprintf("Pin, into new runs' briefs, note %s (%s)%s: %q", item.ID, item.Kind, forWhom(cmp.Or(p.Scope, item.Scope)), truncate(cmp.Or(item.Title, item.Body)))
+	c.Summary = fmt.Sprintf("Pin, into new sessions' briefs, note %s (%s)%s: %q", item.ID, item.Kind, forWhom(cmp.Or(p.Scope, item.Scope)), truncate(cmp.Or(item.Title, item.Body)))
 	return nil
 }
 
@@ -335,7 +218,7 @@ func (s *Server) summarizeMemoryAdd(ctx context.Context, req protocol.Request, c
 	}
 	c.Summary = fmt.Sprintf("Remember a %s in %s%s: %q", p.Kind, ws.Workspace.Name, forWhom(p.Scope), truncate(p.Text))
 	if p.Pin {
-		c.Summary += ", pinned into new runs' briefs"
+		c.Summary += ", pinned into new sessions' briefs"
 	}
 	if p.Supersedes != "" {
 		var old protocol.MemoryShowResult
@@ -347,6 +230,29 @@ func (s *Server) summarizeMemoryAdd(ctx context.Context, req protocol.Request, c
 			c.Summary += " and moving its pin"
 		}
 	}
+	return nil
+}
+
+func (s *Server) summarizeWatchDelete(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.WatchIDParams](req.Params)
+	if err != nil || p.WatchID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": watch_id is required"}
+	}
+	var got protocol.WatchGetResult
+	if rpcErr := s.call(ctx, protocol.MethodWatchGet, p, &got); rpcErr != nil {
+		return rpcErr
+	}
+	w := got.Watch
+	kind := w.Target.Kind
+	if kind == protocol.WatchTargetRun {
+		kind = "session"
+	}
+	notices := "its " + strconv.Itoa(len(got.Notifications))
+	// watch.get returns only the newest WatchNotificationsMax notices.
+	if len(got.Notifications) >= protocol.WatchNotificationsMax {
+		notices = "at least " + strconv.Itoa(len(got.Notifications))
+	}
+	c.Summary = fmt.Sprintf("Delete your watch %s on %s %q (%s) and %s notices", w.ID, kind, truncate(w.TargetTitle), strings.Join(w.Conditions, ", "), notices)
 	return nil
 }
 
@@ -362,6 +268,20 @@ func forWhom(scope string) string {
 		return " for you only"
 	}
 	return " for everyone"
+}
+
+// summarizeForget shows the exact text the member would forget.
+func (s *Server) summarizeForget(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.PreferenceIDParams](req.Params)
+	if err != nil || p.ID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": id is required"}
+	}
+	var pref protocol.AssistantPreference
+	if rpcErr := s.call(ctx, protocol.MethodAssistantPreferenceShow, p, &pref); rpcErr != nil {
+		return rpcErr
+	}
+	c.Summary, c.Shown = fmt.Sprintf("Forget your preference %s: %q", p.ID, pref.Text), pref.UpdatedAt
+	return nil
 }
 
 // summarizeLaunchDefaults spells out every choice the save replaces the

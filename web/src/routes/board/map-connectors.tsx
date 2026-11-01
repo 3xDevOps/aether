@@ -18,7 +18,7 @@ export function roundedPath({ points, radius }: MapLine): string {
   return `${d} L${last.x} ${last.y}`
 }
 
-/** A swarm's trunk, bus, rails and elbows, in the unit's own coordinates so they move with it. */
+/** A family's trunk, bus, rails and elbows, in the unit's own coordinates so they move with it. */
 export function MapConnectors({ unit }: { unit: MapUnit }) {
   if (!unit.lines.length) return null
   return (

@@ -11,6 +11,7 @@ import type { Workspace } from '@/lib/types'
 import { Step } from '@/routes/onboarding/layout'
 import { CONNECTORS_SECTION_ID } from '@/routes/settings/connectors'
 import { sameIdentity, useStore } from '@/store'
+import { rememberChoice, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useIsAdmin, useSelfRole } from '@/store/hooks'
 
 function useSourceCheck(client: Api, workspaceID: string | undefined) {
@@ -58,18 +59,18 @@ export function FirstRunStep({
   const navigate = useStore((s) => s.navigate)
   const setOnboarded = useStore((s) => s.setOnboarded)
   const upsertRun = useStore((s) => s.upsertRun)
-  const rememberLaunch = useStore((s) => s.rememberLaunch)
   // The draft outlives this component: the header can jump to another step
   // and back, which unmounts it.
   const draft = useStore((s) => s.onboardingFirstRun)
   const setDraft = useStore((s) => s.setOnboardingFirstRun)
   const caps = useCapability()
   const launchable = canLaunch({ cap: caps, role: useSelfRole() })
-  const choice = useAgentChoice({ account: '', ownAccountID: '', preferred: draft.harness, preferredModel: draft.model, client })
+  const saved = useLaunchDefaultsRead(client)
+  const choice = useAgentChoice({ account: '', ownAccountID: '', saved, preferred: draft.harness, preferredModel: draft.model, preferredEffort: draft.effort, client })
   const source = useSourceCheck(client, workspace?.id)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const { harness, mode, model, agentError, noAgents } = choice
+  const { harness, mode, model, effort, agentError, noAgents } = choice
 
   useEffect(() => {
     const current = useStore.getState().onboardingFirstRun
@@ -81,6 +82,11 @@ export function FirstRunStep({
     if (harness && model !== (current.model ?? '')) setDraft({ ...current, model })
   }, [harness, model, setDraft])
 
+  useEffect(() => {
+    const current = useStore.getState().onboardingFirstRun
+    if (harness && effort !== (current.effort ?? '')) setDraft({ ...current, effort })
+  }, [harness, effort, setDraft])
+
   const goToBoard = () => {
     setOnboarded(true)
     navigate('board')
@@ -89,9 +95,9 @@ export function FirstRunStep({
   if (!workspace) {
     return (
       <Step
-        label="First run"
-        title="Start your first run"
-        lead="A run is one agent working on its own branch in its own container. It starts from a workspace's base branch, so choose a workspace first."
+        label="First session"
+        title="Start your first session"
+        lead="A session is one agent working on its own branch in its own container. It starts from a workspace's base branch, so choose a workspace first."
         actions={<><Button onClick={onBackToRepository}>Choose a repository</Button><Button variant="secondary" onClick={goToBoard}>Go to board</Button>{back}</>}
       />
     )
@@ -113,8 +119,9 @@ export function FirstRunStep({
         ...(task ? { task } : {}),
         mode,
         ...(chosenModel ? { model: chosenModel } : {}),
+        ...(effort ? { effort } : {}),
       })
-      if (signedIn()) rememberLaunch(harness, mode, chosenModel)
+      if (signedIn()) rememberChoice(harness, mode, chosenModel)
       upsertRun(run)
       setOnboarded(true)
       navigate('run', { runId: run.id })
@@ -127,9 +134,9 @@ export function FirstRunStep({
 
   return (
     <Step
-      label="First run"
-      title="Start your first run"
-      lead={<>A run is one agent working on its own branch in its own container, starting from <Code>{workspace.base_branch}</Code> in {workspace.name}.</>}
+      label="First session"
+      title="Start your first session"
+      lead={<>A session is one agent working on its own branch in its own container, starting from <Code>{workspace.base_branch}</Code> in {workspace.name}.</>}
       actions={
         <>
           {noAgents ? (
@@ -149,7 +156,7 @@ export function FirstRunStep({
       }
     >
       {!launchable && (
-        <Callout tone="neutral">Your membership or this gateway cannot launch runs. Ask an administrator for launch access; you can still prepare your account.</Callout>
+        <Callout tone="neutral">Your membership or this gateway cannot launch sessions. Ask an administrator for launch access; you can still prepare your account.</Callout>
       )}
       {source.error && (
         <Callout
@@ -169,7 +176,7 @@ export function FirstRunStep({
       )}
       {noAgents ? (
         <Callout tone="neutral" title="No agent is installed yet">
-          A run starts an agent, and your environment has none. Set one up, then come back here.
+          A session starts an agent, and your environment has none. Set one up, then come back here.
         </Callout>
       ) : (
         <div className="flex min-w-0 flex-col gap-4">
@@ -179,14 +186,14 @@ export function FirstRunStep({
       {error && <Callout tone="failed" role="alert" title="Launch failed" className="whitespace-pre-wrap">{error}</Callout>}
       {!noAgents && (
         <p className="text-ui-sm text-muted">
-          After Launch the run starts its container, pulls the image the first time this server uses it, then starts the agent (about 5 s in Enhanced).
+          After Launch the session starts its container, pulls the image the first time this server uses it, then starts the agent (about 5 s in Enhanced).
         </p>
       )}
       {caps.hasMethod('connector.list') && (
         <p className="text-ui-sm text-muted">
           Optional:{' '}
           <Button variant="link" size="sm" onClick={() => navigate('settings', { section: CONNECTORS_SECTION_ID })}>Finish setup and connect ChatGPT or Claude</Button>
-          {' '}to launch runs and answer agents from a chat, on your phone too. Settings has it any time.
+          {' '}to launch sessions and answer agents from a chat, on your phone too. Settings has it any time.
         </p>
       )}
     </Step>

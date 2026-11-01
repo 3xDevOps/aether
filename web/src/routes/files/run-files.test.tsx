@@ -201,7 +201,7 @@ describe('a run’s Files view', () => {
     fireEvent.drop(tree.getByRole('button', { name: 'aether/run-1-checkout' }), {
       dataTransfer: { types: ['Files'], items: files.map((file) => ({ kind: 'file', webkitGetAsEntry: () => null, getAsFile: () => file })) },
     })
-    expect(within(await tree.findByRole('alert')).getByText('README.md already exists in this run; open it to edit')).toBeDefined()
+    expect(within(await tree.findByRole('alert')).getByText('README.md already exists in this session; open it to edit')).toBeDefined()
     expect(filesUpload).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', path: 'notes.txt', content_base64: 'eA==' })
 
     act(() => useStore.setState({ info: { member: { id: 'mem_viewer', display_name: 'Viewer', role: 'viewer' } } as never }))

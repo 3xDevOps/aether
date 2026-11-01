@@ -202,18 +202,18 @@ function PrimaryChanges({ runID, agent, agentName }: { runID: string; agent: Age
           {(historyNotice?.historyGap || historyNotice?.snapshotError) && (
             <Callout tone={historyNotice.snapshotError ? 'failed' : 'needs-you'} role="status" className="m-2">
               {historyNotice.snapshotError && <p>{historyNotice.snapshotError}</p>}
-              <p>Some snapshot history is unavailable. All changes is separate and still shows the run's changes against its base.</p>
+              <p>Some snapshot history is unavailable. All changes is separate and still shows the session's changes against its base.</p>
             </Callout>
           )}
           {failed && (
             <Callout tone="failed" role="alert" className="m-2">
               {state.error ?? 'The diff could not be loaded.'}
-              {comparison.kind !== 'all' && <p>Choose All changes to view the run's changes against its base.</p>}
+              {comparison.kind !== 'all' && <p>Choose All changes to view the session's changes against its base.</p>}
             </Callout>
           )}
           {truncated && (
             <Callout tone="needs-you" className="m-2">
-              The server returned an incomplete diff. Refresh it or fetch the run branch to read the complete change.
+              The server returned an incomplete diff. Refresh it or fetch the session branch to read the complete change.
             </Callout>
           )}
           {virtual ? (
@@ -247,7 +247,7 @@ function Empty({ comparison, loading, recorded, against }: { comparison: Compari
   if (comparison.kind === 'since') {
     return <EmptyState icon={icon} title="No changes">Nothing changed since {clockTime(comparison.checkpoint.time)}.</EmptyState>
   }
-  if (comparison.kind === 'start') return <EmptyState icon={icon} title="No changes">Nothing changed since the run started.</EmptyState>
+  if (comparison.kind === 'start') return <EmptyState icon={icon} title="No changes">Nothing changed since the session started.</EmptyState>
   if (recorded) return <EmptyState icon={icon} title="No recorded changes">The last snapshot matched {against}.</EmptyState>
   return <EmptyState icon={icon} title="No changes yet">Nothing differs from {against}. Files the agent changes show up here.</EmptyState>
 }

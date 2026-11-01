@@ -189,7 +189,7 @@ func (s *Scheduler) prepareRunTerminalsLocked(set *runTerminalSet, container run
 		set.Closed = false
 	}
 	if set.Closed {
-		return fmt.Errorf("%w: run terminal admissions are closed", ptyhost.ErrNoSession)
+		return fmt.Errorf("%w: session terminal admissions are closed", ptyhost.ErrNoSession)
 	}
 	set.ContainerID = container
 	return nil
@@ -284,7 +284,7 @@ func (s *Scheduler) admitRunTerminalLocked(ctx context.Context, run domain.RunID
 		if byAgent {
 			starter = "the agent has"
 		}
-		return nil, fmt.Errorf("%w: %s %d shells running in this run; stop one to start another", ErrRunShellTabLimit, starter, maxRunShells)
+		return nil, fmt.Errorf("%w: %s %d shells running in this session; stop one to start another", ErrRunShellTabLimit, starter, maxRunShells)
 	}
 	if kept < maxRunShells {
 		return nil, nil
@@ -495,7 +495,7 @@ func (s *Scheduler) MarkDevelopmentContainerEnded(ctx context.Context, run domai
 		terminal.ContainerEnded = true
 		if !terminal.State.Exited || terminal.State.ExitCode == nil {
 			terminal.State = runtime.ExecState{Exited: true}
-			terminal.Unavailable = "run container exited; command exit status unavailable"
+			terminal.Unavailable = "session container exited; command exit status unavailable"
 		}
 	}
 	return s.persistRunTerminalsLocked(run, set)

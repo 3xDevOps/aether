@@ -20,9 +20,11 @@ type LaunchDefaults struct {
 	Account        domain.MemberID
 	FallbackPolicy string
 	FallbackOrder  []domain.MemberID
-	Source         string
-	Revision       int64
-	UpdatedAt      time.Time
+	// Permission empty was never chosen.
+	Permission domain.Permission
+	Source     string
+	Revision   int64
+	UpdatedAt  time.Time
 }
 
 // AgentLaunchDefault is the mode and model a member last chose for one
@@ -51,9 +53,9 @@ func (d *DB) LaunchDefaults(ctx context.Context, member domain.MemberID) (*Launc
 		updated       int64
 	)
 	err := d.db.QueryRowContext(ctx,
-		`SELECT agent, agents, account_member_id, fallback_policy, fallback_order, source, revision, updated_at
+		`SELECT agent, agents, account_member_id, fallback_policy, fallback_order, permission, source, revision, updated_at
 		 FROM launch_defaults WHERE member_id = ?`, member).
-		Scan(&out.Agent, &agents, &out.Account, &out.FallbackPolicy, &order, &out.Source, &out.Revision, &updated)
+		Scan(&out.Agent, &agents, &out.Account, &out.FallbackPolicy, &order, &out.Permission, &out.Source, &out.Revision, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -103,9 +105,9 @@ func (d *DB) PutLaunchDefaults(ctx context.Context, member domain.MemberID, l La
 		}
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO launch_defaults (member_id, agent, agents, account_member_id, fallback_policy, fallback_order, source, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())`,
-		member, l.Agent, string(agents), l.Account, l.FallbackPolicy, string(order), l.Source); err != nil {
+		`INSERT INTO launch_defaults (member_id, agent, agents, account_member_id, fallback_policy, fallback_order, permission, source, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())`,
+		member, l.Agent, string(agents), l.Account, l.FallbackPolicy, string(order), l.Permission, l.Source); err != nil {
 		return fmt.Errorf("store: put launch defaults: %w", mapConstraint(err, ErrNotFound))
 	}
 	if err := tx.Commit(); err != nil {

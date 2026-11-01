@@ -46,7 +46,7 @@ export function watchOutcomeSeen(
       },
       (err: unknown) => {
         inFlight.delete(run.id)
-        toast.error(`Could not mark the run seen: ${errorSentence(err)}`)
+        toast.error(`Could not mark the session seen: ${errorSentence(err)}`)
       },
     )
   }

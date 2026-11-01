@@ -267,6 +267,8 @@ func callBound(method string) time.Duration {
 	switch method {
 	case protocol.MethodAgentInstall:
 		return protocol.AgentInstallTimeout + callTimeout
+	case protocol.MethodAssistantStart, protocol.MethodAssistantPrompt:
+		return protocol.AssistantStartTimeout + callTimeout
 	case protocol.MethodHomeUpload, protocol.MethodHomeDownload, protocol.MethodTerminalFile, protocol.MethodWorkspaceImport, protocol.MethodFilesUpload:
 		return transferTimeout
 	case protocol.MethodTerminalExec:
@@ -344,21 +346,23 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 // as not found where the first succeeded. Prefixes in Call cover dev.*,
 // run.git.* and run.pr.*.
 var noReplay = map[string]bool{
-	protocol.MethodRunLaunch:      true,
-	protocol.MethodRunDelete:      true,
-	protocol.MethodRunPause:       true,
-	protocol.MethodRunResume:      true,
-	protocol.MethodRunRelaunch:    true,
-	protocol.MethodRunHandoff:     true,
-	protocol.MethodRunModeSwitch:  true,
-	protocol.MethodRunInputAnswer: true,
-	protocol.MethodRunACPCancel:   true,
-	protocol.MethodTemplateLaunch: true,
-	protocol.MethodTemplateDelete: true,
-	protocol.MethodScheduleDelete: true,
-	protocol.MethodMissionDelete:  true,
+	protocol.MethodRunLaunch:       true,
+	protocol.MethodRunDelete:       true,
+	protocol.MethodRunPause:        true,
+	protocol.MethodRunResume:       true,
+	protocol.MethodRunRelaunch:     true,
+	protocol.MethodRunHandoff:      true,
+	protocol.MethodRunModeSwitch:   true,
+	protocol.MethodRunInputAnswer:  true,
+	protocol.MethodRunInputRespond: true,
+	protocol.MethodRunACPCancel:    true,
+	protocol.MethodTemplateLaunch:  true,
+	protocol.MethodTemplateDelete:  true,
+	protocol.MethodScheduleDelete:  true,
 
-	protocol.MethodMissionWorkerRelease: true,
+	protocol.MethodPreferenceAdd:    true,
+	protocol.MethodPreferenceUpdate: true,
+	protocol.MethodPreferenceDelete: true,
 
 	protocol.MethodWorkspaceAdd:             true,
 	protocol.MethodWorkspaceDelete:          true,

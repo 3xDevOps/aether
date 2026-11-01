@@ -120,7 +120,7 @@ func TestIntegrationTheSchedulerJudgesWaitsByTheirConditions(t *testing.T) {
 		}
 	}
 	db := srv.Store().(*store.DB)
-	socket := waitMissionSocket(t, filepath.Join(dataDir, "coord", string(owner.ID)))
+	socket := waitCoordSocket(t, filepath.Join(dataDir, "coord", string(owner.ID)))
 	report := func(key, outcome string, until ...string) {
 		t.Helper()
 		if callErr := pacedCall(ctx, socket, protocol.MethodCoordReport, protocol.CoordReportParams{

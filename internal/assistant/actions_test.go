@@ -34,7 +34,7 @@ func (f *actionServer) Call(_ context.Context, method string, params json.RawMes
 	switch method {
 	case protocol.MethodRunGet:
 		if strings.Contains(string(params), "run-gone") {
-			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "run run-gone not found"}
+			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "session run-gone not found"}
 		}
 		if strings.Contains(string(params), "run-2") {
 			return json.RawMessage(`{"run":{"id":"run-2","member_id":"m2","workspace_id":"ws-1","title":"Docs"}}`), nil
@@ -47,7 +47,7 @@ func (f *actionServer) Call(_ context.Context, method string, params json.RawMes
 	case protocol.MethodRunLaunch:
 		return json.RawMessage(`{"run":{"id":"run-new","workspace_id":"ws-1"}}`), nil
 	case protocol.MethodRunKill:
-		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "run run-1 is not live: it finished at 12:04"}
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "session run-1 is not live: it finished at 12:04"}
 	}
 	return json.RawMessage(`{}`), nil
 }
@@ -147,7 +147,7 @@ func callTool(t *testing.T, sock string, m *member, method string, params any, a
 func newActionService(t *testing.T) (*Service, *member, *memStore) {
 	t.Helper()
 	db := newMemStore()
-	svc := New(Config{Dir: t.TempDir(), Store: db})
+	svc := New(Config{Dir: t.TempDir(), Store: db, Host: &fakeHost{}})
 	t.Cleanup(func() { _ = svc.Close() })
 	return svc, svc.member("m1"), db
 }
@@ -170,7 +170,7 @@ func TestApprovedLaunchRecordsApprovalThenTheLaunchedRun(t *testing.T) {
 	}
 	if done.Result == nil || done.Result.RunID != "run-new" || done.Result.WorkspaceID != "ws-1" || done.FinishedAt.IsZero() ||
 		done.ConfirmationID != approved.ConfirmationID || done.Approval != "card" {
-		t.Fatalf("outcome = %+v, want the launched run and the approval kept", done)
+		t.Fatalf("outcome = %+v, want the launched session and the approval kept", done)
 	}
 }
 
@@ -237,7 +237,7 @@ func TestFailedCallRecordsTheServersError(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, _ := serveTools(t, svc, m)
 	err := callTool(t, sock, m, protocol.MethodRunKill, protocol.RunIDParams{RunID: "run-1"}, true, true)
-	const want = "run run-1 is not live: it finished at 12:04"
+	const want = "session run-1 is not live: it finished at 12:04"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("the failed stop = %v, want the server's error", err)
 	}
@@ -263,8 +263,41 @@ func TestReversibleCallIsRecordedWithoutApproval(t *testing.T) {
 	if len(got) != 1 || len(got[0]) != 1 {
 		t.Fatalf("records = %+v, want the pause alone", got)
 	}
-	if a := got[0][0]; a.Outcome != protocol.AssistantActionSucceeded || a.Approval != "" || a.Summary != "Pause run run-1" || a.Target.RunID != "run-1" {
+	if a := got[0][0]; a.Outcome != protocol.AssistantActionSucceeded || a.Approval != "" || a.Summary != "Pause session run-1" || a.Target.RunID != "run-1" {
 		t.Fatalf("pause = %+v, want it succeeded with no approval", a)
+	}
+
+	// A watch only notifies the member, so creating or pausing one asks
+	// nothing either.
+	create := protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"}, Source: protocol.WatchSourceAssistant}
+	if err := callTool(t, sock, m, protocol.MethodWatchCreate, create, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := callTool(t, sock, m, protocol.MethodWatchUpdate, protocol.WatchUpdateParams{WatchID: "w-1", Paused: new(true)}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	got = actions(t, svc, m)
+	if len(got) != 3 || got[1][0].Summary != "Watch session run-1 for its default conditions" || got[2][0].Summary != "Pause watch w-1" ||
+		got[1][0].Approval != "" || got[2][0].Approval != "" {
+		t.Fatalf("records = %+v, want the watch created and paused with no approval", got)
+	}
+	if w := got[1][0].Target.Watch; w == nil || *w != create.Target || got[2][0].Target.WatchID != "w-1" {
+		t.Fatalf("targets = %+v and %+v, want the created watch's target and the paused watch's id", got[1][0].Target, got[2][0].Target)
+	}
+}
+
+func TestReversibleWatchSummaryNamesWhatItCanRead(t *testing.T) {
+	for _, tc := range []struct{ method, params, want string }{
+		{protocol.MethodWatchCreate, `{"target":{"kind":"pr","repo":"acme/shop","number":7},"conditions":["ci"]}`, "Watch pull request acme/shop#7 for ci"},
+		{protocol.MethodWatchCreate, `{"target":{"kind":"run"}}`, `Watch target {"kind":"run"} for its default conditions`},
+		{protocol.MethodWatchCreate, `{"target":{"kind":"deploy","run_id":"run-1"}}`, `Watch target {"kind":"deploy","run_id":"run-1"} for its default conditions`},
+		{protocol.MethodWatchCreate, `{"target":"run-1"}`, "Watch (unreadable parameters)"},
+		{protocol.MethodWatchUpdate, `{"watch_id":7}`, "Watch (unreadable parameters)"},
+		{protocol.MethodWatchUpdate, `{"watch_id":"w-1","paused":false}`, "Resume watch w-1"},
+	} {
+		if got := reversibleSummary(tc.method, json.RawMessage(tc.params), "", ""); got != tc.want {
+			t.Errorf("%s %s = %q, want %q", tc.method, tc.params, got, tc.want)
+		}
 	}
 }
 
@@ -293,7 +326,7 @@ func TestReversibleCallOnAnotherMembersRunNamesTheOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := actions(t, svc, m)
-	if len(got) != 1 || got[0][0].OtherOwner != "Dana" || got[0][0].Summary != "Resume run run-2, owned by Dana" {
+	if len(got) != 1 || got[0][0].OtherOwner != "Dana" || got[0][0].Summary != "Resume session run-2, owned by Dana" {
 		t.Fatalf("records = %+v, want the resume naming Dana as the owner", got)
 	}
 }
@@ -302,14 +335,14 @@ func TestReversibleCallWhoseOwnerCannotBeReadFailsWithoutRunning(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	sock, fake := serveTools(t, svc, m)
 	err := callTool(t, sock, m, protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-gone"}, false, false)
-	if err == nil || !strings.Contains(err.Error(), "look up the owner of run run-gone: run run-gone not found") {
+	if err == nil || !strings.Contains(err.Error(), "look up the owner of session run-gone: session run-gone not found") {
 		t.Fatalf("pause = %v, want the owner lookup's error", err)
 	}
 	if fake.ran(protocol.MethodRunPause) {
 		t.Fatal("run.pause ran without its owner known")
 	}
 	got := actions(t, svc, m)
-	if len(got) != 1 || got[0][0].Outcome != protocol.AssistantActionFailed || !strings.Contains(got[0][0].Error, "run run-gone not found") {
+	if len(got) != 1 || got[0][0].Outcome != protocol.AssistantActionFailed || !strings.Contains(got[0][0].Error, "session run-gone not found") {
 		t.Fatalf("records = %+v, want the pause recorded as failed with the lookup's error", got)
 	}
 }
@@ -336,7 +369,7 @@ func (f *failingSettings) PutAssistantSettings(ctx context.Context, id domain.Me
 
 func TestAnApprovalThatCannotBeReadOrCountedIsRecordedAsFailed(t *testing.T) {
 	db := &failingSettings{memStore: newMemStore()}
-	svc := New(Config{Dir: t.TempDir(), Store: db})
+	svc := New(Config{Dir: t.TempDir(), Store: db, Host: &fakeHost{}})
 	t.Cleanup(func() { _ = svc.Close() })
 	m := svc.member("m1")
 	sock, fake := serveTools(t, svc, m)
@@ -423,7 +456,7 @@ func TestRecordsOfADiscardedConversationAreDropped(t *testing.T) {
 	svc, m, _ := newActionService(t)
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run run-1", CreatedAt: time.Now()})
+		done <- svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop session run-1", CreatedAt: time.Now()})
 	}()
 	for len(m.confirms.snapshot()) == 0 {
 		time.Sleep(time.Millisecond)

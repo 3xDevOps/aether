@@ -1,16 +1,15 @@
 import { useMemo, useState, type MouseEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronRight } from '@/components/icons'
-import { StatusDot } from '@/components/ui/status-dot'
+import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
+import { useClock } from '@/lib/clock'
 import { useDelayed } from '@/lib/hooks'
-import { runLabel, stateLabel, stateTitle, stateTone, stateWords, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateName, stateTitle, stateTone, stateWords, toneOf, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
-import { useRunPresentation } from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
 import type { RunRow } from '@/store/selectors'
 import { rootKey, runKey, runParents } from '@/routes/board/map-layout'
 import { connectors } from '@/components/shell/sidebar-runs'
@@ -21,8 +20,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => nestWorkers(runs), [runs])
-  // A swarm lists its workers; child runs stay folded until asked for.
-  const open = (row: RunRow) => expanded[row.run.id] ?? row.run.mission_role === 'integrator'
+  const open = (row: RunRow) => expanded[row.run.id] ?? true
   const shown = (row: RunRow, workers: RunRow[]) => open(row) ? workers : workers.filter((worker) => worker.needsYou)
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && runs.length === 0)
@@ -55,7 +53,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
         <div className="border-y border-seam px-3 py-3">
           <p className="text-ui font-medium">{empty}</p>
           <p className="mt-1 text-ui-sm leading-4 text-muted">
-            New runs will appear here as soon as they are launched.
+            New sessions will appear here as soon as they are launched.
           </p>
         </div>
       </div>
@@ -66,7 +64,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
     <div className="w-full px-3 py-2 sm:px-4 sm:py-3">
       <div className="border-y border-seam">
         <div className="hidden grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] gap-4 border-b bg-chrome/30 px-3 py-1.5 text-ui-sm font-medium text-muted md:grid">
-          <span>Run</span>
+          <span>Session</span>
           <span>Owner</span>
           <span>Status</span>
           <span className="text-right">Changed</span>
@@ -81,7 +79,6 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                     ? {
                         count: foldable(workers),
                         expanded: open(row),
-                        noun: row.run.mission_role === 'integrator' ? 'worker' : 'child run',
                         onToggle: () => setExpanded((prev) => ({ ...prev, [row.run.id]: !open(row) })),
                       }
                     : undefined
@@ -91,7 +88,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                 <ul
                   id={workersID(row.run.id)}
                   hidden={shown(row, workers).length === 0}
-                  aria-label={`${row.run.mission_role === 'integrator' ? 'Workers' : 'Child runs'} of ${runLabel(row.run)}`}
+                  aria-label={`Subsessions of ${runLabel(row.run)}`}
                   className={cn(
                     '[--wire:--spacing(4.75)]',
                     foldable(workers) > 0 ? '[--trunk:--spacing(12.75)] coarse:[--trunk:--spacing(17.75)]' : '[--trunk:--spacing(4.75)]',
@@ -131,16 +128,18 @@ const foldable = (workers: RunRow[]) => workers.filter((worker) => !worker.needs
 const workersID = (runID: string) => `workers-${runID}`
 
 function Row({
-  row: { run, state, reason, next, cause, since, owner },
+  row: { run, state, reason, next, cause, wait, since, owner },
   toggle,
   nested,
 }: {
   row: RunRow
   nested?: boolean
-  toggle?: { count: number; expanded: boolean; noun: string; onToggle: () => void }
+  toggle?: { count: number; expanded: boolean; onToggle: () => void }
 }) {
   const navigate = useStore((s) => s.navigate)
-  const words = stateWords({ state, reason })
+  const now = useClock()
+  const words = stateWords({ state, reason, cause, wait }, undefined, now)
+  const title = stateTitle({ state, reason, next, cause, wait }, since, now)
   return (
     <div
       onClick={(event: MouseEvent<HTMLDivElement>) => {
@@ -165,7 +164,7 @@ function Row({
           <Button
             variant="ghost"
             size="icon-sm"
-            label={`${toggle.expanded ? 'Hide' : 'Show'} ${toggle.count} ${toggle.noun}${toggle.count === 1 ? '' : 's'}`}
+            label={`${toggle.expanded ? 'Hide' : 'Show'} ${toggle.count} subsession${toggle.count === 1 ? '' : 's'}`}
             aria-expanded={toggle.expanded}
             aria-controls={workersID(run.id)}
             onClick={toggle.onToggle}
@@ -173,7 +172,7 @@ function Row({
             {toggle.expanded ? <ChevronDown /> : <ChevronRight />}
           </Button>
         )}
-        <StatusDot tone={stateTone[state]} label={stateLabel[state]} className="mt-1.5" />
+        <StatusDot tone={toneOf({ state, wait })} label={stateName({ state, cause })} className="mt-1.5" />
         <div className="min-w-0 flex-1">
           <button
             type="button"
@@ -214,7 +213,7 @@ function Row({
             {words.detail && (
               <>
                 <span aria-hidden> · </span>
-                <span>{words.detail}</span>
+                <span title={title}>{words.detail}</span>
               </>
             )}
           </span>
@@ -228,7 +227,7 @@ function Row({
       </span>
       <span className="col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 text-ui-sm text-muted md:col-auto md:row-auto">
         <span className="md:hidden">Status</span>
-        <StatusChip state={state} label={words.label} title={stateTitle({ state, reason, next, cause }, since)} />
+        <StatusChip state={state} tone={toneOf({ state, wait })} label={words.label} title={title} />
         <RunInputIndicator run={run} />
       </span>
       <RelativeTime
@@ -240,14 +239,10 @@ function Row({
   )
 }
 
-export function RunStatusChip({ run }: { run: RunRecord }) {
-  return <StatusChip state={useRunPresentation(run).state} />
-}
-
-export function StatusChip({ state, label = stateLabel[state], title }: { state: PresentationState; label?: string; title?: string }) {
+export function StatusChip({ state, tone = stateTone[state], label = stateLabel[state], title }: { state: PresentationState; tone?: Tone; label?: string; title?: string }) {
   return (
     <span title={title} className="inline-flex min-h-5 items-center gap-1.5 rounded-chip border border-seam/80 px-1.5 py-px text-ui-sm leading-4 text-text">
-      <StatusDot tone={stateTone[state]} />
+      <StatusDot tone={tone} />
       <span>{label}</span>
     </span>
   )

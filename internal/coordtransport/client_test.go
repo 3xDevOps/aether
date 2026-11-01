@@ -54,9 +54,7 @@ func TestCallConsumesMaximumWaitResult(t *testing.T) {
 		{"browser bootstrap", protocol.MethodDevBrowserOpen, protocol.DevBrowserOpenParams{URL: "about:blank"}},
 		{"browser reset", protocol.MethodDevBrowserReset, protocol.DevBrowserResetParams{}},
 		{"browser wait including companion margin", protocol.MethodDevBrowserWait, protocol.DevBrowserWaitParams{TimeoutMS: 30000}},
-		{"mission long poll", protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{WaitSeconds: 30}},
 		{"inbox long poll", protocol.MethodCoordInbox, protocol.CoordInboxParams{WaitSeconds: 30}},
-		{"mission pointer params", protocol.MethodMissionPlanShow, &protocol.MissionPlanShowParams{WaitSeconds: 30}},
 		{"native hook long poll", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: 30}},
 		{"native hook pointer params", protocol.MethodCoordHookStatus, &protocol.CoordHookStatusParams{WaitSeconds: 30}},
 	} {
@@ -99,7 +97,6 @@ func TestCallBoundsInvalidPollWait(t *testing.T) {
 		params       any
 		bound        time.Duration
 	}{
-		{"mission excessive wait", protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{WaitSeconds: 300}, 35 * time.Second},
 		{"native hook excessive wait", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: 300}, 35 * time.Second},
 		{"native hook negative wait", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: -300}, 5 * time.Second},
 	} {

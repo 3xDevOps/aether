@@ -9,15 +9,15 @@ import (
 func init() {
 	register(command{
 		name:    "protect",
-		short:   "let only a run's owner and admins message, control or kill it",
-		usage:   "aether protect <run-id>",
+		short:   "let only a session's owner and admins message, control or kill it",
+		usage:   "aether protect <session-id>",
 		example: "aether protect run-d6ay38tj8j",
 		run:     func(args []string) error { return setProtected(args, true) },
 	})
 	register(command{
 		name:    "unprotect",
-		short:   "lift a run's protection",
-		usage:   "aether unprotect <run-id>",
+		short:   "lift a session's protection",
+		usage:   "aether unprotect <session-id>",
 		example: "aether unprotect run-d6ay38tj8j",
 		run:     func(args []string) error { return setProtected(args, false) },
 	})
@@ -32,7 +32,7 @@ func setProtected(args []string, protect bool) error {
 		verb = "unprotect"
 	}
 	if len(args) != 1 {
-		return fmt.Errorf("usage: aether %s <run-id>", verb)
+		return fmt.Errorf("usage: aether %s <session-id>", verb)
 	}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.RunResult
@@ -45,7 +45,7 @@ func setProtected(args []string, protect bool) error {
 		if res.Run.Protected {
 			fmt.Printf("protected %s: only its owner and admins may message, control or kill it\n", res.Run.ID)
 		} else {
-			fmt.Printf("unprotected %s: the workspace's policy for other members' runs applies again\n", res.Run.ID)
+			fmt.Printf("unprotected %s: the workspace's policy for other members' sessions applies again\n", res.Run.ID)
 		}
 		return nil
 	})

@@ -72,7 +72,7 @@ test('a long menu on a phone opens as a bottom sheet', async () => {
 
 function GroupedItems() {
   return (
-    <MenuPrimitive.Group aria-label="Runs">
+    <MenuPrimitive.Group aria-label="Sessions">
       {Array.from({ length: 7 }, (_, i) => (
         <MenuItem key={i}>Run {i + 1}</MenuItem>
       ))}
@@ -116,7 +116,7 @@ function OpenDialog({ variant }: { variant?: 'center' | 'side' | 'bottom' }) {
   return (
     <Dialog open>
       <DialogContent variant={variant}>
-        <DialogTitle>Rename run</DialogTitle>
+        <DialogTitle>Rename session</DialogTitle>
         <DialogDescription>Give the run a name.</DialogDescription>
       </DialogContent>
     </Dialog>
@@ -128,12 +128,12 @@ test('a dialog is named by its title and closes from its Close button', async ()
   render(
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogTitle>Rename run</DialogTitle>
+        <DialogTitle>Rename session</DialogTitle>
         <DialogDescription>Give the run a name.</DialogDescription>
       </DialogContent>
     </Dialog>,
   )
-  const dialog = screen.getByRole('dialog', { name: 'Rename run' })
+  const dialog = screen.getByRole('dialog', { name: 'Rename session' })
   fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
   expect(onOpenChange).toHaveBeenCalledWith(false)
 })
@@ -157,13 +157,13 @@ test('one Escape closes a hint and the dialog under it', async () => {
   render(
     <Dialog defaultOpen>
       <DialogContent>
-        <DialogTitle>Rename run</DialogTitle>
+        <DialogTitle>Rename session</DialogTitle>
         <DialogDescription>Give the run a name.</DialogDescription>
         <input aria-label="Name" />
       </DialogContent>
     </Dialog>,
   )
-  const dialog = screen.getByRole('dialog', { name: 'Rename run' })
+  const dialog = screen.getByRole('dialog', { name: 'Rename session' })
   within(dialog).getByRole('textbox').focus()
   await userEvent.tab()
   expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Close' }))
@@ -196,16 +196,16 @@ test('an alert dialog focuses Cancel and paints its action as danger', async () 
   render(
     <AlertDialog open>
       <AlertDialogContent>
-        <AlertDialogTitle>Kill run</AlertDialogTitle>
+        <AlertDialogTitle>Kill session</AlertDialogTitle>
         <AlertDialogDescription>The agent stops at once.</AlertDialogDescription>
         <AlertDialogCancel>Cancel</AlertDialogCancel>
-        <AlertDialogAction>Kill run</AlertDialogAction>
+        <AlertDialogAction>Kill session</AlertDialogAction>
       </AlertDialogContent>
     </AlertDialog>,
   )
-  const dialog = screen.getByRole('alertdialog', { name: 'Kill run' })
+  const dialog = screen.getByRole('alertdialog', { name: 'Kill session' })
   await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })))
-  expect(within(dialog).getByRole('button', { name: 'Kill run' }).className).toContain('bg-state-failed')
+  expect(within(dialog).getByRole('button', { name: 'Kill session' }).className).toContain('bg-state-failed')
 })
 
 test('a popover opens on its trigger and closes on Escape', async () => {
@@ -214,11 +214,11 @@ test('a popover opens on its trigger and closes on Escape', async () => {
       <PopoverTrigger asChild>
         <Button>Details</Button>
       </PopoverTrigger>
-      <PopoverContent aria-label="Run details">Branch main</PopoverContent>
+      <PopoverContent aria-label="Session details">Branch main</PopoverContent>
     </Popover>,
   )
   await userEvent.click(screen.getByRole('button', { name: 'Details' }))
-  const popover = await screen.findByRole('dialog', { name: 'Run details' })
+  const popover = await screen.findByRole('dialog', { name: 'Session details' })
   expect(popover.className).toContain('shadow-overlay')
   await userEvent.keyboard('{Escape}')
   expect(screen.queryByRole('dialog')).toBeNull()

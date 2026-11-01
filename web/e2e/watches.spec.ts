@@ -6,7 +6,7 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 interface WatchGet {
   watch: { id: string; state: string }
@@ -30,8 +30,8 @@ test('a watch made from the run menu notices a need while the page is closed', a
   page.on('pageerror', (error) => errors.push(error.message))
 
   await page.goto(`${alice.url}&run=${run.id}`)
-  await expect(page.getByRole('log', { name: 'Session' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
-  await page.getByRole('toolbar', { name: 'Run actions' }).getByRole('button', { name: 'More', exact: true }).click()
+  await expect(page.getByRole('log', { name: 'Chat' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('toolbar', { name: 'Session actions' }).getByRole('button', { name: 'More', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Watch…' }).click()
   const form = page.getByRole('dialog', { name: /^Watch / })
   await expect(form.getByRole('checkbox', { name: 'Needs you', exact: true })).toBeChecked()
@@ -39,7 +39,7 @@ test('a watch made from the run menu notices a need while the page is closed', a
   await expect(form.getByText(/Finished means the agent reported done/)).toBeVisible()
   await form.getByRole('button', { name: 'Watch', exact: true }).click()
   await expect(form).toBeHidden()
-  await expect(page.getByText(/^Watching run .* for: needs you, finished\./)).toBeVisible()
+  await expect(page.getByText(/^Watching session .* for: needs you, finished\./)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Watch on' })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('watch-created.png') })
 

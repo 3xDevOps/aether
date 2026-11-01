@@ -208,6 +208,39 @@ func TestSwitchToStandardKeepsTheRunsModel(t *testing.T) {
 	}
 }
 
+func TestSwitchKeepsTheRunsEffort(t *testing.T) {
+	t.Parallel()
+	e := newSwitchEnv(t)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "omp", domain.LaunchACP, domain.LaunchOptions{Effort: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.sup.run = run.ID
+	waitItems(t, e.sched, run.ID, "the task's turn", assistantSaid("pong"))
+	// Recorded after SwitchMode reads the run row, as a composer change
+	// racing the switch would be.
+	admit := func(f func() error) error {
+		if err := e.db.SetRunEffort(t.Context(), run.ID, "low"); err != nil {
+			return err
+		}
+		return f()
+	}
+	if err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchTUI, admit); err != nil {
+		t.Fatalf("switch to Standard: %v", err)
+	}
+	session := e.rt.fixture.SessionID()
+	if bodies := e.sup.ran(); len(bodies) != 1 || !strings.Contains(bodies[0], "'--resume="+session+"' '--thinking=low'") {
+		t.Fatalf("supervisor ran %q, want the resume command with --thinking=low", bodies)
+	}
+	if err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchACP, admitNow); err != nil {
+		t.Fatalf("switch to Enhanced: %v", err)
+	}
+	execs := e.rt.all()
+	if got := execs[len(execs)-1].wire.setOption(t, "effort"); !slices.Equal(got, []any{"low"}) {
+		t.Fatalf("the reopened session's effort option set to %v, want [low]", got)
+	}
+}
+
 func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 	t.Parallel()
 	e := newSwitchEnv(t)
@@ -233,7 +266,7 @@ func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 		t.Fatalf("supervisor ran %q", bodies)
 	}
 	if got := e.coord.fileBody(run.ID, "status.ts"); got == "" {
-		t.Fatal("the terminal's status extension was not written to the run directory")
+		t.Fatal("the terminal's status extension was not written to the session directory")
 	}
 	row, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil || row.Mode != domain.LaunchTUI || row.ACP {
@@ -470,7 +503,7 @@ func TestRestartRecordsAModeTheRunRowMissed(t *testing.T) {
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 
 	err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchTUI, admitNow)
-	if err == nil || !strings.Contains(err.Error(), "record the run's mode: database is locked") {
+	if err == nil || !strings.Contains(err.Error(), "record the session's mode: database is locked") {
 		t.Fatalf("switch error %v", err)
 	}
 	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.Mode != domain.LaunchTUI || sc.Switch == nil {
@@ -513,7 +546,7 @@ func TestSwitchRefusals(t *testing.T) {
 		t.Fatalf("switch while paused: %v", err)
 	}
 	if len(e.sup.ran()) != 0 || len(e.rt.all()) != 0 || e.sched.Switching(run.ID) != "" {
-		t.Fatal("a refused switch touched the run")
+		t.Fatal("a refused switch touched the session")
 	}
 
 	fake, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "t", "fake", domain.LaunchACP)
@@ -543,7 +576,7 @@ func TestSwitchToEnhancedNeedsTheAdapter(t *testing.T) {
 		t.Fatalf("switch without the adapter: %v", err)
 	}
 	if len(e.sup.ran()) != 0 || e.sched.Switching(run.ID) != "" {
-		t.Fatal("a refused switch touched the run")
+		t.Fatal("a refused switch touched the session")
 	}
 }
 
@@ -579,7 +612,7 @@ func TestSwitchingRunRefusesInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.sched.Switching(run.ID) != "" {
-		t.Fatal("the run is still switching")
+		t.Fatal("the session is still switching")
 	}
 }
 
@@ -596,14 +629,14 @@ func TestSwitchingRunIsNotWoken(t *testing.T) {
 
 	setSwitching(domain.LaunchTUI)
 	if e.sched.IdleEnhanced(run.ID) {
-		t.Fatal("a switching run is idle")
+		t.Fatal("a switching session is idle")
 	}
 	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); !errors.Is(err, errACPBusy) {
 		t.Fatalf("wake during the switch: %v, want errACPBusy", err)
 	}
 	setSwitching("")
 	if !e.sched.IdleEnhanced(run.ID) {
-		t.Fatal("the run is not idle after the switch")
+		t.Fatal("the session is not idle after the switch")
 	}
 }
 

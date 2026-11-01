@@ -257,7 +257,8 @@ func TestRoomStatusAndLegacyInjectAndProtect(t *testing.T) {
 	}, &status); err != nil {
 		t.Fatalf("room status: %v", err)
 	}
-	if !status.Protected || status.Controller == nil || status.Controller.MemberID != string(e.member.ID) || status.QueuedSteers != 3 {
+	if !status.Protected || status.Controller == nil || status.Controller.MemberID != string(e.member.ID) ||
+		status.Controller.ControlSessionID != "private" || status.QueuedSteers != 3 {
 		t.Fatalf("room status = %+v", status)
 	}
 

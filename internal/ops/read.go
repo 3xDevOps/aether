@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -15,8 +16,7 @@ import (
 )
 
 const (
-	nextRuns       = "call aether_list_runs for run ids"
-	nextSwarms     = "call aether_get_swarm for swarm ids"
+	nextRuns       = "call aether_list_sessions for session ids"
 	nextWorkspaces = "call aether_list_workspaces for workspace ids"
 	nextAttention  = "call aether_needs_attention for what is pending"
 	defaultRows    = 20
@@ -25,7 +25,6 @@ const (
 	maxText        = 600
 	maxReport      = 200
 	maxFeedback    = 300
-	maxSwarmPages  = 5
 )
 
 type connectorListRunsInput struct {
@@ -39,6 +38,11 @@ type connectorListRunsInput struct {
 
 type runIDInput struct {
 	RunID string `json:"run_id"`
+}
+
+type getRunInput struct {
+	RunID    string `json:"run_id"`
+	Evidence bool   `json:"evidence,omitempty" jsonschema:"add PR, CI, review and report evidence"`
 }
 
 type historyInput struct {
@@ -55,16 +59,6 @@ type activityInput struct {
 	Period      string `json:"period,omitempty" jsonschema:"default today"`
 	TimeZone    string `json:"time_zone,omitempty" jsonschema:"IANA zone; default UTC"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
-}
-
-type swarmsInput struct {
-	SwarmID     string `json:"swarm_id,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	Limit       int    `json:"limit,omitempty" jsonschema:"default 20"`
-}
-
-type swarmInput struct {
-	SwarmID string `json:"swarm_id"`
 }
 
 type changesInput struct {
@@ -84,7 +78,7 @@ type memoryInput struct {
 	ID          string `json:"id,omitempty" jsonschema:"a note to show in full"`
 	Words       string `json:"words,omitempty"`
 	Kind        string `json:"kind,omitempty"`
-	File        string `json:"file,omitempty" jsonschema:"notes citing this path"`
+	File        string `json:"file,omitempty" jsonschema:"citing this path"`
 	All         bool   `json:"all,omitempty" jsonschema:"with replaced notes"`
 }
 
@@ -92,46 +86,44 @@ var readOps = []Op{
 	opOf("aether_list_workspaces", "List workspaces and agents", ScopeRead, true, "",
 		"Use this when you need a workspace (repository) id or an agent to launch.", listWorkspaces).
 		offer(TierRead).calling(protocol.MethodWorkspaceList, protocol.MethodAgentList),
-	opOf("aether_list_runs", "List runs", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what is happening or about their runs; query finds one by what it works on."+untrustedRule, listRuns).
+	opOf("aether_list_sessions", "List sessions", ScopeRead, true, nextWorkspaces,
+		"Use this when the user asks what is happening or about their sessions; query finds one by what it works on."+untrustedRule, listRuns).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodRunList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline).
-		defaultOn(Connector, "mine", true, "only runs you launched; default true").
-		defaultOn(Assistant, "mine", false, "only runs the member launched; default false, every run they can see"),
-	opOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
-		"Use this when the user asks about one run, or to poll a launched run."+untrustedRule, getRun).
-		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline, protocol.MethodRunPRStatus),
-	opOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
-		"Use this when the user asks what a run said or did: its conversation or terminal, and reports."+untrustedRule, runHistory).
+		defaultOn(Connector, "mine", true, "only sessions you launched; default true").
+		defaultOn(Assistant, "mine", false, "only sessions the member launched; default false, every session they can see"),
+	opOf("aether_get_session", "Get session", ScopeRead, true, nextRuns,
+		"Use this when the user asks about one session."+untrustedRule, getRun).
+		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline,
+		protocol.MethodRunPRStatus, protocol.MethodRunChildren, protocol.MethodRunPRFeedback),
+	opOf("aether_session_history", "Read session history", ScopeRead, true, nextRuns,
+		"Use this when the user asks what a session said or did: its conversation or terminal, and reports."+untrustedRule, runHistory).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodRunACPHistory, protocol.MethodTerminalHistory),
 	opOf("aether_needs_attention", "What needs me", ScopeRead, true, nextWorkspaces,
 		"Use this when the user asks what needs them; each item names the tool that answers it."+untrustedRule, needsAttention).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodAttentionList),
 	opOf("aether_activity_summary", "Activity summary", ScopeRead, true, "",
-		"Use this when the user asks what their agents did today, yesterday or this week."+untrustedRule, activitySummary).
+		"Use this when the user asks what their agents did in a period."+untrustedRule, activitySummary).
 		enum("period", "today", "yesterday", "week").
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodInsightsGet, protocol.MethodWorkspaceTimeline),
-	opOf("aether_get_swarm", "Get swarms", ScopeRead, true, nextSwarms,
-		"Use this when the user asks about their swarms, or one by swarm_id, or to poll a launched swarm."+untrustedRule, getSwarm).
-		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
-	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
-		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, its diff."+untrustedRule, runChanges).
+	opOf("aether_session_changes", "Session changes", ScopeRead, true, nextRuns,
+		"Use this when the user asks what a session changed: commits, predicted conflicts and, with include_diff, its diff."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
 	opOf("aether_pr_status", "Pull request status", ScopeRead, true, nextRuns,
-		"Use this when the user asks about a run's pull request, CI or reviews, before aether_pr_merge."+untrustedRule, prStatus).
+		"Use this when the user asks about a session's pull request, CI or reviews, before aether_pr_merge."+untrustedRule, prStatus).
 		offer(TierRead).calling(protocol.MethodRunPRFeedback),
-	opOf("aether_overlaps", "Overlapping runs", ScopeRead, true, nextRuns,
-		"Use this when coordinating agents: pairs of active runs that touch the same files."+untrustedRule, overlaps).
+	opOf("aether_overlaps", "Overlapping sessions", ScopeRead, true, nextRuns,
+		"Use this when coordinating agents: pairs of active sessions that touch the same files."+untrustedRule, overlaps).
 		offer(TierRead).calling(protocol.MethodRunOverlaps, protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodRunList),
 	opOf("aether_memory_search", "Search team memory", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what the team decided or learned in a workspace, or about one note by id."+untrustedRule, memorySearch).
+		"Use this when the user asks what the team decided or learned in a workspace."+untrustedRule, memorySearch).
 		enum("kind", "decision", "convention", "gotcha", "preference", "outcome").
 		offer(TierRead).calling(protocol.MethodMemorySearch, protocol.MethodMemoryShow),
-	opOf("search", "Search runs and swarms", ScopeRead, true, "",
-		"Use this when ChatGPT deep research needs runs or swarms by words; in chat use aether_list_runs."+searchRule, search).
-		calling(protocol.MethodServerInfo, protocol.MethodRunList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
-	opOf("fetch", "Fetch run or swarm", ScopeRead, true, "call search for ids",
+	opOf("search", "Search sessions", ScopeRead, true, "",
+		"Use this when ChatGPT deep research needs sessions by words; in chat use aether_list_sessions."+searchRule, search).
+		calling(protocol.MethodServerInfo, protocol.MethodRunList),
+	opOf("fetch", "Fetch session", ScopeRead, true, "call search for ids",
 		"Use this when deep research needs the full text of a search result."+searchRule, fetch).
-		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodMissionShow),
+		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodWorkspaceTimeline),
 }
 
 func listWorkspaces(ctx context.Context, c calls, _ struct{}) (string, any, error) {
@@ -181,7 +173,6 @@ type runRow struct {
 	WorkspaceID string   `json:"workspace_id"`
 	Workspace   string   `json:"workspace,omitempty"`
 	Harness     string   `json:"harness"`
-	MissionID   string   `json:"mission_id,omitempty"`
 	CreatedAt   string   `json:"created_at"`
 	URL         string   `json:"url,omitempty"`
 	Untrusted   *runText `json:"untrusted,omitempty"`
@@ -200,7 +191,7 @@ func runTitle(r protocol.Run) string {
 
 func rowOf(r protocol.Run, l links, workspaces map[string]string) runRow {
 	return runRow{ID: r.ID, State: r.Status, Activity: r.Activity, WorkspaceID: r.WorkspaceID, Workspace: workspaces[r.WorkspaceID],
-		Harness: r.Harness, MissionID: r.MissionID, CreatedAt: r.CreatedAt, URL: l.run(r.ID),
+		Harness: r.Harness, CreatedAt: r.CreatedAt, URL: l.run(r.ID),
 		Untrusted: &runText{Title: runTitle(r), Reason: clip(r.Reason, maxReport), Wait: clip(r.Wait.Text(time.Now()), maxReport)}}
 }
 
@@ -267,10 +258,10 @@ func listRuns(ctx context.Context, c calls, in connectorListRunsInput) (string, 
 		return "", nil, err
 	}
 	out := map[string]any{"runs": rows}
-	summary := fmt.Sprintf("%d runs.", total)
+	summary := fmt.Sprintf("%d sessions.", total)
 	if total > len(rows) {
 		out["total"], out["truncated"] = total, true
-		summary = fmt.Sprintf("%d of %d runs.", len(rows), total)
+		summary = fmt.Sprintf("%d of %d sessions.", len(rows), total)
 	}
 	return summary, out, nil
 }
@@ -362,21 +353,27 @@ type pullRequest struct {
 	Draft      bool   `json:"draft"`
 	BaseBranch string `json:"base_branch,omitempty"`
 	HeadOID    string `json:"head_oid,omitempty"`
+	Repository string `json:"repository,omitempty"`
 }
 
 func prOf(p *protocol.RunPullRequest) *pullRequest {
 	if p == nil {
 		return nil
 	}
-	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft, BaseBranch: p.BaseBranch, HeadOID: p.HeadOID}
+	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft, BaseBranch: p.BaseBranch, HeadOID: p.HeadOID, Repository: p.Repository}
 }
 
-func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
-	r, err := getRunRecord(ctx, c.read, in.RunID)
+func getRun(ctx context.Context, c calls, in getRunInput) (string, any, error) {
+	var got protocol.RunResult
+	if err := c.read(ctx, protocol.MethodRunGet, protocol.RunIDParams{RunID: in.RunID}, &got); err != nil {
+		return "", nil, err
+	}
+	r := got.Run
+	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
-	l, err := dashboardLinks(ctx, c.read)
+	book, err := accounts(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
@@ -391,9 +388,10 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	row := rowOf(r, l, nil)
 	untrusted := map[string]any{"run": row.Untrusted, "task": clip(r.Task, maxText)}
 	row.Untrusted = nil
-	out := map[string]any{"run": row, "mode": r.Mode, "model": r.Model, "branch": r.Branch,
+	receipt := runReceipt(r, l, book)
+	out := map[string]any{"run": row, "launch": receipt, "branch": r.Branch,
 		"paused": r.Paused, "pending_inputs": len(r.PendingInputs), "finished_at": r.FinishedAt, "review": r.Review, "untrusted": untrusted}
-	summary := fmt.Sprintf("Run %s is %s.", r.ID, r.Status)
+	summary := fmt.Sprintf("Session %s is %s on %s.", r.ID, r.Status, accountName(receipt))
 	for _, it := range items {
 		if it.RunID == r.ID {
 			out["needs_you"] = attentionRowOf(it, l)
@@ -414,10 +412,77 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	if pr.Error != "" {
 		out["pr_error"] = pr.Error
 	}
+	if r.ParentRunID != "" {
+		out["parent_run_id"], out["parent_url"] = r.ParentRunID, l.run(r.ParentRunID)
+	}
+	addChildren(ctx, c.read, l, book, r.ID, out, untrusted)
+	if in.Evidence {
+		unconfirmed := addRunEvidence(ctx, c.read, r, got.PullRequests, reps, &pr, out)
+		if cs := out["evidence"].(map[string]any)["conflicts"].([]string); len(cs) > 0 {
+			summary += " Its report conflicts with the evidence: " + strings.Join(cs, ", ") + "."
+		}
+		summary += unconfirmed
+	}
 	return summary, out, nil
 }
 
-const historyExpired = "The server no longer keeps this run's oldest history, so its start is missing."
+// childRow is a child run of a run, at depth 1 for its own children.
+type childRow struct {
+	RunID string `json:"run_id"`
+	State string `json:"state"`
+	choice
+	Report map[string]string `json:"report,omitempty"`
+	URL    string            `json:"url,omitempty"`
+}
+
+// addChildren adds run id's descendants, nearest first, to out, and what
+// their parents asked of them to untrusted; a failed read is part of the
+// result.
+func addChildren(ctx context.Context, read Call, l links, book accountBook, id string, out, untrusted map[string]any) {
+	var res protocol.RunChildrenResult
+	if err := read(ctx, protocol.MethodRunChildren, protocol.RunChildrenParams{RunID: id}, &res); err != nil {
+		if !noChildRuns(err) {
+			out["children_error"] = err.Error()
+		}
+		return
+	}
+	if len(res.Children) == 0 {
+		return
+	}
+	rows, purposes, summaries := []childRow{}, map[string]string{}, map[string]string{}
+	for _, ch := range res.Children[:min(len(res.Children), defaultRows)] {
+		row := childRow{RunID: ch.RunID, State: ch.State, choice: choiceOf(ch.Harness, ch.Mode, ch.Model, ch.AccountMemberID, book),
+			URL: l.run(ch.RunID)}
+		if ch.Report != nil {
+			row.Report = map[string]string{"outcome": ch.Report.Outcome, "at": ch.Report.At}
+			summaries[ch.RunID] = clip(ch.Report.Summary, maxReport)
+		}
+		rows = append(rows, row)
+		purposes[ch.RunID] = clip(ch.Purpose, maxReport)
+	}
+	out["children"], untrusted["child_purposes"] = rows, purposes
+	if len(summaries) > 0 {
+		untrusted["child_reports"] = summaries
+	}
+	if len(res.Children) > len(rows) {
+		out["children_total"] = len(res.Children)
+	}
+}
+
+// noChildRuns reports whether err is from a server without child runs,
+// which has none to list.
+// noChildRuns reports a server without child runs, which has none to list;
+// any other failure, such as a lost connection, is reported.
+func noChildRuns(err error) bool {
+	var perr *protocol.Error
+	var data struct {
+		Reason string `json:"reason"`
+	}
+	return errors.As(err, &perr) && (perr.Code == protocol.CodeMethodNotFound ||
+		perr.Code == protocol.CodeUnavailable && json.Unmarshal(perr.Data, &data) == nil && data.Reason == protocol.ErrorReasonChildrenUnavailable)
+}
+
+const historyExpired = "The server no longer keeps this session's oldest history, so its start is missing."
 
 func runHistory(ctx context.Context, c calls, in historyInput) (string, any, error) {
 	r, err := getRunRecord(ctx, c.read, in.RunID)
@@ -435,7 +500,7 @@ func runHistory(ctx context.Context, c calls, in historyInput) (string, any, err
 		var before int64
 		if in.Before != "" {
 			if before, err = strconv.ParseInt(in.Before, 10, 64); err != nil {
-				return "", nil, invalid("before %q is not a next_before this run returned", in.Before)
+				return "", nil, invalid("before %q is not a next_before this session returned", in.Before)
 			}
 		}
 		var res protocol.RunACPHistoryResult
@@ -457,7 +522,7 @@ func runHistory(ctx context.Context, c calls, in historyInput) (string, any, err
 		if res.TruncatedBefore {
 			out["truncated_before"], out["note"] = true, historyExpired
 		}
-		return fmt.Sprintf("%d conversation items of run %s.", len(frames), r.ID), out, nil
+		return fmt.Sprintf("%d conversation items of session %s.", len(frames), r.ID), out, nil
 	}
 	var res protocol.TerminalHistoryResult
 	if err := c.read(ctx, protocol.MethodTerminalHistory, protocol.TerminalHistoryParams{RunID: r.ID, Before: in.Before, Limit: limit}, &res); err != nil {
@@ -474,7 +539,7 @@ func runHistory(ctx context.Context, c calls, in historyInput) (string, any, err
 	if res.TruncatedBefore {
 		out["truncated_before"], out["note"] = true, historyExpired
 	}
-	return fmt.Sprintf("%d terminal lines of run %s.", len(lines), r.ID), out, nil
+	return fmt.Sprintf("%d terminal lines of session %s.", len(lines), r.ID), out, nil
 }
 
 // periodRange is [from, to) for today, yesterday or the last seven days
@@ -549,165 +614,10 @@ func activitySummary(ctx context.Context, c calls, in activityInput) (string, an
 	t := res.Totals
 	out := map[string]any{"from": res.From, "to": res.To, "time_zone": res.TimeZone,
 		"totals":        map[string]int{"launched": t.Launched, "completed": t.Completed, "merged": t.Merged, "failed": t.Failed, "active": t.Active},
-		"pull_requests": res.PullRequests, "swarms": map[string]int{"launched": res.Swarms.Launched, "completed": res.Swarms.Completed},
-		"needs_you": res.NeedsYou, "finished_runs": recent, "untrusted": map[string]any{"finished_runs": texts, "reports": latest}}
+		"pull_requests": res.PullRequests,
+		"needs_you":     res.NeedsYou, "finished_runs": recent, "untrusted": map[string]any{"finished_runs": texts, "reports": latest}}
 	return fmt.Sprintf("%d launched, %d completed, %d merged, %d failed, %d active; %d pull requests merged.",
 		t.Launched, t.Completed, t.Merged, t.Failed, t.Active, res.PullRequests.Merged), out, nil
-}
-
-type swarmRow struct {
-	ID              string `json:"id"`
-	WorkspaceID     string `json:"workspace_id"`
-	Phase           string `json:"phase"`
-	OpenQuestions   int    `json:"open_questions"`
-	IntegratorRunID string `json:"integrator_run_id,omitempty"`
-	CreatedAt       string `json:"created_at"`
-	URL             string `json:"url,omitempty"`
-	Untrusted       struct {
-		Objective string `json:"objective"`
-	} `json:"untrusted"`
-}
-
-func swarmRowOf(m protocol.Mission, l links, objective int) swarmRow {
-	row := swarmRow{ID: m.ID, WorkspaceID: m.WorkspaceID, Phase: m.Phase, OpenQuestions: m.OpenQuestions,
-		IntegratorRunID: m.CurrentIntegratorRunID, CreatedAt: m.CreatedAt, URL: l.swarm(m.ID)}
-	row.Untrusted.Objective = clip(m.Objective, objective)
-	return row
-}
-
-// allSwarms lists the swarms of one workspace, or of every workspace when
-// workspaceID is empty, newest first, up to maxSwarmPages pages of
-// maxRows per workspace.
-func allSwarms(ctx context.Context, read Call, workspaceID string) ([]protocol.Mission, error) {
-	ids := []string{workspaceID}
-	if workspaceID == "" {
-		var res protocol.WorkspaceListResult
-		if err := read(ctx, protocol.MethodWorkspaceList, nil, &res); err != nil {
-			return nil, err
-		}
-		ids = ids[:0]
-		for _, w := range res.Workspaces {
-			ids = append(ids, w.ID)
-		}
-	}
-	var out []protocol.Mission
-	for _, id := range ids {
-		cursor := ""
-		for range maxSwarmPages {
-			var res protocol.MissionListResult
-			if err := read(ctx, protocol.MethodMissionList, protocol.MissionListParams{WorkspaceID: id, Limit: maxRows, Before: cursor}, &res); err != nil {
-				return nil, err
-			}
-			out = append(out, res.Missions...)
-			if cursor = res.NextCursor; cursor == "" {
-				break
-			}
-		}
-	}
-	slices.SortStableFunc(out, func(a, b protocol.Mission) int { return strings.Compare(b.CreatedAt, a.CreatedAt) })
-	return out, nil
-}
-
-func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error) {
-	l, err := dashboardLinks(ctx, c.read)
-	if err != nil {
-		return "", nil, err
-	}
-	if in.SwarmID == "" {
-		missions, err := allSwarms(ctx, c.read, in.WorkspaceID)
-		if err != nil {
-			return "", nil, err
-		}
-		rows := []swarmRow{}
-		for _, m := range missions[:min(len(missions), rowLimit(in.Limit))] {
-			rows = append(rows, swarmRowOf(m, l, maxReport))
-		}
-		out := map[string]any{"swarms": rows}
-		if len(missions) > len(rows) {
-			out["total"], out["truncated"] = len(missions), true
-			return fmt.Sprintf("%d of %d swarms.", len(rows), len(missions)), out, nil
-		}
-		return fmt.Sprintf("%d swarms.", len(rows)), out, nil
-	}
-	var res protocol.MissionShowResult
-	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &res); err != nil {
-		return "", nil, err
-	}
-	m := res.Mission
-	var msgs protocol.CoordMessagesListResult
-	if err := c.read(ctx, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: m.WorkspaceID, MissionID: m.ID, Limit: 10}, &msgs); err != nil {
-		return "", nil, err
-	}
-	type task struct {
-		ID       string   `json:"id"`
-		Status   string   `json:"status"`
-		Title    string   `json:"title,omitempty"`
-		Blockers []string `json:"blockers,omitempty"`
-	}
-	type worker struct {
-		AttemptID string `json:"attempt_id"`
-		RunID     string `json:"run_id,omitempty"`
-		TaskID    string `json:"task_id"`
-		State     string `json:"state"`
-		Harness   string `json:"harness"`
-		HeldBy    string `json:"control_held_by,omitempty"`
-		URL       string `json:"url,omitempty"`
-	}
-	type question struct {
-		ID       string `json:"id"`
-		Body     string `json:"body"`
-		Answer   string `json:"answer,omitempty"`
-		Answered bool   `json:"answered"`
-	}
-	type message struct {
-		FromRunID string `json:"from_run_id"`
-		ToRunID   string `json:"to_run_id"`
-		Kind      string `json:"kind"`
-		Body      string `json:"body"`
-		At        string `json:"at"`
-	}
-	tasks := make([]task, 0, len(res.Tasks))
-	for _, t := range res.Tasks {
-		row := task{ID: t.ID, Status: t.Status}
-		if t.Revision != nil {
-			row.Title = clip(t.Revision.Title, maxReport)
-		}
-		for _, b := range t.Blockers {
-			row.Blockers = append(row.Blockers, clip(b.Action, maxReport))
-		}
-		tasks = append(tasks, row)
-	}
-	type workerError struct {
-		AttemptID string `json:"attempt_id"`
-		LastError string `json:"last_error"`
-	}
-	workers := make([]worker, 0, len(res.Attempts))
-	var errs []workerError
-	for _, a := range res.Attempts {
-		w := worker{AttemptID: a.ID, RunID: a.RunID, TaskID: a.TaskID, State: a.State, Harness: a.Harness, URL: l.run(a.RunID)}
-		if a.LastError != "" {
-			errs = append(errs, workerError{AttemptID: a.ID, LastError: clip(a.LastError, maxText)})
-		}
-		if a.TakeoverActive {
-			w.HeldBy = a.TakeoverMemberID
-		}
-		workers = append(workers, w)
-	}
-	questions := make([]question, 0, len(res.Questions))
-	for _, q := range res.Questions {
-		questions = append(questions, question{ID: q.ID, Body: clip(q.Body, maxText), Answer: clip(q.Answer, maxText), Answered: q.AnsweredAt != nil})
-	}
-	messages := make([]message, 0, len(msgs.Messages))
-	for _, msg := range msgs.Messages {
-		messages = append(messages, message{FromRunID: msg.FromRunID, ToRunID: msg.ToRunID, Kind: msg.Kind,
-			Body: clip(cmp.Or(msg.Summary, msg.Body), maxText), At: msg.CreatedAt})
-	}
-	out := map[string]any{"swarm": swarmRowOf(m, l, maxText), "integrator_generation": m.IntegratorGeneration,
-		"workers": workers, "untrusted": map[string]any{"tasks": tasks, "questions": questions, "messages": messages, "worker_errors": errs}}
-	if m.IntegratorLaunchError != "" {
-		out["integrator_launch_error"] = m.IntegratorLaunchError
-	}
-	return fmt.Sprintf("Swarm %s is %s: %d tasks, %d workers, %d open questions.", m.ID, m.Phase, len(tasks), len(workers), m.OpenQuestions), out, nil
 }
 
 const (
@@ -742,7 +652,7 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 		out["repos"] = repos
 	}
 	untrusted := map[string]any{}
-	summary := fmt.Sprintf("Run %s:", r.ID)
+	summary := fmt.Sprintf("Session %s:", r.ID)
 	var log protocol.RunGitLogResult
 	limit := min(in.CommitsOffset+defaultRows, protocol.MaxRunGitLogLimit)
 	switch err := c.read(ctx, protocol.MethodRunGitLog, protocol.RunGitLogParams{RunID: r.ID, Repo: in.Repo, Limit: limit}, &log); {
@@ -797,15 +707,19 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 		case diff.Error != "":
 			out["diff_error"] = diff.Error
 		default:
+			// An unresolved conflict's file starts with a combined-diff
+			// header instead of diff --git.
 			var files []string
-			for part := range strings.SplitSeq(diff.Output.Stdout, "\ndiff --git ") {
-				if part == "" {
-					continue
+			var file strings.Builder
+			for line := range strings.Lines(diff.Output.Stdout) {
+				if file.Len() > 0 && (strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "diff --cc ") || strings.HasPrefix(line, "diff --combined ")) {
+					files = append(files, strings.TrimSuffix(file.String(), "\n"))
+					file.Reset()
 				}
-				if len(files) > 0 {
-					part = "diff --git " + part
-				}
-				files = append(files, part)
+				file.WriteString(line)
+			}
+			if file.Len() > 0 {
+				files = append(files, strings.TrimSuffix(file.String(), "\n"))
 			}
 			if in.DiffFile < 0 || (in.DiffFile > 0 && in.DiffFile >= len(files)) {
 				return "", nil, invalid("diff_file %d is past the diff's %d files", in.DiffFile, len(files))
@@ -859,8 +773,8 @@ func prStatus(ctx context.Context, c calls, in prStatusInput) (string, any, erro
 		return "", nil, err
 	}
 	if res.PullRequest == nil {
-		msg := cmp.Or(res.Error, "run "+in.RunID+" has no pull request")
-		return "", nil, &protocol.Error{Code: protocol.CodeNotFound, Message: msg + "; aether_message_run can ask its agent to open one"}
+		msg := cmp.Or(res.Error, "session "+in.RunID+" has no pull request")
+		return "", nil, &protocol.Error{Code: protocol.CodeNotFound, Message: msg + "; aether_message_session can ask its agent to open one"}
 	}
 	type check struct {
 		Name       string `json:"name"`
@@ -914,8 +828,18 @@ func prStatus(ctx context.Context, c calls, in prStatusInput) (string, any, erro
 		out["truncated"] = true
 		counted = " (truncated: at least these many)"
 	}
-	return fmt.Sprintf("PR #%d is %s: %d checks passed, %d failing, %d pending; %d reviews, %d comments%s; merge state %s.",
-		pr.Number, pr.State, passed, len(failing), pending, len(reviews), len(comments), counted, cmp.Or(res.MergeStateStatus, "unknown")), out, nil
+	commented := fmt.Sprintf("%d comments", len(comments))
+	if res.CommentsUnavailable {
+		out["comments_unavailable"] = true
+		commented = "comments unavailable (the session's environment is gone)"
+	}
+	reviewed := fmt.Sprintf("%d reviews", len(reviews))
+	if res.ReviewsUnavailable {
+		out["reviews_unavailable"] = true
+		reviewed = "reviews unavailable (" + res.Error + ")"
+	}
+	return fmt.Sprintf("PR #%d is %s: %d checks passed, %d failing, %d pending; %s, %s%s; merge state %s.",
+		pr.Number, pr.State, passed, len(failing), pending, reviewed, commented, counted, cmp.Or(res.MergeStateStatus, "unknown")), out, nil
 }
 
 func overlaps(ctx context.Context, c calls, in overlapsInput) (string, any, error) {
@@ -971,7 +895,7 @@ func overlaps(ctx context.Context, c calls, in overlapsInput) (string, any, erro
 			pairs = append(pairs, row)
 		}
 	}
-	return fmt.Sprintf("%d overlapping pairs of active runs.", len(pairs)), map[string]any{"pairs": pairs}, nil
+	return fmt.Sprintf("%d overlapping pairs of active sessions.", len(pairs)), map[string]any{"pairs": pairs}, nil
 }
 
 func memorySearch(ctx context.Context, c calls, in memoryInput) (string, any, error) {

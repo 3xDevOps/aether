@@ -126,9 +126,9 @@ export async function shareWithAgent(page: Page, fixture: BrowserFixture, phone:
   const snapshot = await fixture.agent<DevBrowserSnapshotResult>('browser', 'snapshot', { session_id: before.session_id, page_id: before.page_id, page_revision: before.page_revision })
   const note = snapshot.nodes.find((node) => node.role === 'textbox' && node.name === 'Shared note')
   expect(note?.node_id).toBeTruthy()
-  const request = { session_id: snapshot.page.session_id, page_id: snapshot.page.page_id, page_revision: snapshot.page.page_revision, control_session_id: acquired.controller!.control_session_id, control_generation: acquired.controller!.control_generation, action: 'fill', node_id: note!.node_id, text: 'Written by the run principal' }
+  const request = { session_id: snapshot.page.session_id, page_id: snapshot.page.page_id, page_revision: snapshot.page.page_revision, control_session_id: acquired.controller!.control_session_id, control_generation: acquired.controller!.control_generation, action: 'fill', node_id: note!.node_id, text: 'Written by the session principal' }
   await fixture.agent<DevBrowserActionResult>('browser', 'action', request)
-  await fixture.waitText('Note: Written by the run principal')
+  await fixture.waitText('Note: Written by the session principal')
   await expect(page.getByText('The agent is driving', { exact: true })).toBeVisible()
   // The rendered Log out button: a press while the agent drives must not reach it.
   await clickRemote(page, 80, 365, phone)
@@ -138,6 +138,6 @@ export async function shareWithAgent(page: Page, fixture: BrowserFixture, phone:
   await page.getByRole('button', { name: 'Take over', exact: true }).click()
   await expect(driving(page)).toBeVisible()
   await expect(fixture.agent('browser', 'action', { ...request, text: 'STALE AGENT MUST NOT WRITE' })).rejects.toThrow()
-  await fixture.waitText('Note: Written by the run principal')
+  await fixture.waitText('Note: Written by the session principal')
   expect((await fixture.currentPage()).page_id).toBe(before.page_id)
 }

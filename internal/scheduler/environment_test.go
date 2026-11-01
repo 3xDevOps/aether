@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,12 +40,12 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 		if planErr != nil {
 			t.Fatalf("BuildEnvironmentPlan(%q): %v", purpose, planErr)
 		}
-		wantMounts := 2
+		wantMounts := 4
 		if purpose == EnvironmentPurposeTerminal {
-			wantMounts = 3
+			wantMounts = 5
 		}
 		if len(plan.Mounts) != wantMounts {
-			t.Fatalf("purpose %q mounts = %v, want home plus isolated cache mount", purpose, plan.Mounts)
+			t.Fatalf("purpose %q mounts = %v, want home, its pinned logins and isolated cache mount", purpose, plan.Mounts)
 		}
 		home, homeErr := homes.Path(member.ID)
 		if homeErr != nil {
@@ -59,8 +60,8 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 			pool = "terminal"
 		}
 		cache := runtime.Mount{HostPath: filepath.Join(homes.CacheRoot(), string(member.ID), pool, "data"), ContainerPath: "/aether-cache"}
-		if plan.Mounts[1] != cache {
-			t.Fatalf("purpose %q cache mount = %+v, want %+v", purpose, plan.Mounts[1], cache)
+		if plan.Mounts[3] != cache {
+			t.Fatalf("purpose %q cache mount = %+v, want %+v", purpose, plan.Mounts[3], cache)
 		}
 		if plan.Env["GOCACHE"] != "/aether-cache/go-build" || plan.Env["HOME"] != "/root" || plan.Env["PATH"] != "/root/.local/bin:/workspace/bin" {
 			t.Fatalf("cache defaults changed persistent environment: %#v", plan.Env)
@@ -69,7 +70,133 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 	}
 }
 
-// Runs and the environment terminal both reach the member's signing agent,
+func TestBuildEnvironmentPlanAppliesThePermission(t *testing.T) {
+	t.Parallel()
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "home-caches"), nil)
+	if err != nil {
+		t.Fatalf("memberhome.New: %v", err)
+	}
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes, Store: db, StateDir: t.TempDir()}}
+	ws := &domain.Workspace{ID: "ws"}
+	member := &domain.Member{ID: "member"}
+	for _, tc := range []struct {
+		permission domain.Permission
+		sudo       bool
+	}{{domain.PermissionRoot, true}, {domain.PermissionDefault, false}, {domain.PermissionIsolated, false}} {
+		run := &domain.Run{ID: domain.RunID("run-" + string(tc.permission)), Permission: tc.permission}
+		plan, planErr := s.BuildEnvironmentPlan(context.Background(), run, ws, member, harness.Profile{}, EnvironmentPurposeRun)
+		if planErr != nil {
+			t.Fatalf("%s: %v", tc.permission, planErr)
+		}
+		if plan.User != unprivilegedUser || plan.Home != "/root" || plan.Sudo != tc.sudo {
+			t.Fatalf("%s: user %q home %q sudo %v, want %q /root %v", tc.permission, plan.User, plan.Home, plan.Sudo, unprivilegedUser, tc.sudo)
+		}
+		isolated := tc.permission == domain.PermissionIsolated
+		scratch := filepath.Join(s.scratchRoot(), string(run.ID))
+		overlays := map[string]string{}
+		var tmp string
+		for _, m := range plan.Mounts {
+			if m.Overlay != "" {
+				overlays[m.ContainerPath] = m.Overlay
+			}
+			if m.ContainerPath == "/tmp" {
+				tmp = m.HostPath
+			}
+		}
+		wantTmp, wantOverlays := scratch, map[string]string{}
+		if isolated {
+			wantTmp = filepath.Join(scratch, "tmp")
+			wantOverlays = map[string]string{"/root": filepath.Join(scratch, "home"), "/aether-cache": filepath.Join(scratch, "cache")}
+		}
+		if plan.Egress != isolated || tmp != wantTmp || !maps.Equal(overlays, wantOverlays) {
+			t.Fatalf("%s: egress %v, /tmp from %q, overlays %v; want egress %v, /tmp from %q, overlays %v", tc.permission, plan.Egress, tmp, overlays, isolated, wantTmp, wantOverlays)
+		}
+	}
+	terminal, err := s.BuildEnvironmentPlan(context.Background(), nil, nil, member, harness.Profile{}, EnvironmentPurposeTerminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.User != unprivilegedUser || !terminal.Sudo {
+		t.Fatalf("terminal user %q sudo %v, want %q with sudo", terminal.User, terminal.Sudo, unprivilegedUser)
+	}
+}
+
+// An isolated run's agent refreshes its login in the member's real home, not
+// in the throwaway copy.
+func TestBuildEnvironmentPlanKeepsAnIsolatedLoginReal(t *testing.T) {
+	t.Parallel()
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "home-caches"), nil)
+	if err != nil {
+		t.Fatalf("memberhome.New: %v", err)
+	}
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes, Store: db, StateDir: t.TempDir()}}
+	member := &domain.Member{ID: "member"}
+	homePath, err := homes.Path(member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(homePath, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(homePath, ".codex", "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	codex, ok := harness.Lookup("codex")
+	if !ok {
+		t.Fatal("no codex profile")
+	}
+	run := &domain.Run{ID: "run-iso", Permission: domain.PermissionIsolated}
+	plan, err := s.BuildEnvironmentPlan(context.Background(), run, &domain.Workspace{ID: "ws"}, member, codex, EnvironmentPurposeRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := runtime.Mount{HostPath: homePath, Subpath: ".codex/auth.json", ContainerPath: "/root/.codex/auth.json"}
+	if !slices.Contains(plan.Mounts, want) {
+		t.Fatalf("mounts = %+v, want the real %+v over the copy", plan.Mounts, want)
+	}
+}
+
+func TestBuildEnvironmentPlanRefusesAnIsolatedRunOnASharedLoginDirectory(t *testing.T) {
+	t.Parallel()
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "home-caches"), nil)
+	if err != nil {
+		t.Fatalf("memberhome.New: %v", err)
+	}
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes, Store: db, StateDir: t.TempDir()}}
+	ownerHome, err := homes.Path("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(ownerHome, ".omp", "agent"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	omp, ok := harness.Lookup("omp")
+	if !ok {
+		t.Fatal("no omp profile")
+	}
+	run := &domain.Run{ID: "run-iso", Permission: domain.PermissionIsolated, AccountMemberID: "owner"}
+	_, err = s.BuildEnvironmentPlan(context.Background(), run, &domain.Workspace{ID: "ws"}, &domain.Member{ID: "member"}, omp, EnvironmentPurposeRun)
+	if err == nil || !strings.Contains(err.Error(), "an isolated session cannot use another member's omp login") {
+		t.Fatalf("err = %v, want the refusal", err)
+	}
+}
+
+// Runs and the environment terminal both reach the member's signing agent,// Runs and the environment terminal both reach the member's signing agent,
 // over a workspace that sets SSH_AUTH_SOCK itself.
 func TestBuildEnvironmentPlanMountsTheSigningAgent(t *testing.T) {
 	t.Parallel()

@@ -142,13 +142,7 @@ func (s *Server) serveDevelopmentAttach(ctx context.Context, member domain.Membe
 				if err := authorize(ctx); err != nil {
 					return err
 				}
-				if err := admit(); err != nil {
-					return err
-				}
-				if mission := s.cfg.Services.MissionControl; mission != nil {
-					return mission.Takeover(ctx, run.ID, member)
-				}
-				return nil
+				return admit()
 			})
 		}
 	}

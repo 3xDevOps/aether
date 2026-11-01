@@ -12,7 +12,7 @@ import (
 )
 
 // WakeAdmission must call dispatch only while holding the shared run-control
-// admission boundary, after freshly checking run and mission authority. It is
+// admission boundary, after freshly checking the run. It is
 // never called during the observer wait. It may wait for a busy lock until
 // ctx ends. A nil seam fails closed.
 type WakeAdmission func(ctx context.Context, run domain.RunID, dispatch func() error) error

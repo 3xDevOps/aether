@@ -354,6 +354,12 @@ type RunPRFeedbackResult struct {
 	Comments       []RunPRComment       `json:"comments"`
 	Reviews        []RunPRReview        `json:"reviews"`
 	ReviewComments []RunPRReviewComment `json:"review_comments"`
+	// CommentsUnavailable means Comments and ReviewComments were not read,
+	// so their emptiness says nothing about the pull request.
+	CommentsUnavailable bool `json:"comments_unavailable,omitempty"`
+	// ReviewsUnavailable means reading Reviews failed after Checks were
+	// read; Error says why.
+	ReviewsUnavailable bool `json:"reviews_unavailable,omitempty"`
 	// GitHub's own verdict on the merge: Mergeable is MERGEABLE, CONFLICTING
 	// or UNKNOWN, MergeStateStatus is CLEAN, BEHIND, DIRTY, BLOCKED, UNSTABLE,
 	// DRAFT, HAS_HOOKS or UNKNOWN.
@@ -368,8 +374,8 @@ type RunPRFeedbackResult struct {
 
 // RunPRBlockers counts what a pull request's feedback reports could block
 // its merge: checks that failed or have not finished, and reviewers whose
-// latest verdict requests changes. Partial means the feedback was cut off,
-// so the counts are lower bounds.
+// latest verdict requests changes. Partial means the feedback was cut off
+// or its reviews were not read, so the counts are lower bounds.
 type RunPRBlockers struct {
 	FailingChecks    int  `json:"failing_checks"`
 	PendingChecks    int  `json:"pending_checks"`
@@ -378,7 +384,7 @@ type RunPRBlockers struct {
 }
 
 func (r RunPRFeedbackResult) Blockers() RunPRBlockers {
-	b := RunPRBlockers{Partial: r.Truncated}
+	b := RunPRBlockers{Partial: r.Truncated || r.ReviewsUnavailable}
 	for _, ch := range r.Checks {
 		switch strings.ToUpper(ch.Conclusion) {
 		case "SUCCESS", "NEUTRAL", "SKIPPED":

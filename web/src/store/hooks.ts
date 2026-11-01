@@ -2,8 +2,9 @@ import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useClock } from '@/lib/clock'
 import { deviceNeeds, type DeviceNeed, type StateContext } from '@/lib/needs-you'
+import { isSudo } from '@/lib/run-requests'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
-import type { GatewayCapabilities, Member, Run, RunStatusCause } from '@/lib/types'
+import type { GatewayCapabilities, Member, Run, RunStatusCause, RunWait } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
 import { runPeople, runWatchers } from '@/store/presence'
 import type { RunRecord } from '@/store/runs'
@@ -70,11 +71,11 @@ export function useRunPresentation(run: RunRecord): RunPresentation {
   const now = useClock()
   const key = useStore((s) => {
     const shown = presentRun(run, stateContextOf(s, now))
-    return JSON.stringify([shown.state, shown.reason, shown.next, shown.cause])
+    return JSON.stringify([shown.state, shown.reason, shown.next, shown.cause, shown.wait])
   })
   return useMemo(() => {
-    const [state, reason, next, cause] = JSON.parse(key) as [PresentationState, string, string | undefined, RunStatusCause | undefined]
-    return { state, reason, ...(next !== undefined && { next }), ...(cause !== undefined && { cause }) }
+    const [state, reason, next, cause, wait] = JSON.parse(key) as [PresentationState, string, string | undefined, RunStatusCause | undefined, RunWait | undefined]
+    return { state, reason, ...(next !== undefined && { next }), ...(cause !== undefined && { cause }), ...(wait && { wait }) }
   }, [key])
 }
 
@@ -117,16 +118,18 @@ export function useRunInput(run: Run) {
   const requests = run.pending_inputs ?? []
   const native = requests.length
   const parts: string[] = []
+  const sudo = requests.filter(isSudo).length
+  if (sudo > 0) parts.push(`${sudo} sudo command${sudo === 1 ? '' : 's'} to allow`)
   for (const [kind, label] of [
     ['question', 'question'],
     ['permission', 'permission request'],
     ['form', 'form'],
     ['extension_ui', 'extension dialog'],
   ] as const) {
-    const count = requests.filter((request) => request.kind === kind).length
+    const count = requests.filter((request) => !isSudo(request) && request.kind === kind).length
     if (count > 0) parts.push(`${count} ${label}${count === 1 ? '' : 's'} in Terminal`)
   }
-  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in the run's notes`)
+  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in the session's notes`)
   return {
     count: native + questions,
     questions,

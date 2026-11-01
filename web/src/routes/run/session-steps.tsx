@@ -5,7 +5,7 @@ import { LinkedText, Markdown } from '@/components/ui/markdown'
 import { DiffBlock, OutputTail, PlanEntries, ToolValue } from '@/components/ui/session-blocks'
 import { Spinner } from '@/components/ui/spinner'
 import { StatusDot } from '@/components/ui/status-dot'
-import { IconStack, ProseMark, StepChip, StepChipToggle, StepLine, StepRow, StepsHeader, StepsLiveMark, StepStatus } from '@/components/ui/steps'
+import { IconStack, StepChip, StepChipToggle, StepLine, StepRow, StepsHeader, StepsLiveMark, StepStatus } from '@/components/ui/steps'
 import { TextSwap } from '@/components/ui/text-swap'
 import { duration, toolIcon } from '@/components/ui/timeline'
 import { api } from '@/lib/api'
@@ -200,12 +200,6 @@ export function StepView({ step, first, last, live, runID }: { step: Step; first
       return <LookupStep id={step.id} entries={step.entries} first={first} last={last} live={live} runID={runID} />
     case 'thought':
       return <ThoughtStep id={step.id} text={step.text} streaming={step.streaming} first={first} last={last} live={live} runID={runID} />
-    case 'narration':
-      return (
-        <StepRow mark={<ProseMark />} first={first} last={last}>
-          <div className="pt-[3px] pb-2"><Markdown text={step.text} live={step.streaming} /></div>
-        </StepRow>
-      )
     case 'plan': {
       const done = step.entries.filter((entry) => entry.status === 'completed').length
       return (

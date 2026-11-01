@@ -2,7 +2,7 @@ import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('captures stay tappable in a short phone sheet', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')

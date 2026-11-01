@@ -259,7 +259,7 @@ func TestAddGatesInOrder(t *testing.T) {
 	}
 	_, err = f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "One too many."})
 	wantError(t, err, protocol.CodeConflict, fmt.Sprintf(
-		"memory.add: run %s already wrote 20 notes, the most one run may write; ask a member to add more (aether memory add)", run.ID))
+		"memory.add: session %s already wrote 20 notes, the most one session may write; ask a member to add more (aether memory add)", run.ID))
 
 	viewer.Role = domain.RoleCollaborator
 	if err := f.db.UpdateMember(context.Background(), viewer); err != nil {
@@ -504,9 +504,9 @@ func TestBriefShape(t *testing.T) {
 Pinned:
 - ` + team.Item.ID + ` convention (Dana): Use bun in web/; never npm.
 - ` + mine.Item.ID + ` preference (yours): No emoji in commit messages.
-Recent runs (48h):
+Recent sessions (48h):
 - Dana codex success ` + "`" + done.Branch + "`" + ` PR #312 merged, 3h: "Fix reattach lease race"
-1 live run: aether-internal status. 5 team notes (1 unpinned agent note): aether-internal memory search <words>
+1 live session: aether-internal status. 5 team notes (1 unpinned agent note): aether-internal memory search <words>
 </team-memory>`
 	if text != want {
 		t.Fatalf("brief =\n%s\nwant\n%s", text, want)
@@ -570,7 +570,7 @@ func TestBriefFitsFullPinBudgets(t *testing.T) {
 	}
 	for _, want := range []string{
 		" convention (Dana Longsurname-Over-It): Rule 00 x", " preference (yours): Rule 08 x",
-		"Recent runs (48h):\n- Dana Longsurname-Over-It codex failure `", `, 1h: "Task 00 \"quoted\" typed by a member yyy`,
+		"Recent sessions (48h):\n- Dana Longsurname-Over-It codex failure `", `, 1h: "Task 00 \"quoted\" typed by a member yyy`,
 		"20 unpinned agent notes", "</team-memory>",
 	} {
 		if !strings.Contains(text, want) {
@@ -578,7 +578,7 @@ func TestBriefFitsFullPinBudgets(t *testing.T) {
 		}
 	}
 	if strings.Contains(text, "did not fit") || strings.Contains(text, "CANARY") {
-		t.Fatalf("brief dropped a pin, or carries a pinned body, unpinned agent text, report prose, a run title or its own run:\n%s", text)
+		t.Fatalf("brief dropped a pin, or carries a pinned body, unpinned agent text, report prose, a session title or its own run:\n%s", text)
 	}
 }
 
@@ -647,7 +647,7 @@ func TestBriefDropsPinsOnlyPastBudgets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(text) > protocol.MemoryBriefMaxBytes || !strings.Contains(text, "- "+kept.Item.ID+" convention (Dana): Use bun in web/; never npm.\n") ||
-		!strings.Contains(text, " more pinned notes did not fit\n") || strings.Contains(text, "Recent runs") {
+		!strings.Contains(text, " more pinned notes did not fit\n") || strings.Contains(text, "Recent sessions") {
 		t.Fatalf("brief over the pin budgets is %d bytes:\n%s", len(text), text)
 	}
 }
@@ -657,7 +657,7 @@ func TestBriefDropsPinsOnlyPastBudgets(t *testing.T) {
 // the workspace is named and however many notes it holds.
 func TestBriefFrameFitsItsShare(t *testing.T) {
 	head, tail := frame(strings.Repeat("\"é\x00 ", 100), 9999999, 9999999, 9999999)
-	if size := len(head) + len("Pinned:\n") + len("Recent runs (48h):\n") + len(tail); size > 512 {
+	if size := len(head) + len("Pinned:\n") + len("Recent sessions (48h):\n") + len(tail); size > 512 {
 		t.Fatalf("frame is %d bytes, over 512:\n%s%s", size, head, tail)
 	}
 }

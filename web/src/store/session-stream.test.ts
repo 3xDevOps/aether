@@ -32,7 +32,7 @@ describe('the session stream owner', () => {
     const { store, stop, session } = setup()
     session.open({ has_control: false })
     expect(controlFrames(session)).toHaveLength(1)
-    session.send({ type: 'control', request_id: 1, ok: false, error: 'run control is held by another session' })
+    session.send({ type: 'control', request_id: 1, ok: false, error: 'session control is held by another session' })
     expect(store.getState().acpSessions.run_1?.controlError).toBeUndefined()
     vi.advanceTimersByTime(1000)
     expect(controlFrames(session)).toHaveLength(2)
@@ -56,7 +56,7 @@ describe('the session stream owner', () => {
     const { store, stop, session } = setup()
     store.getState().upsertRun(run({ mode: 'acp', acp: true, controller_member_id: 'mem_bob' }))
     session.open({ has_control: false })
-    session.send({ type: 'control', request_id: 1, ok: false, error: 'run control is held by another session' })
+    session.send({ type: 'control', request_id: 1, ok: false, error: 'session control is held by another session' })
     await vi.advanceTimersByTimeAsync(60_000)
     expect(controlFrames(session)).toHaveLength(1)
     store.getState().applyRunController('run_1', '')
@@ -98,7 +98,7 @@ describe('the session stream owner', () => {
     const { stop, session } = setup()
     try {
       session.open({ has_control: false })
-      session.send({ type: 'control', request_id: 1, ok: false, error: 'run control is held by another session' })
+      session.send({ type: 'control', request_id: 1, ok: false, error: 'session control is held by another session' })
       requestSessionTakeover('run_1', 'start', 'deliberate-takeover')
       await vi.advanceTimersByTimeAsync(60_000)
       expect(controlFrames(session)).toHaveLength(1)
@@ -149,10 +149,25 @@ describe('the session stream owner', () => {
     }
   })
 
-  it('resets the stream and lease when the last viewer leaves', async () => {
+  it('closes a stream whose release gets no answer after two seconds', () => {
+    const { stop, session } = setup()
+    session.open({ has_control: true, control_generation: 2 })
+    stop()
+    vi.advanceTimersByTime(1999)
+    expect(session.socket.closed).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(session.socket.closed).toBe(true)
+  })
+
+  it('releases the lease, then resets the stream and lease when the last viewer leaves', async () => {
     const { store, stop, session } = setup()
     session.open({ has_control: true, control_generation: 2 })
     stop()
+    const release = session.socket.frames().at(-1) as { request_id: number }
+    expect(release).toMatchObject({ type: 'control', write: false, control_generation: 2 })
+    expect(session.socket.closed).toBe(false)
+    session.send({ type: 'control', request_id: release.request_id, ok: true, has_control: false, control_generation: 2 })
+    expect(session.socket.closed).toBe(true)
     await vi.runAllTimersAsync()
     expect(store.getState().acpSessions.run_1).toMatchObject({ stream: 'connecting', control: undefined, takeover: undefined })
   })

@@ -86,14 +86,14 @@ describe('before a page is open', () => {
   it('says that nothing is listening and what to do', async () => {
     vi.mocked(api.devPortList).mockResolvedValue({ ports: [] })
     render(<BrowserView {...shared} runID="run_1" />)
-    expect(await screen.findByText(/^Nothing in this run is listening on a port yet\. Start a server in the Terminal, or ask the agent to, and it appears here\./)).toBeDefined()
+    expect(await screen.findByText(/^Nothing in this session is listening on a port yet\. Start a server in the Terminal, or ask the agent to, and it appears here\./)).toBeDefined()
     expect(screen.getByRole('button', { name: 'Ports' })).toBeDefined()
   })
 
   it('shows why the ports could not be read', async () => {
-    vi.mocked(api.devPortList).mockRejectedValue(new Error('dev.port.list: read the run’s listening ports: exit 1: grep: /proc/net/tcp: Permission denied'))
+    vi.mocked(api.devPortList).mockRejectedValue(new Error('dev.port.list: read the session’s listening ports: exit 1: grep: /proc/net/tcp: Permission denied'))
     render(<BrowserView {...shared} runID="run_1" />)
-    expect((await screen.findByRole('alert')).textContent).toBe('dev.port.list: read the run’s listening ports: exit 1: grep: /proc/net/tcp: Permission denied')
+    expect((await screen.findByRole('alert')).textContent).toBe('dev.port.list: read the session’s listening ports: exit 1: grep: /proc/net/tcp: Permission denied')
     expect(screen.getByRole('heading', { name: 'Open a page' })).toBeDefined()
   })
 
@@ -135,7 +135,7 @@ describe('opening a port on this computer', () => {
     render(<BrowserView {...shared} runID="run_1" />)
     await listed()
     fireEvent.click(screen.getByRole('button', { name: 'Open 5173 on this computer' }))
-    expect(screen.getByRole('status').textContent).toBe('Port 5173 is bound to ::1 inside the run, so only the run can reach it. Start the server on 0.0.0.0 to open it on this computer.')
+    expect(screen.getByRole('status').textContent).toBe('Port 5173 is bound to ::1 inside the session, so only the session can reach it. Start the server on 0.0.0.0 to open it on this computer.')
     expect(api.localForwardStart).not.toHaveBeenCalled()
     expect(window.open).not.toHaveBeenCalled()
   })

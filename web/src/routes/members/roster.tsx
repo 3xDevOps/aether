@@ -184,7 +184,7 @@ export function Roster({ client }: { client: Api }) {
       {removing && (
         <Confirm
           title={`Remove ${removing.display_name}?`}
-          description="Their runs and history stay; their access ends now."
+          description="Their sessions and history stay; their access ends now."
           action="Remove"
           pending="Removing…"
           onConfirm={() => client.memberRemove(removing.id)}

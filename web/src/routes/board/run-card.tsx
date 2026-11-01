@@ -6,21 +6,14 @@ import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
-import { runLabel, stateLabel, stateTitle, stateTone, stateWords } from '@/lib/status'
-import type { MissionPhase } from '@/lib/types'
+import { runLabel, stateLabel, stateTitle, stateWords, toneOf } from '@/lib/status'
+import { useClock } from '@/lib/clock'
 import { cn } from '@/lib/utils'
 import { CardActionButton, cardAction, openCard, ReplyComposer, setReplying, useReply } from '@/routes/board/card-action'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { diffTotals } from '@/store/diff'
 import { childRunsText, type TreeSummary } from '@/store/selectors'
-
-export const phaseWord: Record<MissionPhase, string> = {
-  planning: 'Swarm planning',
-  active: 'Swarm active',
-  completed: 'Swarm completed',
-  cancelled: 'Swarm cancelled',
-}
 
 /** Indents a wide card's description and footer under its title, past the 14px glyph and 12px gap. */
 export const wideIndent = '@min-[365px]:pl-6.5'
@@ -31,20 +24,21 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
 }) {
   const { run } = card
   const navigate = useStore((s) => s.navigate)
-  const mission = useStore((s) => (card.swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
   const snapshot = useStore((s) => s.diffs[run.id]?.snapshots[0])
   const totals = useMemo(() => diffTotals(snapshot?.files), [snapshot])
   const replying = useReply((s) => s.reply?.runId === run.id)
   const cardRef = useRef<HTMLElement>(null)
   const action = cardAction(card)
   const needsYou = card.group === 'needs-you'
-  const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
+  const title = runLabel(run)
   const state = needsYou && !card.needsYou ? 'needs-you' : card.state
   const asking = !card.needsYou && card.childRuns ? card.children[0] : undefined
-  const reason = card.swarm ? swarmReason(card, mission?.phase) : asking ? `${runLabel(asking.run)}: ${asking.reason}` : card.reason
-  const words = stateWords({ state, reason: asking ? reason : card.reason })
+  const reason = asking ? `${runLabel(asking.run)}: ${asking.reason}` : card.reason
+  const wait = asking ? undefined : card.wait
+  const now = useClock()
+  const words = stateWords({ state, reason: asking ? reason : card.reason, cause: card.cause, wait }, undefined, now)
   const label = needsYou ? stateLabel[state] : words.label
-  const detail = needsYou || card.swarm ? reason : words.detail
+  const detail = needsYou ? reason : words.detail
   const description = detail && detail !== label ? detail : undefined
   const owner = card.owner?.display_name ?? run.member_id
   const since = needsYou ? card.waitingSince : run.stateChangedAt
@@ -71,22 +65,18 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
           <div className={cn('mt-2 flex min-h-4 min-w-0 flex-wrap items-center gap-2 text-ui-sm text-muted', wideIndent)}>
             <span
               className="flex min-w-0 flex-1 items-center gap-1.5"
-              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next, cause: card.cause }, since)}
+              title={stateTitle({ state, reason, next: card.next, cause: card.cause, wait }, since, now)}
             >
-              <StatusDot tone={stateTone[state]} label={label} />
+              <StatusDot tone={toneOf({ state, wait })} label={label} />
               <span className="min-w-0 truncate">
                 <span>{label}</span> · <RelativeTime compact at={since} className="tabular-nums" />
                 {card.workspaceName && <> · <span>{card.workspaceName}</span></>}
               </span>
             </span>
-            {card.swarm ? (
-              <SwarmCounts swarm={card.swarm} />
-            ) : (
-              <span className="sr-only @min-[365px]:not-sr-only @min-[365px]:max-w-40 @min-[365px]:shrink-0 @min-[365px]:truncate">
-                {agentName ?? run.harness}
-              </span>
-            )}
-            {card.childRuns && <SwarmCounts swarm={card.childRuns} noun={childRunsText(card.childRuns)} />}
+            <span className="sr-only @min-[365px]:not-sr-only @min-[365px]:max-w-40 @min-[365px]:shrink-0 @min-[365px]:truncate">
+              {agentName ?? run.harness}
+            </span>
+            {card.childRuns && <ChildRunCounts summary={card.childRuns} />}
             <Avatar name={owner} color={card.owner?.color} />
             {snapshot?.truncated ? (
               <span className="shrink-0 tabular-nums">{snapshot.files.length} files</span>
@@ -121,26 +111,19 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
   )
 })
 
-function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
-  if (card.needsYou) return card.reason
-  if (card.group === 'needs-you') return card.children[0]?.reason ?? card.reason
-  if (card.unread) return card.reason
-  return phase ? phaseWord[phase] : 'Swarm'
-}
-
-const workerStates: { key: keyof TreeSummary['counts']; tone: Tone; words: string }[] = [
+const childStates: { key: keyof TreeSummary['counts']; tone: Tone; words: string }[] = [
   { key: 'needsYou', tone: 'needs-you', words: 'needs you' },
   { key: 'working', tone: 'working', words: 'working' },
   { key: 'done', tone: 'done', words: 'done' },
   { key: 'failed', tone: 'failed', words: 'failed' },
 ]
 
-function SwarmCounts({ swarm: { counts }, noun = '' }: { swarm: TreeSummary; noun?: string }) {
-  const shown = workerStates.filter(({ key }) => counts[key] > 0)
-  if (shown.length === 0) return <span className="shrink-0">No workers yet</span>
+function ChildRunCounts({ summary }: { summary: TreeSummary }) {
+  const { counts } = summary
+  const shown = childStates.filter(({ key }) => counts[key] > 0)
   return (
     <span className="flex shrink-0 items-center gap-2 tabular-nums">
-      {noun && <span>{noun}</span>}
+      <span>{childRunsText(summary)}</span>
       {shown.map(({ key, tone, words }) => (
         <span key={key} role="img" aria-label={`${counts[key]} ${words}`} title={`${counts[key]} ${words}`} className="flex items-center gap-1">
           <StatusDot tone={tone} />

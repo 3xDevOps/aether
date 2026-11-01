@@ -82,10 +82,8 @@ func rpcError(err error) *protocol.Error {
 		case errors.Is(err, store.ErrNotFound):
 			code = protocol.CodeNotFound
 		case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrInUse),
-			errors.Is(err, store.ErrMissionIdempotencyConflict), errors.Is(err, store.ErrMissionStale),
 			errors.Is(err, scheduler.ErrRunShellTabLimit), errors.Is(err, scheduler.ErrAgentInstallRunning),
 			errors.Is(err, ptyhost.ErrSessionReplaced):
-			// Matches coord.missionRPCError for a reused mission idempotency key.
 			code = protocol.CodeConflict
 		case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab),
 			errors.Is(err, store.ErrInvalidCursor):
@@ -94,7 +92,7 @@ func rpcError(err error) *protocol.Error {
 			errors.Is(err, scheduler.ErrTerminalNotRunning), errors.Is(err, scheduler.ErrGitHubNotLoggedIn),
 			errors.Is(err, scheduler.ErrGitHubScopeMissing), errors.Is(err, scheduler.ErrGitHubCLIMissing),
 			errors.Is(err, scheduler.ErrGitHubCLIBroken), errors.Is(err, scheduler.ErrGitHubCLIOutdated),
-			errors.Is(err, store.ErrMissionPhase), errors.Is(err, scheduler.ErrNoLiveEnvironment):
+			errors.Is(err, scheduler.ErrNoLiveEnvironment):
 			code = protocol.CodeInvalidState
 		case errors.Is(err, errWriteDenied), errors.Is(err, errMemberRemoved),
 			errors.Is(err, errMemberPending), errors.Is(err, permissions.ErrDenied):

@@ -190,7 +190,7 @@ export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord
         <Unplaced runID={key} files={files} scope="" />
         {data.error && <Callout tone="failed" role="alert" className="m-2">{data.error}</Callout>}
         {data.truncated && (
-          <Callout tone="needs-you" className="m-2">The server returned an incomplete diff. Refresh it or fetch the run branch to read the complete change.</Callout>
+          <Callout tone="needs-you" className="m-2">The server returned an incomplete diff. Refresh it or fetch the session branch to read the complete change.</Callout>
         )}
         {virtual ? (
           <div ref={setStart} onFocus={(event) => {

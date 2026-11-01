@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
 // The assistant watches every run it launches: the watch is listed and
@@ -54,7 +55,7 @@ func TestIntegrationAssistantWatchesRun(t *testing.T) {
 		t.Fatalf("assistant.start: %v", perr)
 	}
 	frames := env.watch(ctx, 0)
-	conn, err := net.Dial("unix", filepath.Join(env.data, "assistant", string(env.member.ID), "sock", "assistant.sock"))
+	conn, err := net.Dial("unix", filepath.Join(scheduler.AssistantSocketDir(filepath.Join(env.data, "assistant"), env.member.ID), "assistant.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func TestIntegrationAssistantWatchesRun(t *testing.T) {
 		if strings.Contains(item, "needs your attention") && strings.Contains(item, "pick a database") && strings.Contains(item, "watch="+watchID) {
 			attentionNotices++
 		}
-		if strings.Contains(item, `Run \"`+task+`\"`) && (strings.Contains(item, "finished") || strings.Contains(item, "failed")) {
+		if strings.Contains(item, `Session \"`+task+`\"`) && (strings.Contains(item, "finished") || strings.Contains(item, "failed")) {
 			finishedNotices++
 		}
 	}

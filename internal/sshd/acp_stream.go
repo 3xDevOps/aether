@@ -18,7 +18,7 @@ import (
 
 const maxACPViewers = 32
 
-var errACPViewerLimit = errors.New("sshd: too many viewers on this enhanced run")
+var errACPViewerLimit = errors.New("sshd: too many viewers on this Enhanced agent")
 
 // acpStream is one aether-acp channel: the item stream out, lease and
 // takeover control frames both ways.
@@ -82,7 +82,7 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 		return
 	}
 	if !run.ACP {
-		refuse(protocol.CodeInvalidParams, "run "+req.RunID+" does not run its agent over ACP")
+		refuse(protocol.CodeInvalidParams, "session "+req.RunID+" does not run its agent over ACP")
 		return
 	}
 	if (req.Write || req.ReleaseControl) && req.ControlSessionID == "" {
@@ -245,19 +245,17 @@ func (a *acpStream) acquire(force bool, generation uint64, p *pendingTakeover) e
 	var err error
 	if p != nil {
 		acquired, displaced, err = s.cfg.Control.AcquireTakeoverAuthorized(run, string(a.member), a.session, &p.lease,
-			func() error { return s.authorizeTakeover(a.endpoint) })
+			func() error {
+				return s.authorizeTakeover(a.endpoint)
+			})
 	} else {
 		acquired, displaced, err = s.cfg.Control.AcquireInteractiveAuthorized(run, string(a.member), a.session, force, generation,
-			func() error { return checkSteer(a.ctx, s.cfg.Store, a.member, a.run.ID) })
+			func() error {
+				return checkSteer(a.ctx, s.cfg.Store, a.member, a.run.ID)
+			})
 	}
 	if err != nil {
 		return err
-	}
-	if mission := s.cfg.Services.MissionControl; mission != nil {
-		if err = mission.Takeover(a.ctx, a.run.ID, a.member); err != nil {
-			_ = s.cfg.Control.Release(run, a.member, acquired.SessionID, acquired.Generation)
-			return err
-		}
 	}
 	lease := acquired
 	id, err := s.registerControlAttach(run, a.session, acquired.Generation, a.revoke, func() { a.fence(&lease) })
@@ -278,12 +276,7 @@ func (a *acpStream) acquire(force bool, generation uint64, p *pendingTakeover) e
 // release hands the lease back; the stream stays a viewer.
 func (a *acpStream) release(generation uint64) error {
 	s := a.s
-	err := s.cfg.Control.ReleaseAdmitted(string(a.run.ID), a.member, a.session, generation, func() error {
-		if mission := s.cfg.Services.MissionControl; mission != nil {
-			return mission.Release(a.ctx, a.run.ID, a.member)
-		}
-		return nil
-	})
+	err := s.cfg.Control.ReleaseAdmitted(string(a.run.ID), a.member, a.session, generation, func() error { return nil })
 	if err != nil {
 		return err
 	}
@@ -311,7 +304,7 @@ func (a *acpStream) fence(lease *control.Snapshot) {
 	a.mu.Unlock()
 	a.s.unregisterControlAttach(string(a.run.ID), a.session, id)
 	_ = a.sendControl(protocol.DashAttachControl{
-		Type: protocol.DashAttachControlFrame, Error: "run control was revoked",
+		Type: protocol.DashAttachControlFrame, Error: "session control was revoked",
 		ControlSessionID: a.session, ControlGeneration: lease.Generation,
 		RevocationReason: string(lease.RevocationReason()),
 	})
@@ -355,7 +348,7 @@ func (a *acpStream) readControl(r *bufio.Reader) {
 		case ctl.Type != protocol.DashAttachControlFrame && ctl.Type != protocol.DashAttachTakeover:
 			record.Code, record.Error = protocol.CodeInvalidParams, "unknown frame type"
 		case a.s.cfg.Control == nil:
-			record.Code, record.Error = protocol.CodeDenied, "run control is not enabled"
+			record.Code, record.Error = protocol.CodeDenied, "session control is not enabled"
 		case a.session == "":
 			record.Code, record.Error = protocol.CodeInvalidParams, "control_session_id is required"
 		case ctl.RequestID <= last:

@@ -22,11 +22,10 @@ func TestAccountSharesAreDirectionalAndCascade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
-		t.Fatalf("ShareAccount: %v", err)
-	}
-	if err := db.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
-		t.Fatalf("idempotent ShareAccount: %v", err)
+	for i, want := range []bool{true, false} {
+		if changed, err := db.ShareAccount(ctx, owner.ID, grantee.ID); err != nil || changed != want {
+			t.Fatalf("ShareAccount #%d = %v, %v, want changed %v", i+1, changed, err, want)
+		}
 	}
 	shared, err := db.AccountSharedWith(ctx, owner.ID, grantee.ID)
 	if err != nil || !shared {
@@ -45,6 +44,14 @@ func TestAccountSharesAreDirectionalAndCascade(t *testing.T) {
 		t.Fatalf("ListAccountGrantees = %+v, %v", grantees, err)
 	}
 
+	for i, want := range []bool{true, false} {
+		if changed, rerr := db.RevokeAccountShare(ctx, owner.ID, grantee.ID); rerr != nil || changed != want {
+			t.Fatalf("RevokeAccountShare #%d = %v, %v, want changed %v", i+1, changed, rerr, want)
+		}
+	}
+	if _, err = db.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err = db.DeleteMember(ctx, grantee.ID); err != nil {
 		t.Fatalf("DeleteMember: %v", err)
 	}

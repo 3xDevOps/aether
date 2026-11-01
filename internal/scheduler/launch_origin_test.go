@@ -14,7 +14,7 @@ func TestLaunchPassesWorkspaceOriginToTheCheckout(t *testing.T) {
 		t.Fatalf("SetWorkspaceOrigin: %v", err)
 	}
 
-	run, _ := e.launchFake(t, "push from the run")
+	run, _ := e.launchFake(t, "push from the session")
 	if got := e.git.originFor(run.ID); got != origin {
 		t.Fatalf("checkout origin = %q, want %q", got, origin)
 	}

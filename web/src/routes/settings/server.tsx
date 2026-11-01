@@ -105,7 +105,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
         <SettingRow
           id="disk"
           label="Disk and performance"
-          help="CPU, memory, disk and Docker storage, and which runs use them."
+          help="CPU, memory, disk and Docker storage, and which sessions use them."
           control={<Button size="sm" variant="secondary" onClick={() => navigate('insights', { tab: 'system' })}>Open Insights › System</Button>}
         />
       </SettingsSection>
@@ -132,7 +132,7 @@ function RunLimitsRow({ client }: { client: Api }) {
   if (!offered) return null
   if (!limits) {
     return (
-      <SettingRow id="run-limits" label="Run limits" help={error ? null : 'Reading run limits…'}>
+      <SettingRow id="run-limits" label="Session limits" help={error ? null : 'Reading session limits…'}>
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         {error && <TryAgain onClick={reload} />}
       </SettingRow>
@@ -157,8 +157,8 @@ function RunLimitsRow({ client }: { client: Api }) {
   return (
     <SettingRow
       id="run-limits"
-      label="Run limits"
-      help={`Memory, CPU and process ceiling for every run's container, applied to runs started after you save. A run's launch options can override them. Now: ${limitsText(limits.effective)}.`}
+      label="Session limits"
+      help={`Memory, CPU and process ceiling for every session's container, applied to sessions started after you save. A session's launch options can override them. Now: ${limitsText(limits.effective)}.`}
       control={(
         <Button size="sm" disabled={draft === null || saving || !parsed.limits} onClick={save}>
           {saving ? 'Saving…' : 'Save'}
@@ -177,7 +177,7 @@ function DockerInRunsRow({ client }: { client: Api }) {
   if (!caps.hasMethod('server.sysbox.status')) return null
   if (!status) {
     return (
-      <SettingRow id="docker" label="Docker inside runs" help={error ? null : 'Reading Docker support…'}>
+      <SettingRow id="docker" label="Docker inside sessions" help={error ? null : 'Reading Docker support…'}>
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         {error && <TryAgain onClick={read} />}
       </SettingRow>
@@ -187,8 +187,8 @@ function DockerInRunsRow({ client }: { client: Api }) {
   const installing = state === 'installing'
   const command = rootCommand(status)
   const states = {
-    on: ['On', 'Agents can run docker, compose and buildx in their runs.'],
-    off: ['Off', reason || 'Lets agents build and run containers inside their own runs, isolated from this server. Installs the Sysbox runtime.'],
+    on: ['On', 'Agents can run docker, compose and buildx in their sessions.'],
+    off: ['Off', reason || 'Lets agents build and run containers inside their own sessions, isolated from this server. Installs the Sysbox runtime.'],
     unsupported: ['Unavailable on this host', reason],
     installing: ['Installing', undefined],
     failed: ['Install failed', reason],
@@ -197,7 +197,7 @@ function DockerInRunsRow({ client }: { client: Api }) {
   return (
     <SettingRow
       id="docker"
-      label="Docker inside runs"
+      label="Docker inside sessions"
       help={(
         <>
           <p className="text-text">{title}</p>
@@ -212,7 +212,7 @@ function DockerInRunsRow({ client }: { client: Api }) {
     >
       <p role="status" className="flex items-center gap-2 text-ui-sm text-muted empty:hidden">
         {installing && <><Spinner />Installing… this takes a minute or two</>}
-        {justInstalled && state === 'on' && 'New runs get it now. Reopen your Environment to use it there.'}
+        {justInstalled && state === 'on' && 'New sessions get it now. Reopen your Environment to use it there.'}
       </p>
       {command && <CopyableCommand command={command} />}
       {error && <p role="alert" className="whitespace-pre-wrap break-words text-ui-sm text-state-failed">{error}</p>}
@@ -241,8 +241,8 @@ function RetainedContainersRow() {
       id="retained-containers"
       label="Retained containers"
       help={count > 0
-        ? `${count} finished ${count === 1 ? 'run keeps its' : 'runs keep their'} container${where}. Removing containers prevents reopening those runs; it does not delete all run data, homes, repositories or history.`
-        : `No finished run keeps a container${where}.`}
+        ? `${count} finished ${count === 1 ? 'session keeps its' : 'sessions keep their'} container${where}. Removing containers prevents reopening those sessions; it does not delete all session data, homes, repositories or history.`
+        : `No finished session keeps a container${where}.`}
       control={(
         <Button size="sm" variant="secondary" disabled={count === 0} onClick={() => openDialog('release-finished')}>
           Free retained containers…

@@ -20,7 +20,7 @@ export function NoteComposer({ runID, room, focus }: { runID: string; room: RunR
         if (body.trim()) void room.note(body.trim())
       }}
     >
-      <Input ref={input} aria-label="Add a note" placeholder="Add a note for people on this run" value={body} onChange={(event) => useStore.getState().setNoteDraft(runID, event.target.value)} />
+      <Input ref={input} aria-label="Add a note" placeholder="Add a note for people on this session" value={body} onChange={(event) => useStore.getState().setNoteDraft(runID, event.target.value)} />
       <Button type="submit" size="round" variant="primary" label="Add note" disabled={!body.trim()}>
         <ArrowUp />
       </Button>

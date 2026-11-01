@@ -1,12 +1,12 @@
 # Member Environment Image Implementation Plan
 
 **Goal:** Anything a member installs in their environment terminal (apt,
-brew, language toolchains, `gh`) is available to every agent run and
+brew, language toolchains, `gh`) is available to every agent session and
 workspace shell of that member, after one explicit "Save environment" action.
 
 **Architecture:** The environment terminal container is the source of truth
 for a member's system state. Save runs `docker commit` on that container and
-records the resulting image on the member. Runs, workspace shells, and the
+records the resulting image on the member. Sessions, workspace shells, and the
 terminal itself launch from the member's saved image, falling back to the
 standard image when nothing is saved. Per-workspace Dockerfile environments,
 their build/verify/rollback/edit pipeline, the mirror/repo scans, and image
@@ -24,17 +24,17 @@ variables and the setup script stay.
   merge two independent layer stacks; the member image is the only image.
 - No admin-curated shared environments in this change. Teams that want a
   common baseline pin a different `--standard-image`.
-- Run lifecycle stays as it is: one fresh container per run, exec'd shells
+- Session lifecycle stays as it is: one fresh container per session, exec'd shells
   in that container, same supervision and recovery. Only the image changes.
 
 ## Background
 
 Today (`internal/scheduler/environment.go:50-61`) the environment terminal
-starts from `cfg.StandardImage` and each run starts from the workspace's
+starts from `cfg.StandardImage` and each session starts from the workspace's
 effective image. Both mount the member home read-write at `$HOME`, so
 `~/.local/bin` is shared but nothing outside the home is. `sudo apt install
 gh` in the terminal writes the terminal container's own filesystem layer,
-which no run ever sees and which is lost when the terminal container is
+which no session ever sees and which is lost when the terminal container is
 recreated (`docs/environment-home.md:16-18`). The inventory of the
 workspace-image machinery this plan removes is about 7-9k lines across Go,
 dashboard, and tests (details under "Removal").
@@ -65,7 +65,7 @@ case for terminals goes away; the workspace is only consulted for
 variables and setup script on runs. `cfg.NeutralImage` and the
 `--neutral-image` server flag are removed. The `checkAgentPresent` neutral
 image branch (`internal/scheduler/launch.go:165-183`) is removed with it;
-the run fails on the agent's own "command not found" instead, which is the
+the session fails on the agent's own "command not found" instead, which is the
 real error.
 
 If the saved image ref no longer exists in the Docker daemon (pruned by an
@@ -91,7 +91,7 @@ New scheduler method `SaveEnvironment(ctx, member) (image string, err)`:
    image is already active.
 5. Return the tag. The terminal container keeps running unchanged.
 
-Runs already in flight keep their container. Runs launched after the save
+Sessions already in flight keep their container. Sessions launched after the save
 use the new image. The terminal container itself keeps the layer it was
 committed from, so it is already "on" the saved state.
 
@@ -139,7 +139,7 @@ Terminal dock (`web/src/routes/board/terminal-dock.tsx:200-212`): the
 header actions become, left to right, **Save environment** (primary
 variant, always visible when the terminal is running), then the existing
 ghost **Stop environment**. Save shows a spinner label "Saving..." while
-the RPC runs, then a short inline confirmation ("Saved - new runs use this
+the RPC runs, then a short inline confirmation ("Saved - new sessions use this
 environment") that fades. Errors reuse the existing `statusError` path.
 A **Reset to standard** entry sits inside the Stop confirmation dialog as a
 second destructive option, since both stop the container.
@@ -154,7 +154,7 @@ image choice, "still building" run banner, `environment.build` and
 `environment.edit` event handling, env API methods and types.
 
 Onboarding's Agents step already opens the terminal dock to install the
-agent. It gains one sentence pointing at the Save button so the first run
+agent. It gains one sentence pointing at the Save button so the first session
 sees the install.
 
 ### Docs
@@ -246,7 +246,7 @@ Delete `aether env show|rebuild|rollback`, `aether image init`, the
 `--standard`/`--image` creation flags and `workspace settings --image`.
 Delete the dashboard Environment panel, onboarding Environment step, image
 choice component, environment store slice, env API methods/types/events,
-and the run "still building" banner. Trim the local gateway scan surface to
+and the session "still building" banner. Trim the local gateway scan surface to
 the profile scan. Tests: onboarding renders five steps; workspace page has
 no Environment panel; `api.test.ts` env cases removed; CLI usage tests
 updated.
@@ -262,7 +262,7 @@ image agent presence check. Tests: plan uses the saved image for run and
 terminal; falls back to standard when empty; errors when the saved tag is
 missing.
 
-Commit: `feat(scheduler): launch runs and terminals from the member image`
+Commit: `feat(scheduler): launch sessions and terminals from the member image`
 
 ### Task 4: Save and reset
 
@@ -299,14 +299,14 @@ Commit: `docs: describe the member environment image`
 End-to-end on a real server with Docker, as a member:
 
 1. `aether terminal`, run `sudo apt-get install -y gh`, `which gh` works.
-2. Launch a run before saving: `which gh` inside the run fails. Expected.
+2. Launch a session before saving: `which gh` inside the session fails. Expected.
 3. Click Save environment (or `aether env save`). `aether terminal status`
    shows the saved image.
-4. Launch a run: `which gh` succeeds. Open a workspace shell in that run:
+4. Launch a session: `which gh` succeeds. Open a workspace shell in that session:
    `which gh` succeeds.
 5. `aether terminal stop`, then `aether terminal`: `which gh` still works.
 6. Restart the server; repeat step 4.
-7. `aether env reset`, open the terminal: `which gh` fails; runs use the
+7. `aether env reset`, open the terminal: `which gh` fails; sessions use the
    standard image again.
 8. Second member on the same server never sees the first member's image.
 

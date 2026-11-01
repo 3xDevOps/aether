@@ -2214,7 +2214,198 @@ ALTER TABLE runs ADD COLUMN cpu_limit REAL NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN memory_limit_bytes INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN pids_limit INTEGER NOT NULL DEFAULT 0;
 `,
-	// v93: the conditions a run registers with coord.report until, kept as
+	// v93: the effort or thinking level a run, attempt, template or
+	// integrator launches with; empty keeps the agent's default.
+	`
+ALTER TABLE runs ADD COLUMN effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_attempts ADD COLUMN effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE templates ADD COLUMN effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE missions ADD COLUMN integrator_effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_create_receipts ADD COLUMN integrator_effort TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_integrator_replacements ADD COLUMN effort TEXT NOT NULL DEFAULT '';
+`,
+	// v94: audit history of writes by connectors and the assistant, and of
+	// connector, account-share, member and Slack link changes. Rows hold
+	// ids, never params, and outlive the members and connectors they name;
+	// security marks a change that took effect, which is kept apart from
+	// call entries.
+	`
+CREATE TABLE audit (
+	seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+	ts           INTEGER NOT NULL,
+	member_id    TEXT NOT NULL,
+	via          TEXT NOT NULL,
+	connector_id TEXT NOT NULL DEFAULT '',
+	client       TEXT NOT NULL DEFAULT '',
+	method       TEXT NOT NULL,
+	workspace_id TEXT NOT NULL DEFAULT '',
+	target       TEXT NOT NULL DEFAULT '',
+	code         INTEGER NOT NULL,
+	security     INTEGER NOT NULL
+);
+CREATE INDEX audit_member ON audit(member_id, seq);
+CREATE INDEX audit_kept ON audit(member_id, security, seq);
+CREATE INDEX audit_connector ON audit(connector_id, seq);
+CREATE INDEX audit_target ON audit(target, seq);
+`,
+	// v95: each member's private assistant preferences, the setting that
+	// lets the assistant use them, and temporary conversations that do not.
+	`
+CREATE TABLE member_preferences (
+	id           TEXT PRIMARY KEY,
+	member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	workspace_id TEXT,
+	text         TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 500),
+	enabled      INTEGER NOT NULL DEFAULT 1,
+	source       TEXT NOT NULL,
+	source_ref   TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	updated_at   INTEGER NOT NULL,
+	last_used_at INTEGER
+);
+CREATE INDEX idx_member_preferences_member ON member_preferences(member_id);
+ALTER TABLE assistant_settings ADD COLUMN preferences_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE assistant_sessions ADD COLUMN temporary INTEGER NOT NULL DEFAULT 0;
+`,
+	// v96: child runs are on by default and one level deep, and any run
+	// may message any run: members who never saved the setting follow the
+	// default, and the depth, total, fallback, shared-account, nudge and
+	// peer-cap state goes away.
+	`
+UPDATE child_settings SET enabled = 1 WHERE configured = 0;
+ALTER TABLE child_settings DROP COLUMN fallback;
+ALTER TABLE child_settings DROP COLUMN shared_missing;
+ALTER TABLE child_settings DROP COLUMN configured;
+ALTER TABLE child_settings DROP COLUMN nudge_snoozes;
+ALTER TABLE child_settings DROP COLUMN nudge_until;
+ALTER TABLE child_settings DROP COLUMN nudge_off;
+ALTER TABLE workspaces DROP COLUMN child_max_depth;
+ALTER TABLE workspaces DROP COLUMN child_max_total;
+ALTER TABLE run_children DROP COLUMN depth;
+ALTER TABLE runs DROP COLUMN child_refused;
+DROP TABLE coord_peers;
+`,
+	// v97: each run's permission tier. Runs from before tiers ran as root.
+	`
+ALTER TABLE runs ADD COLUMN permission TEXT NOT NULL DEFAULT 'root';
+ALTER TABLE launch_defaults ADD COLUMN permission TEXT NOT NULL DEFAULT '';
+`,
+	// v98: candidate integration is gone: its aggregates and events go with it, and
+	// watches stop waiting on the delivered condition.
+	`
+DROP TABLE integration_candidates;
+DELETE FROM events WHERE type = 'integration.changed';
+UPDATE watches SET state = 'expired', ended_at = updated_at, next_check_at = NULL, version = version + 1
+WHERE conditions LIKE '%"delivered"%' AND state IN ('active', 'paused', 'error')
+	AND NOT EXISTS (SELECT 1 FROM json_each(conditions) WHERE value <> 'delivered');
+UPDATE watches SET conditions = (SELECT json_group_array(value) FROM json_each(conditions) WHERE value <> 'delivered')
+WHERE conditions LIKE '%"delivered"%' AND EXISTS (SELECT 1 FROM json_each(conditions) WHERE value <> 'delivered');
+`,
+	// v99: swarms are gone. A swarm's current integrator becomes a run with
+	// children: every worker run and every earlier integrator of the swarm
+	// becomes a started child of it, with the purpose its task or role gave
+	// it. A swarm with no integrator run has nothing to attach to, and its
+	// runs stay ordinary runs. Runs that ended already told their parent, and
+	// children of an ended parent are detached so history is not settled
+	// again, as are children another member owns. Every current integrator
+	// may start child runs, as it could before. The mission tables and
+	// everything that pointed at a swarm go with it, watches on swarms
+	// included.
+	`
+INSERT INTO run_children (run_id, parent_run_id, root_run_id, tree_key, workspace_id, owner_member_id,
+	account_member_id, harness, mode, model, purpose, task, base_commit, base_branch, fallback_disabled,
+	fallback_order, idempotency_key, request_hash, state, end_notified, detached, created_at, started_at)
+WITH integrators AS (
+	SELECT id AS mission_id, current_integrator_run_id AS parent FROM missions
+	WHERE current_integrator_run_id IN (SELECT id FROM runs)
+), members AS (
+	SELECT a.run_id AS run_id, a.mission_id AS mission_id, 0 AS rank, COALESCE((SELECT t.title FROM mission_task_revisions t
+		WHERE t.task_id = a.task_id AND t.revision = a.task_revision), '') AS purpose
+	FROM mission_attempts a WHERE a.run_id IN (SELECT id FROM runs)
+	UNION ALL SELECT run_id, mission_id, 1, 'earlier swarm integrator' FROM mission_integrator_replacements
+		WHERE run_id IN (SELECT id FROM runs)
+	UNION ALL SELECT initial_run_id, mission_id, 1, 'earlier swarm integrator' FROM mission_create_receipts
+		WHERE initial_run_id IN (SELECT id FROM runs)
+), picked AS (
+	SELECT run_id, mission_id, purpose FROM (
+		SELECT *, ROW_NUMBER() OVER (PARTITION BY run_id ORDER BY rank, mission_id) AS n FROM members
+	) WHERE n = 1
+)
+SELECT r.id, i.parent, i.parent, i.parent, r.workspace_id, r.member_id, COALESCE(r.account_member_id, r.member_id), r.harness, r.mode,
+	r.model, COALESCE(NULLIF(trim(p.purpose), ''), replace(substr(r.task, 1, 80), char(10), ' ')), r.task,
+	r.base_commit, r.base_branch, r.fallback_disabled, r.fallback_order, 'swarm:' || r.id, 'swarm', 'started',
+	r.status IN ('completed', 'merged', 'abandoned', 'failed', 'interrupted'),
+	pr.status IN ('completed', 'merged', 'abandoned', 'failed', 'interrupted') OR r.member_id <> pr.member_id,
+	r.created_at, r.started_at
+FROM picked p JOIN integrators i ON i.mission_id = p.mission_id JOIN runs r ON r.id = p.run_id JOIN runs pr ON pr.id = i.parent
+WHERE p.run_id <> i.parent
+	AND p.run_id NOT IN (SELECT parent FROM integrators)
+	AND p.run_id NOT IN (SELECT run_id FROM run_children);
+UPDATE run_children SET tree_key = root_run_id WHERE mission_id <> '';
+UPDATE runs SET children = 'on', children_set_by = member_id
+WHERE id IN (SELECT current_integrator_run_id FROM missions);
+DELETE FROM watch_deliveries WHERE notification_id IN (SELECT n.id FROM watch_notifications n JOIN watches w ON w.id = n.watch_id WHERE w.target_kind = 'mission');
+DELETE FROM watch_notifications WHERE watch_id IN (SELECT id FROM watches WHERE target_kind = 'mission');
+DELETE FROM watches WHERE target_kind = 'mission';
+DELETE FROM events WHERE type = 'mission.changed';
+CREATE TABLE watches_v98 (
+	id              TEXT PRIMARY KEY,
+	member_id       TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	workspace_id    TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+	target_kind     TEXT NOT NULL CHECK (target_kind IN ('run', 'pr')),
+	run_id          TEXT REFERENCES runs(id) ON DELETE CASCADE,
+	repo            TEXT NOT NULL DEFAULT '',
+	pr_number       INTEGER NOT NULL DEFAULT 0,
+	target_title    TEXT NOT NULL DEFAULT '',
+	conditions      TEXT NOT NULL,
+	label           TEXT NOT NULL DEFAULT '',
+	source          TEXT NOT NULL,
+	state           TEXT NOT NULL CHECK (state IN ('active', 'paused', 'error', 'done', 'expired')),
+	error           TEXT NOT NULL DEFAULT '',
+	failures        INTEGER NOT NULL DEFAULT 0,
+	observed        TEXT NOT NULL DEFAULT '{}',
+	fired           TEXT NOT NULL DEFAULT '{}',
+	idempotency_key TEXT,
+	created_at      INTEGER NOT NULL,
+	updated_at      INTEGER NOT NULL,
+	expires_at      INTEGER NOT NULL,
+	last_check_at   INTEGER,
+	next_check_at   INTEGER,
+	ended_at        INTEGER,
+	version         INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO watches_v98 (id, member_id, workspace_id, target_kind, run_id, repo, pr_number, target_title, conditions,
+	label, source, state, error, failures, observed, fired, idempotency_key, created_at, updated_at, expires_at,
+	last_check_at, next_check_at, ended_at, version)
+SELECT id, member_id, workspace_id, target_kind, run_id, repo, pr_number, target_title, conditions,
+	label, source, state, error, failures, observed, fired, idempotency_key, created_at, updated_at, expires_at,
+	last_check_at, next_check_at, ended_at, version FROM watches;
+DROP TABLE watches;
+ALTER TABLE watches_v98 RENAME TO watches;
+CREATE INDEX idx_watches_member ON watches(member_id);
+CREATE INDEX idx_watches_workspace ON watches(workspace_id) WHERE workspace_id IS NOT NULL;
+CREATE INDEX idx_watches_run ON watches(run_id) WHERE run_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_watches_idempotency ON watches(member_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+DROP INDEX idx_run_messages_mission;
+ALTER TABLE run_messages DROP COLUMN mission_id;
+ALTER TABLE coord_audit_publications DROP COLUMN mission_id;
+ALTER TABLE run_children DROP COLUMN mission_id;
+ALTER TABLE runs DROP COLUMN swarm_run;
+DROP TABLE mission_acceptances;
+DROP TABLE mission_submissions;
+DROP TABLE mission_worker_takeovers;
+DROP TABLE mission_attempts;
+DROP TABLE mission_task_dependencies;
+DROP TABLE mission_task_revisions;
+DROP TABLE mission_tasks;
+DROP TABLE mission_questions;
+DROP TABLE mission_control_changes;
+DROP TABLE mission_integrator_replacements;
+DROP TABLE mission_create_receipts;
+DROP TABLE mission_mutation_receipts;
+DROP TABLE missions;
+`,
+	// v100: the conditions a run registers with coord.report until, kept as
 	// watches its owner run owns: one row per condition, the conditions of
 	// one report sharing a revision, which they get when the report is
 	// applied. The wait columns hold the state the run is told about and
@@ -2253,7 +2444,7 @@ ALTER TABLE coord_state_reports ADD COLUMN until_conditions TEXT NOT NULL DEFAUL
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
 // reference with ON DELETE CASCADE. See applyMigration.
-var foreignKeysOffMigrations = map[int]bool{45: true, 47: true, 49: true}
+var foreignKeysOffMigrations = map[int]bool{45: true, 47: true, 49: true, 99: true}
 
 // SchemaVersion is the schema version this build migrates a database to.
 // A release manifest records it as store_schema.

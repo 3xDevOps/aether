@@ -1,7 +1,6 @@
 package sshd
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -17,13 +16,9 @@ import (
 // watched is refused with why.
 func TestWatchesBelongToTheirCreator(t *testing.T) {
 	t.Parallel()
-	var e *testEnv
-	e = newTestEnv(t, func(c *Config) {
+	e := newTestEnv(t, func(c *Config) {
 		svc, err := watch.New(watch.Config{
 			Store: c.Store.(*store.DB), Bus: c.Bus, Runs: c.Runs,
-			Swarm: func(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-				return e.srv.SwarmAttention(ctx, run)
-			},
 		})
 		if err != nil {
 			t.Fatalf("watch.New: %v", err)
@@ -43,7 +38,7 @@ func TestWatchesBelongToTheirCreator(t *testing.T) {
 	if w := created.Watch; w.State != protocol.WatchActive || strings.Join(w.Conditions, ",") != "needs_you,finished" || w.Link != "/?page=settings&id=watches&watch="+w.ID {
 		t.Fatalf("created = %+v", w)
 	}
-	if !strings.HasPrefix(created.Receipt, "Watching run archive me for: needs you, finished.") || !strings.Contains(created.Receipt, "in-app only") {
+	if !strings.HasPrefix(created.Receipt, "Watching session archive me for: needs you, finished.") || !strings.Contains(created.Receipt, "in-app only") {
 		t.Fatalf("receipt = %q", created.Receipt)
 	}
 	var again protocol.WatchResult
@@ -82,7 +77,6 @@ func TestWatchesBelongToTheirCreator(t *testing.T) {
 		{protocol.WatchCreateParams{Target: create.Target, Conditions: []string{"deployed"}}, "no deploy signal"},
 		{protocol.WatchCreateParams{Target: create.Target, Conditions: []string{"ci"}}, "not supported yet"},
 		{protocol.WatchCreateParams{Target: protocol.WatchTarget{Kind: protocol.WatchTargetPR, Repo: "o/r", Number: 1}}, "not supported yet"},
-		{protocol.WatchCreateParams{Target: create.Target, Conditions: []string{"delivered"}}, "does not apply to a run"},
 		{protocol.WatchCreateParams{Target: create.Target, ExpiresAt: "2099-01-01T00:00:00Z"}, "more than 90 days"},
 	} {
 		var pe *protocol.Error

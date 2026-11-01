@@ -9,7 +9,6 @@ import { virtualizeAbove } from '@/routes/board/card-list'
 import { EdgePopover } from '@/routes/board/lanes/lane-popover'
 import { useBoard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
-import '@/routes/missions'
 import { useStore } from '@/store'
 import { historyBudget } from '@/store/lanes'
 import { optimisticDeadlineMs } from '@/store/optimistic'
@@ -19,7 +18,6 @@ import {
   alice,
   bob,
   fakeApi,
-  mission,
   otherWorkspace,
   pendingDevice,
   roomMessage,
@@ -69,8 +67,6 @@ function seed(runs: Run[], { active = workspace.id, self = alice } = {}) {
     pausedRuns: {},
     roomMessages: {},
     roomStatus: {},
-    missions: {},
-    missionDetails: {},
     diffs: {},
     overlaps: {},
     mineOnly: false,
@@ -249,84 +245,12 @@ describe('board columns', () => {
     expect(cardOf('still going').queryByText('Paused')).toBeNull()
   })
 
-  it('shows a swarm as one card with its objective, phase and counts, opening the swarm page', () => {
-    const integrator = run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })
-    const worker = (id: string, status: Run['status']) => run({
-      id, task: `worker ${id}`, status, mode: 'headless',
-      mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: integrator.id,
-    })
-    seed([integrator, worker('w1', 'running'), worker('w2', 'running'), worker('w3', 'completed'), worker('w4', 'failed')])
-    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
-    renderBoard()
-
-    expect(screen.getAllByRole('article')).toHaveLength(1)
-    const swarm = cardOf('coordinate checkout work')
-    expect(swarm.getByText('Swarm active')).toBeDefined()
-    expect(swarm.getByRole('img', { name: '2 working' })).toBeDefined()
-    expect(swarm.getByRole('img', { name: '1 done' })).toBeDefined()
-    expect(swarm.getByRole('img', { name: '1 failed' })).toBeDefined()
-    expect(swarm.queryByRole('img', { name: /needs you/ })).toBeNull()
-    expect(screen.queryByText('worker w1')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'coordinate checkout work' }))
-    expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mission_1' } })
-  })
-
-  it("labels a swarm waiting on its workers with the integrator's reason", () => {
-    const integrator = run({
-      id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
-      status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers',
-    })
-    seed([integrator])
-    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
-    renderBoard()
-    const swarm = cardOf('coordinate checkout work')
-    expect(swarm.getByRole('img', { name: 'Waiting for 2 workers' })).toBeDefined()
-    expect(swarm.getByText('Swarm active')).toBeDefined()
-  })
-
-  it('acts on a swarm card for the integrator itself when the integrator needs you', () => {
-    const integrator = run({
-      id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
-      pending_inputs: [{ id: 'p', session_id: 's', kind: 'permission' }],
-    })
-    seed([integrator])
-    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
-    renderBoard()
-
-    fireEvent.click(cardOf('coordinate checkout work').getByRole('button', { name: 'Open terminal' }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_integrator' } })
-  })
-
-  it('renders card meta contributions: an overlap count and a swarm conflict count', () => {
-    const integrator = run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })
-    seed([integrator, working])
-    useStore.setState({
-      missions: { mission_1: mission() },
-      missionDetails: {
-        mission_1: {
-          mission: mission(), tasks: [], attempts: [], submissions: [], questions: [],
-          diagnostics: [{ task_id: 't1', task_revision: 1, run_id: 'run_w1', kind: 'observed_overlap', paths: ['src/a.ts'] }],
-        },
-      },
-      overlaps: { [working.id]: [{ run_id: 'run_peer', member_id: bob.id, files: ['src/a.ts'] }] },
-    })
+  it('renders an overlap count on a card', () => {
+    seed([working])
+    useStore.setState({ overlaps: { [working.id]: [{ run_id: 'run_peer', member_id: bob.id, files: ['src/a.ts'] }] } })
     renderBoard()
 
     expect(cardOf('still going').getByRole('button', { name: '1 overlap' })).toBeDefined()
-    expect(cardOf('coordinate checkout work').getByRole('button', { name: '1 conflict' })).toBeDefined()
-  })
-
-  it('folds archived swarm workers into one card and honours Mine there', () => {
-    const archived = (id: string, member = alice.id) =>
-      run({ ...archivedMerged, id, task: `archived ${id}`, member_id: member, mission_id: 'mission_1', mission_role: 'worker' })
-    seed([archived('a1'), archived('a2'), run({ ...archivedMerged, member_id: bob.id, task: 'bob archived' }), working])
-    useStore.setState({ missions: { mission_1: mission({ phase: 'completed' }) }, mineOnly: true })
-    renderBoard()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Archived (1)' }))
-    expect(column('Finished').getAllByRole('article')).toHaveLength(1)
-    expect(cardOf('coordinate checkout work').getByText('Swarm completed')).toBeDefined()
-    expect(screen.queryByText('bob archived')).toBeNull()
   })
 
   it('keeps unchanged cards as the same objects across unrelated updates', () => {
@@ -389,7 +313,7 @@ describe('Needs you actions', () => {
     seed([run({ ...merged, status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true, finished_at: null })])
     renderBoard()
 
-    expect(column('Needs you').getByText('Agent reported failure; review the result. Run remains open for follow-up.')).toBeDefined()
+    expect(column('Needs you').getByText('Agent reported failure; review the result. Session remains open for follow-up.')).toBeDefined()
     expect(cardOf('landed already').getByRole('img', { name: 'Failed' })).toBeDefined()
     fireEvent.click(cardOf('landed already').getByRole('button', { name: 'Review' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: merged.id, view: 'changes' } })
@@ -412,7 +336,7 @@ describe('Needs you actions', () => {
 
   it('keeps the draft and shows the server error when a reply fails', async () => {
     seed([stopped])
-    vi.mocked(api.runInject).mockRejectedValueOnce(new Error('run is not running'))
+    vi.mocked(api.runInject).mockRejectedValueOnce(new Error('session is not running'))
     renderBoard()
 
     fireEvent.click(cardOf('waiting on you').getByRole('button', { name: 'Reply' }))
@@ -420,7 +344,7 @@ describe('Needs you actions', () => {
     await userEvent.type(composer.getByRole('textbox'), 'hello')
     fireEvent.click(composer.getByRole('button', { name: 'Send' }))
 
-    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: run is not running')
+    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: session is not running')
     expect(composer.getByRole('textbox')).toHaveProperty('value', 'hello')
   })
 
@@ -456,8 +380,8 @@ describe('Needs you actions', () => {
     act(() => useStore.setState({ devices: [pendingDevice()] }))
     const composer = within(await screen.findByRole('dialog', { name: 'Reply to waiting on you' }))
     expect(composer.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
-    await act(async () => fail(new Error('run is not running')))
-    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: run is not running')
+    await act(async () => fail(new Error('session is not running')))
+    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: session is not running')
     expect(composer.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false)
   })
 
@@ -571,13 +495,13 @@ describe('Finished footer', () => {
     useStore.setState({ members: { [alice.id]: alice, [bob.id]: { ...bob, role: 'admin' } } })
     renderBoard()
 
-    await userEvent.click(screen.getByRole('button', { name: 'More finished-run actions' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Archive closed runs…' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Archive closed sessions…' }))
     const dialog = within(await screen.findByRole('dialog'))
-    expect(dialog.getByText(/1 run stays: completed but not yet closed/)).toBeDefined()
+    expect(dialog.getByText(/1 session stays: completed but not yet closed/)).toBeDefined()
     fireEvent.click(dialog.getByRole('button', { name: 'Archive 1' }))
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 run'))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 session'))
     expect(api.runArchive).toHaveBeenCalledWith(merged.id, true)
   })
 
@@ -585,15 +509,15 @@ describe('Finished footer', () => {
     const retained = run({ ...merged, reason: 'closed; retained container' })
     seed([run({ ...retained, member_id: bob.id })], { self: bob })
     const { unmount } = renderBoard()
-    await userEvent.click(screen.getByRole('button', { name: 'More finished-run actions' }))
-    expect(await screen.findByRole('menuitem', { name: 'Archive closed runs…' })).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
+    expect(await screen.findByRole('menuitem', { name: 'Archive closed sessions…' })).toBeDefined()
     expect(screen.queryByRole('menuitem', { name: 'Free retained containers…' })).toBeNull()
     await userEvent.keyboard('{Escape}')
     unmount()
 
     seed([retained])
     renderBoard()
-    await userEvent.click(screen.getByRole('button', { name: 'More finished-run actions' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Free retained containers…' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Free 1' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(retained.id))
@@ -700,7 +624,7 @@ describe('empty board', () => {
     expect(await screen.findByRole('heading', { name: 'Base branch missing' })).toBeDefined()
 
     act(() => window.dispatchEvent(new Event('focus')))
-    expect(await screen.findByRole('heading', { name: 'No runs yet' })).toBeDefined()
+    expect(await screen.findByRole('heading', { name: 'No sessions yet' })).toBeDefined()
   })
 
   it('shows any other base-branch check failure as an error', async () => {
@@ -717,7 +641,7 @@ describe('empty board', () => {
     useStore.setState({ mineOnly: true })
     renderBoard()
 
-    fireEvent.click(await screen.findByRole('button', { name: "Show everyone's runs" }))
+    fireEvent.click(await screen.findByRole('button', { name: "Show everyone's sessions" }))
     expect(column('Working').getByText('still going')).toBeDefined()
   })
 
@@ -734,8 +658,8 @@ describe('empty board', () => {
     seed([])
     renderBoard()
 
-    expect(await screen.findByText('A run is one agent working on its own branch in its own container.')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'New run' }))
+    expect(await screen.findByText('A session is one agent working on its own branch in its own container.')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'New session' }))
     expect(useStore.getState().paletteDialog).toBe('launch')
   })
 
@@ -744,8 +668,8 @@ describe('empty board', () => {
     useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.list', 'files.tree', 'agent.list'], ws: [] } })
     renderBoard()
 
-    expect(await screen.findByRole('heading', { name: 'No runs yet' })).toBeDefined()
-    expect(screen.queryByRole('button', { name: 'New run' })).toBeNull()
+    expect(await screen.findByRole('heading', { name: 'No sessions yet' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'New session' })).toBeNull()
   })
 
   it('names an unreachable server with its error instead of an empty board', () => {
@@ -757,21 +681,20 @@ describe('empty board', () => {
 })
 
 describe('map view', () => {
-  it('switches from an aggregated swarm to individual runs and opens the selected worker', async () => {
+  it('switches from an aggregated family to individual runs and opens the selected child run', async () => {
     seed([
-      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' }),
-      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator' }),
+      run({ id: 'run_parent', task: 'coordinate' }),
+      run({ id: 'child', task: 'implement checkout', parent_run_id: 'run_parent' }),
     ])
-    useStore.setState({ missions: { mission_1: mission() } })
     renderBoard()
     expect(screen.getAllByRole('article')).toHaveLength(1)
     await userEvent.click(screen.getByRole('tab', { name: 'Map' }))
-    expect(screen.getAllByRole('article').map((card) => card.dataset.runId).sort()).toEqual(['run_integrator', 'worker'])
+    expect(screen.getAllByRole('article').map((card) => card.dataset.runId).sort()).toEqual(['child', 'run_parent'])
     await userEvent.click(screen.getByRole('button', { name: 'implement checkout' }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'worker' } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'child' } })
   })
 
-  it('reveals archived workers without hiding live runs, and keeps the all-workspaces choice out of Board', async () => {
+  it('reveals archived runs without hiding live runs, and keeps the all-workspaces choice out of Board', async () => {
     seed([working, merged, archivedMerged, run({ id: 'other', task: 'other workspace', workspace_id: otherWorkspace.id })])
     renderBoard()
     await userEvent.click(screen.getByRole('tab', { name: 'Map' }))
@@ -800,7 +723,7 @@ describe('lanes view', () => {
   async function openLanes() {
     renderBoard()
     await userEvent.click(screen.getByRole('tab', { name: 'Lanes' }))
-    return screen.getByRole('tree', { name: 'Run lanes' })
+    return screen.getByRole('tree', { name: 'Session lanes' })
   }
 
   it('lists runs as lanes by section, reads their history, and remembers the view', async () => {
@@ -808,10 +731,10 @@ describe('lanes view', () => {
     const tree = await openLanes()
     expect(useStore.getState().boardViews[workspace.id]).toBe('lanes')
     const items = within(tree).getAllByRole('treeitem').map((item) => item.getAttribute('aria-label'))
-    expect(items[0]).toBe('Needs you, 1 run')
+    expect(items[0]).toBe('Needs you, 1 session')
     expect(items[1]).toMatch(/^waiting on you, Needs you/)
-    expect(items[2]).toBe('Working, 1 run')
-    expect(items[4]).toBe('Finished, 0 runs, 1 ended before this window')
+    expect(items[2]).toBe('Working, 1 session')
+    expect(items[4]).toBe('Finished, 0 sessions, 1 ended before this window')
     await waitFor(() => expect(api.workspaceTimeline).toHaveBeenCalledWith(expect.objectContaining({
       workspace_id: workspace.id, types: ['run.status', 'coord.message', 'coord.message.acked'], newest: true,
     })))
@@ -832,7 +755,7 @@ describe('lanes view', () => {
     await userEvent.keyboard('{Enter}')
     const dialog = await screen.findByRole('dialog', { name: /^waiting on you/ })
     expect(within(dialog).getByRole('button', { name: 'Reply' })).toBeDefined()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Open run' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: stopped.id } })
   })
 
@@ -849,32 +772,15 @@ describe('lanes view', () => {
     expect(document.activeElement).toBe(within(composer).getByRole('textbox', { name: 'Message to the agent' }))
   })
 
-  it('groups a swarm under one lane with its integrator and workers', async () => {
+  it('groups a run with its child runs under one lane', async () => {
     seed([
-      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' }),
-      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator' }),
+      run({ id: 'run_parent', task: 'coordinate' }),
+      run({ id: 'child', task: 'implement checkout', parent_run_id: 'run_parent' }),
     ])
-    useStore.setState({ missions: { mission_1: mission() } })
     const tree = await openLanes()
-    expect(within(tree).getByRole('treeitem', { name: /^Swarm coordinate checkout work/ }).getAttribute('aria-expanded')).toBe('true')
-    const worker = within(tree).getByRole('treeitem', { name: /^implement checkout, Worker/ })
-    expect([worker.getAttribute('aria-level'), worker.getAttribute('aria-posinset'), worker.getAttribute('aria-setsize')]).toEqual(['3', '2', '2'])
-  })
-
-  it("lists a lane's links in its popover, so the keyboard opens what a click on a link does", async () => {
-    const recent = new Date(Date.now() - 10 * 60_000).toISOString()
-    seed([
-      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator', created_at: recent }),
-      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator', created_at: recent }),
-    ])
-    useStore.setState({ missions: { mission_1: mission() } })
-    const tree = await openLanes()
-    act(() => within(tree).getByRole('treeitem', { name: /^implement checkout, Worker/ }).focus())
-    await userEvent.keyboard('{Enter}')
-    const dialog = await screen.findByRole('dialog', { name: /^implement checkout/ })
-    await userEvent.click(within(within(dialog).getByRole('region', { name: 'Links' })).getByRole('button', { name: /^Launched by its integrator/ }))
-    const link = await screen.findByRole('dialog', { name: 'Link' })
-    expect(within(link).getByText(/^Launched by its integrator/)).toBeDefined()
+    expect(within(tree).getByRole('treeitem', { name: /^Session coordinate, 1 subsession/ }).getAttribute('aria-expanded')).toBe('true')
+    const child = within(tree).getByRole('treeitem', { name: /^implement checkout, / })
+    expect([child.getAttribute('aria-level'), child.getAttribute('aria-posinset'), child.getAttribute('aria-setsize')]).toEqual(['3', '2', '2'])
   })
 
   it('closes a popover whose lane folds away and focuses the lane that draws its run', async () => {
@@ -894,20 +800,9 @@ describe('lanes view', () => {
       id: `m_${run_id}`, workspace_id: workspace.id, from_run_id: run_id!, to_run_id: 'c', kind: 'message' as const, body: `from ${run_id}`, created_at: '2026-08-14T10:30:00Z',
     }] })
     vi.mocked(api.coordMessagesList).mockImplementationOnce(sent).mockImplementationOnce(sent)
-    render(<EdgePopover edge={{ key: 'mail', kind: 'message', from: { lane: 'swarm', run: 'a', t: 0 }, to: { lane: 'c', run: 'c', t: 0 }, messages: { ids: ['m_a', 'm_b'], senders: ['a', 'b'], acked: false } }} now={Date.now()} />)
+    render(<EdgePopover edge={{ key: 'mail', kind: 'message', from: { lane: 'a', run: 'a', t: 0 }, to: { lane: 'c', run: 'c', t: 0 }, messages: { ids: ['m_a', 'm_b'], senders: ['a', 'b'], acked: false } }} now={Date.now()} />)
     expect(await screen.findByText('from a')).toBeDefined()
     expect(await screen.findByText('from b')).toBeDefined()
-  })
-
-  it('shows a failed swarm read with its error and retries it', async () => {
-    seed([run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })])
-    vi.mocked(api.missionShow).mockRejectedValueOnce(new ApiError(500, 'mission store unavailable'))
-    await openLanes()
-    const alert = await screen.findByRole('alert')
-    expect(within(alert).getByText('Swarm details')).toBeDefined()
-    expect(alert.textContent).toContain('mission store unavailable')
-    await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   })
 
   it('keeps the timeline when nothing ran in the window, so it can still pan and zoom', async () => {
@@ -956,6 +851,6 @@ describe('lanes view', () => {
     seed([])
     renderBoard()
     await userEvent.click(screen.getByRole('tab', { name: 'Lanes' }))
-    expect(screen.getByText('No runs in this view.')).toBeDefined()
+    expect(screen.getByText('No sessions in this view.')).toBeDefined()
   })
 })

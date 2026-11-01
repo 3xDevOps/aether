@@ -779,6 +779,8 @@ type fakePTY struct {
 	injects        []fakeInject
 	annotations    []fakeInject
 	logDir         string
+	// removedTranscripts are the session keys whose transcripts were removed.
+	removedTranscripts []ptyhost.SessionKey
 }
 
 type fakePTYSession struct {
@@ -849,6 +851,13 @@ func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {
 		return errFakeNoSession
 	}
 	return sess.att.Close()
+}
+
+func (p *fakePTY) RemoveSessionTranscript(_ context.Context, key ptyhost.SessionKey) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.removedTranscripts = append(p.removedTranscripts, key)
+	return nil
 }
 
 func (p *fakePTY) RemoveRunTranscripts(_ context.Context, run domain.RunID) error {

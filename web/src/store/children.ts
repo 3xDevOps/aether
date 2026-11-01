@@ -7,7 +7,7 @@ import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
-/** The viewer's child-run setting, which Settings and every nudge share; null until read. */
+/** The viewer's child-run setting, which Settings and the launch dialog share; null until read. */
 export const useChildSettings = create<{ settings: ChildSettings | null; error: string | null }>(() => ({ settings: null, error: null }))
 
 useStore.subscribe((state, previous) => {
@@ -54,5 +54,5 @@ export function useChildSettingsRead(client: Api = api, attempt = 0): ChildSetti
 /** Stopping `run` stops these too: its direct child runs that are still going and not detached. */
 export function unfinishedChildren(runs: Record<string, RunRecord>, run: RunRecord): RunRecord[] {
   return Object.values(runs).filter((child) =>
-    child.parent_run_id === run.id && child.mission_role !== 'worker' && !child.detached && !isTerminal(child.status))
+    child.parent_run_id === run.id && !child.detached && !isTerminal(child.status))
 }

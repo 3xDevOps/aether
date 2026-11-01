@@ -24,7 +24,10 @@ type AssistantSession struct {
 	ExecIdentity string
 	// Generation counts the member's conversations; a reset starts the next.
 	Generation int64
-	UpdatedAt  time.Time
+	// Temporary keeps the conversation from reading or saving preferences
+	// until a reset.
+	Temporary bool
+	UpdatedAt time.Time
 }
 
 // AssistantSettings is a member's assistant settings and the state of the
@@ -42,6 +45,9 @@ type AssistantSettings struct {
 	NoSuggest bool
 	// ShareView sends the assistant the member's dashboard view context.
 	ShareView bool
+	// PreferencesEnabled lets the assistant read and save the member's
+	// preferences.
+	PreferencesEnabled bool
 }
 
 // AssistantStore persists each member's assistant session. Removing a member
@@ -55,14 +61,18 @@ type AssistantStore interface {
 	// still in generation and still records identity.
 	ClearAssistantExec(ctx context.Context, member domain.MemberID, generation int64, identity string) error
 	// ResetAssistantSession starts the member's next conversation: it clears
-	// the agent, harness session and prompt keys, and returns the new generation.
+	// the agent, harness session, temporary flag and prompt keys, and returns
+	// the new generation.
 	ResetAssistantSession(ctx context.Context, member domain.MemberID) (int64, error)
 	// HasAssistantPromptKey reports whether key was accepted in generation.
 	HasAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) (bool, error)
 	// AddAssistantPromptKey records key, keeping the newest MaxAssistantPromptKeys.
 	AddAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) error
+	// SetAssistantTemporary sets whether the member's current conversation
+	// is temporary.
+	SetAssistantTemporary(ctx context.Context, member domain.MemberID, temporary bool) error
 	// AssistantSettings returns the member's settings; when never set, the
-	// zero value but for ShareView, which is on.
+	// zero value but for ShareView and PreferencesEnabled, which are on.
 	AssistantSettings(ctx context.Context, member domain.MemberID) (AssistantSettings, error)
 	PutAssistantSettings(ctx context.Context, member domain.MemberID, settings AssistantSettings) error
 }
@@ -71,9 +81,9 @@ func (d *DB) GetAssistantSession(ctx context.Context, member domain.MemberID) (*
 	var session AssistantSession
 	var updatedAt int64
 	err := d.db.QueryRowContext(ctx,
-		`SELECT member_id, agent, harness_session_id, exec_identity, generation, updated_at
+		`SELECT member_id, agent, harness_session_id, exec_identity, generation, temporary, updated_at
 		 FROM assistant_sessions WHERE member_id = ?`, member).
-		Scan(&session.MemberID, &session.Agent, &session.HarnessSessionID, &session.ExecIdentity, &session.Generation, &updatedAt)
+		Scan(&session.MemberID, &session.Agent, &session.HarnessSessionID, &session.ExecIdentity, &session.Generation, &session.Temporary, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -121,7 +131,7 @@ func (d *DB) ResetAssistantSession(ctx context.Context, member domain.MemberID) 
 		`INSERT INTO assistant_sessions (member_id, agent, harness_session_id, generation, updated_at)
 		 VALUES (?, '', '', 1, unixepoch())
 		 ON CONFLICT(member_id) DO UPDATE SET
-		   agent = '', harness_session_id = '', generation = generation + 1, updated_at = excluded.updated_at
+		   agent = '', harness_session_id = '', generation = generation + 1, temporary = 0, updated_at = excluded.updated_at
 		 RETURNING generation`, member).Scan(&generation)
 	if err != nil {
 		return 0, fmt.Errorf("store: reset assistant session: %w", mapConstraint(err, ErrNotFound))
@@ -133,6 +143,18 @@ func (d *DB) ResetAssistantSession(ctx context.Context, member domain.MemberID) 
 		return 0, fmt.Errorf("store: reset assistant session: %w", err)
 	}
 	return generation, nil
+}
+
+func (d *DB) SetAssistantTemporary(ctx context.Context, member domain.MemberID, temporary bool) error {
+	_, err := d.db.ExecContext(ctx,
+		`INSERT INTO assistant_sessions (member_id, agent, harness_session_id, temporary, updated_at)
+		 VALUES (?, '', '', ?, unixepoch())
+		 ON CONFLICT(member_id) DO UPDATE SET temporary = excluded.temporary, updated_at = excluded.updated_at`,
+		member, temporary)
+	if err != nil {
+		return fmt.Errorf("store: set assistant temporary: %w", mapConstraint(err, ErrNotFound))
+	}
+	return nil
 }
 
 func (d *DB) HasAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) (bool, error) {
@@ -176,11 +198,11 @@ func (d *DB) AssistantSettings(ctx context.Context, member domain.MemberID) (Ass
 	var settings AssistantSettings
 	var until int64
 	err := d.db.QueryRowContext(ctx,
-		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view
+		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled
 		 FROM assistant_settings WHERE member_id = ?`, member).
-		Scan(&settings.AutoApprove, &settings.Approvals, &settings.Snoozes, &until, &settings.NoSuggest, &settings.ShareView)
+		Scan(&settings.AutoApprove, &settings.Approvals, &settings.Snoozes, &until, &settings.NoSuggest, &settings.ShareView, &settings.PreferencesEnabled)
 	if errors.Is(err, sql.ErrNoRows) {
-		return AssistantSettings{ShareView: true}, nil
+		return AssistantSettings{ShareView: true, PreferencesEnabled: true}, nil
 	}
 	if err != nil {
 		return AssistantSettings{}, fmt.Errorf("store: get assistant settings: %w", err)
@@ -197,13 +219,13 @@ func (d *DB) PutAssistantSettings(ctx context.Context, member domain.MemberID, s
 		until = settings.SnoozedUntil.Unix()
 	}
 	_, err := d.db.ExecContext(ctx,
-		`INSERT INTO assistant_settings (member_id, auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
+		`INSERT INTO assistant_settings (member_id, auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, preferences_enabled, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
 		 ON CONFLICT(member_id) DO UPDATE SET auto_approve = excluded.auto_approve,
 		   manual_approvals = excluded.manual_approvals, suggest_snoozes = excluded.suggest_snoozes,
 		   suggest_after = excluded.suggest_after, suggest_off = excluded.suggest_off,
-		   share_view = excluded.share_view, updated_at = excluded.updated_at`,
-		member, settings.AutoApprove, settings.Approvals, settings.Snoozes, until, settings.NoSuggest, settings.ShareView)
+		   share_view = excluded.share_view, preferences_enabled = excluded.preferences_enabled, updated_at = excluded.updated_at`,
+		member, settings.AutoApprove, settings.Approvals, settings.Snoozes, until, settings.NoSuggest, settings.ShareView, settings.PreferencesEnabled)
 	if err != nil {
 		return fmt.Errorf("store: put assistant settings: %w", mapConstraint(err, ErrNotFound))
 	}

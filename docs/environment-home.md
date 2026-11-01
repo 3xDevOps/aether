@@ -1,14 +1,14 @@
 # Member environment home
 
 Your home is a directory on the server that Aether mounts read-write as `$HOME`
-in your environment (see [environments.md](environments.md)) and in every run
-you launch, including runs on another member's shared agent account. Agent
+in your environment (see [environments.md](environments.md)) and in every session
+you launch, including sessions on another member's shared agent account. Agent
 installs, logins, GitHub credentials and agent configuration live here. This
 guide covers what survives, how to set up an agent and GitHub, and how to edit
 files in the home.
 
 A share of your agent account exposes only that agent's login to the
-recipient's runs and, when they have no installation of that agent, your
+recipient's sessions and, when they have no installation of that agent, your
 `~/.local/bin`, `~/.local/lib` and the agent's install directory, read-only
 ([teams.md](teams.md#agent-accounts)).
 
@@ -34,10 +34,10 @@ The home survives every stop, save, reset and server restart:
   once ([terminal.md](terminal.md#editors)).
 
 Files outside the home live in the environment container. They survive a stop
-until **Reset to standard**, and reach runs only after **Save environment**
+until **Reset to standard**, and reach sessions only after **Save environment**
 ([environments.md](environments.md#save-the-environment)).
 
-`/tmp` is scratch on disk, not memory. A run's `/tmp` is deleted with the run,
+`/tmp` is scratch on disk, not memory. A session's `/tmp` is deleted with the session,
 the environment's is emptied each time the environment starts, and **Save
 environment** never captures it.
 
@@ -65,7 +65,7 @@ hours stay, so running builds keep their files, and a member who builds more
 than 20 GiB in 2 hours stays over until those files age. When disk space runs
 low, every older Go build file goes.
 
-Caches no run or environment is using are removed whole, oldest first, hourly
+Caches no session or environment is using are removed whole, oldest first, hourly
 and before refusing work for disk pressure: after 7 days unused, above 4 GiB
 per pool, or once all caches together pass 16 GiB. Other tools' caches break
 when single files disappear, so they shrink only this way. A cache path you
@@ -86,7 +86,7 @@ account the form uses the owner's installation when you have none, and the
 owner must have logged in. With none installed, the form offers **Set up an
 agent**.
 
-Aether updates a shipped agent in `~/.local/bin` in the background when a run
+Aether updates a shipped agent in `~/.local/bin` in the background when a session
 launches, at most every 6 hours
 ([harnesses.md](harnesses.md#updates-before-launch)). `aether agent remove
 <name>` deletes only its `~/.local/bin` links. Packages, login and settings stay
@@ -94,9 +94,9 @@ launches, at most every 6 hours
 
 ## Connect GitHub
 
-Connect GitHub once so your runs can push branches, open pull requests and sign
+Connect GitHub once so your sessions can push branches, open pull requests and sign
 commits with your credentials. Sharing an agent account does not give the other
-member's runs your GitHub login, and the GitHub connection is separate from an
+member's sessions your GitHub login, and the GitHub connection is separate from an
 agent's vendor login and your server sign-in.
 
 An admin connects in the dashboard: **Settings → GitHub → Connect GitHub**, or
@@ -161,12 +161,12 @@ credential helper and your identity into `~/.gitconfig`, create an ed25519
 signing key on the server if you have none, write its public half to
 `~/.ssh/aether_signing.pub`, turn on commit signing (`gpg.format=ssh`,
 `commit.gpgsign=true`), and register the public key on your account. git in
-your runs and environment signs through the server's signing agent at
+your sessions and environment signs through the server's signing agent at
 `SSH_AUTH_SOCK`. It is safe to run again. `aether member git` keeps the
 identity in `~/.gitconfig` in step with your name and address.
 
 > [!WARNING]
-> Container root in every run you launch can read and replace the GitHub
+> Container root in every session you launch can read and replace the GitHub
 > credential and sign with your key, and the token can register a signing key
 > of its own on your account. Read
 > [security.md](security.md#github-credentials-and-signing-keys) before
@@ -205,7 +205,7 @@ again, because a container keeps the image it started from.
 ## Upload and edit configuration
 
 An agent's configuration (settings, `CLAUDE.md`, commands, skills, hooks, MCP
-configuration) lives in a directory such as `~/.claude`, and runs read the same
+configuration) lives in a directory such as `~/.claude`, and sessions read the same
 path in your home. To copy yours from a computer, open **Agents → Agent config
 files**, click **Copy prompt** and paste it into an agent on that computer
 ([quickstart](quickstart.md#upload-agent-configuration)). That agent uses
@@ -262,12 +262,12 @@ as `unconfirmed <path>`, and the error ends with `aether config ls -r <agent>
 shows what the server has`. A server older than the CLI fails with `the server
 is older than this CLI, and an admin updates it with aether server update`.
 
-The upload writes your own home, so your environment and active runs see it at
+The upload writes your own home, so your environment and active sessions see it at
 once. The agent may need to reload. Nothing watches the local directory: push
 again after you change it.
 
 **Files** in the dashboard has a **Home** tree beside the workspace and live
-run files. It shows your whole home, dotfiles included. Each row's **…** menu
+session files. It shows your whole home, dotfiles included. Each row's **…** menu
 (or right click) creates, uploads, downloads, renames, copies the path and
 deletes. Drag a row onto a folder to move it, or drag files from your desktop
 to upload. Deleting, moving and replacing ask first, and there is no trash.
@@ -284,7 +284,7 @@ to upload. Deleting, moving and replacing ask first, and there is no trash.
 
 The workspace explorer is separate. Saving a base-branch file there is **Commit
 to <branch>** (one commit, not pushed) and needs permission to push. Saving a
-live run's file edits its uncommitted checkout and needs permission to steer the
-run
+live session's file edits its uncommitted checkout and needs permission to steer the
+session
 ([local-gateway.md](local-gateway.md#files-and-member-configuration)).
 

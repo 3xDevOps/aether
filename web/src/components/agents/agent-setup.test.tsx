@@ -35,7 +35,7 @@ describe('the Standard and Enhanced comparison', () => {
   it('draws both modes as one radio group with the copy and the per-agent lines', () => {
     render(<ModeComparison agent={claude} value="tui" onChange={vi.fn()} />)
 
-    const group = screen.getByRole('radiogroup', { name: 'How runs show Claude Code' })
+    const group = screen.getByRole('radiogroup', { name: 'How sessions show Claude Code' })
     const standard = within(group).getByRole('radio', { name: 'Standard' })
     const enhanced = within(group).getByRole('radio', { name: 'Enhanced' })
     expect(standard.getAttribute('aria-checked')).toBe('true')
@@ -48,9 +48,9 @@ describe('the Standard and Enhanced comparison', () => {
     const lines = screen.getByText('Support').closest('dl')!
     expect(lines.textContent).toContain('Claude Code: supported through an adapter published by Anthropic, Zed and JetBrains')
     expect(lines.textContent).toContain('Installed with the agent in the next step')
-    expect(lines.textContent).toContain('Chosen when the run starts')
-    expect(lines.textContent).toContain('If the adapter fails to start, the run tells you why and offers the terminal')
-    expect(lines.textContent).toContain('Uses your Claude login through the Claude Agent SDK; the run shows which account pays')
+    expect(lines.textContent).toContain('Chosen when the session starts')
+    expect(lines.textContent).toContain('If the adapter fails to start, the session tells you why and offers the terminal')
+    expect(lines.textContent).toContain('Uses your Claude login through the Claude Agent SDK; the session shows which account pays')
   })
 
   it('shows the same moment in both mocks, with no permission prompt in either, hidden from assistive tech', () => {
@@ -77,19 +77,19 @@ describe('the Standard and Enhanced comparison', () => {
     render(<ModeComparison agent={{ ...codex, name: 'opencode', display_name: 'OpenCode', enhanced: 'native' }} value="acp" onChange={vi.fn()} />)
     const lines = screen.getByText('Support').closest('dl')!
     expect(lines.textContent).toContain("OpenCode: supported by the agent's own CLI")
-    expect(lines.textContent).toContain('If Enhanced fails to start, the run tells you why and offers the terminal')
+    expect(lines.textContent).toContain('If Enhanced fails to start, the session tells you why and offers the terminal')
     expect(lines.textContent).not.toContain('adapter')
   })
 
   it.each([
-    ['claude', 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'],
-    ['codex', 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'],
+    ['claude', 'Runs with full permissions by default, like Standard; switch its mode in the session to be asked.'],
+    ['codex', 'Runs with full permissions by default, like Standard; switch its mode in the session to be asked.'],
     ['omp', 'Runs with full permissions; its ACP mode has no asking option.'],
     ['pi', 'pi never asks for permission.'],
     ['opencode', "Runs with full permissions through its config; a workspace's own permission rules still apply."],
-    ['copilot', 'Runs with full permissions through --allow-all, which a run cannot take back.'],
-    ['gemini', 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'],
-    ['cursor', "Runs with full permissions through --force, unless your Cursor team's auto-run controls forbid it; switch to plan or ask in the run for read-only."],
+    ['copilot', 'Runs with full permissions through --allow-all, which a session cannot take back.'],
+    ['gemini', 'Runs with full permissions by default, like Standard; switch its mode in the session to be asked.'],
+    ['cursor', "Runs with full permissions through --force, unless your Cursor team's auto-run controls forbid it; switch to plan or ask in the session for read-only."],
   ])('says how %s handles permissions in Enhanced', (name, note) => {
     render(<ModeComparison agent={{ ...codex, name }} value="acp" onChange={vi.fn()} />)
     expect(screen.getByRole('radio', { name: 'Enhanced' }).textContent).toContain(note)

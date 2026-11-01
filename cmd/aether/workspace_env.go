@@ -21,7 +21,7 @@ const (
 	workspaceEnvImportUsage = "usage: aether workspace env import [--workspace <name-or-id>] [--plain] <file|->"
 	workspaceEnvScriptUsage = "usage: aether workspace env script [--workspace <name-or-id>] [--file <path|->|--clear]"
 
-	workspaceEnvScope = "new runs get this; containers that already exist keep what they started with"
+	workspaceEnvScope = "new sessions get this; containers that already exist keep what they started with"
 )
 
 func workspaceEnv(args []string) error {

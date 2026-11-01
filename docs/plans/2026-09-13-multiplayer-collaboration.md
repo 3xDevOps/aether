@@ -25,15 +25,15 @@ explicitly deferred rather than becoming implicit implementation requirements.
 handles the necessary complexity.** Simplify the interaction, not enforcement.
 
 Aether is a self-hosted server, CLI, and dashboard for coding agents. A
-**workspace** is a repository and its shared settings and history. A **run** is
+**workspace** is a repository and its shared settings and history. A **session** is
 one agent execution with its own container, checkout, branch, and terminal
 transcript. A **harness** is the coding-agent CLI Aether launches. A **mission**
-is a durable objective spanning tasks and runs, coordinated by an **integrator**
-agent. Ordinary single-agent runs do not require a mission.
+is a durable objective spanning tasks and sessions, coordinated by an **integrator**
+agent. Ordinary single-agent sessions do not require a mission.
 
 The product has two everyday workflows:
 
-1. **Work together on a run:** watch, comment, take control, send an instruction,
+1. **Work together on a session:** watch, comment, take control, send an instruction,
    or hand responsibility to a teammate with the current context attached.
 2. **Delegate a mission:** authorize an objective and limits, let an integrator
    coordinate workers, then review evidence for the combined result.
@@ -69,13 +69,13 @@ claim that the proposed features already exist.
 
 | Existing behavior | Consequence |
 |---|---|
-| Multiple members can write to the same run terminal. | A driver lease is new runtime enforcement, not just presence UI. |
+| Multiple members can write to the same session terminal. | A driver lease is new runtime enforcement, not just presence UI. |
 | Account sharing exposes the selected account's complete writable home, credentials, environment, and configuration. | Workspace or harness selectors cannot restrict what those credentials can actually do inside the container. |
 | Revocation blocks subsequent launches and relaunches, not existing containers. | Revoke access now needs a distinct stop action and cannot recall copied credentials. |
-| Workspace budgets refuse new launches once recorded spend reaches the cap. Running work continues; some harnesses are unmetered. | Do not advertise hard per-run dollar ceilings without a different enforcement mechanism. |
+| Workspace budgets refuse new launches once recorded spend reaches the cap. Running work continues; some harnesses are unmetered. | Do not advertise hard per-session dollar ceilings without a different enforcement mechanism. |
 | The coordination socket authenticates the originating run and exposes a deliberately narrow interface. | This is a strong foundation for an agent CLI; do not give containers a human's SSH credentials. |
 | Peer messaging currently depends on observed file overlap. | Missions need explicit communication relationships before workers edit anything. |
-| Diff snapshot objects depend on the run checkout and disappear with its cleanup. | Durable evidence must retain its referenced objects independently. |
+| Diff snapshot objects depend on the session checkout and disappear with its cleanup. | Durable evidence must retain its referenced objects independently. |
 | `close --outcome merged` records a human declaration. | It is not proof of Git integration. |
 | The approval service records decisions. That record alone is not an execution barrier. | Consequential actions need enforcement on the actual execution path. |
 | Workspace identifiers organize work, but current permissions are not per-workspace tenant isolation. | New missions or grants must not imply private workspaces. |
@@ -137,7 +137,7 @@ that Aether already implements their behavior.
 ## 4. Foundational contracts
 
 These rules apply to every feature. They are correctness requirements, not
-extra choices that users must configure on each run.
+extra choices that users must configure on each session.
 
 ### Identity is not one field
 
@@ -148,18 +148,18 @@ Record the identities that explain a mission operation separately:
   coordination calls it makes.
 - **Authorizing human:** the human who authorized the mission or other
   consequential operation. This is not necessarily the actor or the owner of
-  the run that executes it.
-- **Run owner:** the human responsible for a run's workflow and notifications.
+  the session that executes it.
+- **Session owner:** the human responsible for a session's workflow and notifications.
 - **Account owner:** the member whose selected agent account supplies the
-  environment and home mounted into the run. Existing account sharing remains
-  whole-home sharing; it is not a per-run credential boundary.
+  environment and home mounted into the session. Existing account sharing remains
+  whole-home sharing; it is not a per-session credential boundary.
 - **Execution configuration:** the selected image, configuration snapshot, and
   credential references, never secret values.
 
 The mission's accountable human is recorded alongside these identities. An
 agent acting within an authorization must not be rewritten as the authorizing
-human, and a run owner must not be inferred to be the account owner. Keep the
-actor, authorizer, run owner, account owner, and relevant controller
+human, and a session owner must not be inferred to be the account owner. Keep the
+actor, authorizer, session owner, account owner, and relevant controller
 inspectable without requiring five identity choices at launch.
 
 The server rechecks current role, account-sharing, mission-assignment, and
@@ -191,7 +191,7 @@ A skill, prompt, message, or role name cannot grant permissions.
 
 The server checks current authority for every consequential operation. A worker
 cannot become an integrator by changing an environment variable or passing
-another run's ID. Native subagents inside one container are not automatically
+another session's ID. Native subagents inside one container are not automatically
 separate Aether workers with independent identities.
 
 ### Durable decisions, replaceable processes
@@ -219,20 +219,20 @@ replaced, allowing the server to reject commands from an obsolete assignment.
 
 ### F1. Run Rework: controlled collaboration
 
-**Purpose:** several humans can contribute to one live run without becoming
+**Purpose:** several humans can contribute to one live session without becoming
 competing invisible input sources. A Run Room is the collaborative view of an
-existing run, not another execution object.
+existing session, not another execution object.
 
 #### Required behavior
 
-- Each run exposes who is watching, who is controlling, its shared conversation,
+- Each session exposes who is watching, who is controlling, its shared conversation,
   and open blockers.
 - Collaborators can comment and send to agent; viewers remain read-only.
 - A sidebar on the right, initially collapsed, can be pulled up and serve as a feature rich chatroom. Comments and Injections both get sent and displayed here. 
-	- Comments are cosmetic - they are, as their name suggests, intended for a way for humans in the run to send each other messages. 
+	- Comments are cosmetic - they are, as their name suggests, intended for a way for humans in the session to send each other messages. 
 	- Steer Requests are send to agent instructions that will be injected directly to steer the agent from someone who doesn't have full native active steering control over the agent's terminal.
-		- Obviously, steer requests won't work if the run is under protected status. Injection attempts for the run should be removed immediately after the run owner clicks "protect run"
-		- Steer requests from other collaborators cannot influence the session immediately. By default, Injection requests displayed as queued in the chat and have a 45 second countdown (make a visual for this on the UI) before they are injected officially to the agent. During this time, the current control user of the run have the option to deny the injection or to approve it for injection immediately.  
+		- Obviously, steer requests won't work if the session is under protected status. Injection attempts for the session should be removed immediately after the session owner clicks "protect run"
+		- Steer requests from other collaborators cannot influence the session immediately. By default, Injection requests displayed as queued in the chat and have a 45 second countdown (make a visual for this on the UI) before they are injected officially to the agent. During this time, the current control user of the session have the option to deny the injection or to approve it for injection immediately.  
 	- The same "image upload" logic for the terminal should apply here. Steer requests can contain references to images, in which case users can upload images to the server and the server will convert the image to a persistent file so that the eventual message sent to the agent represents the image as /path/to/image.png  
 - Use **Take control** and **Release control**. No request queue or token-passing
   ceremony initially.
@@ -337,25 +337,25 @@ recoverable resources; do not turn cleanup into silent data loss.
 
 #### Handoff
 
-Preserve `aether handoff <run> <member>` as an immediate authorized transfer.
+Preserve `aether handoff <session> <member>` as an immediate authorized transfer.
 Notify the recipient and attach the current factual summary and open questions.
 Do not require a recipient acceptance handshake or wait for narrative generation.
 Record outgoing owner, incoming owner, and actor.
 
 Ownership transfer must not silently change accounts or confer credential grants.
-A missing summary does not prevent stopping or handing off a run. Missing
+A missing summary does not prevent stopping or handing off a session. Missing
 required evidence can still prevent accepting the work.
 
 #### Fork
 
 A fork is an explicit later action that creates:
 
-> a new run from retained repository state, selected evidence, and newly
+> a new session from retained repository state, selected evidence, and newly
 > authorized execution configuration.
 
 It does not claim to clone hidden model context, running processes, browser
 sessions, or credentials. Preserve a link to the source and state what was
-restored or excluded. Fork and export are not required steps in finishing a run.
+restored or excluded. Fork and export are not required steps in finishing a session.
 
 **Acceptance:** after the source container and checkout are removed, a reviewer
 can inspect retained changes and evidence. Handoff succeeds without a recipient
@@ -406,7 +406,7 @@ automatically available in every managed container. `skill` is an on-demand
 request for the live assignment's version-matched instructions; it does not
 install a package or rewrite a repository or shared configuration home.
 
-Use the existing run-authenticated socket as the authority boundary:
+Use the existing session-authenticated socket as the authority boundary:
 
 ```text
 worker or integrator agent
@@ -420,7 +420,7 @@ worker or integrator agent
 ```
 
 - Do not require manual CLI skill installation, identity flags, or human login.
-- Derive a run caller from its socket, not a command-line identity claim.
+- Derive a session caller from its socket, not a command-line identity claim.
 - Bind task, attempt, and integrator authority server-side.
 - The optional MCP bridge remains a manual integration for its six existing
   coordination tools. It is not automatically registered and does not promise
@@ -429,12 +429,12 @@ worker or integrator agent
 - Do not expose a human SSH key, dashboard token, Docker socket, or
   unrestricted control RPC to a worker.
 
-Binary availability is not run identity. A managed container without a run
+Binary availability is not session identity. A managed container without a session
 socket can use general help or the non-run portion of `skill`, but run-bound
 status, messaging, reporting, and mission operations are unavailable. The
 coordination disable switch remains effective: it prevents the coordination
 surface and run operations even when a packaged binary is present. Ordinary
-standalone runs remain ordinary runs.
+standalone runs remain ordinary sessions.
 
 Mission execution must not silently degrade into uncoordinated workers when a
 required orchestration capability is unavailable. Refuse mission operations
@@ -447,7 +447,7 @@ wire details are implementation decisions, not additional scope:
 
 | Command family | Purpose |
 | --- | --- |
-| `status` | Own run identity, current assignment, capabilities, and coordinator. |
+| `status` | Own session identity, current assignment, capabilities, and coordinator. |
 | `skill` | Version-matched instructions for the caller's actual assignment. |
 | `task` | Inspect or propose work within the assigned authority. |
 | `send` | Attributed messages to authorized peers. |
@@ -520,7 +520,7 @@ integration inside that authorization. The human can inspect progress, take
 control, answer consequential questions, and review the proposed delivery.
 
 No general-purpose task-graph editor or separately configurable coordinator role
-is required initially. Ordinary single-agent runs remain ordinary runs.
+is required initially. Ordinary single-agent sessions remain ordinary sessions.
 
 Essentially, this allows an agent to act as the leader for a swarm of agents through orchestration capabilities. 
 
@@ -531,11 +531,11 @@ Essentially, this allows an agent to act as the leader for a swarm of agents thr
 | Mission               | Objective, accountable human, permitted scope, limits, and acceptance policy. |
 | Task                  | Durable work item with dependencies and required evidence.                    |
 | Attempt               | One authorized execution of that task, backed by an Aether Run.               |
-| Integrator assignment | Currently authorized coordinating run and its authority generation.           |
+| Integrator assignment | Currently authorized coordinating session and its authority generation.           |
 | Gate                  | Specific decision or evidence requirement.                                    |
 | Submission            | Proposed result tied to an exact artifact revision.                           |
 
-Do not rename Aether's existing Run to match Orca's different terminology.
+Do not rename Aether's existing Session to match Orca's different terminology.
 Start with one workspace/repository per mission. Cross-repository missions are
 not part of the initial scope.
 
@@ -605,13 +605,13 @@ It cannot:
 - select an unauthorized account;
 - approve a human-only gate;
 - launch unlimited descendants;
-- direct unrelated runs;
+- direct unrelated sessions;
 - mark its own assertions independently verified.
 
-Workers do not spawn children initially. They propose subtasks to the integrator.
+Workers do not spawn subsessions initially. They propose subtasks to the integrator.
 Hierarchical delegation is outside this implementation scope.
 For each attempt, record the actor run that dispatched or reported it, the
-authorizing human, the run owner, and the account owner separately. A current
+authorizing human, the session owner, and the account owner separately. A current
 integrator assignment and authority generation authorize orchestration only
 while the server's current role, account-sharing, mission, and assignment
 checks still pass.
@@ -762,7 +762,7 @@ Rules for the later records:
 - Retrieved records cannot grant privileges or override platform policy.
 - Conflicting accepted records are surfaced, not silently resolved by semantic
   similarity.
-- Runs record exactly which revisions were supplied.
+- Sessions record exactly which revisions were supplied.
 - Retrieval is bounded, at launch or through an explicit CLI query.
 
 For example, an accepted package-scoped decision can state that the public API
@@ -770,15 +770,15 @@ remains v2-only and link to the design and compatibility evidence. A vector
 database is not required to retrieve that record.
 
 **Acceptance:** a reviewer can see which decision caused an assumption.
-Superseding a record does not rewrite a previous run's history. Initial missions
+Superseding a record does not rewrite a previous session's history. Initial missions
 remain useful without a workspace-memory feature.
 
 ### F9. Actionable flow and attention — excluded from Release B
 
 Release B does not add a new attention board, action inbox, blocker ownership
 model, flow analytics, or eligible-decision-maker administration. Retain the
-shipped question UI: existing Run Room questions remain correlated, durable
-until answered or otherwise settled, and visible through the current run
+shipped question UI: existing Session Room questions remain correlated, durable
+until answered or otherwise settled, and visible through the current session
 attention indicators. They do not become a second task or approval product.
 
 Do not infer that an overlap notice, unanswered question, or agent report is a
@@ -797,7 +797,7 @@ reuse the current authority and account-sharing boundaries.
 - F4: the canonical `aether-internal` CLI, on-demand version-matched skill,
   and existing coordination operations.
 
-This improves existing runs without requiring users to adopt missions. Preserve
+This improves existing sessions without requiring users to adopt missions. Preserve
 the current team roles and trusted whole-home account-sharing boundary; do not
 imply stronger grants.
 
@@ -852,7 +852,7 @@ implementation requirements:
   accountable human reused across ordinary executions; not immortal processes
   or human impersonation identities.
 - **Agent-proposed missions:** proposals generated inside an already authorized
-  run and budget, awaiting human acceptance before launching new work or gaining
+  session and budget, awaiting human acceptance before launching new work or gaining
   privileges. No self-replenishing spending or approval loop.
 - **Incident/release governance:** quorum approval and restricted production
   authority only where issued credentials cannot bypass those restrictions.

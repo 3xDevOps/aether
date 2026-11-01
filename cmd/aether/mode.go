@@ -10,6 +10,8 @@ const defaultModeHelp = "enhanced where it is installed, else standard"
 
 const modelHelp = "agent model, passed to the agent as is; empty keeps the agent's default"
 
+const effortHelp = "effort or thinking level, one of the agent's effort_levels in aether agent list --json; empty keeps the agent's default"
+
 func parseLaunchMode(name string) (string, error) {
 	if mode, ok := launchModes[name]; ok {
 		return mode, nil

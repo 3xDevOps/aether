@@ -11,7 +11,7 @@ type WaitEvidence string
 
 const (
 	// WaitCondition: every condition is pending with a fresh source read,
-	// or resolved and its wake is on the way or delivered.
+	// or resolved and its wake is on the way.
 	WaitCondition WaitEvidence = "condition"
 	// WaitSourceUnknown: a pending condition's source has not been read
 	// successfully within twice its poll interval.
@@ -19,7 +19,8 @@ const (
 	// WaitFault: a condition errored or expired, or resolved and its wake
 	// was not delivered.
 	WaitFault WaitEvidence = "system_fault"
-	// WaitUnverified: the agent named no condition.
+	// WaitUnverified: the agent named no condition, or only ones whose
+	// wake was delivered.
 	WaitUnverified WaitEvidence = "unverified"
 )
 

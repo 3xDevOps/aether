@@ -21,45 +21,48 @@ import (
 // identical launch of the member's instead of launching again.
 const duplicateWindow = 60 * time.Second
 
+// accountChoice is a launch's account and fallback policy, as
+// aether_launch_options lists them.
+type accountChoice struct {
+	AccountMemberID          string   `json:"account_member_id,omitempty"`
+	FallbackAccountMemberIDs []string `json:"fallback_account_member_ids,omitempty"`
+	NoFallback               bool     `json:"no_fallback,omitempty"`
+	ExtraWorkspaceIDs        []string `json:"extra_workspace_ids,omitempty"`
+}
+
 type connectorLaunchInput struct {
-	WorkspaceID    string `json:"workspace_id"`
-	Task           string `json:"task" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
-	Harness        string `json:"harness" jsonschema:"an agent from aether_list_workspaces"`
-	Mode           string `json:"mode,omitempty" jsonschema:"acp is enhanced; default acp if installed"`
-	Model          string `json:"model,omitempty"`
+	WorkspaceID string            `json:"workspace_id"`
+	Task        string            `json:"task,omitempty" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
+	Harness     string            `json:"harness,omitempty"`
+	Template    string            `json:"template,omitempty" jsonschema:"a saved template instead of task"`
+	Params      map[string]string `json:"params,omitempty" jsonschema:"template placeholder values"`
+	// TemplateVersion pins the template as aether_launch_options read it.
+	TemplateVersion string `json:"template_version,omitempty" jsonschema:"refused if the template changed"`
+	Mode            string `json:"mode,omitempty" jsonschema:"default acp if installed"`
+	Model           string `json:"model,omitempty"`
+	Children        string `json:"children,omitempty" jsonschema:"may the agent start subsessions; default your setting"`
+	SavedDefaults   string `json:"saved_defaults,omitempty" jsonschema:"ignore sends only the given fields"`
+	accountChoice
+	// Reason is the assistant's, for the member's confirmation card; the
+	// server never sees it.
+	Reason         string `json:"reason,omitempty" jsonschema:"one line on why, shown to the member"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
-}
-
-type swarmWorker struct {
-	Harness string `json:"harness"`
-	Mode    string `json:"mode,omitempty"`
-	Model   string `json:"model,omitempty"`
-}
-
-type launchSwarmInput struct {
-	WorkspaceID    string        `json:"workspace_id"`
-	Objective      string        `json:"objective" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
-	Harness        string        `json:"harness" jsonschema:"the integrator's agent"`
-	Mode           string        `json:"mode,omitempty"`
-	Model          string        `json:"model,omitempty"`
-	Workers        []swarmWorker `json:"workers,omitempty" jsonschema:"default the integrator's agent"`
-	IdempotencyKey string        `json:"idempotency_key,omitempty"`
 }
 
 type connectorMessageInput struct {
 	RunID          string `json:"run_id"`
 	Message        string `json:"message"`
-	Steer          bool   `json:"steer,omitempty" jsonschema:"join an enhanced run's current turn"`
+	Steer          bool   `json:"steer,omitempty" jsonschema:"join an enhanced session's current turn"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 type answerInput struct {
 	RunID    string         `json:"run_id"`
-	AnswerID string         `json:"answer_id" jsonschema:"from aether_needs_attention"`
+	AnswerID string         `json:"answer_id"`
 	Answer   string         `json:"answer,omitempty"`
 	OptionID string         `json:"option_id,omitempty"`
-	Values   map[string]any `json:"values,omitempty" jsonschema:"form values"`
-	// IdempotencyKey repeats a swarm or teammate answer safely; an agent's
+	Values   map[string]any `json:"values,omitempty"`
+	// IdempotencyKey repeats a teammate answer safely; an agent's
 	// question takes one answer, so a repeat finds nothing pending.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
@@ -71,45 +74,41 @@ type reviewInput struct {
 
 type decideInput struct {
 	RunID    string `json:"run_id"`
-	AnswerID string `json:"answer_id" jsonschema:"from aether_needs_attention"`
+	AnswerID string `json:"answer_id"`
 	Decision string `json:"decision"`
 	Action   string `json:"action" jsonschema:"the item's untrusted.text, word for word"`
 }
 
 type stopInput struct {
 	RunID   string `json:"run_id"`
-	Outcome string `json:"outcome,omitempty" jsonschema:"close the run as this"`
+	Outcome string `json:"outcome,omitempty"`
 }
 
 const idempotencyRule = " Reuse idempotency_key on a retry; "
 
 var writeOps = []Op{
-	opOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user asks to start an agent on a task, one call per task; then poll aether_get_run."+
-			idempotencyRule+"without one, a repeat within 60s returns the first run.", launchRun).
-		enum("mode", "tui", "headless", "acp").hints(false, true).
-		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunList, protocol.MethodRunLaunch),
-	opOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user wants one goal split across agents: an integrator plans tasks for workers; then poll aether_get_swarm."+
-			idempotencyRule+"without one, a repeat within 60s returns the first swarm.", launchSwarm).
-		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").hints(false, true).
-		calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodMissionList, protocol.MethodMissionCreate),
-	opOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
-		"Use this when the user wants to tell a run's agent something, which cannot be taken back; it waits up to 45s for approval if someone else controls the run."+
+	opOf("aether_launch_session", "Launch session", ScopeWrite, false, nextWorkspaces,
+		"Use this when starting an agent on a task or saved template, one call per task; then poll aether_get_session."+
+			idempotencyRule+"without one, a repeat within 60s, or of a template while it starts, returns the first session.", launchRun).
+		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
+		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodAgentList, protocol.MethodRunList,
+		protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
+	opOf("aether_message_session", "Message session", ScopeWrite, false, nextRuns,
+		"Use this when the user wants to tell a session's agent something, which cannot be taken back; it waits up to 45s if another member controls the session."+
 			idempotencyRule+"without one, a repeat within 60s is sent once.", messageRun).hints(true, true).
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunInject),
 	opOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,
 		"Use this when an aether_needs_attention item's answer_with is aether_answer: option_id (and values) for an agent's question, else answer.", answer).hints(true, true).
-		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost, protocol.MethodRunInputRespond, protocol.MethodRunGet,
-		protocol.MethodMissionShow, protocol.MethodRunRoomList),
-	opOf("aether_pause_run", "Pause run", ScopeWrite, true, nextRuns,
-		"Use this when the user wants a run paused; its container freezes until aether_resume_run.", pauseRun(protocol.MethodRunPause, "Paused")).
+		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodRunRoomPost, protocol.MethodRunInputRespond, protocol.MethodRunGet,
+		protocol.MethodRunRoomList),
+	opOf("aether_pause_session", "Pause session", ScopeWrite, true, nextRuns,
+		"Use this when the user wants a session paused; its container freezes until aether_resume_session.", pauseRun(protocol.MethodRunPause, "Paused")).
 		offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodRunPause, protocol.MethodRunGet),
-	opOf("aether_resume_run", "Resume run", ScopeWrite, true, nextRuns,
-		"Use this when the user wants a paused run to continue.", pauseRun(protocol.MethodRunResume, "Resumed")).hints(false, true).
+	opOf("aether_resume_session", "Resume session", ScopeWrite, true, nextRuns,
+		"Use this when the user wants a paused session to continue.", pauseRun(protocol.MethodRunResume, "Resumed")).hints(false, true).
 		offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodRunResume, protocol.MethodRunGet),
-	opOf("aether_mark_reviewed", "Mark run reviewed", ScopeWrite, true, nextRuns,
-		"Use this when the user has checked a run's reported success: complete accepts it and closes the run, later puts it off.", markReviewed).
+	opOf("aether_mark_reviewed", "Mark session reviewed", ScopeWrite, true, nextRuns,
+		"Use this when the user has checked a session's reported success: complete accepts it and closes the session, later puts it off.", markReviewed).
 		enum("action", protocol.RunReviewComplete, protocol.RunReviewLater).hints(true, false).
 		calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodRunReview),
 }
@@ -119,18 +118,15 @@ var controlOps = []Op{
 		"Use this when the user allows or denies a permission item from aether_needs_attention, once; an allowed action cannot be taken back.", decideApproval).
 		enum("decision", "allow", "deny").hints(true, true).
 		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodServerInfo, protocol.MethodRunInputRespond),
-	opOf("aether_stop_run", "Stop or close run", ScopeControl, true, nextRuns,
-		"Use this when the user wants a run's agent stopped now, or, with outcome, the run closed as merged or abandoned.", stopRun).
+	opOf("aether_stop_session", "Stop or close session", ScopeControl, true, nextRuns,
+		"Use this when the user wants a session stopped now, or with outcome closed as merged or abandoned.", stopRun).
 		enum("outcome", "merged", "abandoned").hints(true, false).
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunKill, protocol.MethodRunClose, protocol.MethodRunGet),
-	opOf("aether_cancel_swarm", "Cancel swarm", ScopeControl, true, nextSwarms,
-		"Use this when the user wants a swarm ended; it stops its integrator and workers.", cancelSwarm).hints(true, false).
-		calling(protocol.MethodMissionCancel),
 }
 
-func launched(r protocol.Run, l links) map[string]any {
-	return map[string]any{"run_id": r.ID, "state": r.Status, "workspace_id": r.WorkspaceID, "harness": r.Harness, "url": l.run(r.ID),
-		"next": "poll aether_get_run with run_id"}
+func launched(r protocol.Run, l links, book accountBook) map[string]any {
+	return map[string]any{"run_id": r.ID, "state": r.Status, "url": l.run(r.ID), "launch": runReceipt(r, l, book),
+		"next": "poll aether_get_session with run_id"}
 }
 
 func recent(at string, now time.Time) bool {
@@ -151,7 +147,7 @@ func lockLaunches(member string) func() {
 
 // inflight maps a member's keyless launch still in flight, by method and
 // params, to the idempotency key derived for it; an identical keyless call
-// replays that key and gets the same run or swarm.
+// replays that key and gets the same run.
 var inflight sync.Map
 
 // keyless gives a launch with no idempotency key one: an identical
@@ -195,7 +191,7 @@ const replayWait = 5 * time.Second
 // launch calls method, a launch whose params carry an idempotency key, on
 // a context the tool's deadline and the client's disconnect do not cancel,
 // since cancelling it fails the run it is provisioning. Past launchWait it
-// replays the key, which the server answers as soon as the run or swarm
+// replays the key, which the server answers as soon as the run
 // exists; finished is false then, err is the replay's, and res is empty if
 // that replay failed or is not answered in time either. done runs when the
 // launch call returns. A surface with no budget waits for the launch, since
@@ -248,10 +244,11 @@ func starting(tool, key string, replayErr error) (string, any, error) {
 	return text, out, nil
 }
 
-// recentLaunch is the member's run of the same task, agent, mode and
-// model in the workspace created within duplicateWindow that has not
-// stopped, if any. An omitted mode or model matches any.
-func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, now time.Time) (protocol.Run, bool, error) {
+// recentLaunch is the member's run in the workspace, created within
+// duplicateWindow and not stopped, with the same task, agent, mode, model,
+// account, fallback policy, extra repositories and child-run setting. An omitted mode or
+// model matches any; an omitted account is self, the member's own.
+func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self string, now time.Time) (protocol.Run, bool, error) {
 	params := struct {
 		protocol.RunListParams
 		Mine bool `json:"mine"`
@@ -261,8 +258,16 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, now t
 		return protocol.Run{}, false, err
 	}
 	for _, r := range res.Runs {
+		var extras []string
+		for _, repo := range r.Repos {
+			if !repo.Primary {
+				extras = append(extras, repo.WorkspaceID)
+			}
+		}
 		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model) &&
-			!domain.RunStatus(r.Status).Final() && recent(r.CreatedAt, now) {
+			cmp.Or(in.AccountMemberID, self) == cmp.Or(r.RequestedAccountMemberID, r.AccountMemberID) &&
+			slices.Equal(in.FallbackAccountMemberIDs, r.FallbackAccountMemberIDs) && in.NoFallback == r.NoFallback && in.Children == r.Children &&
+			sameRepos(in.ExtraWorkspaceIDs, extras) && !domain.RunStatus(r.Status).Final() && recent(r.CreatedAt, now) {
 			return r, true, nil
 		}
 	}
@@ -270,167 +275,121 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, now t
 }
 
 func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, any, error) {
+	switch {
+	case in.Template != "":
+		return launchTemplate(ctx, c, in)
+	case len(in.Params) > 0 || in.TemplateVersion != "":
+		return "", nil, invalid("params and template_version are for a template; pass template too")
+	case in.Task == "":
+		return "", nil, invalid("task is required, or template to run a saved template; aether_launch_options lists the agents and, with workspace_id, the templates")
+	}
 	info, err := serverInfo(ctx, c.read)
+	if err != nil {
+		return "", nil, err
+	}
+	book, err := accounts(ctx, c.read)
+	if err != nil {
+		return "", nil, err
+	}
+	saved, err := savedDefaults(ctx, c.read, in.SavedDefaults)
+	if err != nil {
+		return "", nil, err
+	}
+	fill, err := fillSaved(saved, launchSlots{harness: &in.Harness, mode: &in.Mode, model: &in.Model, account: &in.accountChoice},
+		agentLister(ctx, c.read, book), book)
 	if err != nil {
 		return "", nil, err
 	}
 	l := links(info.DashboardURL)
 	params := protocol.RunLaunchParams{WorkspaceID: in.WorkspaceID, Task: in.Task, Harness: in.Harness, Mode: in.Mode, Model: in.Model,
-		IdempotencyKey: in.IdempotencyKey}
+		AccountMemberID: in.AccountMemberID, FallbackAccountMemberIDs: in.FallbackAccountMemberIDs, NoFallback: in.NoFallback,
+		ExtraWorkspaceIDs: in.ExtraWorkspaceIDs, Children: in.Children, IdempotencyKey: in.IdempotencyKey}
 	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		var prior protocol.Run
 		var found bool
 		params.IdempotencyKey, dup, found, done, err = keyless(info.Member.ID, protocol.MethodRunLaunch, params, func() (ok bool, err error) {
-			prior, ok, err = recentLaunch(ctx, c.read, in, time.Now())
+			prior, ok, err = recentLaunch(ctx, c.read, in, book.self(), time.Now())
 			return ok, err
 		})
 		if err != nil {
 			return "", nil, err
 		}
 		if found {
-			out := launched(prior, l)
+			out := launched(prior, l, book)
 			out["duplicate"] = true
-			return fmt.Sprintf("You launched this task with %s at %s; returning run %s instead of launching it again. Pass an idempotency_key to launch another.",
+			return fmt.Sprintf("You launched this task with %s at %s; returning session %s instead of launching it again. Pass an idempotency_key to launch another.",
 				prior.Harness, prior.CreatedAt, prior.ID), out, nil
 		}
 	}
-	res, finished, err := launch[protocol.RunLaunchResult](ctx, c, protocol.MethodRunLaunch, params, done)
+	res, finished, err := launch[protocol.RunLaunchResult](ctx, c, protocol.MethodRunLaunch, withReason(params, in.Reason, c.surface, fill), done)
 	if err != nil && finished {
-		return "", nil, retryable(err, params.IdempotencyKey)
+		return "", nil, retryable(savedConflict(err, in.SavedDefaults != savedIgnore, in.IdempotencyKey != ""), params.IdempotencyKey)
 	}
 	if res.Run.ID == "" {
-		return starting("aether_launch_run", params.IdempotencyKey, err)
+		return starting("aether_launch_session", params.IdempotencyKey, err)
 	}
-	out := launched(res.Run, l)
+	out := launched(res.Run, l, book)
+	receipt := out["launch"].(*launchReceipt)
+	receipt.IdempotencyKey, receipt.Skipped = params.IdempotencyKey, res.SkippedFallbackAccounts
+	if !dup && !res.Replayed {
+		fill.startedOn(res.Run.AccountMemberID)
+		fill.stamp(receipt)
+	}
 	out["idempotency_key"] = params.IdempotencyKey
 	switch {
 	case dup:
 		out["duplicate"] = true
-		return fmt.Sprintf("You are already launching this task; returning run %s instead of launching it again. Pass an idempotency_key to launch another.", res.Run.ID), out, nil
+		return fmt.Sprintf("You are already launching this task; returning session %s instead of launching it again. Pass an idempotency_key to launch another.", res.Run.ID), out, nil
 	case !finished:
 		out["state"], out["write"] = "starting", writePending
-		return fmt.Sprintf("Run %s is starting.", res.Run.ID), out, nil
+		return fmt.Sprintf("Session %s is starting.", res.Run.ID), out, nil
 	case res.Replayed:
 		out["replayed"] = true
-		return fmt.Sprintf("This idempotency_key already launched run %s; nothing new was launched.", res.Run.ID), out, nil
+		return fmt.Sprintf("This idempotency_key already launched session %s; nothing new was launched.", res.Run.ID), out, nil
 	}
-	return fmt.Sprintf("Launched run %s (%s).", res.Run.ID, res.Run.Status), out, nil
+	return fmt.Sprintf("Launched session %s (%s) on %s.", res.Run.ID, res.Run.Status, accountName(receipt)), out, nil
 }
 
-func swarmLaunched(m protocol.Mission, l links) map[string]any {
-	return map[string]any{"swarm_id": m.ID, "phase": m.Phase, "integrator_run_id": m.CurrentIntegratorRunID, "url": l.swarm(m.ID),
-		"next": "poll aether_get_swarm with swarm_id"}
+// withReason adds the assistant's stated reason, and on the assistant what
+// saved defaults filled, to a launch's params, for the member's
+// confirmation card; the assistant's socket takes both off before the call
+// reaches the server.
+func withReason(params any, reason string, s Surface, fill savedFill) any {
+	noted := s == Assistant && (len(fill.Applied) > 0 || len(fill.Skipped) > 0 || len(fill.Unchecked) > 0)
+	if reason == "" && !noted {
+		return params
+	}
+	// params are a launch's own params struct, which always encodes as an
+	// object.
+	b, _ := json.Marshal(params)
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(b, &fields)
+	if reason != "" {
+		fields["reason"], _ = json.Marshal(reason)
+	}
+	if noted {
+		fields["saved_defaults"], _ = json.Marshal(protocol.AssistantDefaultsUse{Applied: fill.Applied, Skipped: fill.Skipped, Unchecked: fill.Unchecked})
+	}
+	return fields
 }
 
-// recentSwarm is the member's swarm of the same objective, integrator and
-// worker choices in the workspace created within duplicateWindow that is
-// not cancelled, if any.
-func recentSwarm(ctx context.Context, read Call, member string, in protocol.MissionCreateParams, now time.Time) (protocol.Mission, bool, error) {
-	var res protocol.MissionListResult
-	if err := read(ctx, protocol.MethodMissionList, protocol.MissionListParams{WorkspaceID: in.WorkspaceID, Limit: defaultRows}, &res); err != nil {
-		return protocol.Mission{}, false, err
-	}
-	for _, m := range res.Missions {
-		if m.AccountableHumanID == member && m.Objective == in.Objective && sameChoices(m, in) && m.Phase != string(domain.MissionPhaseCancelled) && recent(m.CreatedAt, now) {
-			return m, true, nil
+// accountName says whose account a run launched on, and the account it
+// asked for when fallback moved it.
+func accountName(r *launchReceipt) string {
+	name := func(a *accountRef) string {
+		switch {
+		case a == nil:
+			return "an unknown account"
+		case a.Access == accessOwn:
+			return "your account"
 		}
+		return cmp.Or(a.Name, a.MemberID) + "'s account"
 	}
-	return protocol.Mission{}, false, nil
-}
-
-// sameChoices compares agents, modes and models; the server fills in the
-// account members.
-func sameChoices(m protocol.Mission, p protocol.MissionCreateParams) bool {
-	bare := func(c protocol.MissionExecutionChoice) protocol.MissionExecutionChoice {
-		c.AccountMemberID = ""
-		return c
+	if r.RequestedAccount != nil {
+		return name(r.Account) + ", as usage fallback moved it from " + name(r.RequestedAccount)
 	}
-	if bare(protocol.MissionExecutionChoice(m.Integrator)) != bare(protocol.MissionExecutionChoice(p.Integrator)) || len(m.ExecutionChoices) != len(p.ExecutionChoices) {
-		return false
-	}
-	for _, c := range m.ExecutionChoices {
-		if !slices.Contains(p.ExecutionChoices, bare(c)) {
-			return false
-		}
-	}
-	return true
-}
-
-func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any, error) {
-	var listed protocol.AgentListResult
-	if in.Mode == "" || slices.ContainsFunc(in.Workers, func(w swarmWorker) bool { return w.Mode == "" }) {
-		if err := c.read(ctx, protocol.MethodAgentList, nil, &listed); err != nil {
-			return "", nil, fmt.Errorf("list agents to choose their modes (or pass every mode): %w", err)
-		}
-	}
-	mode := func(agent, given string) (string, error) {
-		if given != "" {
-			return given, nil
-		}
-		return protocol.SwarmMode(listed.Agents, agent)
-	}
-	integratorMode, err := mode(in.Harness, in.Mode)
-	if err != nil {
-		return "", nil, err
-	}
-	integrator := protocol.MissionExecutionChoice{Harness: in.Harness, Mode: integratorMode, Model: in.Model}
-	choices := []protocol.MissionExecutionChoice{integrator}
-	for _, w := range in.Workers {
-		workerMode, modeErr := mode(w.Harness, w.Mode)
-		if modeErr != nil {
-			return "", nil, modeErr
-		}
-		choice := protocol.MissionExecutionChoice{Harness: w.Harness, Mode: workerMode, Model: w.Model}
-		// The store refuses a choice listed twice.
-		if !slices.Contains(choices, choice) {
-			choices = append(choices, choice)
-		}
-	}
-	info, err := serverInfo(ctx, c.read)
-	if err != nil {
-		return "", nil, err
-	}
-	l := links(info.DashboardURL)
-	params := protocol.MissionCreateParams{WorkspaceID: in.WorkspaceID, Objective: in.Objective,
-		Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: choices, IdempotencyKey: in.IdempotencyKey}
-	dup, done := false, func(error) {}
-	if params.IdempotencyKey == "" {
-		var prior protocol.Mission
-		var found bool
-		params.IdempotencyKey, dup, found, done, err = keyless(info.Member.ID, protocol.MethodMissionCreate, params, func() (ok bool, err error) {
-			prior, ok, err = recentSwarm(ctx, c.read, info.Member.ID, params, time.Now())
-			return ok, err
-		})
-		if err != nil {
-			return "", nil, err
-		}
-		if found {
-			out := swarmLaunched(prior, l)
-			out["duplicate"] = true
-			return fmt.Sprintf("You launched this objective at %s; returning swarm %s instead of launching it again. Pass an idempotency_key to launch another.",
-				prior.CreatedAt, prior.ID), out, nil
-		}
-	}
-	res, finished, err := launch[protocol.MissionCreateResult](ctx, c, protocol.MethodMissionCreate, params, done)
-	if err != nil && finished {
-		return "", nil, retryable(err, params.IdempotencyKey)
-	}
-	m := res.Mission
-	if m.ID == "" {
-		return starting("aether_launch_swarm", params.IdempotencyKey, err)
-	}
-	out := swarmLaunched(m, l)
-	out["idempotency_key"] = params.IdempotencyKey
-	switch {
-	case dup:
-		out["duplicate"] = true
-		return fmt.Sprintf("You are already launching this objective; returning swarm %s instead of launching it again. Pass an idempotency_key to launch another.", m.ID), out, nil
-	case !finished:
-		out["state"], out["write"] = "starting", writePending
-		return fmt.Sprintf("Swarm %s is starting; its integrator is run %s.", m.ID, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
-	}
-	return fmt.Sprintf("Launched swarm %s (%s); its integrator is run %s.", m.ID, m.Phase, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
+	return name(r.Account)
 }
 
 // sentKeys remembers the key of each keyless message by member, run, steer
@@ -497,14 +456,14 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 	}
 	m := res.Message
 	out := map[string]any{"run_id": in.RunID, "state": m.State, "outcome": res.Outcome, "url": l.run(in.RunID), "idempotency_key": params.IdempotencyKey}
-	summary := fmt.Sprintf("Message to run %s is %s.", in.RunID, m.State)
+	summary := fmt.Sprintf("Message to session %s is %s.", in.RunID, m.State)
 	if m.State == protocol.RoomMessageQueued && m.DeliverAfter != nil {
 		out["deliver_after"], out["write"] = *m.DeliverAfter, writePending
-		summary = fmt.Sprintf("Message to run %s is queued: the member in control can approve or deny it, else it is delivered at %s.", in.RunID, *m.DeliverAfter)
+		summary = fmt.Sprintf("Message to session %s is queued: the member in control can approve or deny it, else it is delivered at %s.", in.RunID, *m.DeliverAfter)
 	}
 	if dup {
 		out["duplicate"] = true
-		summary = fmt.Sprintf("You sent this message to run %s within the last 60s; returning it (%s) instead of sending it again. Pass a new idempotency_key to send the same text again.", in.RunID, m.State)
+		summary = fmt.Sprintf("You sent this message to session %s within the last 60s; returning it (%s) instead of sending it again. Pass a new idempotency_key to send the same text again.", in.RunID, m.State)
 	}
 	return summary, out, nil
 }
@@ -520,7 +479,7 @@ func pendingItem(ctx context.Context, read Call, runID, id string) (protocol.Att
 		}
 	}
 	return protocol.AttentionItem{}, &protocol.Error{Code: protocol.CodeNotFound,
-		Message: fmt.Sprintf("run %s has nothing pending for you with that answer_id; it may be answered already", runID)}
+		Message: fmt.Sprintf("session %s has nothing pending for you with that answer_id; it may be answered already", runID)}
 }
 
 // controlHeld adds the way forward to run.input.respond's refusal while
@@ -537,7 +496,7 @@ func controlHeld(err error) error {
 		return err
 	}
 	return &protocol.Error{Code: perr.Code, Data: perr.Data,
-		Message: perr.Message + "; ask the member in control to answer, or send your answer to the agent with aether_message_run"}
+		Message: perr.Message + "; ask the member in control to answer, or send your answer to the agent with aether_message_session"}
 }
 
 func invalid(format string, args ...any) error {
@@ -555,15 +514,6 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 	}
 	key := cmp.Or(in.IdempotencyKey, "connector-answer-"+in.AnswerID)
 	switch it.Kind {
-	case protocol.AttentionKindSwarmQuestion:
-		if in.Answer == "" {
-			return "", nil, invalid("a swarm question takes answer, the reply text")
-		}
-		var res protocol.MissionQuestionResult
-		if err := c.act(ctx, protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{QuestionID: in.AnswerID, Answer: in.Answer, IdempotencyKey: key}, &res); err != nil {
-			return "", nil, retryable(err, key)
-		}
-		return fmt.Sprintf("Answered swarm %s's question.", it.MissionID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
 	case protocol.AttentionKindRoomQuestion:
 		if in.Answer == "" {
 			return "", nil, invalid("a teammate's question takes answer, the reply text")
@@ -573,7 +523,7 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 			Kind: protocol.RoomMessageReply, Body: in.Answer, CorrelationID: in.AnswerID, IdempotencyKey: key}, &res); err != nil {
 			return "", nil, retryable(err, key)
 		}
-		return fmt.Sprintf("Replied on run %s.", in.RunID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
+		return fmt.Sprintf("Replied on session %s.", in.RunID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
 	case protocol.AttentionKindQuestion:
 		if in.OptionID == "" {
 			return "", nil, invalid("an agent's question takes option_id, one of the item's options")
@@ -583,31 +533,18 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 			OptionID: in.OptionID, Values: in.Values}, &res); err != nil {
 			return "", nil, controlHeld(err)
 		}
-		return fmt.Sprintf("Run %s's question: %s.", in.RunID, res.Status), map[string]any{"run_id": in.RunID, "status": res.Status}, nil
+		return fmt.Sprintf("Session %s's question: %s.", in.RunID, res.Status), map[string]any{"run_id": in.RunID, "status": res.Status}, nil
 	}
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
 }
 
-// answerAgain repeats a keyed swarm or teammate answer whose question is
-// no longer pending, so a retry after a lost response gets the saved answer
-// back: the server returns what the key already did. It answers only a
-// swarm question by that id, or a teammate question on the run that the id
-// names or the key already replied to; anything else fails with notPending.
+// answerAgain repeats a keyed teammate answer whose question is no longer
+// pending, so a retry after a lost response gets the saved answer back: the
+// server returns what the key already did. It answers only a teammate
+// question on the run that the id names or the key already replied to;
+// anything else fails with notPending.
 func answerAgain(ctx context.Context, c calls, in answerInput, notPending error) (string, any, error) {
 	key := in.IdempotencyKey
-	var shown protocol.MissionShowResult
-	err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{QuestionID: in.AnswerID}, &shown)
-	var perr *protocol.Error
-	switch {
-	case err == nil:
-		var q protocol.MissionQuestionResult
-		if actErr := c.act(ctx, protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{QuestionID: in.AnswerID, Answer: in.Answer, IdempotencyKey: key}, &q); actErr != nil {
-			return "", nil, retryable(actErr, key)
-		}
-		return fmt.Sprintf("Answered swarm %s's question.", shown.Mission.ID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
-	case !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound:
-		return "", nil, err
-	}
 	r, err := getRunRecord(ctx, c.read, in.RunID)
 	if err != nil {
 		return "", nil, notPending
@@ -624,7 +561,12 @@ func answerAgain(ctx context.Context, c calls, in answerInput, notPending error)
 		Kind: protocol.RoomMessageReply, Body: in.Answer, CorrelationID: in.AnswerID, IdempotencyKey: key}, &res); err != nil {
 		return "", nil, retryable(err, key)
 	}
-	return fmt.Sprintf("Replied on run %s.", r.ID), map[string]any{"run_id": r.ID, "answered": true, "idempotency_key": key}, nil
+	return fmt.Sprintf("Replied on session %s.", r.ID), map[string]any{"run_id": r.ID, "answered": true, "idempotency_key": key}, nil
+}
+
+// sameRepos compares two sets of extra workspace ids.
+func sameRepos(a, b []string) bool {
+	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }
 
 // roomPages bounds how many pages of a run's room roomQuestion reads.
@@ -659,13 +601,13 @@ func roomQuestion(ctx context.Context, read Call, r protocol.Run, id, key string
 func acted(ctx context.Context, read Call, l links, id, did string) (string, any, error) {
 	r, err := getRunRecord(ctx, read, id)
 	if err != nil {
-		return fmt.Sprintf("%s run %s; reading its state failed: %v.", did, id, err), map[string]any{"run_id": id, "state_error": err.Error(), "url": l.run(id)}, nil
+		return fmt.Sprintf("%s session %s; reading its state failed: %v.", did, id, err), map[string]any{"run_id": id, "state_error": err.Error(), "url": l.run(id)}, nil
 	}
 	paused := ""
 	if r.Paused {
 		paused = ", paused"
 	}
-	return fmt.Sprintf("%s run %s; it is %s%s.", did, r.ID, r.Status, paused),
+	return fmt.Sprintf("%s session %s; it is %s%s.", did, r.ID, r.Status, paused),
 		map[string]any{"run_id": r.ID, "state": r.Status, "activity": r.Activity, "paused": r.Paused, "review": r.Review, "url": l.run(r.ID)}, nil
 }
 
@@ -696,7 +638,7 @@ func markReviewed(ctx context.Context, c calls, in reviewInput) (string, any, er
 		}
 		if r.Review != string(domain.ReviewReady) {
 			return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-				"run %s has no reported success awaiting review (review %q); to end it, aether_stop_run, which needs the control scope", r.ID, r.Review)}
+				"session %s has no reported success awaiting review (review %q); to end it, aether_stop_session, which needs the control scope", r.ID, r.Review)}
 		}
 	}
 	return runAction(ctx, c, protocol.MethodRunReview, in.RunID, "Marked reviewed ("+in.Action+")", protocol.RunReviewParams{RunID: in.RunID, Action: in.Action})
@@ -709,7 +651,7 @@ func decidable(in decideInput, l links, shown ...string) error {
 	for _, text := range shown {
 		if len([]rune(text)) > maxText {
 			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-				"run %s's request is longer than the connector shows; decide it in the Aether dashboard%s", in.RunID, at(l.run(in.RunID)))}
+				"session %s's request is longer than the connector shows; decide it in the Aether dashboard%s", in.RunID, at(l.run(in.RunID)))}
 		}
 	}
 	if in.Action != shown[0] {
@@ -754,13 +696,13 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 		}
 		if option == "" {
 			return "", nil, &protocol.Error{Code: protocol.CodeInvalidState,
-				Message: fmt.Sprintf("run %s's request offers no %s option, and the connector never answers for always; decide it in the Aether dashboard%s", in.RunID, want, at(l.run(in.RunID)))}
+				Message: fmt.Sprintf("session %s's request offers no %s option, and the connector never answers for always; decide it in the Aether dashboard%s", in.RunID, want, at(l.run(in.RunID)))}
 		}
 		var res protocol.RunInputRespondResult
 		if err := c.act(ctx, protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: in.RunID, RequestID: in.AnswerID, OptionID: option}, &res); err != nil {
 			return "", nil, controlHeld(err)
 		}
-		return fmt.Sprintf("%s the request once on run %s: %s.", verb, in.RunID, res.Status),
+		return fmt.Sprintf("%s the request once on session %s: %s.", verb, in.RunID, res.Status),
 			map[string]any{"run_id": in.RunID, "option": want, "status": res.Status, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	}
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
@@ -771,12 +713,4 @@ func stopRun(ctx context.Context, c calls, in stopInput) (string, any, error) {
 		return runAction(ctx, c, protocol.MethodRunKill, in.RunID, "Stopped", protocol.RunIDParams{RunID: in.RunID})
 	}
 	return runAction(ctx, c, protocol.MethodRunClose, in.RunID, "Closed ("+in.Outcome+")", protocol.RunCloseParams{RunID: in.RunID, Outcome: in.Outcome})
-}
-
-func cancelSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) {
-	var res protocol.MissionCancelResult
-	if err := c.act(ctx, protocol.MethodMissionCancel, protocol.MissionCancelParams{MissionID: in.SwarmID, IdempotencyKey: "connector-cancel-" + in.SwarmID}, &res); err != nil {
-		return "", nil, err
-	}
-	return fmt.Sprintf("Swarm %s is %s.", res.Mission.ID, res.Mission.Phase), map[string]any{"swarm_id": res.Mission.ID, "phase": res.Mission.Phase}, nil
 }

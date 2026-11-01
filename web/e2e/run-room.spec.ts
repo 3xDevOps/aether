@@ -10,7 +10,7 @@ import { OnboardingWizard } from './pages/wizard'
 
 const requestedAliceName = 'Alice'
 const requestedBobName = 'Bob'
-const task = 'shared release A run room'
+const task = 'shared release A session room'
 const comment = `${requestedAliceName} leaves ${requestedBobName} a note`
 const deniedSteer = 'Please inspect the first failing test'
 const approvedSteer = 'Please inspect the second failing test'
@@ -23,7 +23,7 @@ async function expectHitTarget(target: Locator) {
   })).toBe(true)
 }
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('two members share notes, moderated messages, and explicit control transfer', async ({
   page,
@@ -92,14 +92,14 @@ test('two members share notes, moderated messages, and explicit control transfer
     await bobPage.goto(`${bob.url}&run=${run.id}`)
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
     await expect(bobPage.getByRole('heading', { name: task, exact: true })).toBeVisible()
-    const alicePresence = page.getByRole('group', { name: 'Run presence', exact: true })
-    const bobPresence = bobPage.getByRole('group', { name: 'Run presence', exact: true })
+    const alicePresence = page.getByRole('group', { name: 'Session presence', exact: true })
+    const bobPresence = bobPage.getByRole('group', { name: 'Session presence', exact: true })
     // The owner's desktop attach takes the lease; everyone else watches it.
     await expect(alicePresence.getByText('You control', { exact: true })).toBeVisible()
     await expect(alicePresence.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     await expect(bobPresence.getByText(`${aliceDisplayName} controls`, { exact: true })).toBeVisible()
     for (const viewerPage of [page, bobPage]) {
-      const facts = viewerPage.getByRole('complementary', { name: 'Run details' }).getByRole('region', { name: 'Details' })
+      const facts = viewerPage.getByRole('complementary', { name: 'Session details' }).getByRole('region', { name: 'Details' })
       await expect(facts.getByRole('img', { name: bobDisplayName, exact: true })).toBeVisible()
     }
 
@@ -128,11 +128,11 @@ test('two members share notes, moderated messages, and explicit control transfer
     await expect.poll(() => terminalSizes.at(-1)?.cols ?? 0).toBeGreaterThan(0)
     const withDetails = terminalSizes.at(-1)!.cols
     for (const viewerPage of [page, bobPage]) {
-      const details = viewerPage.getByRole('complementary', { name: 'Run details' })
+      const details = viewerPage.getByRole('complementary', { name: 'Session details' })
       const terminal = viewerPage.getByRole('tabpanel').filter({ has: viewerPage.locator('.xterm') })
       const terminalBox = await terminal.boundingBox()
       const detailsBox = await details.boundingBox()
-      if (!terminalBox || !detailsBox) throw new Error('the terminal and Run details must have visible geometry')
+      if (!terminalBox || !detailsBox) throw new Error('the terminal and Session details must have visible geometry')
       expect(terminalBox.x + terminalBox.width).toBeLessThanOrEqual(detailsBox.x + 1)
       expect(Math.round(detailsBox.width)).toBe(320)
       for (const name of ['Hide details', 'More']) {
@@ -147,12 +147,12 @@ test('two members share notes, moderated messages, and explicit control transfer
     const terminalInput = page.locator('.xterm-helper-textarea:not([data-aether-frozen-view] *)')
     await terminalInput.focus()
     await page.keyboard.press('ControlOrMeta+Period')
-    await expect(page.getByRole('complementary', { name: 'Run details' })).toBeHidden()
+    await expect(page.getByRole('complementary', { name: 'Session details' })).toBeHidden()
     await expect(terminalInput).toBeFocused()
     await expect.poll(() => terminalSizes.at(-1)?.cols ?? withDetails).toBeGreaterThan(withDetails)
     const withoutDetails = terminalSizes.at(-1)!.cols
     await page.keyboard.press('ControlOrMeta+Period')
-    const aliceDetails = page.getByRole('complementary', { name: 'Run details' })
+    const aliceDetails = page.getByRole('complementary', { name: 'Session details' })
     await expect(aliceDetails).toBeVisible()
     await expect.poll(() => terminalSizes.at(-1)?.cols ?? withoutDetails).toBeLessThan(withoutDetails)
     const more = page.getByRole('button', { name: 'More', exact: true })
@@ -166,7 +166,7 @@ test('two members share notes, moderated messages, and explicit control transfer
 
     // Alice's note shows at once and settles into the one persisted copy;
     // the room event makes the other browser refetch it.
-    const bobDetails = bobPage.getByRole('complementary', { name: 'Run details' })
+    const bobDetails = bobPage.getByRole('complementary', { name: 'Session details' })
     const aliceNotes = aliceDetails.getByRole('region', { name: 'Notes' })
     const noteBox = aliceDetails.getByRole('textbox', { name: 'Add a note' })
     await noteBox.fill(comment)
@@ -179,14 +179,14 @@ test('two members share notes, moderated messages, and explicit control transfer
 
     // Bob does not control the run: his message waits 45 seconds unless
     // Alice, who does, delivers or denies it first.
-    await bobPage.getByRole('tab', { name: 'Session', exact: true }).click()
+    await bobPage.getByRole('tab', { name: 'Chat', exact: true }).click()
     const bobComposer = bobPage.getByRole('textbox', { name: 'Message the agent' })
     await bobComposer.fill(deniedSteer)
     await bobPage.getByRole('button', { name: 'Send', exact: true }).hover()
     await expect(bobPage.getByRole('tooltip')).toContainText('Delivers in 45 s unless the controller decides sooner.')
     await bobComposer.press('Enter')
     await expect(bobComposer).toHaveValue('')
-    const bobLog = bobPage.getByRole('log', { name: 'Session' })
+    const bobLog = bobPage.getByRole('log', { name: 'Chat' })
     const deniedRow = bobLog.getByRole('article').filter({ hasText: deniedSteer })
     await expect(deniedRow).toContainText(/Delivers in (?:4[0-5])s/)
     const needsAlice = aliceDetails.getByRole('region', { name: 'Needs you' })
@@ -206,7 +206,7 @@ test('two members share notes, moderated messages, and explicit control transfer
     // A short occupied click reports the conflict without displacing Alice.
     const takeControl = bobPresence.getByRole('button', { name: 'Take control', exact: true })
     await takeControl.click()
-    await expect(bobPage.getByText('run control is held by another session', { exact: true })).toBeVisible()
+    await expect(bobPage.getByText('session control is held by another client', { exact: true })).toBeVisible()
     await expect(bobPage.getByRole('alertdialog')).toBeHidden()
     await expect(bobPresence.getByRole('button', { name: 'Release', exact: true })).toBeHidden()
     await expect(alicePresence.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
@@ -214,7 +214,7 @@ test('two members share notes, moderated messages, and explicit control transfer
     // Hold through the server's three-second threshold; only the holder decides.
     await takeControl.focus()
     await bobPage.keyboard.down('Space')
-    const takeover = page.getByRole('alertdialog', { name: 'Run control requested' })
+    const takeover = page.getByRole('alertdialog', { name: 'Session control requested' })
     await expect(takeover).toBeVisible()
     await bobPage.keyboard.up('Space')
     await expect(takeover).toContainText(bobDisplayName)

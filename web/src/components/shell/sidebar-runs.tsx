@@ -4,7 +4,7 @@ import { RunDetails, RunDetailsGroup } from '@/components/shell/run-details'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { ChevronRight, Network, Waypoints } from '@/components/icons'
+import { ChevronRight, Network } from '@/components/icons'
 import { CountBadge } from '@/components/ui/count-badge'
 import { ListRow } from '@/components/ui/list-row'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -15,7 +15,7 @@ import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { needsYou, type StateContext } from '@/lib/needs-you'
-import { groupOf, runLabel, stateTone, stateWords, type PresentationState } from '@/lib/status'
+import { groupOf, runLabel, stateWords, toneOf, type PresentationState } from '@/lib/status'
 import { chevronTurn, cn } from '@/lib/utils'
 import { targetRoute } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/run/views'
@@ -24,7 +24,7 @@ import { useDeviceNeeds, useRun, useRunPeople, useSidebarGroups, useStateContext
 import { isTerminal, type RunRecord } from '@/store/runs'
 import { childRunsText, stateContextOf, type RunTree, type SidebarGroup, type TreeSummary } from '@/store/selectors'
 import type { Route } from '@/store/ui'
-import type { RunStatusCause } from '@/lib/types'
+import type { RunStatusCause, RunWait } from '@/lib/types'
 
 export const runRowSelector = '#sidebar-runs [data-run-row]'
 
@@ -32,7 +32,7 @@ export function needsYouRoute(run: RunRecord, ctx: StateContext): Route {
   return targetRoute(run, needsYou(run, ctx)?.target)
 }
 
-function swarmCounts({ counts }: TreeSummary): string {
+function childRunCounts({ counts }: TreeSummary): string {
   return [
     counts.working > 0 && `${counts.working} working`,
     counts.needsYou > 0 && `${counts.needsYou} needs you`,
@@ -103,7 +103,7 @@ export function SidebarRuns() {
     <section
       ref={region}
       id="sidebar-runs"
-      aria-label="Runs"
+      aria-label="Sessions"
       className={cn(
         'min-h-0 flex-1 overflow-y-auto px-2 pb-2',
         moreBelow && '[mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]',
@@ -119,7 +119,7 @@ export function SidebarRuns() {
           ) : loading ? (
             <LoadingRuns />
           ) : hydrated && (
-            <p className="px-2 py-1 text-ui-sm text-muted">No runs yet.</p>
+            <p className="px-2 py-1 text-ui-sm text-muted">No sessions yet.</p>
           )
         ) : (
           groups.map((group) => {
@@ -147,7 +147,7 @@ const bar = 'bg-hover-chrome after:via-raised'
 
 function LoadingRuns() {
   return (
-    <div role="status" aria-label="Loading runs" className="flex flex-col pt-2">
+    <div role="status" aria-label="Loading sessions" className="flex flex-col pt-2">
       {loadingWidths.map((width, row) => (
         <div key={row} className="flex h-7 items-center gap-2 px-2">
           <Skeleton className={cn(bar, 'size-2.5 shrink-0 rounded-full')} />
@@ -196,7 +196,7 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
             {tree.children.length > 0 && (
-              <ul aria-label={`Runs in ${runLabel(tree.run)}`}>
+              <ul aria-label={`Sessions in ${runLabel(tree.run)}`}>
                 {tree.children.map((child) => (
                   <li key={child.run.id} className={connectors}>
                     <RunRowItem tree={{ ...child, children: [] }} />
@@ -244,7 +244,7 @@ function MineToggle() {
     <Button
       variant={mineOnly ? 'secondary' : 'ghost'}
       size="sm"
-      hint="Show only your runs under Working and Finished"
+      hint="Show only your sessions under Working and Finished"
       aria-pressed={mineOnly}
       onClick={() => setMineOnly(!mineOnly)}
     >
@@ -262,11 +262,10 @@ function RunRowItem({ tree }: { tree: RunTree }) {
       reason={tree.reason}
       next={tree.next}
       cause={tree.cause}
+      wait={tree.wait}
       since={tree.since}
       workspaceName={tree.workspaceName}
-      swarm={tree.swarm}
       childRuns={tree.childRuns}
-      unread={tree.unread}
     />
   )
 }
@@ -278,11 +277,10 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   reason: string
   next?: string
   cause?: RunStatusCause
+  wait?: RunWait
   since: string
   workspaceName?: string
-  swarm?: TreeSummary
   childRuns?: TreeSummary
-  unread?: number
 }) {
   const run = useRun(runID)
   return run ? <RunRowButton run={run} {...shown} /> : null
@@ -290,35 +288,32 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
 
 const names = new Intl.ListFormat(undefined, { type: 'conjunction' })
 
-function RunRowButton({ run, state, waiting, reason, next, cause, since, workspaceName, swarm, childRuns, unread }: {
+function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, workspaceName, childRuns }: {
   run: RunRecord
   state: PresentationState
   waiting: boolean
   reason: string
   next?: string
   cause?: RunStatusCause
+  wait?: RunWait
   since: string
   workspaceName?: string
-  swarm?: TreeSummary
   childRuns?: TreeSummary
-  unread?: number
 }) {
   const navigate = useStore((s) => s.navigate)
   const self = useStore((s) => s.info?.member.id)
   const selected = useStore((s) => isRunRoute(s.route, run.id))
-  const swarmSelected = useStore((s) => !!swarm && s.route.name === 'missions' && s.route.params.missionId === run.mission_id)
   const title = runLabel(run)
-  const counts = swarm ? swarmCounts(swarm) : childRuns ? `${childRunsText(childRuns)} · ${swarmCounts(childRuns)}` : ''
+  const counts = childRuns ? `${childRunsText(childRuns)} · ${childRunCounts(childRuns)}` : ''
   const open = () => {
-    if (swarm) navigate('run', { runId: run.id })
-    else if (waiting) {
+    if (waiting) {
       const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
       navigate(route.name, route.params)
     } else navigate('run', { runId: run.id })
   }
   const unopened = run.finish_unopened === true && (state === 'ready' || groupOf({ state }) === 'finished')
   const active = state === 'working' || state === 'waiting-agents' || state === 'waiting-ci' || state === 'waiting-tools'
-  const recedes = !waiting && !unopened && (!active || (!swarm && run.member_id !== self))
+  const recedes = !waiting && !unopened && (!active || run.member_id !== self)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const people = useRunPeople(run)
@@ -327,16 +322,16 @@ function RunRowButton({ run, state, waiting, reason, next, cause, since, workspa
   const controller = run.controller_member_id
   const watching = people.filter((id) => id !== controller).map((id) => (id === self ? 'you' : name(id)))
   useClock()
-  const words = stateWords({ state, reason })
+  const words = stateWords({ state, reason, cause, wait })
   const label = [
     words.label,
     workspaceName,
     title,
-    swarm && !unread ? counts : words.detail,
+    words.detail,
     childRuns && counts,
     unopened && 'Not opened yet',
     timeAgo(since),
-    run.member_id === self ? 'your run' : `${name(run.member_id)}'s run`,
+    run.member_id === self ? 'your session' : `${name(run.member_id)}'s session`,
     controller
       ? controller === self ? 'you control' : `${name(controller)} controls`
       : controller === '' && people.length > 0 && !isTerminal(run.status) && 'nobody controls',
@@ -356,7 +351,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, since, workspa
     </span>
   )
   return (
-    <RunDetails run={run} state={state} waiting={waiting} reason={reason} next={next} cause={cause} since={since} counts={counts} people={people} label={label}>
+    <RunDetails run={run} state={state} waiting={waiting} reason={reason} next={next} cause={cause} wait={wait} since={since} counts={counts} people={people} label={label}>
       <ListRow
         data-run-row=""
         aria-label={label}
@@ -366,7 +361,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, since, workspa
         onClick={open}
         leading={
           <>
-            <StatusDot tone={stateTone[state]} />
+            <StatusDot tone={toneOf({ state, wait })} />
             <span
               data-slot="owner-mark"
               aria-hidden
@@ -375,22 +370,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, since, workspa
             />
           </>
         }
-        trailing={!swarm ? indicators : undefined}
-        action={swarm && run.mission_id && (
-          <>
-            <Button
-              variant={swarmSelected ? 'secondary' : 'ghost'}
-              size="icon-sm"
-              label={`Open swarm controls for ${title}`}
-              hint={counts ? `Open swarm controls · ${counts}` : 'Open swarm controls'}
-              aria-current={swarmSelected ? 'page' : undefined}
-              onClick={() => navigate('missions', { missionId: run.mission_id! })}
-            >
-              <Waypoints />
-            </Button>
-            {indicators}
-          </>
-        )}
+        trailing={indicators}
         hoverAction={waiting && <AnswerButton run={run} />}
       >
         {workspaceName && <span className="text-muted">{workspaceName} · </span>}

@@ -41,7 +41,7 @@ func (s *Scheduler) captureDir(id domain.RunID) (string, error) {
 		dir = sc.CoordDir
 	}
 	if dir == "" || !filepath.IsAbs(dir) {
-		return "", errors.New("run has no read-only capture mount; relaunch with the current server")
+		return "", errors.New("session has no read-only capture mount; relaunch with the current server")
 	}
 	return filepath.Join(dir, "captures"), nil
 }
@@ -151,7 +151,7 @@ func (s *Scheduler) saveDevelopmentCapture(ctx context.Context, id domain.RunID,
 	}
 	// Count even an interrupted publication's image: a crash cannot evade quota.
 	if count >= maxDevelopmentCaptures || total > maxDevelopmentCaptureBytes {
-		return out, errors.New("run capture limit reached; delete captures before taking another")
+		return out, errors.New("session capture limit reached; delete captures before taking another")
 	}
 	var nonce [16]byte
 	if _, err = rand.Read(nonce[:]); err != nil {

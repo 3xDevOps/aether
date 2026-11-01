@@ -191,16 +191,6 @@ const (
 	DeviceStatusRevoked    DeviceStatus = "revoked"
 )
 
-// ParseDeviceStatus returns the status s names, and refuses any other
-// value, the empty one included.
-func ParseDeviceStatus(s string) (DeviceStatus, error) {
-	switch d := DeviceStatus(s); d {
-	case DeviceStatusRegistered, DeviceStatusApproved, DeviceStatusPending, DeviceStatusRevoked:
-		return d, nil
-	}
-	return "", fmt.Errorf("edgeproto: unknown device status %q", s)
-}
-
 // ParseDeviceKey parses a device key: one Ed25519 authorized_keys line with
 // no options.
 func ParseDeviceKey(line string) (ssh.PublicKey, error) {

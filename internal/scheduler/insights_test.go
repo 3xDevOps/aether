@@ -28,7 +28,7 @@ func TestStatusChangesRecordTransitions(t *testing.T) {
 		t.Fatalf("Insights: %v", err)
 	}
 	if got.Totals.Killed != 1 || got.Durations.StateRunsMeasured != 1 || got.StateTimesSince == nil || got.StateTimesSince.Before(from) {
-		t.Fatalf("insights after a kill = totals %+v, durations %+v, state times since %v; want the run's transitions recorded",
+		t.Fatalf("insights after a kill = totals %+v, durations %+v, state times since %v; want the session's transitions recorded",
 			got.Totals, got.Durations, got.StateTimesSince)
 	}
 }

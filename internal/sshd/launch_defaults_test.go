@@ -27,12 +27,12 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 	boSigner, bo := addMember(t, e, "Bo", domain.RoleCollaborator, false)
 	_, cy := addMember(t, e, "Cy", domain.RoleCollaborator, false)
 	ana, boClient := controlClient(t, e), controlAs(t, e, boSigner)
-	if err := e.store.ShareAccount(ctx, bo.ID, e.member.ID); err != nil {
+	if _, err := e.store.ShareAccount(ctx, bo.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	children := e.store.(store.ChildStore)
-	childSettings := store.ChildSettings{Enabled: true, Fallback: false, Configured: true}
+	childSettings := store.ChildSettings{Enabled: true}
 	if err := children.PutChildSettings(ctx, e.member.ID, childSettings); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 		}
 	}
 
-	if err := e.store.RevokeAccountShare(ctx, bo.ID, e.member.ID); err != nil {
+	if _, err := e.store.RevokeAccountShare(ctx, bo.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := ana.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, &got); err != nil || got.Defaults.AccountMemberID != string(bo.ID) || got.Revision != saved.Revision {
@@ -235,4 +235,25 @@ func TestLaunchDefaultsSetRefusesOversizedShapesAndMembersWhoCannotLaunch(t *tes
 	pending := controlAs(t, e, pendingSigner)
 	wantDenied(t, pending.Call(protocol.MethodLaunchDefaultsSet, set, nil), "pending member launch.defaults.set")
 	wantDenied(t, pending.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, nil), "pending member launch.defaults.get")
+}
+
+// Settings' Forget saves the defaults with no agent, which clears the saved
+// agent and keeps the other agents' choices.
+func TestLaunchDefaultsSetWithNoAgentForgetsTheSavedAgent(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ana := controlClient(t, e)
+	var got protocol.LaunchDefaultsResult
+	first := protocol.LaunchDefaults{Agent: "claude", Agents: map[string]protocol.AgentLaunchDefault{"claude": {Mode: "acp"}, "codex": {Mode: "tui"}}}
+	if err := ana.Call(protocol.MethodLaunchDefaultsSet, protocol.LaunchDefaultsSetParams{Defaults: &first}, &got); err != nil {
+		t.Fatalf("launch.defaults.set: %v", err)
+	}
+	forget := protocol.LaunchDefaults{Agents: map[string]protocol.AgentLaunchDefault{"codex": {Mode: "tui"}}}
+	if err := ana.Call(protocol.MethodLaunchDefaultsSet, protocol.LaunchDefaultsSetParams{Defaults: &forget, Revision: got.Revision}, &got); err != nil {
+		t.Fatalf("launch.defaults.set with no agent: %v", err)
+	}
+	var read protocol.LaunchDefaultsResult
+	if err := ana.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, &read); err != nil || read.Defaults.Agent != "" || len(read.Defaults.Agents) != 1 || read.Defaults.Agents["codex"].Mode != "tui" {
+		t.Fatalf("launch.defaults.get after forgetting the agent = %+v, %v", read, err)
+	}
 }

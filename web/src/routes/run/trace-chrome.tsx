@@ -129,7 +129,7 @@ export function TraceAxisHeader({
         {wide && <span className="mr-auto text-ui-xs text-muted">Span</span>}
         {zoomed && (
           <Button variant="ghost" size="sm" hint="Escape" onClick={onWholeRun}>
-            Whole run
+            Whole session
           </Button>
         )}
         <Menu>

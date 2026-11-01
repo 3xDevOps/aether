@@ -4,14 +4,13 @@ import type { Route } from '@/store/ui'
 const renamedViews: Record<string, string> = { diff: 'changes' }
 
 const pageIDs: Record<string, string> = {
-  missions: 'missionId',
   workspace: 'workspaceId',
   insights: 'tab',
   settings: 'section',
   templates: 'template',
 }
 
-const keys = ['run', 'view', 'agent', 'repo', 'page', 'id', 'watch']
+const keys = ['run', 'view', 'agent', 'repo', 'page', 'id', 'watch', 'entry']
 
 const boardRoute: Route = { name: 'board', params: {} }
 
@@ -30,6 +29,7 @@ export function routeQuery(route: Route): URLSearchParams {
   const id = route.params[pageIDs[route.name] ?? '']
   if (id) query.set('id', id)
   if (route.name === 'settings' && route.params.watch) query.set('watch', route.params.watch)
+  if (route.name === 'settings' && route.params.entry) query.set('entry', route.params.entry)
   return query
 }
 
@@ -48,7 +48,8 @@ export function routeFromQuery(query: URLSearchParams): Route {
   const id = query.get('id')
   const param = pageIDs[page]
   const watch = page === 'settings' ? query.get('watch') : null
-  return { name: page, params: { ...(param && id ? { [param]: id } : {}), ...(watch ? { watch } : {}) } }
+  const entry = page === 'settings' ? query.get('entry') : null
+  return { name: page, params: { ...(param && id ? { [param]: id } : {}), ...(watch ? { watch } : {}), ...(entry ? { entry } : {}) } }
 }
 
 export function hrefFor(href: string, route: Route): string {

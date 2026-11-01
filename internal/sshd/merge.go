@@ -160,7 +160,7 @@ func (s *Server) refuseRetainedRuns(ctx context.Context, ms store.MergeStore, a,
 		return nil
 	}
 	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-		"stop these first, then merge: finished runs %s still keep their containers, which mount the members' agent logins; merge once the server releases them, or delete the runs (aether delete <run-id>)",
+		"stop these first, then merge: finished sessions %s still keep their containers, which mount the members' agent logins; merge once the server releases them, or delete the sessions (aether delete <session-id>)",
 		strings.Join(kept, ", "))}
 }
 
@@ -219,7 +219,7 @@ func (s *Server) memberMergePending(ctx context.Context, member domain.MemberID,
 }
 
 // memberMergeAccept merges under registerMu, so the last-admin check
-// holds, and authorizationMu, so no run, swarm or terminal is admitted for
+// holds, and authorizationMu, so no run or terminal is admitted for
 // either member while their rows move. Nothing changes, no terminal stops
 // and no lease is fenced, until the proposal is the caller's to accept as
 // it was proposed. The absorbed member's connections
@@ -319,8 +319,11 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 			}
 		}
 		var err error
-		merge, err = ms.AcceptMerge(ctx, accept)
-		return err
+		if merge, err = ms.AcceptMerge(ctx, accept); err != nil {
+			return err
+		}
+		noteChange(ctx)
+		return nil
 	}
 	// Only a run where either member holds the lease or a browser or shell
 	// surface has control the merge changes: the absorbed member's ends,

@@ -9,8 +9,8 @@ import (
 func init() {
 	register(command{
 		name:    "reopen",
-		short:   "reopen a finished run that still keeps its container",
-		usage:   "aether reopen <run-id>",
+		short:   "reopen a finished session that still keeps its container",
+		usage:   "aether reopen <session-id>",
 		example: "aether reopen run-d6ay38tj8j",
 		run:     runReopen,
 	})
@@ -18,14 +18,14 @@ func init() {
 
 func runReopen(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether reopen <run-id>")
+		return fmt.Errorf("usage: aether reopen <session-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.RunResult
 		if err := c.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: args[0]}, &res); err != nil {
 			return runNotFound(args[0], err)
 		}
-		fmt.Printf("run %s %s\n", res.Run.ID, res.Run.Status)
+		fmt.Printf("session %s %s\n", res.Run.ID, res.Run.Status)
 		return nil
 	})
 }

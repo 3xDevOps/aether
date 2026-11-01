@@ -15,9 +15,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-var ErrACPItemNotFound = errors.New("scheduler: no such session item")
+var ErrACPItemNotFound = errors.New("scheduler: no such conversation item")
 
-var errNoItemLog = errors.New("scheduler: the run has no session item log")
+var errNoItemLog = errors.New("scheduler: the session has no conversation item log")
 
 type ACPStream struct {
 	Replay []acphost.Item
@@ -176,8 +176,34 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 		return err
 	}
 	isModel := optionID == sess.ModelOptionID()
+	effortID := sess.EffortOptionID()
 	if err = sess.SetOption(ctx, optionID, value); err != nil {
 		return err
+	}
+	if effortID != "" && optionID == effortID {
+		effort := sess.Effort()
+		// Claude Code's adapter offers "default", which its CLI flag refuses.
+		if effort == "default" {
+			effort = ""
+		}
+		var stored *domain.Run
+		if stored, err = s.cfg.Store.GetRun(ctx, run); err != nil {
+			return fmt.Errorf("scheduler: load session to record its effort: %w", err)
+		}
+		if effort == stored.Effort {
+			return nil
+		}
+		if err = domain.ValidEffort(effort); err != nil {
+			if nerr := sess.Notice("error", "Effort not recorded", err.Error()); nerr != nil {
+				slog.Warn("scheduler: record the effort notice", "run", run, "error", nerr)
+			}
+			return nil
+		}
+		if err = s.cfg.Store.SetRunEffort(ctx, run, effort); err != nil {
+			return fmt.Errorf("scheduler: record the session's effort: %w", err)
+		}
+		s.publish(ctx, events.Event{WorkspaceID: stored.WorkspaceID, RunID: run, Payload: events.RunEffortPayload{Effort: effort}})
+		return nil
 	}
 	model := sess.Model()
 	if !isModel || model == "" {
@@ -185,7 +211,7 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 	}
 	stored, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return fmt.Errorf("scheduler: load run to record its model: %w", err)
+		return fmt.Errorf("scheduler: load session to record its model: %w", err)
 	}
 	if model == stored.Model {
 		return nil
@@ -197,13 +223,13 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 		return nil
 	}
 	if err = s.cfg.Store.SetRunModel(ctx, run, model); err != nil {
-		return fmt.Errorf("scheduler: record the run's model: %w", err)
+		return fmt.Errorf("scheduler: record the session's model: %w", err)
 	}
 	s.publish(ctx, events.Event{WorkspaceID: stored.WorkspaceID, RunID: run, Payload: events.RunModelPayload{Model: model}})
 	return nil
 }
 
-var errACPBusy = errors.New("scheduler: the enhanced session is busy")
+var errACPBusy = errors.New("scheduler: the Enhanced agent is busy")
 
 // Wakeable reports whether the server can prompt run's agent session: an
 // idle enhanced session, or a Standard Codex terminal attached to its

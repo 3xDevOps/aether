@@ -47,7 +47,7 @@ func (h *Host) admitSession(ctx context.Context, key SessionKey, a SessionAdmiss
 		defer mu.Unlock()
 		if closed || called {
 			repeated = true
-			return errors.New("ptyhost: session admission repeated or deferred")
+			return errors.New("ptyhost: terminal admission repeated or deferred")
 		}
 		called = true
 		if err := ctx.Err(); err != nil {
@@ -71,7 +71,7 @@ func (h *Host) admitSession(ctx context.Context, key SessionKey, a SessionAdmiss
 		return ErrWriteDenied
 	}
 	if repeated {
-		return errors.New("ptyhost: session admission repeated or deferred")
+		return errors.New("ptyhost: terminal admission repeated or deferred")
 	}
 	return effectErr
 }

@@ -1,15 +1,14 @@
 import { memo, type CSSProperties, type ReactNode } from 'react'
-import { ChevronRight, Waypoints } from '@/components/icons'
+import { ChevronRight, Network } from '@/components/icons'
 import { modeLabel } from '@/components/launch/modes'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatusDot, toneClasses, type Tone } from '@/components/ui/status-dot'
-import { compactAge } from '@/lib/format'
-import { stateDetail, stateLabel, stateTone } from '@/lib/status'
+import { compactAge, elapsed } from '@/lib/format'
+import { stateLabel, stateTone, stateWords } from '@/lib/status'
 import { cn, focusRingInset } from '@/lib/utils'
-import { elapsed } from '@/routes/missions/tree'
 import { xOf, type TimeWindow } from '@/routes/board/lanes/axis'
 import type { Lane, LaneMetrics, RunLane } from '@/routes/board/lanes/model'
 import { segmentTone, type Segment, type Stretch } from '@/routes/board/lanes/segments'
@@ -115,7 +114,8 @@ function barText(lane: RunLane): string {
   const { card } = lane
   if (lane.outcome) return stateLabel[card.state]
   if (card.group === 'needs-you') return card.reason
-  return [stateLabel[card.state], stateDetail(card)].filter(Boolean).join(' · ')
+  const words = stateWords(card)
+  return [words.label, words.detail].filter(Boolean).join(' · ')
 }
 
 function RunBar({ lane, g, now }: { lane: RunLane; g: LaneGeometry; now: number }) {
@@ -190,7 +190,7 @@ function RunLabel({ lane, agentName, compact, now }: { lane: RunLane; agentName?
       </span>
       <span className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
         <AgentGlyph agent={card.run.harness} />
-        <span className="min-w-0 truncate">{lane.handle ?? `${agentName ?? card.run.harness} · ${modeLabel(card.run.mode)}`}</span>
+        <span className="min-w-0 truncate">{`${agentName ?? card.run.harness} · ${modeLabel(card.run.mode)}`}</span>
         {card.workspaceName && <span className="min-w-0 truncate">· {card.workspaceName}</span>}
         <span className="ml-auto shrink-0 tabular-nums">{compactAge(card.run.created_at, now)}</span>
       </span>
@@ -245,11 +245,11 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
       label = <span className="min-w-0 truncate text-ui-sm text-muted">{lane.label}</span>
       track = <Strip strip={lane.strip} g={g} height={8} />
       break
-    case 'swarm':
+    case 'family':
       label = (
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <Chevron open={lane.open} />
-          <Waypoints aria-hidden className="size-3.5 shrink-0 text-muted" />
+          <Network aria-hidden className="size-3.5 shrink-0 text-muted" />
           <span className="flex min-w-0 flex-col">
             <span className="truncate text-ui leading-4 font-medium">{lane.title}</span>
             <span className="truncate text-ui-sm text-muted">{lane.detail}</span>
@@ -303,7 +303,7 @@ export const LaneRow = memo(function LaneRow({ lane, top, height, g, now, tree, 
         </span>
       )
   }
-  const header = g.compact && (lane.kind === 'section' || lane.kind === 'swarm')
+  const header = g.compact && (lane.kind === 'section' || lane.kind === 'family')
   return (
     <div
       role="treeitem"

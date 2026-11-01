@@ -38,7 +38,7 @@ test('back walks the steps without losing what they settled', async ({
 
   await wizard.repository.continue().click()
   await wizard.agent.skip().click()
-  await wizard.expectStep('First run')
+  await wizard.expectStep('First session')
   await wizard.back().click()
   await wizard.expectStep('Agent')
 

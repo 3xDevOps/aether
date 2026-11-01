@@ -81,7 +81,7 @@ func TestBackgroundRunOverACPFinishesOnEndTurn(t *testing.T) {
 	e, rt := newBackgroundEnv(t, enhancedAgent, true)
 	run := e.launchBackground(t, enhancedAgent, "say pong")
 	if !run.ACP {
-		t.Fatal("a background run of an agent with an installed ACP server is not driven over ACP")
+		t.Fatal("a background session of an agent with an installed ACP server is not driven over ACP")
 	}
 	c := e.rt.byName(string(run.ID))
 	cmd := strings.Join(c.spec.Command, " ")
@@ -97,7 +97,7 @@ func TestBackgroundRunOverACPFinishesOnEndTurn(t *testing.T) {
 
 	got := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if got.Reason != exitedCompletedReason || !got.ACP {
-		t.Fatalf("finished run %+v, want completed with %q", got, exitedCompletedReason)
+		t.Fatalf("finished session %+v, want completed with %q", got, exitedCompletedReason)
 	}
 	page, err := e.sched.ACPHistory(run.ID, 0, 0)
 	if err != nil {
@@ -148,122 +148,33 @@ func TestBackgroundRunOverACPFailsOnAnotherStop(t *testing.T) {
 	}
 }
 
-func TestBackgroundRunOverACPFailsWhenTheModelIsRefused(t *testing.T) {
-	t.Parallel()
-	e, rt := newBackgroundEnv(t, enhancedAgent, true)
-	// No configOptions, so the model goes through session/set_model, which
-	// the mock agent does not implement.
-	rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
-	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", enhancedAgent, domain.LaunchHeadless, domain.LaunchOptions{Model: "anthropic/claude-sonnet-4-5"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if want := exitedFailedReasonPrefix + "1: model not set: "; !strings.HasPrefix(got.Reason, want) {
-		t.Fatalf("reason %q, want prefix %q", got.Reason, want)
-	}
-	if slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
-		t.Fatal("the task ran on the agent's default model")
-	}
-}
-
-// A swarm worker is otherwise left running for CompleteMission; one whose
-// agent never got its task ends and frees its slot.
-func TestBackgroundWorkerOverACPEndsWhenItsTaskNeverStarted(t *testing.T) {
+func TestBackgroundRunOverACPFailsWhenItsSettingIsRefused(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
-		task, model string
-		legacy      bool
+		opts   domain.LaunchOptions
+		reason string
 	}{
-		"model refused":  {task: "say pong", model: "anthropic/claude-sonnet-4-5", legacy: true},
-		"prompt refused": {task: acpmock.PromptRefuse},
+		"model":  {domain.LaunchOptions{Model: "anthropic/claude-sonnet-4-5"}, "model not set: "},
+		"effort": {domain.LaunchOptions{Effort: "high"}, "effort not set: "},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			e, rt := newBackgroundEnv(t, enhancedAgent, true)
-			if tc.legacy {
-				rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
-			}
-			run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-				WorkspaceID: e.ws.ID, RunID: "unstarted-worker", Actor: e.member.ID,
-				RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: tc.task,
-				Harness: enhancedAgent, Mode: domain.LaunchHeadless, Model: tc.model,
-			})
+			// No configOptions: the model goes through session/set_model, which
+			// the mock agent does not implement, and there is no effort option.
+			rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
+			run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", enhancedAgent, domain.LaunchHeadless, tc.opts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			e.waitStoreStatus(t, run.ID, domain.RunFailed)
-			waitFor(t, "the worker observed as retained", func() bool {
-				observed, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
-				return err == nil && observed.State == MissionRunRetained
-			})
-			if tc.legacy && slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
-				t.Fatal("the task ran on the agent's default model")
+			got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+			if want := exitedFailedReasonPrefix + "1: " + tc.reason; !strings.HasPrefix(got.Reason, want) {
+				t.Fatalf("reason %q, want prefix %q", got.Reason, want)
+			}
+			if slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
+				t.Fatalf("the task ran without its %s", name)
 			}
 		})
-	}
-}
-
-// The wait prompt sends no update, so the cancel ends the turn before
-// Prompt's grace runs out: the session's acceptance must still count.
-func TestBackgroundWorkerOverACPParksWhenItsStartedTurnIsCancelled(t *testing.T) {
-	t.Parallel()
-	e, _ := newBackgroundEnv(t, enhancedAgent, true)
-	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-		WorkspaceID: e.ws.ID, RunID: "cancelled-worker", Actor: e.member.ID,
-		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: acpmock.PromptWait,
-		Harness: enhancedAgent, Mode: domain.LaunchHeadless,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "the turn", func() bool {
-		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
-	})
-	if err = e.sched.ACPCancel(t.Context(), run.ID); err != nil {
-		t.Fatal(err)
-	}
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	observed, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
-	if err != nil || observed.State != MissionRunActive {
-		t.Fatalf("observed %+v, %v; want the attempt still active", observed, err)
-	}
-}
-
-// A refused continuation is not an unstarted task: the worker keeps the
-// lifecycle of any failed turn and is left to CompleteMission.
-func TestBackgroundWorkerOverACPParksWhenItsResumeIsRefused(t *testing.T) {
-	t.Parallel()
-	e, rt := newBackgroundEnv(t, enhancedAgent, true)
-	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-		WorkspaceID: e.ws.ID, RunID: "resumed-worker", Actor: e.member.ID,
-		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: acpmock.PromptWait,
-		Harness: enhancedAgent, Mode: domain.LaunchHeadless,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "the turn", func() bool {
-		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
-	})
-	if err = e.sched.Close(); err != nil {
-		t.Fatal(err)
-	}
-	rt.fixture.RefusePrompts = true
-
-	cfg := e.cfg
-	cfg.PTY = newFakePTY()
-	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
-	s2, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s2.Close() })
-	startScheduler(t, s2)
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	observed, err := s2.ObserveMissionRun(t.Context(), run.ID)
-	if err != nil || observed.State != MissionRunActive {
-		t.Fatalf("observed %+v, %v; want the attempt still active", observed, err)
 	}
 }
 
@@ -359,7 +270,7 @@ func TestBackgroundRunKeepsCommandLine(t *testing.T) {
 			e, rt := newBackgroundEnv(t, tc.agent, tc.installed)
 			run := e.launchBackground(t, tc.agent, "say pong")
 			if run.ACP {
-				t.Fatal("the background run is driven over ACP")
+				t.Fatal("the background session is driven over ACP")
 			}
 			if cmd := e.rt.byName(string(run.ID)).spec.Command; !slices.Equal(cmd, []string{"fake-agent", "-p", withInstructions("say pong", e.sched.runInstructions(coordhooks.Guide{Role: coordhooks.RoleBackground, Background: true}))}) {
 				t.Fatalf("container command %q, want the headless command line", cmd)
@@ -438,7 +349,7 @@ func TestEnhancedClaudeRunStaysRunningWhileABackgroundTaskRuns(t *testing.T) {
 		t.Fatalf("status events %+v, want the one park after the follow-up", trail)
 	}
 	if !assistantSaidNow(e, run.ID, "background done") {
-		t.Fatal("the run parked before the background follow-up")
+		t.Fatal("the session parked before the background follow-up")
 	}
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if got.Reason != turnEndedReason {
@@ -469,7 +380,7 @@ func TestEnhancedClaudeRunParksWhileADevServerRuns(t *testing.T) {
 	run := e.launchClaudeACP(t, acpmock.PromptDevServer)
 	trail := e.statusTrail(t, sub, run.ID, parkedIdle)
 	if i := slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return strings.HasPrefix(p.Reason, agentstatus.ReasonBackground) }); i >= 0 {
-		t.Fatalf("status events %+v, want the dev server never to hold the run working", trail)
+		t.Fatalf("status events %+v, want the dev server never to hold the session working", trail)
 	}
 }
 
@@ -503,7 +414,7 @@ func TestEnhancedClaudeRunRestoredWithATaskPendingIsInterrupted(t *testing.T) {
 		sess := e.sched.acp.session(run.ID)
 		return sess != nil && assistantSaidNow(e, run.ID, "started") && sess.State().Background
 	})
-	waitFor(t, "the run to report its task", func() bool {
+	waitFor(t, "the session to report its task", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Reason == "working in background: 1 task"
 	})
@@ -520,7 +431,7 @@ func TestEnhancedClaudeRunRestoredWithATaskPendingIsInterrupted(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s2.Close() })
 	startScheduler(t, s2)
-	waitFor(t, "the restored run to report the interrupted turn", func() bool {
+	waitFor(t, "the restored session to report the interrupted turn", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Status == domain.RunNeedsAttention && r.Reason == acpInterruptedReason
 	})
@@ -548,7 +459,7 @@ func TestEnhancedClaudeRunKeepsAQuestionAskedBeforeItsTurnEndedWithTasksLive(t *
 		}
 	}
 	inject(acpmock.PromptBackground)
-	waitFor(t, "the run to report its task", func() bool {
+	waitFor(t, "the session to report its task", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Reason == "working in background: 1 task"
 	})
@@ -583,7 +494,7 @@ func TestEnhancedClaudeRunKeepsAQuestionAskedBeforeItsTurnEndedWithTasksLive(t *
 	asked := statusIndex(trail, domain.RunNeedsAttention, question)
 	for _, p := range trail[asked+1:] {
 		if p.To != domain.RunNeedsAttention || p.Reason != question {
-			t.Fatalf("status events %+v, want nothing to move the run off its question", trail[asked:])
+			t.Fatalf("status events %+v, want nothing to move the session off its question", trail[asked:])
 		}
 	}
 	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunNeedsAttention || r.Reason != question {
@@ -601,7 +512,7 @@ func TestEnhancedClaudeRunParksAQuestionAskedBetweenTurnsWithTasksLive(t *testin
 	e, _ := newACPEnv(t)
 	withCoordination(t, e)
 	run := e.launchClaudeACP(t, acpmock.PromptHold)
-	waitFor(t, "the run to report its task", func() bool {
+	waitFor(t, "the session to report its task", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && r.Reason == "working in background: 1 task"
 	})

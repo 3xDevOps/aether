@@ -18,14 +18,14 @@ import (
 var memoryUsages = map[string]string{
 	"memory": `usage: aether-internal memory <add|search|show|brief> [options]
 
-Team memory holds short, attributed notes that every run in this workspace
+Team memory holds short, attributed notes that every session in this workspace
 can search and write. ` + coordhooks.MemoryRule + `
 
 Commands:
   add     record a decision, convention, gotcha or preference
   search  list up to 10 matching notes, best first
   show    print one note with its provenance and supersede chain
-  brief   print this run's team memory brief
+  brief   print this session's team memory brief
 
 Output is text. A refusal prints the server's error on stderr with a
 nonzero exit, as for the other commands.
@@ -36,27 +36,27 @@ Record one note of at most 1024 bytes; its first line is its title. --file
 cites a repository path (repeatable, at most 20). --supersedes replaces a
 note; an agent may replace only an unpinned note an agent wrote. --scope me
 makes it a member-scope note: a pin on it enters only the pinning member's
-briefs. The server records your member, run, harness and commit, and
+briefs. The server records your member, session, harness and commit, and
 refuses text holding a secret. The note is searchable at once and reaches
-new runs only after a member pins it. Put -- before text that starts with a
+new sessions only after a member pins it. Put -- before text that starts with a
 dash.
 `,
 	"memory search": `usage: aether-internal memory search [--kind <kind>] [--file <path>] [--all] [<words>]
 
 Print up to 10 notes matching any of the words, best first; without words,
-the newest. Each line: id, kind, source, member/harness, run, age, cited
+the newest. Each line: id, kind, source, member/harness, session, age, cited
 files, pull request and the first 100 characters. --file keeps notes citing
 that path; --all includes replaced notes.
 `,
 	"memory show": `usage: aether-internal memory show <id>
 
-Print one note's full text, author, run, harness, commit, cited files, pull
+Print one note's full text, author, session, harness, commit, cited files, pull
 request and pin, then the notes it replaced or was replaced by.
 `,
 	"memory brief": `usage: aether-internal memory brief
 
-Print this run's team memory brief exactly as the server builds it now: pinned
-notes and recently finished runs. Prints nothing when there is nothing to
+Print this session's team memory brief exactly as the server builds it now: pinned
+notes and recently finished sessions. Prints nothing when there is nothing to
 brief.
 `,
 }
@@ -72,7 +72,7 @@ const memoryAddSkill = `After solving a non-obvious failure, record a gotcha; wh
 approaches, record the decision and why:
   aether-internal memory add --kind gotcha --file <path> "<symptom, cause, fix>"
   aether-internal memory add --kind decision "<choice and why>"
-A note reaches new runs only after a member pins it. Promote a stable
+A note reaches new sessions only after a member pins it. Promote a stable
 convention into AGENTS.md or CLAUDE.md through a pull request.
 `
 
@@ -186,9 +186,9 @@ func memoryAdd(ctx context.Context, socket string, args []string) (string, error
 		fmt.Fprintf(&b, "%s saved.\n", item.ID)
 	}
 	if item.PinnedAt != nil {
-		fmt.Fprintf(&b, "Pinned by %s: it reaches new runs.\n", cmp.Or(item.PinnedByName, item.PinnedBy))
+		fmt.Fprintf(&b, "Pinned by %s: it reaches new sessions.\n", cmp.Or(item.PinnedByName, item.PinnedBy))
 	} else {
-		fmt.Fprintf(&b, "Searchable now; reaches new runs only after a member pins it: aether memory pin %s\n", item.ID)
+		fmt.Fprintf(&b, "Searchable now; reaches new sessions only after a member pins it: aether memory pin %s\n", item.ID)
 	}
 	if len(out.Similar) > 0 {
 		b.WriteString("Similar notes:\n")
@@ -249,7 +249,7 @@ func memoryShow(ctx context.Context, socket string, args []string) (string, erro
 		}
 	}
 	field("Author", memoryAuthor(item))
-	field("Run", item.RunID)
+	field("Session", item.RunID)
 	field("Harness", item.Harness)
 	field("Commit", item.Commit)
 	field("Files", strings.Join(item.Files, ", "))

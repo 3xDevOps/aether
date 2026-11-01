@@ -90,7 +90,7 @@ func NewManager(root string, runtime containerruntime.Runtime, config Config) (*
 
 func (m *Manager) entry(run Run) (*managedRun, string, error) {
 	if run.ID == "" || run.ContainerID == "" {
-		return nil, "", errors.New("browser run and container identities are required")
+		return nil, "", errors.New("browser session and container identities are required")
 	}
 	digest := sha256.Sum256([]byte(run.ID))
 	name := hex.EncodeToString(digest[:16])
@@ -158,7 +158,7 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 	}
 	persisted := status
 	if status.RunID != run.ID || status.RunContainer != run.ContainerID {
-		return status, nil, fmt.Errorf("%w: run container identity changed", ErrUnavailable)
+		return status, nil, fmt.Errorf("%w: session container identity changed", ErrUnavailable)
 	}
 	if status.CreationKey == "" {
 		return status, nil, errors.New("browser lifecycle journal has no creation identity")
@@ -199,7 +199,7 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 	}
 	if status.ProcessID != "" && status.ProcessID != health.ProcessID {
 		status.State = "session_lost"
-		status.Reason = "Companion process restarted and its previous browser session was lost; explicit restart required"
+		status.Reason = "Companion process restarted and its previous browser context was lost; explicit restart required"
 		if status != persisted {
 			if err := saveStatus(dir, status); err != nil {
 				return status, nil, err
@@ -319,7 +319,7 @@ func (m *Manager) transition(ctx context.Context, run Run, action string) (Statu
 		return status, err
 	}
 	if status.RunID != run.ID || status.RunContainer != run.ContainerID {
-		return status, errors.New("browser lifecycle run identity mismatch")
+		return status, errors.New("browser lifecycle session identity mismatch")
 	}
 	if status.ContainerID == "" {
 		status.ContainerID, err = m.runtime.FindByCreationKey(ctx, status.CreationKey)

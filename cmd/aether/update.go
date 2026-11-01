@@ -123,7 +123,7 @@ func runUpdate(args []string) error {
 	if len(replaced) > 1 {
 		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart aether-server\n", *tag)
 		if offerSysbox(ctx, "/etc/os-release", dockerRuntimes) {
-			fmt.Println("Let agents use Docker inside runs: sudo aether-server sysbox install (or Settings → Server in the dashboard)")
+			fmt.Println("Let agents use Docker inside sessions: sudo aether-server sysbox install (or Settings → Server in the dashboard)")
 		}
 	}
 	warnShadowed(os.Stderr, replaced[0])
@@ -176,7 +176,7 @@ func handOffToServerUpdate(ctx context.Context, tag string, out io.Writer) (hand
 	}
 	_, _ = fmt.Fprintf(out, "this is a server host; handing off to: sudo %s\n", strings.Join(argv, " "))
 	if err := execProcess(server, argv, os.Environ()); err != nil {
-		return false, fmt.Errorf("run %s: %w", strings.Join(argv, " "), err)
+		return false, fmt.Errorf("session %s: %w", strings.Join(argv, " "), err)
 	}
 	return true, nil
 }

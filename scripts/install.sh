@@ -214,7 +214,10 @@ if [ -z "$ROLE" ] && [ "$have_tty" = no ]; then
 fi
 
 if [ -z "$ROLE" ]; then
-	if [ "$COMPONENTS" != "client" ] && [ "$os" = "linux" ]; then
+	# A Linux machine with a desktop session is more likely the computer
+	# someone works at than the box agents run on.
+	if [ "$COMPONENTS" != "client" ] && [ "$os" = "linux" ] &&
+		[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
 		role_default="server"
 	else
 		role_default="client"
@@ -860,9 +863,11 @@ next_step() {
 }
 
 link_steps() {
-	next_step "aether login" "$1"
-	next_step "aether link --claim <code>" "code from server setup or \`sudo aether-server edge claim-code\`"
-	next_step "aether link $2:2222" "instead, on a tailnet or without the edge"
+	printf '  %s\n' "$1"
+	next_step "aether link $2" "on a tailnet: the server's tailnet name"
+	next_step "aether login" "otherwise, sign in to the edge, Aether's relay"
+	next_step "aether link --claim <code>" "with the claim link server setup printed"
+	next_step "aether link '<invite link>'" "or with an invite link from an admin"
 }
 
 echo
@@ -872,11 +877,7 @@ client) echo "This machine is a client: you work here and connect to a server." 
 *) echo "The binaries are installed. Nothing else was set up on this machine." ;;
 esac
 echo
-echo "Read the quickstart before going further. It is ten minutes to a finished agent"
-echo "run, and skipping it is how people end up stuck."
-echo
-echo "  ${quickstart}"
-echo
+echo "Quickstart, ten minutes to a finished agent run: ${quickstart}"
 echo "Install reference: https://github.com/${REPO}/blob/main/docs/install.md"
 echo
 echo "${hi}next:${lo}"
@@ -894,10 +895,14 @@ server)
 	else
 		next_step "sudo aether-server setup" "config, systemd unit, and how to start it"
 	fi
-	link_steps "from your own machine, sign in to the edge" "<this-host>"
+	link_steps "then, on your computer:" "<this-host>"
 	;;
 client)
-	link_steps "sign in to the edge" "<server-host>"
+	if [ "$gui_built" = yes ]; then
+		link_steps "open Aether from your applications to link your server, or in a terminal:" "<server-host>"
+	else
+		link_steps "link your server:" "<server-host>"
+	fi
 	if [ "$gui_built" != yes ]; then
 		next_step "aether gui build" "the desktop app, or run \`aether gui\` for a browser tab"
 	fi
@@ -912,6 +917,6 @@ client)
 	elif [ "$COMPONENTS" != "client" ]; then
 		next_step "sudo aether-server setup" "on the server box: config, systemd unit, activation line"
 	fi
-	link_steps "from a client, sign in to the edge" "<server>"
+	link_steps "then, on a client:" "<server>"
 	;;
 esac

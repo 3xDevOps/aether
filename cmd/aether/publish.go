@@ -16,8 +16,8 @@ import (
 func init() {
 	register(command{
 		name:  "publish",
-		short: "push a run's branch and open a pull request into its base branch, as the dashboard's Publish does",
-		usage: "aether publish <run-id> [--repo <workspace>]",
+		short: "push a session's branch and open a pull request into its base branch, as the dashboard's Publish does",
+		usage: "aether publish <session-id> [--repo <workspace>]",
 		example: "aether publish run-d6ay38tj8j\n" +
 			"aether publish run-d6ay38tj8j --repo app",
 		flags: true,
@@ -27,8 +27,8 @@ func init() {
 
 func runPublish(args []string) error {
 	fs := newFlagSet("publish")
-	repo := fs.String("repo", "", "publish this extra repository of a multi-repo run, by workspace ID or name (default: the primary)")
-	const usage = "usage: aether publish <run-id> [--repo <workspace>]"
+	repo := fs.String("repo", "", "publish this extra repository of a multi-repo session, by workspace ID or name (default: the primary)")
+	const usage = "usage: aether publish <session-id> [--repo <workspace>]"
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, usage)
@@ -56,7 +56,7 @@ func repoFailure(runID, message string, out protocol.RunRepoCommandOutput, actua
 
 // publishGap words each gap as web/src/routes/diff/publish-push.tsx does.
 func publishGap(runID string, st protocol.RunGitStatusResult, push protocol.RunGitPushTarget) error {
-	terminal := fmt.Sprintf("in the run's terminal (aether attach %s), then run aether publish %s again", runID, runID)
+	terminal := fmt.Sprintf("in the session's terminal (aether attach %s), then run aether publish %s again", runID, runID)
 	switch {
 	case len(st.Remotes) == 0:
 		return fmt.Errorf("this checkout has no remote. Add one with git %s", terminal)
@@ -74,7 +74,7 @@ func publish(c *protocol.Client, w, notes io.Writer, runID, repoName string) err
 		return err
 	}
 	if !domain.RunStatus(r.Status).Live() {
-		return fmt.Errorf("run %s is %s and publishing needs its container. A run closed or reported within the last 7 days keeps it: aether reopen %s, then aether publish %s. An interrupted run, or one that failed without reporting, cannot be reopened. Either way aether pull %s fetches the branch", r.ID, r.Status, r.ID, r.ID, r.ID)
+		return fmt.Errorf("session %s is %s and publishing needs its container. A session closed or reported within the last 7 days keeps it: aether reopen %s, then aether publish %s. An interrupted session, or one that failed without reporting, cannot be reopened. Either way aether pull %s fetches the branch", r.ID, r.Status, r.ID, r.ID, r.ID)
 	}
 	var list protocol.WorkspaceListResult
 	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
@@ -89,14 +89,14 @@ func publish(c *protocol.Client, w, notes io.Writer, runID, repoName string) err
 		if id != r.WorkspaceID {
 			j := slices.IndexFunc(r.Repos, func(rr protocol.RunRepo) bool { return rr.WorkspaceID == id })
 			if j < 0 {
-				return fmt.Errorf("--repo %s is not one of run %s's repos", repoName, r.ID)
+				return fmt.Errorf("--repo %s is not one of session %s's repos", repoName, r.ID)
 			}
 			repo, wsID, base = id, id, r.Repos[j].BaseBranch
 		}
 	}
 	i := slices.IndexFunc(list.Workspaces, func(ws protocol.Workspace) bool { return ws.ID == wsID })
 	if i < 0 {
-		return fmt.Errorf("workspace %s of run %s not found", wsID, r.ID)
+		return fmt.Errorf("workspace %s of session %s not found", wsID, r.ID)
 	}
 	ws := list.Workspaces[i]
 	base = cmp.Or(base, ws.BaseBranch)
@@ -109,13 +109,13 @@ func publish(c *protocol.Client, w, notes io.Writer, runID, repoName string) err
 		return repoFailure(r.ID, st.Error, st.Output, nil)
 	}
 	if st.Detached || st.Branch == "" {
-		return fmt.Errorf("the checkout is on a detached HEAD at %s. Check out a branch in the run's terminal (aether attach %s), then run aether publish %s again", st.Head, r.ID, r.ID)
+		return fmt.Errorf("the checkout is on a detached HEAD at %s. Check out a branch in the session's terminal (aether attach %s), then run aether publish %s again", st.Head, r.ID, r.ID)
 	}
 	if repo == "" && st.Head == r.BaseCommit {
 		if len(st.Changes) > 0 {
-			return fmt.Errorf("run %s's branch %s has no commit beyond its base %s, and %s uncommitted; publish pushes commits only. Ask the agent to commit (aether message %s \"commit your changes\"), then run aether publish %s again", r.ID, st.Branch, r.BaseCommit, plural(len(st.Changes), "change"), r.ID, r.ID)
+			return fmt.Errorf("session %s's branch %s has no commit beyond its base %s, and %s uncommitted; publish pushes commits only. Ask the agent to commit (aether message %s \"commit your changes\"), then run aether publish %s again", r.ID, st.Branch, r.BaseCommit, plural(len(st.Changes), "change"), r.ID, r.ID)
 		}
-		return fmt.Errorf("run %s's branch %s has no commit beyond its base %s; nothing to publish", r.ID, st.Branch, r.BaseCommit)
+		return fmt.Errorf("session %s's branch %s has no commit beyond its base %s; nothing to publish", r.ID, st.Branch, r.BaseCommit)
 	}
 	push := protocol.DefaultPushTarget(st.Remotes, st.Upstream, st.Branch, ws.Origin != "")
 	if err := publishGap(r.ID, st, push); err != nil {
@@ -140,14 +140,14 @@ func publish(c *protocol.Client, w, notes io.Writer, runID, repoName string) err
 			return repoFailure(r.ID, cmp.Or(found.Error, "the checkout moved"), found.Output, found.Actual)
 		}
 		if !prInReview(found.PullRequest) && strings.TrimSpace(st.HeadSubject) == "" {
-			return fmt.Errorf("a pull request needs a title, and the head commit %s has no subject. Amend it in the run's terminal (aether attach %s), then run aether publish %s again", st.Head, r.ID, r.ID)
+			return fmt.Errorf("a pull request needs a title, and the head commit %s has no subject. Amend it in the session's terminal (aether attach %s), then run aether publish %s again", st.Head, r.ID, r.ID)
 		}
 		if found.Identity == "" {
 			detail := ""
 			if st.IdentityError != "" {
 				detail = " (" + st.IdentityError + ")"
 			}
-			return fmt.Errorf("a pull request is opened with the run account's GitHub login, and it has none%s. Connect GitHub (gh auth login in aether terminal, then aether github connect), then run aether publish %s again", detail, r.ID)
+			return fmt.Errorf("a pull request is opened with the session account's GitHub login, and it has none%s. Connect GitHub (gh auth login in aether terminal, then aether github connect), then run aether publish %s again", detail, r.ID)
 		}
 	}
 

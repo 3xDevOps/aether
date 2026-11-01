@@ -1,24 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Camera, Copy, Eye, GitBranch, Lock, PanelRight, ScrollText } from '@/components/icons'
-import { RunChildNudge } from '@/components/child-nudge'
+import { permissionLabel, permissions } from '@/components/launch/permission-control'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
 import { ConnectionLine } from '@/components/shell/connection'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PaneHeader } from '@/components/ui/pane-header'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { StatusDot } from '@/components/ui/status-dot'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { extraRepoCount, repoLabel } from '@/lib/repos'
+import { isSudo } from '@/lib/run-requests'
 import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateLabel, stateTitle, stateWords } from '@/lib/status'
+import { runLabel, stateName, stateTitle, stateWords, toneOf, waitLine } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { watchHint, watchRoute } from '@/lib/watches'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -54,7 +57,6 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   const now = useClock()
   const condition = useStore((s) => needsYou(run, stateContextOf(s, now)))
   const room = useStore((s) => s.roomMessages[run.id])
-  const navigate = useStore((s) => s.navigate)
   const selfID = useStore((s) => s.info?.member.id)
   if (!condition) return null
 
@@ -68,8 +70,6 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   switch (condition.target) {
     case 'changes':
       return view === 'changes' ? null : { label: action.label, act: () => nav.go('changes') }
-    case 'swarm':
-      return run.mission_id ? { label: action.label, act: () => navigate('missions', { missionId: run.mission_id! }) } : null
     case 'notes': {
       const question = unansweredQuestions(room ?? []).find((m) => m.actor_id !== run.member_id)
       return { label: action.label, act: () => nav.reveal(question ? requestCardID.question(question.id) : 'details-needs-you') }
@@ -77,8 +77,8 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
     case 'request': {
       if (action.label === terminalAction.label) return openTerminal()
       const steer = condition.id === 'queued-message' ? queuedSteers(room ?? []).find((m) => m.actor_id !== selfID) : undefined
-      const input = run.pending_inputs?.[0]
-      if (!steer && input && run.acp) return { label: action.label, act: () => nav.focusRequest() }
+      const input = run.pending_inputs?.find((request) => isSudo(request) === (condition.id === 'sudo'))
+      if (!steer && input && run.acp && !isSudo(input)) return { label: action.label, act: () => nav.focusRequest() }
       const card = steer ? requestCardID.steer(steer.id) : input ? requestCardID.input(input.id) : 'details-needs-you'
       return { label: action.label, act: () => nav.reveal(card) }
     }
@@ -87,6 +87,22 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
     case 'run':
       return null
   }
+}
+
+/** A phone's header line cuts what a wait last read short, so it gets a line of its own. */
+function WaitLine({ run }: { run: RunRecord }) {
+  const shown = useRunPresentation(run)
+  const now = useClock()
+  const line = shown.state === 'needs-you' && shown.wait?.kind === 'system_fault'
+    ? stateWords(shown, undefined, now).detail
+    : waitLine(shown.wait, shown.state, now)
+  if (!line) return null
+  return (
+    <p className="flex gap-1.5 border-b border-seam px-4 py-1 text-ui-sm text-muted">
+      <StatusDot tone={toneOf(shown)} className="mt-1" />
+      <span className="min-w-0 break-words">{line}</span>
+    </p>
+  )
 }
 
 function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
@@ -106,7 +122,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   // The Workflow chip under the header shows the state's own label.
   const detail = [
     subagents > 0 && `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running`,
-    words.label !== stateLabel[state] && words.label,
+    words.label !== stateName(presentation) && words.label,
     words.detail,
   ]
     .filter(Boolean)
@@ -120,7 +136,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const navigate = useStore((s) => s.navigate)
   return (
     <div className="@container/state flex w-full min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-ui-sm text-muted">
-      <span role="status" className="sr-only">{stateLabel[state]}</span>
+      <span role="status" className="sr-only">{stateName(presentation)}</span>
       {run.branch && (
         <>
           <Button
@@ -144,11 +160,17 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
           <span aria-hidden>·</span>
         </>
       )}
-      <span className="flex min-w-0 items-center gap-1.5" title={[agentName, mode, run.model].filter(Boolean).join(' · ')}>
+      <span className="flex min-w-0 items-center gap-1.5" title={[agentName, mode, run.model, run.effort].filter(Boolean).join(' · ')}>
         <AgentGlyph agent={run.harness} />
         <span className="sr-only">{agentName} · </span>
         <span className="min-w-0 truncate">{mode}</span>
       </span>
+      {run.permission && run.permission !== 'default' && (
+        <>
+          <span aria-hidden>·</span>
+          <Badge tone={run.permission === 'root' ? 'needs-you' : 'neutral'} title={permissions.find((p) => p.value === run.permission)?.detail}>{permissionLabel(run.permission)}</Badge>
+        </>
+      )}
       {accountID && (
         <>
           <span aria-hidden>·</span>
@@ -219,7 +241,7 @@ export function ViewSwitch({ view, views }: { view: RunView; views: RunView[] })
     <TabsList
       ref={strip}
       look="segmented"
-      aria-label="Run views"
+      aria-label="Session views"
       onScroll={measure}
       className={cn('overflow-x-auto [scrollbar-width:none]', more && '[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]')}
     >
@@ -277,12 +299,12 @@ export function RunHeader({
         title={
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate">{runLabel(run)}</span>
-            {run.protected && <Lock role="img" aria-label="Protected: only the owner or an admin can message, control or stop this run" className="size-3.5 shrink-0 text-muted" />}
+            {run.protected && <Lock role="img" aria-label="Protected: only the owner or an admin can message, control or stop this session" className="size-3.5 shrink-0 text-muted" />}
           </span>
         }
         stateLine={!composing && <StateLine run={run} agentName={agentName} />}
         onOpenSidebar={!mobile && collapsed ? toggleSidebar : undefined}
-        actionsLabel="Run actions"
+        actionsLabel="Session actions"
         actions={
           <>
             {primary && <Button size="sm" onClick={primary.act}>{primary.label}</Button>}
@@ -311,9 +333,9 @@ export function RunHeader({
           </>
         }
       />
+      {mobile && !composing && <WaitLine run={run} />}
       <RunLineage run={run} />
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
-      <RunChildNudge run={run} />
       {!composing && (
         <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch view={view} views={views} />

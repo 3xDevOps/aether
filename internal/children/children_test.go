@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	agentharness "github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -28,6 +30,8 @@ type fakeRuns struct {
 	launched []domain.LaunchOptions
 	accounts []domain.MemberID
 	killed   []domain.RunID
+	closed   []domain.RunID
+	paused   map[domain.RunID]bool
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
@@ -48,13 +52,42 @@ func (f *fakeRuns) LaunchWithOptions(ctx context.Context, ws domain.WorkspaceID,
 	return r, nil
 }
 
-func (f *fakeRuns) Kill(ctx context.Context, run domain.RunID, _ domain.MemberID) error {
+func (f *fakeRuns) StopForParent(ctx context.Context, run, parent domain.RunID) error {
 	f.mu.Lock()
 	f.killed = append(f.killed, run)
 	f.mu.Unlock()
 	now := time.Now()
-	_, err := f.db.UpdateRunStatus(ctx, run, domain.RunFailed, "killed", "", nil, &now)
+	_, err := f.db.UpdateRunStatus(ctx, run, domain.RunCompleted, "stopped by parent session "+string(parent), "", nil, &now)
 	return err
+}
+
+func (f *fakeRuns) Paused(run domain.RunID) bool { return f.paused[run] }
+
+func (f *fakeRuns) WakeRefusal(agent string, mode domain.LaunchMode) error {
+	return agentharness.WakeRefusal(agent, mode)
+}
+
+func (f *fakeRuns) CloseRun(ctx context.Context, run domain.RunID, _ domain.MemberID, outcome domain.RunStatus) error {
+	f.mu.Lock()
+	f.closed = append(f.closed, run)
+	f.mu.Unlock()
+	now := time.Now()
+	_, err := f.db.UpdateRunStatus(ctx, run, outcome, "closed", "", nil, &now)
+	return err
+}
+
+func (f *fakeRuns) Review(ctx context.Context, run domain.RunID, _ domain.MemberID, _ string, _ bool) (*domain.Run, error) {
+	if r, err := f.db.GetRun(ctx, run); err == nil && r.Status.Terminal() && r.Status != domain.RunCompleted {
+		return nil, errors.New("a final run cannot be marked complete")
+	}
+	f.mu.Lock()
+	f.closed = append(f.closed, run)
+	f.mu.Unlock()
+	_, _, err := f.db.SetRunReview(ctx, run, domain.ReviewAccepted, "")
+	if err != nil {
+		return nil, err
+	}
+	return f.db.GetRun(ctx, run)
 }
 
 func (f *fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
@@ -93,18 +126,38 @@ type mail struct {
 	body     string
 }
 
+// fakeMail dedupes by key, or, with db set, appends to the real mailbox and
+// keeps the errors it returns.
 type fakeMail struct {
 	mu   sync.Mutex
 	sent []mail
 	keys map[string]bool
 	fail bool
+	db   *store.DB
+	errs []error
 }
 
-func (m *fakeMail) Notify(_ context.Context, from, to domain.RunID, body, _, key string) error {
+func (m *fakeMail) Notify(ctx context.Context, from, to domain.RunID, body, _, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.fail {
 		return errors.New("inbox full")
+	}
+	if m.db != nil {
+		target, err := m.db.GetRun(ctx, to)
+		if err != nil {
+			return err
+		}
+		created, err := m.db.AppendRunMessageCreated(ctx, &store.RunMessage{WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to,
+			Kind: store.RunMessageKindMessage, Body: body, IdempotencyKey: key}, protocol.CoordMaxUnread)
+		if err != nil {
+			m.errs = append(m.errs, err)
+			return err
+		}
+		if created {
+			m.sent = append(m.sent, mail{from, to, body})
+		}
+		return nil
 	}
 	if m.keys[key] {
 		return nil
@@ -121,6 +174,7 @@ type harness struct {
 	svc    *Service
 	runs   *fakeRuns
 	mail   *fakeMail
+	now    time.Time
 	agents *fakeAgents
 	ws     *domain.Workspace
 	ada    *domain.Member
@@ -135,7 +189,8 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
+	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db, paused: map[domain.RunID]bool{}}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
+	h.now = time.Now()
 	h.ws = &domain.Workspace{Name: "app"}
 	if err = db.CreateWorkspace(ctx, h.ws); err != nil {
 		t.Fatal(err)
@@ -149,6 +204,7 @@ func newHarness(t *testing.T) *harness {
 			return fallback.ResolveLaunchAccount(ctx, st, actor, account)
 		},
 		AuthorizationMu: &mu,
+		Now:             func() time.Time { return h.now },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +273,7 @@ func (h *harness) mustStart(parent domain.RunID, p protocol.ChildStartParams) pr
 	h.t.Helper()
 	out, err := h.start(parent, p)
 	if err != nil {
-		h.t.Fatalf("child start: %v", err)
+		h.t.Fatalf("subsession start: %v", err)
 	}
 	return out
 }
@@ -237,7 +293,7 @@ func (h *harness) settle() {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	h.t.Fatal("children still launching")
+	h.t.Fatal("subsessions still launching")
 }
 
 func code(err error) int {
@@ -248,40 +304,22 @@ func code(err error) int {
 	return 0
 }
 
-func TestOffByDefaultAndRefusalMarksTheRun(t *testing.T) {
+func TestOnByDefaultAndOffRefuses(t *testing.T) {
 	h := newHarness(t)
 	parent := h.run(h.ada.ID, domain.LaunchACP, "fix login")
-	_, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"})
-	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Settings → Child runs") {
-		t.Fatalf("start with child runs off = %v, want a denial pointing at Settings", err)
-	}
-	r, _ := h.db.GetRun(h.ctx, parent.ID)
-	if !r.ChildRefused {
-		t.Fatal("a refused start did not mark the run for the nudge")
-	}
 	settings, _ := h.svc.Settings(h.ctx, h.ada.ID)
-	if settings.Enabled || settings.Configured || !settings.Fallback || settings.SharedWhenMissing || settings.Nudge != protocol.ChildNudgeShow {
-		t.Fatalf("default settings = %+v", settings)
+	if !settings.Enabled {
+		t.Fatalf("default settings = %+v, want subsessions on", settings)
 	}
-}
-
-func TestMemberSettingPersistsAndNudgeSnoozes(t *testing.T) {
-	h := newHarness(t)
-	for i, want := range []string{protocol.ChildNudgeSnoozed, protocol.ChildNudgeSnoozed, protocol.ChildNudgeNever} {
-		got, err := h.svc.SetSettings(h.ctx, h.ada.ID, protocol.ChildSettingsParams{Nudge: protocol.ChildNudgeLater})
-		if err != nil || got.Nudge != want || got.Enabled || got.Configured {
-			t.Fatalf("later #%d = %+v, %v; want nudge %s, still off and unconfigured", i+1, got, err, want)
-		}
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "review"})
+	off := false
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: &off})
+	_, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "again"})
+	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Settings → Subsessions") {
+		t.Fatalf("start with subsessions off = %v, want a denial pointing at Settings", err)
 	}
-	h.enable(h.bob.ID, protocol.ChildSettingsParams{Nudge: protocol.ChildNudgeNever})
-	h.enable(h.bob.ID, protocol.ChildSettingsParams{Enabled: on(), SharedWhenMissing: on()})
-	got, _ := h.svc.Settings(h.ctx, h.bob.ID)
-	if !got.Enabled || !got.Configured || !got.SharedWhenMissing || !got.Fallback {
-		t.Fatalf("saved settings = %+v", got)
-	}
-	ada, _ := h.svc.Settings(h.ctx, h.ada.ID)
-	if ada.Enabled {
-		t.Fatal("one member's setting enabled another's")
+	if bob, _ := h.svc.Settings(h.ctx, h.bob.ID); !bob.Enabled {
+		t.Fatal("one member's setting changed another's")
 	}
 }
 
@@ -295,11 +333,13 @@ func TestRunSettingOverridesOnlyWhileItsSetterOwnsTheRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
+	off := false
+	h.enable(h.bob.ID, protocol.ChildSettingsParams{Enabled: &off})
 	if err := h.db.TransferRun(h.ctx, parent.ID, h.bob.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("after a handoff to a member with child runs off = %v, want denied", err)
+		t.Fatalf("after a handoff to a member with subsessions off = %v, want denied", err)
 	}
 }
 
@@ -323,18 +363,18 @@ func TestStartIsIdempotentAndQueuesBeyondTheLimit(t *testing.T) {
 		h.mustStart(a.ID, protocol.ChildStartParams{Harness: "codex", Task: fmt.Sprintf("review part %d", i)})
 	}
 	h.settle()
-	counts, _ := h.db.ChildCounts(h.ctx, string(a.ID))
-	if counts.Busy != 2 || counts.Queued != 2 || counts.Total != 4 {
-		t.Fatalf("counts = %+v, want 2 busy, 2 queued of 4", counts)
+	counts, _ := h.db.ChildCounts(h.ctx, a.ID)
+	if counts.Busy != 2 || counts.Queued != 2 {
+		t.Fatalf("counts = %+v, want 2 busy, 2 queued", counts)
 	}
-	kids, _ := h.db.ListChildren(h.ctx, a.ID, false)
+	kids, _ := h.db.ListChildren(h.ctx, a.ID)
 	if _, err := h.db.UpdateRunStatus(h.ctx, kids[0].RunID, domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	h.settle()
-	counts, _ = h.db.ChildCounts(h.ctx, string(a.ID))
+	counts, _ = h.db.ChildCounts(h.ctx, a.ID)
 	if counts.Busy != 2 || counts.Queued != 1 {
-		t.Fatalf("after one child reported: %+v, want a queued child started", counts)
+		t.Fatalf("after one subsession reported: %+v, want a queued subsession started", counts)
 	}
 	for _, opts := range h.runs.launched {
 		if opts.FromCommit != strings.Repeat("a", 40) || opts.ReservedRunID == "" {
@@ -343,53 +383,27 @@ func TestStartIsIdempotentAndQueuesBeyondTheLimit(t *testing.T) {
 	}
 }
 
-func TestQueueStartsTheParentWithFewestBusyChildrenFirst(t *testing.T) {
+func TestAChildCannotStartChildren(t *testing.T) {
 	h := newHarness(t)
-	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
-	two := 2
-	if _, err := h.svc.SetLimits(h.ctx, protocol.WorkspaceChildLimitsParams{WorkspaceID: string(h.ws.ID), MaxLive: &two}); err != nil {
-		t.Fatal(err)
-	}
-	root := h.run(h.ada.ID, domain.LaunchACP, "root")
-	first := h.mustStart(root.ID, protocol.ChildStartParams{Harness: "codex", Task: "child a"})
-	h.mustStart(root.ID, protocol.ChildStartParams{Harness: "codex", Task: "child b"})
-	h.settle()
-	// Child a parks waiting on its own children, which frees its slot; a
-	// waiting parent never holds one, so its reviewer cannot deadlock it.
-	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(first.RunID), domain.RunNeedsAttention, "waiting for 1 child run", domain.ActivityWaitingAgents, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	older := h.mustStart(root.ID, protocol.ChildStartParams{Harness: "codex", Task: "child c"})
-	grand := h.mustStart(domain.RunID(first.RunID), protocol.ChildStartParams{Harness: "claude", Task: "grandchild"})
-	h.settle()
-	g, _ := h.db.GetChild(h.ctx, domain.RunID(grand.RunID))
-	c, _ := h.db.GetChild(h.ctx, domain.RunID(older.RunID))
-	if g.State != domain.ChildStarted || g.Depth != 2 || g.RootRunID != root.ID || g.TreeKey != string(root.ID) || c.State != domain.ChildQueued {
-		t.Fatalf("grandchild %s at depth %d in %s, older sibling %s; want the parent with no busy child served first",
-			g.State, g.Depth, g.TreeKey, c.State)
-	}
-}
-
-func TestDepthAndTotalLimitsHoldAcrossNesting(t *testing.T) {
-	h := newHarness(t)
-	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
-	one, three := 1, 3
-	if _, err := h.svc.SetLimits(h.ctx, protocol.WorkspaceChildLimitsParams{WorkspaceID: string(h.ws.ID), MaxDepth: &one, MaxTotal: &three}); err != nil {
-		t.Fatal(err)
-	}
 	root := h.run(h.ada.ID, domain.LaunchACP, "root")
 	child := h.mustStart(root.ID, protocol.ChildStartParams{Harness: "codex"})
 	h.settle()
-	if _, err := h.start(domain.RunID(child.RunID), protocol.ChildStartParams{Harness: "claude"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "levels deep") {
-		t.Fatalf("a grandchild past max depth = %v", err)
+	_, err := h.start(domain.RunID(child.RunID), protocol.ChildStartParams{Harness: "claude", Task: "grandchild"})
+	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "subsessions go one level deep") {
+		t.Fatalf("a grandchild = %v, want the one-level refusal", err)
 	}
-	h.mustStart(root.ID, protocol.ChildStartParams{Harness: "codex", Task: "two"})
-	h.mustStart(root.ID, protocol.ChildStartParams{Harness: "codex", Task: "three"})
-	if _, err := h.start(root.ID, protocol.ChildStartParams{Harness: "codex", Task: "four"}); code(err) != protocol.CodeConflict {
-		t.Fatalf("a fourth child past max total = %v, want conflict", err)
+}
+
+func TestParentsMustWakeOnMail(t *testing.T) {
+	h := newHarness(t)
+	parent := h.run(h.ada.ID, domain.LaunchTUI, "standard gemini")
+	parent.Harness = "gemini"
+	if err := h.db.UpdateRun(h.ctx, parent); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := h.start(root.ID, protocol.ChildStartParams{Harness: "claude", Task: "root"}); code(err) != protocol.CodeConflict || !strings.Contains(err.Error(), "exact task") {
-		t.Fatalf("the parent's own task on its agent = %v, want a loop refusal", err)
+	_, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"})
+	if code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "gemini in Standard mode has no idle wake; start it in Enhanced") {
+		t.Fatalf("start from a Standard session that cannot wake = %v", err)
 	}
 }
 
@@ -402,68 +416,6 @@ func TestBackgroundParentsCannotDelegate(t *testing.T) {
 	}
 }
 
-func TestSharedSubscriptionOnlyWhenOwnIsMissingAndShared(t *testing.T) {
-	h := newHarness(t)
-	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
-	parent := h.run(h.ada.ID, domain.LaunchACP, "fix login")
-	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex", AccountMemberID: string(h.bob.ID)}); code(err) != protocol.CodeDenied {
-		t.Fatalf("a teammate's account without the setting = %v, want denied", err)
-	}
-	h.agents.missing[h.ada.ID] = true
-	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "not signed in") {
-		t.Fatalf("no own login and no setting = %v, want not signed in", err)
-	}
-	h.enable(h.ada.ID, protocol.ChildSettingsParams{SharedWhenMissing: on()})
-	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("setting on but nothing shared = %v, want denied", err)
-	}
-	if err := h.db.ShareAccount(h.ctx, h.bob.ID, h.ada.ID); err != nil {
-		t.Fatal(err)
-	}
-	got := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
-	if got.AccountMemberID != string(h.bob.ID) || got.OwnerID != string(h.ada.ID) {
-		t.Fatalf("child = %+v, want Ada's run on Bob's shared account", got)
-	}
-	if err := h.db.RevokeAccountShare(h.ctx, h.bob.ID, h.ada.ID); err != nil {
-		t.Fatal(err)
-	}
-	h.settle()
-	c, _ := h.db.GetChild(h.ctx, domain.RunID(got.RunID))
-	if c.State != domain.ChildRefused || len(h.runs.launched) != 0 {
-		t.Fatalf("after a revoke the queued child is %s with %d launches, want refused before launch", c.State, len(h.runs.launched))
-	}
-}
-
-func TestSwarmChildrenUseOnlyTheSwarmsChoices(t *testing.T) {
-	h := newHarness(t)
-	m := &domain.Mission{
-		WorkspaceID: h.ws.ID, Objective: "objective", AccountableHumanID: h.ada.ID, IdempotencyKey: "swarm-1",
-		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP},
-		ExecutionChoices: []domain.MissionExecutionChoice{
-			{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP},
-			{AccountMemberID: h.ada.ID, Harness: "codex", Mode: domain.LaunchACP, Model: "gpt-5-codex"},
-		},
-	}
-	if err := h.db.CreateMission(h.ctx, m); err != nil {
-		t.Fatalf("mission fixture: %v", err)
-	}
-	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "objective", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
-	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
-		t.Fatal(err)
-	}
-	got := h.mustStart(integrator.ID, protocol.ChildStartParams{Harness: "codex"})
-	if got.Model != "gpt-5-codex" {
-		t.Fatalf("child model = %q, want the swarm's choice", got.Model)
-	}
-	if _, err := h.start(integrator.ID, protocol.ChildStartParams{Harness: "codex", Model: "o3"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("a model outside the swarm's choices = %v, want denied", err)
-	}
-	c, _ := h.db.GetChild(h.ctx, domain.RunID(got.RunID))
-	if c.TreeKey != "mission:"+string(m.ID) || c.MissionID != m.ID {
-		t.Fatalf("swarm child tree = %q mission %q", c.TreeKey, c.MissionID)
-	}
-}
-
 func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	h := newHarness(t)
 	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
@@ -472,9 +424,9 @@ func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	stopped := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "stop"})
 	h.settle()
 	if err := h.svc.ValidateReport(h.ctx, parent.ID, store.CoordOutcomeSuccess); code(err) != protocol.CodeInvalidState {
-		t.Fatalf("success with unfinished children = %v, want refused", err)
+		t.Fatalf("success with unfinished subsessions = %v, want refused", err)
 	}
-	if _, err := h.svc.Detach(h.ctx, domain.RunID(kept.RunID)); err != nil {
+	if err := h.db.DetachChild(h.ctx, domain.RunID(kept.RunID)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildCancel, json.RawMessage(`{"run_id":"`+stopped.RunID+`"}`)); err != nil {
@@ -487,7 +439,7 @@ func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	}
 	ended := 0
 	for _, m := range h.mail.sent {
-		if m.from == domain.RunID(stopped.RunID) && strings.Contains(m.body, "without a report") {
+		if m.from == domain.RunID(stopped.RunID) && strings.Contains(m.body, "without a final report") {
 			ended++
 		}
 	}
@@ -501,11 +453,11 @@ func TestParentEndCascadesAndChildEndNotifiesOnce(t *testing.T) {
 	h.settle()
 	k, _ := h.db.GetRun(h.ctx, domain.RunID(kept.RunID))
 	if k.Status.Terminal() {
-		t.Fatal("a detached child was stopped with its parent")
+		t.Fatal("a detached subsession was stopped with its parent")
 	}
 	attached := h.mustStartAfterEnd(parent.ID)
 	if attached {
-		t.Fatal("an ended parent started a child")
+		t.Fatal("an ended parent started a subsession")
 	}
 }
 
@@ -540,7 +492,7 @@ func TestTreeUsageCountsEachRunOnceOnThePayingAccount(t *testing.T) {
 	}
 	for _, c := range out.Children {
 		if c.Purpose == "" || (c.RunID == metered.RunID && (c.CostUSD == nil || *c.CostUSD != 0.5)) {
-			t.Fatalf("child %+v", c)
+			t.Fatalf("subsession %+v", c)
 		}
 	}
 }
@@ -553,7 +505,7 @@ func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("start after an admin turned child runs off = %v, want denied", err)
+		t.Fatalf("start after an admin turned subsessions off = %v, want denied", err)
 	}
 	if _, err := h.svc.Allow(h.ctx, h.bob, parent.ID, ""); err != nil {
 		t.Fatal(err)
@@ -564,36 +516,14 @@ func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	if related, _ := h.svc.Related(h.ctx, parent.ID, domain.RunID(child.RunID)); related {
-		t.Fatal("a child handed to another member still messages its old parent outside the usual rules")
+		t.Fatal("a subsession handed to another member still messages its old parent outside the usual rules")
 	}
 	_, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildCancel, json.RawMessage(`{"run_id":"`+child.RunID+`"}`))
 	if code(err) != protocol.CodeDenied {
-		t.Fatalf("the old parent cancelling a handed-off child = %v, want denied", err)
+		t.Fatalf("the old parent cancelling a handed-off subsession = %v, want denied", err)
 	}
 	if err := h.svc.ValidateReport(h.ctx, parent.ID, store.CoordOutcomeSuccess); err != nil {
-		t.Fatalf("a handed-off child still holds its old parent's success: %v", err)
-	}
-}
-
-func TestSwarmChildrenNeedTheSwarmOwnersRun(t *testing.T) {
-	h := newHarness(t)
-	m := &domain.Mission{
-		WorkspaceID: h.ws.ID, Objective: "objective", AccountableHumanID: h.ada.ID, IdempotencyKey: "swarm-owner",
-		Integrator:       domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP},
-		ExecutionChoices: []domain.MissionExecutionChoice{{AccountMemberID: h.ada.ID, Harness: "codex", Mode: domain.LaunchACP}},
-	}
-	if err := h.db.CreateMission(h.ctx, m); err != nil {
-		t.Fatal(err)
-	}
-	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "objective", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
-	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.db.TransferRun(h.ctx, integrator.ID, h.bob.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.start(integrator.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
-		t.Fatalf("a swarm run handed to another member starting a child on the swarm's accounts = %v, want denied", err)
+		t.Fatalf("a handed-off subsession still holds its old parent's success: %v", err)
 	}
 }
 
@@ -611,11 +541,11 @@ func TestSettleForgetsEndedTrees(t *testing.T) {
 	h.settle()
 	left, err := h.db.ChildrenToSettle(h.ctx)
 	if err != nil || len(left) != 0 {
-		t.Fatalf("children left to settle = %d, %v; want none once the tree ended", len(left), err)
+		t.Fatalf("subsessions left to settle = %d, %v; want none once the tree ended", len(left), err)
 	}
 }
 
-func TestNoticesSurviveAFailedDeliveryAndQueuedChildrenCannotDetach(t *testing.T) {
+func TestNoticesSurviveAFailedDelivery(t *testing.T) {
 	h := newHarness(t)
 	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
 	zero := 1
@@ -625,10 +555,7 @@ func TestNoticesSurviveAFailedDeliveryAndQueuedChildrenCannotDetach(t *testing.T
 	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
 	first := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "first"})
 	h.settle()
-	queued := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "second"})
-	if _, err := h.svc.Detach(h.ctx, domain.RunID(queued.RunID)); code(err) != protocol.CodeInvalidState {
-		t.Fatalf("detaching a queued child = %v, want invalid state", err)
-	}
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "second"})
 	h.mail.fail = true
 	now := time.Now()
 	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(first.RunID), domain.RunFailed, "agent exited 1", "", nil, &now); err != nil {
@@ -639,7 +566,7 @@ func TestNoticesSurviveAFailedDeliveryAndQueuedChildrenCannotDetach(t *testing.T
 	h.settle()
 	notices := 0
 	for _, m := range h.mail.sent {
-		if strings.Contains(m.body, first.RunID) && strings.Contains(m.body, "without a report") {
+		if strings.Contains(m.body, first.RunID) && strings.Contains(m.body, "without a final report") {
 			notices++
 		}
 	}
@@ -679,7 +606,174 @@ func TestFinishedChildrenOutliveTheirParent(t *testing.T) {
 	kept, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID))
 	stopped, _ := h.db.GetRun(h.ctx, domain.RunID(busy.RunID))
 	if kept.Status.Terminal() || !kept.Detached || !stopped.Status.Terminal() {
-		t.Fatalf("finished child %s detached=%v, busy child %s; want the finished one kept for review and the busy one stopped",
+		t.Fatalf("finished subsession %s detached=%v, busy subsession %s; want the finished one kept for review and the busy one stopped",
 			kept.Status, kept.Detached, stopped.Status)
+	}
+}
+
+func TestClosedParentClosesItsChildren(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	done := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "finished"})
+	live := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "live"})
+	h.settle()
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(done.RunID), domain.RunCompleted, "agent reported success", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunMerged, "closed", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	h.settle()
+	for _, id := range []string{done.RunID, live.RunID} {
+		r, _ := h.db.GetRun(h.ctx, domain.RunID(id))
+		if r.Status != domain.RunMerged {
+			t.Fatalf("subsession %s = %s, want merged with its parent", id, r.Status)
+		}
+	}
+}
+
+func TestKilledParentKeepsItsFinishedChildrenForReview(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	done := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "finished"})
+	h.settle()
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(done.RunID), domain.RunCompleted, "agent reported success", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunAbandoned, "killed", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	h.settle()
+	if r, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID)); r.Status != domain.RunCompleted {
+		t.Fatalf("subsession of a killed parent = %s, want it left completed for review", r.Status)
+	}
+	if left, err := h.db.ChildrenToSettle(h.ctx); err != nil || len(left) != 0 {
+		t.Fatalf("subsessions left to settle = %d, %v", len(left), err)
+	}
+}
+
+func TestClosedParentSettlesAChildStoppedWhileProvisioning(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	child := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "slow"})
+	h.settle()
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(child.RunID), domain.RunAbandoned, "stopped by parent session "+string(parent.ID), "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunCompleted, "agent reported success", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.db.SetRunReview(h.ctx, parent.ID, domain.ReviewAccepted, ""); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	h.settle()
+	if left, err := h.db.ChildrenToSettle(h.ctx); err != nil || len(left) != 0 {
+		t.Fatalf("subsessions left to settle = %d, %v; want none", len(left), err)
+	}
+}
+
+func TestChildChecksOutItsParentsExtraRepositories(t *testing.T) {
+	h := newHarness(t)
+	parent := h.run(h.ada.ID, domain.LaunchACP, "fix login")
+	var extra []domain.WorkspaceID
+	for _, name := range []string{"lib", "docs"} {
+		w := &domain.Workspace{Name: name, BaseBranch: "main"}
+		if err := h.db.CreateWorkspace(h.ctx, w); err != nil {
+			t.Fatal(err)
+		}
+		extra = append(extra, w.ID)
+	}
+	repos := []domain.RunRepo{
+		{WorkspaceID: extra[0], Name: "lib", Path: "/repos/lib", BaseBranch: "main", BaseCommit: "abc"},
+		{WorkspaceID: extra[1], Name: "docs", Path: "/repos/docs", BaseBranch: "main", BaseCommit: "abc"},
+	}
+	if err := h.db.SetRunRepos(h.ctx, parent.ID, repos); err != nil {
+		t.Fatal(err)
+	}
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
+	h.settle()
+	h.runs.mu.Lock()
+	defer h.runs.mu.Unlock()
+	if len(h.runs.launched) != 1 || !slices.Equal(h.runs.launched[0].ExtraWorkspaces, extra) {
+		t.Fatalf("subsession launch = %+v, want the parent's extra repositories %v", h.runs.launched, extra)
+	}
+}
+
+func TestParentIsToldOncePerIdleSpell(t *testing.T) {
+	h := newHarness(t)
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	waiter := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Purpose: "watch ci", Task: "w"})
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "x"})
+	paused := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "y"})
+	h.settle()
+	h.mail.db = h.db
+	park := func(id string, reason string, activity domain.RunActivity) {
+		t.Helper()
+		if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(id), domain.RunNeedsAttention, reason, activity, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idle := func() (n int) {
+		for _, m := range h.mail.sent {
+			if m.from == domain.RunID(waiter.RunID) && strings.Contains(m.body, "has been") {
+				n++
+			}
+		}
+		return n
+	}
+	park(waiter.RunID, "checks pending", domain.ActivityWaitingCI)
+	park(paused.RunID, "checks pending", domain.ActivityWaitingCI)
+	h.runs.paused[domain.RunID(paused.RunID)] = true
+	h.now = h.now.Add(59 * time.Minute)
+	h.settle()
+	if len(h.mail.sent) != 0 {
+		t.Fatalf("notices before an hour = %+v, want none", h.mail.sent)
+	}
+	h.now = h.now.Add(2 * time.Minute)
+	h.settle()
+	h.settle()
+	if idle() != 1 || len(h.mail.sent) != 1 {
+		t.Fatalf("notices = %+v, want one for the waiting child only (not the working or paused one)", h.mail.sent)
+	}
+	body := h.mail.sent[0].body
+	for _, want := range []string{waiter.RunID, "watch ci", "waiting-ci", "checks pending", "aether-internal send --to " + waiter.RunID, "subsession cancel --run-id " + waiter.RunID} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("notice %q lacks %q", body, want)
+		}
+	}
+	if h.mail.sent[0].to != parent.ID {
+		t.Fatalf("notice went to %s, want the parent", h.mail.sent[0].to)
+	}
+
+	// A reason change and more time inside the spell are the same spell.
+	park(waiter.RunID, "still pending", domain.ActivityWaitingCI)
+	h.now = h.now.Add(5 * time.Minute)
+	h.settle()
+	if idle() != 1 || len(h.mail.errs) != 0 {
+		t.Fatalf("later passes in the spell sent %+v, errors %v; want the one notice", h.mail.sent, h.mail.errs)
+	}
+
+	// Work resets the spell; a second hour of quiet is told again.
+	park(waiter.RunID, "", domain.ActivityWorking)
+	h.settle()
+	park(waiter.RunID, "turn ended without a report", domain.ActivityWaiting)
+	h.now = time.Now().Add(30 * time.Minute)
+	h.settle()
+	if idle() != 1 {
+		t.Fatalf("a fresh spell was told before an hour: %+v", h.mail.sent)
+	}
+	h.now = time.Now().Add(61 * time.Minute)
+	h.settle()
+	if idle() != 2 || len(h.mail.errs) != 0 {
+		t.Fatalf("notices after a second spell = %+v, errors %v; want 2", h.mail.sent, h.mail.errs)
 	}
 }

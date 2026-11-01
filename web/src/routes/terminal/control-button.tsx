@@ -74,9 +74,9 @@ export function ControlButton({ ownsControl, unavailable, onTakeControl, onRelea
 
   return (
     <Button
-      hint={ownsControl ? 'Release run control' : takeover?.phase === 'review'
+      hint={ownsControl ? 'Release session control' : takeover?.phase === 'review'
         ? `Waiting for the controller's decision · ${takeover.seconds}s`
-        : 'Click to take free control. Hold for 3 seconds to request an occupied run. Release early or press Escape to cancel.'}
+        : 'Click to take free control. Hold for 3 seconds to request an occupied session. Release early or press Escape to cancel.'}
       type="button"
       size="sm"
       variant={ownsControl ? 'primary' : 'secondary'}

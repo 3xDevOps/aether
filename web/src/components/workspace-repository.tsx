@@ -48,14 +48,14 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
   return <section aria-label="Workspace repository" className="flex min-w-0 flex-col gap-4">
     {notReady && (
       <Callout tone="needs-you" title={`The server's copy is ${source.status ?? 'pending'}`}>
-        {source.last_error || 'Runs start once it is verified and adopted. Open Advanced to review it.'}
+        {source.last_error || 'Sessions start once it is verified and adopted. Open Advanced to review it.'}
       </Callout>
     )}
     {!packaged && <div className="flex flex-col items-start gap-2">
       <h3 className="text-ui font-medium text-text">Local clone</h3>
       <p className="text-ui-sm text-muted">
         {source?.enabled
-          ? 'Link a clone on this computer to pull run branches. The base branch stays server-owned.'
+          ? 'Link a clone on this computer to pull session branches. The base branch stays server-owned.'
           : <>Link a clone on this computer and Aether pushes <Code>{workspace.base_branch}</Code> for you. Linking adds an <Code>aether</Code> remote; your history and origin stay as they are.</>}
       </p>
       {!local && <Button size="sm" variant="secondary" onClick={() => { setLocal(true); onLocalChange?.(true) }}>Link local repository</Button>}
@@ -71,8 +71,8 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
           {canReadSource ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} canManageSource={isAdmin} onStatusChange={onStatusChange} /> : <p className="text-ui-sm text-muted">This gateway does not offer source status, so source ownership cannot be checked. Linking works, but base pushes stay off until local-only ownership is confirmed; ask an administrator to verify the source with Review source mirror on the Repository page before launching.</p>}
           <div className="flex flex-col gap-1.5">
             <h4 className="text-ui font-medium text-text">Checkout origin</h4>
-            <p className="break-words font-code text-ui-sm">{workspace.origin || 'Not configured; new run checkouts have no publishing remote.'}</p>
-            <p className="text-ui-sm text-muted">The upstream URL a run checkout publishes to, not the read-only source. To change it, run this on your linked computer with the intended URL:</p>
+            <p className="break-words font-code text-ui-sm">{workspace.origin || 'Not configured; new session checkouts have no publishing remote.'}</p>
+            <p className="text-ui-sm text-muted">The upstream URL a session checkout publishes to, not the read-only source. To change it, run this on your linked computer with the intended URL:</p>
             <CodeBlock className="whitespace-pre-wrap break-words">{`aether workspace origin --workspace ${shellQuote(workspace.id)} https://your-git-host/your-team/your-repository.git`}</CodeBlock>
           </div>
           <p className="text-ui-sm text-muted">A read-only deploy key only lets the server fetch. To publish branches or pull requests, set up your own Git or gh credentials in your environment and get upstream permission.</p>

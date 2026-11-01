@@ -26,7 +26,7 @@ func (s *runRepositoryService) Execution(ctx context.Context, run domain.Run) (r
 		return runrepo.Execution{}, err
 	}
 	if live.Run.AccountMember() != run.AccountMember() {
-		return runrepo.Execution{}, errors.New("run account changed; refresh before acting")
+		return runrepo.Execution{}, errors.New("session account changed; refresh before acting")
 	}
 	execution := runrepo.Execution{ContainerID: live.ContainerID, WorkDir: live.Workdir}
 	execution.Authorize = func(ctx context.Context, _ bool) error {
@@ -35,7 +35,7 @@ func (s *runRepositoryService) Execution(ctx context.Context, run domain.Run) (r
 			return err
 		}
 		if current.ContainerID != live.ContainerID || current.Workdir != live.Workdir || current.User != live.User || current.Run.AccountMember() != live.Run.AccountMember() {
-			return errors.New("run execution or account changed; refresh before acting")
+			return errors.New("session execution or account changed; refresh before acting")
 		}
 		return nil
 	}
@@ -52,7 +52,7 @@ func (s *runRepositoryService) Execution(ctx context.Context, run domain.Run) (r
 func init() {
 	registerService("run-repository", func(d Deps) (Service, error) {
 		if d.SSH == nil || d.Runs == nil || d.Runtime == nil {
-			return nil, fmt.Errorf("run repository: SSH, scheduler, and runtime are required")
+			return nil, fmt.Errorf("session repository: SSH, scheduler, and runtime are required")
 		}
 		// Exec inherits the existing run container's configured user, HOME,
 		// credentials, signing configuration and environment. No GitHub command

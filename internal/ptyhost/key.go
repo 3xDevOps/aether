@@ -22,9 +22,15 @@ func RunShellSession(run domain.RunID, tab string) SessionKey {
 	return SessionKey("run-shell:" + string(run) + ":" + tab)
 }
 
+// AssistantLoginSession returns the key for agent's sign-in in a member's
+// assistant container.
+func AssistantLoginSession(member domain.MemberID, agent string) SessionKey {
+	return SessionKey("assistant-login:" + string(member) + ":" + agent)
+}
+
 // Run returns the run ID when k identifies an agent run session.
 func (k SessionKey) Run() (domain.RunID, bool) {
-	if strings.HasPrefix(string(k), "terminal:") || strings.HasPrefix(string(k), "run-shell:") {
+	if strings.HasPrefix(string(k), "terminal:") || strings.HasPrefix(string(k), "run-shell:") || strings.HasPrefix(string(k), "assistant-login:") {
 		return "", false
 	}
 	return domain.RunID(k), true
@@ -32,8 +38,8 @@ func (k SessionKey) Run() (domain.RunID, bool) {
 
 // seedsReplay reports whether a restarted session should replay the prior
 // transcript tail: agent runs and member terminals survive restarts, while
-// a run-shell tab is always a fresh process whose old scrollback would
-// mislead.
+// a run-shell tab or a sign-in is always a fresh process whose old
+// scrollback would mislead.
 func (k SessionKey) seedsReplay() bool {
-	return !strings.HasPrefix(string(k), "run-shell:")
+	return !strings.HasPrefix(string(k), "run-shell:") && !strings.HasPrefix(string(k), "assistant-login:")
 }

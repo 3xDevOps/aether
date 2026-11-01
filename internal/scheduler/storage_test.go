@@ -19,7 +19,7 @@ func TestStorageRetentionUsesLiveOwnerAfterSidecarWriteFailure(t *testing.T) {
 		{"evidence", &supervised{evidencePending: true}, "Evidence preservation pending"},
 		{"destroy", &supervised{destroyPending: true}, "Execution cleanup pending"},
 		{"container", &supervised{containerID: "live-container"}, "Retained execution environment"},
-		{"finalizing", &supervised{finalizing: true}, "Run finalization in progress"},
+		{"finalizing", &supervised{finalizing: true}, "Session finalization in progress"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTestEnv(t, nil)
@@ -119,7 +119,7 @@ func TestRetentionSidecarOwnershipIsReadOnlyAndExplicit(t *testing.T) {
 				t.Fatalf("Retention = %+v, %v", info, err)
 			}
 			if !run.Status.Terminal() && info.RetainedUntil != nil {
-				t.Fatal("active run exposed a stale retention deadline")
+				t.Fatal("active session exposed a stale retention deadline")
 			}
 			if tc.raw != "" {
 				after, err := os.ReadFile(path)

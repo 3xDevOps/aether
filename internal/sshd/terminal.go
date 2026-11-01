@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -177,9 +178,10 @@ func (s *Server) terminalHistory(ctx context.Context, _ domain.MemberID, params 
 	}, nil
 }
 
-// serveTerminal serves one member's persistent environment terminal. The
-// member identity comes from the authenticated SSH connection, so the header
-// cannot select another member's environment.
+// serveTerminal serves one member's persistent environment terminal, or an
+// agent's sign-in for their assistant. The member identity comes from the
+// authenticated SSH connection, so the header cannot select another member's
+// environment or assistant.
 func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *sessionState, ch subsystemConn) {
 	defer func() { _ = ch.Close() }()
 
@@ -208,15 +210,20 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 		cols, rows = 80, 24
 	}
 
+	key := ptyhost.TerminalSession(member, tab)
 	s.authorizationMu.Lock()
 	admissionErr := s.checkMember(ctx, member)
-	if admissionErr == nil {
-		_, admissionErr = s.cfg.Runs.EnsureTerminal(ctx, member)
-	}
-	if admissionErr == nil {
-		admissionErr = s.cfg.Runs.EnsureTerminalTab(ctx, member, tab, cols, rows)
+	if admissionErr == nil && req.AssistantLogin == "" {
+		if _, admissionErr = s.cfg.Runs.EnsureTerminal(ctx, member); admissionErr == nil {
+			admissionErr = s.cfg.Runs.EnsureTerminalTab(ctx, member, tab, cols, rows)
+		}
 	}
 	s.authorizationMu.Unlock()
+	// A first sign-in installs the adapter, too long to hold admissions for;
+	// the assistant's own lock orders it with the member's removal.
+	if admissionErr == nil && req.AssistantLogin != "" {
+		admissionErr = s.startAssistantLogin(ctx, member, req.AssistantLogin, cols, rows, &key)
+	}
 	if admissionErr != nil {
 		e := rpcError(admissionErr)
 		_ = writeJSONLine(ch, protocol.TerminalResponse{Code: e.Code, Error: e.Message})
@@ -233,7 +240,7 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	conn := newAttachConn(ch, r, ack, req.Framed, nil)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.cfg.PTY.Attach(attachCtx, ptyhost.TerminalSession(member, tab), ptyhost.AttachClient{
+		errCh <- s.cfg.PTY.Attach(attachCtx, key, ptyhost.AttachClient{
 			Member:   member,
 			Cols:     cols,
 			Rows:     rows,
@@ -268,6 +275,11 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 		})
 		attachErr = <-errCh
 	}
+	if req.AssistantLogin != "" {
+		if err := s.cfg.Runs.EndAssistantLogin(context.WithoutCancel(ctx), member, req.AssistantLogin); err != nil {
+			slog.Warn("sshd: assistant sign-in ended", "member", member, "agent", req.AssistantLogin, "error", err)
+		}
+	}
 	switch {
 	case errors.Is(context.Cause(attachCtx), errAttachMembershipRevoked):
 		ch.exit(protocol.AttachExitMembershipRevoked)
@@ -276,6 +288,28 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	default:
 		ch.exit(1)
 	}
+}
+
+// startAssistantLogin starts agent's sign-in for member's assistant and sets
+// key to the session that streams it. It needs the same permission as a
+// prompt.
+func (s *Server) startAssistantLogin(ctx context.Context, member domain.MemberID, agent string, cols, rows uint, key *ptyhost.SessionKey) error {
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return errors.New("the assistant is not configured on this server")
+	}
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return err
+	}
+	if err := permissions.Check(permissions.Launch, actor, permissions.Target{}); err != nil {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: "assistant sign-in: " + err.Error()}
+	}
+	return svc.SignIn(ctx, member, func(ctx context.Context) error {
+		var err error
+		*key, err = s.cfg.Runs.StartAssistantLogin(ctx, member, agent, cols, rows)
+		return err
+	})
 }
 
 func (s *Server) terminalStatus(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {

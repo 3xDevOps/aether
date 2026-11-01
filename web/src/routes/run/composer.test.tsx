@@ -37,7 +37,7 @@ function mount(over: Partial<ReturnType<typeof run>>, methods = every) {
 
 beforeEach(() => vi.clearAllMocks())
 
-describe.each([{ mode: 'tui', acp: false }, { mode: 'acp', acp: true }] as const)('finished $mode run', (kind) => {
+describe.each([{ mode: 'tui', acp: false }, { mode: 'acp', acp: true }] as const)('finished $mode session', (kind) => {
   it('offers Relaunch inside the retention grace and returns to a live run', async () => {
     vi.mocked(api.runRelaunch).mockResolvedValue(run({ ...kind, id: 'run_1', status: 'running', reason: undefined, finished_at: undefined, status_seq: 99 }))
     mount({ ...kind, ...closed })
@@ -63,7 +63,7 @@ describe.each([{ mode: 'tui', acp: false }, { mode: 'acp', acp: true }] as const
 
   it('offers nothing once the container is released', () => {
     mount({ ...kind, ...closed, reason: 'closed', container_retained_until: undefined })
-    expect(screen.getByRole('status').textContent).toBe('This run has finished.')
+    expect(screen.getByRole('status').textContent).toBe('This session has finished.')
     expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
   })
 

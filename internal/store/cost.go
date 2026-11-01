@@ -101,7 +101,7 @@ const runCostCols = `run_id, segment, workspace_id, member_id, input_tokens, out
 
 func (d *DB) PutRunCost(ctx context.Context, c *RunCost) error {
 	if c.RunID == "" || c.WorkspaceID == "" || c.MemberID == "" {
-		return errors.New("store: put run cost: run_id, workspace_id, and member_id are required")
+		return errors.New("store: put session cost: run_id, workspace_id, and member_id are required")
 	}
 	at := c.RecordedAt
 	if at.IsZero() {
@@ -109,7 +109,7 @@ func (d *DB) PutRunCost(ctx context.Context, c *RunCost) error {
 	}
 	recordedAt, err := encodeTime(at)
 	if err != nil {
-		return fmt.Errorf("store: put run cost: %w", err)
+		return fmt.Errorf("store: put session cost: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO run_costs (`+runCostCols+`)
@@ -125,7 +125,7 @@ func (d *DB) PutRunCost(ctx context.Context, c *RunCost) error {
 		 WHERE excluded.metered = 1 OR run_costs.metered = 0`,
 		c.RunID, c.Segment, c.WorkspaceID, c.MemberID, c.InputTokens, c.OutputTokens, c.CostUSD, c.Metered, recordedAt,
 	); err != nil {
-		return fmt.Errorf("store: put run cost %s: %w", c.RunID, mapConstraint(err, ErrNotFound))
+		return fmt.Errorf("store: put session cost %s: %w", c.RunID, mapConstraint(err, ErrNotFound))
 	}
 	c.RecordedAt = at
 	return nil
@@ -135,7 +135,7 @@ func (d *DB) ListRunCosts(ctx context.Context, run domain.RunID) ([]*RunCost, er
 	rows, err := d.db.QueryContext(ctx,
 		`SELECT `+runCostCols+` FROM run_costs WHERE run_id = ? ORDER BY segment`, run)
 	if err != nil {
-		return nil, fmt.Errorf("store: list run costs %s: %w", run, err)
+		return nil, fmt.Errorf("store: list session costs %s: %w", run, err)
 	}
 	return collect(rows, scanRunCost)
 }
@@ -172,7 +172,7 @@ func (d *DB) SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID
 	).Scan(&summary.Runs, &summary.Metered, &summary.Unmetered,
 		&summary.InputTokens, &summary.OutputTokens, &summary.CostUSD)
 	if err != nil {
-		return RunCostSummary{}, fmt.Errorf("store: summarize run costs: %w", err)
+		return RunCostSummary{}, fmt.Errorf("store: summarize session costs: %w", err)
 	}
 	return summary, nil
 }

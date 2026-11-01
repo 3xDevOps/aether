@@ -192,7 +192,7 @@ it('answers Escape before the run does, and only outside a card', async () => {
 })
 
 it('leaves annotate off, with the server\'s reason, when the companion cannot inspect', async () => {
-  const reason = "dev.browser.inspect: this run's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the run to replace the companion: browser: invalid_request: Unknown browser operation"
+  const reason = "dev.browser.inspect: this session's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the session to replace the companion: browser: invalid_request: Unknown browser operation"
   vi.mocked(api.devBrowserInspect).mockRejectedValue(new ApiError(404, reason, -32601))
   await show()
   await userEvent.click(annotate())
@@ -252,7 +252,7 @@ it('counts new console and network rows on its toggle and sends the ticked ones'
   await userEvent.click(within(bar()).getByRole('button', { name: 'Send to agent' }))
   await waitFor(() => expect(api.runRoomPost).toHaveBeenCalled())
   expect(vi.mocked(api.runRoomPost).mock.calls[0][0].body).toBe([
-    "Feedback from the page in this run's browser: 1 console message, 1 failed request.",
+    "Feedback from the page in this session's browser: 1 console message, 1 failed request.",
     '',
     'Console (http://localhost:3000/settings):',
     '- 12:01:03Z error Uncaught TypeError: x is not a function',

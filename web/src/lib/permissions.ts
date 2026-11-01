@@ -8,7 +8,7 @@
 import type { Member } from '@/lib/types'
 
 /** One guarded class of action, named as internal/permissions names it. */
-export type RunPermission = 'steer' | 'kill' | 'handoff' | 'protect' | 'launch' | 'push'
+export type RunPermission = 'steer' | 'kill' | 'handoff' | 'protect' | 'sudo' | 'launch' | 'push'
 
 /** The member attempting the action. */
 export interface Actor {
@@ -47,6 +47,7 @@ export function allowed(
       return actor.role === 'collaborator'
     case 'handoff':
     case 'protect':
+    case 'sudo':
       return owner
     case 'steer':
     case 'kill':

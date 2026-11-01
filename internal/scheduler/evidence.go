@@ -50,10 +50,10 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return fmt.Errorf("scheduler: evidence run lookup: %w", err)
+		return fmt.Errorf("scheduler: evidence session lookup: %w", err)
 	}
 	if r == nil || r.ID != run {
-		return fmt.Errorf("scheduler: evidence run lookup returned no matching run")
+		return fmt.Errorf("scheduler: evidence session lookup returned no matching session")
 	}
 	related, unresolved, roomSource := s.roomEvidenceWithFact(ctx, r.WorkspaceID, run)
 	req := evidence.Request{

@@ -325,7 +325,7 @@ func (d *Daemon) connect(ctx context.Context) (*ssh.Client, io.ReadWriteCloser, 
 	sess, err := client.NewSession()
 	if err != nil {
 		_ = client.Close()
-		return nil, nil, fmt.Errorf("open session: %w", err)
+		return nil, nil, fmt.Errorf("open SSH channel: %w", err)
 	}
 	stdin, err := sess.StdinPipe()
 	if err != nil {

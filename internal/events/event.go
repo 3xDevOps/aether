@@ -41,6 +41,7 @@ const (
 	TypeRunController Type = "run.controller"
 	TypeRunMode       Type = "run.mode"
 	TypeRunModel      Type = "run.model"
+	TypeRunEffort     Type = "run.effort"
 	// TypeRunArchived carries a run's archive state: a nil ArchivedAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
@@ -221,13 +222,11 @@ func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
 
 func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
 
-// RunChildrenPayload is a run's own child-run setting ("", "on" or "off"),
-// whether its agent tried to start a child while child runs were off, and
-// whether it is a child detached from its parent.
+// RunChildrenPayload is a run's own child-run setting ("", "on" or "off")
+// and whether it is a child detached from its parent.
 type RunChildrenPayload struct {
-	Children     string `json:"children,omitempty"`
-	ChildRefused bool   `json:"child_refused,omitempty"`
-	Detached     bool   `json:"detached,omitempty"`
+	Children string `json:"children,omitempty"`
+	Detached bool   `json:"detached,omitempty"`
 }
 
 func (RunChildrenPayload) EventType() Type { return TypeRunChildren }
@@ -269,6 +268,16 @@ type RunModelPayload struct {
 func (RunModelPayload) EventType() Type { return TypeRunModel }
 
 func init() { registerPayload[RunModelPayload](TypeRunModel) }
+
+// RunEffortPayload reports the effort level a run's agent now uses; empty
+// is the agent's default.
+type RunEffortPayload struct {
+	Effort string `json:"effort"`
+}
+
+func (RunEffortPayload) EventType() Type { return TypeRunEffort }
+
+func init() { registerPayload[RunEffortPayload](TypeRunEffort) }
 
 // RunArchivedPayload reports a run's archive state as RFC3339. A nil
 // ArchivedAt means the run was restored.

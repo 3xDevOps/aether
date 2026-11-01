@@ -27,9 +27,9 @@ function places(layout: RunMapLayout): Map<string, Place> {
 
 /**
  * Glides what a repack moved, fades in new nodes and fades out removed ones
- * (returned as `ghosts` to draw at their old place), and runs the fold: workers
+ * (returned as `ghosts` to draw at their old place), and runs the fold: child runs
  * fade last to first before `commit` repacks without them. The folded or
- * unfolded integrator stays put on screen: `follow` pans the camera by its
+ * unfolded parent stays put on screen: `follow` pans the camera by its
  * move in world units, and the glides start from where things were seen.
  */
 export function useMapMotion(
@@ -108,23 +108,23 @@ export function useMapMotion(
     folding.current.get(unitKey)?.forEach((animation) => animation.cancel())
     folding.current.delete(unitKey)
     const unit = [...world.current?.querySelectorAll<HTMLElement>('[data-map-unit]') ?? []].find((el) => el.dataset.glideKey === `u:${unitKey}`)
-    const workers = [...unit?.querySelectorAll<HTMLElement>('[data-map-role="worker"]') ?? []]
+    const children = [...unit?.querySelectorAll<HTMLElement>('[data-map-role="child"]') ?? []]
     anchor.current = null
-    if (!folded || !workers.length || prefersReducedMotion()) {
+    if (!folded || !children.length || prefersReducedMotion()) {
       anchor.current = unitKey
       commit(unitKey, folded)
       return
     }
     const step = time('--stagger-row')
-    const animations = workers.map((el, index) => play(el, [{ opacity: 1 }, { opacity: 0 }], fade, {
-      fill: 'forwards', extraDelay: Math.min(workers.length - 1 - index, staggerCap) * step,
+    const animations = children.map((el, index) => play(el, [{ opacity: 1 }, { opacity: 0 }], fade, {
+      fill: 'forwards', extraDelay: Math.min(children.length - 1 - index, staggerCap) * step,
     }))
     const lines = unit?.querySelector('[data-map-connectors]')
     if (lines) animations.push(play(lines, [{ opacity: 1 }, { opacity: 0 }], fade, { fill: 'forwards' }))
     folding.current.set(unitKey, animations)
     Promise.all(animations.map((animation) => animation.finished)).then(() => {
       folding.current.delete(unitKey)
-      for (const el of workers) faded.current.add(el.dataset.glideKey!.slice(2))
+      for (const el of children) faded.current.add(el.dataset.glideKey!.slice(2))
       anchor.current = unitKey
       commit(unitKey, true)
     }, () => {})

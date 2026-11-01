@@ -13,7 +13,6 @@ const CoordMessageKindReport = "report"
 // CoordMessagesListParams.RunID matches either side of a message.
 type CoordMessagesListParams struct {
 	WorkspaceID   string `json:"workspace_id"`
-	MissionID     string `json:"mission_id,omitempty"`
 	RunID         string `json:"run_id,omitempty"`
 	CorrelationID string `json:"correlation_id,omitempty"`
 	Before        string `json:"before,omitempty"`
@@ -23,7 +22,6 @@ type CoordMessagesListParams struct {
 type RunMessage struct {
 	ID            string  `json:"id"`
 	WorkspaceID   string  `json:"workspace_id"`
-	MissionID     string  `json:"mission_id,omitempty"`
 	FromRunID     string  `json:"from_run_id"`
 	ToRunID       string  `json:"to_run_id"`
 	Kind          string  `json:"kind"`
@@ -46,7 +44,7 @@ func CoordMessagesPageFromStore(page *store.RunMessagePage) CoordMessagesListRes
 	out := CoordMessagesListResult{Messages: make([]RunMessage, 0, len(page.Items)), NextBefore: page.NextBefore}
 	for _, m := range page.Items {
 		row := RunMessage{
-			ID: m.ID, WorkspaceID: string(m.WorkspaceID), MissionID: string(m.MissionID),
+			ID: m.ID, WorkspaceID: string(m.WorkspaceID),
 			FromRunID: string(m.FromRun), ToRunID: string(m.ToRun), Kind: string(m.Kind),
 			CorrelationID: m.CorrelationID, Body: m.Body,
 			CreatedAt:   m.CreatedAt.UTC().Format(time.RFC3339Nano),

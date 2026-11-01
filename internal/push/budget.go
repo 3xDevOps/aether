@@ -188,9 +188,9 @@ func budgetNotice(ws *domain.Workspace, st cost.Status) Notice {
 	body := "Budget warning: " + spent
 	switch {
 	case st.State == events.BudgetExceeded && st.Budget.Override:
-		body = "Budget reached: " + spent + ", the override admits new runs"
+		body = "Budget reached: " + spent + ", the override admits new sessions"
 	case st.State == events.BudgetExceeded:
-		body = "Budget reached: " + spent + ", new runs are refused"
+		body = "Budget reached: " + spent + ", new sessions are refused"
 	}
 	return Notice{Workspace: ws.ID, Title: clip(ws.Name, fallbackTitleRunes), Body: body}
 }

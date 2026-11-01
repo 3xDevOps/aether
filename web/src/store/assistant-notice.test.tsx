@@ -63,7 +63,7 @@ describe('assistant.notice', () => {
     await deliver(notice())
     expect(await screen.findByText('Fix login finished')).toBeTruthy()
     expect(screen.getByText('Tests pass.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Open run' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
   })
 

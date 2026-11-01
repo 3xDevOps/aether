@@ -11,7 +11,7 @@ Target: `docs/media/demo.gif`, referenced from the README as
 One continuous take, roughly 25-40 seconds, no cuts and no narration. The point
 is that the work happens somewhere else and comes back as a branch.
 
-1. **Launch** (~5s) - `aether run "add a health check endpoint" --agent claude`
+1. **Launch** (~5s) - `aether session "add a health check endpoint" --agent claude`
    in a terminal. The run ID prints.
 2. **Watch** (~15s) - `aether gui`, then the dashboard: the run card moving
    through the board, the live terminal mirror with the agent actually working,
@@ -76,7 +76,7 @@ These screenshots are browser verification evidence, not the live-agent demo
 described above:
 
 - `run-map-restored.png`: the actual Board, run cards and store with
-  deterministic fixture runs, including swarm workers, a paused run and a
+  deterministic fixture runs, including child runs, a paused run and a
   failed run. No live gateway was connected.
 - `launch-splash-restored.png`: the restored animation paused at 700ms by a
   temporary browser harness. Production animation timings were unchanged.

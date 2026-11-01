@@ -48,7 +48,7 @@ const (
 var acpTitleLookupDelay = 3 * time.Second
 
 // ErrACPNotRunning rejects input for an enhanced run with no live session.
-var ErrACPNotRunning = errors.New("scheduler: the enhanced session is not running")
+var ErrACPNotRunning = errors.New("scheduler: the Enhanced agent is not running")
 
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
 // shell, and the agent's ACP server runs beside it as a managed exec whose
@@ -82,9 +82,6 @@ type acpRun struct {
 	err      error
 	stopping bool
 	ended    bool
-	// untried marks a first task sent but not yet accepted, so a refusal
-	// fails a worker whichever of startOneShot or the turn end reports it.
-	untried bool
 	// instructions are the run instructions the first message or mail prompt
 	// a taskless session accepts carries, for an agent with no system prompt
 	// route.
@@ -136,7 +133,7 @@ func (d *acpDriver) Start(ctx context.Context, entry *supervised, att runtime.At
 	// own error, so it is recorded here rather than reported.
 	if err := d.openRestored(ctx, entry, openContinue); err != nil {
 		d.setRun(entry.runID, &acpRun{err: err})
-		d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
+		d.notice(entry.runID, "error", "Enhanced agent failed", err.Error())
 	}
 	return nil
 }
@@ -164,7 +161,7 @@ func (d *acpDriver) sendContinuation(entry *supervised) {
 	switch {
 	case err == nil || usageLimited(err):
 	case d.oneShot(entry):
-		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the continuation to the agent: " + err.Error()})
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the continuation to the agent: " + err.Error()})
 	default:
 		slog.Warn("scheduler: send the continuation to the agent", "run", entry.runID, "error", err)
 	}
@@ -406,7 +403,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	run, err := d.s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
-		return fmt.Errorf("load run: %w", err)
+		return fmt.Errorf("load session: %w", err)
 	}
 	profile, argv, err := d.s.launchProfile(ctx, run.MemberID, run.AccountMember(), run.Harness)
 	if err != nil {
@@ -415,6 +412,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	adapter := argv[domain.LaunchACP]
 	if len(adapter) == 0 {
 		return fmt.Errorf("agent %q has no ACP command", run.Harness)
+	}
+	if profile.ACPEffortArgs {
+		adapter = append(slices.Clone(adapter), profile.EffortLaunchArgs(run.Effort)...)
 	}
 	managed, ok := d.s.cfg.Runtime.(runtime.ManagedExecRuntime)
 	if !ok {
@@ -432,7 +432,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			mode = recorded
 		}
 	}
-	instructions, err := d.s.briefedInstructions(ctx, d.s.runGuide(ctx, entry.runID, entry.missionAssigned, oneShot, true), run.Extras, run.WorkspaceID, run.MemberID)
+	instructions, err := d.s.briefedInstructions(ctx, d.s.runGuide(ctx, entry.runID, oneShot, true), run.Extras, run.WorkspaceID, run.MemberID)
 	if err != nil {
 		return err
 	}
@@ -517,7 +517,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		if stopErr := d.stopExec(exec); stopErr != nil {
 			slog.Warn("scheduler: stop the failed ACP server", "run", runID, "error", stopErr)
 		}
-		return adapterError(fmt.Errorf("open the agent session: %w", err), stderr)
+		return adapterError(fmt.Errorf("open the agent conversation: %w", err), stderr)
 	}
 	if id := sess.SessionID(); id != run.HarnessSessionID {
 		if err := d.s.cfg.Store.SetRunAgentSession(ctx, runID, id); err != nil {
@@ -538,6 +538,15 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			}
 		}
 	}
+	// After the model: the levels an agent offers can depend on it.
+	var effortErr error
+	if run.Effort != "" && !profile.ACPEffortArgs {
+		if effortErr = sess.SetEffort(ctx, run.Effort); effortErr != nil {
+			if err := sess.Notice("error", "Effort not set", effortErr.Error()); err != nil {
+				slog.Warn("scheduler: record the effort notice", "run", runID, "error", err)
+			}
+		}
+	}
 	r.session = sess
 	// A session that started anew, here or after a failed restore, or
 	// refused its prompts so far has not had them yet.
@@ -553,14 +562,14 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	go d.watch(entry, r)
 	c := d.s.coordinationSeam()
 	if c != nil && c.enabled && !oneShot {
-		c.svc.EnhancedSessionOpened(ctx, runID)
+		c.svc.EnhancedSessionOpened(runID)
 	}
 	if c != nil && c.enabled && coordDir != "" && fresh {
 		channel := "first message"
 		if systemPrompt != "" {
 			channel = "system prompt"
 		}
-		d.s.publishTimeline(ctx, run.WorkspaceID, runID, "", events.TimelineNote, "run instructions: "+channel)
+		d.s.publishTimeline(ctx, run.WorkspaceID, runID, "", events.TimelineNote, "session instructions: "+channel)
 	}
 	switch {
 	case oneShot && marked:
@@ -568,7 +577,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		// how the failed turn ends.
 	case oneShot && modelErr != nil:
 		// Unattended, the task would otherwise run on the agent's default model.
-		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
+	case oneShot && effortErr != nil:
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "effort not set: " + effortErr.Error()})
 	case how == openContinue:
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, prompt)
@@ -618,10 +629,10 @@ func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
 		if err := d.stopAdapterLocked(ctx, entry.runID); err != nil {
 			slog.Warn("scheduler: stop the ACP server that lost its session", "run", entry.runID, "error", err)
 		}
-		d.fail(entry, fmt.Errorf("the agent lost its session again within %d minutes: %w", int(acpLostAgain.Minutes()), cause))
+		d.fail(entry, fmt.Errorf("the agent lost its conversation again within %d minutes: %w", int(acpLostAgain.Minutes()), cause))
 		return
 	}
-	if err := sess.Notice("warning", "Agent session lost", "The agent no longer has this session. Aether is restarting the agent and restoring the session from its history; send again any message that failed."); err != nil {
+	if err := sess.Notice("warning", "Agent conversation lost", "The agent no longer has this conversation. Aether is restarting the agent and restoring the conversation from its history; send again any message that failed."); err != nil {
 		slog.Warn("scheduler: record the lost session notice", "run", entry.runID, "error", err)
 	}
 	if err := d.open(ctx, entry, openRestore); err != nil {
@@ -650,10 +661,10 @@ func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {
 func (d *acpDriver) fail(entry *supervised, err error) {
 	slog.Warn("scheduler: enhanced session failed", "run", entry.runID, "error", err)
 	d.setRun(entry.runID, &acpRun{err: err})
-	d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
+	d.notice(entry.runID, "error", "Enhanced agent failed", err.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
 	if d.oneShot(entry) {
-		d.endOneShot(entry, false, false, idle)
+		d.endOneShot(entry, false, idle)
 		return
 	}
 	go d.report(entry.runID, idle)
@@ -717,10 +728,18 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	if !current {
 		return
 	}
-	d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
+	d.s.mu.Lock()
+	stopped := entry.stopNoticeLocked()
+	d.s.mu.Unlock()
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
+	if stopped != "" {
+		d.notice(entry.runID, "info", "Enhanced agent stopped", stopped)
+		idle.Reason = acpEndedReason + stopped
+	} else {
+		d.notice(entry.runID, "error", "Enhanced agent exited", cause.Error())
+	}
 	if d.oneShot(entry) {
-		d.endOneShot(entry, false, false, idle)
+		d.endOneShot(entry, false, idle)
 		return
 	}
 	d.report(entry.runID, idle)

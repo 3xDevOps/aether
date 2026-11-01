@@ -104,7 +104,7 @@ func TestAccountUsageSelfAndSharedAccount(t *testing.T) {
 	}
 
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(context.Background(), e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(context.Background(), e.member.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	shared, perr := dispatchUsage(t, e, grantee.ID, usageParams(t, protocol.AccountUsageParams{AccountMemberID: string(e.member.ID)}))
@@ -169,7 +169,7 @@ func TestAccountUsageRevocationAfterReadCannotReturnData(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(context.Background(), e.member.ID, grantee.ID); err != nil {
+	if _, err := e.store.ShareAccount(context.Background(), e.member.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	reader := &usageReaderStub{

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -381,6 +382,7 @@ type fakeRuns struct {
 	unswitchable   map[string]bool
 	acpStream      scheduler.ACPStream
 	acpPending     map[domain.RunID][]acphost.Request
+	sudo           map[domain.RunID][]domain.RunInputRequest
 	readImage      func(context.Context, domain.RunID, string) ([]byte, string, error)
 }
 
@@ -482,8 +484,8 @@ func (f *fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID
 	return domain.LaunchACP, nil
 }
 
-func (f *fakeRuns) SwarmRefusal(agent string, mode domain.LaunchMode) error {
-	return harness.SwarmRefusal(agent, mode)
+func (f *fakeRuns) WakeRefusal(agent string, mode domain.LaunchMode) error {
+	return harness.WakeRefusal(agent, mode)
 }
 
 func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harness string) (bool, error) {
@@ -686,7 +688,7 @@ func (f *fakeRuns) Wait(domain.RunID, domain.RunActivity) *domain.RunWait       
 func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	inputs := []domain.RunInputRequest{}
+	inputs := slices.Clone(f.sudo[run])
 	for _, r := range f.acpPending[run] {
 		in := domain.RunInputRequest{ID: r.ID, SessionID: "s1", Kind: "question"}
 		if r.Kind == acphost.RequestPermission {
@@ -695,6 +697,19 @@ func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 		inputs = append(inputs, in)
 	}
 	return inputs
+}
+
+func (f *fakeRuns) DecideSudo(_ context.Context, run domain.RunID, request string, allow bool, member domain.MemberID) error {
+	f.mu.Lock()
+	i := slices.IndexFunc(f.sudo[run], func(r domain.RunInputRequest) bool { return r.ID == request })
+	if i >= 0 {
+		f.sudo[run] = slices.Delete(f.sudo[run], i, i+1)
+	}
+	f.mu.Unlock()
+	if i < 0 {
+		return scheduler.ErrSudoNotPending
+	}
+	return f.record(fmt.Sprintf("sudo:%s:%s:%v:%s", run, request, allow, member))
 }
 
 func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {
@@ -825,6 +840,14 @@ func (f *fakeRuns) EnsureTerminal(ctx context.Context, member domain.MemberID) (
 
 func (f *fakeRuns) EnsureTerminalTab(_ context.Context, member domain.MemberID, tab string, cols, rows uint) error {
 	return f.record(fmt.Sprintf("terminal-tab:%s:%s:%d:%d", member, tab, cols, rows))
+}
+
+func (f *fakeRuns) StartAssistantLogin(_ context.Context, member domain.MemberID, agent string, cols, rows uint) (ptyhost.SessionKey, error) {
+	return ptyhost.AssistantLoginSession(member, agent), f.record(fmt.Sprintf("assistant-login:%s:%s:%d:%d", member, agent, cols, rows))
+}
+
+func (f *fakeRuns) EndAssistantLogin(_ context.Context, member domain.MemberID, agent string) error {
+	return f.record(fmt.Sprintf("assistant-login-end:%s:%s", member, agent))
 }
 
 func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error {

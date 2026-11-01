@@ -50,12 +50,11 @@ let sends = 0
 const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
 
 export function targetRoute(run: RunRecord, target: NeedsYouTarget | undefined): Route {
-  if (target === 'swarm' && run.mission_id) return { name: 'missions', params: { missionId: run.mission_id } }
   return runRoute(run.id, target && targetView[target])
 }
 
 export function openCard(card: BoardCard, navigate: (name: string, params?: Record<string, string>) => void) {
-  const route = targetRoute(card.run, conditionOf(card)?.target ?? (card.swarm ? 'swarm' : undefined))
+  const route = targetRoute(card.run, conditionOf(card)?.target)
   navigate(route.name, route.params)
 }
 

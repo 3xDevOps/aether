@@ -12,8 +12,11 @@ import type {
   ChildLimits,
   ChildSettings,
   ChildSettingsParams,
+  LaunchDefaultsResult,
+  LaunchDefaultsSetParams,
   Connector,
   ConnectorCode,
+  ConnectorList,
   CoordMessagesListResult,
   DaemonInstallResult,
   DaemonStatusResult,
@@ -62,16 +65,6 @@ import type {
   MergeCode,
   MergePlan,
   MergeProposal,
-  Mission,
-  MissionCancelResult,
-  MissionCreateResult,
-  MissionExecutionChoice,
-  MissionIntegrator,
-  MissionListResult,
-  MissionQuestionResult,
-  MissionReplaceIntegratorResult,
-  MissionShowResult,
-  MissionWorkerReleaseResult,
   Overlap,
   PresenceEntry,
   PullResult,
@@ -94,6 +87,13 @@ import type {
   WatchCreateParams,
   WatchGetResult,
   WatchListParams,
+  PreferenceAddParams,
+  PreferenceDeleteResult,
+  PreferenceExpect,
+  PreferenceListParams,
+  PreferenceListResult,
+  PreferenceResult,
+  PreferenceUpdateParams,
   WatchResult,
   WatchUpdateParams,
   NotifyPrefs,
@@ -103,6 +103,7 @@ import type {
   FileDiff,
   FileRead,
   FilesTreeResult,
+  Permission,
   Run,
   RunPatch,
   Schedule,
@@ -133,27 +134,6 @@ import type {
   SystemStatsParams,
   SystemStatsResult,
 } from '@/lib/types'
-import type {
-  IntegrationDecideParams,
-  IntegrationDecideResult,
-  IntegrationDeliverParams,
-  IntegrationDeliverResult,
-  IntegrationDeleteParams,
-  IntegrationDeleteResult,
-  IntegrationListParams,
-  IntegrationListResult,
-  IntegrationPatchResult,
-  IntegrationPrepareParams,
-  IntegrationPrepareResult,
-  IntegrationRequestDeliveryParams,
-  IntegrationRequestDeliveryResult,
-  IntegrationResolveParams,
-  IntegrationResolveResult,
-  IntegrationShowParams,
-  IntegrationShowResult,
-  IntegrationVerifyParams,
-  IntegrationVerifyResult,
-} from '@/lib/integration-types'
 import type {
   DevArtifactDeleteParams,
   DevArtifactDeleteResult,
@@ -557,6 +537,8 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    effort?: string
+    permission?: Permission
     account_member_id?: string
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
@@ -568,10 +550,11 @@ export const api = {
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   childSettings: (params: ChildSettingsParams = {}) => call<ChildSettings>('child.settings', params),
+  launchDefaultsGet: () => call<LaunchDefaultsResult>('launch.defaults.get'),
+  launchDefaultsSet: (params: LaunchDefaultsSetParams) => call<LaunchDefaultsResult>('launch.defaults.set', params),
   runChildren: (runID: string) => call<RunChildrenResult>('run.children', { run_id: runID }),
   runChildrenAllow: (runID: string, children: RunChildrenSetting) =>
     call<{ children: RunChildrenSetting }>('run.children.allow', { run_id: runID, children }),
-  runChildDetach: (runID: string) => call<unknown>('run.child.detach', { run_id: runID }),
   /** Without limits it reads them; an admin's limits change them. */
   workspaceChildLimits: (workspaceID: string, limits: Partial<ChildLimits> = {}) =>
     call<ChildLimits>('workspace.child_limits', { workspace_id: workspaceID, ...limits }),
@@ -664,41 +647,6 @@ export const api = {
     call<DevPortListResult>('dev.port.list', params),
   devArtifactDownload: (params: DevArtifactDownloadRequest, signal?: AbortSignal) =>
     downloadArtifact(params, signal),
-  missionCreate: (params: {
-    workspace_id: string
-    objective: string
-    accountable_human_id: string
-    integrator: MissionIntegrator
-    execution_choices: MissionExecutionChoice[]
-    fallback_account_member_ids?: string[]
-    no_fallback?: boolean
-    extra_workspace_ids?: string[]
-    idempotency_key: string
-  }) => call<MissionCreateResult>('mission.create', params),
-  missionShow: (missionID: string) =>
-    call<MissionShowResult>('mission.show', { mission_id: missionID }),
-  missionList: (params: { workspace_id: string; limit?: number; before?: string }) =>
-    call<MissionListResult>('mission.list', params),
-  missionReplaceIntegrator: (params: {
-    mission_id: string
-    expected_generation: number
-    integrator: MissionIntegrator
-    idempotency_key: string
-  }) => call<MissionReplaceIntegratorResult>('mission.replace-integrator', params),
-  missionQuestionAnswer: (params: {
-    question_id: string
-    answer: string
-    idempotency_key: string
-  }) => call<MissionQuestionResult>('mission.question.answer', params),
-  missionCancel: (params: { mission_id: string; idempotency_key: string }) =>
-    call<MissionCancelResult>('mission.cancel', params),
-  missionArchive: (missionID: string) =>
-    call<{ mission: Mission }>('mission.archive', { mission_id: missionID }).then((r) => r.mission),
-  missionUnarchive: (missionID: string) =>
-    call<{ mission: Mission }>('mission.unarchive', { mission_id: missionID }).then((r) => r.mission),
-  missionDelete: (missionID: string) => call<unknown>('mission.delete', { mission_id: missionID }),
-  missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>
-    call<MissionWorkerReleaseResult>('mission.worker.release', params),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
@@ -728,6 +676,8 @@ export const api = {
       ...(values ? { values } : {}),
       ...lease,
     }),
+  runInputRespond: (runID: string, requestID: string, optionID: string) =>
+    call<unknown>('run.input.respond', { run_id: runID, request_id: requestID, option_id: optionID }),
   assistantStatus: () => call<AssistantStatus>('assistant.status', {}),
   assistantStart: (params: AssistantStartParams = {}) => call<AssistantStatus>('assistant.start', params),
   assistantPrompt: (text: string, idempotencyKey: string, viewContext?: ViewContext, signal?: AbortSignal) =>
@@ -772,7 +722,6 @@ export const api = {
   }) => call<RoomMessageListResult>('run.room.list', params),
   coordMessagesList: (params: {
     workspace_id: string
-    mission_id?: string
     run_id?: string
     correlation_id?: string
     before?: string
@@ -816,26 +765,6 @@ export const api = {
     packet_id: string
     max_bytes?: number
   }) => call<EvidenceTranscriptResult>('run.evidence.transcript', params),
-  integrationPrepare: (params: IntegrationPrepareParams) =>
-    call<IntegrationPrepareResult>('integration.prepare', params),
-  integrationShow: (params: IntegrationShowParams) =>
-    call<IntegrationShowResult>('integration.show', params),
-  integrationList: (params: IntegrationListParams) =>
-    call<IntegrationListResult>('integration.list', params),
-  integrationResolve: (params: IntegrationResolveParams) =>
-    call<IntegrationResolveResult>('integration.resolve', params),
-  integrationVerify: (params: IntegrationVerifyParams) =>
-    call<IntegrationVerifyResult>('integration.verify', params),
-  integrationRequestDelivery: (params: IntegrationRequestDeliveryParams) =>
-    call<IntegrationRequestDeliveryResult>('integration.request_delivery', params),
-  integrationDecide: (params: IntegrationDecideParams) =>
-    call<IntegrationDecideResult>('integration.decide', params),
-  integrationDeliver: (params: IntegrationDeliverParams) =>
-    call<IntegrationDeliverResult>('integration.deliver', params),
-  integrationPatch: (params: IntegrationShowParams) =>
-    call<IntegrationPatchResult>('integration.patch', params),
-  integrationDelete: (params: IntegrationDeleteParams) =>
-    call<IntegrationDeleteResult>('integration.delete', params),
   presenceRoster: () =>
     call<{ members: PresenceEntry[] }>('presence.roster').then((r) => r.members),
   presenceHeartbeat: (workspaceID: string) =>
@@ -1016,6 +945,7 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    effort?: string
     params?: Record<string, string>
     budget_usd?: number
   }) =>
@@ -1069,12 +999,16 @@ export const api = {
   pushTest: (endpoint: string) => call<unknown>('push.test', { endpoint }),
   pushActive: () => call<unknown>('push.active'),
   connectorCode: () => call<ConnectorCode>('connector.code'),
-  connectorList: () => call<{ connectors: Connector[] }>('connector.list'),
+  connectorList: () => call<ConnectorList>('connector.list'),
   connectorRevoke: (connectorID: string) => call<{ connector: Connector }>('connector.revoke', { connector_id: connectorID }),
   slackStatus: () => call<SlackStatusResult>('slack.status'),
   slackLink: () => call<SlackLinkResult>('slack.link'),
   slackUnlink: () => call<SlackUnlinkResult>('slack.unlink'),
   watchCreate: (params: WatchCreateParams) => call<WatchResult>('watch.create', params),
+  preferenceList: (params: PreferenceListParams = {}) => call<PreferenceListResult>('preference.list', params),
+  preferenceAdd: (params: PreferenceAddParams) => call<PreferenceResult>('preference.add', params),
+  preferenceUpdate: (params: PreferenceUpdateParams) => call<PreferenceResult>('preference.update', params),
+  preferenceDelete: (id: string, expect: PreferenceExpect = {}) => call<PreferenceDeleteResult>('preference.delete', { id, ...expect }),
   watchList: (params: WatchListParams = {}) => call<{ watches: Watch[] }>('watch.list', params).then((r) => r.watches),
   watchGet: (watchID: string) => call<WatchGetResult>('watch.get', { watch_id: watchID }),
   watchUpdate: (params: WatchUpdateParams) => call<WatchResult>('watch.update', params),
@@ -1203,6 +1137,8 @@ export const api = {
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
+  assistantLoginSocket: (agent: string) =>
+    socketURL(`/ws/terminal?assistant_login=${encodeURIComponent(agent)}`),
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),

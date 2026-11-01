@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -29,6 +30,7 @@ type Snapshot struct {
 	Number   int        `json:"number"`
 	State    string     `json:"state"`
 	MergedAt *time.Time `json:"merged_at,omitempty"`
+	Draft    bool       `json:"draft,omitempty"`
 	Title    string     `json:"title"`
 	URL      string     `json:"html_url"`
 	HeadSHA  string     `json:"head_sha"`
@@ -108,9 +110,28 @@ type Review struct {
 	Body        string     `json:"body,omitempty"`
 	URL         string     `json:"html_url"`
 	SubmittedAt *time.Time `json:"submitted_at,omitempty"`
+	// Clipped is whether Body was cut at 2000 characters.
+	Clipped bool `json:"clipped,omitempty"`
 }
 
 func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, number int, prev *Snapshot) (Snapshot, error) {
+	return s.pullRequestSnapshot(ctx, token, repo, number, prev, nil)
+}
+
+// fetchFunc is one conditional GET of a snapshot.
+type fetchFunc func(ctx context.Context, path, etag string, dst any) (header http.Header, notModified bool, err error)
+
+// pullRequestSnapshot is PullRequestSnapshot calling check, when set, before
+// every request, so access revoked mid-read stops it.
+func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, number int, prev *Snapshot, check func(context.Context) error) (Snapshot, error) {
+	fetch := func(ctx context.Context, path, etag string, dst any) (http.Header, bool, error) {
+		if check != nil {
+			if err := check(ctx); err != nil {
+				return nil, false, err
+			}
+		}
+		return s.fetch(ctx, token, path, etag, dst)
+	}
 	if !validFullName(repo) || number <= 0 {
 		return Snapshot{}, errors.New("github: pull request must be an owner/name on github.com and a positive number")
 	}
@@ -125,6 +146,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 		URL      string     `json:"html_url"`
 		State    string     `json:"state"`
 		MergedAt *time.Time `json:"merged_at"`
+		Draft    bool       `json:"draft"`
 		Head     struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -139,18 +161,18 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	if cached {
 		etag = old.ETag
 	}
-	header, notModified, err := s.fetch(ctx, token, pullPath, etag, &pull)
+	header, notModified, err := fetch(ctx, pullPath, etag, &pull)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	if notModified {
-		snap.State, snap.MergedAt, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = prev.State, prev.MergedAt, prev.Title, prev.URL, prev.HeadSHA, prev.BaseRef
+		snap.State, snap.MergedAt, snap.Draft, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = prev.State, prev.MergedAt, prev.Draft, prev.Title, prev.URL, prev.HeadSHA, prev.BaseRef
 		snap.ReviewRequested = prev.ReviewRequested
 	} else {
 		if pull.Number != number || pull.State != "open" && pull.State != "closed" || !validSHA(pull.Head.SHA) || !strings.HasPrefix(pull.URL, "https://github.com/") {
 			return Snapshot{}, errors.New("github: API returned invalid pull request metadata")
 		}
-		snap.State, snap.MergedAt, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = pull.State, pull.MergedAt, pull.Title, pull.URL, pull.Head.SHA, pull.Base.Ref
+		snap.State, snap.MergedAt, snap.Draft, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = pull.State, pull.MergedAt, pull.Draft, pull.Title, pull.URL, pull.Head.SHA, pull.Base.Ref
 		snap.ReviewRequested = len(pull.RequestedReviewers)+len(pull.RequestedTeams) > 0
 		if snap.MergedAt != nil {
 			snap.State = "merged"
@@ -184,7 +206,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			} `json:"app"`
 		} `json:"check_runs"`
 	}
-	runs, pages, err := paginate(ctx, s, token, commit+"/check-runs?", prev, prevRuns, "check runs", nil, func(page checkRunsPage) []CheckRun {
+	runs, pages, err := paginate(ctx, fetch, commit+"/check-runs?", prev, prevRuns, "check runs", nil, func(page checkRunsPage) []CheckRun {
 		out := make([]CheckRun, 0, len(page.CheckRuns))
 		for _, r := range page.CheckRuns {
 			run := CheckRun{ID: r.ID, Name: r.Name, Status: r.Status, SuiteID: r.Suite.ID, App: r.App.Name, URL: r.URL, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt}
@@ -212,7 +234,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			} `json:"app"`
 		} `json:"check_suites"`
 	}
-	suites, pages, err := paginate(ctx, s, token, commit+"/check-suites?", prev, prevSuites, "check suites", nil, func(page checkSuitesPage) []CheckSuite {
+	suites, pages, err := paginate(ctx, fetch, commit+"/check-suites?", prev, prevSuites, "check suites", nil, func(page checkSuitesPage) []CheckSuite {
 		out := make([]CheckSuite, 0, len(page.CheckSuites))
 		for _, r := range page.CheckSuites {
 			suite := CheckSuite{ID: r.ID, Status: r.Status, App: r.App.Name, AppSlug: r.App.Slug, Runs: r.Runs}
@@ -237,7 +259,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			WorkflowRuns []WorkflowRun `json:"workflow_runs"`
 		}
 		var workflows []WorkflowRun
-		workflows, pages, err = paginate(ctx, s, token, "/repos/"+repo+"/actions/runs?head_sha="+snap.HeadSHA+"&", prev, prevWorkflows, "workflow runs", nil, func(page workflowRunsPage) []WorkflowRun {
+		workflows, pages, err = paginate(ctx, fetch, "/repos/"+repo+"/actions/runs?head_sha="+snap.HeadSHA+"&", prev, prevWorkflows, "workflow runs", nil, func(page workflowRunsPage) []WorkflowRun {
 			return page.WorkflowRuns
 		})
 		var refused *APIError
@@ -254,7 +276,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	type statusPage struct {
 		Statuses []CommitStatus `json:"statuses"`
 	}
-	statuses, pages, err := paginate(ctx, s, token, commit+"/status?", prev, prevStatuses, "commit statuses", nil, func(page statusPage) []CommitStatus {
+	statuses, pages, err := paginate(ctx, fetch, commit+"/status?", prev, prevStatuses, "commit statuses", nil, func(page statusPage) []CommitStatus {
 		return page.Statuses
 	})
 	if err != nil {
@@ -275,10 +297,11 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	// A PENDING review is the token owner's unsubmitted draft; submitting it
 	// later keeps the ID, so announcing the draft would hide the real review.
 	submitted := func(r Review) bool { return r.State != "PENDING" }
-	reviews, pages, err := paginate(ctx, s, token, pullPath+"/reviews?", prev, prevReviews, "reviews", submitted, func(page []reviewRecord) []Review {
+	reviews, pages, err := paginate(ctx, fetch, pullPath+"/reviews?", prev, prevReviews, "reviews", submitted, func(page []reviewRecord) []Review {
 		out := make([]Review, 0, len(page))
 		for _, r := range page {
-			review := Review{ID: r.ID, State: r.State, Body: truncate(r.Body, reviewBodyMax), URL: r.URL, SubmittedAt: r.SubmittedAt}
+			review := Review{ID: r.ID, State: r.State, Body: truncate(r.Body, reviewBodyMax), URL: r.URL, SubmittedAt: r.SubmittedAt,
+				Clipped: utf8.RuneCountInString(r.Body) > reviewBodyMax}
 			// GitHub returns a null user for deleted accounts.
 			if r.User != nil {
 				review.User = r.User.Login
@@ -288,7 +311,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 		return out
 	})
 	if err != nil {
-		return Snapshot{}, err
+		return snap, &ReviewsError{Err: err}
 	}
 	snap.Reviews, snap.Pages = reviews, append(snap.Pages, pages...)
 	return snap, nil
@@ -298,7 +321,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 // recorded in prev. A 304 page reuses its items from cached, which holds
 // prev's items for the same endpoint in page order. keep, when set, drops
 // items before they are recorded.
-func paginate[R, T any](ctx context.Context, s *Service, token, base string, prev *Snapshot, cached []T, what string, keep func(T) bool, items func(R) []T) ([]T, []Page, error) {
+func paginate[R, T any](ctx context.Context, fetch fetchFunc, base string, prev *Snapshot, cached []T, what string, keep func(T) bool, items func(R) []T) ([]T, []Page, error) {
 	var out []T
 	var pages []Page
 	offset, reusable := 0, prev != nil
@@ -318,7 +341,7 @@ func paginate[R, T any](ctx context.Context, s *Service, token, base string, pre
 			etag = old.ETag
 		}
 		var record R
-		header, notModified, err := s.fetch(ctx, token, path, etag, &record)
+		header, notModified, err := fetch(ctx, path, etag, &record)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -416,6 +439,21 @@ func (s Snapshot) CurrentRuns() []CheckRun {
 	})
 }
 
+// WaitingSuites are the suites Checks counts as one pending check each.
+func (s Snapshot) WaitingSuites() []CheckSuite {
+	running := map[int64]bool{}
+	for _, run := range s.CurrentRuns() {
+		if run.Status != "completed" {
+			running[run.SuiteID] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(s.Suites), func(suite CheckSuite) bool { return !s.waiting(suite, running) })
+}
+
+func (s Snapshot) waiting(suite CheckSuite, running map[int64]bool) bool {
+	return suite.Status != "completed" && !running[suite.ID] && (suite.AppSlug == "github-actions" || suite.Runs > 0)
+}
+
 // Checks counts CurrentRuns and the commit statuses. An incomplete suite
 // with no pending run counts as one pending check when it belongs to GitHub
 // Actions or already has runs; other apps can leave a zero-run suite queued
@@ -438,7 +476,7 @@ func (s Snapshot) Checks() Checks {
 		}
 	}
 	for _, suite := range s.Suites {
-		if suite.Status != "completed" && !running[suite.ID] && (suite.AppSlug == "github-actions" || suite.Runs > 0) {
+		if s.waiting(suite, running) {
 			c.Pending++
 			ids = append(ids, "q"+strconv.FormatInt(suite.ID, 10))
 		}

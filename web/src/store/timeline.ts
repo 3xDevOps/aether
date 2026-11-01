@@ -1,4 +1,5 @@
-import type { CoordMessagePayload, Event, RunStatusPayload } from '@/lib/types'
+import { isReread } from '@/lib/events'
+import type { CoordMessagePayload, Event } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /** Empty strings mean no filter. */
@@ -112,7 +113,7 @@ export const createTimelineSlice: SliceCreator<TimelineSlice> = (set, get) => ({
 })
 
 /** Firehoses the server's reader leaves out unless asked for by type. */
-const detailTypes = new Set(['run.diff', 'run.title', 'run.agent', 'coord.message.acked', 'mission.changed', 'integration.changed', 'run.pr', 'workspace.presence'])
+const detailTypes = new Set(['run.diff', 'run.title', 'run.agent', 'coord.message.acked', 'run.pr', 'workspace.presence'])
 
 function mailTo(event: Event, runID: string): boolean {
   return event.type === 'coord.message' && (event.payload as CoordMessagePayload | undefined)?.to_run_id === runID
@@ -124,5 +125,5 @@ function selects(f: FeedFilters, event: Event): boolean {
   if (f.runID && event.run_id !== f.runID && !mailTo(event, f.runID)) return false
   if (f.memberID && event.actor_id !== f.memberID) return false
   if (f.type) return event.type === f.type
-  return !detailTypes.has(event.type) && !(event.type === 'run.status' && (event.payload as RunStatusPayload | undefined)?.reread)
+  return !detailTypes.has(event.type) && !isReread(event)
 }

@@ -49,10 +49,10 @@ func (f *fakeInbox) NotifyRun(ctx context.Context, from, to domain.RunID, body, 
 	defer f.mu.Unlock()
 	c := notifyCall{from: from, to: to, body: body, corr: corr, key: key}
 	f.calls = append(f.calls, c)
-	created, err := f.db.AppendRunMessageWithPeer(ctx, &store.RunMessage{
+	created, err := f.db.AppendRunMessageCreated(ctx, &store.RunMessage{
 		WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to, Kind: store.RunMessageKindMessage,
 		Body: body, CorrelationID: corr, IdempotencyKey: key,
-	}, protocol.CoordMaxUnread, 8, false)
+	}, protocol.CoordMaxUnread)
 	if err != nil {
 		return false, err
 	}
@@ -96,7 +96,7 @@ func (h *waitHarness) restart() {
 	h.t.Helper()
 	_ = h.svc.Close()
 	svc, err := New(Config{
-		Store: h.bg, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Store: h.bg, Bus: h.bus, Runs: h.runs, Push: h.push, Head: h.log.LastSeq,
 		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now, Recovered: h.recovered,
 	})
 	if err != nil {

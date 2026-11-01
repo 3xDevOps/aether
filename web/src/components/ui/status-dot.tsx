@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils'
 export type Tone =
   | 'working'
   | 'waiting'
+  | 'wait-unknown'
+  | 'wait-fault'
   | 'ended'
   | 'needs-you'
   | 'review'
@@ -18,6 +20,8 @@ export type Tone =
 const classes: Record<Tone, { text: string; soft: string }> = {
   working: { text: 'text-state-working', soft: 'bg-state-working-soft' },
   waiting: { text: 'text-muted', soft: 'bg-chrome' },
+  'wait-unknown': { text: 'text-muted', soft: 'bg-chrome' },
+  'wait-fault': { text: 'text-state-failed', soft: 'bg-state-failed-soft' },
   ended: { text: 'text-muted', soft: 'bg-chrome' },
   disconnected: { text: 'text-muted', soft: 'bg-chrome' },
   'needs-you': { text: 'text-state-needs-you', soft: 'bg-state-needs-you-soft' },
@@ -37,6 +41,18 @@ export function toneClasses(tone: Tone): { text: string; soft: string } {
 const shapes: Record<Tone, React.ReactNode> = {
   working: <circle cx="5" cy="5" r="4" fill="currentColor" />,
   waiting: (
+    <>
+      <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M5 2.75V5h1.75" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  'wait-unknown': (
+    <>
+      <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" strokeDasharray="2.3 1.135" />
+      <path d="M5 2.75V5h1.75" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  'wait-fault': (
     <>
       <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" />
       <path d="M5 2.75V5h1.75" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />

@@ -40,7 +40,7 @@ describe('system tab', () => {
     expect(memory.textContent).toContain('8.0 GB of 16 GB · swap 0 B of 2.0 GB')
     expect(screen.getByRole('group', { name: 'Disk' }).textContent).toContain('25%')
     expect(screen.getByRole('group', { name: 'Network' }).textContent).toContain('↓ 117 KB/s ↑ 29 KB/s')
-    expect(screen.getByRole('group', { name: 'Containers' }).textContent).toContain('9 running8 runs · 1 environment · up 3d 4h')
+    expect(screen.getByRole('group', { name: 'Containers' }).textContent).toContain('9 running8 sessions · 1 environment · up 3d 4h')
     expect(screen.getByRole('group', { name: 'Pressure' }).textContent).toContain('CPU 2.0% · Memory 0.0% · I/O 0.5%')
     expect(screen.getByRole('status').textContent).toBe('Live · every 5s')
     expect(client.systemStats).toHaveBeenCalledWith({ since_ms: 0 }, expect.any(AbortSignal))
@@ -52,9 +52,9 @@ describe('system tab', () => {
     expect(rows()).toHaveLength(9)
     expect(rows()[0]!.textContent).toContain('rewrite the checkout flow')
 
-    fireEvent.click(within(screen.getByRole('list', { name: 'Slices' })).getByRole('button', { name: /Other runs/ }))
+    fireEvent.click(within(screen.getByRole('list', { name: 'Slices' })).getByRole('button', { name: /Other sessions/ }))
 
-    expect(screen.getByText('Showing 7 runs in Other runs')).toBeDefined()
+    expect(screen.getByText('Showing 7 sessions in Other sessions')).toBeDefined()
     expect(rows()).toHaveLength(7)
     expect(screen.queryByText('Aether server, Docker and host processes')).toBeNull()
 

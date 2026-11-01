@@ -12,31 +12,30 @@ import (
 var agentOrder = []string{"claude", "codex"}
 
 // ErrNoAgent means none of the assistant's agents is ready.
-var ErrNoAgent = errors.New("assistant: no agent is ready; install Claude Code or Codex with its Enhanced adapter and sign in")
+var ErrNoAgent = errors.New("assistant: no agent is ready; sign in to Claude Code or Codex for the assistant")
 
 // readiness describes the assistant's agents from an agent.list result. An
-// agent is ready when it and its Enhanced adapter are installed and its login
-// was found.
-func readiness(listed []protocol.AgentInfo) []protocol.AssistantAgent {
+// agent is ready when found reports its login in the member's own home: the
+// assistant installs its adapter in its own container, never runs the
+// member's installation.
+func readiness(listed []protocol.AgentInfo, found func(agent string) (bool, error)) ([]protocol.AssistantAgent, error) {
 	out := make([]protocol.AssistantAgent, 0, len(agentOrder))
 	for _, name := range agentOrder {
 		i := slices.IndexFunc(listed, func(a protocol.AgentInfo) bool { return a.Name == name })
 		if i < 0 {
 			continue
 		}
-		a := listed[i]
-		agent := protocol.AssistantAgent{Name: name, DisplayName: a.DisplayName, Ready: true}
-		switch {
-		case !a.Installed:
-			agent.Ready, agent.Reason = false, "Not installed"
-		case !a.EnhancedInstalled:
-			agent.Ready, agent.Reason = false, "Enhanced adapter not installed"
-		case a.LoginFound != nil && !*a.LoginFound:
-			agent.Ready, agent.Reason = false, "No sign-in found"
+		ok, err := found(name)
+		if err != nil {
+			return nil, fmt.Errorf("assistant: look for the %s login: %w", name, err)
+		}
+		agent := protocol.AssistantAgent{Name: name, DisplayName: listed[i].DisplayName, Ready: ok}
+		if !ok {
+			agent.Reason = "Not signed in for the assistant"
 		}
 		out = append(out, agent)
 	}
-	return out
+	return out, nil
 }
 
 // choose picks the requested agent, else the stored one, else the first ready

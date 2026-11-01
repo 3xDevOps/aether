@@ -5,6 +5,7 @@ import type { DevArtifact } from '@/lib/development-types'
 export * from '@/lib/development-types'
 export * from '@/lib/run-repository-types'
 export * from '@/lib/child-types'
+export * from '@/lib/launch-defaults-types'
 
 export type RunStatus =
   | 'queued'
@@ -39,6 +40,21 @@ export type RunStatusCause =
   | 'human'
   | 'disconnect'
 
+/** How far Aether can vouch for a reported wait; mirrors domain.WaitEvidence in internal/domain/wait.go. */
+export type WaitKind = 'condition' | 'source_unknown' | 'system_fault' | 'unverified'
+
+/**
+ * The evidence behind the reported wait a live run shows, from the conditions its agent named; mirrors
+ * domain.RunWait. `detail` and `error` are server text, `error` the source's or delivery's error
+ * verbatim; `verified_at` is the oldest last successful source read, absent when one was never read.
+ */
+export interface RunWait {
+  kind: WaitKind
+  detail?: string
+  verified_at?: string
+  error?: string
+}
+
 export type RunActivity =
   | 'working'
   | 'waiting-agents'
@@ -61,6 +77,8 @@ export interface RunInputRequest {
   id: string
   session_id: string
   kind: 'question' | 'permission' | 'form' | 'extension_ui'
+  /** Set only on a sudo request (isSudo in lib/run-requests.ts). */
+  title?: string
 }
 
 export type WaitKind = 'pr_merged' | 'pr_checks' | 'run_finished'
@@ -125,10 +143,10 @@ export interface Run {
   account_member_id?: string
   /** The account the launcher chose, present only when usage fallback moved the run to `account_member_id`. */
   requested_account_member_id?: string
-  mission_id?: string
-  mission_role?: 'integrator' | 'worker'
-  integrator_run_id?: string
-  /** The run that started this one, or a worker's current integrator. */
+  /** The run's fallback order; absent means automatic, or a server too old to say. */
+  fallback_account_member_ids?: string[]
+  no_fallback?: boolean
+  /** The run that started this one. */
   parent_run_id?: string
   /** The top of the run's tree. */
   root_run_id?: string
@@ -137,14 +155,15 @@ export interface Run {
   detached?: boolean
   /** The run's own child-run setting; absent follows the owner's. */
   children?: RunChildrenSetting
-  /** The agent tried to start a child run while child runs were off. */
-  child_refused?: boolean
   task: string
   /** Latest terminal title, omitted by older servers and for empty titles. */
   title?: string
   harness: string
   mode: string
   model?: string
+  effort?: string
+  /** Omitted by servers from before permission tiers, whose runs ran as root. */
+  permission?: Permission
   /** The connector client, such as ChatGPT, the run was launched through. */
   via?: string
   /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
@@ -156,6 +175,8 @@ export interface Run {
   cause?: RunStatusCause
   /** A live Enhanced run's turn, read from its agent session when the run was fetched; not pushed. */
   liveness?: RunLiveness
+  /** Set while `state` is a wait the agent reported. */
+  wait?: RunWait
   /** Increments on every change of status, state, reason or outcome flags. */
   status_seq: number
   branch: string
@@ -172,9 +193,6 @@ export interface Run {
   profile_snapshot_id?: string
   /** Server-computed unanswered room questions; absent on older gateways. */
   unanswered_questions?: number
-  /** Agent mail addressed to the run that it has not acknowledged. */
-  unacked_messages?: number
-  oldest_unacked_at?: string
   /** Correlated native requests; independent of execution status. */
   pending_inputs?: RunInputRequest[]
   /** The run's latest coord.report until conditions, live or ended. */
@@ -212,260 +230,7 @@ export interface RunRepo {
   branch: string
   primary: boolean
 }
-/** Only `active` dispatches workers; `completed` and `cancelled` are final. */
-export type MissionPhase = 'planning' | 'active' | 'completed' | 'cancelled'
-export type MissionTaskStatus = 'ready' | 'working' | 'review' | 'done' | 'proposed' | 'abandoned' | 'blocked'
-export type MissionTaskRevisionStatus = 'proposed' | 'accepted' | 'superseded' | 'abandoned'
-export type MissionAttemptState =
-  | 'reserved'
-  | 'launching'
-  | 'running'
-  | 'unknown'
-  | 'submitted'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'superseded'
-  | 'abandoned'
-export type MissionSubmissionState =
-  | 'proposed'
-  | 'accepted'
-  | 'rejected'
-  | 'superseded'
-  | 'abandoned'
 
-export interface MissionExecutionChoice {
-  account_member_id: string
-  harness: string
-  mode: string
-  model?: string
-}
-
-export type MissionIntegrator = MissionExecutionChoice
-
-export interface Mission {
-  id: string
-  workspace_id: string
-  objective: string
-  accountable_human_id: string
-  integrator: MissionIntegrator
-  execution_choices: MissionExecutionChoice[]
-  /** Workspaces the integrator and every worker check out at /repos/<name>. */
-  extra_workspace_ids?: string[]
-  current_integrator_run_id: string
-  integrator_generation: number
-  accepted_set_version: number
-  phase: MissionPhase
-  /** Unanswered questions; only mission.show and mission.list compute it. */
-  open_questions: number
-  /** Why the integrator run last failed to launch; cleared once it launched. */
-  integrator_launch_error?: string
-  integrator_launch_error_at?: string
-  /** True once the current integrator's run row has existed. */
-  integrator_run_launched?: boolean
-  created_at: string
-  updated_at: string
-  archived_at?: string
-}
-
-export interface MissionQuestion {
-  id: string
-  mission_id: string
-  seq: number
-  body: string
-  asked_by_run_id: string
-  asked_at: string
-  answer?: string
-  answered_by_member_id?: string
-  answered_at?: string | null
-}
-
-export interface MissionTaskScope {
-  expected_paths?: string[]
-  semantic_responsibility?: string
-  interfaces?: MissionInterfaceRevision[]
-  migrations?: string[]
-  shared_tests?: string[]
-  base?: string
-  target?: string
-  exclusions?: string[]
-}
-
-export interface MissionInterfaceRevision {
-  name: string
-  revision: string
-}
-
-export interface MissionEvidenceRequirement {
-  kind: string
-  detail?: string
-}
-
-export interface MissionTaskRevision {
-  task_id: string
-  revision: number
-  title: string
-  objective: string
-  scope: MissionTaskScope
-  evidence_requirements: MissionEvidenceRequirement[]
-  status: MissionTaskRevisionStatus
-  proposed_by_run_id?: string
-  supersedes_revision?: number
-  accepted_by_member_id?: string
-  accepted_by_run_id?: string
-  created_at: string
-  accepted_at?: string | null
-}
-
-export interface MissionTaskDependency {
-  task_id: string
-  revision: number
-  depends_on_task_id: string
-  depends_on_revision: number
-  output_ref?: string
-}
-
-export interface MissionTaskBlocker {
-  kind: string
-  task_id?: string
-  owner_run_id?: string
-  action: string
-}
-
-export interface MissionTask {
-  id: string
-  mission_id: string
-  current_revision: number
-  revision?: MissionTaskRevision | null
-  /** A proposed revision above `current_revision`; it cannot be dispatched. */
-  pending_revision?: MissionTaskRevision | null
-  dependencies?: MissionTaskDependency[]
-  status: MissionTaskStatus
-  blockers?: MissionTaskBlocker[]
-  abandoned_at?: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface MissionAttempt {
-  id: string
-  mission_id: string
-  task_id: string
-  task_revision: number
-  number: number
-  dispatch_key: string
-  harness: string
-  mode: string
-  state: MissionAttemptState
-  run_id: string
-  actor_run_id?: string
-  authorizing_human_id?: string
-  run_owner_id?: string
-  account_owner_id?: string
-  authority_generation: number
-  integrator_generation: number
-  created_at: string
-  reserved_at: string
-  started_at?: string | null
-  finished_at?: string | null
-  /** Durable hold/takeover state, not inferred from a live lease. */
-  takeover_active?: boolean
-  takeover_member_id?: string
-  takeover_generation?: number
-  orchestration_hold?: boolean
-  cancel_requested_at?: string | null
-  cancellation_actor_run_id?: string
-  cancellation_generation?: number
-  last_error?: string
-}
-
-export interface MissionSubmissionEvidence {
-  kind: string
-  ref: string
-  available: boolean
-  truncated?: boolean
-  detail?: string
-}
-
-export interface MissionSubmissionRef {
-  workspace_id: string
-  run_id: string
-  evidence_ref: string
-  retained_revision: string
-}
-
-export interface MissionSubmissionAcceptance {
-  scope_disposition?: string
-  /** Monotonic position in the mission's accepted set. */
-  accepted_set_version?: number
-}
-
-export interface MissionSubmission {
-  id: string
-  mission_id: string
-  task_id: string
-  task_revision: number
-  attempt_id: string
-  ref: MissionSubmissionRef
-  evidence: MissionSubmissionEvidence[]
-  scope_violations?: string[]
-  acceptance?: MissionSubmissionAcceptance
-  state: MissionSubmissionState
-  proposed_by_run_id: string
-  integrator_generation: number
-  created_at: string
-  decided_at?: string | null
-  decision_by_run_id?: string
-}
-
-export interface MissionScopeDiagnostic {
-  task_id: string
-  task_revision: number
-  run_id: string
-  kind: 'intended_overlap' | 'observed_overlap' | 'out_of_scope'
-  paths: string[]
-  peer_task_id?: string
-  peer_run_id?: string
-  unavailable?: boolean
-  unavailable_why?: string
-  detail?: string
-}
-
-export interface MissionShowResult {
-  mission: Mission
-  tasks: MissionTask[]
-  attempts?: MissionAttempt[]
-  submissions?: MissionSubmission[]
-  diagnostics?: MissionScopeDiagnostic[]
-  questions?: MissionQuestion[]
-}
-
-export interface MissionQuestionResult {
-  question: MissionQuestion
-}
-
-export interface MissionCancelResult {
-  mission: Mission
-}
-
-export interface MissionListResult {
-  missions: Mission[]
-  next_cursor?: string
-}
-
-export interface MissionCreateResult {
-  mission: Mission
-}
-
-export interface MissionReplaceIntegratorResult {
-  mission: Mission
-  run_id?: string
-}
-export interface MissionWorkerReleaseResult {
-  run_id: string
-  takeover_active: boolean
-  takeover_generation: number
-}
 export interface Workspace {
   id: string
   name: string
@@ -600,7 +365,6 @@ export interface InsightsRun {
   created_at: string
   finished_at: string
   duration_seconds: number
-  mission_id: string
   pr_url: string
   pr_state: string
 }
@@ -636,7 +400,6 @@ export interface InsightsOutcomeBucket {
   /** A local date, YYYY-MM-DD, as in the series. */
   start: string
   runs: InsightsOutcome
-  swarms: InsightsOutcome
 }
 
 export interface InsightsMemberOutcome {
@@ -645,13 +408,11 @@ export interface InsightsMemberOutcome {
   /** The member's profile color. */
   color: string
   runs: InsightsOutcome
-  swarms: InsightsOutcome
   series: InsightsOutcomeBucket[]
 }
 
 export interface InsightsOutcomes {
   runs: InsightsOutcome
-  swarms: InsightsOutcome
   series: InsightsOutcomeBucket[]
   /** Filled for scope "everyone" only. */
   members: InsightsMemberOutcome[]
@@ -670,7 +431,6 @@ export interface InsightsResult {
   by_workspace: (InsightsBreakdown & { workspace_id: string; name: string })[]
   /** model "" is the agent's default model. */
   by_agent: (InsightsBreakdown & { harness: string; model: string })[]
-  swarms: { launched: number; completed: number; cancelled: number; agents: number; tasks_accepted: number }
   durations: {
     runs_measured: number
     median_run_seconds: number
@@ -682,7 +442,7 @@ export interface InsightsResult {
   }
   cost: InsightsCost
   pull_requests: { opened: number; merged: number }
-  success: { runs: InsightsSuccessCount; swarms: InsightsSuccessCount }
+  success: { runs: InsightsSuccessCount }
   outcomes: InsightsOutcomes
   recent: InsightsRun[]
   needs_you: number
@@ -971,6 +731,8 @@ export interface RoomMessageListResult {
 
 export interface RoomController {
   member_id: string
+  /** The holder's control session; absent from a gateway older than the field. */
+  control_session_id?: string
   connected: boolean
   acquired_at: string
   expires_at?: string
@@ -1077,6 +839,7 @@ export interface RunStatusPayload {
   cause?: RunStatusCause
   /** Only a newer read of the wait's sources; history leaves it out. */
   reread?: boolean
+  wait?: RunWait
   status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean
@@ -1117,35 +880,14 @@ export interface RunPRPayload {
   merged_at?: string
 }
 
-export interface IntegrationChangedPayload {
-  mission_id: string
-  candidate_id: string
-  state: string
-  version: number
-}
-
-export type MissionChange =
-  | 'task_proposed'
-  | 'task_accepted'
-  | 'task_finished'
-  | 'question_asked'
-  | 'question_answered'
-  | 'worker_ended'
-  | 'phase_changed'
-
-export interface MissionChangedPayload {
-  mission_id: string
-  deleted?: boolean
-  change?: MissionChange
-  task_id?: string
-  attempt_id?: string
-}
-
 export interface RunTitlePayload {
   title: string
 }
 export interface RunModelPayload {
   model: string
+}
+export interface RunEffortPayload {
+  effort: string
 }
 export interface RunProtectedPayload {
   protected: boolean
@@ -1171,7 +913,6 @@ export type RunMessageKind = 'message' | 'question' | 'reply' | 'report'
 export interface RunMessage {
   id: string
   workspace_id: string
-  mission_id?: string
   from_run_id: string
   to_run_id: string
   kind: RunMessageKind
@@ -1193,7 +934,6 @@ export interface CoordMessagesListResult {
 export interface CoordMessagePayload {
   message_id: string
   workspace_id: string
-  mission_id?: string
   from_run_id: string
   to_run_id: string
   kind: RunMessageKind
@@ -1254,7 +994,6 @@ export interface TimelinePage {
 export interface TimelineQuery {
   workspace_id: string
   run_id?: string
-  mission_id?: string
   member_id?: string
   types?: string[]
   after_seq?: number
@@ -1362,6 +1101,7 @@ export interface Template {
   harness: string
   mode: string
   model?: string
+  effort?: string
   params?: Record<string, string>
   budget_usd?: number
   created_at: string
@@ -1405,6 +1145,9 @@ export interface WorkspaceSelector {
 /** The wire names of Standard, Enhanced and Background. */
 export type LaunchMode = 'tui' | 'acp' | 'headless'
 
+/** What a run's agent may change outside its checkout: Root access, Default and Isolated. */
+export type Permission = 'root' | 'default' | 'isolated'
+
 /** One entry of agent.list; source is who supplied the harness. */
 export interface AgentInfo {
   name: string
@@ -1427,8 +1170,6 @@ export interface AgentInfo {
   default_mode?: 'tui' | 'acp'
   /** Whether the agent prefers Enhanced, installed yet or not. */
   enhanced_default?: boolean
-  /** Why a swarm integrator or worker cannot run the agent in Standard: Aether could not wake it when mail arrives. */
-  swarm_standard_refusal?: string
   /** Whether a running run can switch between Standard and Enhanced. */
   switchable?: boolean
   /** Shared account: refused because its owner has no login for this agent. */
@@ -1442,6 +1183,8 @@ export interface AgentInfo {
   install_script?: string
   /** install_script followed by the pinned enhanced-mode adapter's install. */
   enhanced_install_script?: string
+  /** The levels a launch may send as `effort`, lowest first; absent when the agent has no effort setting. */
+  effort_levels?: string[]
 }
 
 /** One model agent.models discovered; `id` is what a launch sends as `model`. */
@@ -1654,7 +1397,7 @@ export interface EdgeLinkResult {
   edge: string
   addr?: string
   user: string
-  member: { id: string; display_name: string; role: string }
+  member: { id: string; display_name: string; role: string; pending?: boolean }
   /** The link is saved, but the clone's aether remote was not updated. */
   remote_error?: string
 }
@@ -1829,7 +1572,7 @@ export interface MemberMerge {
 export interface LinkApplyResult {
   addr: string
   user: string
-  member: { id: string; display_name: string; role: string }
+  member: { id: string; display_name: string; role: string; pending?: boolean }
   key_generated?: string
 }
 
@@ -2359,12 +2102,29 @@ export interface ConnectorCode {
 export interface Connector {
   id: string
   member_id: string
+  /** The OAuth client_id metadata URL, such as `https://chatgpt.com/...`; Claude Code's is on claude.ai and returns to a loopback port. */
+  client_id?: string
   client_name: string
   redirect_host: string
   device_id?: string
+  /** The connector URL it was authorized for: the edge's universal `<edge>/mcp` or the server's own `<edge>/mcp/<server id>`. */
+  resource?: string
   scopes: string[]
   created_at: string
   last_used_at?: string
+}
+
+/**
+ * connector.list: the member's connectors and how they add one. `url` is
+ * the URL to add; `universal_url` the edge's one URL for every server,
+ * which differs from `url` until the member links a GitHub account;
+ * `sign_in` means the consent page takes the edge sign-in, no code.
+ */
+export interface ConnectorList {
+  connectors: Connector[]
+  url?: string
+  universal_url?: string
+  sign_in?: boolean
 }
 
 export interface SlackLinkResult {
@@ -2379,18 +2139,17 @@ export interface SlackUnlinkResult {
 }
 
 /** What a watch follows (docs/watches.md). */
-export type WatchTargetKind = 'run' | 'mission' | 'pr'
+export type WatchTargetKind = 'run' | 'pr'
 
 export interface WatchTarget {
   kind: WatchTargetKind
   run_id?: string
-  mission_id?: string
   /** owner/name */
   repo?: string
   number?: number
 }
 
-export type WatchCondition = 'needs_you' | 'finished' | 'pr_merged' | 'ci' | 'delivered' | 'review' | 'merged' | 'closed'
+export type WatchCondition = 'needs_you' | 'finished' | 'pr_merged' | 'ci' | 'review' | 'merged' | 'closed'
 
 export type WatchState = 'active' | 'paused' | 'error' | 'done' | 'expired'
 
@@ -2471,7 +2230,6 @@ export interface WatchListParams {
   state?: WatchState
   target_kind?: WatchTargetKind
   run_id?: string
-  mission_id?: string
 }
 
 /** watch.create and watch.update: the watch and one human line saying what it now does. */
@@ -2505,4 +2263,65 @@ export interface WatchChangedPayload {
   watch_id: string
   member_id: string
   notification_id?: string
+}
+
+// Wire types of preference.* (internal/protocol/preference.go).
+
+export type PreferenceSource = 'assistant' | 'settings'
+
+export interface Preference {
+  id: string
+  /** Absent: applies in all the member's workspaces. */
+  workspace_id?: string
+  text: string
+  enabled: boolean
+  source: PreferenceSource
+  /** The assistant message the member said it in. */
+  source_ref?: string
+  created_at: string
+  updated_at: string
+  last_used_at?: string
+}
+
+export interface PreferenceListParams {
+  workspace_id?: string
+  query?: string
+  include_disabled?: boolean
+}
+
+export interface PreferenceListResult {
+  preferences: Preference[]
+  /** The member's "use my preferences" setting. */
+  enabled: boolean
+}
+
+/** Refused with "signed in as a different member" when it is not the caller. */
+export interface PreferenceExpect {
+  expected_member_id?: string
+  /** Refused with "changed since you saw it" when the row's updated_at differs. */
+  expected_updated_at?: string
+}
+
+export interface PreferenceAddParams {
+  text: string
+  workspace_id?: string
+  expected_member_id?: string
+}
+
+export interface PreferenceUpdateParams extends PreferenceExpect {
+  id: string
+  text?: string
+  workspace_id?: string
+  clear_workspace?: boolean
+  enabled?: boolean
+}
+
+export interface PreferenceResult {
+  preference: Preference
+  /** The row before the change. */
+  previous?: Preference
+}
+
+export interface PreferenceDeleteResult {
+  deleted: Preference
 }

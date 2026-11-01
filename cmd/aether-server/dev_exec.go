@@ -21,10 +21,21 @@ func devExec(args []string) int {
 		return served(devexec.ServeSFTP(stdio{}))
 	}
 	if len(args) < 2 {
-		_, _ = fmt.Fprintln(os.Stderr, "dev-exec: expected run|run-pipe <key> <claim> <argv...>, control <key> <exec-id> <claim> <action> [grace-ms], forward or sftp")
+		_, _ = fmt.Fprintln(os.Stderr, "dev-exec: expected run|run-pipe <key> <claim> <argv...>, run-attached <input-bytes> <argv...>, control <key> <exec-id> <claim> <action> [grace-ms], forward or sftp")
 		return 125
 	}
 	switch args[0] {
+	case devexec.Attached:
+		n, err := strconv.Atoi(args[1])
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "dev-exec:", err)
+			return 125
+		}
+		code, err := devexec.RunAttached(n, args[2:])
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "dev-exec:", err)
+		}
+		return code
 	case "run", "run-pipe":
 		if len(args) < 4 {
 			return 125

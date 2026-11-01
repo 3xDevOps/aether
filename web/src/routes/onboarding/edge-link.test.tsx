@@ -73,6 +73,10 @@ function seed() {
   })
 }
 
+async function chooseRelay() {
+  fireEvent.click(await screen.findByRole('radio', { name: 'Aether relay' }))
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   vi.useRealTimers()
@@ -91,6 +95,7 @@ describe('onboarding link through an edge', () => {
       localEdgeLogin: vi.fn(async () => customLogin),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     fireEvent.change(await screen.findByLabelText('Have an invitation or claim link?'), {
       target: { value: `${custom}/join/${serverID}/inv-7k2m9q4xbd#abcdefghijk23456` },
@@ -98,23 +103,62 @@ describe('onboarding link through an edge', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open link' }))
 
     const join = within(await screen.findByRole('region', { name: 'Join' }))
-    fireEvent.click(await join.findByRole('button', { name: 'Sign in' }))
+    fireEvent.click(await join.findByRole('button', { name: 'Sign in with GitHub' }))
     expect(client.localEdgeLogin).toHaveBeenCalledWith(custom)
   })
 
-  it('offers sign-in first and keeps the address form behind a disclosure', async () => {
+  it('opens the Join panel for an invite link pasted into the tailnet name', async () => {
+    seed()
+    const client = fakeApi({ localLinkStatus: vi.fn(async () => unlinked) })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.change(await screen.findByLabelText("Server's tailnet name"), {
+      target: { value: `${edge}/join/${serverID}/inv-7k2m9q4xbd#abcdefghijk23456` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }))
+
+    expect(await screen.findByRole('region', { name: 'Join' })).toBeDefined()
+    expect(screen.getByRole('radio', { name: 'Aether relay' }).getAttribute('aria-checked')).toBe('true')
+    expect(client.localLinkApply).not.toHaveBeenCalled()
+  })
+
+  it('holds a bare claim code pasted before signing in, then fills the claim form with it', async () => {
+    seed()
+    const code = `${serverID}-abcdefghijk23456`
+    render(<OnboardingRoute params={{}} client={fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn().mockResolvedValueOnce({ edges: [] }).mockResolvedValue(signedIn),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [] })),
+    })} />)
+    await chooseRelay()
+
+    fireEvent.change(await screen.findByLabelText('Have an invitation or claim link?'), { target: { value: code } })
+    fireEvent.click(screen.getByRole('button', { name: 'Open link' }))
+
+    expect(await screen.findByText(/^Claim link received/)).toBeDefined()
+    expect(screen.queryByLabelText('Have an invitation or claim link?')).toBeNull()
+  })
+
+  it('offers Tailscale first, then the relay sign-in and an SSH address as the other choices', async () => {
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi({ localLinkStatus: vi.fn(async () => unlinked) })} />)
 
-    const signIn = await screen.findByRole('button', { name: 'Sign in' })
-    const byAddress = screen.getByRole('button', { name: /^Link by address/ })
-    expect(signIn.compareDocumentPosition(byAddress) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const choices = await screen.findAllByRole('radio')
+    expect(choices.map((c) => c.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false'])
+    expect(within(choices[0]).getByText('Recommended')).toBeDefined()
+    const tailnet = screen.getByRole('form', { name: 'Link server' })
+    expect(within(tailnet).getByLabelText("Server's tailnet name")).toBeDefined()
+    expect(within(tailnet).queryByLabelText('Invite code')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sign in with GitHub' })).toBeNull()
+
+    await chooseRelay()
+    expect(await screen.findByRole('button', { name: 'Sign in with GitHub' })).toBeDefined()
     expect(screen.queryByRole('form', { name: 'Link server' })).toBeNull()
 
-    fireEvent.click(byAddress)
-    const form = screen.getByRole('form', { name: 'Link server' })
-    expect(within(form).getByLabelText('Server address')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDefined()
+    fireEvent.click(screen.getByRole('radio', { name: 'SSH address' }))
+    const ssh = screen.getByRole('form', { name: 'Link server' })
+    expect(within(ssh).getByLabelText('Server address')).toBeDefined()
+    expect(within(ssh).getByLabelText('Invite code')).toBeDefined()
   })
 
   it('shows the code, opens the browser, and waits for the gateway to report the sign-in', async () => {
@@ -134,8 +178,9 @@ describe('onboarding link through an edge', () => {
       localEdgeServers: vi.fn(async () => ({ edge, servers: [buildBox] })),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with GitHub' }))
 
     expect(await screen.findByText('WDJB-MJHT')).toBeDefined()
     expect(screen.getByRole('link', { name: `${edge}/device` }).getAttribute('href')).toBe(
@@ -169,13 +214,14 @@ describe('onboarding link through an edge', () => {
       localEdgeLogin: vi.fn(async () => pending),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with GitHub' }))
     expect(await screen.findByText('WDJB-MJHT')).toBeDefined()
     await vi.advanceTimersByTimeAsync(2000)
 
     expect(await screen.findByText('Sign-in was replaced by another window. Try again.')).toBeDefined()
-    expect((screen.getByRole('button', { name: 'Sign in' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Sign in with GitHub' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('resumes a sign-in still pending when the step opens again', async () => {
@@ -185,6 +231,7 @@ describe('onboarding link through an edge', () => {
       localEdgeStatus: vi.fn(async () => ({ edges: [], login: pending })),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     expect(await screen.findByText('WDJB-MJHT')).toBeDefined()
     expect(client.localEdgeLogin).not.toHaveBeenCalled()
@@ -202,15 +249,16 @@ describe('onboarding link through an edge', () => {
       ),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with GitHub' }))
 
     expect(
       await screen.findByText(
         'edge.login: sign in: Post "https://edge.onaether.dev/v1/device": dial tcp: i/o timeout',
       ),
     ).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Sign in with GitHub' })).toBeDefined()
   })
 
   it('shows why a sign-in failed', async () => {
@@ -227,13 +275,14 @@ describe('onboarding link through an edge', () => {
       })),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     expect(
       await screen.findByText(
         'sign in: code WDJB-MJHT expired before it was confirmed; run aether login again',
       ),
     ).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Sign in with GitHub' })).toBeDefined()
   })
 
   it('links a listed server only after showing what the link pins', async () => {
@@ -263,6 +312,7 @@ describe('onboarding link through an edge', () => {
       localEdgeLink: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     const servers = within(await screen.findByRole('list', { name: 'Your servers' }))
     const oldBox = servers.getByText('old-box').closest('li')!
@@ -299,6 +349,7 @@ describe('onboarding link through an edge', () => {
       localEdgeHostKey: vi.fn(() => Promise.reject(new ApiError(503, refusal))),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Link build-box' }))
     const confirm = within(await screen.findByRole('region', { name: 'Confirm server' }))
@@ -318,6 +369,7 @@ describe('onboarding link through an edge', () => {
       localEdgeLink: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Server id from your admin'), {
@@ -341,6 +393,7 @@ describe('onboarding link through an edge', () => {
       localEdgeClaim: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     expect(await screen.findByText(/Your account reaches no servers yet/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Other ways to link' }))
@@ -348,7 +401,7 @@ describe('onboarding link through an edge', () => {
     // before the code is sent.
     const form = screen.getByRole('form', { name: 'Add a server' })
     expect(form.textContent).toContain("Claiming makes octocat (GitHub) the server's admin.")
-    fireEvent.change(screen.getByLabelText('Claim code or link'), { target: { value: ' abcdefgh-example ' } })
+    fireEvent.change(screen.getByLabelText('Claim or invite link'), { target: { value: ' abcdefgh-example ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     expect((await screen.findByText(/^Linked to/)).textContent).toBe(
@@ -366,9 +419,10 @@ describe('onboarding link through an edge', () => {
       localEdgeClaim: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
-    fireEvent.change(screen.getByLabelText('Claim code or link'), {
+    fireEvent.change(screen.getByLabelText('Claim or invite link'), {
       target: { value: `aether://claim?edge=${encodeURIComponent(edge)}&server=${serverID}#abcdefghijk23456` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
@@ -387,9 +441,10 @@ describe('onboarding link through an edge', () => {
       localEdgeJoin: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
-    fireEvent.change(screen.getByLabelText('Claim code or link'), { target: { value: ` ${joinLink} ` } })
+    fireEvent.change(screen.getByLabelText('Claim or invite link'), { target: { value: ` ${joinLink} ` } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     const join = within(await screen.findByRole('region', { name: 'Join' }))
@@ -409,14 +464,15 @@ describe('onboarding link through an edge', () => {
       localEdgeClaim: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
-    fireEvent.change(screen.getByLabelText('Claim code or link'), {
+    fireEvent.change(screen.getByLabelText('Claim or invite link'), {
       target: { value: `aether://claim?edge=${encodeURIComponent(other)}&server=${serverID}#abcdefghijk23456` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(await screen.findByRole('button', { name: 'Sign in with GitHub' })).toBeDefined()
     expect(screen.getByText('edge.other.test')).toBeDefined()
     expect(client.localEdgeClaim).not.toHaveBeenCalled()
   })
@@ -430,15 +486,16 @@ describe('onboarding link through an edge', () => {
       localEdgeClaim: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     const plain = edge.replace('https://', 'http://')
-    fireEvent.change(screen.getByLabelText('Claim code or link'), {
+    fireEvent.change(screen.getByLabelText('Claim or invite link'), {
       target: { value: `aether://claim?edge=${encodeURIComponent(plain)}&server=${serverID}#abcdefghijk23456` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(await screen.findByRole('button', { name: 'Sign in with GitHub' })).toBeDefined()
     expect(client.localEdgeClaim).not.toHaveBeenCalled()
   })
 
@@ -461,6 +518,7 @@ describe('onboarding link through an edge', () => {
       localEdgeClaim: vi.fn(() => Promise.reject(new ApiError(409, 'claim code is wrong'))),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     const choice = within(await screen.findByRole('group', { name: /signed in to 2 edges/ }))
     expect(screen.queryByLabelText('Server id from your admin')).toBeNull()
@@ -472,7 +530,7 @@ describe('onboarding link through an edge', () => {
     expect(client.localEdgeServers).not.toHaveBeenCalledWith(edge)
 
     fireEvent.click(screen.getByRole('button', { name: 'Other ways to link' }))
-    fireEvent.change(screen.getByLabelText('Claim code or link'), { target: { value: 'abcdefgh-wrong' } })
+    fireEvent.change(screen.getByLabelText('Claim or invite link'), { target: { value: 'abcdefgh-wrong' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
     expect(await screen.findByText('claim code is wrong')).toBeDefined()
     expect(client.localEdgeClaim).toHaveBeenCalledWith('abcdefgh-wrong', other)
@@ -493,13 +551,14 @@ describe('onboarding link through an edge', () => {
       localEdgeClaim: vi.fn(() => Promise.reject(new ApiError(409, refusal))),
     })
     render(<OnboardingRoute params={{}} client={client} />)
+    await chooseRelay()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
-    fireEvent.change(screen.getByLabelText('Claim code or link'), { target: { value: 'abcdefgh-wrong' } })
+    fireEvent.change(screen.getByLabelText('Claim or invite link'), { target: { value: 'abcdefgh-wrong' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     expect(await screen.findByText(refusal)).toBeDefined()
-    expect(screen.getByLabelText('Claim code or link')).toBeDefined()
+    expect(screen.getByLabelText('Claim or invite link')).toBeDefined()
   })
 })
 
@@ -524,7 +583,7 @@ describe('a join link handed to the dashboard', () => {
     expect(window.location.search).toBe('?token=t')
     expect(window.location.hash).toBe('')
     const join = within(await screen.findByRole('region', { name: 'Join' }))
-    expect(join.getByText(/as the invited account\?/).textContent).toBe(`Join ${serverID} as the invited account?`)
+    expect(join.getByText(/You are invited to the server/).textContent).toBe(`You are invited to the server ${serverID}.`)
     expect((await join.findByText(/This device is signed in/)).textContent).toContain('edge.example.test as octocat (GitHub)')
     expect(client.localEdgeJoin).not.toHaveBeenCalled()
     fireEvent.click(join.getByRole('button', { name: 'Join' }))
@@ -604,7 +663,7 @@ describe('a join link handed to the dashboard', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
     const join = within(await screen.findByRole('region', { name: 'Join' }))
-    expect(await join.findByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(await join.findByRole('button', { name: 'Sign in with GitHub' })).toBeDefined()
     expect(join.getByRole('alert').textContent).toContain('the edge revoked this device token')
     expect(join.queryByRole('button', { name: 'Join' })).toBeNull()
   })
@@ -737,7 +796,7 @@ describe('a join link handed to the dashboard', () => {
     window.dispatchEvent(new HashChangeEvent('hashchange'))
 
     const join = within(await screen.findByRole('region', { name: 'Join' }))
-    expect(join.getByText(/as the invited account\?/).textContent).toBe(`Join ${otherServer} as the invited account?`)
+    expect(join.getByText(/You are invited to the server/).textContent).toBe(`You are invited to the server ${otherServer}.`)
     expect(screen.queryByRole('status')).toBeNull()
     await vi.advanceTimersByTimeAsync(10000)
     expect(client.localEdgeJoin).toHaveBeenCalledTimes(1)
@@ -788,7 +847,7 @@ describe('a claim link handed to the dashboard', () => {
     window.history.replaceState(null, '', `/?token=t#claim=${encodeURIComponent(claimTo(custom))}`)
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     const section = within(await screen.findByRole('region', { name: 'Sign in' }))
-    expect(await section.findByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(await section.findByRole('button', { name: 'Sign in with GitHub' })).toBeDefined()
 
     first(signedIn)
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -817,7 +876,7 @@ describe('a claim link handed to the dashboard', () => {
 
     const section = within(await screen.findByRole('region', { name: 'Sign in' }))
     expect(section.getByText('edge.custom.test:8443')).toBeDefined()
-    fireEvent.click(await section.findByRole('button', { name: 'Sign in' }))
+    fireEvent.click(await section.findByRole('button', { name: 'Sign in with GitHub' }))
     expect(client.localEdgeLogin).toHaveBeenCalledWith(custom)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Claim and link' }, { timeout: 4000 }))
@@ -838,7 +897,7 @@ describe('a claim link handed to a linked dashboard', () => {
     })
     render(<OnboardingRoute params={{}} client={client} />)
 
-    expect((await screen.findByLabelText('Claim code or link') as HTMLInputElement).value).toBe(claimLink)
+    expect((await screen.findByLabelText('Claim or invite link') as HTMLInputElement).value).toBe(claimLink)
     expect(screen.getByRole('form', { name: 'Add a server' }).textContent).toContain("Claiming makes octocat (GitHub) the server's admin.")
     expect(screen.getByText(/^Linked to/)).toBeDefined()
   })

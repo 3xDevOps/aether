@@ -47,7 +47,7 @@ export const NoteRow = memo(function NoteRow({
   const writable = canWrite && mayChange(item, self, mergedInto)
   const replaced = superseded(item)
   const pinned = Boolean(item.pinned_at)
-  const pinLabel = pinned ? 'Unpin' : item.scope === 'member' ? 'Pin for your new runs' : 'Pin for every new run'
+  const pinLabel = pinned ? 'Unpin' : item.scope === 'member' ? 'Pin for your new sessions' : 'Pin for every new session'
 
   const togglePin = async () => {
     setPinning(true)

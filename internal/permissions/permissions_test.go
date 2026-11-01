@@ -21,7 +21,7 @@ func want(cap Capability, role domain.Role, owner, protected bool, steerOthers s
 		return false
 	case Launch, Push:
 		return role == domain.RoleCollaborator
-	case Handoff, Protect:
+	case Handoff, Protect, Sudo:
 		return owner
 	case Steer, Kill, Message:
 		if role != domain.RoleCollaborator {
@@ -39,7 +39,7 @@ func want(cap Capability, role domain.Role, owner, protected bool, steerOthers s
 // protected x steer-others.
 func TestCheckFullMatrix(t *testing.T) {
 	roles := []domain.Role{domain.RoleViewer, domain.RoleCollaborator, domain.RoleAdmin}
-	caps := []Capability{View, Steer, Kill, Message, Launch, Push, Handoff, Protect, WorkspaceAdmin}
+	caps := []Capability{View, Steer, Kill, Message, Launch, Push, Handoff, Protect, Sudo, WorkspaceAdmin}
 	settings := []string{"", domain.SteerOthersAdminsOnly}
 	actor := domain.MemberID("m_actor")
 	other := domain.MemberID("m_other")

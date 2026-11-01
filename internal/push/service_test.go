@@ -19,7 +19,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/cost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -39,10 +38,6 @@ func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 }
 
 func (f *fakeRuns) Paused(domain.RunID) bool { return f.paused.Load() }
-
-func noSwarm(context.Context, *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-	return nil, "", nil
-}
 
 func (f *fakeRuns) set(run domain.RunID, inputs ...domain.RunInputRequest) {
 	f.mu.Lock()
@@ -135,7 +130,7 @@ func (h *harness) start() {
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, Budgets: h.costs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
+	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Budgets: h.costs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
 	}
@@ -423,7 +418,7 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 		t.Errorf("cleared urgency = %v, want %s", got, urgencyNormal)
 	}
 	if got, want := phone.topic.Load(), topicOf(id); got != want {
-		t.Errorf("cleared topic = %v, want the run's %s", got, want)
+		t.Errorf("cleared topic = %v, want the session's %s", got, want)
 	}
 	phone.expectNone(t, testQuiet)
 
@@ -821,10 +816,10 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	h.svc.Active(h.ada.ID)
 	started := time.Now()
 
-	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, `Session "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
-	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID), Notice: true})
+	phone.expect(t, notification{Title: `Session "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID), Notice: true})
 	if waited := time.Since(started); waited < testQuiet {
 		t.Fatalf("sent after %v, want it held for the %v quiet window", waited, testQuiet)
 	}
@@ -853,10 +848,10 @@ func TestNotifyMarksOnlyNewsAsANotice(t *testing.T) {
 	phone := h.subscribe(h.ada)
 	run := h.run(h.ada, "Fix the login redirect", domain.LaunchACP)
 	stands := func(context.Context) bool { return true }
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "Bob's run needs Bob", "which region?", run.ID, true, nil, stands); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "Bob's session needs Bob", "which region?", run.ID, true, nil, stands); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
-	phone.expect(t, notification{Title: "Bob's run needs Bob", Body: "which region?", Run: string(run.ID)})
+	phone.expect(t, notification{Title: "Bob's session needs Bob", Body: "which region?", Run: string(run.ID)})
 }
 
 func TestNotifyReturnsTheDeviceError(t *testing.T) {
@@ -933,7 +928,7 @@ func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	reads := &failingReads{DB: h.db}
-	svc, err := New(Config{Store: reads, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, Budgets: h.costs, KeyPath: h.keyPath, Quiet: testQuiet})
+	svc, err := New(Config{Store: reads, Bus: h.bus, Runs: h.runs, Budgets: h.costs, KeyPath: h.keyPath, Quiet: testQuiet})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

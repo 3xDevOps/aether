@@ -52,7 +52,7 @@ export function LinkTo({ link, children, className }: { link: string; children: 
 function Observed({ watch }: { watch: Watch }) {
   const o = watch.observed
   const rows: [string, ReactNode][] = []
-  if (o.run_status) rows.push(['Run status', o.run_status])
+  if (o.run_status) rows.push(['Session status', o.run_status])
   if (o.activity) rows.push(['Activity', o.activity])
   if (o.need) rows.push(['Need', o.need])
   if (o.phase) rows.push(['Phase', o.phase])
@@ -120,7 +120,8 @@ interface EditFields {
 }
 
 function editFields(watch: Watch): EditFields {
-  return { conditions: watch.conditions, label: watch.label ?? '', expires: dateValue(watch.expires_at) }
+  const offered = conditionChoices[watch.target.kind].map((choice) => choice.value)
+  return { conditions: watch.conditions.filter((c) => offered.includes(c)), label: watch.label ?? '', expires: dateValue(watch.expires_at) }
 }
 
 function sameConditions(a: WatchCondition[], b: WatchCondition[]): boolean {
@@ -273,7 +274,7 @@ export function WatchDetail({ watchID, client, onClose }: { watchID: string; cli
                 <span aria-hidden>·</span>
                 {sourceLabel(watch) && <><span>{sourceLabel(watch)}</span><span aria-hidden>·</span></>}
                 <span>{watch.conditions.map((c) => conditionLabel(watch.target.kind, c)).join(', ')}</span>
-                <span aria-hidden>·</span><LinkTo link={targetLink(watch.target)}>Open {watch.target.kind === 'mission' ? 'swarm' : watch.target.kind === 'pr' ? 'pull request' : 'run'}</LinkTo>
+                <span aria-hidden>·</span><LinkTo link={targetLink(watch.target)}>Open {watch.target.kind === 'pr' ? 'pull request' : 'session'}</LinkTo>
               </div>
             </DialogDescription>
           )}

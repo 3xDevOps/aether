@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 import { useConnectionProblem } from '@/components/shell/connection'
+import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -28,7 +29,7 @@ import { useNotes } from '@/routes/memory/use-notes'
 import { useRemoval } from '@/routes/memory/use-removal'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useSelf } from '@/store/hooks'
+import { useCapability, useSelf } from '@/store/hooks'
 
 const searchDelay = 250
 const noticeMs = 4000
@@ -51,6 +52,7 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspaces = useStore(useShallow((s) => Object.values(s.workspaces)))
   const canWrite = allowed('push', useSelf())
+  const hasPreferences = useCapability().hasMethod('preference.list')
   const problem = useConnectionProblem()
   const mobile = useIsMobile()
   const { agents } = useAgentList(client)
@@ -285,6 +287,12 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
           )}
           {ready && (
             <>
+              {hasPreferences && (
+                <p className="shrink-0 border-b border-seam px-4 py-2 text-ui-sm text-muted">
+                  Your private preferences are in{' '}
+                  <Button variant="link" size="sm" onClick={() => useStore.getState().navigate('settings', { section: 'memory' })}>Settings → Memory</Button>
+                </p>
+              )}
               <BriefRegion brief={notes.brief} open={briefOpen} onRetry={() => void notes.readBrief()} />
               <ShowBar
                 filter={filter}

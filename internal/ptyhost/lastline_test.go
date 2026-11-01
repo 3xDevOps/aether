@@ -35,6 +35,6 @@ func TestLastLineRendersTheFinalOutputOfAnEndedSession(t *testing.T) {
 func TestLastLineWithoutATranscript(t *testing.T) {
 	h, _ := newTestHost(t)
 	if _, err := h.LastLine(context.Background(), "run-never-started", time.Second); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("LastLine for a run that recorded nothing = %v, want os.ErrNotExist", err)
+		t.Fatalf("LastLine for a session that recorded nothing = %v, want os.ErrNotExist", err)
 	}
 }
