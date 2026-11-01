@@ -269,11 +269,12 @@ func (e *dockerManagedExec) Status(ctx context.Context) (ExecState, error) {
 // exitRecord reads the final record of an exec Docker saw end. The exec's
 // process is its helper, whose command dies with it, so a helper that left
 // neither a supervisor nor a record proves the command gone with its exit
-// status lost.
+// status lost. Jobs the command put in the background are not its helper's
+// children and nothing names them any more; they end with the container.
 func (e *dockerManagedExec) exitRecord(ctx context.Context) (devexec.State, error) {
 	final, err := e.control(ctx, "status", 0)
 	if errors.Is(err, devexec.ErrNoSupervisor) {
-		return final, fmt.Errorf("%w: command exit record unavailable: %w: %w", ErrExecUnavailable, ErrNotFound, err)
+		return final, fmt.Errorf("%w: the exec's helper died without a command exit record; the command died with it, and background jobs it started may run until the container stops: %w: %w", ErrExecUnavailable, ErrNotFound, err)
 	}
 	if err != nil {
 		return final, fmt.Errorf("%w: command exit record unavailable: %w", ErrExecUnavailable, err)

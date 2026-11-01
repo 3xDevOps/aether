@@ -433,7 +433,9 @@ stop` still stops it. A terminal whose process is provably gone, because its
 container stopped or its exec helper died without recording an exit (whether
 or not Docker still remembers the exec), reads
 **exited** with the reason; stopping it removes it without taking control
-first, and closing the session is not blocked by it.
+first, and closing the session is not blocked by it. Its exit status is
+unknown. Background jobs its command started are no longer tracked and run
+until the session's container stops.
 
 ## Limits
 
