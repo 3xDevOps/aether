@@ -104,6 +104,25 @@ func (s *Scheduler) EnsureTerminal(ctx context.Context, member domain.MemberID) 
 // container being opened. Existing terminals need no admission.
 func (s *Scheduler) ensureTerminalAdmittedLocked(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
 	terminal, err := s.ensureTerminalLocked(ctx, member)
+	s.mu.Lock()
+	blocked := s.terminals[member]
+	if err == nil || blocked == nil || !blocked.ownershipBlocked || blocked.metadataPending || blocked.runUser != "" {
+		blocked = nil
+	}
+	s.mu.Unlock()
+	if blocked != nil && ctx.Err() == nil {
+		// Environments run unprivileged, so a terminal still running as root
+		// was started before that upgrade. Stopped, it fails the fingerprint
+		// check and is recreated with the member's mapping.
+		slog.Warn("scheduler: recreate a root environment terminal blocked by the member's live containers", "member", member, "container", blocked.containerID, "error", err)
+		if stopErr := s.cfg.Runtime.Stop(ctx, blocked.containerID, s.cfg.StopGrace); stopErr != nil && !errors.Is(stopErr, runtime.ErrNotFound) {
+			return nil, errors.Join(err, fmt.Errorf("scheduler: stop root terminal: %w", stopErr))
+		}
+		if cleanupErr := s.cleanupExitedTerminalLocked(ctx, blocked); cleanupErr != nil {
+			return nil, errors.Join(err, cleanupErr)
+		}
+		terminal, err = s.ensureTerminalLocked(ctx, member)
+	}
 	if !errors.Is(err, ErrDiskFull) || ctx.Err() != nil {
 		return terminal, err
 	}
@@ -129,20 +148,10 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 			}
 		} else {
 			terminal := terminalFromSupervision(existing)
-			err := s.ensureTerminalReady(ctx, existing, terminal)
-			if err == nil {
-				return terminal, nil
-			}
-			if !s.legacyRootTerminalBlocked(existing) {
+			if err := s.ensureTerminalReady(ctx, existing, terminal); err != nil {
 				return nil, err
 			}
-			// Environments run unprivileged, so a terminal still running as
-			// root was started before that upgrade. Stopped, it fails the
-			// fingerprint below and is recreated with the members' mapping.
-			slog.Warn("scheduler: recreate a root environment terminal blocked by the member's live containers", "member", member, "container", existing.containerID, "error", err)
-			if stopErr := s.stopTerminalLocked(ctx, member); stopErr != nil {
-				return nil, errors.Join(err, stopErr)
-			}
+			return terminal, nil
 		}
 	}
 	m, err := s.cfg.Store.GetMember(ctx, member)
@@ -584,12 +593,6 @@ func (s *Scheduler) checkTerminalOwnership(sup *terminalSupervision) error {
 		}
 	}
 	return nil
-}
-
-func (s *Scheduler) legacyRootTerminalBlocked(sup *terminalSupervision) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return sup.ownershipBlocked && !sup.metadataPending && sup.runUser == ""
 }
 
 func terminalOwnershipConflict(member domain.MemberID, other *credentialUserReservation, user string) error {

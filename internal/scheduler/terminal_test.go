@@ -858,16 +858,18 @@ func TestExitedTerminalCleanupRetainsStateForRetry(t *testing.T) {
 
 // A terminal still running as root after the upgrade to unprivileged
 // environments is recreated with the member's mapping once a live session of
-// theirs holds the home. A terminal running as another non-root user stays
+// theirs holds the home, whether recovery or the open itself adopted it. A terminal running as another non-root user stays
 // refused, and the session's reservation is kept either way.
 func TestEnsureTerminalRecreatesBlockedRootTerminal(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
 		user      string
 		recreated bool
+		recovered bool
 	}{
-		"root":          {"", true},
-		"other mapping": {"2000:2000", false},
+		"root":                    {"", true, true},
+		"root adopted by an open": {"", true, false},
+		"other mapping":           {"2000:2000", false, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -891,10 +893,12 @@ func TestEnsureTerminalRecreatesBlockedRootTerminal(t *testing.T) {
 			recovered := e.newScheduler(t, e.rt, newFakePTY())
 			live := &credentialUserReservation{home: e.member.ID, user: unprivilegedUser, owner: "live session run-live"}
 			recovered.credentialUsers = map[*credentialUserReservation]struct{}{live: {}}
-			startScheduler(t, recovered)
-			waitFor(t, "terminal recovery", func() bool {
-				return recovered.lookupTerminal(e.member.ID) != nil
-			})
+			if tc.recovered {
+				startScheduler(t, recovered)
+				waitFor(t, "terminal recovery", func() bool {
+					return recovered.lookupTerminal(e.member.ID) != nil
+				})
+			}
 
 			second, err := recovered.EnsureTerminal(t.Context(), e.member.ID)
 			recovered.mu.Lock()
