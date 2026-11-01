@@ -335,8 +335,8 @@ top to bottom:
    no scrim; the panel stays open while you use the view behind it, and
    Escape or its **Close** button closes it and returns focus to what opened
    it. The right half appears once a launch has been saved: it shows the saved
-   agent's glyph and an Enhanced, Standard or Background mark, and launches
-   that agent, mode, model, account and fallback at once with no task
+   agent's glyph and launches that agent, mode, model, account and fallback at
+   once with no task
    (`quick-launch.ts`). Hovering or focusing it slides out the saved choices.
    A Background launch needs a task, so that half opens the panel instead, as
    it does when the saved choices name an agent or model the account cannot
