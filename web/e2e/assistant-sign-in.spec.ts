@@ -9,18 +9,6 @@ import { expect, test } from './fixtures'
 
 const prompt = 'Paste code here if prompted >'
 
-function status(state: string) {
-  return {
-    state,
-    agent: 'claude',
-    agents: [{ name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in.' }],
-    confirmations: [],
-    auto_approve: false,
-    suggest_auto_approve: false,
-    share_view: true,
-  }
-}
-
 interface SignIn {
   socket: WebSocketRoute
   resizes: { cols: number; rows: number }[]
@@ -30,7 +18,17 @@ interface SignIn {
 
 async function playSignIn(page: Page, state: string) {
   const signIns: SignIn[] = []
-  await page.route('**/api/v1/assistant.status', (route) => route.fulfill({ json: status(state) }))
+  await page.route('**/api/v1/assistant.status', (route) => route.fulfill({
+    json: {
+      state,
+      agent: 'claude',
+      agents: [{ name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in.' }],
+      confirmations: [],
+      auto_approve: false,
+      suggest_auto_approve: false,
+      share_view: true,
+    },
+  }))
   await page.routeWebSocket(/\/ws\/terminal\?assistant_login=claude/, (socket) => {
     const signIn: SignIn = { socket, resizes: [], input: '', closed: false }
     signIns.push(signIn)
@@ -51,7 +49,6 @@ async function playSignIn(page: Page, state: string) {
   return signIns
 }
 
-/** The terminal's row count, its host's height and the resizes sent, once and again after an idle second. */
 async function expectSettled(page: Page, signIn: SignIn) {
   const pane = page.getByRole('region', { name: 'Sign in to Claude Code' })
   await expect(pane.locator('.xterm-rows')).toContainText(prompt)
