@@ -559,6 +559,9 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 		return errors.Join(err, s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid))
 	}
 	s.setPaused(entry, false)
+	if err := s.RecoverDevelopmentTerminals(ctx, run); err != nil {
+		slog.Warn("scheduler: recover the terminals of a resumed session", "run", run, "error", err)
+	}
 	if acp {
 		s.acp.resumeAfterPause(ctx, entry)
 	}

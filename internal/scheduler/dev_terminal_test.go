@@ -60,7 +60,22 @@ func newTerminalTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 	})
 }
 
+// refusePaused refuses an exec into a paused container, as Docker does.
+func (r *terminalTestRuntime) refusePaused(container runtime.ID) error {
+	c, err := r.get(container)
+	if err != nil {
+		return nil
+	}
+	if c.currentState() == "paused" {
+		return fmt.Errorf("%w: container %s is paused, unpause the container before exec", runtime.ErrExecUnavailable, container)
+	}
+	return nil
+}
+
 func (r *terminalTestRuntime) StartExecTTY(_ context.Context, container runtime.ID, spec runtime.ExecSpec) (runtime.ManagedExec, error) {
+	if err := r.refusePaused(container); err != nil {
+		return nil, err
+	}
 	if len(spec.Argv) > 3 && spec.Argv[1] == acpkeeper.Command {
 		return r.startKeeperExec(container, spec)
 	}
@@ -87,6 +102,9 @@ func (r *terminalTestRuntime) StartExecPipe(ctx context.Context, container runti
 }
 
 func (r *terminalTestRuntime) RecoverExec(_ context.Context, identity runtime.ExecIdentity) (runtime.ManagedExec, error) {
+	if err := r.refusePaused(identity.ContainerID); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.gone[identity.ExecID] {
