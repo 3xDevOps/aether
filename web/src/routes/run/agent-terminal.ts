@@ -52,7 +52,7 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
   const [readingHistory, setReadingHistory] = useState(true)
 
   const steerable = run.status === 'running' || run.status === 'needs-attention'
-  const automaticWrite = surfaceShown && !phone && steerable && run.mission_role !== 'worker' && run.member_id === self.id
+  const automaticWrite = surfaceShown && !phone && steerable && run.member_id === self.id
   const authorityKey = [
     self.id,
     self.role,
@@ -182,8 +182,7 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
     run.controller_member_id !== undefined ? run.controller_member_id || undefined : s.roomStatus[run.id]?.controller?.member_id)
   const holderConnected = useStore((s) => s.roomStatus[run.id]?.controller?.connected !== false)
   const free = run.member_id === self.id && holder === undefined
-  const worker = run.mission_role === 'worker'
-  const implicit = !agent.localControl && free && !worker && agent.steerable && !agent.controlUnavailable
+  const implicit = !agent.localControl && free && agent.steerable && !agent.controlUnavailable
   const queued = useRef<(() => void) | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
@@ -203,5 +202,5 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
     agent.session.takeControl()
   }
   const canAct = agent.localControl || implicit
-  return { canAct, waits: !canAct && !(free && worker) && (holder !== self.id || !holderConnected), withControl }
+  return { canAct, waits: !canAct && (holder !== self.id || !holderConnected), withControl }
 }

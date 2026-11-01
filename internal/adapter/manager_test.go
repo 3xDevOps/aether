@@ -117,7 +117,7 @@ func publishRunning(t *testing.T, bus events.Bus, run domain.RunID) {
 		Payload:     events.RunStatusPayload{From: domain.RunProvisioning, To: domain.RunRunning},
 	})
 	if err != nil {
-		t.Fatalf("publish run status: %v", err)
+		t.Fatalf("publish session status: %v", err)
 	}
 }
 
@@ -184,7 +184,7 @@ func TestManagerEndToEnd(t *testing.T) {
 	assertPayloads(t, payloads, want)
 }
 
-// A swarm worker's supervisor keeps the PTY open after the agent exits.
+// A supervisor keeps the PTY open after the agent exits.
 func TestManagerHandsOverTheResultWhileThePTYStaysOpen(t *testing.T) {
 	data, err := os.ReadFile("testdata/claude_clean.jsonl")
 	if err != nil {
@@ -200,7 +200,7 @@ func TestManagerHandsOverTheResultWhileThePTYStaysOpen(t *testing.T) {
 	}}
 	results := startManager(t, bus, runs, &pipeTap{r: output})
 	publishRunning(t, bus, run)
-	waitFor(t, "the run's result", func() bool {
+	waitFor(t, "the session's result", func() bool {
 		message, ok := results.result(run)
 		return ok && message == "Fixed the backoff reset; the test suite passes."
 	})
@@ -306,7 +306,7 @@ func TestManagerStartupScan(t *testing.T) {
 	}
 	assertPayloads(t, payloads, want)
 	if n := tap.taps("run_prov") + tap.taps("run_done"); n != 0 {
-		t.Errorf("non-running runs tapped %d times, want 0", n)
+		t.Errorf("non-running sessions tapped %d times, want 0", n)
 	}
 }
 

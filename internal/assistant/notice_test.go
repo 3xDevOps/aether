@@ -47,10 +47,10 @@ func TestTranscribeWordsEachNoticeAndLinksItsWatch(t *testing.T) {
 		notice      watch.AssistantNotice
 		kind, title string
 	}{
-		{runNotice(protocol.WatchNeedsYou, "input:s|question|q1", "Question: Which region?"), events.AssistantNoticeNeedsInput, `Run "Fix login" needs your input`},
-		{runNotice(protocol.WatchNeedsYou, "status:x", "Blocked: no credentials"), events.AssistantNoticeNeedsAttention, `Run "Fix login" needs your attention`},
-		{runNotice(protocol.WatchFinished, "reported|1", "Agent reported done"), events.AssistantNoticeFinished, `Run "Fix login" finished`},
-		{runNotice(protocol.WatchFinished, "failed", "Failed: tests"), events.AssistantNoticeFinished, `Run "Fix login" failed`},
+		{runNotice(protocol.WatchNeedsYou, "input:s|question|q1", "Question: Which region?"), events.AssistantNoticeNeedsInput, `Session "Fix login" needs your input`},
+		{runNotice(protocol.WatchNeedsYou, "status:x", "Blocked: no credentials"), events.AssistantNoticeNeedsAttention, `Session "Fix login" needs your attention`},
+		{runNotice(protocol.WatchFinished, "reported|1", "Agent reported done"), events.AssistantNoticeFinished, `Session "Fix login" finished`},
+		{runNotice(protocol.WatchFinished, "failed", "Failed: tests"), events.AssistantNoticeFinished, `Session "Fix login" failed`},
 	} {
 		if err := svc.Transcribe(t.Context(), "m1", tc.notice); err != nil {
 			t.Fatalf("Transcribe %s: %v", tc.title, err)

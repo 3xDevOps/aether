@@ -7,7 +7,7 @@ teal accent. Adjoining panes are flat and quiet. Elevation is restrained:
 cards and secondary buttons carry a light shadow, floating surfaces a deeper
 one, panes none. Do not add saturated colours, gradients or backdrop blur.
 The desktop launch splash is an intentional original-animation exception;
-see [Run state and motion](#run-state-and-motion).
+see [Session state and motion](#session-state-and-motion).
 
 ## Type
 
@@ -95,8 +95,8 @@ surface is `bg-raised`, a 1px seam and `shadow-overlay`; dialogs, the
 palette and sheets take `shadow-dialog` and sit over `bg-scrim`.
 [Geometry](#geometry-and-responsive-behavior) lists every shadow.
 
-The five run states (see
-[dashboard-frontend.md](dashboard-frontend.md#run-state)), used on dots,
+The five session states (see
+[dashboard-frontend.md](dashboard-frontend.md#session-state)), used on dots,
 state lines, badges, callouts and request cards:
 
 | State | Utility | Light | Dark |
@@ -109,7 +109,7 @@ state lines, badges, callouts and request cards:
 
 Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark;
 `bg-accent-soft` likewise. `text-on-failed` is the text on a `bg-state-failed`
-fill. Diffs use `text-diff-add`/`text-diff-del` (the done and failed colours)
+fill, and `text-on-done` on a `bg-state-done` fill. Diffs use `text-diff-add`/`text-diff-del` (the done and failed colours)
 and `bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
 
 Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
@@ -117,7 +117,7 @@ Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
 of a Board card, through `AgentGlyph colored`.
 
 Member colours are the only arbitrary server data applied inline: avatar
-rings, the owner rail in run lists, the owner mark on sidebar run rows and
+rings, the owner rail in session lists, the owner mark on sidebar session rows and
 member names on conflict chips.
 Identity colour never replaces run-state colour.
 
@@ -133,7 +133,7 @@ and `StateLine`, `Avatar`, `AgentGlyph`, `Code` and `CodeBlock`, `Kbd`,
 `Markdown`, `RelativeTime`, `Spinner`, `Skeleton`, `ProgressBar`, `DropZone`,
 `TextSwap` and `IconSwap`, `CopyButton`, `Separator`, `Toaster`, `LineGutter`
 (a code line's clickable number gutter, for the Changes view's comments) and
-the Session view's timeline rows, step rail (`steps.tsx`) and blocks. Reach
+the Chat view's timeline rows, step rail (`steps.tsx`) and blocks. Reach
 for one before writing markup, and pass its `variant`, `size` or `tone` rather
 than restyling it.
 
@@ -145,6 +145,7 @@ than restyling it.
 | `secondary` | Seam border on `bg-raised`, `shadow-button` | Other actions |
 | `ghost` | Muted text, `bg-hover-chrome` on hover | Toolbar and icon buttons |
 | `danger` | `bg-state-failed`, `text-on-failed` | Confirming a destructive action |
+| `confirm` | `bg-state-done`, `text-on-done` | Approve, beside a `danger` Deny |
 | `link` | Accent text, underline on hover | Inline actions that read as links |
 | `quiet` | Muted text; `text-text` and an underline on hover | Inline secondary actions inside muted copy |
 
@@ -161,6 +162,18 @@ terminal's hold-to-take control never scale.
 
 The other primitives with motion or a fixed size:
 
+- `Switch` is a 28×16px track with a 10px thumb that glides 12px in 150ms
+  (`ease-pop`, none under reduced motion); on is `bg-accent`, off a
+  `border-control` outline with an `icon-faint` thumb. Use it for a setting
+  that applies at once or for one session, beside its `Label`.
+- The split **New session** button is two 28px halves (44px coarse) cut on a
+  forward slash that leans 8px (about 16°) with 3px radii on the cut and 8px
+  on the outer corners, 2px apart; its clip paths come from `split-shape.ts`,
+  and the focus outline follows the cut. `SlideOut` (`slide-out.tsx`) is the
+  surface that slides out of the sidebar edge (220ms, `--ease-sheet`) for the
+  launch panel and the right half's preview: clipped at that edge, no scrim,
+  `shadow-dialog` for the panel, `shadow-overlay` for the preview. With the
+  sidebar hidden or on a phone it slides in from the window edge.
 - `Tabs` draws one `SlidingIndicator` per list: the underline look slides a
   2px accent bar, the segmented look a `bg-raised` pill with a seam ring. It
   follows keyboard selection and stays attached in a scrolling strip.
@@ -247,8 +260,8 @@ The Insights activity charts, heatmap and sparklines are hand-drawn SVG; the
 Insights > System charts use recharts through `ChartContainer` in
 `web/src/components/ui/chart.tsx`, with recharts' animation off. Marks use
 `fill-*` and `stroke-*` token utilities or `currentColor`, never inline
-colours. Outcomes use the run state tokens (`state-done`, `state-failed`,
-`state-paused`). A neutral count such as runs launched is outlined in
+colours. Outcomes use the session state tokens (`state-done`, `state-failed`,
+`state-paused`). A neutral count such as sessions launched is outlined in
 `stroke-icon-faint` on `fill-chrome`, so it never reads as the solid paused
 grey. A sequential scale steps one hue: `fill-accent` at 25%, 50%, 75% and
 100% over `fill-chrome` for zero. Every colour has a text legend, and every
@@ -264,7 +277,7 @@ with a 3px radius, segments inside them 2px. A finished tool call is
 bars take the `-soft` fill and border of `state-working`, `state-failed`,
 `state-paused` and `state-needs-you`. Turn and subagent bars are `bg-chrome`
 with a seam border, holding `icon-faint` model time and accent tool density
-at 50%, 75% and 100% for one, two and three or more calls at once. The run's
+at 50%, 75% and 100% for one, two and three or more calls at once. The session's
 own bar is its state history in the `-soft` state fills. A running bar
 carries `trace-live`, the live shimmer's band in working blue; history that
 is not loaded is hatched (`trace-unknown`). A duration that would run past
@@ -292,28 +305,21 @@ it). Subagent sub-lanes use the same fills.
 | Needs you, or Needed attention in history | `text-state-needs-you`; a live bar ends in a `bg-raised` **Needs you** tag with a pulsing dot |
 | Paused | `text-state-paused` |
 | Ready for review | `text-accent`, matching its dot |
-| Done, Failed | `text-state-done`, `text-state-failed`; a finished run's working spans take its outcome's colour |
+| Done, Failed | `text-state-done`, `text-state-failed`; a finished session's working spans take its outcome's colour |
 | Waiting, answered, closed | `text-muted` |
 | Starting | hollow, dashed `border-seam` |
 | History not loaded | hollow, dotted `border-icon-faint` |
 
 Neighbouring spans that share a fill draw as one. A bar that starts before
-the window fades in over its first 32px (a mask, not a colour). Strips (a
-folded swarm's workers, folded Finished) are 6px and 8px `bg-current` pills
+the window fades in over its first 32px (a mask, not a colour). Strips (folded Finished) are 6px and 8px `bg-current` pills
 in the state's text colour, neighbours of one colour drawn as one; each
-stretch is at least 1/300 of the window, so a brief failure still shows. A
-folded swarm's strip takes the most urgent worker state at each moment, in
-the order Needs you, Failed, Working, Ready for review, Paused, Waiting,
-Done, Closed, so every worker in the window shows on it.
+stretch is at least 1/300 of the window, so a brief failure still shows.
 
 Links use the categorical series by meaning:
 
 | Link | Colour | Style | Ends |
 | --- | --- | --- | --- |
-| Integrator launched worker | `text-series-7` | solid 1.5px; dashed `5 3` across owners | arrowhead at the worker's bar |
 | Agent message | `text-series-5` | dotted, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a chip with the kind glyph and count |
-| Submission | `text-state-done` accepted, `text-state-failed` rejected, `text-muted` otherwise | solid 1.25px | open circle at the worker, arrowhead at the integrator, ✓ or ✕ chip |
-| Task dependency | `text-muted` | dashed `2 2` S-curve with 16px handles | none |
 | File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
 | Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
 
@@ -351,7 +357,7 @@ when a listed file already complies, so the lists only shrink.
 
 The same file checks contrast in both themes: `text` and `text-muted` on
 every surface, `text` on `selection`, accent text on canvas and chrome,
-`on-accent` on the accent fill, `on-failed` on the failed fill, and the
+`on-accent` on the accent fill, `on-failed` and `on-done` on their fills, and the
 states and diff colours on canvas at 4.5:1; control borders, `icon-faint`
 and the agent colours on canvas at 3:1. It also checks that every `text-*`
 and `bg-*` class in `components/ui/` names a token defined in `index.css`.
@@ -368,10 +374,10 @@ importing `lucide-react`. The same module holds `Claude`, the Claude mark that
 Use compact workbench geometry rather than landing-page ornament:
 
 - A branded header with horizontal navigation; destinations that do not fit
-  move into **More navigation**, except Board and Swarms. One sidebar, 260px
+  move into **More navigation**, except Board. One sidebar, 260px
   by default and resizable from 220px to 400px; under 768px it is a side
   sheet, opened from a second, 48px toolbar. The desktop window bar is 35px.
-- 44px view headers (`PaneHeader`), 56px for a run's header, 32px terminal
+- 44px view headers (`PaneHeader`), 56px for a session's header, 32px terminal
   toolbars, 28px list rows and menu items (44px coarse).
 - 28px fields and buttons, 24px small and toolbar icon buttons (44px on a
   coarse pointer), 12px form gaps, 4px label gaps, 16px content gutters and
@@ -382,17 +388,17 @@ Use compact workbench geometry rather than landing-page ornament:
   `rounded-control`) for buttons, fields, rows, menu items and tooltips;
   `--radius-panel` 12px (`rounded-md` and up, `rounded-panel`) for cards,
   callouts, dialogs, menus, popovers, toasts and the palette; and
-  `--radius-composer` 14px (`rounded-composer`) for the run composer and
+  `--radius-composer` 14px (`rounded-composer`) for the session composer and
   Board's column wells. A radius nested
   in another is the outer one minus the inset: a 12px menu with 4px padding
   holds 8px items. Edges that meet another surface stay square: sheets at the
-  screen edge, a run's details box where it docks, joined buttons and dock
-  tabs. `rounded-full` is for dots, radios, avatars, meters and the
+  screen edge, a session's details box where it docks, joined buttons and dock
+  tabs. `rounded-full` is for dots, radios, avatars, meters, switches and the
   composer's and the Notes field's send control only. The Context window's
   grid cells and legend swatches are 2px (`rounded-xs`).
 - Elevation: panes and headers have none; cards `shadow-card`, lifting to
   `shadow-card-hover` on hover; secondary buttons `shadow-button`; menus,
-  popovers, selects, tooltips, toasts and the run details box
+  popovers, selects, tooltips, toasts and the session details box
   `shadow-overlay`; dialogs, the palette and sheets `shadow-dialog`. Values
   differ per theme in `web/src/index.css`. Every shadow sits over a seam
   border, which forced-colors mode keeps when it drops shadows. A shadow
@@ -429,12 +435,11 @@ Use compact workbench geometry rather than landing-page ornament:
   for the larger text sizes, 20px taller on a coarse pointer) on a
   `bg-chrome` canvas: `bg-canvas` with `shadow-card`, a 22px `bg-chrome` agent
   tile, the state as a soft `Badge` led by its `StatusDot`, and no pulse.
-  Swarms are org charts joined by 1.5px `icon-faint` connectors with rounded
-  corners and an 8px ringed dot under the integrator. Owner sections, when
+  Owner sections, when
   there are two or more, and Needs you elsewhere are `border-seam` frames
   with no fill; identity colour stays on the shared avatars. The **N needs
   you** and **N failed** chips are small buttons on their state's soft fill,
-  a 20% mix of the state colour on hover and while open. The Runs toolbar
+  a 20% mix of the state colour on hover and while open. The Sessions toolbar
   wraps its counts, scope, Mine, archive and camera controls on phones. Live
   presentation updates do not move nodes or reset the camera.
 
@@ -445,7 +450,7 @@ own surfaces. Floating menus stay inside the available viewport and scroll to
 their last action. Route roots own the shell's bounded height; their content
 regions use `min-h-0` and vertical overflow.
 
-The run Browser view has one `bg-chrome` toolbar row over the page: ghost
+The session Browser view has one `bg-chrome` toolbar row over the page: ghost
 icon buttons for **Back**, **Forward** and **Reload**, the address field,
 **Ports** with its count, **Viewport**, the beside-or-tab toggle and
 **Browser actions**, then who is driving. A listening port is a `secondary`
@@ -460,7 +465,7 @@ behaviour.
 
 The terminal toolbar holds the terminal tabs, **Tools** (a menu; a bottom
 sheet under 768px) and, at its end, who controls the terminal beside **Take
-control** or **Release** ([terminal.md](terminal.md)). A run shell adds
+control** or **Release** ([terminal.md](terminal.md)). A session shell adds
 **Shell actions**. The Environment page puts **Save environment** and
 **Environment actions** in its header.
 
@@ -470,20 +475,18 @@ The shell has a branded navigation header above one sidebar and the content
 view, with no icon rail or status bar. The Aether mark and title sit at its
 left; Board through Templates follow as horizontal `ListRow`s. Measure
 available width rather than assuming every label fits a breakpoint, and
-keep Board and Swarms outside the overflow menu. The header and sidebar use
+keep Board outside the overflow menu. The header and sidebar use
 `bg-chrome` with seams against the content; navigation rows have muted icons
-and the open page in `bg-selection`. **New run** at the sidebar's top is the
+and the open page in `bg-selection`. **New session** at the sidebar's top is the
 only filled button in the shell.
-Run rows carry a shaped `StatusDot`, a 6×7px owner mark (a right-pointing
+Session rows carry a shaped `StatusDot`, a 6×7px owner mark (a right-pointing
 triangle in the owner's colour, 4px from the dot and from the title), the
 agent's title, a compact age ("15m") in `text-ui-sm` muted tabular figures
-and a monochrome `AgentGlyph`. The people on a run follow as 16px avatars
+and a monochrome `AgentGlyph`. The people on a session follow as 16px avatars
 overlapping by 6px, the first one whole at the right edge, each ringed in
 the row's own background so the one in front cuts into the one behind.
-A swarm's root also has a `Waypoints` graph-node button before the age; it
-opens swarm controls while the row opens the run. Use
-the same icon for swarm navigation and commands. Swarm children are
-indented 26px under the root and joined to it by 1px `icon-faint` tree
+Subsessions are
+indented 26px under their parent and joined to it by 1px `icon-faint` tree
 connectors: a trunk under the centre of the root's status dot, and for each
 child a wire from the trunk to the row's left edge, level with the child's
 dot. The trunk ends at the last child's wire. Connectors stay in the indent,
@@ -499,8 +502,8 @@ update notice above it is one 12px muted line with an **Update** link.
 
 Under 768px a second, 48px toolbar (`bg-chrome`) holds the sidebar button,
 with a needs-you dot while anything needs the viewer, the view title in
-13/20 medium, **Search** and **New run**. When the page has its own primary
-action, the toolbar's **New run** becomes a ghost `+` icon so the screen keeps
+13/20 medium, **Search** and **New session**. When the page has its own primary
+action, the toolbar's **New session** becomes a ghost `+` icon so the screen keeps
 one filled button. The sidebar opens as a left side sheet. Content views draw
 `PaneHeader`: the title in `text-title`, one optional muted line under it,
 and actions on the right. A connection problem is a failed-tone `StateLine`,
@@ -516,28 +519,28 @@ commands.
 focus and field styles. Buttons and navigation show their outlines only
 after Tab, never after a click or another key; text fields use a 1px inset accent outline over the existing border with a
 faint 4px glow and no offset gap. The outline remains visible in forced-colors
-mode, where box shadows disappear. The Session composer draws this treatment
+mode, where box shadows disappear. The Chat composer draws this treatment
 on its enclosing box, not its embedded textarea, so attachments do not clip
 the highlight. Preserve readable placeholders, disabled and read-only states,
 menu roving focus, typeahead, portalling and viewport flipping. Shared
 primitives retain their props, events, refs and accessibility contracts.
 
-The run header shows one primary action for the run's state, a **Details**
+The session header shows one primary action for the session's state, a **Details**
 toggle and **More**; destructive verbs stay last in **More**, behind their
 existing gates and confirmations. The view switch (Session, Trace on an
-Enhanced run, Terminal, Changes, Files, Browser) is a segmented tab list. A run with a pull request ends
+Enhanced session, Terminal, Changes, Files, Browser) is a segmented tab list. A session with a pull request ends
 that row with its number as a muted link and its check state as a ghost
 button led by a `StatusDot`: failed, working, done or neutral. Details is a 320px side panel at
 1280px and wider, a side sheet below that and a bottom sheet on phones; it
-never overlays the terminal on wide screens. Standard runs keep control in
-the terminal toolbar; Enhanced runs keep a compact **Multiplayer** strip
+never overlays the terminal on wide screens. Standard sessions keep control in
+the terminal toolbar; Enhanced sessions keep a compact **Multiplayer** strip
 below the view switch on every view. Names and member avatars identify the
 controller and watchers directly in that strip, which stays one row while
 the controls fit beside a 6rem roster and otherwise wraps them to a second
 line. The roster scrolls horizontally, and below 34rem watchers show as avatars and
 below 30rem **Multiplayer** as its icon.
 Takeover progress uses `state-failed` with `on-failed` text in both themes.
-One run-owned holder decision dialog sits above every sheet and dialog.
+One session-owned holder decision dialog sits above every sheet and dialog.
 Request cards are neutral, with a needs-you dot in the header; the Session
 transcript column is 736px wide with no row borders and no card around a
 block of steps. In it a person's message is a `bg-chrome` bubble at the
@@ -546,14 +549,14 @@ starts after the step rail's 24px gutter, where state dots and step marks
 sit. Turns are 24px apart and a turn's header and answer 12px. Its composer
 fills the available pane with balanced 16px side gutters, including when
 Details is open. An empty ACP
-conversation shows a subdued Aether mark above the centered run title and
+conversation shows a subdued Aether mark above the centered session title and
 metadata rows: workspace, agent, branch, owner and creation time. Symmetric
 scrollbar gutters keep the overview centered when its content needs scrolling.
 
-## Run state and motion
+## Session state and motion
 
 The `--state-*` tokens in [Semantic palette](#semantic-palette) are the
-status vocabulary for a run's presentation state. Domain status enums remain
+status vocabulary for a session's presentation state. Domain status enums remain
 unchanged.
 
 Motion confirms a change the viewer caused or marks the one live thing; it
@@ -585,7 +588,7 @@ literal time or curve.
   at once on keyboard focus, and at once within 300ms of another closing.
 - Dialogs fade in from `--scale-enter` (0.95) through `transform`, leaving
   the `translate` that centres them alone. Sheets slide in from their edge; a
-  run's details box wipes in from the row it docks to.
+  session's details box wipes in from the row it docks to.
 - `Collapsible` bodies glide their height, clipped only while they move, and
   unmount once shut.
 - The Session request dock fades a request that left `pending` out over
@@ -617,8 +620,7 @@ literal time or curve.
   coordinates on `--duration-glide` / `--ease-glide` (never DOM-measured,
   since the world is scaled), new cards rise 6px and fade in over 220ms after
   a 150ms hold, staggered by `--stagger-row` up to the eighth, and removed
-  cards fade out over 130ms. Folding fades workers out last to first before
-  the repack. Hydration and scope changes never animate.
+  cards fade out over 130ms. Hydration and scope changes never animate.
 - A popover may animate what it shows: the Context window tweens its token
   total over 500ms and recolours its grid cells on the glide curve, each 2ms
   after the one before (`--stagger-cell`). Nothing runs on open; the number and
@@ -636,9 +638,9 @@ literal time or curve.
   `SlidingIndicator`. Its detail fades in over 220ms on `--ease-standard`
   when the selection changes, never on mount; its footer swaps text with
   `TextSwap` and Copy's icon with `IconSwap`.
-- `state-pulse` (the run header's working dot, the Session view's live row
+- `state-pulse` (the session header's working dot, the Chat view's live row
   and live steps header, a plan's step in progress, the dot under a streaming
-  answer and the working rows on a swarm's Tasks list) breathes: opacity to
+  answer) breathes: opacity to
   `--opacity-muted` and size to two thirds and back each second.
   `live-shimmer`, on those rows' reasons and on a working lane's activity in
   Board's Lanes, sweeps a light band across muted text in 1.4s of each 1.6s.
@@ -670,7 +672,7 @@ session and startup timing.
 
 The bar that holds **Take control** and **Release** shows who steers: the
 Enhanced Multiplayer strip, or the agent terminal's toolbar in a Standard
-run. Its background is a grid of 2px round dots on a 6px pitch, behind the
+session. Its background is a grid of 2px round dots on a 6px pitch, behind the
 bar's text and controls. The dots are neutral, `--text` at 24%, until this
 tab has live, acknowledged writable control; then they turn
 `--control-light`, the accent teal in light theme and a brighter teal in

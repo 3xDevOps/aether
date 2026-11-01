@@ -17,7 +17,7 @@ import { LanesView } from '@/routes/board/lanes/lanes'
 import { Legend } from '@/routes/board/lanes/legend'
 import { buildLanes, coarseMetrics, fineMetrics, reuseLanes, type LanesModel, type RunLane } from '@/routes/board/lanes/model'
 import { statusChanges } from '@/routes/board/lanes/segments'
-import { useLaneAgents, useLaneHistory, useLaneMissions } from '@/routes/board/lanes/use-lane-data'
+import { useLaneAgents, useLaneHistory } from '@/routes/board/lanes/use-lane-data'
 import { useMapRuns, type BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
@@ -27,9 +27,6 @@ const phone = '(max-width: 767px)'
 const minute = 60_000
 
 const edgeWords: Record<LaneEdgeKind, string> = {
-  orchestration: 'Orchestration',
-  dependency: 'Dependencies',
-  submission: 'Submissions',
   message: 'Agent messages',
   overlap: 'Overlaps',
 }
@@ -129,11 +126,6 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
 
   const workspaces = useMemo(() => [...new Set(visible.map((card) => card.run.workspace_id))].sort(), [visible])
   const history = useLaneHistory(workspaces, Math.floor(timeWindow.start / minute) * minute)
-  const missionIDs = useMemo(
-    () => [...new Set(visible.filter((card) => card.run.mission_id && (!card.run.finished_at || Date.parse(card.run.finished_at) >= timeWindow.start)).map((card) => card.run.mission_id!))].sort(),
-    [visible, timeWindow.start],
-  )
-  const missions = useLaneMissions(missionIDs)
   const { agents, toggle: toggleAgents, retry: retryAgents } = useLaneAgents()
   const [open, setOpen] = useState<ReadonlyMap<string, boolean>>(() => new Map())
 
@@ -164,15 +156,13 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
   const hidden = useMemo(() => new Set<LaneEdgeKind>(prefs.hidden), [prefs.hidden])
   const mail = useMemo(() => mailOf(history.events), [history.events])
   const edgeInput = useMemo(() => ({
-    cards: new Map(visible.map((card) => [card.run.id, card])),
     drawn: model.drawn,
-    details: ctx.missionDetails,
     mail,
     window: timeWindow,
     now,
     bucket: (24 * span) / width,
     overlaps,
-  }), [visible, model.drawn, ctx.missionDetails, mail, timeWindow, now, span, width, overlaps])
+  }), [model.drawn, mail, timeWindow, now, span, width, overlaps])
   const edges = useMemo(() => laneEdges({ ...edgeInput, hidden }), [edgeInput, hidden])
 
   const announceItems = useMemo(
@@ -197,15 +187,15 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
   } else if (loading) {
     body = (
       <div className="flex flex-col gap-2 p-4">
-        <p role="status" className="text-ui-sm text-muted">Loading runs…</p>
+        <p role="status" className="text-ui-sm text-muted">Loading sessions…</p>
         {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-6" />)}
       </div>
     )
   } else if (visible.length === 0) {
     body = (
       <div className="flex flex-col items-start gap-2 p-4 text-ui-sm text-muted">
-        <p>No runs in this view.</p>
-        {hiddenByMine && <Button variant="link" size="sm" onClick={() => setMineOnly(false)}>Show everyone&apos;s runs</Button>}
+        <p>No sessions in this view.</p>
+        {hiddenByMine && <Button variant="link" size="sm" onClick={() => setMineOnly(false)}>Show everyone&apos;s sessions</Button>}
       </div>
     )
   } else {
@@ -250,9 +240,9 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
   }
 
   return (
-    <section ref={sizeRef} aria-label="Run lanes view" className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section ref={sizeRef} aria-label="Session lanes view" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-seam px-4 py-2">
-        <h2 className="text-ui-sm font-medium">Runs <span className="text-muted tabular-nums">{model.inWindow}</span></h2>
+        <h2 className="text-ui-sm font-medium">Sessions <span className="text-muted tabular-nums">{model.inWindow}</span></h2>
         <Select value={scope ? 'workspace' : 'all'} onValueChange={(value) => setAllWorkspaces(value === 'all')}>
           <SelectTrigger aria-label="Lanes workspace scope" className="w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -298,15 +288,8 @@ export function BoardLanes({ agentNames }: { agentNames: Record<string, string> 
       </header>
       {history.error && (
         <div className="shrink-0 px-4 pt-3">
-          <Callout role="alert" tone="failed" title="Run history" actions={<Button variant="secondary" size="sm" onClick={history.retry}>Retry</Button>}>
+          <Callout role="alert" tone="failed" title="Session history" actions={<Button variant="secondary" size="sm" onClick={history.retry}>Retry</Button>}>
             {history.error}
-          </Callout>
-        </div>
-      )}
-      {missions.error && (
-        <div className="shrink-0 px-4 pt-3">
-          <Callout role="alert" tone="failed" title="Swarm details" actions={<Button variant="secondary" size="sm" onClick={missions.retry}>Retry</Button>}>
-            {missions.error}
           </Callout>
         </div>
       )}

@@ -42,7 +42,7 @@ func (s *Service) handleChild(ctx context.Context, run domain.RunID, method stri
 		defer lock.Unlock()
 	}
 	result, err := s.cfg.Children.HandleAgent(ctx, run, method, params)
-	return result, missionRPCError(method, err)
+	return result, rpcError(method, err)
 }
 
 // Notify appends a server-written message from one run to another, which
@@ -51,7 +51,7 @@ func (s *Service) handleChild(ctx context.Context, run domain.RunID, method stri
 func (s *Service) Notify(ctx context.Context, from, to domain.RunID, body, correlation, key string) error {
 	target, err := s.cfg.Store.GetRun(ctx, to)
 	if err != nil {
-		return fmt.Errorf("notify run %s: %w", to, err)
+		return fmt.Errorf("notify session %s: %w", to, err)
 	}
 	if target.Status.Terminal() {
 		return nil
@@ -60,9 +60,9 @@ func (s *Service) Notify(ctx context.Context, from, to domain.RunID, body, corre
 		WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to, Kind: store.RunMessageKindMessage,
 		Body: cleanCoordText(body, protocol.CoordMaxBodyBytes), CorrelationID: correlation, IdempotencyKey: key,
 	}
-	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, false)
+	created, err := appendRunMessage(ctx, s.cfg.Mail, msg)
 	if err != nil {
-		return fmt.Errorf("notify run %s: %w", to, err)
+		return fmt.Errorf("notify session %s: %w", to, err)
 	}
 	if created {
 		s.wakeInbox(to)
@@ -73,7 +73,7 @@ func (s *Service) Notify(ctx context.Context, from, to domain.RunID, body, corre
 func isChildMethod(method string) bool {
 	switch method {
 	case protocol.MethodChildOptions, protocol.MethodChildStart, protocol.MethodChildList,
-		protocol.MethodChildCancel, protocol.MethodChildDetach, protocol.MethodChildFetch:
+		protocol.MethodChildCancel, protocol.MethodChildFetch:
 		return true
 	}
 	return false

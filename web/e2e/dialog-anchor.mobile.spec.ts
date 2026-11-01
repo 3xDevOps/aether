@@ -54,10 +54,10 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
 
   await page
     .getByRole('banner')
-    .getByRole('button', { name: 'New run' })
+    .getByRole('button', { name: 'New session' })
     .tap()
 
-  const dialog = page.getByRole('dialog', { name: 'New run' })
+  const dialog = page.getByRole('dialog', { name: 'New session' })
   await expect(dialog).toBeVisible()
 
   const height = await page.evaluate(() => window.innerHeight)
@@ -83,9 +83,9 @@ test('a launch refusal sits below the form, not over it', async ({ page, aether 
   await page.goto(alice.url)
   await page
     .getByRole('banner')
-    .getByRole('button', { name: 'New run' })
+    .getByRole('button', { name: 'New session' })
     .tap()
-  const dialog = page.getByRole('dialog', { name: 'New run' })
+  const dialog = page.getByRole('dialog', { name: 'New session' })
   await dialog.getByRole('radio', { name: /^custom/ }).tap()
   await dialog.getByLabel('Task').fill('say hello')
   await dialog.getByRole('button', { name: 'Launch', exact: true }).tap()

@@ -28,10 +28,9 @@ onPullRequestPoll((runID) => {
 
 useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) useGitLogs.setState({}, true)
-  if (state.gitSeq === previous.gitSeq && state.integrationSeq === previous.integrationSeq) return
+  if (state.gitSeq === previous.gitSeq) return
   for (const runID of watched.keys()) {
-    const mission = state.runs[runID]?.mission_id
-    if (state.gitSeq[runID] !== previous.gitSeq[runID] || (mission && state.integrationSeq[mission] !== previous.integrationSeq[mission])) {
+    if (state.gitSeq[runID] !== previous.gitSeq[runID]) {
       refreshGitLog(runID)
     }
   }

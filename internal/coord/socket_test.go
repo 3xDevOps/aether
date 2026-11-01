@@ -2,14 +2,12 @@ package coord
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +86,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 		t.Fatalf("coord.status: %v", cerr)
 	}
 	if status.RunID != string(a) || len(status.Peers) != 1 || status.Peers[0].RunID != string(b) {
-		t.Fatalf("status = %+v, want run %s with peer %s", status, a, b)
+		t.Fatalf("status = %+v, want session %s with peer %s", status, a, b)
 	}
 
 	var sent protocol.CoordSendResult
@@ -120,7 +118,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	case e := <-timeline.Events():
 		p, ok := e.Payload.(events.CoordMessagePayload)
 		if !ok || e.RunID != a || e.ActorID != "" || p.MessageID != sent.MessageID || p.ToRunID != b {
-			t.Fatalf("message event = %+v, want the server-originated send on run %s", e, a)
+			t.Fatalf("message event = %+v, want the server-originated send on session %s", e, a)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the coordination message was never published")
@@ -135,30 +133,6 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	}
 	if msg, err := h.db.GetRunMessage(ctx, sent.MessageID); err != nil || msg.RetiredAt == nil {
 		t.Fatalf("message after release = %+v (err %v), want it kept and retired", msg, err)
-	}
-}
-func TestMissionMethodWhitelistIntegrationSurface(t *testing.T) {
-	for _, method := range []string{
-		protocol.MethodIntegrationPrepare,
-		protocol.MethodIntegrationShow,
-		protocol.MethodIntegrationVerify,
-		protocol.MethodIntegrationRequestDelivery,
-		protocol.MethodIntegrationDeliver,
-	} {
-		if !isMissionMethod(method) {
-			t.Errorf("integration method %q is not admitted to mission dispatch", method)
-		}
-	}
-	for _, method := range []string{
-		protocol.MethodIntegrationList,
-		protocol.MethodIntegrationResolve,
-		protocol.MethodIntegrationPatch,
-		protocol.MethodIntegrationDecide,
-		protocol.MethodIntegrationDelete,
-	} {
-		if isMissionMethod(method) {
-			t.Errorf("forbidden integration method %q is admitted to mission dispatch", method)
-		}
 	}
 }
 
@@ -267,14 +241,14 @@ func TestRestartRecovery(t *testing.T) {
 			t.Errorf("socket mode after recovery = %o, want %o (a reused socket would keep the scuffed mode)", got, socketMode)
 		}
 		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(finished))); !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("the finished run's directory survived recovery: %v", err)
+			t.Errorf("the finished session's directory survived recovery: %v", err)
 		}
 		var status protocol.CoordStatusResult
 		if err := h.dial(t, alive).Call(protocol.MethodCoordStatus, nil, &status); err != nil {
 			t.Fatalf("coord.status after recovery: %v", err)
 		}
 		if status.RunID != string(alive) {
-			t.Fatalf("status after recovery = %+v, want run %s", status, alive)
+			t.Fatalf("status after recovery = %+v, want session %s", status, alive)
 		}
 	})
 
@@ -298,7 +272,7 @@ func TestRestartRecovery(t *testing.T) {
 		}
 		for _, r := range []domain.RunID{retained, expired} {
 			if _, err := h.db.UpdateRunStatus(ctx, r, domain.RunMerged, "", "", nil, nil); err != nil {
-				t.Fatalf("finish run %s: %v", r, err)
+				t.Fatalf("finish session %s: %v", r, err)
 			}
 		}
 		socket := filepath.Join(h.dir, "coord", string(retained), coordtransport.SocketName)
@@ -355,7 +329,7 @@ func TestRestartRecovery(t *testing.T) {
 		if err := client.Call(protocol.MethodCoordStatus, nil, &status); err != nil || status.RunID != string(run) {
 			t.Fatalf("identity after disabled recovery = %+v, %v", status, err)
 		}
-		for _, method := range []string{protocol.MethodCoordInbox, protocol.MethodTaskList, protocol.MethodRunReport} {
+		for _, method := range []string{protocol.MethodCoordInbox, protocol.MethodCoordSend, protocol.MethodRunReport} {
 			err := client.Call(method, nil, nil)
 			var rpcErr *protocol.Error
 			if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeUnavailable {
@@ -542,157 +516,31 @@ func TestWedgedWriterIsDropped(t *testing.T) {
 	t.Fatal("the server never dropped a connection that stopped reading responses")
 }
 
-// missionTransportStub is the mission authority: every run in mission is
-// assigned to one mission and is a peer of the others; every other run is
-// ordinary. HandleAgent fails with err.
-type missionTransportStub struct {
-	err     error
-	mission []domain.RunID
-	// integrator, when set, is the one mission run whose role is integrator;
-	// every other mission run is a worker.
-	integrator domain.RunID
-}
-
-func (m missionTransportStub) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
-	if !slices.Contains(m.mission, run) {
-		return protocol.CoordMissionAssignment{}, nil
-	}
-	role := "worker"
-	if run == m.integrator {
-		role = "integrator"
-	}
-	return protocol.CoordMissionAssignment{MissionID: "mission-1", Role: role, Capabilities: coordinationCapabilities}, nil
-}
-
-func (m missionTransportStub) Peers(_ context.Context, run domain.RunID) ([]protocol.CoordPeer, error) {
-	peers := make([]protocol.CoordPeer, 0, len(m.mission))
-	for _, id := range m.mission {
-		if id != run {
-			peers = append(peers, protocol.CoordPeer{RunID: string(id)})
-		}
-	}
-	return peers, nil
-}
-
-func (m missionTransportStub) HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error) {
-	return nil, m.err
-}
-
-func (m missionTransportStub) ValidateReport(context.Context, domain.RunID, store.CoordOutcome) error {
-	return nil
-}
-
-func (m missionTransportStub) ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error {
-	return nil
-}
-
-func (m missionTransportStub) ReportRecipient(_ context.Context, run domain.RunID) (domain.RunID, error) {
-	if !slices.Contains(m.mission, run) || run == m.integrator {
-		return "", nil
-	}
-	return m.integrator, nil
-}
-
-func TestMissionTransportMapsMissionErrors(t *testing.T) {
+func TestRPCErrorMapsErrorsToCodesAndKeepsTheCause(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cause    error
 		wantCode int
 	}{
-		"mission": {
-			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionIdempotencyConflict),
-			wantCode: protocol.CodeConflict,
-		},
-		"coordination": {
-			cause:    fmt.Errorf("wrapped: %w", store.ErrIdempotencyConflict),
-			wantCode: protocol.CodeConflict,
-		},
-		"accepted-revision": {
-			cause:    fmt.Errorf("task revision: %w", store.ErrConflict),
-			wantCode: protocol.CodeConflict,
-		},
-		"unauthorized-integrator": {
-			cause:    fmt.Errorf("%w: integrator lookup: %w", permissions.ErrDenied, store.ErrNotFound),
-			wantCode: protocol.CodeDenied,
-		},
-		"stale-integrator": {
-			cause:    fmt.Errorf("assignment: %w", store.ErrMissionStale),
-			wantCode: protocol.CodeDenied,
-		},
-		"missing-attempt": {
-			cause:    fmt.Errorf("attempt lookup: %w", store.ErrNotFound),
-			wantCode: protocol.CodeNotFound,
-		},
-		"active-retry": {
-			cause:    &protocol.Error{Code: protocol.CodeInvalidState, Message: "worker.retry: attempt remains active"},
-			wantCode: protocol.CodeInvalidState,
-		},
-		"phase": {
-			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionPhase),
-			wantCode: protocol.CodeInvalidState,
-		},
-		"real-error": {
-			cause:    errors.New("database unavailable"),
-			wantCode: protocol.CodeInternal,
-		},
+		"coordination": {fmt.Errorf("wrapped: %w", store.ErrIdempotencyConflict), protocol.CodeConflict},
+		"conflict":     {fmt.Errorf("revision: %w", store.ErrConflict), protocol.CodeConflict},
+		"unauthorized": {fmt.Errorf("%w: lookup: %w", permissions.ErrDenied, store.ErrNotFound), protocol.CodeDenied},
+		"missing":      {fmt.Errorf("lookup: %w", store.ErrNotFound), protocol.CodeNotFound},
+		"protocol":     {&protocol.Error{Code: protocol.CodeInvalidState, Message: "attempt remains active"}, protocol.CodeInvalidState},
+		"internal":     {errors.New("database unavailable"), protocol.CodeInternal},
 	} {
 		t.Run(name, func(t *testing.T) {
-			cause, wantCode := tc.cause, tc.wantCode
-			h := newHarness(t, 1, func(c *Config) {
-				c.Mission = missionTransportStub{err: cause}
-			})
-			ctx := context.Background()
-			h.start()
-			run := h.run(0)
-			if _, err := h.svc.Provision(ctx, run, nil); err != nil {
-				t.Fatalf("Provision: %v", err)
+			rpcErr := rpcError("coord.test", tc.cause)
+			if rpcErr.Code != tc.wantCode {
+				t.Fatalf("code = %d, want %d", rpcErr.Code, tc.wantCode)
 			}
-
-			err := h.dial(t, run).Call(protocol.MethodTaskPropose, protocol.TaskProposeParams{}, nil)
-			var rpcErr *protocol.Error
-			if !errors.As(err, &rpcErr) {
-				t.Fatalf("task.propose error = %v, want protocol error", err)
-			}
-			if rpcErr.Code != wantCode {
-				t.Fatalf("task.propose code = %d, want %d", rpcErr.Code, wantCode)
-			}
-			wantCause := cause.Error()
+			want := tc.cause.Error()
 			var causeRPC *protocol.Error
-			if errors.As(cause, &causeRPC) {
-				wantCause = causeRPC.Message
+			if errors.As(tc.cause, &causeRPC) {
+				want = causeRPC.Message
 			}
-			if !strings.Contains(rpcErr.Message, wantCause) {
-				t.Fatalf("mission error lost its cause: message %q, want cause %q", rpcErr.Message, wantCause)
+			if !strings.Contains(rpcErr.Message, want) {
+				t.Fatalf("error lost its cause: message %q, want cause %q", rpcErr.Message, want)
 			}
 		})
-	}
-}
-
-// TestMissionMethodWhitelistPlanning: the allow-list, not the capability
-// advertisement, is what makes a method reachable from a run. The human
-// answer and cancel are control-channel-only and must stay unreachable from
-// any agent.
-func TestMissionMethodWhitelistPlanning(t *testing.T) {
-	for _, method := range []string{
-		protocol.MethodMissionQuestionAsk,
-		protocol.MethodMissionPlanShow,
-		protocol.MethodMissionStart,
-	} {
-		if !isMissionMethod(method) {
-			t.Errorf("planning method %q is not admitted to mission dispatch", method)
-		}
-	}
-	h := newHarness(t, 1)
-	for _, method := range []string{
-		protocol.MethodMissionQuestionAnswer,
-		protocol.MethodMissionCancel,
-	} {
-		if isMissionMethod(method) {
-			t.Errorf("human method %q is admitted to mission dispatch", method)
-		}
-		line := []byte(`{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{}}`)
-		resp := h.svc.handle(context.Background(), h.runs[0].ID, line)
-		if resp.Error == nil || resp.Error.Code != protocol.CodeMethodNotFound {
-			t.Errorf("%s over the agent socket = %+v, want CodeMethodNotFound", method, resp.Error)
-		}
 	}
 }

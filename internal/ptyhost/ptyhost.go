@@ -63,11 +63,11 @@ const (
 )
 
 var (
-	ErrNoSession       = errors.New("ptyhost: no session for run")
-	ErrSessionEnded    = errors.New("ptyhost: session ended")
+	ErrNoSession       = errors.New("ptyhost: no terminal for session")
+	ErrSessionEnded    = errors.New("ptyhost: terminal ended")
 	ErrWriteDenied     = errors.New("ptyhost: write access denied")
-	ErrInvalidRunID    = errors.New("ptyhost: invalid run id")
-	ErrSessionReplaced = errors.New("ptyhost: session was replaced")
+	ErrInvalidRunID    = errors.New("ptyhost: invalid session id")
+	ErrSessionReplaced = errors.New("ptyhost: terminal was replaced")
 	// ErrSnapshotPending means one bounded, deduplicated background repair is
 	// rebuilding a missing, stale, or invalid screen checkpoint.
 	ErrSnapshotPending = errors.New("ptyhost: terminal snapshot repair pending")
@@ -273,7 +273,7 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 // buffered output must be interpreted at its original geometry.
 func (h *Host) StartDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment, cols, rows uint) error {
 	if !strings.HasPrefix(string(key), "run-shell:") {
-		return errors.New("ptyhost: development session must be a run shell")
+		return errors.New("ptyhost: development terminal must be a session shell")
 	}
 	if err := validateScreenDimensions(cols, rows); err != nil {
 		return err
@@ -296,7 +296,7 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 	if prev := h.lookup(key); prev != nil {
 		if stopErr := prev.stop(); stopErr != nil {
 			h.unreserve(key)
-			return fmt.Errorf("ptyhost: stop previous session: %w", stopErr)
+			return fmt.Errorf("ptyhost: stop previous terminal: %w", stopErr)
 		}
 	}
 
@@ -539,7 +539,7 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 		}()
 		archives, err := removablePriorCastPaths(ctx, transcript)
 		if err != nil {
-			return fmt.Errorf("ptyhost: find run transcript history: %w", err)
+			return fmt.Errorf("ptyhost: find session transcript history: %w", err)
 		}
 		paths := append(archives, transcript, transcript+".next", checkpointPath(transcript), castRetentionPath(transcript), castRetentionPath(transcript)+".next", h.ItemLogPath(run), h.ItemLogPath(run)+".compact")
 		patterns := []string{
@@ -552,7 +552,7 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 		for _, pattern := range patterns {
 			matches, err := filepath.Glob(pattern)
 			if err != nil {
-				return fmt.Errorf("ptyhost: find run transcripts: %w", err)
+				return fmt.Errorf("ptyhost: find session transcripts: %w", err)
 			}
 			paths = append(paths, matches...)
 		}
@@ -561,7 +561,7 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 				return err
 			}
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("ptyhost: remove run transcript: %w", err)
+				return fmt.Errorf("ptyhost: remove session transcript: %w", err)
 			}
 		}
 		return nil
@@ -1206,7 +1206,7 @@ func (h *Host) reserve(key SessionKey) error {
 	}
 	if _, ok := h.starting[key]; ok {
 		h.mu.Unlock()
-		return fmt.Errorf("ptyhost: session already started for key %s", key)
+		return fmt.Errorf("ptyhost: terminal already started for key %s", key)
 	}
 	prev := h.sessions[key]
 	h.starting[key] = struct{}{}
@@ -1217,7 +1217,7 @@ func (h *Host) reserve(key SessionKey) error {
 	// asking the session for its state.
 	if prev != nil && prev.isActive() {
 		h.unreserve(key)
-		return fmt.Errorf("ptyhost: session already started for key %s", key)
+		return fmt.Errorf("ptyhost: terminal already started for key %s", key)
 	}
 	return nil
 }

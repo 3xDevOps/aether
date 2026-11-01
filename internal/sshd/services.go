@@ -37,17 +37,10 @@ type Services struct {
 	Rooms RoomService
 	// Evidence is the durable evidence packet service.
 	Evidence EvidenceService
-	// MissionControl arbitrates mission worker takeover and integrator input.
-	MissionControl MissionControl
-	// Missions is authenticated human mission creation and inspection.
-	Missions MissionService
 	// Children is child runs: settings, trees and limits.
 	Children ChildService
 	// Usage reads read-only Claude Code and Codex subscription quota.
 	Usage fallback.QuotaReader
-	// Integration exposes authenticated candidate preparation, review,
-	// verification, and delivery through the generic control gateway.
-	Integration IntegrationService
 	// Development is the live run terminal, browser, and capture broker.
 	Development DevelopmentService
 	// RunSSH starts the processes behind ssh into a run.
@@ -69,4 +62,6 @@ type Services struct {
 	Memory MemoryService
 	// Watches keeps each member's watches and notification preferences.
 	Watches WatchService
+	// Preferences keeps each member's private assistant preferences.
+	Preferences PreferenceService
 }

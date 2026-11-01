@@ -314,7 +314,7 @@ func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup
 			return protocol.EvidencePacket{}, err
 		}
 		if saveErr := req.Uncaptured(ctx, err); saveErr != nil {
-			return protocol.EvidencePacket{}, fmt.Errorf("evidence: keep uncaptured run %s: %w", req.RunID, saveErr)
+			return protocol.EvidencePacket{}, fmt.Errorf("evidence: keep uncaptured session %s: %w", req.RunID, saveErr)
 		}
 	}
 	if cleanup != nil {
@@ -322,14 +322,14 @@ func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup
 		err := cleanup(cleanupCtx)
 		cancel()
 		if err != nil {
-			return packet, fmt.Errorf("evidence: cleanup run %s: %w", req.RunID, err)
+			return packet, fmt.Errorf("evidence: cleanup session %s: %w", req.RunID, err)
 		}
 	}
 	return packet, nil
 }
 func validateRequest(req Request) error {
 	if req.RunID == "" || req.IdempotencyKey == "" {
-		return fmt.Errorf("%w: run id and idempotency key are required", ErrInvalidRequest)
+		return fmt.Errorf("%w: session id and idempotency key are required", ErrInvalidRequest)
 	}
 	if len(req.IdempotencyKey) > 512 {
 		return fmt.Errorf("%w: idempotency key is too long", ErrInvalidRequest)
@@ -363,10 +363,10 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 	}
 	run, err := s.runs.GetRun(ctx, req.RunID)
 	if err != nil {
-		return protocol.EvidencePacket{}, fmt.Errorf("evidence: lookup run: %w", err)
+		return protocol.EvidencePacket{}, fmt.Errorf("evidence: lookup session: %w", err)
 	}
 	if run == nil || run.ID == "" || run.ID != req.RunID {
-		return protocol.EvidencePacket{}, fmt.Errorf("%w: run lookup returned no matching run", ErrInvalidRequest)
+		return protocol.EvidencePacket{}, fmt.Errorf("%w: session lookup returned no matching session", ErrInvalidRequest)
 	}
 	origin := req.Origin
 	creator := req.CreatorID
@@ -454,9 +454,9 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 	if revision.WorkspaceID != run.WorkspaceID {
 		rollbackErr := s.rollbackCapture(ctx, run.WorkspaceID, key, gitCreated, false, journaled)
 		if rollbackErr != nil {
-			return protocol.EvidencePacket{}, fmt.Errorf("evidence: retained revision workspace does not match run (rollback: %v)", rollbackErr)
+			return protocol.EvidencePacket{}, fmt.Errorf("evidence: retained revision workspace does not match session (rollback: %v)", rollbackErr)
 		}
-		return protocol.EvidencePacket{}, errors.New("evidence: retained revision workspace does not match run")
+		return protocol.EvidencePacket{}, errors.New("evidence: retained revision workspace does not match session")
 	}
 
 	transcriptFact, transcriptUnresolved, transcriptStaged, err := s.retainTranscript(ctx, req.RunID, key)

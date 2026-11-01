@@ -41,7 +41,7 @@ func TestInstallAgentHoldsTheGuardPastADroppedRequest(t *testing.T) {
 	drop()
 
 	if _, _, err := e.sched.InstallAgent(t.Context(), e.member.ID, "install-again"); !errors.Is(err, ErrAgentInstallRunning) {
-		t.Fatalf("second install while the first runs: error = %v, want %v", err, ErrAgentInstallRunning)
+		t.Fatalf("second install while the first sessions: error = %v, want %v", err, ErrAgentInstallRunning)
 	}
 	close(release)
 	got := <-first

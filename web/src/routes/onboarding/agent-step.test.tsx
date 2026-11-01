@@ -109,7 +109,7 @@ describe('the agent the step set up', () => {
     })
     renderStep(client)
     fireEvent.click(await screen.findByRole('button', { name: 'Set up Claude Code' }))
-    expect(await screen.findByRole('radiogroup', { name: 'How runs show Claude Code' })).toBeDefined()
+    expect(await screen.findByRole('radiogroup', { name: 'How sessions show Claude Code' })).toBeDefined()
 
     vi.mocked(client.agentList).mockResolvedValue([agentInfo({ display_name: 'Claude Code', login_found: true, enhanced: 'adapter' })])
     fireEvent.click(screen.getByRole('button', { name: 'Install Claude Code' }))

@@ -836,6 +836,79 @@ func TestDockerAdditionalMounts(t *testing.T) {
 	}
 }
 
+// An overlay home takes the container's writes without changing the host
+// directory under it, and a container without Sudo cannot gain privileges.
+func TestDockerOverlayHomeAndNoNewPrivileges(t *testing.T) {
+	t.Parallel()
+	d := newTestDocker(t)
+	home, overlay := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "seed.txt"), []byte("seeded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, sub := range []string{"upper", "work"} {
+		if err := os.Mkdir(filepath.Join(overlay, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec := Spec{
+		Name:   fmt.Sprintf("it-overlay-%d", time.Now().UnixNano()),
+		Image:  testImage,
+		Mounts: []Mount{{HostPath: home, ContainerPath: "/root", Overlay: overlay}},
+		Command: []string{"/bin/sh", "-c",
+			`cat /root/seed.txt; echo changed > /root/seed.txt; echo new > /root/new.txt; cat /root/seed.txt; grep NoNewPrivs /proc/self/status`},
+	}
+	id := createContainer(t, d, spec)
+	att, err := d.Attach(t.Context(), id)
+	if err != nil {
+		t.Fatalf("Attach() error: %v", err)
+	}
+	defer att.Close()
+	lines := readLines(att)
+	if err := d.Start(t.Context(), id); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	waitLine(t, lines, 10*time.Second, "seeded")
+	waitLine(t, lines, 10*time.Second, "changed")
+	waitLine(t, lines, 10*time.Second, "NoNewPrivs:\t1")
+	if _, err := d.Wait(t.Context(), id); err != nil {
+		t.Fatalf("Wait() error: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(home, "seed.txt")); err != nil || string(got) != "seeded\n" {
+		t.Fatalf("host seed.txt = %q, %v; want it untouched", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "new.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("host new.txt: %v, want it absent", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(overlay, "upper", "new.txt")); err != nil || string(got) != "new\n" {
+		t.Fatalf("overlay upper new.txt = %q, %v; want the container's write", got, err)
+	}
+}
+
+// An unprivileged user the image does not know gets a passwd entry whose
+// home is the container's HOME before the main process starts.
+func TestDockerUnprivilegedUserGetsAHome(t *testing.T) {
+	t.Parallel()
+	d := newTestDocker(t)
+	spec := Spec{
+		Name:    fmt.Sprintf("it-user-home-%d", time.Now().UnixNano()),
+		Image:   testImage,
+		User:    "1000:1000",
+		Env:     map[string]string{"HOME": "/root"},
+		Command: []string{"/bin/sh", "-c", `printf 'home=%s\n' "$(awk -F: '$3 == 1000 { print $6 }' /etc/passwd)"`},
+	}
+	id := createContainer(t, d, spec)
+	att, err := d.Attach(t.Context(), id)
+	if err != nil {
+		t.Fatalf("Attach() error: %v", err)
+	}
+	defer att.Close()
+	lines := readLines(att)
+	if err := d.Start(t.Context(), id); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	waitLine(t, lines, 10*time.Second, "home=/root")
+}
+
 // TestDockerFindByCreationKey verifies the crash-window lookup: a created
 // (never started) container is found by its unique creation key, a
 // missing key reports ErrNotFound, and a destroyed container is gone.

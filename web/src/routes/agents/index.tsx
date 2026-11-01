@@ -146,8 +146,8 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
           ) : (
             <>
               <p className="max-w-2xl text-ui text-muted">
-                An agent is the coding CLI a run starts. Each one is installed once in your environment and every workspace uses it.
-                {' '}A run shows the agent in Standard or Enhanced mode.{' '}
+                An agent is the coding CLI a session starts. Each one is installed once in your environment and every workspace uses it.
+                {' '}A session shows the agent in Standard or Enhanced mode.{' '}
                 <Button variant="link" size="sm" onClick={() => setCompare(true)}>What's the difference?</Button>
               </p>
               {loading && <AgentsSkeleton />}
@@ -176,7 +176,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Standard or Enhanced</DialogTitle>
-            <DialogDescription>Two ways a run can show the same agent. You pick one per run; the default is set per agent.</DialogDescription>
+            <DialogDescription>Two ways a session can show the same agent. You pick one per session; the default is set per agent.</DialogDescription>
           </DialogHeader>
           <ModeOverview />
         </DialogContent>

@@ -72,8 +72,8 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   const [loading, setLoading] = useState(false)
   const hidden = useStore((s) => s.hiddenAgentMessages[run.id] === true)
   useMessageList(useStore, api, scope)
-  if (messages.length === 0 && !run.mission_id) return null
-  const label = (id: string) => (id === run.id ? 'This run' : undefined)
+  if (messages.length === 0) return null
+  const label = (id: string) => (id === run.id ? 'This session' : undefined)
   const shown = all ? messages : messages.slice(-recentMessages)
   const older = async () => {
     setLoading(true)
@@ -99,7 +99,7 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
       )}
       {messages.length > 0 && (
         <Button size="sm" variant="ghost" onClick={() => useStore.getState().toggleAgentMessages(run.id)}>
-          {hidden ? 'Show in Session' : 'Hide from Session'}
+          {hidden ? 'Show in Chat' : 'Hide from Chat'}
         </Button>
       )}
     </Section>
@@ -197,7 +197,7 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
   noteFocus: number
 }) {
   const requests = useRunRequests(run)
-  const waiting = requests.inputs.length + requests.sessionRequests.length + requests.steers.length + requests.questions.length
+  const waiting = requests.inputs.length + requests.sudo.length + requests.sessionRequests.length + requests.steers.length + requests.questions.length
   return (
     <div className="flex flex-col">
       {room.error && !room.errorFromComposer && (

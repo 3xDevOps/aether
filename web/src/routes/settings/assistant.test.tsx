@@ -97,7 +97,7 @@ describe('assistant settings', () => {
   it('lists what auto-approval covers', () => {
     show()
     const scope = screen.getByLabelText('What auto-approval covers')
-    for (const text of ['Without a card', 'Always asks', 'Not affected', 'Messaging or stopping another member’s run.', /shell and file tools/]) {
+    for (const text of ['Without a card', 'Always asks', 'Not affected', 'Messaging or stopping another member’s session.', /shell and file tools/]) {
       expect(within(scope).getByText(text)).toBeDefined()
     }
   })

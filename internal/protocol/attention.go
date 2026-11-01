@@ -22,18 +22,15 @@ const (
 // Attention item kinds, in the order a run is checked: a run is listed
 // under the first kind that holds for it.
 const (
-	AttentionKindPermission     = "permission"
-	AttentionKindQuestion       = "question"
-	AttentionKindQueuedMessage  = "queued-message"
-	AttentionKindRoomQuestion   = "room-question"
-	AttentionKindSwarmQuestion  = "swarm-question"
-	AttentionKindIntegratorDown = "integrator-down"
-	AttentionKindControlHold    = "control-hold"
-	AttentionKindDisconnected   = "disconnected"
-	AttentionKindBlocked        = "blocked"
-	AttentionKindNeedsInput     = "needs-input"
-	AttentionKindReady          = "ready"
-	AttentionKindFailed         = "failed"
+	AttentionKindPermission    = "permission"
+	AttentionKindQuestion      = "question"
+	AttentionKindQueuedMessage = "queued-message"
+	AttentionKindRoomQuestion  = "room-question"
+	AttentionKindDisconnected  = "disconnected"
+	AttentionKindBlocked       = "blocked"
+	AttentionKindNeedsInput    = "needs-input"
+	AttentionKindReady         = "ready"
+	AttentionKindFailed        = "failed"
 )
 
 // AttentionListParams narrows the list to one workspace; empty lists every
@@ -49,12 +46,11 @@ type AttentionListResult struct {
 // AttentionItem is one run that needs the caller. Reason is worded as the
 // dashboard's Needs you row. Since is RFC 3339, empty when unknown. The
 // field matching Kind carries what answering needs: Request for permission
-// and question, Message for swarm-question, room-question and
+// and question, Message for room-question and
 // queued-message.
 type AttentionItem struct {
 	Kind        string            `json:"kind"`
 	RunID       string            `json:"run_id"`
-	MissionID   string            `json:"mission_id,omitempty"`
 	WorkspaceID string            `json:"workspace_id"`
 	Title       string            `json:"title"`
 	Harness     string            `json:"harness"`
@@ -87,11 +83,9 @@ type AttentionOption struct {
 	Kind  string `json:"kind,omitempty"`
 }
 
-// AttentionMessage is a swarm question (answered with
-// mission.question.answer), a room question to the run's owner (answered
-// with a run.room.post reply), or a queued message its controller decides
-// with run.room.decide. From is the sender's member id; empty for a swarm
-// question, which the integrator asks.
+// AttentionMessage is a room question to the run's owner (answered with a
+// run.room.post reply), or a queued message its controller decides with
+// run.room.decide. From is the sender's member id.
 type AttentionMessage struct {
 	ID   string `json:"id"`
 	Body string `json:"body"`

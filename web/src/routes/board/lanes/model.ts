@@ -1,15 +1,13 @@
 import { dequal } from 'dequal'
 import type { Tone } from '@/components/ui/status-dot'
-import { swarmHandle } from '@/components/messages/handles'
 import type { StateContext } from '@/lib/needs-you'
 import { endedBadly, groupLabel, outcomeState, runLabel, type PresentationState, type RunGroup } from '@/lib/status'
 import type { Member } from '@/lib/types'
+import { rootKey, runKey, runParents } from '@/routes/board/map-layout'
 import type { TimeWindow } from '@/routes/board/lanes/axis'
 import { runSegments, segmentTone, strongest, type Segment, type StatusChange, type Stretch } from '@/routes/board/lanes/segments'
 import type { BoardCard } from '@/routes/board/selectors'
-import { missionFinal, objectiveTitle, phaseWord } from '@/routes/missions/swarm'
 import type { LaneGroup } from '@/store/lanes'
-import type { MissionDetail } from '@/store/missions'
 import { agentLabel, agentState, type AgentIndex, type AgentState } from '@/store/subagents'
 
 interface LaneBase {
@@ -35,16 +33,14 @@ export interface SummaryLane extends LaneBase {
   strip: Stretch[]
 }
 
-export interface SwarmLane extends LaneBase {
-  kind: 'swarm'
-  missionID: string
+export interface FamilyLane extends LaneBase {
+  kind: 'family'
   title: string
   detail: string
   open: boolean
-  /** Undefined when neither the swarm nor a listed run names its integrator. */
-  integratorID?: string
+  parentID: string
   strip: Stretch[]
-  /** The current integrator's bar, drawn while the swarm is folded. */
+  /** The parent run's bar, drawn while the family is folded. */
   segments: Segment[]
   outcome?: PresentationState
 }
@@ -53,7 +49,6 @@ export interface RunLane extends LaneBase {
   kind: 'run'
   card: BoardCard
   title: string
-  handle?: string
   segments: Segment[]
   /** Set once the run ended, from its status: the viewer's state can read Ready for review instead. */
   outcome?: PresentationState
@@ -81,7 +76,7 @@ export interface NoteLane extends LaneBase {
   retry: boolean
 }
 
-export type Lane = SectionLane | SummaryLane | SwarmLane | RunLane | AgentLane | NoteLane
+export type Lane = SectionLane | SummaryLane | FamilyLane | RunLane | AgentLane | NoteLane
 
 export type AgentLoad =
   | { status: 'loading' }
@@ -109,7 +104,7 @@ export interface LanesInput {
 
 export interface LanesModel {
   lanes: Lane[]
-  /** The lane each run is drawn on: its own, or the folded swarm or section that holds it. */
+  /** The lane each run is drawn on: its own, or the folded family or section that holds it. */
   drawn: Map<string, string>
   /** Runs whose bars reach into the window. */
   inWindow: number
@@ -117,12 +112,11 @@ export interface LanesModel {
 
 export const sectionOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
 const groupRank = Object.fromEntries(sectionOrder.map((group, i) => [group, i])) as Record<RunGroup, number>
-const swarmTasksOpen = 8
+const familyChildrenOpen = 8
 const agentDepth = 4
 
 interface Unit {
   key: string
-  missionID?: string
   root: BoardCard
   members: RunLane[]
   group: RunGroup
@@ -130,9 +124,8 @@ interface Unit {
 
 const parse = (iso: string | null | undefined) => (iso ? Date.parse(iso) : undefined)
 
-function runLane(card: BoardCard, input: LanesInput, detail: MissionDetail | undefined): RunLane {
+function runLane(card: BoardCard, input: LanesInput): RunLane {
   const { run } = card
-  const handle = run.mission_id ? swarmHandle(detail, run.id) : undefined
   const outcome = outcomeState(run.status)
   const start = Date.parse(run.created_at)
   return {
@@ -140,8 +133,7 @@ function runLane(card: BoardCard, input: LanesInput, detail: MissionDetail | und
     key: `run:${run.workspace_id}:${run.id}`,
     level: 2,
     card,
-    title: handle?.task ?? runLabel(run),
-    handle: handle?.name ?? (run.mission_role === 'integrator' ? 'Integrator' : run.mission_role === 'worker' ? 'Worker' : undefined),
+    title: runLabel(run),
     segments: runSegments({
       run,
       shown: card.state,
@@ -155,47 +147,29 @@ function runLane(card: BoardCard, input: LanesInput, detail: MissionDetail | und
   }
 }
 
-/** Integrators first, the current one leading; then workers in task order, retries after their first attempt. */
-function memberOrder(detail: MissionDetail | undefined) {
-  const taskIndex = new Map(detail?.tasks.map((task, i) => [task.id, i]))
-  const attempt = new Map(detail?.attempts.map((item) => [item.run_id, item]))
-  const rank = (lane: RunLane) => {
-    const { run } = lane.card
-    if (run.mission_role === 'integrator') return [0, run.id === detail?.mission.current_integrator_run_id ? 0 : 1, -lane.start]
-    const a = attempt.get(run.id)
-    return a ? [1, taskIndex.get(a.task_id) ?? Infinity, a.number] : [2, lane.start, 0]
-  }
-  return (a: RunLane, b: RunLane) => {
-    const x = rank(a)
-    const y = rank(b)
-    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || a.key.localeCompare(b.key)
-  }
-}
-
 function units(input: LanesInput): Unit[] {
-  const swarms = new Map<string, Unit>()
+  const parents = runParents(input.cards)
+  const byKey = new Map(input.cards.map((card) => [runKey(card), card]))
+  const families = new Map<BoardCard, RunLane[]>()
   const out: Unit[] = []
   for (const card of input.cards) {
-    const { mission_id: missionID, mission_role: role, workspace_id: workspace } = card.run
-    const detail = missionID ? input.ctx.missionDetails[missionID] : undefined
-    const lane = runLane(card, input, detail)
-    if (!missionID || !role) {
-      out.push({ key: lane.key, root: card, members: [lane], group: card.group })
-      continue
-    }
-    const key = `swarm:${workspace}:${missionID}`
-    const unit = swarms.get(key)
-    if (unit) unit.members.push(lane)
-    else swarms.set(key, { key, missionID, root: card, members: [lane], group: card.group })
+    const root = byKey.get(rootKey(runKey(card), parents))!
+    const lane = runLane(card, input)
+    if (root === card) out.push({ key: lane.key, root: card, members: [lane], group: card.group })
+    else families.set(root, [...(families.get(root) ?? []), lane])
   }
-  for (const unit of swarms.values()) {
-    unit.members.sort(memberOrder(input.ctx.missionDetails[unit.missionID!]))
-    unit.root = unit.members[0].card
-    unit.group = unit.members.reduce<RunGroup>((best, lane) => (groupRank[lane.card.group] < groupRank[best] ? lane.card.group : best), 'finished')
-    out.push(unit)
+  for (const unit of out) {
+    const children = families.get(unit.root)
+    if (!children) continue
+    children.sort((a, b) => a.start - b.start || a.key.localeCompare(b.key))
+    unit.members.push(...children)
+    unit.group = bestGroup(unit.members)
   }
   return out
 }
+
+const bestGroup = (members: RunLane[]) =>
+  members.reduce<RunGroup>((best, lane) => (groupRank[lane.card.group] < groupRank[best] ? lane.card.group : best), 'finished')
 
 const latest = (lanes: RunLane[], pick: (lane: RunLane) => number) => Math.max(...lanes.map(pick))
 
@@ -217,8 +191,8 @@ function unitOrder(a: Unit, b: Unit): number {
 
 const reaches = (lane: RunLane, window: TimeWindow) => lane.end >= window.start && lane.start <= window.end
 
-/** Every tone ranks, so each worker in the window shows on the strip. */
-const swarmRank: Record<Tone, number> = {
+/** Every tone ranks, so each child run in the window shows on the strip. */
+const familyRank: Record<Tone, number> = {
   'needs-you': 8,
   failed: 7,
   interrupted: 7,
@@ -244,10 +218,10 @@ function tonesOf(lane: RunLane, least: number): Stretch[] {
   })
 }
 
-function swarmCounts(members: RunLane[]): string {
+function childCounts(members: RunLane[]): string {
   const counts = { working: 0, needsYou: 0, done: 0, failed: 0 }
-  for (const { card } of members) {
-    if (card.run.mission_role !== 'worker') continue
+  for (const lane of members) {
+    const { card } = lane
     if (card.group === 'needs-you') counts.needsYou++
     else if (card.group === 'working') counts.working++
     else if (endedBadly(card.state)) counts.failed++
@@ -258,7 +232,7 @@ function swarmCounts(members: RunLane[]): string {
     counts.working > 0 && `${counts.working} working`,
     counts.done > 0 && `${counts.done} done`,
     counts.failed > 0 && `${counts.failed} failed`,
-  ].filter(Boolean).join(' · ') || 'No workers yet'
+  ].filter(Boolean).join(' · ')
 }
 
 function agentLanes(run: RunLane, load: AgentLoad, now: number): Lane[] {
@@ -267,7 +241,7 @@ function agentLanes(run: RunLane, load: AgentLoad, now: number): Lane[] {
   if (load.status === 'loading') return [note('Loading agents…')]
   if (load.status === 'error') return [note(`Agents: ${load.error}`, true)]
   const { agents, roots } = load.index
-  if (roots.length === 0) return [note(load.partial ? 'No subagents in the newest 1000 session items.' : 'No subagents.')]
+  if (roots.length === 0) return [note(load.partial ? 'No subagents in the newest 1000 conversation items.' : 'No subagents.')]
   const out: Lane[] = []
   const count = (id: string): number => agents[id].children.reduce((n, child) => n + 1 + count(child), 0)
   const walk = (id: string, depth: number, parentKey: string) => {
@@ -364,34 +338,30 @@ export function buildLanes(input: LanesInput): LanesModel {
       continue
     }
     for (const unit of section.units) {
-      if (!unit.missionID) {
-        lanes.push(...withAgents({ ...unit.members[0], parentKey: key }))
+      const [parent, ...children] = unit.members
+      if (children.length === 0 || parent.card !== unit.root) {
+        for (const lane of unit.members) lanes.push(...withAgents({ ...lane, parentKey: key }))
         continue
       }
-      const mission = ctx.missions[unit.missionID]
-      const detail = ctx.missionDetails[unit.missionID]
-      const workers = unit.members.filter((lane) => lane.card.run.mission_role === 'worker')
+      const familyKey = `family:${unit.key}`
       const needs = unit.members.filter((lane) => lane.card.group === 'needs-you')
-      const live = mission ? !missionFinal(mission) : unit.members.some((lane) => !lane.outcome)
-      const tasks = detail?.tasks.length ?? workers.length
-      const swarmOpen = open.get(unit.key) ?? ((live && tasks <= swarmTasksOpen) || needs.some((lane) => lane.card.run.mission_role === 'worker'))
-      const integrator = unit.members.find((lane) => lane.card.run.id === mission?.current_integrator_run_id) ?? unit.members.find((lane) => lane.card.run.mission_role === 'integrator')
+      const familyOpen = open.get(familyKey) ?? ((!parent.outcome && children.length <= familyChildrenOpen) || needs.some((lane) => lane !== parent))
       lanes.push({
-        kind: 'swarm',
-        key: unit.key,
+        kind: 'family',
+        key: familyKey,
         level: 2,
         parentKey: key,
-        missionID: unit.missionID,
-        title: objectiveTitle(mission?.objective ?? runLabel(unit.root.run)),
-        detail: [mission ? phaseWord[mission.phase] : 'Swarm', swarmCounts(unit.members)].join(' · '),
-        open: swarmOpen,
-        integratorID: mission?.current_integrator_run_id || integrator?.card.run.id,
-        strip: strongest(workers.flatMap((lane) => tonesOf(lane, least)), swarmRank),
-        segments: integrator?.segments ?? [],
-        outcome: integrator?.outcome,
+        title: parent.title,
+        detail: [`${children.length} ${children.length === 1 ? 'subsession' : 'subsessions'}`, childCounts(children)].join(' · '),
+        open: familyOpen,
+        parentID: parent.card.run.id,
+        strip: strongest(children.flatMap((lane) => tonesOf(lane, least)), familyRank),
+        segments: parent.segments,
+        outcome: parent.outcome,
       })
-      for (const lane of unit.members) drawn.set(lane.card.run.id, unit.key)
-      for (const lane of swarmOpen ? unit.members : needs) lanes.push(...withAgents({ ...lane, level: 3, parentKey: unit.key }))
+      drawn.set(parent.card.run.id, familyKey)
+      for (const lane of children) drawn.set(lane.card.run.id, familyKey)
+      for (const lane of familyOpen ? [parent, ...children] : needs) lanes.push(...withAgents({ ...lane, level: 3, parentKey: familyKey }))
     }
   }
   return { lanes, drawn, inWindow }

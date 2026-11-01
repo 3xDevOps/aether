@@ -12,7 +12,7 @@ func TestHookSummaryCodexManagedLaunchNeedsNoHooks(t *testing.T) {
 	if err := writeHookSummaryWithInputs(&got, "codex", in); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(got.String(), "Inbox (codex): Aether hands this run its mail through Codex's app-server") {
+	if !strings.HasPrefix(got.String(), "Inbox (codex): Aether hands this session its mail through Codex's app-server") {
 		t.Fatalf("summary = %q", got.String())
 	}
 }

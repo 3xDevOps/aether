@@ -750,9 +750,9 @@ func (c *Conn) awaitSession(ctx context.Context, sid string, cancelled <-chan st
 		case <-cancelled:
 			return "", errRequestCancelled
 		case <-deadline.C:
-			return "", fmt.Errorf("unknown session %q", sid)
+			return "", fmt.Errorf("unknown agent conversation %q", sid)
 		case <-ctx.Done():
-			return "", fmt.Errorf("unknown session %q", sid)
+			return "", fmt.Errorf("unknown agent conversation %q", sid)
 		}
 	}
 }

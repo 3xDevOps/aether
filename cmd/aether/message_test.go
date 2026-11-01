@@ -15,14 +15,14 @@ func TestMessagePrintsTheReceipt(t *testing.T) {
 		out     string
 		err     string
 	}{
-		{message: protocol.RoomMessage{ID: "m1", State: protocol.RoomMessageSent}, out: "message m1 delivered to run r1\n"},
+		{message: protocol.RoomMessage{ID: "m1", State: protocol.RoomMessageSent}, out: "message m1 delivered to session r1\n"},
 		{message: protocol.RoomMessage{ID: "m1", State: protocol.RoomMessageSent, AgentDelivery: "queued"},
-			out: "message m1 sent to run r1, queued behind the agent's current turn\n"},
+			out: "message m1 sent to session r1, queued behind the agent's current turn\n"},
 		{message: protocol.RoomMessage{ID: "m1", State: protocol.RoomMessageQueued, DeliverAfter: &after},
-			out: "message m1 queued for the member in control of run r1, who can approve or deny it; otherwise it is delivered at " + after + "\n"},
+			out: "message m1 queued for the member in control of session r1, who can approve or deny it; otherwise it is delivered at " + after + "\n"},
 		{message: protocol.RoomMessage{ID: "m1", State: protocol.RoomMessageDenied, Failure: &protocol.RoomMessageFailure{Message: "denied by the controller"}},
-			err: "message m1 to run r1 was denied: denied by the controller"},
-		{message: protocol.RoomMessage{ID: "m1", State: protocol.RoomMessageNotSent}, err: "message m1 to run r1 was not sent"},
+			err: "message m1 to session r1 was denied: denied by the controller"},
+		{message: protocol.RoomMessage{ID: "m1", State: protocol.RoomMessageNotSent}, err: "message m1 to session r1 was not sent"},
 	} {
 		c := fakeControlMethods(t, map[string]*fakeReply{protocol.MethodRunInject: {result: protocol.RunRoomPostResult{Message: tc.message}}})
 		var out bytes.Buffer
@@ -46,10 +46,10 @@ func TestRunActionsPrintTheStatusAndNameMissingRuns(t *testing.T) {
 		protocol.MethodRunKill:  {err: &protocol.Error{Code: protocol.CodeNotFound, Message: "store: not found"}},
 	})
 	var out bytes.Buffer
-	if err := actOnRun(c, &out, protocol.MethodRunPause, "r1"); err != nil || out.String() != "run r1 paused\n" {
-		t.Fatalf("pause printed %q (%v), want run r1 paused", out.String(), err)
+	if err := actOnRun(c, &out, protocol.MethodRunPause, "r1"); err != nil || out.String() != "session r1 paused\n" {
+		t.Fatalf("pause printed %q (%v), want session r1 paused", out.String(), err)
 	}
-	if err := actOnRun(c, &out, protocol.MethodRunKill, "r9"); err == nil || err.Error() != "run r9 not found; aether runs lists runs" {
+	if err := actOnRun(c, &out, protocol.MethodRunKill, "r9"); err == nil || err.Error() != "session r9 not found; aether sessions lists sessions" {
 		t.Fatalf("kill of an unknown run = %v", err)
 	}
 	if strings.Contains(out.String(), "r9") {

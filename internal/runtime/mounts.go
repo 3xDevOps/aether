@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -13,9 +14,10 @@ import (
 const (
 	reservedRunPath = "/run/aether"
 	reservedOptPath = "/opt/aether"
-	// reservedCLIPath is a file target rather than a prefix: only the
-	// server-staged aether-internal executable owns this location.
-	reservedCLIPath = "/usr/local/bin/aether-internal"
+	// reservedCLIPath and reservedSudoPath are file targets rather than
+	// prefixes: only the server-staged executable owns these locations.
+	reservedCLIPath  = "/usr/local/bin/aether-internal"
+	reservedSudoPath = "/usr/local/bin/sudo"
 )
 
 // dockerSocketPaths are the host spellings of the Docker control socket.
@@ -49,7 +51,7 @@ type MountPolicy struct {
 // files, subpath mounts whose subpath is not a clean local path or whose
 // base is not a directory, duplicate targets, nested targets except the
 // approved child-after-parent pairs (never beneath a subpath mount), targets under the reserved /run/aether, /opt/aether,
-// and /usr/local/bin/aether-internal surfaces, root targets, collisions with the
+// /usr/local/bin/aether-internal and /usr/local/bin/sudo surfaces, root targets, collisions with the
 // worktree bind on either side, and read-only sources containing another
 // mount's source (Docker's per-bind read-only flag is not recursive and no
 // recursive fallback is used).
@@ -91,7 +93,7 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 		if target == "/" {
 			return fmt.Errorf("runtime: mount %d: target must not be the container root", i)
 		}
-		for _, reserved := range []string{reservedRunPath, reservedOptPath, reservedCLIPath} {
+		for _, reserved := range []string{reservedRunPath, reservedOptPath, reservedCLIPath, reservedSudoPath} {
 			if target == reserved || underSlash(target, reserved) {
 				return fmt.Errorf("runtime: mount %d: target %q is reserved for aether", i, target)
 			}
@@ -144,6 +146,11 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 		} else if !info.IsDir() && !info.Mode().IsRegular() {
 			return fmt.Errorf("runtime: mount %d: source %q is neither a directory nor a regular file", i, m.HostPath)
 		}
+		if m.Overlay != "" {
+			if err := validateOverlay(&mounts[i], source, info, roots); err != nil {
+				return fmt.Errorf("runtime: mount %d: %w", i, err)
+			}
+		}
 		if worktreeHost != "" && (mounted == worktreeHost ||
 			withinHost(mounted, worktreeHost) || withinHost(worktreeHost, mounted)) {
 			return fmt.Errorf("runtime: mount %d: source %q collides with the worktree checkout %q", i, m.HostPath, policy.WorktreeHostPath)
@@ -177,6 +184,26 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 		targets[i], sources[i] = target, mounted
 		mounts[i].HostPath = source
 	}
+	return nil
+}
+
+// validateOverlay resolves m.Overlay in place. The overlay mount options
+// separate paths with ',' and ':', so neither may appear in them.
+func validateOverlay(m *Mount, source string, info os.FileInfo, roots []string) error {
+	if m.Subpath != "" || !info.IsDir() {
+		return fmt.Errorf("overlay source %q must be a whole directory", m.HostPath)
+	}
+	overlay, err := filepath.EvalSymlinks(m.Overlay)
+	if err != nil {
+		return fmt.Errorf("overlay %q: %w", m.Overlay, err)
+	}
+	if !slices.ContainsFunc(roots, func(root string) bool { return withinHost(overlay, root) }) {
+		return fmt.Errorf("overlay %q resolves to %q, outside every aether-owned root", m.Overlay, overlay)
+	}
+	if strings.ContainsAny(source+overlay, ",:") {
+		return fmt.Errorf("overlay paths %q and %q must not contain ',' or ':'", source, overlay)
+	}
+	m.Overlay = overlay
 	return nil
 }
 

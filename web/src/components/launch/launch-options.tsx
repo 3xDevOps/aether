@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { limitsText, type LimitsDraft, parseLimits, RunLimitsFields } from '@/components/launch/run-limits'
 import type { Member, RunLimits, Workspace } from '@/lib/types'
@@ -82,7 +83,7 @@ function FallbackList({
             })}
           </ul>
           <p className="text-ui-sm text-muted">
-            The run starts on {fallback.order ? 'the first ticked account, top to bottom, with usage left' : 'the account here with the most usage left'} if {owner}&apos;s usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-run.
+            The session starts on {fallback.order ? 'the first ticked account, top to bottom, with usage left' : 'the account here with the most usage left'} if {owner}&apos;s usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-session.
           </p>
         </>
       )}
@@ -98,7 +99,6 @@ export function AccountOptions({
   onChange,
   fallback,
   onFallback,
-  swarm = false,
   save,
 }: {
   label: string
@@ -108,11 +108,8 @@ export function AccountOptions({
   onChange: (account: string) => void
   fallback: Fallback
   onFallback: (fallback: Fallback) => void
-  swarm?: boolean
   save?: ReactNode
 }) {
-  // A swarm's list is every worker's policy too; the server skips each run's current account.
-  const skip = swarm ? '' : account
   const accountName = (member: Member) => `${member.display_name}${member.id === ownAccountID ? ' (you)' : ' (shared)'}`
   const chosen = accounts.find((member) => member.id === account)
   const shared = account !== '' && account !== ownAccountID
@@ -120,7 +117,7 @@ export function AccountOptions({
     <Collapsible defaultOpen={shared}>
       <CollapsibleTrigger>
         <span className="font-medium">Options</span>
-        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallbackParams(fallback, accounts, skip).no_fallback && ' · Fallback off'}</span>}
+        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallbackParams(fallback, accounts, account).no_fallback && ' · Fallback off'}</span>}
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-1 pt-2 pl-5">
         <Label htmlFor="launch-account">{label}</Label>
@@ -141,7 +138,7 @@ export function AccountOptions({
             ? `Uses ${chosen?.display_name ?? account}'s agent login and vendor quota in your own environment, with your GitHub login. You remain its owner and actor.`
             : 'A teammate who shares their agent account appears here.'}
         </p>
-        <FallbackList accounts={accounts} account={account} skip={skip} accountName={accountName} fallback={fallback} onChange={onFallback} />
+        <FallbackList accounts={accounts} account={account} skip={account} accountName={accountName} fallback={fallback} onChange={onFallback} />
         {save}
       </CollapsibleContent>
     </Collapsible>
@@ -150,35 +147,34 @@ export function AccountOptions({
 
 export type ChildRunsChoice = '' | 'on' | 'off'
 
-const childRunsWords: Record<ChildRunsChoice, string> = {
-  '': 'Use my setting',
-  on: 'Allow for this run',
-  off: 'Off for this run',
-}
-
-/** Radix Select reserves the empty value, so "Use my setting" travels as `default`. */
-export function ChildRunsOption({ value, onChange, enabled, disabled }: {
+/** Whether this run may start child runs; it follows the member setting until flipped, and only a flip is sent. */
+export function ChildRunsSwitch({ value, onChange, enabled, readError, unavailable, disabled }: {
   value: ChildRunsChoice
   onChange: (value: ChildRunsChoice) => void
   /** The member setting, unknown until read. */
   enabled: boolean | undefined
+  /** Why the setting could not be read; the switch then sets this run alone. */
+  readError?: string | null
+  /** Why this run cannot start child runs whatever the setting says. */
+  unavailable?: string
   disabled?: boolean
 }) {
-  const own = enabled === undefined ? '' : enabled ? ' (on)' : ' (off)'
+  const on = !unavailable && (value ? value === 'on' : enabled === true)
   return (
     <div className="flex flex-col gap-1">
-      <Label htmlFor="launch-child-runs">Child runs</Label>
-      <Select value={value || 'default'} onValueChange={(next) => onChange(next === 'default' ? '' : next as ChildRunsChoice)} disabled={disabled}>
-        <SelectTrigger id="launch-child-runs" aria-describedby="launch-child-runs-help">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {(['', 'on', 'off'] as const).map((choice) => (
-            <SelectItem key={choice || 'default'} value={choice || 'default'}>{childRunsWords[choice]}{choice === '' && own}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <p id="launch-child-runs-help" className="text-ui-sm text-muted">Whether the agent may start other agents as child runs. Allowing covers the runs it starts too.</p>
+      <div className="flex min-h-7 items-center justify-between gap-3 coarse:min-h-11">
+        <Label htmlFor="launch-child-runs">Subsessions</Label>
+        <Switch
+          id="launch-child-runs"
+          aria-describedby="launch-child-runs-help"
+          checked={on}
+          disabled={disabled || !!unavailable || (enabled === undefined && !readError)}
+          onCheckedChange={(next) => onChange(enabled !== undefined && next === enabled ? '' : next ? 'on' : 'off')}
+        />
+      </div>
+      <p id="launch-child-runs-help" className="text-ui-sm text-muted">
+        {unavailable ?? (enabled === undefined ? (readError ? `Could not read your setting: ${readError}` : 'Reading your subsessions setting…') : ['Lets the agent start other agents as subsessions.', value ? 'Set for this run only.' : `Follows your setting, which is ${enabled ? 'on' : 'off'}.`].join(' ').trim())}
+      </p>
     </div>
   )
 }

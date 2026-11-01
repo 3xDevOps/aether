@@ -194,7 +194,7 @@ func printServerUpdateStatus(w io.Writer, res protocol.ServerUpdateStatusResult)
 }
 
 // waitingLine says what a pending update has not applied for. Paused runs
-// are named because they look active in `aether runs` but are not holding
+// are named because they look active in `aether sessions` but are not holding
 // anything back; leaving them out would make the count look wrong.
 func waitingLine(w *protocol.ServerUpdateWaiting) string {
 	if w == nil {
@@ -202,15 +202,15 @@ func waitingLine(w *protocol.ServerUpdateWaiting) string {
 	}
 	parts := make([]string, 0, 3)
 	if w.Runs > 0 {
-		parts = append(parts, plural(w.Runs, "run")+" still working")
+		parts = append(parts, plural(w.Runs, "session")+" still working")
 	}
 	if w.Shells > 0 {
 		parts = append(parts, plural(w.Shells, "attached terminal")+" open")
 	}
 	if w.Paused > 0 {
-		// Named because a paused run shows as running in `aether runs`;
+		// Named because a paused run shows as running in `aether sessions`;
 		// leaving it out would make the count look wrong.
-		parts = append(parts, plural(w.Paused, "paused run")+" not holding it back")
+		parts = append(parts, plural(w.Paused, "paused session")+" not holding it back")
 	}
 	if len(parts) == 0 {
 		// The server reported busy without naming anything this client
@@ -241,7 +241,7 @@ func serverUpdateIdle(version string) error {
 		if err := c.Call(protocol.MethodServerUpdate, protocol.ServerUpdateParams{Version: version, When: protocol.ServerUpdateIdle}, &res); err != nil {
 			return err
 		}
-		fmt.Printf("scheduled %s; it applies when no run is working and no terminal is attached\n", res.Version)
+		fmt.Printf("scheduled %s; it applies when no session is working and no terminal is attached\n", res.Version)
 		return nil
 	})
 }
@@ -383,9 +383,9 @@ func confirmServerUpdateNow(r io.Reader, w io.Writer, version string, activeRuns
 	}
 	_, _ = fmt.Fprintf(w, "updating the server to %s restarts it now.\n", target)
 	if activeRuns > 0 {
-		_, _ = fmt.Fprintf(w, "%s active; they keep running and the server reattaches to them.\n", plural(activeRuns, "run"))
+		_, _ = fmt.Fprintf(w, "%s active; they keep running and the server reattaches to them.\n", plural(activeRuns, "session"))
 	} else {
-		_, _ = fmt.Fprintln(w, "no runs are active.")
+		_, _ = fmt.Fprintln(w, "no sessions are active.")
 	}
 	_, _ = fmt.Fprintln(w, "attached terminals and live syncs drop and reconnect.")
 	_, _ = fmt.Fprint(w, "continue? [y/N]: ")

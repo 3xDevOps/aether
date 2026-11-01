@@ -148,7 +148,8 @@ func autoApprovable(c protocol.AssistantConfirmation) bool {
 }
 
 func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
-	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest, ShareView: st.ShareView}
+	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest, ShareView: st.ShareView,
+		PreferencesEnabled: st.PreferencesEnabled}
 }
 
 // approver passes a confirmed call at once when the member turned
@@ -184,12 +185,12 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 			}
 			return err
 		}
-		slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", false)
+		slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", false)
 		a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
 		if err = s.noteAction(ctx, conv, m, a, c.Method+" passed after you approved its card."); err != nil {
 			return fmt.Errorf("record the approval: %w", err)
 		}
-		m.actions.hold(conv, a, c.Params)
+		m.actions.hold(conv, a, c.Params, c.Shown)
 		return nil
 	}
 }
@@ -246,19 +247,19 @@ func (s *Service) autoApprove(ctx, conv context.Context, m *member, c protocol.A
 	if err != nil {
 		return false, fmt.Errorf("read the auto-approval setting: %w", err)
 	}
-	if !st.AutoApprove || !autoApprovable(c) {
+	if !st.AutoApprove || !autoApprovable(c) || s.carriesPreference(ctx, m.id, c) {
 		return false, nil
 	}
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
-	slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", true)
 	a := newAction(c)
+	slog.Info("assistant approval", "member", m.id, "method", c.Method, "action", a.ID, "auto", true)
 	a.Outcome, a.Approval, a.DecidedAt = protocol.AssistantActionAutoApproved, "auto", a.CreatedAt
 	if err = s.noteAction(ctx, conv, m, a, c.Method+" passed without a card: auto-approval is on."); err != nil {
 		return false, fmt.Errorf("record the approval: %w", err)
 	}
-	m.actions.hold(conv, a, c.Params)
+	m.actions.hold(conv, a, c.Params, c.Shown)
 	return true, nil
 }
 
@@ -267,7 +268,7 @@ func (s *Service) Settings(ctx context.Context, id domain.MemberID) (protocol.As
 	if err != nil {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
-	return settingsOf(st), nil
+	return s.withTemporary(ctx, id, settingsOf(st))
 }
 
 // SetSettings applies p and notes a change of auto-approval in the member's
@@ -301,6 +302,12 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		st.Approvals = 0
 		st.NoSuggest = true
 	}
+	if p.PreferencesEnabled != nil {
+		st.PreferencesEnabled = *p.PreferencesEnabled
+	}
+	if err = s.setTemporary(ctx, id, p.Temporary); err != nil {
+		return protocol.AssistantSettings{}, err
+	}
 	if p.AutoApprove != nil {
 		st.AutoApprove = *p.AutoApprove
 		if st.AutoApprove {
@@ -313,24 +320,32 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
 	if was == st.AutoApprove {
-		return settingsOf(st), nil
+		return s.withTemporary(ctx, id, settingsOf(st))
 	}
 	slog.Info("assistant auto-approval changed", "member", id, "auto", st.AutoApprove)
-	severity, title, body := "info", "Auto-approval turned off", "Launching, messaging and stopping runs and saving the environment wait for your approval again."
+	severity, title, body := "info", "Auto-approval turned off", "Launching, messaging and stopping sessions and saving the environment wait for your approval again."
 	if st.AutoApprove {
-		severity, title, body = "warning", "Auto-approval turned on", "The assistant launches, messages and stops your runs and saves the environment without asking. Messaging or stopping another member's run still asks."
+		severity, title, body = "warning", "Auto-approval turned on", "The assistant launches, messages and stops your sessions and saves the environment without asking. Messaging or stopping another member's session still asks."
 	}
 	if err = s.note(ctx, m, acphost.Notice{Severity: severity, Title: title, Description: body}); err != nil && !errors.Is(err, ErrRemoving) {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %s, but noting it in the transcript failed: %w", strings.ToLower(title), err)
 	}
-	return settingsOf(st), nil
+	return s.withTemporary(ctx, id, settingsOf(st))
 }
 
 func newAction(c protocol.AssistantConfirmation) protocol.AssistantAction {
 	a := protocol.AssistantAction{ID: rand.Text(), Method: c.Method, Summary: c.Summary, OtherOwner: c.OtherOwner, CreatedAt: c.CreatedAt.UTC()}
 	// The socket validated the params, and every action method names its
-	// target with these fields; env.save has none.
+	// target with these fields; env.save has none, and watch.create nests
+	// its target.
 	_ = json.Unmarshal(c.Params, &a.Target)
+	if c.Method == protocol.MethodWatchCreate {
+		var p struct {
+			Target *protocol.WatchTarget `json:"target"`
+		}
+		_ = json.Unmarshal(c.Params, &p)
+		a.Target.Watch = p.Target
+	}
 	var keyed struct {
 		IdempotencyKey string `json:"idempotency_key"`
 	}
@@ -401,6 +416,7 @@ func (s *Service) noteOutcome(conv context.Context, m *member, a protocol.Assist
 type heldAction struct {
 	conv   context.Context
 	action protocol.AssistantAction
+	shown  time.Time
 }
 
 // heldActions are the actions whose call was allowed and has not run yet,
@@ -411,14 +427,14 @@ type heldActions struct {
 	held map[string][]heldAction
 }
 
-func (h *heldActions) hold(conv context.Context, a protocol.AssistantAction, params json.RawMessage) {
+func (h *heldActions) hold(conv context.Context, a protocol.AssistantAction, params json.RawMessage, shown time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.held == nil {
 		h.held = make(map[string][]heldAction)
 	}
 	key := a.Method + "\x00" + string(params)
-	h.held[key] = append(h.held[key], heldAction{conv, a})
+	h.held[key] = append(h.held[key], heldAction{conv, a, shown})
 }
 
 // take returns the oldest action held for the call, dropping those of a
@@ -456,11 +472,15 @@ func (c actionCaller) Call(ctx context.Context, method string, params json.RawMe
 	if !ok {
 		conv = c.m.conversation()
 		a = newAction(protocol.AssistantConfirmation{Method: method, Params: params, CreatedAt: time.Now()})
-		owner, rpcErr := tools.OwnerName(ctx, c.Caller, string(c.m.id), a.Target.RunID)
+		var owner string
+		var rpcErr *protocol.Error
+		if a.Target.RunID != "" {
+			owner, rpcErr = tools.OwnerName(ctx, c.Caller, string(c.m.id), a.Target.RunID)
+		}
 		a.OtherOwner = owner
-		a.Summary = reversibleSummary(method, a.Target.RunID, owner)
+		a.Summary = reversibleSummary(method, params, a.Target.RunID, owner)
 		if rpcErr != nil {
-			rpcErr = &protocol.Error{Code: rpcErr.Code, Message: "look up the owner of run " + a.Target.RunID + ": " + rpcErr.Message}
+			rpcErr = &protocol.Error{Code: rpcErr.Code, Message: "look up the owner of session " + a.Target.RunID + ": " + rpcErr.Message}
 			c.record(conv, method, a, nil, rpcErr)
 			return nil, rpcErr
 		}
@@ -479,7 +499,7 @@ func (c actionCaller) record(conv context.Context, method string, a protocol.Ass
 	} else {
 		a.Outcome, a.Result = protocol.AssistantActionSucceeded, created(result, a.Target)
 		if a.Result != nil {
-			body = "Run " + a.Result.RunID
+			body = "Session " + a.Result.RunID
 		}
 	}
 	// A record that cannot be written must not change the call's result.
@@ -500,13 +520,50 @@ func created(result json.RawMessage, target protocol.AssistantActionTarget) *pro
 	return &protocol.AssistantActionTarget{RunID: ids.Run.ID, WorkspaceID: ids.Run.WorkspaceID}
 }
 
-func reversibleSummary(method, run, owner string) string {
+const unreadableWatch = "Watch (unreadable parameters)"
+
+func reversibleSummary(method string, params json.RawMessage, run, owner string) string {
+	switch method {
+	case protocol.MethodWatchCreate:
+		p, err := protocol.DecodeParams[protocol.WatchCreateParams](params)
+		if err != nil {
+			return unreadableWatch
+		}
+		t := p.Target
+		var target string
+		switch {
+		case t.Kind == protocol.WatchTargetRun && t.RunID != "":
+			target = "session " + t.RunID
+		case t.Kind == protocol.WatchTargetPR && t.Repo != "":
+			target = fmt.Sprintf("pull request %s#%d", t.Repo, t.Number)
+		default:
+			raw, _ := json.Marshal(t)
+			target = "target " + string(raw)
+		}
+		conditions := "its default conditions"
+		if len(p.Conditions) > 0 {
+			conditions = strings.Join(p.Conditions, ", ")
+		}
+		return fmt.Sprintf("Watch %s for %s", target, conditions)
+	case protocol.MethodWatchUpdate:
+		p, err := protocol.DecodeParams[protocol.WatchUpdateParams](params)
+		if err != nil || p.WatchID == "" {
+			return unreadableWatch
+		}
+		switch {
+		case p.Paused == nil || len(p.Conditions) > 0 || p.ExpiresAt != "" || p.Label != nil:
+			return "Change watch " + p.WatchID
+		case *p.Paused:
+			return "Pause watch " + p.WatchID
+		}
+		return "Resume watch " + p.WatchID
+	}
 	verb := "Pause"
 	if method == protocol.MethodRunResume {
 		verb = "Resume"
 	}
 	if owner != "" {
-		return fmt.Sprintf("%s run %s, owned by %s", verb, run, owner)
+		return fmt.Sprintf("%s session %s, owned by %s", verb, run, owner)
 	}
-	return verb + " run " + run
+	return verb + " session " + run
 }

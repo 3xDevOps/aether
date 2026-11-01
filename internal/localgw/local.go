@@ -890,7 +890,7 @@ func (g *Gateway) localForwardStart(_ *http.Request, body []byte) (any, *protoco
 		return nil, perr
 	}
 	if !validForwardTarget(params.Target) {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "target must be run:<run-id> or terminal"}
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "target must be run:<session-id> or terminal"}
 	}
 	if params.Port < 1 || params.Port > 65535 {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}
@@ -920,7 +920,7 @@ func (g *Gateway) localForwardStop(_ *http.Request, body []byte) (any, *protocol
 		return nil, perr
 	}
 	if !validForwardTarget(params.Target) {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "target must be run:<run-id> or terminal"}
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "target must be run:<session-id> or terminal"}
 	}
 	if params.Port < 1 || params.Port > 65535 {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}

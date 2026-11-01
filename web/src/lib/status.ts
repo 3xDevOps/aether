@@ -4,8 +4,6 @@ import {
   isPaused,
   memberName,
   needsYou,
-  unreadMail,
-  unreadReason,
   waitingOn,
   type NeedsYouCondition,
   type StateContext,
@@ -38,7 +36,6 @@ export interface RunPresentation {
   /** What happens next, or what the viewer can do; absent when nothing is to say. */
   next?: string
   needsYou?: NeedsYouCondition
-  unread?: number
   /** What chose the server's state, from the run's `cause`; absent once the run is not live. */
   cause?: RunStatusCause
   /** What Aether verified about the wait the server's state shows. */
@@ -95,7 +92,7 @@ const stateNext: Partial<Record<PresentationState, string>> = {
   stalled: "It returns to Working with the agent's next update.",
 }
 
-function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'needsYou' | 'unread'> {
+function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'needsYou'> {
   if (run.status === 'queued') return { state: 'working', reason: 'Queued' }
   if (run.status === 'provisioning') return { state: 'working', reason: 'Starting' }
   const state = liveStateOf(run.status as 'running' | 'needs-attention', run.state)
@@ -103,15 +100,12 @@ function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'ne
   if (waiter !== undefined) {
     return { state: state === 'needs-you' || state === 'ended' ? 'waiting' : state, reason: `Waiting for ${memberName(waiter, ctx)}` }
   }
-  if (state === 'needs-you' && run.mission_role === 'worker') {
-    return { state: 'waiting-agents', reason: 'Waiting for the integrator', next: 'It continues when the integrator answers.' }
-  }
   if (state === 'working' && run.toolActivity) {
     return { state, reason: `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd() }
   }
   const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : stateReasons[state]
   if (possiblyStalled(run)) return { state: 'stalled', reason, next: stateNext.stalled }
-  if (state === 'failed') return { state, reason: `${reason}. Run remains open for follow-up.` }
+  if (state === 'failed') return { state, reason: `${reason}. Session remains open for follow-up.` }
   // Only Claude Code reports held background tasks, and it starts a turn when one ends.
   if (run.reason?.startsWith('working in background: ')) return { state, reason, next: 'Claude Code resumes it when a background task ends.' }
   return { state, reason, next: stateNext[state] }
@@ -169,12 +163,7 @@ function presentation(run: RunRecord, ctx: StateContext): RunPresentation {
     return { state: outcomeState(run.status)!, reason: finishedReason(run) }
   }
   if (isPaused(run, ctx)) return { state: 'paused', reason: 'Paused' }
-  const live = liveState(run, ctx)
-  const unread = unreadMail(run, ctx.now)
-  if (unread > 0 && waitingOn(run, ctx) === undefined) {
-    return { state: live.state, reason: unreadReason(unread, run.oldest_unacked_at!, ctx.now), unread }
-  }
-  return live
+  return liveState(run, ctx)
 }
 
 /** The reason worth printing beside the state's label, without the words that restate it. */
@@ -198,7 +187,7 @@ export function waitLine(wait: RunWait | undefined, state: PresentationState, no
 const staleWait = /^No update for ([^\s:]+)(?:: (.*))?$/s
 
 /**
- * A state's words: what the run waits on when the reason names it ("Waiting for 2 workers",
+ * A state's words: what the run waits on when the reason names it ("Waiting for 2 child runs",
  * "Waiting for Ada") and no checked wait says more, else the state's label, and the detail after
  * it. Given `since`, a CI wait's detail starts with how long it has run, for a surface that prints
  * no age of its own, unless it went stale.
@@ -238,13 +227,13 @@ const causeWords: Record<string, string> = {
   turn: 'a turn is running',
   report: 'the agent reported it',
   'turn-end': 'the turn ended',
-  stall: 'the run stalled',
+  stall: 'the session stalled',
   'wait-expired': 'its reported wait went stale',
   'wait-fault': 'a condition it waits on resolved or broke, and the agent was not woken',
-  workers: 'its swarm workers or child runs are live or have unread mail for it',
+  workers: 'its subsessions are live',
   'tasks-held': 'it holds background tasks',
   human: 'a request waits on a person',
-  disconnect: 'the agent session ended',
+  disconnect: 'the agent exited',
 }
 
 /**
@@ -299,7 +288,7 @@ export function runLabel(run: { task: string; title?: string; child_purpose?: st
   const title = run.child_purpose?.trim() || run.title?.trim()
   if (title) return title
   const line = run.task.split('\n').find((l) => l.trim())?.trim() ?? ''
-  return line ? clipLabel(line) : 'Untitled run'
+  return line ? clipLabel(line) : 'Untitled session'
 }
 
 export const stateLabel: Record<PresentationState, string> = {

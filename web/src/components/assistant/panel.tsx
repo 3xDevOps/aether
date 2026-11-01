@@ -5,6 +5,7 @@ import { ActionHistory } from '@/components/assistant/action-history'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
+import { TemporaryChatToggle } from '@/components/assistant/temporary'
 import { AssistantFailed, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
 import { AssistantSheet, AutoApproveSuggestion } from '@/components/assistant/suggestion'
 import { assistantRows, Transcript } from '@/components/assistant/transcript'
@@ -88,7 +89,7 @@ function AutoApproveLine() {
   }
   return (
     <p className="mx-3 mt-3 flex shrink-0 flex-wrap items-center gap-x-2 text-ui-sm text-muted">
-      <span>Acts without asking: launches, saves, and messages or stops your own runs with no card.</span>
+      <span>Acts without asking: launches, saves, and messages or stops your own sessions with no card.</span>
       <Button variant="link" size="sm" onClick={open}>Change in Settings</Button>
     </p>
   )
@@ -181,6 +182,7 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
         actions={
           <>
             {ready && <ActionHistory session={session} />}
+            {ready && status.temporary !== undefined && <TemporaryChatToggle temporary={status.temporary} />}
             {ready && (
               <Button variant="ghost" size="icon-sm" label="New conversation" onClick={() => setConfirming(true)}>
                 <MessageSquarePlus />

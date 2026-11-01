@@ -214,7 +214,7 @@ describe('the server update banner', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
     expect(await screen.findByText('Update the server to v1.3.0?')).toBeTruthy()
-    expect(screen.getByText(/2 runs are active right now/)).toBeTruthy()
+    expect(screen.getByText(/2 sessions are active right now/)).toBeTruthy()
     expect(screen.getByText(/They keep running/)).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update and restart' }))
@@ -231,7 +231,7 @@ describe('the server update banner', () => {
 
     expect(
       await screen.findByText(
-        'No runs are active right now. Attached terminals reconnect on their own.',
+        'No sessions are active right now. Attached terminals reconnect on their own.',
       ),
     ).toBeTruthy()
   })
@@ -244,7 +244,7 @@ describe('the server update banner', () => {
     await waitFor(() => expect(client.serverUpdate).toHaveBeenCalledWith('idle'))
 
     expect(await screen.findByText('Server v1.3.0 is scheduled.')).toBeTruthy()
-    expect(screen.getByText('Scheduled by Alice, applies when no run is active.')).toBeTruthy()
+    expect(screen.getByText('Scheduled by Alice, applies when no session is active.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -271,8 +271,8 @@ describe('the server update banner', () => {
     render(<UpdateHost client={client} />)
 
     expect(await screen.findByText('Server v1.3.0 is scheduled.')).toBeTruthy()
-    expect(screen.getByText('Scheduled by Alice, applies when no run is active.')).toBeTruthy()
-    expect(screen.getByText('Waiting for 2 runs and 1 open shell.')).toBeTruthy()
+    expect(screen.getByText('Scheduled by Alice, applies when no session is active.')).toBeTruthy()
+    expect(screen.getByText('Waiting for 2 sessions and 1 open shell.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
   })
 
@@ -314,7 +314,7 @@ describe('the server update banner', () => {
 
     phase({ phase: 'scheduled', version: 'v1.3.0', actor_id: alice.id })
     expect(screen.getByText('Server v1.3.0 is scheduled.')).toBeTruthy()
-    expect(screen.getByText('Scheduled by Alice, applies when no run is active.')).toBeTruthy()
+    expect(screen.getByText('Scheduled by Alice, applies when no session is active.')).toBeTruthy()
 
     phase({ phase: 'applying', version: 'v1.3.0' })
     expect(screen.getByText('Updating the server to v1.3.0…')).toBeTruthy()

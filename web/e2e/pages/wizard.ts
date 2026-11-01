@@ -8,7 +8,7 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 
 /** The step labels the wizard's header lists, in order. */
-export const stepNames = ['Connect', 'Repository', 'Agent', 'First run'] as const
+export const stepNames = ['Connect', 'Repository', 'Agent', 'First session'] as const
 
 export type StepName = (typeof stepNames)[number]
 
@@ -42,11 +42,11 @@ export class ConnectStep extends Step {
   }
 
   byAddress(): Locator {
-    return this.section.getByRole('button', { name: /^Link by address/ })
+    return this.section.getByRole('radio', { name: 'SSH address', exact: true })
   }
 
   async link(addr: string, options: { invite?: string; name?: string } = {}): Promise<void> {
-    await this.expand('Link by address')
+    await this.byAddress().click()
     await this.section.getByLabel('Server address').fill(addr)
     if (options.invite) await this.section.getByLabel('Invite code').fill(options.invite)
     if (options.name) await this.section.getByLabel('Your name').fill(options.name)
@@ -214,7 +214,7 @@ export class ConfigurationPrompt {
 
 export class FirstRunStep extends Step {
   constructor(page: Page) {
-    super(page, 'First run')
+    super(page, 'First session')
   }
 
   /**

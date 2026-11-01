@@ -121,7 +121,7 @@ func TestPullCommandRunsEdgeSSHOnlyForEdgeHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.ContainsFunc(edge.Env, func(e string) bool { return strings.HasPrefix(e, "GIT_SSH_COMMAND=") }) {
-		t.Fatal("an edge fetch runs without GIT_SSH_COMMAND")
+		t.Fatal("an edge fetch sessions without GIT_SSH_COMMAND")
 	}
 	_, direct, err := PullCommand(t.TempDir(), "aether", "host:2222", coords)
 	if err != nil {

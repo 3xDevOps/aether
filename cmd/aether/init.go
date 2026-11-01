@@ -48,10 +48,10 @@ func runInit(args []string) error {
 	if _, err := os.Stat(reachability.DefaultTailscaledSocket); err == nil {
 		fmt.Printf("tailscale: socket %s detected\n", reachability.DefaultTailscaledSocket)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ep, derr := reachability.NewTailscale("").Discover(ctx)
+		node, derr := reachability.NewTailscale("").Self(ctx)
 		cancel()
 		if derr == nil {
-			fmt.Printf("tailscale: tailnet hostname %s\n", ep.Host)
+			fmt.Printf("tailscale: tailnet hostname %s\n", node.DNSName)
 		} else if line := tailscaleStatusLine(); line != "" {
 			// LocalAPI socket exists but is not readable by this user
 			// (client-side case): fall back to the tailscale CLI.

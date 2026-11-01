@@ -15,14 +15,9 @@ export interface ConditionChoice {
 export const conditionChoices: Record<WatchTargetKind, ConditionChoice[]> = {
   run: [
     { value: 'needs_you', label: 'Needs you', description: 'The agent asks a question, wants a permission or is blocked. Once per need.', default: true },
-    { value: 'finished', label: 'Finished', description: 'The run ends: the agent reported done or failed, it was stopped, or a member closed it. Finished means the agent reported done, not that anything merged.', default: true },
-    { value: 'pr_merged', label: 'Pull request merged', description: "The run's pull request merged on GitHub. Merged means GitHub merged the PR.", default: false },
-    { value: 'ci', label: 'CI finished', description: "The checks on the run's pull request finish, pass or fail.", default: false },
-  ],
-  mission: [
-    { value: 'needs_you', label: 'Needs you', description: 'The integrator asks you something, is blocked or stops. Never for each worker.', default: true },
-    { value: 'finished', label: 'Finished', description: 'The swarm completes or is cancelled.', default: true },
-    { value: 'delivered', label: 'Delivered', description: 'The integrated result lands on its target branch, or is proposed as a pull request.', default: false },
+    { value: 'finished', label: 'Finished', description: 'The session ends: the agent reported done or failed, it was stopped, or a member closed it. Finished means the agent reported done, not that anything merged.', default: true },
+    { value: 'pr_merged', label: 'Pull request merged', description: "The session's pull request merged on GitHub. Merged means GitHub merged the PR.", default: false },
+    { value: 'ci', label: 'CI finished', description: "The checks on the session's pull request finish, pass or fail.", default: false },
   ],
   pr: [
     { value: 'ci', label: 'CI finished', description: 'Every check on the newest commit finishes, pass or fail. Again after a rerun.', default: true },
@@ -61,9 +56,7 @@ export function sourceLabel(watch: Pick<Watch, 'source'>): string | undefined {
 export function targetKindLabel(target: WatchTarget): string {
   switch (target.kind) {
     case 'run':
-      return 'Run'
-    case 'mission':
-      return 'Swarm'
+      return 'Session'
     case 'pr':
       return `PR #${target.number ?? '?'}${target.repo ? ` · ${target.repo}` : ''}`
   }
@@ -92,7 +85,7 @@ export function deliveryText(delivery: WatchDelivery): string {
         case 'withdrawn':
           return detail ? `Push withdrawn: ${detail}` : 'Push withdrawn from your devices: the need ended'
         case 'skipped':
-          return `Push skipped: ${detail || 'the run notification already sent it'}`
+          return `Push skipped: ${detail || 'the session notification already sent it'}`
       }
       break
     case 'in_app':
@@ -142,13 +135,11 @@ export const defaultExpiryDays = 14
 export const maxExpiryDays = 90
 
 /** A dashboard link opens in place; anything else, such as a pull request on GitHub, is a page of its own. */
-/** Where a watch's target lives: a run or swarm in the dashboard, a pull request on GitHub. watch.link is the watch's own page. */
+/** Where a watch's target lives: a run in the dashboard, a pull request on GitHub. watch.link is the watch's own page. */
 export function targetLink(target: WatchTarget): string {
   switch (target.kind) {
     case 'run':
       return `/?run=${encodeURIComponent(target.run_id ?? '')}`
-    case 'mission':
-      return `/?page=missions&id=${encodeURIComponent(target.mission_id ?? '')}`
     case 'pr':
       return `https://github.com/${target.repo ?? ''}/pull/${target.number ?? ''}`
   }

@@ -104,7 +104,7 @@ function SavedLaunchDefaults({ client }: { client: Api }) {
         ) : null}
       </SettingRow>
       {saved && (
-        <SettingRow label="Agent" help={defaults.agent ? `New launches preselect ${defaults.agent}.` : 'No agent saved; the dialog picks the newest run\'s agent.'}>
+        <SettingRow label="Agent" help={defaults.agent ? `New launches preselect ${defaults.agent}.` : 'No agent saved; the dialog picks the newest session\'s agent.'}>
           {agents.length > 0 && (
             <ul aria-label="Saved agent choices" className="flex flex-col gap-1">
               {agents.map(([agent, choice]) => (

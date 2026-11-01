@@ -36,7 +36,7 @@ for this review.
    "Open dashboard".
    Server name: <the review server's MagicDNS name>
 3. The dashboard opens already signed in as the review member. The board,
-   a run's terminal and its diff are all reachable from the sidebar.
+   a session's terminal and its diff are all reachable from the sidebar.
 
 In this mode the app has no accounts, no sign-in and no password of its own:
 the phone's Tailscale login identifies it, and the server decides what that

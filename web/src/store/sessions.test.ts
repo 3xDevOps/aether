@@ -28,7 +28,7 @@ describe('session rows', () => {
       event('run.agent', { kind: 'tool_result', tool_use_id: 't3', is_error: true }, '2026-08-14T10:03:04Z'),
     ]
     const [start, work] = rowsForRun({ run: toRecord(run()), events, room: [], memberName, paused: false })
-    expect(start).toMatchObject({ kind: 'event', text: 'Run started' })
+    expect(start).toMatchObject({ kind: 'event', text: 'Session started' })
     expect(work).toMatchObject({
       kind: 'steps',
       summary: 'Ran 1 command and read 2 files',
@@ -81,11 +81,11 @@ describe('session rows', () => {
       event('workspace.timeline', { kind: 'handoff', message: bob.id }, '2026-08-14T10:07:00Z', alice.id),
     ]
     expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events, room, memberName, paused: false })).toEqual([
-      { kind: 'event', text: 'Run started' },
+      { kind: 'event', text: 'Session started' },
       { kind: 'event', text: 'Paused by Alice' },
       { kind: 'note', authorID: bob.id, body: 'looks good', pending: false },
       { kind: 'request', answer: 'reply', authorID: bob.id, title: 'Bob asked', body: 'keep the prefix?', reply: { authorID: alice.id, body: 'yes' } },
-      { kind: 'event', text: 'Alice handed the run to Bob' },
+      { kind: 'event', text: 'Alice handed the session to Bob' },
     ])
   })
 
@@ -117,7 +117,7 @@ describe('session rows', () => {
     expect(rows({ run: toRecord(run()), events: [], room: [], memberName, paused: false }).at(-2)).toEqual({ kind: 'live', label: 'Working', tone: 'working' })
     expect(rows({ run: toRecord(run({ state: 'waiting-agents' })), events: [], room: [], memberName, paused: false }).at(-2))
       .toEqual({ kind: 'live', label: 'Waiting for agents', tone: 'waiting' })
-    expect(rows({ run: working, events: [], room: [], memberName, paused: true }).at(-1)).toEqual({ kind: 'event', text: 'Run started' })
+    expect(rows({ run: working, events: [], room: [], memberName, paused: true }).at(-1)).toEqual({ kind: 'event', text: 'Session started' })
   })
 
   it('ends with the agent\'s pending requests and the finish', () => {

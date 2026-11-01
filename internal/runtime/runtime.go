@@ -69,6 +69,10 @@ type Mount struct {
 	ContainerPath string
 	// ReadOnly mounts the bind read-only.
 	ReadOnly bool
+	// Overlay, when set, mounts HostPath as the read-only lower layer of an
+	// overlay whose writes land in Overlay/upper, so they never reach
+	// HostPath. Overlay is a directory the caller owns and removes.
+	Overlay string
 }
 
 // ContainerInfo is immutable metadata captured from a live or stopped
@@ -136,6 +140,9 @@ type Spec struct {
 	// Egress starts the container on a network with no route out; the
 	// caller points Env at a proxy it can reach.
 	Egress bool
+	// Sudo lets User run sudo as root without a password. Without it the
+	// container gets no-new-privileges, so no setuid binary raises User.
+	Sudo bool
 	// SecretEnv names the Env entries whose values are masked wherever the
 	// setup script's output is logged or returned.
 	SecretEnv []string

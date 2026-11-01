@@ -30,8 +30,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/quota"
@@ -103,10 +103,6 @@ type Config struct {
 	// nil leaves every reported wait unverified. Primarily for tests until
 	// the condition store is wired.
 	WaitConditions scheduler.WaitConditions
-	// IntegrationAdmission is the server-controlled policy seam for
-	// consequential candidate mutations. It is never populated from a
-	// request field.
-	IntegrationAdmission integration.AdmissionFunc
 	// StandardImage is the server-owned image used for all runs until member
 	// image selection is available. Empty uses DefaultStandardImage.
 	StandardImage string
@@ -166,9 +162,8 @@ type Config struct {
 	// StallThreshold for an Enhanced turn with no first update yet, or quiet
 	// with no tool running. CheckoutTTL is how long a finished run's
 	// checkout is kept before the GC reclaims it (negative disables GC).
-	// RunContainerTTL retains exact containers after TUI Close, an agent-finished
-	// TUI run, or mission-run completion (negative disables retention).
-	// Completed mission workers never reopen.
+	// RunContainerTTL retains exact containers after TUI Close, or an agent-finished
+	// TUI run (negative disables retention).
 	// MinFreeDiskBytes overrides the automatic data/runtime filesystem
 	// reserve. Negative disables disk admission, not host memory checks.
 	StallThreshold   time.Duration
@@ -296,6 +291,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		return nil, fmt.Errorf("server: create data dir: %w", err)
 	}
 	if s.db, err = store.Open(StorePath(cfg.DataDir)); err != nil {
+		return nil, err
+	}
+	preferences := preference.New(s.db, filepath.Join(cfg.DataDir, "preference-tombstones"))
+	if _, err = preferences.Restore(ctx); err != nil {
 		return nil, err
 	}
 	if s.log, err = events.OpenSQLiteLog(StorePath(cfg.DataDir)); err != nil {
@@ -485,14 +484,16 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	s.assistant = assistant.New(assistant.Config{
-		Dir:    filepath.Join(cfg.DataDir, "assistant"),
-		Store:  s.db,
-		Runs:   s.sched,
-		Host:   s.sched,
-		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
-		Bus:    s.bus,
+		Dir:         filepath.Join(cfg.DataDir, "assistant"),
+		Store:       s.db,
+		Runs:        s.sched,
+		Host:        s.sched,
+		Caller:      func(member domain.MemberID) tools.Caller { return s.ssh.AssistantLocal(member) },
+		Bus:         s.bus,
+		Preferences: preferences,
 	})
 	sshCfg.Services.Assistant = s.assistant
+	sshCfg.Services.Preferences = preferences
 	sshCfg.EdgeAccess = cfg.EdgeAccess
 	sshCfg.EdgeReviewer = cfg.EdgeReviewer
 	sshCfg.Services.Usage = cfg.Usage

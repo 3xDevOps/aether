@@ -572,8 +572,8 @@ input[type=checkbox]{width:1.25rem;height:1.25rem;font-size:inherit;vertical-ali
 {{if .Universal}}<input type="hidden" name="server" value="{{.ServerID}}">
 {{end}}<fieldset>
 <legend>Also allow it to:</legend>
-<p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs and swarms, message runs, answer agents' questions, pause, resume and mark runs reviewed.</label></p>
-<p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop and approve</strong>: decide approvals and permission requests, stop and close runs, cancel swarms. Text an agent wrote that the assistant reads could then talk it into approving or ending work without asking you.</label></p>
+<p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs, message runs, answer agents' questions, pause, resume and mark runs reviewed.</label></p>
+<p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop and approve</strong>: decide approvals and permission requests, stop and close runs. Text an agent wrote that the assistant reads could then talk it into approving or ending work without asking you.</label></p>
 </fieldset>
 <p>To change these later, revoke the connector and connect again.</p>
 <p>Allow only if you started connecting {{.Client}} to Aether yourself just now.</p>

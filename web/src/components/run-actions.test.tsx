@@ -83,8 +83,8 @@ test.each([false, true, undefined])('pause state %s offers only the eligible pau
   render(<RunActions run={seed({ paused })} />)
   expect(screen.getAllByRole('button')).toEqual([screen.getByRole('button', { name: 'More' })])
   const menu = await openMore()
-  expect(Boolean(menu.queryByRole('menuitem', { name: 'Pause run' }))).toBe(paused === false)
-  expect(Boolean(menu.queryByRole('menuitem', { name: 'Resume run' }))).toBe(paused === true)
+  expect(Boolean(menu.queryByRole('menuitem', { name: 'Pause session' }))).toBe(paused === false)
+  expect(Boolean(menu.queryByRole('menuitem', { name: 'Resume session' }))).toBe(paused === true)
   expect(menu.queryByRole('menuitem', { name: 'Send a message to the agent…' })).toBeNull()
 })
 
@@ -98,13 +98,13 @@ test.each(['fine', 'coarse'] as const)('every verb is labeled and keyboard reach
   await userEvent.keyboard('{Enter}')
   const menu = within(await screen.findByRole('menu'))
   expect(names(menu)).toEqual([
-    'Pause run', 'Forward a port…', 'Watch…', 'Protect run', 'Pull branch', 'Hand off…', 'Captures…', 'Close run…', 'Kill run', 'Delete run',
+    'Pause session', 'Forward a port…', 'Watch…', 'Protect session', 'Pull branch', 'Hand off…', 'Captures…', 'Close session…', 'Kill session', 'Delete session',
   ])
-  fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Pause session' }))
   await waitFor(() => expect(api.runPause).toHaveBeenCalledWith(record.id))
 })
 
-test.each(['Kill run', 'Delete run'])('%s waits for explicit confirmation before its RPC', async (name) => {
+test.each(['Kill session', 'Delete session'])('%s waits for explicit confirmation before its RPC', async (name) => {
   const record = seed({ paused: false })
   render(<RunActions run={record} />)
   await selectMore(name)
@@ -113,7 +113,7 @@ test.each(['Kill run', 'Delete run'])('%s waits for explicit confirmation before
   expect(api.runDelete).not.toHaveBeenCalled()
   await waitFor(() => expect(document.activeElement).toBe(dialog.getByRole('button', { name: 'Cancel' })))
   fireEvent.click(dialog.getByRole('button', { name }))
-  if (name === 'Kill run') {
+  if (name === 'Kill session') {
     await waitFor(() => expect(api.runKill).toHaveBeenCalledWith(record.id))
     expect(useStore.getState().runs[record.id]?.status).toBe('abandoned')
     act(() => useStore.getState().applyRunStatus(record.id, { to: 'abandoned', reason: 'killed', status_seq: 1 }, '2020-08-14T10:00:00Z'))
@@ -129,7 +129,7 @@ test.each(['{Enter}', '{Escape}'])('safe confirmation cancellation with %s resto
   const more = screen.getByRole('button', { name: 'More' })
   const menu = await openMore()
   await userEvent.keyboard('{End}')
-  expect(document.activeElement).toBe(menu.getByRole('menuitem', { name: 'Delete run' }))
+  expect(document.activeElement).toBe(menu.getByRole('menuitem', { name: 'Delete session' }))
   await userEvent.keyboard('{Enter}')
   const dialog = within(await screen.findByRole('alertdialog'))
   await waitFor(() => expect(document.activeElement).toBe(dialog.getByRole('button', { name: 'Cancel' })))
@@ -143,16 +143,16 @@ test('a queued run remains deletable without offering Close', async () => {
   const record = seed({ run: { status: 'queued' } })
   render(<RunActions run={record} />)
   const menu = await openMore()
-  expect(menu.queryByRole('menuitem', { name: 'Close run…' })).toBeNull()
-  fireEvent.click(menu.getByRole('menuitem', { name: 'Delete run' }))
-  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete run' }))
+  expect(menu.queryByRole('menuitem', { name: 'Close session…' })).toBeNull()
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Delete session' }))
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete session' }))
   await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
 })
 
 test.each(['merged', 'abandoned', 'failed', 'interrupted'] as const)('Archive for final status %s needs no confirmation and stays reversible', async (status) => {
   const record = seed({ run: { status } })
   render(<RunActions run={record} />)
-  await selectMore('Archive run')
+  await selectMore('Archive session')
   expect(screen.queryByRole('alertdialog')).toBeNull()
   await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(record.id, true))
   expect(api.runDelete).not.toHaveBeenCalled()
@@ -169,8 +169,8 @@ test('an archived run offers Restore and Reopen, not Archive', async () => {
   render(<RunActions run={record} />)
   const menu = await openMore()
   expect(menu.getByRole('menuitem', { name: 'Relaunch' })).toBeTruthy()
-  expect(menu.queryByRole('menuitem', { name: 'Archive run' })).toBeNull()
-  fireEvent.click(menu.getByRole('menuitem', { name: 'Restore run' }))
+  expect(menu.queryByRole('menuitem', { name: 'Archive session' })).toBeNull()
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Restore session' }))
   await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(record.id, false))
   expect(api.runDelete).not.toHaveBeenCalled()
 })
@@ -178,11 +178,11 @@ test('an archived run offers Restore and Reopen, not Archive', async () => {
 test('an old archived run is deleted only after explicit confirmation', async () => {
   const record = seed({ run: { status: 'merged', archived_at: '2020-08-14T10:00:00Z' } })
   render(<RunActions run={record} />)
-  await selectMore('Delete run')
+  await selectMore('Delete session')
   const dialog = within(await screen.findByRole('alertdialog'))
   expect(api.runDelete).not.toHaveBeenCalled()
   expect(useStore.getState().runs[record.id]).toBeDefined()
-  fireEvent.click(dialog.getByRole('button', { name: 'Delete run' }))
+  fireEvent.click(dialog.getByRole('button', { name: 'Delete session' }))
   await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
   await waitFor(() => expect(useStore.getState().runs[record.id]).toBeUndefined())
   expect(api.runArchive).not.toHaveBeenCalled()
@@ -190,12 +190,12 @@ test('an old archived run is deleted only after explicit confirmation', async ()
 
 test('archive follows kill permission and the run.archive capability', async () => {
   const view = render(<RunActions run={seed({ run: { status: 'merged', protected: true }, members: [alice, bob], self: bob })} />)
-  expect((await openMore()).queryByRole('menuitem', { name: 'Archive run' })).toBeNull()
+  expect((await openMore()).queryByRole('menuitem', { name: 'Archive session' })).toBeNull()
   view.unmount()
   const record = seed({ run: { status: 'merged' } })
   useStore.setState({ capabilities: { gateway: 'remote', methods: [], ws: [] } })
   render(<RunActions run={record} />)
-  expect((await openMore()).queryByRole('menuitem', { name: /^(Archive|Restore) run$/ })).toBeNull()
+  expect((await openMore()).queryByRole('menuitem', { name: /^(Archive|Restore) session$/ })).toBeNull()
 })
 
 test('handoff includes eligible members only and returns focus to More', async () => {
@@ -228,7 +228,7 @@ test.each([
   { status: 'merged', reason: 'closed; retained container' },
   { status: 'completed', reason: 'agent reported success; retained container' },
   { status: 'failed', reason: 'agent reported failure; retained container' },
-] satisfies Partial<Run>[])('a TUI run that kept its container offers Relaunch: %j', async (over) => {
+] satisfies Partial<Run>[])('a TUI session that kept its container offers Relaunch: %j', async (over) => {
   const record = seed({ run: { ...over, mode: 'tui' } })
   render(<RunActions run={record} />)
   await selectMore('Relaunch')
@@ -306,15 +306,15 @@ test('a viewer gets no mutating actions, but can watch and use eligible local Pu
 test('a collaborator can steer and kill another member run, but cannot protect or hand it off', async () => {
   render(<RunActions run={seed({ paused: false, members: [alice, bob], self: bob })} />)
   const menu = await openMore()
-  for (const name of ['Pause run', 'Kill run', 'Delete run', 'Close run…']) expect(menu.getByRole('menuitem', { name })).toBeTruthy()
-  expect(menu.queryByRole('menuitem', { name: 'Protect run' })).toBeNull()
+  for (const name of ['Pause session', 'Kill session', 'Delete session', 'Close session…']) expect(menu.getByRole('menuitem', { name })).toBeTruthy()
+  expect(menu.queryByRole('menuitem', { name: 'Protect session' })).toBeNull()
   expect(menu.queryByRole('menuitem', { name: 'Hand off…' })).toBeNull()
 })
 
 test.each([{ run: { protected: true } }, { steerOthers: 'admins_only' }])('protected ownership and workspace policies still gate all actions: %j', async (policy) => {
   render(<RunActions run={seed({ paused: false, members: [alice, bob], self: bob, ...policy })} />)
   const menu = await openMore()
-  for (const name of ['Pause run', 'Kill run', 'Delete run', 'Close run…', 'Hand off…', 'Protect run']) expect(menu.queryByRole('menuitem', { name })).toBeNull()
+  for (const name of ['Pause session', 'Kill session', 'Delete session', 'Close session…', 'Hand off…', 'Protect session']) expect(menu.queryByRole('menuitem', { name })).toBeNull()
 })
 
 type State = ReturnType<typeof useStore.getState>
@@ -332,21 +332,21 @@ const verbs: {
   from: unknown
   to: unknown
 }[] = [
-  { name: 'Pause run', method: 'runPause', done: 'Paused', over: { paused: false }, read: (s) => s.pausedRuns.run_1, from: false, to: true },
-  { name: 'Resume run', method: 'runResume', done: 'Resumed', over: { paused: true }, read: (s) => s.pausedRuns.run_1, from: true, to: false },
-  { name: 'Kill run', confirm: 'Kill run', slow: true, method: 'runKill', done: 'Killed', over: { paused: false }, read: (s) => runOne(s).status, from: 'running', to: 'abandoned' },
+  { name: 'Pause session', method: 'runPause', done: 'Paused', over: { paused: false }, read: (s) => s.pausedRuns.run_1, from: false, to: true },
+  { name: 'Resume session', method: 'runResume', done: 'Resumed', over: { paused: true }, read: (s) => s.pausedRuns.run_1, from: true, to: false },
+  { name: 'Kill session', confirm: 'Kill session', slow: true, method: 'runKill', done: 'Killed', over: { paused: false }, read: (s) => runOne(s).status, from: 'running', to: 'abandoned' },
   {
     name: 'Free container…', confirm: 'Free container', slow: true, method: 'runRelease', done: 'Freed container',
     over: { run: { status: 'merged', container_retained_until: '2030-01-01T00:00:00Z' } },
     read: (s) => runOne(s).container_retained_until, from: '2030-01-01T00:00:00Z', to: undefined,
   },
-  { name: 'Archive run', method: 'runArchive', done: 'Archived', over: { run: { status: 'merged' } }, read: (s) => Boolean(runOne(s).archived_at), from: false, to: true },
+  { name: 'Archive session', method: 'runArchive', done: 'Archived', over: { run: { status: 'merged' } }, read: (s) => Boolean(runOne(s).archived_at), from: false, to: true },
   {
-    name: 'Restore run', method: 'runArchive', done: 'Restored', over: { run: { status: 'merged', archived_at: '2020-08-14T10:00:00Z' } },
+    name: 'Restore session', method: 'runArchive', done: 'Restored', over: { run: { status: 'merged', archived_at: '2020-08-14T10:00:00Z' } },
     read: (s) => Boolean(runOne(s).archived_at), from: true, to: false,
   },
-  { name: 'Protect run', method: 'runProtect', done: 'Protected', over: {}, read: (s) => Boolean(runOne(s).protected), from: false, to: true },
-  { name: 'Unprotect run', method: 'runProtect', done: 'Unprotected', over: { run: { protected: true } }, read: (s) => Boolean(runOne(s).protected), from: true, to: false },
+  { name: 'Protect session', method: 'runProtect', done: 'Protected', over: {}, read: (s) => Boolean(runOne(s).protected), from: false, to: true },
+  { name: 'Unprotect session', method: 'runProtect', done: 'Unprotected', over: { run: { protected: true } }, read: (s) => Boolean(runOne(s).protected), from: true, to: false },
 ]
 
 async function choose(verb: (typeof verbs)[number]) {
@@ -384,8 +384,8 @@ test('a refusal leaves a state the server sent while the verb was pending', asyn
   await choose(verbs[2])
   await waitFor(() => expect(runOne(useStore.getState()).status).toBe('abandoned'))
   act(() => useStore.getState().applyRunStatus('run_1', { to: 'failed', reason: 'exited 1', status_seq: 1 }, new Date().toISOString()))
-  await act(async () => reject(refusal('run is finishing')))
-  expect(toast.error).toHaveBeenCalledWith('Killed failed: run is finishing')
+  await act(async () => reject(refusal('session is finishing')))
+  expect(toast.error).toHaveBeenCalledWith('Killed failed: session is finishing')
   expect(runOne(useStore.getState()).status).toBe('failed')
 })
 
@@ -398,7 +398,7 @@ test('an unanswered verb reverts with a lasting Retry, and a late answer dismiss
   const menu = await openMore()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   try {
-    fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' }))
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' }))
     expect(runOne(useStore.getState()).protected).toBe(true)
     act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
     await act(async () => {})
@@ -430,15 +430,15 @@ test('a refusal whose re-read fails puts back a kill even when the agent wrote t
   await choose(verbs[2])
   await waitFor(() => expect(runOne(useStore.getState()).status).toBe('abandoned'))
   act(() => useStore.getState().applyLastCommit('run_1', 'b'.repeat(40), new Date().toISOString()))
-  await act(async () => reject(refusal('run is finishing')))
-  expect(toast.error).toHaveBeenCalledWith('Killed failed: run is finishing')
+  await act(async () => reject(refusal('session is finishing')))
+  expect(toast.error).toHaveBeenCalledWith('Killed failed: session is finishing')
   expect(runOne(useStore.getState())).toMatchObject({ status: 'running', last_commit: 'b'.repeat(40) })
   expect(runOne(useStore.getState()).stateChangedAtPredicted).toBeUndefined()
 })
 
 async function confirmDelete() {
-  await selectMore('Delete run')
-  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete run' }))
+  await selectMore('Delete session')
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete session' }))
 }
 
 test('Delete takes the run off at once, and no re-read brings it back before the answer', async () => {
@@ -458,10 +458,10 @@ test('Delete takes the run off at once, and no re-read brings it back before the
 })
 
 test('a refused delete puts the run back and shows the refusal', async () => {
-  vi.mocked(api.runDelete).mockRejectedValueOnce(refusal('run.delete: run is protected'))
+  vi.mocked(api.runDelete).mockRejectedValueOnce(refusal('run.delete: session is protected'))
   render(<RunActions run={seed({ paused: false })} />)
   await confirmDelete()
-  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Deleted failed: run is protected'))
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Deleted failed: session is protected'))
   expect(runOne(useStore.getState()).status).toBe('running')
   expect(useStore.getState().deletingRuns).toEqual({})
 })
@@ -473,8 +473,8 @@ test('a delete refused after the server stopped the run puts the run back stoppe
   render(<RunActions run={seed({ paused: false })} />)
   await confirmDelete()
   act(() => useStore.getState().applyRunStatus('run_1', { to: 'abandoned', reason: 'killed', status_seq: 1 }, new Date().toISOString()))
-  await act(async () => reject(refusal('run.delete: scheduler: delete run checkout: device or resource busy')))
-  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Deleted failed: delete run checkout: device or resource busy'))
+  await act(async () => reject(refusal('run.delete: scheduler: delete session checkout: device or resource busy')))
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Deleted failed: delete session checkout: device or resource busy'))
   expect(runOne(useStore.getState())).toMatchObject({ status: 'abandoned', reason: 'killed', status_seq: 1 })
   expect(useStore.getState().deletingRuns).toEqual({})
 })
@@ -489,7 +489,7 @@ test('a delete with no answer puts the run back as the server still holds it', a
   expect(useStore.getState().deletingRuns).toEqual({})
 })
 
-const notFound = () => Object.assign(new Error('run.delete: run not found'), { code: codeNotFound })
+const notFound = () => Object.assign(new Error('run.delete: session not found'), { code: codeNotFound })
 
 test.each([
   { says: 'the delete', arrange: () => vi.mocked(api.runDelete).mockRejectedValueOnce(notFound()) },
@@ -503,7 +503,7 @@ test.each([
   {
     says: 'the re-read after a refusal',
     arrange: () => {
-      vi.mocked(api.runDelete).mockRejectedValueOnce(refusal('run.delete: scheduler: delete run checkout: device or resource busy'))
+      vi.mocked(api.runDelete).mockRejectedValueOnce(refusal('run.delete: scheduler: delete session checkout: device or resource busy'))
       vi.mocked(api.runGet).mockRejectedValueOnce(notFound())
     },
   },
@@ -538,7 +538,7 @@ test.each([
   vi.mocked(api.runGet).mockImplementationOnce(read)
   render(<RunActions run={seed()} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   expect(api.runGet).toHaveBeenCalledWith('run_1')
   expect(Boolean(runOne(useStore.getState()).protected)).toBe(protect)
   if (protect) {
@@ -555,7 +555,7 @@ test('a deadline re-read answered after a newer event keeps the event and still 
   vi.mocked(api.runGet).mockReturnValueOnce(read.promise)
   render(<RunActions run={seed()} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   act(() => useStore.getState().applyRunTitle('run_1', 'renamed'))
   await act(async () => read.resolve(run({ id: 'run_1', protected: true })))
   expect(runOne(useStore.getState())).toMatchObject({ title: 'renamed', protected: true })
@@ -568,7 +568,7 @@ test('a deadline re-read answered after a newer event keeps the event and revert
   vi.mocked(api.runGet).mockReturnValueOnce(read.promise)
   render(<RunActions run={seed()} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   act(() => useStore.getState().applyRunTitle('run_1', 'renamed'))
   await act(async () => read.resolve(run({ id: 'run_1', protected: false })))
   expect(runOne(useStore.getState())).toMatchObject({ title: 'renamed' })
@@ -584,7 +584,7 @@ test('an unanswered unprotect counts a re-read that omits protected as applied',
   vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1' }))
   render(<RunActions run={seed({ run: { protected: true } })} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Unprotect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Unprotect session' })))
   expect(runOne(useStore.getState()).protected).toBeFalsy()
   expect(toast.success).toHaveBeenCalledWith('Unprotected')
   expect(toast.error).not.toHaveBeenCalled()
@@ -596,7 +596,7 @@ test('a retry never reverts what the first attempt\'s late success confirmed', a
   vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1' })).mockRejectedValueOnce(new Error('Failed to fetch'))
   render(<RunActions run={seed()} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   expect(runOne(useStore.getState()).protected).toBeFalsy()
   const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
   await pastDeadline(() => {
@@ -616,9 +616,9 @@ test('a verb\'s late answer leaves the lock of the verb pressed after it', async
   seed({ paused: false })
   render(<RunActions run={runOne(useStore.getState())} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   expect(useStore.getState().predicting.run_1).toBeUndefined()
-  await selectMore('Pause run')
+  await selectMore('Pause session')
   await waitFor(() => expect(useStore.getState().pausedRuns.run_1).toBe(true))
   await act(async () => protect.resolve({}))
   expect(useStore.getState().predicting.run_1).toBeDefined()
@@ -628,11 +628,11 @@ test('an open More menu offers predicted verbs again once the pending one is ans
   const { promise, resolve } = Promise.withResolvers<unknown>()
   vi.mocked(api.runProtect).mockReturnValueOnce(promise)
   render(<RunActions run={seed({ paused: false })} />)
-  await selectMore('Protect run')
+  await selectMore('Protect session')
   const menu = await openMore()
-  expect(menu.queryByRole('menuitem', { name: 'Pause run' })).toBeNull()
+  expect(menu.queryByRole('menuitem', { name: 'Pause session' })).toBeNull()
   await act(async () => resolve({}))
-  expect(menu.getByRole('menuitem', { name: 'Pause run' })).toBeTruthy()
+  expect(menu.getByRole('menuitem', { name: 'Pause session' })).toBeTruthy()
 })
 
 test('a status event keeps the estimated change time of a run no verb predicted', () => {
@@ -650,25 +650,25 @@ test('a pending kill offers no predicted verb until it is answered', async () =>
   render(<Live />)
   await choose(verbs[2])
   await waitFor(() => expect(runOne(useStore.getState()).status).toBe('abandoned'))
-  expect(names(await openMore())).toEqual(['Close run…', 'Delete run'])
+  expect(names(await openMore())).toEqual(['Close session…', 'Delete session'])
   await userEvent.keyboard('{Escape}')
   await act(async () => resolve({}))
-  expect((await openMore()).getByRole('menuitem', { name: 'Archive run' })).toBeTruthy()
+  expect((await openMore()).getByRole('menuitem', { name: 'Archive session' })).toBeTruthy()
 })
 
 test.each([
   { paused: true, toast: 'success' },
   { paused: false, toast: 'error' },
-] as const)('an invalid-state refusal applies the re-read run, paused $paused', async ({ paused, toast: kind }) => {
-  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: run is already paused'), { code: codeInvalidState }))
+] as const)('an invalid-state refusal applies the re-read session, paused $paused', async ({ paused, toast: kind }) => {
+  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: session is already paused'), { code: codeInvalidState }))
   vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', paused }))
   render(<RunActions run={seed({ paused: false })} />)
-  await selectMore('Pause run')
+  await selectMore('Pause session')
   await waitFor(() => expect(toast[kind]).toHaveBeenCalled())
   expect(api.runGet).toHaveBeenCalledWith('run_1')
   expect(useStore.getState().pausedRuns.run_1).toBe(paused)
   if (kind === 'success') expect(toast.error).not.toHaveBeenCalled()
-  else expect(toast.error).toHaveBeenCalledWith('Paused failed: run is already paused')
+  else expect(toast.error).toHaveBeenCalledWith('Paused failed: session is already paused')
 })
 
 async function confirmPastDeadline(verb: (typeof verbs)[number]) {
@@ -699,9 +699,9 @@ test('a kill refused past the deadline is put back and shows the refusal', async
   vi.mocked(api.runKill).mockReturnValueOnce(promise)
   render(<RunActions run={seed({ paused: false })} />)
   await confirmPastDeadline(verbs[2])
-  await act(async () => reject(refusal('run is finishing')))
+  await act(async () => reject(refusal('session is finishing')))
   expect(runOne(useStore.getState()).status).toBe('running')
-  expect(toast.error).toHaveBeenCalledWith('Killed failed: run is finishing', { id: undefined, action: undefined, duration: undefined })
+  expect(toast.error).toHaveBeenCalledWith('Killed failed: session is finishing', { id: undefined, action: undefined, duration: undefined })
   expect(useStore.getState().predicting.run_1).toBeUndefined()
 })
 
@@ -721,13 +721,13 @@ test('a kill that fails with no answer past the deadline shows the real error', 
 
 test('an invalid-state refusal still being checked at the deadline reports once it is checked', async () => {
   const read = Promise.withResolvers<Run>()
-  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: run is already paused'), { code: codeInvalidState }))
+  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: session is already paused'), { code: codeInvalidState }))
   vi.mocked(api.runGet).mockReturnValueOnce(read.promise)
   render(<RunActions run={seed({ paused: false })} />)
   const menu = await openMore()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   try {
-    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause session' }))
     await act(async () => {})
     expect(api.runGet).toHaveBeenCalledTimes(1)
     act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
@@ -738,7 +738,7 @@ test('an invalid-state refusal still being checked at the deadline reports once 
   expect(api.runGet).toHaveBeenCalledTimes(1)
   await act(async () => read.resolve(run({ id: 'run_1', paused: false })))
   expect(toast.error).toHaveBeenCalledTimes(1)
-  expect(toast.error).toHaveBeenCalledWith('Paused failed: run is already paused', expect.objectContaining({ action: undefined }))
+  expect(toast.error).toHaveBeenCalledWith('Paused failed: session is already paused', expect.objectContaining({ action: undefined }))
   expect(useStore.getState().predicting.run_1).toBeUndefined()
 })
 
@@ -752,14 +752,14 @@ test('ignores an invalid-state re-read that answers after the deadline re-read c
   const menu = await openMore()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   try {
-    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause session' }))
     await act(async () => {})
     act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
     await act(async () => {})
   } finally {
     vi.useRealTimers()
   }
-  await act(async () => pause.reject(Object.assign(new Error('run.pause: run is already paused'), { code: codeInvalidState })))
+  await act(async () => pause.reject(Object.assign(new Error('run.pause: session is already paused'), { code: codeInvalidState })))
   expect(api.runGet).toHaveBeenCalledTimes(2)
   await act(async () => deadlineRead.resolve(run({ id: 'run_1', paused: true })))
   act(() => useStore.getState().setPaused('run_1', false))
@@ -769,20 +769,20 @@ test('ignores an invalid-state re-read that answers after the deadline re-read c
 })
 
 test('an invalid-state refusal whose re-read never answers reports the refusal and frees the run', async () => {
-  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: run is already paused'), { code: codeInvalidState }))
+  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: session is already paused'), { code: codeInvalidState }))
   vi.mocked(api.runGet).mockReturnValueOnce(new Promise(() => {}))
   render(<RunActions run={seed({ paused: false })} />)
   const menu = await openMore()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   try {
-    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause session' }))
     await act(async () => {})
     act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
     await act(async () => {})
   } finally {
     vi.useRealTimers()
   }
-  expect(toast.error).toHaveBeenCalledWith('Paused failed: run is already paused', expect.objectContaining({ action: undefined }))
+  expect(toast.error).toHaveBeenCalledWith('Paused failed: session is already paused', expect.objectContaining({ action: undefined }))
   expect(useStore.getState().predicting.run_1).toBeUndefined()
 })
 
@@ -793,7 +793,7 @@ test('a re-read served before the commit never overrides the success that answer
   vi.mocked(api.runGet).mockReturnValueOnce(read.promise)
   render(<RunActions run={seed()} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   await act(async () => answer.resolve({}))
   await act(async () => read.resolve(run({ id: 'run_1', protected: false })))
   expect(runOne(useStore.getState()).protected).toBe(true)
@@ -807,15 +807,15 @@ test('Retry waits while another verb is pending on the run', async () => {
   vi.mocked(api.runGet).mockRejectedValueOnce(new Error('Failed to fetch'))
   render(<RunActions run={seed({ paused: false })} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
-  await selectMore('Pause run')
+  await selectMore('Pause session')
   const marker = useStore.getState().predicting.run_1
   expect(marker).toBeDefined()
 
   act(() => retry.onClick(new MouseEvent('click') as never))
   expect(api.runProtect).toHaveBeenCalledTimes(1)
-  expect(toast.error).toHaveBeenLastCalledWith('Protected not retried: another action on this run is still waiting for the server.')
+  expect(toast.error).toHaveBeenLastCalledWith('Protected not retried: another action on this session is still waiting for the server.')
   expect(useStore.getState().predicting.run_1).toBe(marker)
 })
 
@@ -825,11 +825,11 @@ test('a late refusal of an earlier attempt is dropped once a retry succeeded', a
   vi.mocked(api.runGet).mockRejectedValueOnce(new Error('Failed to fetch'))
   render(<RunActions run={seed()} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
   await act(async () => retry.onClick(new MouseEvent('click') as never))
   expect(toast.success).toHaveBeenCalledWith('Protected')
-  await act(async () => first.reject(refusal('run is protected by policy')))
+  await act(async () => first.reject(refusal('session is protected by policy')))
   expect(toast.error).toHaveBeenCalledTimes(1)
   expect(runOne(useStore.getState()).protected).toBe(true)
 })
@@ -841,7 +841,7 @@ test('a sign-in switch dismisses an unanswered verb\'s Retry and drops its late 
   vi.mocked(toast.error).mockReturnValueOnce('timeout')
   render(<RunActions run={seed()} />)
   const menu = await openMore()
-  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect session' })))
   const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
   act(() => useStore.setState({ identityKey: crypto.randomUUID() }))
   expect(toast.dismiss).toHaveBeenCalledWith('timeout')
@@ -857,7 +857,7 @@ test.each([
   { status: 'merged', reason: 'closed' },
   { status: 'abandoned', reason: 'killed' },
   { status: 'failed', reason: 'agent exited 1' },
-] satisfies Partial<Run>[])('a run inside its runtime grace offers Relaunch whatever its reason: %j', async (over) => {
+] satisfies Partial<Run>[])('a session inside its runtime grace offers Relaunch whatever its reason: %j', async (over) => {
   const record = seed({ run: { ...over, mode: 'acp', acp: true, container_retained_until: '2030-01-01T00:00:00Z' } })
   render(<RunActions run={record} />)
   await selectMore('Relaunch')

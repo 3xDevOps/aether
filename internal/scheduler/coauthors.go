@@ -27,7 +27,7 @@ var coAuthorsPath = path.Join(coordtransport.MountDir, coord.CoAuthorsName)
 // The list changes while the agent works, so re-reading it is part of the
 // instruction.
 var coAuthorInstruction = "Before each commit, read " + coAuthorsPath +
-	". It holds one Co-authored-by trailer per person other than the run owner who has steered this run," +
+	". It holds one Co-authored-by trailer per person other than the session owner who has steered this session," +
 	" and it changes while you work. End every commit message you write, and the description of any pull" +
 	" request you open, with exactly those lines. If the file is missing or empty, add nothing." +
 	" After those lines, end every pull request description with \"Opened from Aether run <run id>\", using the run_id" +
@@ -71,27 +71,21 @@ func (s *Scheduler) briefedInstructions(ctx context.Context, g coordhooks.Guide,
 	return text + "\n\n" + brief, nil
 }
 
-// runGuide is what a run's role card depends on: its mission role when the
-// store records one, else what the launch knows. assigned marks a mission
-// worker or integrator, background a headless run and wake a launch that
-// Aether resumes when mail arrives while it is idle.
-func (s *Scheduler) runGuide(ctx context.Context, run domain.RunID, assigned, background, wake bool) coordhooks.Guide {
+// runGuide is what a run's role card depends on: background marks a
+// headless run and wake a launch that Aether resumes when mail arrives while
+// it is idle.
+func (s *Scheduler) runGuide(ctx context.Context, run domain.RunID, background, wake bool) coordhooks.Guide {
 	g := coordhooks.Guide{RunID: string(run), Background: background, Wake: wake && !background}
 	var r *domain.Run
 	if run != "" {
 		r, _ = s.cfg.Store.GetRun(ctx, run)
 	}
-	switch {
-	case !assigned && background:
+	if background {
 		g.Role = coordhooks.RoleBackground
-	case !assigned:
+	} else {
 		g.Role = coordhooks.RoleInteractive
-	case r != nil && r.MissionRole != "":
-		g.Role = r.MissionRole
-	default:
-		g.Role = coordhooks.RoleMission
 	}
-	if !assigned && r != nil {
+	if r != nil {
 		g.Parent = string(r.ParentRunID)
 	}
 	return g
@@ -101,11 +95,11 @@ func (s *Scheduler) runGuide(ctx context.Context, run domain.RunID, assigned, ba
 // its system prompt, or none for a profile that has no place for them. A
 // member's own developer_instructions, which the launch's setting would
 // replace, come first.
-func (s *Scheduler) launchInstructions(ctx context.Context, run *domain.Run, profile harness.Profile, assigned bool, native harness.NativeLaunch) (string, error) {
+func (s *Scheduler) launchInstructions(ctx context.Context, run *domain.Run, profile harness.Profile, native harness.NativeLaunch) (string, error) {
 	if !profile.CarriesInstructions() {
 		return "", nil
 	}
-	text, err := s.briefedInstructions(ctx, s.runGuide(ctx, run.ID, assigned, run.Mode == domain.LaunchHeadless, native.IdleWake), run.Extras, run.WorkspaceID, run.MemberID)
+	text, err := s.briefedInstructions(ctx, s.runGuide(ctx, run.ID, run.Mode == domain.LaunchHeadless, native.IdleWake), run.Extras, run.WorkspaceID, run.MemberID)
 	if err != nil {
 		return "", err
 	}
@@ -178,7 +172,7 @@ func coAuthorTrailers(members []*domain.Member, credited ...string) []string {
 func (s *Scheduler) runCoAuthors(ctx context.Context, run *domain.Run, credited ...string) ([]string, error) {
 	steerers, err := s.cfg.Store.ListRunSteerers(ctx, run.ID)
 	if err != nil {
-		return nil, fmt.Errorf("scheduler: list run steerers: %w", err)
+		return nil, fmt.Errorf("scheduler: list session steerers: %w", err)
 	}
 	return coAuthorTrailers(steerers, credited...), nil
 }
@@ -195,7 +189,7 @@ func (s *Scheduler) runCoAuthors(ctx context.Context, run *domain.Run, credited 
 func (s *Scheduler) containerCoAuthors(ctx context.Context, run *domain.Run, author string) ([]string, error) {
 	steerers, err := s.cfg.Store.ListRunSteerers(ctx, run.ID)
 	if err != nil {
-		return nil, fmt.Errorf("scheduler: list run steerers: %w", err)
+		return nil, fmt.Errorf("scheduler: list session steerers: %w", err)
 	}
 	members := steerers
 	if owner, oerr := s.cfg.Store.GetMember(ctx, run.MemberID); oerr != nil {
@@ -280,7 +274,7 @@ func (s *Scheduler) RecordHandoff(ctx context.Context, run domain.RunID, from do
 func (s *Scheduler) RecordHandoffOperation(ctx context.Context, run domain.RunID, from domain.MemberID, operationID string, at time.Time) error {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return fmt.Errorf("scheduler: resolve run after handoff: %w", err)
+		return fmt.Errorf("scheduler: resolve session after handoff: %w", err)
 	}
 	if operationID == "" {
 		return fmt.Errorf("scheduler: handoff operation ID is required")
@@ -394,7 +388,7 @@ func (s *Scheduler) refreshCoAuthorsErr(ctx context.Context, run domain.RunID) e
 	defer entry.coAuthorMu.Unlock()
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return fmt.Errorf("scheduler: resolve run for co-authors: %w", err)
+		return fmt.Errorf("scheduler: resolve session for co-authors: %w", err)
 	}
 	trailers, err := s.containerCoAuthors(ctx, r, author)
 	if err != nil {

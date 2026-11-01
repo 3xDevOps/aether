@@ -26,22 +26,19 @@ const (
 	maxViewPath         = 512
 	maxViewAttachments  = 6
 	maxViewCheck        = 128
-	maxViewDefaults     = 4
 )
 
 var (
 	viewID         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 	viewWord       = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,39}$`)
 	viewRepository = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
-	viewModel      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/@\[\]-]{0,127}$`)
-	launchMode     = map[string]bool{"tui": true, "headless": true, "acp": true}
-	attachmentKind = map[string]bool{"workspace": true, "run": true, "mission": true, "pr": true, "check": true, "failure": true, "task": true}
+	attachmentKind = map[string]bool{"workspace": true, "run": true, "pr": true, "check": true, "failure": true}
 )
 
 // CleanViewContext checks a view context from the dashboard: an id, word or
 // path that is malformed is dropped, recent and attachments are cut to their
-// caps, and the oldest recent pages, then the open file, then the launch
-// defaults, then the last attachments go until it fits in 4 KiB. An unknown version is dropped whole.
+// caps, and the oldest recent pages, then the open file, then the last
+// attachments go until it fits in 4 KiB. An unknown version is dropped whole.
 func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantViewContext, error) {
 	if v == nil || v.Version != viewContextVersion {
 		return nil, nil
@@ -54,11 +51,6 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 	for _, e := range v.Recent {
 		if e = cleanEntry(e); e.Name != "" && len(out.Recent) < maxViewRecent {
 			out.Recent = append(out.Recent, e)
-		}
-	}
-	for _, d := range v.LaunchDefaults {
-		if clean, ok := cleanLaunchDefault(d); ok && len(out.LaunchDefaults) < maxViewDefaults {
-			out.LaunchDefaults = append(out.LaunchDefaults, clean)
 		}
 	}
 	for _, a := range v.Attachments {
@@ -78,8 +70,6 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 			out.Recent = out.Recent[:len(out.Recent)-1]
 		case out.OpenFile != nil:
 			out.OpenFile = nil
-		case len(out.LaunchDefaults) > 0:
-			out.LaunchDefaults = nil
 		case len(out.Attachments) > 0:
 			out.Attachments = out.Attachments[:len(out.Attachments)-1]
 		default:
@@ -90,28 +80,16 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 
 func cleanEntry(e protocol.AssistantViewEntry) protocol.AssistantViewEntry {
 	return protocol.AssistantViewEntry{
-		Name: cleanWord(e.Name), WorkspaceID: cleanID(e.WorkspaceID), RunID: cleanID(e.RunID), MissionID: cleanID(e.MissionID),
+		Name: cleanWord(e.Name), WorkspaceID: cleanID(e.WorkspaceID), RunID: cleanID(e.RunID),
 		Subagent: cleanID(e.Subagent), View: cleanWord(e.View), At: cleanTime(e.At),
 	}
-}
-
-// cleanLaunchDefault drops a malformed model, and the default when its
-// agent or mode is malformed. A model holding both : and @ is shaped like
-// user:token@host and is dropped: no model name needs both.
-func cleanLaunchDefault(d protocol.AssistantLaunchDefault) (protocol.AssistantLaunchDefault, bool) {
-	out := protocol.AssistantLaunchDefault{Agent: cleanWord(d.Agent), Mode: d.Mode}
-	if viewModel.MatchString(d.Model) && (!strings.Contains(d.Model, ":") || !strings.Contains(d.Model, "@")) {
-		out.Model = d.Model
-	}
-	return out, out.Agent != "" && launchMode[d.Mode]
 }
 
 // cleanAttachment drops malformed fields, and the attachment when its kind
 // is unknown or it names nothing.
 func cleanAttachment(a protocol.AssistantViewAttachment) (protocol.AssistantViewAttachment, bool) {
 	out := protocol.AssistantViewAttachment{
-		Kind: a.Kind, WorkspaceID: cleanID(a.WorkspaceID), RunID: cleanID(a.RunID), MissionID: cleanID(a.MissionID),
-		TaskID: cleanID(a.TaskID), AttemptID: cleanID(a.AttemptID), Failure: cleanWord(a.Failure),
+		Kind: a.Kind, WorkspaceID: cleanID(a.WorkspaceID), RunID: cleanID(a.RunID), Failure: cleanWord(a.Failure),
 	}
 	if a.PR > 0 {
 		out.PR = a.PR
@@ -125,7 +103,7 @@ func cleanAttachment(a protocol.AssistantViewAttachment) (protocol.AssistantView
 	if a.Seq > 0 {
 		out.Seq = a.Seq
 	}
-	named := out.WorkspaceID != "" || out.RunID != "" || out.MissionID != "" || out.TaskID != "" || out.PR != 0
+	named := out.WorkspaceID != "" || out.RunID != "" || out.PR != 0
 	return out, attachmentKind[a.Kind] && named
 }
 
@@ -164,6 +142,34 @@ func cleanPath(s string) string {
 	return s
 }
 
+// The tags around the view context for an agent that takes no embedded
+// resource.
+const (
+	viewOpen  = "<aether-view-context>"
+	viewClose = "</aether-view-context>"
+)
+
+// promptView is the view context among a prompt's blocks for the agent,
+// as promptBlocks wrote it, or nil.
+func promptView(blocks []acp.ContentBlock) *protocol.AssistantViewContext {
+	for _, b := range blocks {
+		var raw string
+		switch {
+		case b.Resource != nil && b.Resource.Resource.TextResourceContents != nil && b.Resource.Resource.TextResourceContents.Uri == ViewContextURI:
+			raw = b.Resource.Resource.TextResourceContents.Text
+		case b.Text != nil && strings.HasPrefix(strings.TrimSpace(b.Text.Text), viewOpen):
+			raw = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(b.Text.Text), viewOpen), viewClose)
+		default:
+			continue
+		}
+		var v protocol.AssistantViewContext
+		if json.Unmarshal([]byte(raw), &v) == nil {
+			return &v
+		}
+	}
+	return nil
+}
+
 // promptBlocks follows text with v, annotated for the agent alone so the
 // transcript records only the member's text: an embedded resource, or
 // delimited text for an agent that takes none.
@@ -178,7 +184,7 @@ func promptBlocks(text string, v *protocol.AssistantViewContext, embedded bool) 
 	}
 	agentOnly := &acp.Annotations{Audience: []acp.Role{acp.RoleAssistant}}
 	if !embedded {
-		block := acp.TextBlock("\n\n<aether-view-context>\n" + string(b) + "\n</aether-view-context>")
+		block := acp.TextBlock("\n\n" + viewOpen + "\n" + string(b) + "\n" + viewClose)
 		block.Text.Annotations = agentOnly
 		return append(blocks, block), nil
 	}

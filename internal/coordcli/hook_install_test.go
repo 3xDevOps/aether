@@ -52,7 +52,7 @@ func TestHookInstallationRejectsMisleadingRegistrations(t *testing.T) {
 		{"mention only", hookInstallEntry{Hooks: []hookInstallEntry{{Type: "command", Command: "echo " + command}}}},
 		{"wrong event argument", hookInstallEntry{Hooks: []hookInstallEntry{{Type: "command", Command: strings.Replace(command, "Stop", "SessionStart", 1)}}}},
 		{"restricted group", hookInstallEntry{Matcher: "Bash", Hooks: []hookInstallEntry{{Type: "command", Command: command}}}},
-		{"asynchronous child", hookInstallEntry{Hooks: []hookInstallEntry{{Type: "command", Command: command, Async: true}}}},
+		{"asynchronous subsession", hookInstallEntry{Hooks: []hookInstallEntry{{Type: "command", Command: command, Async: true}}}},
 		{"disabled group", hookInstallEntry{Disabled: true, Hooks: []hookInstallEntry{{Type: "command", Command: command}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -189,8 +189,8 @@ func TestHookSummaryReportsOnlyTheRunHarness(t *testing.T) {
 // An Enhanced run gets its mail as a session prompt, so its hooks do nothing
 // and are never reported missing.
 func TestHookInstallManagedLaunchLoadsHooks(t *testing.T) {
-	const managed = "Inbox hooks (opencode): loaded by this run's launch; do not install a manual copy.\n"
-	const enhanced = "Inbox hooks: not used in Enhanced runs; Aether hands this run its mail as a session prompt. Do not install them.\n"
+	const managed = "Inbox hooks (opencode): loaded by this session's launch; do not install a manual copy.\n"
+	const enhanced = "Inbox hooks: not used in Enhanced sessions; Aether hands this session its mail as a prompt. Do not install them.\n"
 	for _, tt := range []struct {
 		name    string
 		env     map[string]string
@@ -227,7 +227,7 @@ func TestHookInstallManagedLaunchLoadsHooks(t *testing.T) {
 				}
 				return
 			}
-			if !strings.Contains(summary.String(), "Install or inspect: aether-internal skill --hooks") || strings.Contains(summary.String(), "loaded by this run's launch") {
+			if !strings.Contains(summary.String(), "Install or inspect: aether-internal skill --hooks") || strings.Contains(summary.String(), "loaded by this session's launch") {
 				t.Fatalf("summary = %q", summary.String())
 			}
 			if !strings.HasPrefix(full.String(), "\nHook installation (read-only)") {

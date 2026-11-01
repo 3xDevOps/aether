@@ -24,6 +24,7 @@ type Run struct {
 	Mode            string `json:"mode"`
 	Model           string `json:"model,omitempty"`
 	Effort          string `json:"effort,omitempty"`
+	Permission      string `json:"permission"`
 	// Via is the connector client, such as ChatGPT, the run was launched
 	// through.
 	Via    string `json:"via,omitempty"`
@@ -88,20 +89,14 @@ type Run struct {
 	UnansweredQuestions int     `json:"unanswered_questions"`
 	UnackedMessages     int     `json:"unacked_messages"`
 	OldestUnackedAt     *string `json:"oldest_unacked_at,omitempty"`
-	MissionID           string  `json:"mission_id,omitempty"`
-	MissionRole         string  `json:"mission_role,omitempty"`
-	IntegratorRunID     string  `json:"integrator_run_id,omitempty"`
-	// ParentRunID is the run that started this one, or a worker's current
-	// integrator; RootRunID is the top of its tree.
+	// ParentRunID is the run that started this one; RootRunID is the top
+	// of its tree.
 	ParentRunID  string `json:"parent_run_id,omitempty"`
 	RootRunID    string `json:"root_run_id,omitempty"`
 	ChildPurpose string `json:"child_purpose,omitempty"`
 	Detached     bool   `json:"detached,omitempty"`
 	// Children is the run's own child-run setting: "", "on" or "off".
 	Children string `json:"children,omitempty"`
-	// ChildRefused reports that the run's agent tried to start a child run
-	// while child runs were off.
-	ChildRefused bool `json:"child_refused,omitempty"`
 	// Immutable base provenance captured at launch.
 	BaseCommit    string  `json:"base_commit,omitempty"`
 	BaseBranch    string  `json:"base_branch,omitempty"`
@@ -235,6 +230,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Mode:                string(r.Mode),
 		Model:               r.Model,
 		Effort:              r.Effort,
+		Permission:          string(r.Permission),
 		Via:                 r.Via,
 		ACP:                 r.ACP,
 		Status:              string(r.Status),
@@ -259,15 +255,11 @@ func RunFromDomain(r *domain.Run) Run {
 		UnansweredQuestions: r.UnansweredQuestions,
 		UnackedMessages:     r.UnackedMessages,
 		OldestUnackedAt:     rfc3339Ptr(r.OldestUnackedAt),
-		MissionID:           string(r.MissionID),
-		MissionRole:         r.MissionRole,
-		IntegratorRunID:     string(r.IntegratorRunID),
 		ParentRunID:         string(r.ParentRunID),
 		RootRunID:           string(r.RootRunID),
 		ChildPurpose:        r.ChildPurpose,
 		Detached:            r.Detached,
 		Children:            r.Children,
-		ChildRefused:        r.ChildRefused,
 		BaseCommit:          r.BaseCommit,
 		BaseBranch:          r.BaseBranch,
 		BaseSource:          r.BaseSource,
@@ -335,8 +327,9 @@ type ServerInfoResult struct {
 
 const FeatureMultiRepo = "multi-repo"
 
-// FeatureSwarmRepos marks a server whose mission.create takes extra_workspace_ids; an older one drops them.
-const FeatureSwarmRepos = "swarm-repos"
+// FeaturePermission marks a server whose run.launch takes permission; an
+// older one drops it and runs the agent as root.
+const FeaturePermission = "permission"
 
 // CapabilityRunRepos is listed in a gateway's capability methods but is not an RPC method.
 const CapabilityRunRepos = "run.repos"
@@ -456,6 +449,8 @@ type RunLaunchParams struct {
 	// Effort is one of the agent's effort_levels; empty keeps the agent's
 	// default.
 	Effort string `json:"effort,omitempty"`
+	// Permission is "root", "default" or "isolated"; empty is "default".
+	Permission string `json:"permission,omitempty"`
 	// Empty means the caller's own account.
 	AccountMemberID string `json:"account_member_id,omitempty"`
 	// CachedBase retries a transient base-capture failure with the accepted
@@ -522,6 +517,22 @@ type RunPullParams struct {
 // (run.launch, run.get, run.close, run.relaunch).
 type RunResult struct {
 	Run Run `json:"run"`
+	// PullRequests are the pull requests the run opened, newest first, as
+	// Aether last recorded them without asking GitHub; only run.get sets it.
+	PullRequests []RecordedPullRequest `json:"pull_requests,omitempty"`
+}
+
+// RecordedPullRequest is a run's pull request as Aether last observed it at
+// CheckedAt. Repo is the run's repos[].workspace_id that owns it, empty for
+// the run's own repository.
+type RecordedPullRequest struct {
+	Repo       string     `json:"repo,omitempty"`
+	Repository string     `json:"repository"`
+	Number     int        `json:"number"`
+	URL        string     `json:"url"`
+	State      string     `json:"state"`
+	MergedAt   *time.Time `json:"merged_at,omitempty"`
+	CheckedAt  time.Time  `json:"checked_at"`
 }
 
 // RunInjectParams.IdempotencyKey makes a retry return the original room
@@ -901,9 +912,9 @@ type AgentInfo struct {
 	// EffortLevels are the effort or thinking levels a launch may pass;
 	// empty when the agent has no effort setting.
 	EffortLevels []string `json:"effort_levels,omitempty"`
-	// SwarmStandardRefusal is why a swarm integrator or worker cannot run the
-	// agent in Standard mode; empty when it can.
-	SwarmStandardRefusal string `json:"swarm_standard_refusal,omitempty"`
+	// WakeStandardRefusal is why a run that waits for mail from its child
+	// runs cannot use the agent in Standard mode; empty when it can.
+	WakeStandardRefusal string `json:"wake_standard_refusal,omitempty"`
 	// Empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
 	// InstallScript followed by the pinned adapter's install.
@@ -918,23 +929,6 @@ type AgentInfo struct {
 	LoginMissing   bool   `json:"login_missing,omitempty"`
 	OwnAccountOnly bool   `json:"own_account_only,omitempty"`
 	Unavailable    string `json:"unavailable,omitempty"`
-}
-
-// SwarmMode is the mode a swarm starts agent in when none is given, read from
-// agents, an agent.list result: Enhanced where it is installed, since Aether
-// can wake any Enhanced run when mail arrives, and Standard otherwise.
-// Standard that Aether could not wake is refused with the install command.
-func SwarmMode(agents []AgentInfo, agent string) (string, error) {
-	for _, a := range agents {
-		switch {
-		case a.Name != agent:
-		case a.EnhancedInstalled:
-			return string(domain.LaunchACP), nil
-		case a.SwarmStandardRefusal != "" && a.Enhanced != "none":
-			return "", fmt.Errorf("%s, which is not installed: aether agent add %s --enhanced", a.SwarmStandardRefusal, agent)
-		}
-	}
-	return string(domain.LaunchTUI), nil
 }
 
 type AgentInstallParams struct {

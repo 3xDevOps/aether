@@ -100,7 +100,7 @@ func TestMemoryMembersCurateAndViewersRead(t *testing.T) {
 		t.Fatalf("memory.rm --run: %v", err)
 	}
 	if !slices.Equal(removed.IDs, byID) {
-		t.Fatalf("removed = %v, want the run's notes %v", removed.IDs, byID)
+		t.Fatalf("removed = %v, want the session's notes %v", removed.IDs, byID)
 	}
 	if err = danaC.Call(protocol.MethodMemorySearch, protocol.MemorySearchParams{WorkspaceID: ws, All: true}, &found); err != nil {
 		t.Fatalf("memory.search --all: %v", err)
@@ -288,7 +288,7 @@ func TestMemoryMemberNotesStayTheirOwners(t *testing.T) {
 		t.Fatalf("alice's agent memory.add --me: %v", err)
 	}
 	_, err = agentAdd(bobRun.ID, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "The table writer pads to 120 columns.", Supersedes: agents.Item.ID})
-	denied("bob's agent memory.add --supersedes", err, "memory.add: "+agents.Item.ID+" is a member note of Alice from run "+string(aliceRun.ID)+
+	denied("bob's agent memory.add --supersedes", err, "memory.add: "+agents.Item.ID+" is a member note of Alice from session "+string(aliceRun.ID)+
 		"; ask a member to replace it (aether memory add --supersedes "+agents.Item.ID+")")
 	denied("bob memory.rm --run alice's run", bobC.Call(protocol.MethodMemoryRm, protocol.MemoryRmParams{WorkspaceID: ws, RunID: string(aliceRun.ID)}, nil),
 		"memory.rm: permission denied: "+agents.Item.ID+" is a member note of Alice; only they or an admin may remove it")

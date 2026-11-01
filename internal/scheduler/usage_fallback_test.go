@@ -66,7 +66,7 @@ func (n *roomNotes) all() []string {
 	return slices.Clone(n.bodies)
 }
 
-const continuedOnGrace = "Your previous turn stopped because Ada's usage ran out. The run continues on Grace's account. Continue the task where you stopped."
+const continuedOnGrace = "Your previous turn stopped because Ada's usage ran out. The session continues on Grace's account. Continue the task where you stopped."
 
 // newFallbackEnv is Ada running Claude on her own account with her own
 // installation, Grace logged in to Claude, and Grace's usage at 10%. Grace
@@ -99,14 +99,14 @@ func enhancedClaude(cfg *Config) {
 
 func (e *shareEnv) share(t *testing.T) {
 	t.Helper()
-	if err := e.db.ShareAccount(t.Context(), e.owner.ID, e.member.ID); err != nil {
+	if _, err := e.db.ShareAccount(t.Context(), e.owner.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (e *shareEnv) assertMovedToOwner(t *testing.T, run domain.RunID, notes *roomNotes) runtime.Spec {
 	t.Helper()
-	waitFor(t, "the run on Grace's account", func() bool {
+	waitFor(t, "the session on Grace's account", func() bool {
 		row, err := e.db.GetRun(t.Context(), run)
 		return err == nil && row.AccountMemberID == e.owner.ID
 	})
@@ -124,7 +124,7 @@ func (e *shareEnv) assertMovedToOwner(t *testing.T, run domain.RunID, notes *roo
 	})
 	c := e.rt.byName(string(run))
 	if c == nil || e.containerCount() != 1 {
-		t.Fatalf("%d containers, want only the run's new one", e.containerCount())
+		t.Fatalf("%d containers, want only the session's new one", e.containerCount())
 	}
 	if c.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.owner.ID) {
 		t.Fatalf("new container account = %q", c.spec.Env["AETHER_ACCOUNT_MEMBER_ID"])
@@ -151,7 +151,7 @@ func TestEnhancedRunContinuesOnAFallbackAccount(t *testing.T) {
 
 	e.assertMovedToOwner(t, run.ID, notes)
 	if e.rt.byName(string(run.ID)) == first {
-		t.Fatal("the run kept Ada's container")
+		t.Fatal("the session kept Ada's container")
 	}
 	waitFor(t, "the continuation prompt", func() bool {
 		execs := rt.all()
@@ -338,7 +338,7 @@ func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 		opts         domain.LaunchOptions
 	}{
 		{"no account qualifies", "Usage limit reached on Ada's account; no other account is shared to fall back on", nil, domain.LaunchOptions{}},
-		{"fallback off", "Usage limit reached on Ada's account; fallback is off for this run", nil,
+		{"fallback off", "Usage limit reached on Ada's account; fallback is off for this session", nil,
 			domain.LaunchOptions{Fallback: domain.AccountFallback{Disabled: true}}},
 		{"no capacity for the replacement", "Usage limit reached on Ada's account; cannot continue on another account: ", func(e *shareEnv) {
 			e.sched.cfg.filesystemCapacity = func(string) (disk.Usage, error) { return disk.Usage{}, errors.New("statfs failed") }
@@ -372,7 +372,7 @@ func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 				t.Fatalf("run = reason %q account %s, want %q", got.Reason, got.AccountMemberID, tc.reason)
 			}
 			if e.rt.byName(string(run.ID)) != first || first.currentState() != "running" || len(notes.all()) != 0 {
-				t.Fatal("a run that did not move lost its container or posted a move")
+				t.Fatal("a session that did not move lost its container or posted a move")
 			}
 			// The launch's wait and at most the move's one probe: a live
 			// container keeps its single wait.
@@ -393,7 +393,7 @@ func TestHandedOffRunMovesOnlyToAccountsSharedWithItsHome(t *testing.T) {
 	t.Parallel()
 	e, _, notes := newFallbackEnv(t, enhancedClaude)
 	lin := e.addRecipient(t)
-	if err := e.db.ShareAccount(t.Context(), e.owner.ID, lin.ID); err != nil {
+	if _, err := e.db.ShareAccount(t.Context(), e.owner.ID, lin.ID); err != nil {
 		t.Fatal(err)
 	}
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
@@ -484,7 +484,7 @@ func TestEnhancedRunWhoseRestoreFailsNeedsAttention(t *testing.T) {
 	rt.mu.Unlock()
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if !strings.HasPrefix(got.Reason, "Usage limit reached on Ada's account; the run is on Grace's account and its session could not be restored: ") ||
+	if !strings.HasPrefix(got.Reason, "Usage limit reached on Ada's account; the session is on Grace's account and its conversation could not be restored: ") ||
 		!strings.Contains(got.Reason, "exec: no such file") || got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
 		t.Fatalf("run = reason %q account %s notes %v", got.Reason, got.AccountMemberID, notes.all())
 	}
@@ -502,7 +502,7 @@ func TestEnhancedRunMovesAgainOnASecondLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeHomeFiles(t, linHome, ".claude/.credentials.json")
-	if err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
+	if _, err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10, lin.ID: 20}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
@@ -519,7 +519,7 @@ func TestEnhancedRunMovesAgainOnASecondLimit(t *testing.T) {
 		return err == nil && scErr == nil && sc.AccountSwap == nil
 	})
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
-	waitFor(t, "the run on Lin's account", func() bool {
+	waitFor(t, "the session on Lin's account", func() bool {
 		row, err := e.db.GetRun(t.Context(), run.ID)
 		return err == nil && row.AccountMemberID == lin.ID && !row.Status.Terminal()
 	})
@@ -543,7 +543,7 @@ func TestUnconfirmedSharedLoginDoesNotUseUpTheAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeHomeFiles(t, linHome, ".claude/.credentials.json")
-	if err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
+	if _, err = e.db.ShareAccount(t.Context(), lin.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10, lin.ID: 20}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
@@ -658,7 +658,7 @@ func TestHeadlessRunContinuesOnAFallbackAccount(t *testing.T) {
 				sched.UseUsageFallback(seam)
 				startScheduler(t, sched)
 			case "no fallback":
-				if err = e.db.RevokeAccountShare(t.Context(), e.owner.ID, e.member.ID); err != nil {
+				if _, err = e.db.RevokeAccountShare(t.Context(), e.owner.ID, e.member.ID); err != nil {
 					t.Fatal(err)
 				}
 				e.rt.byName(string(run.ID)).exitNow(1)
@@ -732,7 +732,7 @@ func TestStandardRunContinuesOnAFallbackAccount(t *testing.T) {
 
 	spec := e.assertMovedToOwner(t, run.ID, notes)
 	if e.rt.byName(string(run.ID)) == first {
-		t.Fatal("the run kept Ada's container")
+		t.Fatal("the session kept Ada's container")
 	}
 	want := []string{"claude", "--dangerously-skip-permissions", "--resume", "sess-1", continuedOnGrace}
 	agent := spec.Command[slices.Index(spec.Command, "aether-run-supervisor")+1:]
@@ -1066,45 +1066,6 @@ func TestShutdownDuringAMoveLeavesTheRunForRecovery(t *testing.T) {
 	}
 }
 
-// A swarm worker whose replacement container cannot be created has no
-// container left to retain: it fails at once with the real error and leaves
-// the scheduler, so its attempt settles instead of holding a swarm slot.
-func TestWorkerWhoseMoveFailsFinishesWithoutRetention(t *testing.T) {
-	t.Parallel()
-	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
-	e.share(t)
-	startScheduler(t, e.sched)
-	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-		WorkspaceID: e.ws.ID, RunID: "moving-worker", Actor: e.member.ID,
-		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
-		Harness: "claude", Mode: domain.LaunchHeadless,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-e.sched.RecoveryReady()
-	e.rt.mu.Lock()
-	e.rt.createErr = errors.New("no space left on device")
-	e.rt.mu.Unlock()
-	if _, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
-		Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: create container: no space left on device" {
-		t.Fatalf("reason %q", got.Reason)
-	}
-	waitFor(t, "the worker released", func() bool {
-		e.sched.mu.Lock()
-		defer e.sched.mu.Unlock()
-		return e.sched.runs[run.ID] == nil
-	})
-	if _, err := e.sched.readSidecar(run.ID); !os.IsNotExist(err) || len(notes.all()) != 0 || e.containerCount() != 0 {
-		t.Fatalf("sidecar %v, notes %v, %d containers; want the worker gone without a move", err, notes.all(), e.containerCount())
-	}
-}
-
 // A move that cannot remove the exhausted container fails the run, which
 // keeps owning that container: it may still run with Ada's login mounted.
 func TestMoveThatCannotRemoveTheOldContainerKeepsIt(t *testing.T) {
@@ -1137,11 +1098,10 @@ func TestMoveThatCannotRemoveTheOldContainerKeepsIt(t *testing.T) {
 
 // A server that stops while a live run's move reads quota keeps the run's
 // usage limit, and the next server moves the run once it has recovered it:
-// a swarm worker whose container outlives its agent, a Standard run and an
-// Enhanced run.
+// a Standard run and an Enhanced run.
 func TestRestartResumesALiveRunsMove(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []string{"worker", "standard", "enhanced"} {
+	for _, tc := range []string{"standard", "enhanced"} {
 		t.Run(tc, func(t *testing.T) {
 			t.Parallel()
 			mutate := func(cfg *Config) { delete(cfg.Harnesses, "claude") }
@@ -1162,12 +1122,6 @@ func TestRestartResumesALiveRunsMove(t *testing.T) {
 			var run *domain.Run
 			var err error
 			switch tc {
-			case "worker":
-				run, err = e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-					WorkspaceID: e.ws.ID, RunID: "resumed-worker", Actor: e.member.ID,
-					RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
-					Harness: "claude", Mode: domain.LaunchHeadless,
-				})
 			case "standard":
 				run, err = e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix it", "claude", domain.LaunchTUI)
 			default:
@@ -1178,10 +1132,6 @@ func TestRestartResumesALiveRunsMove(t *testing.T) {
 			}
 			<-e.sched.RecoveryReady()
 			switch tc {
-			case "worker":
-				_, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
-					Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
-				}})
 			case "standard":
 				if err = e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: "sess-1"}); err != nil {
 					t.Fatal(err)
@@ -1347,45 +1297,6 @@ func TestDuplicateLimitDuringAMoveKeepsTheMark(t *testing.T) {
 	}
 }
 
-// A swarm worker whose old container cannot be removed fails with that
-// error, stays on its account, and keeps the container for cleanup to retry
-// rather than for the swarm.
-func TestWorkerWhoseOldContainerCannotBeRemovedFails(t *testing.T) {
-	t.Parallel()
-	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
-	e.share(t)
-	startScheduler(t, e.sched)
-	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-		WorkspaceID: e.ws.ID, RunID: "stuck-worker", Actor: e.member.ID,
-		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
-		Harness: "claude", Mode: domain.LaunchHeadless,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-e.sched.RecoveryReady()
-	first := e.rt.byName(string(run.ID))
-	e.rt.mu.Lock()
-	e.rt.destroyErr = errors.New("daemon busy")
-	e.rt.mu.Unlock()
-	if _, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
-		Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: remove the container on Ada's account: daemon busy" || got.AccountMemberID != e.member.ID {
-		t.Fatalf("worker = reason %q account %s", got.Reason, got.AccountMemberID)
-	}
-	waitFor(t, "the old container kept for cleanup", func() bool {
-		sc, scErr := e.sched.readSidecar(run.ID)
-		return scErr == nil && sc.DestroyPending && sc.ContainerID == string(first.id)
-	})
-	if segments, err := e.db.ListRunAccountSegments(t.Context(), run.ID); err != nil || len(segments) != 0 || len(notes.all()) != 0 {
-		t.Fatalf("segments %+v, %v, notes %v; want no move recorded", segments, err, notes.all())
-	}
-}
-
 // failingSub ends at once with an error, as a replay whose log read fails.
 type failingSub struct{ ch chan events.Event }
 
@@ -1483,7 +1394,7 @@ func TestMoveRecordsTheReplacementsGitAuthor(t *testing.T) {
 	spec := e.assertMovedToOwner(t, run.ID, notes)
 	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil || spec.Env["GIT_AUTHOR_EMAIL"] != "ada@example.com" || sc.GitAuthorEmail != "ada@example.com" {
-		t.Fatalf("replacement commits as %q, run records %q, %v; want both the new address", spec.Env["GIT_AUTHOR_EMAIL"], sc.GitAuthorEmail, err)
+		t.Fatalf("replacement commits as %q, session records %q, %v; want both the new address", spec.Env["GIT_AUTHOR_EMAIL"], sc.GitAuthorEmail, err)
 	}
 }
 
@@ -1527,7 +1438,7 @@ func TestNoFallbackReason(t *testing.T) {
 		measured fallback.Measured
 		want     string
 	}{
-		{"opencode", fallback.Measured{ada: 100}, "Aether cannot read opencode's usage, so its runs do not move to another account"},
+		{"opencode", fallback.Measured{ada: 100}, "Aether cannot read opencode's usage, so its sessions do not move to another account"},
 		{"claude", fallback.Measured{ada: 100}, "no other account is shared to fall back on"},
 		{"claude", fallback.Measured{ada: 100, grace: 97}, "no fallback has usage left"},
 		{"claude", fallback.Measured{ada: 100, grace: fallback.Unknown}, "no account that may have usage left can run claude here"},

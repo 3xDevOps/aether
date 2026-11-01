@@ -14,21 +14,19 @@ const (
 )
 
 const (
-	WatchTargetRun     = "run"
-	WatchTargetMission = "mission"
-	WatchTargetPR      = "pr"
+	WatchTargetRun = "run"
+	WatchTargetPR  = "pr"
 )
 
 // A target kind accepts only its own subset of the watch conditions.
 const (
-	WatchNeedsYou  = "needs_you"
-	WatchFinished  = "finished"
-	WatchPRMerged  = "pr_merged"
-	WatchCI        = "ci"
-	WatchDelivered = "delivered"
-	WatchReview    = "review"
-	WatchMerged    = "merged"
-	WatchClosed    = "closed"
+	WatchNeedsYou = "needs_you"
+	WatchFinished = "finished"
+	WatchPRMerged = "pr_merged"
+	WatchCI       = "ci"
+	WatchReview   = "review"
+	WatchMerged   = "merged"
+	WatchClosed   = "closed"
 )
 
 const (
@@ -72,11 +70,10 @@ const (
 )
 
 type WatchTarget struct {
-	Kind      string `json:"kind"`
-	RunID     string `json:"run_id,omitempty"`
-	MissionID string `json:"mission_id,omitempty"`
-	Repo      string `json:"repo,omitempty"`
-	Number    int    `json:"number,omitempty"`
+	Kind   string `json:"kind"`
+	RunID  string `json:"run_id,omitempty"`
+	Repo   string `json:"repo,omitempty"`
+	Number int    `json:"number,omitempty"`
 }
 
 // WatchChecks counts every check on the head commit.
@@ -103,7 +100,6 @@ type WatchObserved struct {
 	RunStatus   string       `json:"run_status,omitempty"`
 	Activity    string       `json:"activity,omitempty"`
 	Need        string       `json:"need,omitempty"`
-	Phase       string       `json:"phase,omitempty"`
 	PRState     string       `json:"pr_state,omitempty"`
 	HeadSHA     string       `json:"head_sha,omitempty"`
 	Checks      *WatchChecks `json:"checks,omitempty"`
@@ -169,7 +165,6 @@ type WatchListParams struct {
 	State      string `json:"state,omitempty"`
 	TargetKind string `json:"target_kind,omitempty"`
 	RunID      string `json:"run_id,omitempty"`
-	MissionID  string `json:"mission_id,omitempty"`
 }
 
 type WatchListResult struct {

@@ -86,6 +86,9 @@ type Config struct {
 	// EgressBudget is how many bytes the relay sends in a calendar month
 	// (UTC) before it throttles every splice. Zero means no budget.
 	EgressBudget int64
+	// DirectoryInterval overrides the least time between two stores of
+	// one server's directory. Zero keeps the default.
+	DirectoryInterval time.Duration
 }
 
 const (
@@ -220,6 +223,9 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		directories:        map[string]*directoryWrite{},
 		addrConns:          map[netip.Prefix]int{},
 		refusalsMap:        map[string]uint64{},
+	}
+	if cfg.DirectoryInterval > 0 {
+		r.directoryInterval = cfg.DirectoryInterval
 	}
 	r.http = &http.Transport{
 		DialContext:         r.dialHTTP,

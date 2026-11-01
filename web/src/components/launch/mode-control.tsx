@@ -1,5 +1,5 @@
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
-import { type ReactNode, useId } from 'react'
+import { useId } from 'react'
 import { modes, type Refusal } from '@/components/launch/modes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,14 +13,12 @@ export function ModeControl({
   value,
   onChange,
   refused = {},
-  help,
   onSetUp,
 }: {
   label: string
   value: LaunchMode | undefined
   onChange: (mode: LaunchMode) => void
   refused?: Partial<Record<LaunchMode, Refusal>>
-  help?: ReactNode
   onSetUp: () => void
 }) {
   const id = useId()
@@ -86,7 +84,6 @@ export function ModeControl({
           )}
         </p>
       ))}
-      {help && <p className="text-ui-sm text-muted">{help}</p>}
     </div>
   )
 }

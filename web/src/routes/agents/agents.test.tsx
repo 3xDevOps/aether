@@ -146,7 +146,7 @@ describe('agents page', () => {
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'More for Claude Code' }), { button: 0, ctrlKey: false })
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Set up again' }))
-    expect(screen.getByRole('radiogroup', { name: 'How runs show Claude Code' })).toBeDefined()
+    expect(screen.getByRole('radiogroup', { name: 'How sessions show Claude Code' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'All agents' }))
     expect(screen.getByRole('list', { name: 'Agents' })).toBeDefined()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Run Claude Code' }))
@@ -160,7 +160,7 @@ describe('agents page', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove…' }))
     const dialog = screen.getByRole('alertdialog', { name: 'Remove Claude Code?' })
     expect(dialog.textContent).toContain('Deletes ~/.local/bin/claude')
-    expect(dialog.textContent).toContain("New runs can't start it; running runs keep going.")
+    expect(dialog.textContent).toContain("New sessions can't start it; running sessions keep going.")
     expect(dialog.textContent).toContain('Its login, settings and package files stay. Set up installs it again.')
 
     vi.mocked(api.agentList).mockClear()

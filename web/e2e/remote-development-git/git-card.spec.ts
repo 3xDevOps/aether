@@ -39,7 +39,7 @@ test('the git card draws the run branch against a base that moved, names the con
     'printf "# upstream title\\n" > /tmp/upstream/README.md',
     'git -C /tmp/upstream commit -qam "Rename the project upstream"',
     'git update-ref refs/remotes/origin/main "$(git -C /tmp/upstream rev-parse HEAD)"',
-    'printf "# run title\\n" > README.md',
+    'printf "# session title\\n" > README.md',
     'git commit -qam "Retitle the README"',
     'printf "notes\\n" > notes.txt',
     'git add notes.txt',

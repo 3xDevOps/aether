@@ -65,6 +65,12 @@ INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
 # shards the unit tests by setting TEST_PKGS or TEST_SKIP.
 TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|.|'))
 
+# Race detector for `test`. The SQLite driver is transpiled C, which the
+# detector slows ten to twenty times, so a pull request in CI sets this empty
+# and the merge queue and main keep -race. -parallel 16 lets the tests that
+# wait on a timer or a socket overlap instead of queueing behind GOMAXPROCS.
+TEST_RACE ?= -race
+
 # Release matrix. The server and the edge are Linux-only by design (see the
 # v1 cut-line); the CLI additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
@@ -195,15 +201,16 @@ browser-smoke:
 	$(BROWSER_RUN) --test /opt/aether-browser/companion.test.mjs
 
 test:
-	go test -race $(TEST_PKGS)
+	go test $(TEST_RACE) -parallel 16 $(TEST_PKGS)
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
 # carry them - the unit tests are `make test`'s job. CI shards it with
 # INTEGRATION_PKGS, INTEGRATION_SKIP, INTEGRATION_RUN, and
 # INTEGRATION_SKIP_PATTERN. The run and skip patterns are optional; they are
 # quoted so the shell does not interpret their metacharacters.
+# A non-empty INTEGRATION_NORACE turns the race detector off.
 test-integration:
-	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS) \
+	go test $(if $(INTEGRATION_NORACE),,-race) -timeout=30m -tags integration $(INTEGRATION_PKGS) \
 		$(if $(INTEGRATION_RUN),-run '$(INTEGRATION_RUN)') \
 		$(if $(INTEGRATION_SKIP_PATTERN),-skip '$(INTEGRATION_SKIP_PATTERN)')
 
@@ -213,7 +220,7 @@ agents-image:
 # Real Claude Code and Codex runs in AGENTS_IMAGE against a mock model. It
 # needs Docker and real git, and `make agents-image` first.
 test-agents:
-	AETHER_AGENTS_IMAGE='$(AGENTS_IMAGE)' go test -race -count=1 -timeout=15m -tags integration \
+	AETHER_AGENTS_IMAGE='$(AGENTS_IMAGE)' go test $(if $(INTEGRATION_NORACE),,-race) -count=1 -timeout=15m -tags integration \
 		-run '^(TestIntegrationRealAgents|TestIntegrationSilentModelParksAsPossibleStall)$$' -v ./internal/server
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
@@ -244,9 +251,11 @@ test-scripts:
 	sh scripts/release-ci-check-test.sh
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
+	sh scripts/ci-classify-areas-test.sh
 	sh scripts/ci-classify-changes-test.sh
 	sh scripts/ci-classify-desktop-test.sh
 	sh scripts/ci-classify-edge-test.sh
+	sh scripts/ci-classify-platform-test.sh
 	sh scripts/edge-go-version-test.sh
 	sh scripts/edge-nginx-test.sh
 	sh scripts/edge-update-test.sh

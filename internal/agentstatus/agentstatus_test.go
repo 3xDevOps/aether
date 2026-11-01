@@ -23,9 +23,9 @@ func TestClaudeCorrelatedInput(t *testing.T) {
 		{"failure", `{"hook_event_name":"PostToolUseFailure","tool_name":"AskUserQuestion","session_id":"root","tool_use_id":"q"}`, "close", "question", "q", "root", Working},
 		{"elicitation", `{"hook_event_name":"Elicitation","session_id":"root","elicitation_id":"f","url":"https://private","message":"credential prompt"}`, "open", "form", "f", "root", ""},
 		{"dismissal", `{"hook_event_name":"ElicitationResult","session_id":"root","elicitation_id":"f","action":"cancel","content":{"token":"secret"}}`, "close", "form", "f", "root", ""},
-		{"child question", `{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"root","agent_id":"child","tool_use_id":"q"}`, "open", "question", "q", `["root","child"]`, ""},
+		{"subsession question", `{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"root","agent_id":"subsession","tool_use_id":"q"}`, "open", "question", "q", `["root","subsession"]`, ""},
 		{"interrupted question", `{"hook_event_name":"PostToolUseFailure","tool_name":"AskUserQuestion","session_id":"root","tool_use_id":"q","is_interrupt":true}`, "close", "question", "q", "root", ""},
-		{"child termination", `{"hook_event_name":"SessionEnd","session_id":"root","agent_id":"child"}`, "clear", "", "", `["root","child"]`, ""},
+		{"subsession termination", `{"hook_event_name":"SessionEnd","session_id":"root","agent_id":"subsession"}`, "clear", "", "", `["root","subsession"]`, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := FromClaudeHook([]byte(tc.payload))
@@ -47,8 +47,8 @@ func TestClaudeDoesNotInventInput(t *testing.T) {
 		`{"hook_event_name":"Elicitation","session_id":"root"}`,
 		`{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"root"}`,
 		`{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"q"}`,
-		`{"hook_event_name":"Stop","agent_id":"child"}`,
-		`{"hook_event_name":"SubagentStop","session_id":"root","agent_id":"child"}`,
+		`{"hook_event_name":"Stop","agent_id":"subsession"}`,
+		`{"hook_event_name":"SubagentStop","session_id":"root","agent_id":"subsession"}`,
 		`not JSON`,
 	} {
 		if got, ok := FromClaudeHook([]byte(payload)); ok || len(got.InputUpdates) != 0 {
@@ -102,25 +102,25 @@ func TestClaudeDoesNotInventInput(t *testing.T) {
 // its own scope.
 func TestClaudeSubagentHooksLeaveTheTurnAlone(t *testing.T) {
 	for _, payload := range []string{
-		`{"hook_event_name":"SubagentStart","session_id":"root","agent_id":"child"}`,
-		`{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"root","agent_id":"child","tool_use_id":"t"}`,
-		`{"hook_event_name":"PostToolUse","tool_name":"Bash","session_id":"root","agent_id":"child","tool_use_id":"t"}`,
-		`{"hook_event_name":"PostToolUseFailure","tool_name":"Bash","session_id":"root","agent_id":"child","tool_use_id":"t"}`,
+		`{"hook_event_name":"SubagentStart","session_id":"root","agent_id":"subsession"}`,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"root","agent_id":"subsession","tool_use_id":"t"}`,
+		`{"hook_event_name":"PostToolUse","tool_name":"Bash","session_id":"root","agent_id":"subsession","tool_use_id":"t"}`,
+		`{"hook_event_name":"PostToolUseFailure","tool_name":"Bash","session_id":"root","agent_id":"subsession","tool_use_id":"t"}`,
 	} {
 		if got, ok := FromClaudeHook([]byte(payload)); !ok || got.State != "" || !got.Subagent {
 			t.Errorf("subagent hook %s reported %+v, want liveness only", payload, got)
 		}
 	}
 	for _, payload := range []string{
-		`{"hook_event_name":"SubagentStop","session_id":"root","agent_id":"child"}`,
+		`{"hook_event_name":"SubagentStop","session_id":"root","agent_id":"subsession"}`,
 		`{"hook_event_name":"SubagentStop","session_id":"root"}`,
-		`{"hook_event_name":"Stop","session_id":"root","agent_id":"child"}`,
+		`{"hook_event_name":"Stop","session_id":"root","agent_id":"subsession"}`,
 	} {
 		if got, ok := FromClaudeHook([]byte(payload)); ok {
 			t.Errorf("subagent stop %s reported %+v", payload, got)
 		}
 	}
-	got, ok := FromClaudeHook([]byte(`{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","session_id":"root","agent_id":"child","tool_use_id":"q"}`))
+	got, ok := FromClaudeHook([]byte(`{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","session_id":"root","agent_id":"subsession","tool_use_id":"q"}`))
 	if !ok || got.State != "" || len(got.InputUpdates) != 1 || got.InputUpdates[0].Operation != "close" {
 		t.Fatalf("subagent's answered question = %+v, want only its close", got)
 	}

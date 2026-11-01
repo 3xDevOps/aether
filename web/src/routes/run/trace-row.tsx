@@ -36,14 +36,14 @@ export interface TraceGeometry {
 }
 
 export const kindLabel: Record<SpanKind, string> = {
-  run: 'Run',
+  run: 'Session',
   turn: 'Turn',
   agent: 'Subagent',
   tool: 'Tool call',
   wait: 'Waiting for you',
   notice: 'Error',
-  workers: 'Workers',
-  worker: 'Worker',
+  workers: 'Subsessions',
+  worker: 'Subsession',
 }
 
 export const statusLabel: Record<SpanStatus, string> = {

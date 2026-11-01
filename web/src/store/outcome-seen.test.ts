@@ -181,7 +181,7 @@ describe('watchOutcomeSeen', () => {
     const store = setup()
     const client = fakeApi({
       runSeen: vi.fn(async () => {
-        throw new ApiError(403, 'run.seen: only the run owner can mark it seen')
+        throw new ApiError(403, 'run.seen: only the session owner can mark it seen')
       }),
     })
     const stop = watchOutcomeSeen(store, client, fakeDocument())
@@ -193,7 +193,7 @@ describe('watchOutcomeSeen', () => {
 
     expect(client.runSeen).toHaveBeenCalledTimes(1)
     expect(toast.error).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(toast.error).mock.calls[0][0]).toContain('only the run owner can mark it seen')
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toContain('only the session owner can mark it seen')
     expect(store.getState().runs[reported.id].outcome_unseen).toBe(true)
 
     store.getState().navigate('board')

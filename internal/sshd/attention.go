@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -30,17 +28,9 @@ type attentionRun struct {
 	controller domain.MemberID
 	inputs     []domain.RunInputRequest
 	pending    []acphost.Request
-	mission    *domain.Mission
-	// questions are the swarm's unanswered questions, for its current
-	// integrator.
-	questions []*domain.MissionQuestion
 	// open are the run's open room questions and queued steer requests,
 	// oldest first, read only when a room row can hold.
 	open []*store.RoomMessage
-	// hold is the swarm worker's attempt while a member holds its control.
-	hold *domain.Attempt
-	// integratorOwner owns the run's integrator run.
-	integratorOwner domain.MemberID
 }
 
 type attentionViewer struct {
@@ -82,16 +72,11 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		owners := make(map[domain.RunID]domain.MemberID, len(runs))
-		for _, run := range runs {
-			owners[run.ID] = run.MemberID
-		}
-		missions := map[domain.MissionID]*domain.Mission{}
 		for _, run := range runs {
 			if run.ArchivedAt != nil {
 				continue
 			}
-			r, err := s.attentionRun(ctx, run, owners, missions)
+			r, err := s.attentionRun(ctx, run)
 			if err != nil {
 				return nil, rpcError(err)
 			}
@@ -121,8 +106,8 @@ func compareSince(a, b string) int {
 	return at.Compare(bt)
 }
 
-func (s *Server) attentionRun(ctx context.Context, run *domain.Run, owners map[domain.RunID]domain.MemberID, missions map[domain.MissionID]*domain.Mission) (*attentionRun, error) {
-	r := &attentionRun{run: run, integratorOwner: owners[run.IntegratorRunID]}
+func (s *Server) attentionRun(ctx context.Context, run *domain.Run) (*attentionRun, error) {
+	r := &attentionRun{run: run}
 	if !run.Status.Terminal() {
 		r.paused = s.cfg.Runs.Paused(run.ID)
 		r.inputs = s.cfg.Runs.PendingInputs(run.ID)
@@ -133,33 +118,6 @@ func (s *Server) attentionRun(ctx context.Context, run *domain.Run, owners map[d
 	if s.cfg.Control != nil {
 		if holder, ok := s.cfg.Control.Status(string(run.ID)); ok {
 			r.controller = holder.MemberID
-		}
-	}
-	if ms, ok := s.cfg.Store.(store.MissionStore); ok && run.MissionID != "" {
-		mission, cached := missions[run.MissionID]
-		if !cached {
-			var err error
-			if mission, err = ms.GetMission(ctx, run.MissionID); err != nil && !errors.Is(err, store.ErrNotFound) {
-				return nil, err
-			}
-			missions[run.MissionID] = mission
-		}
-		r.mission = mission
-		if r.currentIntegrator() != nil && mission.OpenQuestions > 0 {
-			questions, err := ms.ListMissionQuestions(ctx, mission.ID)
-			if err != nil {
-				return nil, err
-			}
-			r.questions = slices.DeleteFunc(questions, func(q *domain.MissionQuestion) bool { return q.AnsweredAt != nil })
-		}
-		if run.MissionRole == "worker" {
-			attempt, err := ms.GetAttemptByRun(ctx, run.ID)
-			if err != nil && !errors.Is(err, store.ErrNotFound) {
-				return nil, err
-			}
-			if attempt != nil && attempt.TakeoverActive && attempt.TakeoverMemberID != "" {
-				r.hold = attempt
-			}
 		}
 	}
 	if run.UnansweredQuestions > 0 || r.controller != "" {
@@ -217,8 +175,6 @@ type attentionRow struct {
 	resolvers  func(r *attentionRun) []domain.MemberID
 	admins     bool
 	background bool
-	workers    bool
-	swarm      bool
 	completed  bool
 	fill       func(r *attentionRun, viewer attentionViewer, item *protocol.AttentionItem)
 }
@@ -234,36 +190,23 @@ func (r *attentionRun) live() bool {
 	return r.run.Status.Live()
 }
 
+// firstInput is the agent's own oldest request of one of kinds.
 func (r *attentionRun) firstInput(kinds ...string) *domain.RunInputRequest {
 	for i := range r.inputs {
-		if slices.Contains(kinds, r.inputs[i].Kind) {
+		if r.inputs[i].SessionID != domain.SudoSessionID && slices.Contains(kinds, r.inputs[i].Kind) {
 			return &r.inputs[i]
 		}
 	}
 	return nil
 }
 
-// currentIntegrator is the run's swarm while the run is its current
-// integrator and the swarm runs.
-func (r *attentionRun) currentIntegrator() *domain.Mission {
-	m := r.mission
-	if r.run.MissionRole != "integrator" || m == nil || m.CurrentIntegratorRunID != r.run.ID {
-		return nil
+func (r *attentionRun) sudoInput() *domain.RunInputRequest {
+	for i := range r.inputs {
+		if r.inputs[i].SessionID == domain.SudoSessionID {
+			return &r.inputs[i]
+		}
 	}
-	if m.Phase != domain.MissionPhasePlanning && m.Phase != domain.MissionPhaseActive {
-		return nil
-	}
-	return m
-}
-
-func (r *attentionRun) swarmHuman() domain.MemberID {
-	switch {
-	case r.mission != nil && r.mission.AccountableHumanID != "":
-		return r.mission.AccountableHumanID
-	case r.integratorOwner != "":
-		return r.integratorOwner
-	}
-	return r.run.MemberID
+	return nil
 }
 
 func (r *attentionRun) openRoomQuestions() []*store.RoomMessage {
@@ -301,6 +244,14 @@ func since(t *time.Time) string {
 
 func (r *attentionRun) request(input *domain.RunInputRequest) *protocol.AttentionRequest {
 	out := &protocol.AttentionRequest{ID: input.ID, Kind: input.Kind}
+	if input.SessionID == domain.SudoSessionID {
+		out.Title = input.Title
+		out.Options = []protocol.AttentionOption{
+			{ID: domain.SudoAllow, Label: "Allow once", Kind: "allow_once"},
+			{ID: domain.SudoDeny, Label: "Deny", Kind: "reject_once"},
+		}
+		return out
+	}
 	for _, pending := range r.pending {
 		if pending.ID != input.ID {
 			continue
@@ -314,6 +265,17 @@ func (r *attentionRun) request(input *domain.RunInputRequest) *protocol.Attentio
 }
 
 var attentionRows = []attentionRow{
+	{
+		kind:       protocol.AttentionKindPermission,
+		background: true,
+		admins:     true,
+		holds:      func(r *attentionRun) bool { return r.sudoInput() != nil },
+		resolvers:  owner,
+		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
+			item.Reason = "Permission requested"
+			item.Request = r.request(r.sudoInput())
+		},
+	},
 	{
 		kind:       protocol.AttentionKindPermission,
 		background: true,
@@ -373,57 +335,6 @@ var attentionRows = []attentionRow{
 		},
 	},
 	{
-		kind:       protocol.AttentionKindSwarmQuestion,
-		background: true,
-		swarm:      true,
-		admins:     true,
-		holds: func(r *attentionRun) bool {
-			m := r.currentIntegrator()
-			return m != nil && (len(r.questions) > 0 || m.OpenQuestions > 0)
-		},
-		resolvers: func(r *attentionRun) []domain.MemberID {
-			return []domain.MemberID{r.currentIntegrator().AccountableHumanID}
-		},
-		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			item.Reason = "The integrator has a question"
-			if len(r.questions) > 0 {
-				q := r.questions[0]
-				item.Reason, item.Since = "The integrator asks: "+q.Body, since(&q.AskedAt)
-				item.Message = &protocol.AttentionMessage{ID: string(q.ID), Body: q.Body}
-			}
-		},
-	},
-	{
-		kind:       protocol.AttentionKindIntegratorDown,
-		background: true,
-		swarm:      true,
-		admins:     true,
-		holds: func(r *attentionRun) bool {
-			m := r.currentIntegrator()
-			return m != nil && (m.IntegratorLaunchError != "" || r.run.Status.Terminal())
-		},
-		resolvers: func(r *attentionRun) []domain.MemberID { return []domain.MemberID{r.swarmHuman()} },
-		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			item.Reason = "Integrator stopped, replace it to continue"
-			if r.mission.IntegratorLaunchError != "" {
-				item.Reason = "Integrator failed to launch, replace it to continue"
-			}
-			if at := since(r.mission.IntegratorLaunchErrorAt); at != "" {
-				item.Since = at
-			}
-		},
-	},
-	{
-		kind:       protocol.AttentionKindControlHold,
-		background: true,
-		workers:    true,
-		holds:      func(r *attentionRun) bool { return r.hold != nil },
-		resolvers:  func(r *attentionRun) []domain.MemberID { return []domain.MemberID{r.hold.TakeoverMemberID} },
-		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			item.Reason = fmt.Sprintf("You hold control of worker %d", r.hold.Number)
-		},
-	},
-	{
 		kind:       protocol.AttentionKindDisconnected,
 		background: true,
 		holds:      func(r *attentionRun) bool { return r.run.Activity == domain.ActivityDisconnected },
@@ -438,22 +349,12 @@ var attentionRows = []attentionRow{
 	{
 		kind:       protocol.AttentionKindBlocked,
 		background: true,
-		workers:    true,
 		holds: func(r *attentionRun) bool {
 			return r.run.Activity == domain.ActivityNeedsYou && strings.HasPrefix(r.run.Reason, domain.BlockedReasonPrefix)
 		},
-		resolvers: func(r *attentionRun) []domain.MemberID {
-			if r.run.MissionRole == "worker" {
-				return []domain.MemberID{r.swarmHuman()}
-			}
-			return owner(r)
-		},
+		resolvers: owner,
 		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			label := "Blocked"
-			if r.run.MissionRole == "worker" {
-				label = "Worker blocked"
-			}
-			item.Reason = label + ": " + strings.TrimPrefix(r.run.Reason, domain.BlockedReasonPrefix)
+			item.Reason = "Blocked: " + strings.TrimPrefix(r.run.Reason, domain.BlockedReasonPrefix)
 		},
 	},
 	{
@@ -471,7 +372,7 @@ var attentionRows = []attentionRow{
 			case strings.HasPrefix(reason, needsInputPrefix), strings.HasPrefix(reason, usageLimitPrefix):
 				item.Reason = plainReason(reason)
 			default:
-				item.Reason = "Open the run to see its request"
+				item.Reason = "Open the session to see its request"
 			}
 		},
 	},
@@ -497,7 +398,7 @@ var attentionRows = []attentionRow{
 		holds:      func(r *attentionRun) bool { return r.run.Activity == domain.ActivityFailed && r.run.OutcomeUnseen },
 		resolvers:  owner,
 		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			item.Reason = "Agent reported failure; review the result. Run remains open for follow-up."
+			item.Reason = "Agent reported failure; review the result. Session remains open for follow-up."
 			if r.run.Reason != "" && r.run.Reason != "agent reported failure" {
 				item.Reason = plainReason(r.run.Reason)
 			}
@@ -507,8 +408,8 @@ var attentionRows = []attentionRow{
 
 func (row attentionRow) applies(r *attentionRun, viewer attentionViewer) bool {
 	run := r.run
-	standing := row.swarm || r.live() && !r.paused || row.completed && run.Status == domain.RunCompleted
-	if !standing || !row.background && run.Mode == domain.LaunchHeadless || !row.workers && run.MissionRole == "worker" || !row.holds(r) {
+	standing := r.live() && !r.paused || row.completed && run.Status == domain.RunCompleted
+	if !standing || !row.background && run.Mode == domain.LaunchHeadless || !row.holds(r) {
 		return false
 	}
 	return row.admins && viewer.admin || slices.Contains(row.resolvers(r), viewer.id)
@@ -517,7 +418,7 @@ func (row attentionRow) applies(r *attentionRun, viewer attentionViewer) bool {
 func (row attentionRow) item(r *attentionRun, viewer attentionViewer) protocol.AttentionItem {
 	run := r.run
 	item := protocol.AttentionItem{
-		Kind: row.kind, RunID: string(run.ID), MissionID: string(run.MissionID), WorkspaceID: string(run.WorkspaceID),
+		Kind: row.kind, RunID: string(run.ID), WorkspaceID: string(run.WorkspaceID),
 		Title: push.RunTitle(run), Harness: run.Harness, Since: since(run.StatusChangedAt),
 	}
 	row.fill(r, viewer, &item)
@@ -531,25 +432,4 @@ func attentionItem(r *attentionRun, viewer attentionViewer) (protocol.AttentionI
 		}
 	}
 	return protocol.AttentionItem{}, false
-}
-
-// SwarmAttention is the first swarm row of the Needs you table that holds
-// for run, as the member it waits on sees it, and that member. Only a
-// swarm's current integrator carries one.
-func (s *Server) SwarmAttention(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-	if run.MissionRole != "integrator" || run.ArchivedAt != nil {
-		return nil, "", nil
-	}
-	r, err := s.attentionRun(ctx, run, nil, map[domain.MissionID]*domain.Mission{})
-	if err != nil {
-		return nil, "", err
-	}
-	for _, row := range attentionRows {
-		if row.swarm && row.holds(r) {
-			viewer := attentionViewer{id: row.resolvers(r)[0]}
-			item := row.item(r, viewer)
-			return &item, viewer.id, nil
-		}
-	}
-	return nil, "", nil
 }

@@ -57,7 +57,7 @@ func TestRunPatchSinceCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sinceStart.Text, "before.txt") || !strings.Contains(sinceStart.Text, "untracked.txt") {
-		t.Errorf("since the run started should list every change:\n%s", sinceStart.Text)
+		t.Errorf("since the session started should list every change:\n%s", sinceStart.Text)
 	}
 
 	r.e.StopDiffWatch(r.run)

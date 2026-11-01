@@ -8,7 +8,6 @@ import {
   FolderTree,
   History,
   LayoutGrid,
-  Waypoints,
   MonitorSmartphone,
   Settings,
   SquareTerminal,
@@ -32,8 +31,6 @@ export interface Surface {
 
 export function surfaces(cap: Capability, admin = false): Surface[] {
   const list: Surface[] = [{ name: 'board', label: 'Board', Icon: LayoutGrid, place: 'nav' }]
-  if (cap.hasMethod('mission.list'))
-    list.push({ name: 'missions', label: 'Swarms', Icon: Waypoints, place: 'nav' })
   if (cap.hasMethod('workspace.timeline'))
     list.push({ name: 'timeline', label: 'Activity', Icon: History, place: 'nav' })
   // A server older than insights.get still reports disk use, which Insights › System shows.

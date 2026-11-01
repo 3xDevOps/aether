@@ -33,7 +33,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
       >
         <DialogHeader className="px-4 pt-4 pb-3">
           <DialogTitle>Launch from a template</DialogTitle>
-          <DialogDescription>The filled-in task starts as a new run.</DialogDescription>
+          <DialogDescription>The filled-in task starts as a new session.</DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col border-t border-seam">
           {workspaceID ? (
@@ -54,7 +54,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
                     upsertRun(run)
                     onClose()
                     navigate('run', { runId: run.id })
-                    toast.success('Run launched')
+                    toast.success('Session launched')
                   } catch (err) {
                     setLaunching(false)
                     setError(`Launch failed: ${message(err)}`)

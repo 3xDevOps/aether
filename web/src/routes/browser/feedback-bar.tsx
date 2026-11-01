@@ -100,7 +100,7 @@ export function FeedbackBar({ run, agent, agentName }: { run: RunRecord; agent: 
         <p role="status" className={cn('min-w-0 flex-1', tone === 'failed' ? 'text-state-failed' : 'text-text')}>
           {text}{' '}
           <Button variant="link" size="sm" onClick={() => useStore.getState().navigate('run', { runId: run.id, view: 'session' })}>
-            Open the session
+            Open the chat
           </Button>
         </p>
         <Button variant="ghost" size="icon-sm" label="Dismiss" onClick={() => patchFeedback(run.id, { sent: undefined })}>
@@ -131,7 +131,7 @@ export function FeedbackBar({ run, agent, agentName }: { run: RunRecord; agent: 
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Discard {what}?</AlertDialogTitle>
-            <AlertDialogDescription>Nothing here has been sent to the agent, and discarded notes cannot be brought back. A screenshot stays in the run's captures.</AlertDialogDescription>
+            <AlertDialogDescription>Nothing here has been sent to the agent, and discarded notes cannot be brought back. A screenshot stays in the session's captures.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep</AlertDialogCancel>

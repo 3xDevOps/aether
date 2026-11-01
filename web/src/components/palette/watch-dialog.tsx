@@ -19,12 +19,7 @@ function useTargetTitle(target: WatchTarget | null): string {
     switch (target.kind) {
       case 'run': {
         const run = target.run_id ? s.runs[target.run_id] : undefined
-        return run ? `“${runLabel(run)}”` : 'this run'
-      }
-      case 'mission': {
-        const objective = target.mission_id ? s.missions[target.mission_id]?.objective : undefined
-        const line = objective?.split('\n').map((l) => l.trim()).find(Boolean)
-        return line ? `the swarm “${line}”` : 'this swarm'
+        return run ? `“${runLabel(run)}”` : 'this session'
       }
       case 'pr':
         return `pull request #${target.number}${target.repo ? ` in ${target.repo}` : ''}`
@@ -32,7 +27,7 @@ function useTargetTitle(target: WatchTarget | null): string {
   })
 }
 
-/** Watch a run, a swarm or a pull request; the server's receipt says what it will do. */
+/** Watch a run or a pull request; the server's receipt says what it will do. */
 export function WatchDialog({ client = api }: { client?: Api }) {
   const returnFocus = useReturnFocus()
   const close = useStore((s) => s.closePaletteDialog)

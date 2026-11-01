@@ -78,7 +78,7 @@ describe('the session stream client', () => {
     const refused = ScriptedSession.last()
     act(() => {
       refused.socket.onopen?.()
-      refused.socket.onmessage?.({ data: JSON.stringify({ ok: false, code: -32003, error: 'run control is held by another session' }) })
+      refused.socket.onmessage?.({ data: JSON.stringify({ ok: false, code: -32003, error: 'session control is held by another session' }) })
     })
     vi.advanceTimersByTime(0)
     expect(ScriptedSession.last().open().header()).toEqual({ after_seq: 0, control_session_id: 'tab-1' })
@@ -90,7 +90,7 @@ describe('the session stream client', () => {
     const session = ScriptedSession.last()
     act(() => {
       session.socket.onopen?.()
-      session.socket.onmessage?.({ data: JSON.stringify({ ok: false, code: -32602, error: 'run run_1 does not run its agent over ACP' }) })
+      session.socket.onmessage?.({ data: JSON.stringify({ ok: false, code: -32602, error: 'session run_1 does not run its agent over ACP' }) })
     })
     vi.advanceTimersByTime(60_000)
     expect(StubSocket.opened).toHaveLength(1)

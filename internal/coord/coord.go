@@ -8,11 +8,10 @@
 // Native harness hooks discover pending context without writing to terminals.
 //
 // The same socket carries run.report, a harness lifecycle hook. Durable
-// worker outcomes use coord.report and remain available after the request
+// outcomes use coord.report and remain available after the request
 // returns. Nothing here blocks, locks, or arbitrates. A send is authorized
-// by a swarm assignment, a live radar overlap (or its grace window), or the
-// sender owner's message permission on a live run in the same workspace;
-// it is size-capped, rate-limited, depth-capped, and stamped into the
+// by the sender owner's message permission on any live run on the server,
+// including a parent or child; it is size-capped, rate-limited, depth-capped, and stamped into the
 // workspace timeline;
 // beyond that the agents are on their own, and the radar chips remain the
 // human safety net.
@@ -51,16 +50,16 @@ var (
 	ErrNoEvidenceCapture = errors.New("coord: no evidence capture service is attached")
 	// ErrNoOutcomeSink is returned when a needs-input report arrives with no
 	// scheduler behind it.
-	ErrNoOutcomeSink = errors.New("coord: no run outcome sink is attached")
+	ErrNoOutcomeSink = errors.New("coord: no session outcome sink is attached")
 	// ErrCannotAsk is returned by OutcomeSink.ReportNeedsInput for a run
 	// that cannot take its user's answer.
-	ErrCannotAsk = errors.New("a Background run cannot ask its user; report blocked or failure instead")
+	ErrCannotAsk = errors.New("a Background session cannot ask its user; report blocked or failure instead")
 	// ErrRunFinished is returned by an OutcomeSink for a run that already
 	// finished or is ending.
-	ErrRunFinished = errors.New("the run already finished or is ending; its outcome stands, so this report cannot take effect")
+	ErrRunFinished = errors.New("the session already finished or is ending; its outcome stands, so this report cannot take effect")
 	// ErrReportSuperseded is returned by an OutcomeSink for a report older
 	// than one the run already recorded, or than its relaunch.
-	ErrReportSuperseded = errors.New("a newer report or a relaunch of this run already replaced this report; report again with a new idempotency key")
+	ErrReportSuperseded = errors.New("a newer report or a relaunch of this session already replaced this report; report again with a new idempotency key")
 	// ErrHumanOpen is returned by an OutcomeSink for an answered report
 	// while the run's question or blocker still waits on a member.
 	ErrHumanOpen = errors.New("your needs-input or blocked report is still open and stays shown; end your turn without another report")
@@ -89,23 +88,6 @@ type Runs interface {
 	ListLiveRunSummaries(ctx context.Context, workspace domain.WorkspaceID, taskBytes int) ([]*store.RunSummary, error)
 }
 
-// MissionService is the optional mission authority behind the coordination
-// socket. It is deliberately expressed only in protocol/domain/store types:
-// the mission package can implement it without importing coord, while this
-// package remains the one run-authenticated transport boundary.
-//
-// A nil service means an ordinary run. Mission errors are authoritative:
-// callers must not silently fall back to radar authorization or ordinary
-// reporting when a current mission assignment is stale.
-type MissionService interface {
-	Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error)
-	Peers(context.Context, domain.RunID) ([]protocol.CoordPeer, error)
-	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
-	ValidateReport(context.Context, domain.RunID, store.CoordOutcome) error
-	ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error
-	ReportRecipient(context.Context, domain.RunID) (domain.RunID, error)
-}
-
 // DevelopmentService supplies only implemented run-scoped development methods.
 // The transport binds identity, applies its explicit allowlist, and owns request
 // cancellation. Capabilities must describe current availability for this run.
@@ -128,8 +110,7 @@ type RunWaits interface {
 	Wait(run domain.RunID, activity domain.RunActivity) *domain.RunWait
 }
 
-// Peers is the conflict radar's read side. Mission authorization, when
-// configured, is evaluated by MissionService before radar fallback.
+// Peers is the conflict radar's read side.
 type Peers interface {
 	Overlaps(ctx context.Context) ([]overlap.Entry, error)
 }
@@ -147,20 +128,16 @@ type Config struct {
 	RetainsContainer func(context.Context, domain.RunID) bool
 	// Mail persists the mailbox.
 	Mail store.MessageStore
-	// Bus carries the radar's overlap changes and mission changes in and
+	// Bus carries the radar's overlap changes in and
 	// timeline entries out.
 	Bus events.Bus
 	// Peers is the radar index sends are authorized against.
 	Peers Peers
-	// Mission is the optional current mission authority. It extends peer
-	// authorization and owns mission task/worker methods and report
-	// validation/reconciliation; nil preserves ordinary coordination.
-	Mission MissionService
 	// Children is the optional child-run authority. It owns the child
 	// methods, lets a parent and child message each other, and routes a
 	// child's reports to its parent.
 	Children ChildService
-	// Development is independent of conflict and mission policy. Nil advertises
+	// Development is independent of conflict policy. Nil advertises
 	// no development methods and leaves their dispatch unavailable.
 	Development DevelopmentService
 	// Memory is team memory, independent of conflict policy like
@@ -185,12 +162,18 @@ type Config struct {
 	// Outcomes is where an ordinary run's published coord.report lands: the
 	// scheduler. Nil leaves the run's status to its process and hooks.
 	Outcomes OutcomeSink
+	// Sudo runs a Default run's sudo commands (the scheduler); nil leaves
+	// run.sudo unavailable.
+	Sudo SudoRunner
 	// Evidence captures and durably retains the run state before coord.report
 	// accepts an outcome. It is required for coord.report.
 	Evidence EvidenceCapture
 	// EvidencePackets loads retained packets for pending publication replay.
 	EvidencePackets EvidencePacketLookup
-	// Disabled blocks conflict coordination, peer/mailbox operations, mission
+	// Controlled reports whether a member holds the run's control; mail to
+	// a child run they hold is shown as held.
+	Controlled func(domain.RunID) bool
+	// Disabled blocks conflict coordination, peer/mailbox operations,
 	// actions and lifecycle reporting, but not identity or development transport.
 	Disabled bool
 	// Grace overrides DefaultGrace.
@@ -227,7 +210,6 @@ type Service struct {
 	inboxConsumers    map[domain.RunID]int
 	reportLocks       map[domain.RunID]*sync.Mutex
 	enhancedWoken     map[domain.RunID]map[string]struct{}
-	enhancedNotices   map[domain.RunID]missionNotice
 	enhancedOpens     map[domain.RunID]uint64
 	enhancedRefusals  map[domain.RunID]wakeRefusal
 	enhancedOverlaps  map[domain.RunID]string
@@ -297,7 +279,6 @@ func New(cfg Config) (*Service, error) {
 		inboxConsumers:    make(map[domain.RunID]int),
 		reportLocks:       make(map[domain.RunID]*sync.Mutex),
 		enhancedWoken:     make(map[domain.RunID]map[string]struct{}),
-		enhancedNotices:   make(map[domain.RunID]missionNotice),
 		enhancedOpens:     make(map[domain.RunID]uint64),
 		enhancedRefusals:  make(map[domain.RunID]wakeRefusal),
 		enhancedOverlaps:  make(map[domain.RunID]string),
@@ -311,7 +292,7 @@ func New(cfg Config) (*Service, error) {
 
 // Start recovers the host-side listeners left by the previous process and,
 // while coordination is enabled, begins consuming the radar's overlap
-// changes and mission changes. ctx bounds only the setup; the service runs
+// changes. ctx bounds only the setup; the service runs
 // until Close.
 func (s *Service) Start(ctx context.Context) error {
 	if err := s.recoverListeners(ctx); err != nil {
@@ -321,10 +302,10 @@ func (s *Service) Start(ctx context.Context) error {
 		return nil
 	}
 	sub, err := s.cfg.Bus.Subscribe(ctx, events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeRunOverlap, events.TypeMissionChanged, events.TypeRunProtected, events.TypeRunController}},
+		Filter: events.Filter{Types: []events.Type{events.TypeRunOverlap, events.TypeRunProtected, events.TypeRunController}},
 	})
 	if err != nil {
-		return fmt.Errorf("coord: subscribe to overlap, mission, protection and control changes: %w", err)
+		return fmt.Errorf("coord: subscribe to overlap, protection and control changes: %w", err)
 	}
 	s.mu.Lock()
 	if s.closed {
@@ -384,17 +365,12 @@ func (s *Service) Close() error {
 	return errors.Join(errs...)
 }
 
-// consume folds the radar's overlap changes into grace bookkeeping, offers
-// changed missions to their enhanced integrators, and retries a run's owed
+// consume folds the radar's overlap changes into grace bookkeeping, and retries a run's owed
 // wake when its protection or controller changes. Authorization
 // also re-reads the live index, so a dropped event cannot extend a grace
 // window beyond the last observed overlap.
 func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 	for e := range sub.Events() {
-		if p, ok := e.Payload.(events.MissionChangedPayload); ok {
-			s.wakeMissionIntegrators(p.MissionID)
-			continue
-		}
 		switch e.Payload.(type) {
 		case events.RunProtectedPayload, events.RunControllerPayload:
 			s.WakeIdle(e.RunID)
@@ -489,7 +465,7 @@ func (s *Service) wakeContext(parent context.Context, run domain.RunID, timeout 
 }
 
 func runClosing(method string) *protocol.Error {
-	return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": run is closing"}
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": session is closing"}
 }
 func (s *Service) isRunClosing(run domain.RunID) bool {
 	s.mu.Lock()
@@ -515,7 +491,7 @@ func (s *Service) reportLock(run domain.RunID) *sync.Mutex {
 	return lock
 }
 
-// unavailable denies conflict/mission/report actions before they touch the
+// unavailable denies conflict/report actions before they touch the
 // mailbox, radar, or timeline. coord.status remains the identity bootstrap.
 func unavailable(method string) *protocol.Error {
 	return &protocol.Error{

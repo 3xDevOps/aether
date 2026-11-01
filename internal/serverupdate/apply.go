@@ -141,7 +141,7 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	slog.Info("serverupdate: binaries replaced", "version", pending.Version, "paths", rec.Binaries)
 	if scheduled && !s.busyNow(ctx).Idle() {
 		if err := unswap(s.cfg.StateDir, rec); err != nil {
-			return nil, s.fail(ctx, pending, fmt.Errorf("a run started during the download, and undoing the swap failed: %w", err))
+			return nil, s.fail(ctx, pending, fmt.Errorf("a session started during the download, and undoing the swap failed: %w", err))
 		}
 		s.release()
 		s.publish(ctx, pending.RequestedBy, events.ServerUpdateScheduled, pending.Version, errBecameBusy.Error())
@@ -159,7 +159,7 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 
 // errBecameBusy is a scheduled update undone because the server stopped
 // being idle while the release downloaded.
-var errBecameBusy = errors.New("a run started while the release downloaded; the update applies at the next idle moment")
+var errBecameBusy = errors.New("a session started while the release downloaded; the update applies at the next idle moment")
 
 // retryable marks a failure of the network or the release host, which a
 // scheduled update retries at a later idle poll.

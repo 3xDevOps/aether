@@ -17,7 +17,7 @@ import { memberID, seedWorkspace } from './harness/setup'
  */
 const drops = 4
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('a run whose session is missing never reads as offline while it waits', async ({
   page,
@@ -50,7 +50,7 @@ test('a run whose session is missing never reads as offline while it waits', asy
       return
     }
     if (opened <= drops + 1) {
-      ws.send(JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }))
+      ws.send(JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no terminal for session' }))
       ws.close({ code: 1008, reason: 'attach refused' })
     }
   })
@@ -68,15 +68,15 @@ test('a run whose session is missing never reads as offline while it waits', asy
   await alice.api.rpc('run.launch', {
     workspace_id: workspaces[0].id,
     harness: 'claude',
-    task: 'a run whose session is late',
+    task: 'a session whose terminal is late',
   })
 
   await page.goto(alice.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /session is late/ }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /terminal is late/ }).click()
   // The wait only applies to a run that can still gain a session, so the test
   // is only about what it says while the run is one.
   await expect(
-    page.locator('header').filter({ hasText: 'a run whose session is late' }),
+    page.locator('header').filter({ hasText: 'a session whose terminal is late' }),
   ).toContainText('Working')
 
   // Every dropped socket, the refusal, and the reconnect that refusal earns.
@@ -92,6 +92,6 @@ test('a run whose session is missing never reads as offline while it waits', asy
 
   // The wait is the whole of what is on screen: no refusal to read, and
   // nothing to press that could not help.
-  await expect(page.getByText('ptyhost: no session for run')).toHaveCount(0)
+  await expect(page.getByText('ptyhost: no terminal for session')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0)
 })

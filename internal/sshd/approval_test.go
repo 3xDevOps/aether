@@ -132,7 +132,7 @@ func TestPresenceTypingPublishesEphemeralEvent(t *testing.T) {
 	select {
 	case ev := <-sub.Events():
 		if ev.ActorID != bob.ID || ev.RunID != e.run.ID || ev.Seq != 0 {
-			t.Fatalf("typing event = actor %s run %s seq %d, want Bob on Ada's run with no sequence", ev.ActorID, ev.RunID, ev.Seq)
+			t.Fatalf("typing event = actor %s session %s seq %d, want Bob on Ada's run with no sequence", ev.ActorID, ev.RunID, ev.Seq)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for the typing event")

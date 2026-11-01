@@ -140,11 +140,11 @@ export function OnboardingRoute({ params, client = api }: RouteProps & { client?
               onSetup={setSubStep}
               onNext={(skipped) => {
                 useStore.getState().setOnboardingAgentSkipped(skipped)
-                setStep(onboardingStepIndex('First run'))
+                setStep(onboardingStepIndex('First session'))
               }}
             />
           )}
-          {current === 'First run' && (
+          {current === 'First session' && (
             <FirstRunStep
               client={client}
               workspace={workspace}

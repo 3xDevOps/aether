@@ -1375,16 +1375,16 @@ func TestLifecycleErrorsAndLastOutput(t *testing.T) {
 	h, _ := newTestHost(t)
 	ctx := context.Background()
 	if err := h.Attach(ctx, SessionKey("nope"), AttachClient{Member: "m", Cols: 80, Rows: 24}, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrNoSession) {
-		t.Fatalf("Attach unknown run = %v", err)
+		t.Fatalf("Attach unknown session = %v", err)
 	}
 	if err := h.Inject(ctx, SessionKey("nope"), "a", "", "hi", "\r"); !errors.Is(err, ErrNoSession) {
-		t.Fatalf("Inject unknown run = %v", err)
+		t.Fatalf("Inject unknown session = %v", err)
 	}
 	if err := h.StopSession(ctx, SessionKey("nope")); !errors.Is(err, ErrNoSession) {
-		t.Fatalf("StopSession unknown run = %v", err)
+		t.Fatalf("StopSession unknown session = %v", err)
 	}
 	if _, ok := h.LastOutput(SessionKey("nope")); ok {
-		t.Fatal("LastOutput for unknown run reported a session")
+		t.Fatal("LastOutput for unknown session reported a session")
 	}
 
 	att := newFakeAtt()
@@ -2136,12 +2136,12 @@ func TestStartSessionTitleCallbackUsesSessionKey(t *testing.T) {
 	if err := h.StartSession(context.Background(), key, att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	att.writeOutput(t, "\x1b]0;run title\x07")
+	att.writeOutput(t, "\x1b]0;session title\x07")
 
 	select {
 	case gotTitle := <-got:
-		if gotTitle.key != key || gotTitle.title != "run title" {
-			t.Fatalf("title callback = %#v, want key %q and title %q", gotTitle, key, "run title")
+		if gotTitle.key != key || gotTitle.title != "session title" {
+			t.Fatalf("title callback = %#v, want key %q and title %q", gotTitle, key, "session title")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for title callback")
@@ -2187,7 +2187,7 @@ func TestReplayTranscript(t *testing.T) {
 	}
 
 	if _, err := h.Replay("run-never"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Replay unknown run = %v, want os.ErrNotExist", err)
+		t.Fatalf("Replay unknown session = %v, want os.ErrNotExist", err)
 	}
 }
 

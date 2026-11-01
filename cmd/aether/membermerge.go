@@ -240,7 +240,7 @@ func printMergePlan(out io.Writer, plan protocol.MemberMergePlan) {
 		for _, d := range m.Devices {
 			_, _ = fmt.Fprintf(out, "   device %q: %s\n", d.Label, d.Status)
 		}
-		_, _ = fmt.Fprintf(out, "   %d runs, %d schedules\n", m.Runs, m.Schedules)
+		_, _ = fmt.Fprintf(out, "   %d sessions, %d schedules\n", m.Runs, m.Schedules)
 	}
 	_, _ = fmt.Fprintf(out, "\nthe merged member signs in with: %s, as %s\n", strings.Join(plan.SignIns, ", "), plan.Role)
 	if plan.RoleWithKeepAdmin != "" {

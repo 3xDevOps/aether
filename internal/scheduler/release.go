@@ -25,7 +25,7 @@ func (s *Scheduler) Release(ctx context.Context, run domain.RunID, _ domain.Memb
 			}
 			if !current.Status.Terminal() || s.pending[run] != nil {
 				s.mu.Unlock()
-				return fmt.Errorf("%w: release requires a finished run (%s)", ErrInvalidTransition, current.Status)
+				return fmt.Errorf("%w: release requires a finished session (%s)", ErrInvalidTransition, current.Status)
 			}
 			sc, err := s.readSidecar(run)
 			if errors.Is(err, os.ErrNotExist) {
@@ -38,7 +38,7 @@ func (s *Scheduler) Release(ctx context.Context, run domain.RunID, _ domain.Memb
 			}
 			if sc.RunID != string(run) {
 				s.mu.Unlock()
-				return fmt.Errorf("scheduler: retained sidecar run ID mismatch")
+				return fmt.Errorf("scheduler: retained sidecar session ID mismatch")
 			}
 			s.rememberRetentionLocked(current)
 			if sc.DestroyPending && sc.RunUser == "" {
@@ -60,7 +60,7 @@ func (s *Scheduler) Release(ctx context.Context, run domain.RunID, _ domain.Memb
 				}
 				if !current.Status.Terminal() {
 					s.mu.Unlock()
-					return fmt.Errorf("%w: release requires a finished run (%s)", ErrInvalidTransition, current.Status)
+					return fmt.Errorf("%w: release requires a finished session (%s)", ErrInvalidTransition, current.Status)
 				}
 				latest, readErr := s.readSidecar(run)
 				if errors.Is(readErr, os.ErrNotExist) {
@@ -118,7 +118,7 @@ func (s *Scheduler) Release(ctx context.Context, run domain.RunID, _ domain.Memb
 		if !current.Status.Terminal() {
 			s.mu.Unlock()
 			entry.lifecycleMu.Unlock()
-			return fmt.Errorf("%w: release requires a finished run (%s)", ErrInvalidTransition, current.Status)
+			return fmt.Errorf("%w: release requires a finished session (%s)", ErrInvalidTransition, current.Status)
 		}
 		retained, destroyPending := entry.retained, entry.destroyPending
 		s.mu.Unlock()

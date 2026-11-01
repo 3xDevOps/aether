@@ -5,6 +5,7 @@ package egress
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -14,15 +15,20 @@ import (
 // again.
 const Port = 3128
 
-// Defaults is a workspace's host list until an admin edits it.
-// docs/environments.md says which agent or tool needs each.
-var Defaults = []string{
+// AgentHosts are the hosts the shipped agents sign in and talk to, and the
+// whole list an isolated run reaches.
+var AgentHosts = []string{
 	"api.anthropic.com", "claude.ai", "claude.com", "platform.claude.com",
 	"api.openai.com", "auth.openai.com", "chatgpt.com",
 	"api.githubcopilot.com", "*.individual.githubcopilot.com", "*.business.githubcopilot.com", "*.enterprise.githubcopilot.com", "copilot-proxy.githubusercontent.com",
 	"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com", "accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com",
 	"*.cursor.sh", "cursor.com",
 	"opencode.ai", "models.dev",
+}
+
+// Defaults is a workspace's host list until an admin edits it.
+// docs/environments.md says which agent or tool needs each.
+var Defaults = append(slices.Clone(AgentHosts),
 	"github.com", "api.github.com", "codeload.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "raw.githubusercontent.com",
 	"registry.npmjs.org",
 	"pypi.org", "files.pythonhosted.org",
@@ -30,7 +36,7 @@ var Defaults = []string{
 	"crates.io", "index.crates.io", "static.crates.io",
 	"registry-1.docker.io", "auth.docker.io", "production.cloudflare.docker.com", "production.cloudfront.docker.com", "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com",
 	"archive.ubuntu.com", "security.ubuntu.com", "ports.ubuntu.com",
-}
+)
 
 func NormalizeHost(entry string) (string, error) {
 	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(entry)), ".")
@@ -59,6 +65,13 @@ func allowed(hosts []string, host string) bool {
 		}
 	}
 	return false
+}
+
+func runHosts(run *domain.Run, ws *domain.Workspace) []string {
+	if run.Permission == domain.PermissionIsolated {
+		return AgentHosts
+	}
+	return Hosts(ws.Environment.Egress)
 }
 
 func Hosts(policy domain.EgressPolicy) []string {

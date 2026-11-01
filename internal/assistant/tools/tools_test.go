@@ -140,7 +140,7 @@ func TestConfirmedApproveAndDecline(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeDenied || !strings.Contains(err.Error(), "declined by the member") {
 		t.Fatalf("decline: %v", err)
 	}
-	if got.Summary != `Stop run run-1 ("Fix login")` || got.Method != protocol.MethodRunKill {
+	if got.Summary != `Stop session run-1 ("Fix login")` || got.Method != protocol.MethodRunKill {
 		t.Fatalf("confirmation: %+v", got)
 	}
 	for _, m := range fc.called() {
@@ -221,14 +221,14 @@ func TestConfirmedCallsNameAnotherMembersRun(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeDenied {
 		t.Fatalf("inject: %v", err)
 	}
-	if want := `Send to run run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
+	if want := `Send to session run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
 		t.Fatalf("inject summary %q, owner %q, want %q by Grace", got.Summary, got.OtherOwner, want)
 	}
 	err = coordtransport.Call(t.Context(), sock, protocol.MethodRunKill, protocol.RunIDParams{RunID: "run-1"}, nil)
 	if rpcCode(t, err) != protocol.CodeDenied {
 		t.Fatalf("kill: %v", err)
 	}
-	if want := `Stop run run-1 ("Fix login"), owned by Grace`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
+	if want := `Stop session run-1 ("Fix login"), owned by Grace`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
 		t.Fatalf("kill summary %q, owner %q, want %q by Grace", got.Summary, got.OtherOwner, want)
 	}
 	for _, m := range fc.called() {
@@ -241,8 +241,8 @@ func TestConfirmedCallsNameAnotherMembersRun(t *testing.T) {
 		return errors.New("no")
 	})
 	_ = coordtransport.Call(t.Context(), sock, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "hi"}, nil)
-	if want := `Send to run run-1 ("Fix login"): "hi"`; got.Summary != want || got.OtherMember || got.OtherOwner != "" {
-		t.Fatalf("own run summary %q, owner %q, want %q and no other owner", got.Summary, got.OtherOwner, want)
+	if want := `Send to session run-1 ("Fix login"): "hi"`; got.Summary != want || got.OtherMember || got.OtherOwner != "" {
+		t.Fatalf("own session summary %q, owner %q, want %q and no other owner", got.Summary, got.OtherOwner, want)
 	}
 }
 
@@ -292,17 +292,13 @@ func (c *launchCaller) Call(ctx context.Context, method string, params json.RawM
 	switch method {
 	case protocol.MethodRunLaunch:
 		return json.RawMessage(`{"run":{"id":"run-9"}}`), nil
-	case protocol.MethodMissionCreate:
-		return json.RawMessage(`{"mission":{"id":"mis-1","current_integrator_run_id":"run-int"}}`), nil
 	case protocol.MethodRunRelaunch:
 		return json.RawMessage(`{"run":{"id":"run-1"}}`), nil
-	case protocol.MethodMissionReplaceIntegrator:
-		return json.RawMessage(`{"mission":{"id":"mis-1"},"run_id":"run-int2"}`), nil
 	}
 	return c.fakeCaller.Call(ctx, method, params)
 }
 
-func TestFollowIsToldOnlyOfSuccessfulLaunchesSwarmsAndMessages(t *testing.T) {
+func TestFollowIsToldOnlyOfSuccessfulLaunchesAndMessages(t *testing.T) {
 	var followed []string
 	var verdict error
 	caller := &launchCaller{fail: map[string]bool{}}
@@ -337,20 +333,11 @@ func TestFollowIsToldOnlyOfSuccessfulLaunchesSwarmsAndMessages(t *testing.T) {
 	if perr := call(protocol.MethodRunInject, inject); perr != nil {
 		t.Fatal(perr)
 	}
-	swarm := protocol.MissionCreateParams{WorkspaceID: "ws-1", Objective: "o", Integrator: protocol.MissionIntegrator{Harness: "claude", Mode: "acp"},
-		ExecutionChoices: []protocol.MissionExecutionChoice{{Harness: "claude", Mode: "acp"}}}
-	if perr := call(protocol.MethodMissionCreate, swarm); perr != nil {
-		t.Fatal(perr)
-	}
 	if perr := call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: "run-1"}); perr != nil {
 		t.Fatal(perr)
 	}
-	if perr := call(protocol.MethodMissionReplaceIntegrator, protocol.MissionReplaceIntegratorParams{MissionID: "mis-1", ExpectedGeneration: 1,
-		Integrator: protocol.MissionIntegrator{AccountMemberID: "m1", Harness: "claude", Mode: "acp"}, IdempotencyKey: "k"}); perr != nil {
-		t.Fatal(perr)
-	}
 	_ = call(protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-1"})
-	if want := []string{"run-9", "run-1", "run-int", "run-1", "run-int2"}; !slices.Equal(followed, want) {
+	if want := []string{"run-9", "run-1", "run-1"}; !slices.Equal(followed, want) {
 		t.Fatalf("followed %v, want %v", followed, want)
 	}
 }
@@ -371,35 +358,6 @@ func TestViewContextIsServedFromTheMembersOwnSnapshot(t *testing.T) {
 	}
 }
 
-// A connector's mission.create names no actor: the caller is the swarm's
-// accountable human and the account of every agent that names none.
-// Naming accounts to launch on is the server's to check.
-func TestPrepareMissionCreate(t *testing.T) {
-	got, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(`{"workspace_id":"ws-1","objective":"o","integrator":{"harness":"claude","mode":"tui"},`+
-		`"execution_choices":[{"harness":"claude","mode":"tui"},{"account_member_id":"m2","harness":"codex","mode":"acp"}],"idempotency_key":"k",`+
-		`"fallback_account_member_ids":["m3"]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := protocol.DecodeParams[protocol.MissionCreateParams](got)
-	if err != nil || p.AccountableHumanID != "m1" || p.Integrator.AccountMemberID != "m1" || p.ExecutionChoices[0].AccountMemberID != "m1" ||
-		p.ExecutionChoices[1].AccountMemberID != "m2" || p.IdempotencyKey != "k" || !slices.Equal(p.FallbackAccountMemberIDs, []string{"m3"}) {
-		t.Fatalf("prepared mission.create = %s %v", got, err)
-	}
-	if _, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(`{"accountable_human_id":"m2"}`)); err == nil || !strings.Contains(err.Error(), "not accepted") {
-		t.Errorf("mission.create naming accountable_human_id = %v, want refused", err)
-	}
-	for params, field := range map[string]string{
-		`{"workspace_id":"ws-1","no_falback":true}`:                       `"no_falback"`,
-		`{"integrator":{"harness":"claude","efort":"high"}}`:              `"efort"`,
-		`{"execution_choices":[{"harness":"claude","mode":"tui","x":1}]}`: `"x"`,
-	} {
-		if _, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(params)); err == nil || err.Error() != "unknown param "+field+"; this server does not support it" {
-			t.Errorf("mission.create %s = %v, want %s refused", params, err, field)
-		}
-	}
-}
-
 // Prepare passes exactly the account fields through and refuses every other
 // member id, which would make the call act for or on another member.
 func TestPrepareAccountFields(t *testing.T) {
@@ -417,7 +375,6 @@ func TestPrepareAccountFields(t *testing.T) {
 		{protocol.MethodRunList, `{"account_member_id":"m2"}`, false},
 		{protocol.MethodTemplateLaunch, `{"account_member_id":"m2"}`, false},
 		{protocol.MethodRunLaunch, `{"to_member_id":"m2"}`, false},
-		{protocol.MethodMissionCreate, `{"accountable_human_id":"m2"}`, false},
 	} {
 		_, err := Prepare("m1", c.method, json.RawMessage(c.params))
 		if (err == nil) != c.ok {
@@ -443,14 +400,16 @@ func TestLaunchCardQuotesTheTaskFirstLine(t *testing.T) {
 	}
 }
 
-// A template launch's card shows the task its params fill in, and the
-// approved launch is pinned to the version the card showed; a launch pinned
-// to an older version gets no card.
+// A template launch's card shows the whole task its params fill in and the
+// assistant's reason as their own fields, neither sent to the server, and
+// the approved launch is pinned to the version the card showed; a launch
+// pinned to an older version gets no card.
 func TestTemplateLaunchIsPinnedToItsCard(t *testing.T) {
 	fc := &fakeCaller{}
 	var cards []string
+	var card protocol.AssistantConfirmation
 	s := &Server{Caller: fc, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
-		cards = append(cards, c.Summary)
+		cards, card = append(cards, c.Summary), c
 		return nil
 	}}
 	launch := func(method string, params any) *protocol.Error {
@@ -458,12 +417,19 @@ func TestTemplateLaunchIsPinnedToItsCard(t *testing.T) {
 		_, perr := s.dispatch(t.Context(), protocol.Request{Method: method, Params: raw})
 		return perr
 	}
-	if perr := launch(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}}); perr != nil {
+	if perr := launch(protocol.MethodTemplateLaunch, map[string]any{"workspace_id": "ws-1", "name": "triage", "params": map[string]string{"issue": "42"},
+		"reason": "the member asked to triage 42"}); perr != nil {
 		t.Fatal(perr)
 	}
 	sent, err := protocol.DecodeParams[protocol.TemplateLaunchParams](fc.params[protocol.MethodTemplateLaunch])
-	if err != nil || sent.ExpectedVersion != "v1" || sent.Params["issue"] != "42" || !strings.HasSuffix(cards[0], `: "triage issue 42…"`) {
+	if err != nil || sent.ExpectedVersion != "v1" || sent.Params["issue"] != "42" || !strings.Contains(cards[0], `: "triage issue 42…"`) {
 		t.Fatalf("template.launch sent %+v (%v) after card %q, want pinned to v1", sent, err, cards[0])
+	}
+	if card.Task != "triage issue 42\nthen label it" || card.Reason != "the member asked to triage 42" {
+		t.Fatalf("template.launch card task %q, reason %q; want the whole rendered task and the reason", card.Task, card.Reason)
+	}
+	if raw := string(fc.params[protocol.MethodTemplateLaunch]); strings.Contains(raw, "then label it") || strings.Contains(raw, "reason") {
+		t.Fatalf("template.launch reached the server as %s, want neither the card's task nor its reason", raw)
 	}
 	delete(fc.params, protocol.MethodTemplateLaunch)
 	perr := launch(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"},
@@ -490,7 +456,7 @@ func (c *replayCaller) Call(ctx context.Context, method string, params json.RawM
 	case p.ReplayOnly && p.IdempotencyKey == "k-done":
 		return json.RawMessage(`{"run":{"id":"run-first"},"replayed":true}`), nil
 	case p.ReplayOnly:
-		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "template.launch: no run was launched under idempotency_key"}
+		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "template.launch: no session was launched under idempotency_key"}
 	}
 	return json.RawMessage(`{"run":{"id":"run-new"}}`), nil
 }
@@ -513,7 +479,7 @@ func TestTemplateLaunchRetryReplaysBeforeTheCard(t *testing.T) {
 	got, perr := launch(protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}, ExpectedVersion: "v0",
 		IdempotencyKey: "k-done"})
 	if perr != nil || !strings.Contains(string(got), "run-first") || len(cards) != 0 || !slices.Equal(followed, []string{"run-first"}) {
-		t.Fatalf("retry of a stale launch = %s, %v with %d cards, followed %v; want the first run, no card", got, perr, len(cards), followed)
+		t.Fatalf("retry of a stale launch = %s, %v with %d cards, followed %v; want the first session, no card", got, perr, len(cards), followed)
 	}
 	if _, perr = launch(protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}, ExpectedVersion: "v0",
 		IdempotencyKey: "k-new"}); perr == nil || perr.Code != protocol.CodeConflict || len(cards) != 0 {

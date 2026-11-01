@@ -225,6 +225,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		MemoryLimitBytes: limits.MemoryBytes,
 		PidsLimit:        limits.Pids,
 		NestedDocker:     true,
+		Sudo:             plan.Sudo,
 	}
 	spec.Fingerprint = terminalFingerprint(spec, s.cfg.StandardImage)
 	cid, image, err := s.startOrCreateTerminal(ctx, kept, spec)
@@ -718,7 +719,7 @@ func (s *Scheduler) attachTerminalSession(ctx context.Context, member domain.Mem
 	}
 	if sessionErr := s.cfg.PTY.StartSession(ctx, ptyhost.TerminalSession(member, terminalTabMain), att); sessionErr != nil {
 		_ = att.Close()
-		return fmt.Errorf("scheduler: start terminal session: %w", sessionErr)
+		return fmt.Errorf("scheduler: start terminal: %w", sessionErr)
 	}
 	return nil
 }

@@ -18,7 +18,7 @@ prose, and repetition.
 The reader is a software developer who is new to Aether. Assume working
 fluency with git, a shell, containers, and coding-agent CLIs such as Claude
 Code, Codex, and opencode. Do not assume any knowledge of Aether's own
-concepts - workspace, run, harness, tool snapshot - and introduce each one
+concepts - workspace, session, harness, tool snapshot - and introduce each one
 where it first appears.
 
 In practice, across docs, CLI output, and dashboard copy:

@@ -30,30 +30,25 @@ function fraction(count: InsightsSuccessCount, unit: string): string {
 }
 
 export function Tiles({ result, agentNames }: { result: InsightsResult; agentNames: Record<string, string> }) {
-  const { swarms, success, outcomes, cost } = result
-  const rate = percent(success.runs.succeeded + success.swarms.succeeded, success.runs.finished + success.swarms.finished)
+  const { success, outcomes, cost } = result
+  const rate = percent(success.runs.succeeded, success.runs.finished)
   const top = cost.by_agent[0]
   return (
     <div className="@container">
-      <div className="grid grid-cols-1 gap-3 @min-[30rem]:grid-cols-2 @min-[64rem]:grid-cols-4">
-        <StatTile label="Runs / swarms completed" value={`${plural(outcomes.runs.done, 'run')} / ${plural(outcomes.swarms.done, 'swarm')}`}>
-          <span>{plural(outcomes.runs.failed, 'run')} failed, {plural(outcomes.runs.abandoned, 'run')} abandoned</span>
-          <span>{plural(outcomes.swarms.failed, 'swarm')} failed, {plural(outcomes.swarms.abandoned, 'swarm')} abandoned</span>
+      <div className="grid grid-cols-1 gap-3 @min-[30rem]:grid-cols-2 @min-[64rem]:grid-cols-3">
+        <StatTile label="Sessions completed" value={plural(outcomes.runs.done, 'session')}>
+          <span>{plural(outcomes.runs.failed, 'session')} failed, {plural(outcomes.runs.abandoned, 'session')} abandoned</span>
         </StatTile>
         <StatTile label="Success rate" value={rate === null ? '—' : `${rate}%`}>
-          <span>Runs: {fraction(success.runs, 'run')}</span>
-          <span>Swarms: {fraction(success.swarms, 'swarm')}</span>
-        </StatTile>
-        <StatTile label="Swarm tasks accepted" value={swarms.tasks_accepted.toLocaleString()}>
-          <span>{plural(swarms.agents, 'agent')} in swarms started in the last 7 days</span>
+          <span>{fraction(success.runs, 'session')}</span>
         </StatTile>
         <StatTile label="Total tokens used" value={tokens(cost.total_tokens)}>
           {top && cost.total_tokens > 0 ? (
             <span>{agentNames[top.harness] ?? top.harness} used {percent(top.total_tokens, cost.total_tokens)}% of the {tokens(cost.total_tokens)}</span>
           ) : (
-            <span>{outcomes.runs.done + outcomes.runs.failed + outcomes.runs.abandoned > 0 ? 'No tokens reported' : 'No runs ended'}</span>
+            <span>{outcomes.runs.done + outcomes.runs.failed + outcomes.runs.abandoned > 0 ? 'No tokens reported' : 'No sessions ended'}</span>
           )}
-          {cost.unmetered_runs > 0 && <span>{plural(cost.unmetered_runs, 'run')} did not report tokens</span>}
+          {cost.unmetered_runs > 0 && <span>{plural(cost.unmetered_runs, 'session')} did not report tokens</span>}
         </StatTile>
       </div>
     </div>
@@ -78,7 +73,7 @@ export function StatsSection({
     <Section title={title}>
       {load.kind === 'loading' && skeleton && (
         <div aria-hidden className="@container flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3 @min-[64rem]:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 @min-[64rem]:grid-cols-3">
             {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-28 rounded-panel" />)}
           </div>
           <Skeleton className="h-52" />
@@ -99,7 +94,7 @@ export function StatsSection({
 function FinishedRow({ run, workspace, agent, prError }: { run: InsightsRun; workspace: string; agent: string; prError?: string }) {
   const navigate = useStore((s) => s.navigate)
   const { label, tone } = outcome(run)
-  const title = run.title || 'Untitled run'
+  const title = run.title || 'Untitled session'
   const pr = /\/pull\/(\d+)/.exec(run.pr_url)?.[1]
   return (
     <Card>
@@ -141,7 +136,7 @@ export function FinishedList({
   const shown = all ? runs : runs.slice(0, 10)
   return (
     <Section title="Finished work">
-      {runs.length === 0 && <p className="text-ui text-muted">No runs ended in the last 7 days.</p>}
+      {runs.length === 0 && <p className="text-ui text-muted">No sessions ended in the last 7 days.</p>}
       {runs.length > 0 && (
         <ul className="flex min-w-0 flex-col gap-2">
           {shown.map((run) => (
@@ -154,7 +149,7 @@ export function FinishedList({
       {shown.length < runs.length && (
         <Button variant="secondary" className="self-start" onClick={() => setAll(true)}>Show all {runs.length}</Button>
       )}
-      {runs.length >= 50 && <p className="text-ui-sm text-muted">The 50 most recent runs that ended in the last 7 days.</p>}
+      {runs.length >= 50 && <p className="text-ui-sm text-muted">The 50 most recent sessions that ended in the last 7 days.</p>}
     </Section>
   )
 }
@@ -211,11 +206,11 @@ export function Time({ result }: { result: InsightsResult }) {
   return (
     <Section title="Time">
       {d.runs_measured === 0 ? (
-        <p className="text-ui text-muted">No runs ended in this period, so there is nothing to measure.</p>
+        <p className="text-ui text-muted">No sessions ended in this period, so there is nothing to measure.</p>
       ) : (
         <>
           <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Figure label="Median run" value={duration(d.median_run_seconds)} />
+            <Figure label="Median session" value={duration(d.median_run_seconds)} />
             <Figure label="Slowest 10% take over" value={duration(d.p90_run_seconds)} />
             {d.state_runs_measured > 0 && (
               <>
@@ -226,10 +221,10 @@ export function Time({ result }: { result: InsightsResult }) {
             )}
           </dl>
           <p className="text-ui-sm text-muted">
-            Run time is from start to end for {plural(d.runs_measured, 'run')} that ended in this period.
+            Session time is from start to end for {plural(d.runs_measured, 'session')} that ended in this period.
             {d.state_runs_measured < d.runs_measured && (since
-              ? ` Working and waiting time is measured for ${d.state_runs_measured} of ${d.runs_measured} runs; Aether records this from ${sinceLabel(since)} on.`
-              : ' Working and waiting time is not recorded yet; Aether measures it for runs from now on.')}
+              ? ` Working and waiting time is measured for ${d.state_runs_measured} of ${d.runs_measured} sessions; Aether records this from ${sinceLabel(since)} on.`
+              : ' Working and waiting time is not recorded yet; Aether measures it for sessions from now on.')}
           </p>
         </>
       )}
@@ -248,14 +243,14 @@ export function Usage({ result }: { result: InsightsResult }) {
       <CollapsibleContent>
         <div className="flex min-w-0 flex-col gap-2 px-1 pt-2">
           {runs === 0 ? (
-            <p className="text-ui text-muted">No runs ended in this period.</p>
+            <p className="text-ui text-muted">No sessions ended in this period.</p>
           ) : cost.metered_runs === 0 ? (
-            <p className="text-ui text-muted">No cost reported for {plural(runs, 'run')} (headless Claude reports cost; other agents do not).</p>
+            <p className="text-ui text-muted">No cost reported for {plural(runs, 'session')} (headless Claude reports cost; other agents do not).</p>
           ) : (
             <>
               <p className="text-ui">
                 <span className="font-medium tabular-nums">{amount}</span>
-                <span className="text-muted"> metered for {cost.metered_runs} of {plural(runs, 'run')} (headless Claude reports cost; other agents do not)</span>
+                <span className="text-muted"> metered for {cost.metered_runs} of {plural(runs, 'session')} (headless Claude reports cost; other agents do not)</span>
               </p>
               <p className="text-ui-sm tabular-nums text-muted">
                 {plural(cost.input_tokens, 'input token')} · {plural(cost.output_tokens, 'output token')}
@@ -263,7 +258,7 @@ export function Usage({ result }: { result: InsightsResult }) {
             </>
           )}
           <p className="text-ui-sm text-muted">
-            Cost is reported, not enforced: nothing here stops a run.{' '}
+            Cost is reported, not enforced: nothing here stops a session.{' '}
             <Button variant="quiet" onClick={() => navigate('settings', { section: 'usage' })}>Subscription quota is in Settings › Usage</Button>
           </p>
         </div>

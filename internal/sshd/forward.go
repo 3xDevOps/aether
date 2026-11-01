@@ -59,7 +59,7 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		if err := checkSteer(ctx, s.cfg.Store, member, runID); err != nil {
 			reason := err.Error()
 			if errors.Is(err, store.ErrNotFound) {
-				reason = "run not found"
+				reason = "session not found"
 			}
 			rejectDirectTCPIP(nc, ssh.Prohibited, reason)
 			return
@@ -67,11 +67,11 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		var err error
 		addr, err = s.cfg.Runs.ContainerAddr(ctx, runID)
 		if err != nil || addr == "" {
-			rejectDirectTCPIP(nc, ssh.Prohibited, "run has no live container")
+			rejectDirectTCPIP(nc, ssh.Prohibited, "session has no live container")
 			return
 		}
 	default:
-		rejectDirectTCPIP(nc, ssh.Prohibited, "port forwarding targets must be run:<run-id> or terminal")
+		rejectDirectTCPIP(nc, ssh.Prohibited, "port forwarding targets must be run:<session-id> or terminal")
 		return
 	}
 	dialer := net.Dialer{Timeout: 10 * time.Second}

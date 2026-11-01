@@ -92,7 +92,7 @@ describe('the Enhanced composer gate', () => {
       expect(enhancedBlock({ ...open, run: parked, canReopen: false })).toBeNull()
       expect(composerBlock({ ...parked, outcome_unseen: false }, true, false)).toBeNull()
       expect(composerBlock({ ...parked, status: 'abandoned' }, true, true))
-        .toBe('This run has finished. Relaunch it to continue the chat and files.')
+        .toBe('This session has finished. Relaunch it to continue the chat and files.')
     }
   })
 
@@ -105,9 +105,9 @@ describe('composerBlock for a finished run', () => {
   const finished = (reason: string) => toRecord(run({ status: 'merged', reason }))
 
   it.each([
-    ['retained container reclaimed for disk space', 'This run has finished. Its container was removed early because disk space was low.'],
-    ['retained container expired', 'This run has finished. Its container was removed when it expired.'],
-    ['closed', 'This run has finished.'],
+    ['retained container reclaimed for disk space', 'This session has finished. Its container was removed early because disk space was low.'],
+    ['retained container expired', 'This session has finished. Its container was removed when it expired.'],
+    ['closed', 'This session has finished.'],
   ])('says why a released container is gone: %s', (reason, text) => {
     expect(composerBlock(finished(reason), true, false)).toBe(text)
   })

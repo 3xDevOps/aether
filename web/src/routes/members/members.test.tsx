@@ -308,7 +308,7 @@ describe('members page', () => {
   it('confirms a removal and keeps a refusal in the dialog', async () => {
     const client = fakeApi({
       memberRemove: vi.fn(async () => {
-        throw new ApiError(409, 'member has running runs')
+        throw new ApiError(409, 'member has running sessions')
       }),
     })
     seed()
@@ -318,7 +318,7 @@ describe('members page', () => {
     const dialog = within(await screen.findByRole('alertdialog', { name: 'Remove Bob?' }))
     fireEvent.click(dialog.getByRole('button', { name: 'Remove' }))
 
-    expect(await dialog.findByText('member has running runs')).toBeDefined()
+    expect(await dialog.findByText('member has running sessions')).toBeDefined()
     expect(client.memberRemove).toHaveBeenCalledWith(bob.id)
   })
 

@@ -58,7 +58,7 @@ export function board(s: RunsInput): BoardData {
       label: groupLabel[key],
       cards: cards[key],
     })),
-    archivedCards: runTrees(archivedRows(s), s.ctx).sort(
+    archivedCards: runTrees(archivedRows(s)).sort(
       (a, b) => at(b.run.archived_at ?? '') - at(a.run.archived_at ?? ''),
     ),
     hiddenByMine:

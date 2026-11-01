@@ -43,7 +43,7 @@ func TestRunLaunchReplaysAnIdempotencyKey(t *testing.T) {
 	}
 	again, perr := launch("build it", "chat-42")
 	if perr != nil || !again.Replayed || again.Run.ID != first.Run.ID || launches() != 1 {
-		t.Fatalf("retry = %+v, %v after %d launches; want run %s replayed", again, perr, launches(), first.Run.ID)
+		t.Fatalf("retry = %+v, %v after %d launches; want session %s replayed", again, perr, launches(), first.Run.ID)
 	}
 	if _, perr := launch("build something else", "chat-42"); perr == nil || perr.Code != protocol.CodeConflict {
 		t.Fatalf("same key, other params = %v, want CodeConflict", perr)
@@ -52,7 +52,7 @@ func TestRunLaunchReplaysAnIdempotencyKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, perr := launch("build it", "chat-42"); perr == nil || perr.Code != protocol.CodeNotFound || launches() != 1 {
-		t.Fatalf("retry after the run was deleted = %v after %d launches, want CodeNotFound and no launch", perr, launches())
+		t.Fatalf("retry after the session was deleted = %v after %d launches, want CodeNotFound and no launch", perr, launches())
 	}
 	if _, perr := launch("build it", ""); perr != nil {
 		t.Fatal(perr)
@@ -87,7 +87,7 @@ func TestRunLaunchReplaysDuringProvisioning(t *testing.T) {
 	select {
 	case got := <-replayed:
 		if bound, _, err := e.store.LaunchReceipt(t.Context(), e.member.ID, "k-slow"); err != nil || !got.Replayed || got.Run.ID != string(bound) {
-			t.Errorf("retry during provisioning = %+v, want run %s replayed (%v)", got, bound, err)
+			t.Errorf("retry during provisioning = %+v, want session %s replayed (%v)", got, bound, err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("a retry waited for the first launch's provisioning")
@@ -138,11 +138,11 @@ func TestRunLaunchReceiptOutlivesAFailedLaunch(t *testing.T) {
 	e.runs.failAdmitted = nil
 	left, _, err := e.store.LaunchReceipt(t.Context(), e.member.ID, "k-failed")
 	if err != nil || left == "" {
-		t.Fatalf("receipt after a failed launch = %q, %v; want the run it left", left, err)
+		t.Fatalf("receipt after a failed launch = %q, %v; want the session it left", left, err)
 	}
 	replay, perr := launch("provision fails", "k-failed")
 	if perr != nil || !replay.Replayed || replay.Run.ID != string(left) || launches() != 1 {
-		t.Fatalf("retry after a failed launch = %+v, %v after %d launches; want run %s replayed", replay, perr, launches(), left)
+		t.Fatalf("retry after a failed launch = %+v, %v after %d launches; want session %s replayed", replay, perr, launches(), left)
 	}
 
 	fingerprint, err := launchFingerprint(protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: string(e.ws.ID), Task: "crashed", Harness: "claude"})
@@ -154,7 +154,7 @@ func TestRunLaunchReceiptOutlivesAFailedLaunch(t *testing.T) {
 	}
 	relaunched, perr := launch("crashed", "k-pending")
 	if perr != nil || relaunched.Replayed || launches() != 2 {
-		t.Fatalf("retry of a reservation with no run = %+v, %v after %d launches; want one new launch", relaunched, perr, launches())
+		t.Fatalf("retry of a reservation with no session = %+v, %v after %d launches; want one new launch", relaunched, perr, launches())
 	}
 	if bound, _, err := e.store.LaunchReceipt(t.Context(), e.member.ID, "k-pending"); err != nil || string(bound) != relaunched.Run.ID {
 		t.Fatalf("reservation bound to %q, %v; want %s", bound, err, relaunched.Run.ID)
@@ -162,7 +162,7 @@ func TestRunLaunchReceiptOutlivesAFailedLaunch(t *testing.T) {
 
 	e.srv.cfg.Store = failingReceipts{Store: e.store, err: errors.New("disk I/O error")}
 	if _, perr := launch("unrecorded", "k-unrecorded"); perr == nil || !strings.Contains(perr.Message, "disk I/O error") || !strings.Contains(perr.Message, "started") {
-		t.Fatalf("launch whose receipt write failed = %v, want the write error naming the started run", perr)
+		t.Fatalf("launch whose receipt write failed = %v, want the write error naming the started session", perr)
 	}
 }
 
@@ -190,6 +190,6 @@ func TestRunLaunchOutlivesItsCaller(t *testing.T) {
 	}
 	close(release)
 	if perr := <-done; perr != nil {
-		t.Fatalf("launch whose caller went away = %v, want the run", perr)
+		t.Fatalf("launch whose caller went away = %v, want the session", perr)
 	}
 }

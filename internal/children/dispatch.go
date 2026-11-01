@@ -5,59 +5,51 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// dispatch starts queued children while their tree has free slots, the
-// parent with the fewest busy children first, then the oldest request.
+// dispatch starts queued children while their parent has free slots, the
+// oldest request first.
 func (s *Service) dispatch(ctx context.Context) error {
 	queued, err := s.cfg.Store.ChildrenInState(ctx, domain.ChildQueued)
 	if err != nil {
 		return err
 	}
-	trees := map[string][]*domain.ChildReservation{}
-	var order []string
+	parents := map[domain.RunID][]*domain.ChildReservation{}
+	var order []domain.RunID
 	for _, c := range queued {
-		if trees[c.TreeKey] == nil {
-			order = append(order, c.TreeKey)
+		if parents[c.ParentRunID] == nil {
+			order = append(order, c.ParentRunID)
 		}
-		trees[c.TreeKey] = append(trees[c.TreeKey], c)
+		parents[c.ParentRunID] = append(parents[c.ParentRunID], c)
 	}
-	for _, key := range order {
-		list := trees[key]
+	for _, parent := range order {
+		list := parents[parent]
 		limits, err := s.cfg.Store.WorkspaceChildLimits(ctx, list[0].WorkspaceID)
 		if err != nil {
 			return err
 		}
-		counts, err := s.cfg.Store.ChildCounts(ctx, key)
+		counts, err := s.cfg.Store.ChildCounts(ctx, parent)
 		if err != nil {
 			return err
 		}
-		busy := map[domain.RunID]int{}
-		for _, c := range list {
-			if _, ok := busy[c.ParentRunID]; !ok {
-				if busy[c.ParentRunID], err = s.cfg.Store.BusyChildren(ctx, c.ParentRunID); err != nil {
-					return err
-				}
-			}
-		}
-		for free := limits.MaxLive - counts.Busy; free > 0 && len(list) > 0; {
-			sort.SliceStable(list, func(i, j int) bool { return busy[list[i].ParentRunID] < busy[list[j].ParentRunID] })
+		for free := limits.MaxLive - counts.Busy; free > 0 && len(list) > 0; free-- {
 			c := list[0]
 			list = list[1:]
 			if err := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildLaunching, "", domain.ChildQueued); err != nil {
 				if errors.Is(err, store.ErrConflict) {
+					free++
 					continue
 				}
 				return err
 			}
-			busy[c.ParentRunID]++
-			free--
 			go s.launch(ctx, c)
 		}
 	}
@@ -69,33 +61,30 @@ func (s *Service) dispatch(ctx context.Context) error {
 func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	refuse := func(reason string) {
 		if err := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildRefused, reason, domain.ChildLaunching); err != nil {
-			slog.Warn("children: refuse child", "child", c.RunID, "error", err)
+			slog.Warn("subsessions: refuse subsession", "child", c.RunID, "error", err)
 			return
 		}
 		s.publish(ctx, c.ParentRunID, "")
 		// A child that never started has no run to send from.
 		_ = s.notify(ctx, c.ParentRunID, c.ParentRunID,
-			fmt.Sprintf("Child run %s (%s) did not start: %s", c.RunID, c.Purpose, reason), "", "child-refused:"+string(c.RunID))
+			fmt.Sprintf("Subsession %s (%s) did not start: %s", c.RunID, c.Purpose, reason), "child-refused:"+string(c.RunID))
 	}
 	p, err := s.resolve(ctx, c.ParentRunID)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		_ = s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "the parent run was deleted", domain.ChildLaunching)
+		_ = s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "the parent session was deleted", domain.ChildLaunching)
 		return
 	case err != nil:
 		refuse(err.Error())
 		return
 	case p.parent.Status.Terminal() && !c.Detached:
-		_ = s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "the parent run ended before it started", domain.ChildLaunching)
+		_ = s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "the parent session ended before it started", domain.ChildLaunching)
 		return
 	case p.refusal != "":
 		refuse(p.refusal)
 		return
 	case p.owner != c.OwnerID:
-		refuse(fmt.Sprintf("the parent run now belongs to %s, not %s, who asked for it", p.owner, c.OwnerID))
-		return
-	case p.mission == nil && c.AccountID != c.OwnerID && !p.settings.SharedWhenMissing:
-		refuse("\"Use subscriptions shared with me when I don't have my own\" was turned off before this child started")
+		refuse(fmt.Sprintf("the parent session now belongs to %s, not %s, who asked for it", p.owner, c.OwnerID))
 		return
 	}
 	if s.cfg.Cost != nil {
@@ -116,9 +105,10 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	defer unlock()
 	// A handoff takes this lock, so the parent read here is the one the
 	// launch runs under.
-	if parent, getErr := s.cfg.Store.GetRun(ctx, c.ParentRunID); getErr != nil || parent.MemberID != c.OwnerID || parent.Status.Terminal() {
+	parent, getErr := s.cfg.Store.GetRun(ctx, c.ParentRunID)
+	if getErr != nil || parent.MemberID != c.OwnerID || parent.Status.Terminal() {
 		unlock()
-		refuse("the parent run ended or changed owner before this child started")
+		refuse("the parent session ended or changed owner before this subsession started")
 		return
 	}
 	requested, err := s.cfg.Authorize(ctx, s.cfg.Store, c.OwnerID, string(c.AccountID))
@@ -131,16 +121,20 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		return s.cfg.Runs.FallbackLaunchable(ctx, c.OwnerID, requested, account, c.Harness, c.Mode)
 	})
 	if excluded != nil {
-		slog.Warn("children: fallback accounts left out of a child launch", "child", c.RunID, "error", excluded)
+		slog.Warn("subsessions: fallback accounts left out of a subsession launch", "child", c.RunID, "error", excluded)
 	}
 	created := false
+	extras := make([]domain.WorkspaceID, len(p.parent.Extras))
+	for i, repo := range p.parent.Extras {
+		extras[i] = repo.WorkspaceID
+	}
 	_, err = s.cfg.Runs.LaunchWithOptions(ctx, c.WorkspaceID, c.OwnerID, account, c.Task, c.Harness, c.Mode, domain.LaunchOptions{
-		Model: c.Model, RequestedAccount: requested, Fallback: c.Fallback, ReservedRunID: c.RunID,
-		FromCommit: c.BaseCommit, FromBranch: c.BaseBranch, Admitted: unlock,
+		Model: c.Model, Permission: parent.Permission, RequestedAccount: requested, Fallback: c.Fallback, ReservedRunID: c.RunID,
+		FromCommit: c.BaseCommit, FromBranch: c.BaseBranch, ExtraWorkspaces: extras, Admitted: unlock,
 		Created: func(domain.RunID) {
 			created = true
 			if stateErr := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildStarted, "", domain.ChildLaunching); stateErr != nil {
-				slog.Warn("children: mark child started", "child", c.RunID, "error", stateErr)
+				slog.Warn("subsessions: mark subsession started", "child", c.RunID, "error", stateErr)
 			}
 		},
 	})
@@ -152,8 +146,15 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	s.Kick()
 }
 
-// settle stops the attached children of ended parents and tells a parent
-// once when a child ended without a report.
+// maxNoticeSummary bounds the report summary in a parent's notice, which a
+// message cuts at 4 KiB, so the child's branch after it survives.
+const maxNoticeSummary = 3000
+
+// settle ends the attached children of ended parents and tells a parent
+// once when a child ended without a final report. A parent a person closed
+// takes its children with it: finished ones are closed as it was, live ones
+// are stopped and closed. A parent that ended otherwise detaches children
+// that already reported and stops the rest.
 func (s *Service) settle(ctx context.Context) error {
 	list, err := s.cfg.Store.ChildrenToSettle(ctx)
 	if err != nil {
@@ -167,9 +168,49 @@ func (s *Service) settle(ctx context.Context) error {
 		}
 		child, childErr := s.cfg.Store.GetRun(ctx, c.RunID)
 		childLive := childErr == nil && !child.Status.Terminal()
-		if !c.Detached && (gone || parent.Status.Terminal()) && (c.State == domain.ChildQueued || childLive) {
+		parentEnded := gone || parent.Status.Terminal()
+		// A person closed the parent when they chose its final disposition
+		// or accepted its completion; a kill also ends a run abandoned but
+		// leaves its finished children for review.
+		closed := !gone && (parent.Status == domain.RunMerged ||
+			(parent.Status == domain.RunAbandoned && parent.Reason != "killed") ||
+			(parent.Status == domain.RunCompleted && parent.Review == domain.ReviewAccepted))
+		if !c.Detached && parentEnded && closed && childErr == nil {
+			// A child still provisioning cannot be closed; stop it first.
+			if child.Status == domain.RunQueued || child.Status == domain.RunProvisioning {
+				if stopErr := s.stop(ctx, c); stopErr != nil {
+					slog.Warn("subsessions: stop the subsession of a closed session", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
+				}
+				continue
+			}
+			// A child already in a final state has nothing to close.
+			if child.Status.Final() {
+				if _, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID); err != nil {
+					return err
+				}
+				continue
+			}
+			// The child's result was delivered to the parent and is part of
+			// its work: close it as the parent was.
+			var closeErr error
+			if parent.Status == domain.RunCompleted {
+				_, closeErr = s.cfg.Runs.Review(ctx, c.RunID, c.OwnerID, protocol.RunReviewComplete, false)
+			} else {
+				closeErr = s.cfg.Runs.CloseRun(ctx, c.RunID, c.OwnerID, parent.Status)
+			}
+			if closeErr != nil {
+				slog.Warn("subsessions: close the subsession of a closed session", "child", c.RunID, "parent", c.ParentRunID, "error", closeErr)
+				continue
+			}
+			if _, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID); err != nil {
+				return err
+			}
+			s.publish(ctx, c.RunID, "")
+			continue
+		}
+		if !c.Detached && parentEnded && (c.State == domain.ChildQueued || childLive) {
 			// A child that already delivered its result keeps it for review
-			// instead of being killed with its parent.
+			// instead of being stopped with its parent.
 			reported, err := s.cfg.Store.ChildReported(ctx, c.RunID)
 			if err != nil {
 				return err
@@ -181,8 +222,8 @@ func (s *Service) settle(ctx context.Context) error {
 				s.publish(ctx, c.RunID, "")
 				continue
 			}
-			if stopErr := s.stop(ctx, c, ""); stopErr != nil {
-				slog.Warn("children: stop the child of an ended run", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
+			if stopErr := s.stop(ctx, c); stopErr != nil {
+				slog.Warn("subsessions: stop the subsession of an ended session", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
 			}
 			continue
 		}
@@ -198,14 +239,18 @@ func (s *Service) settle(ctx context.Context) error {
 		if _, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		} else if err != nil {
-			reason := ""
-			if child.Reason != "" {
-				reason = ": " + child.Reason
-			}
 			// The notice's key makes a resend after a failed mark a no-op.
-			if err := s.notify(ctx, c.RunID, c.ParentRunID,
-				fmt.Sprintf("Child run %s (%s) ended %s without a report%s", c.RunID, c.Purpose, child.Status, reason),
-				"", "child-ended:"+string(c.RunID)); err != nil {
+			msg := fmt.Sprintf("Subsession session %s (%s) ended %s without a final report", c.RunID, c.Purpose, child.Status)
+			if child.Reason != "" {
+				msg += ": " + child.Reason
+			}
+			if latest, err := s.cfg.Store.LatestReportOfAnyOutcome(ctx, c.RunID); err == nil {
+				msg += fmt.Sprintf("\nIts latest report, %s at %s: %s", latest.Outcome, latest.CreatedAt.UTC().Format(time.RFC3339), truncateSummary(latest.Summary))
+			}
+			if child.Branch != "" {
+				msg += "\nIts branch: " + child.Branch
+			}
+			if err := s.notify(ctx, c.RunID, c.ParentRunID, msg, "child-ended:"+string(c.RunID)); err != nil {
 				continue
 			}
 		}
@@ -222,4 +267,55 @@ func finished(r *domain.Run) bool {
 		return true
 	}
 	return false
+}
+
+// idleNoticeAfter is how long a child may sit quiet before its parent is
+// told.
+const idleNoticeAfter = time.Hour
+
+// noticeIdle tells each parent once per quiet spell about an attached child
+// that has waited, answered or asked its owner for over idleNoticeAfter. The
+// notice's key holds the spell's start, so new work starts a new spell. A run
+// a person paused is left alone.
+func (s *Service) noticeIdle(ctx context.Context) error {
+	now := s.cfg.Now()
+	idle, err := s.cfg.Store.IdleChildren(ctx, now.Add(-idleNoticeAfter))
+	if err != nil {
+		return err
+	}
+	for _, c := range idle {
+		if s.cfg.Runs.Paused(c.Child.RunID) {
+			continue
+		}
+		// The body names a growing duration, so a resend under the same key
+		// would be refused as a different message.
+		key := "child-idle:" + string(c.Child.RunID) + ":" + c.Since.UTC().Format(time.RFC3339Nano)
+		if _, err := s.cfg.Store.GetRunMessageByIdempotency(ctx, c.Child.RunID, key); err == nil {
+			continue
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		// The commands come before the reason and report, which a long
+		// question can push past the mailbox's body limit.
+		msg := fmt.Sprintf("Subsession %s (%s) has been %s for %s.", c.Child.RunID, c.Child.Purpose, c.Run.Activity, now.Sub(c.Since).Round(time.Minute)) +
+			"\nCheck what it is doing, then wake it with an instruction: aether-internal send --to " + string(c.Child.RunID) +
+			" --body <text>, or stop it: aether-internal subsession cancel --run-id " + string(c.Child.RunID)
+		if c.Run.Reason != "" {
+			msg += "\nIts status reason: " + truncateSummary(c.Run.Reason)
+		}
+		if latest, err := s.cfg.Store.LatestReportOfAnyOutcome(ctx, c.Child.RunID); err == nil {
+			msg += fmt.Sprintf("\nIts latest report, %s at %s: %s", latest.Outcome, latest.CreatedAt.UTC().Format(time.RFC3339), truncateSummary(latest.Summary))
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		_ = s.notify(ctx, c.Child.RunID, c.Child.ParentRunID, msg, key)
+	}
+	return nil
+}
+
+func truncateSummary(summary string) string {
+	if len(summary) > maxNoticeSummary {
+		return strings.ToValidUTF8(summary[:maxNoticeSummary], "") + "…"
+	}
+	return summary
 }

@@ -44,14 +44,9 @@ function AccountOf({ id }: { id: unknown }) {
   return text(id) === self ? 'your account' : `${name ?? 'another member'}'s account`
 }
 
-function MissionName({ id }: { id: unknown }) {
-  const objective = useStore((s) => s.missions[text(id)]?.objective)
-  return objective ? `“${objective.split('\n')[0]}”` : 'a swarm'
-}
-
 const statusWords: Record<Exclude<RunStatus, 'running' | 'needs-attention'>, string> = {
-  queued: 'Run queued',
-  provisioning: 'Run starting',
+  queued: 'Session queued',
+  provisioning: 'Session starting',
   completed: 'Completed',
   merged: 'Merged',
   abandoned: 'Closed without merging',
@@ -64,7 +59,7 @@ function statusLine(p: Payload): string {
   const reason = text(p.reason)
   if (to === 'abandoned' && reason === 'killed') return 'Stopped'
   const live = to === 'running' || to === 'needs-attention'
-  const word = live ? stateLabel[liveStateOf(to, text(p.state) as RunActivity)] : statusWords[to] ?? 'Run changed state'
+  const word = live ? stateLabel[liveStateOf(to, text(p.state) as RunActivity)] : statusWords[to] ?? 'Session changed state'
   if (!reason || (to === 'running' && reason === 'agent resumed')) return word
   const plain = plainReason(reason)
   return `${word}: ${live ? plain.charAt(0).toLowerCase() + plain.slice(1) : plain}`
@@ -95,7 +90,7 @@ function roomLine(p: Payload): ReactNode {
       return state ? <>A message from <Who id={p.actor_id} object /> {state}</> : <>{who} messaged the agent</>
     }
     default:
-      return <>{who} posted on the run</>
+      return <>{who} posted on the session</>
   }
 }
 
@@ -106,15 +101,15 @@ function timelineLine(p: Payload, actor: string): ReactNode {
     case 'steer':
       return <>{who} messaged the agent{message && <>: <Quote>{bounded(message, 240)}</Quote></>}</>
     case 'pause':
-      return <>{who} paused the run</>
+      return <>{who} paused the session</>
     case 'resume':
-      return <>{who} resumed the run</>
+      return <>{who} resumed the session</>
     case 'kill':
-      return <>{who} stopped the run</>
+      return <>{who} stopped the session</>
     case 'handoff':
-      return <>{who} handed the run to <Who id={message} fallback="another member" object /></>
+      return <>{who} handed the session to <Who id={message} fallback="another member" object /></>
     case 'co-author':
-      return <>{who} steered the run and is now a co-author</>
+      return <>{who} steered the session and is now a co-author</>
     case 'report':
       return reportLine(p)
     case 'note':
@@ -151,7 +146,7 @@ function agentLine(p: Payload): string {
     case 'subagent':
       return `Started a subagent${detail ? `: ${detail}` : ''}`
     case 'session':
-      return 'The agent started its session'
+      return 'The agent started'
     default:
       return detail || 'Agent activity'
   }
@@ -160,11 +155,11 @@ function agentLine(p: Payload): string {
 const presenceWords: Record<string, string> = {
   online: 'came online',
   offline: 'went offline',
-  watching: 'opened the run',
+  watching: 'opened the session',
 }
 
 const updateWords: Record<string, (version: string) => string> = {
-  scheduled: (v) => `Server update${v} scheduled for when no run is active`,
+  scheduled: (v) => `Server update${v} scheduled for when no session is active`,
   applying: (v) => `Downloading the server update${v}`,
   restarting: (v) => `Server restarting${v}`,
   failed: (v) => `Server update${v} failed`,
@@ -178,8 +173,8 @@ function updateLine(p: Payload): string {
 }
 
 const captureWords: Record<string, string> = {
-  finish: "Saved the run's results",
-  handoff: 'Saved the run for a handoff',
+  finish: "Saved the session's results",
+  handoff: 'Saved the session for a handoff',
   report: "Saved evidence for the agent's report",
 }
 
@@ -198,8 +193,8 @@ const profileWords: Record<string, string> = {
 
 // An absent or empty `with` means the run's overlaps cleared.
 function overlapLine(peers: unknown): string {
-  if (!Array.isArray(peers) || peers.length === 0) return 'No longer edits the same files as another run'
-  return `Edits the same files as ${peers.length} other ${peers.length === 1 ? 'run' : 'runs'}`
+  if (!Array.isArray(peers) || peers.length === 0) return 'No longer edits the same files as another session'
+  return `Edits the same files as ${peers.length} other ${peers.length === 1 ? 'session' : 'sessions'}`
 }
 
 function budgetLine(p: Payload): string {
@@ -233,7 +228,7 @@ function retentionLine(p: Payload): ReactNode {
 const memoryWords: Record<string, string> = {
   add: 'added a team memory note',
   rewrite: 'rewrote a team memory note',
-  answer: 'recorded a swarm answer in team memory',
+  answer: 'recorded an answer in team memory',
   supersede: 'replaced a team memory note',
   pin: 'pinned a team memory note',
   unpin: 'unpinned a team memory note',
@@ -257,15 +252,15 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.input': (p) => Array.isArray(p.pending_inputs) && p.pending_inputs.length > 0
     ? `The agent is waiting on ${p.pending_inputs.length === 1 ? 'an answer' : `${p.pending_inputs.length} answers`}`
     : "The agent's questions were answered",
-  'run.deleted': () => 'Run deleted',
+  'run.deleted': () => 'Session deleted',
   'workspace.deleted': () => 'Workspace deleted',
   'run.children': (p, e) => {
-    if (p.detached) return 'Detached from its parent run'
-    if (p.children === 'on') return <><Who id={e.actor_id} /> allowed child runs for this run</>
-    if (p.children === 'off') return <><Who id={e.actor_id} /> turned child runs off for this run</>
-    return p.child_refused ? 'The agent tried to start a child run while child runs were off' : 'Child runs follow the owner’s setting'
+    if (p.detached) return 'Detached from its parent session'
+    if (p.children === 'on') return <><Who id={e.actor_id} /> allowed subsessions for this session</>
+    if (p.children === 'off') return <><Who id={e.actor_id} /> turned subsessions off for this session</>
+    return 'Subsessions follow the owner’s setting'
   },
-  'run.protected': (p, e) => <><Who id={e.actor_id} /> {p.protected ? 'protected the run' : 'removed the run’s protection'}</>,
+  'run.protected': (p, e) => <><Who id={e.actor_id} /> {p.protected ? 'protected the session' : 'removed the session’s protection'}</>,
   'run.controller': (p, e) => {
     if (p.member_id) return <><Who id={p.member_id} /> took control</>
     return e.actor_id ? <><Who id={e.actor_id} /> released control</> : 'Control released'
@@ -275,11 +270,11 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.usage_limit': (p) => (text(p.message) ? `Usage limit reached: ${bounded(p.message, 160)}` : 'Usage limit reached'),
   'run.model': (p) => <>Model set to <Quote>{bounded(p.model, 160)}</Quote></>,
   'run.effort': (p) => <>Effort set to <Quote>{bounded(p.effort, 160)}</Quote></>,
-  'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the run' : 'restored the run'}</>,
-  'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished run</>,
-  'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished run</>,
+  'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the session' : 'restored the session'}</>,
+  'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished session</>,
+  'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished session</>,
   'run.review': (p, e) => (
-    <><Who id={e.actor_id} fallback="The owner" /> {text(p.review) === 'later' ? 'chose Not yet on the finished task' : 'marked the run complete'}</>
+    <><Who id={e.actor_id} fallback="The owner" /> {text(p.review) === 'later' ? 'chose Not yet on the finished task' : 'marked the session complete'}</>
   ),
   'run.title': (p) => <>Agent set the title to <Quote>{bounded(p.title, 160)}</Quote></>,
   'run.agent': (p) => agentLine(p),
@@ -292,12 +287,12 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'workspace.timeline': (p, e) => timelineLine(p, e.actor_id),
   'workspace.presence': (p, e) => <><Who id={e.actor_id} /> {presenceWords[text(p.state)] ?? 'changed presence'}</>,
   'workspace.budget': (p) => budgetLine(p),
-  'git.branch': (p) => `Branch ${text(p.branch) || 'of the run'} moved${text(p.commit) ? ` to ${text(p.commit).slice(0, 7)}` : ''}`,
+  'git.branch': (p) => `Branch ${text(p.branch) || 'of the session'} moved${text(p.commit) ? ` to ${text(p.commit).slice(0, 7)}` : ''}`,
   'run.pr': (p) => `Pull request${typeof p.number === 'number' ? ` #${p.number}` : ''} ${p.merged_at ? 'merged' : text(p.state).toLowerCase() || 'changed'}`,
   'sync.conflict': (p) => `Live sync paused: ${files(p.files)} changed on both sides`,
   'server.update': (p) => updateLine(p),
   'workspace.room_message': (p) => roomLine(p),
-  'workspace.evidence_packet': (p) => captureWords[text(p.trigger)] ?? 'Saved evidence for the run',
+  'workspace.evidence_packet': (p) => captureWords[text(p.trigger)] ?? 'Saved evidence for the session',
   'coord.message': (p) => (
     <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5">
       <Participants from={text(p.from_run_id)} to={text(p.to_run_id)} />
@@ -305,8 +300,6 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     </span>
   ),
   'coord.message.acked': () => 'An agent read its message',
-  'mission.changed': (p) => (p.deleted ? 'A swarm was deleted' : <>Swarm <MissionName id={p.mission_id} /> updated</>),
-  'integration.changed': (p) => <>Swarm <MissionName id={p.mission_id} /> integration {text(p.state) || 'changed'}</>,
   'member.changed': (p, e) => <MemberRenamed member={p.member_id} actor={e.actor_id} name={p.display_name} />,
   'member.merged': (p) => <>Merged a member into <Who id={p.survivor_id} object /></>,
   'member.device': (p) => deviceWords[text(p.status)] ?? 'A device changed',

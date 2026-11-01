@@ -10,7 +10,7 @@ const output: RunRepoCommandOutput = { exit_code: 0, truncated: false }
 const status: RunGitStatusResult = {
   branch: 'aether/reviewed', head: 'a'.repeat(40), detached: false, unborn: false,
   changes: [{ path: 'selected.txt', index: ' ', worktree: 'M', untracked: false, conflicted: false }],
-  truncated: false, account_member_id: serverInfo.member.id, account_name: 'Run account', identity: 'reviewed-login',
+  truncated: false, account_member_id: serverInfo.member.id, account_name: 'Session account', identity: 'reviewed-login',
   remotes: [{ name: 'fork', fetch_urls: ['https://github.com/fork/project.git'], push_urls: ['https://github.com/fork/project.git'] }], output,
 }
 const reviewedState = { state: { branch: status.branch, head: status.head }, output }
@@ -52,9 +52,9 @@ it('names the checkout and the account above both steps and commits only what wa
   })
   renderOpen(client)
 
-  const checkout = await screen.findByRole('region', { name: 'Run checkout' })
+  const checkout = await screen.findByRole('region', { name: 'Session checkout' })
   await within(checkout).findByText('aether/reviewed')
-  expect(checkout.textContent).toBe('aether/reviewed at aaaaaaaa · as Run account · GitHub reviewed-login')
+  expect(checkout.textContent).toBe('aether/reviewed at aaaaaaaa · as Session account · GitHub reviewed-login')
   expect(screen.getByRole('tab', { name: '1 · Commit' }).getAttribute('aria-selected')).toBe('true')
 
   await reviewSelected()
@@ -206,7 +206,7 @@ it('shows the pull request a run already has in place of the fields to open one'
   renderOpen(client)
 
   expect(await screen.findByRole('link', { name: '#7: fix the flaky scheduler test' })).toBeTruthy()
-  expect(destination().textContent).toContain(`Open · fork/project:${status.branch} → fork/project:main. Its checks and review comments are under #7 in the run’s header.`)
+  expect(destination().textContent).toContain(`Open · fork/project:${status.branch} → fork/project:main. Its checks and review comments are under #7 in the session’s header.`)
   expect(screen.queryByLabelText('PR title')).toBeNull()
   expect(screen.getByRole('button', { name: 'Push branch' })).toHaveProperty('disabled', false)
   expect(screen.queryByRole('button', { name: 'Open pull request' })).toBeNull()

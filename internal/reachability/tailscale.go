@@ -1,3 +1,5 @@
+// Package reachability reads how clients can reach this server over the
+// tailnet from the local tailscaled.
 package reachability
 
 import (
@@ -21,9 +23,7 @@ const DefaultTailscaledSocket = "/var/run/tailscale/tailscaled.sock"
 // tailnet, MagicDNS name and addresses, and the HTTPS certificate it can
 // issue for that name - over the LocalAPI unix socket. Like the sshd WhoIs
 // client it is a minimal internal client rather than a dependency on the
-// tailscale.com/client/local module. As an Adapter, any failure - no
-// socket, daemon down, empty DNS name - means "not present": callers fall
-// through to the next adapter.
+// tailscale.com/client/local module.
 type Tailscale struct {
 	client *http.Client
 }
@@ -42,18 +42,6 @@ func NewTailscale(socketPath string) *Tailscale {
 			},
 		},
 	}}
-}
-
-// Name implements Adapter.
-func (*Tailscale) Name() string { return "tailscale" }
-
-// Discover implements Adapter: the node's MagicDNS name from Self.
-func (t *Tailscale) Discover(ctx context.Context) (Endpoint, error) {
-	self, err := t.Self(ctx)
-	if err != nil {
-		return Endpoint{}, err
-	}
-	return Endpoint{Host: self.DNSName, Label: "tailnet"}, nil
 }
 
 // Node is what the local tailscaled reports about this machine.

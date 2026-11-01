@@ -3,10 +3,10 @@ import type { SliceCreator } from '@/store/slice'
 
 export type LaneWindow = '1h' | '6h' | '24h' | '7d'
 export type LaneGroup = 'status' | 'owner'
-export type LaneEdgeKind = 'orchestration' | 'dependency' | 'submission' | 'message' | 'overlap'
+export type LaneEdgeKind = 'message' | 'overlap'
 
 export const laneWindows: LaneWindow[] = ['1h', '6h', '24h', '7d']
-export const laneEdgeKinds: LaneEdgeKind[] = ['orchestration', 'dependency', 'submission', 'message', 'overlap']
+export const laneEdgeKinds: LaneEdgeKind[] = ['message', 'overlap']
 
 /** The event types Lanes reads: state changes for the bars and agent mail for the edges. */
 export const laneEventTypes = ['run.status', 'coord.message', 'coord.message.acked']

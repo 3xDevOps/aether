@@ -87,7 +87,7 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 		return call, invalidParams("run_id is required")
 	}
 	if s.cfg.Services.RunRepo == nil || s.cfg.Services.RunRepo.Native() == nil {
-		return call, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run repository service unavailable"}
+		return call, &protocol.Error{Code: protocol.CodeUnavailable, Message: "session repository service unavailable"}
 	}
 	run, runErr := s.cfg.Store.GetRun(ctx, domain.RunID(runID))
 	if runErr != nil {
@@ -129,7 +129,7 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 				return currentErr
 			}
 			if current.AccountMember() != account {
-				return fmt.Errorf("%w: run account changed; refresh before acting", permissions.ErrDenied)
+				return fmt.Errorf("%w: session account changed; refresh before acting", permissions.ErrDenied)
 			}
 			_, accountErr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(account))
 			return accountErr
@@ -149,7 +149,7 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 	}
 	liveAuthorize := execution.Authorize
 	if liveAuthorize == nil {
-		return call, errors.New("run repository execution has no live authorization fence")
+		return call, errors.New("session repository execution has no live authorization fence")
 	}
 	execution.Authorize = func(ctx context.Context, mutate bool) error {
 		if liveAuthorityErr := authorize(ctx, mutate); liveAuthorityErr != nil {
@@ -170,7 +170,7 @@ func repoView(run *domain.Run, repoID string) (domain.Run, error) {
 	}
 	extra, ok := run.ExtraRepo(domain.WorkspaceID(repoID))
 	if !ok {
-		return domain.Run{}, invalidParams("repo " + repoID + " is not one of the run's repos")
+		return domain.Run{}, invalidParams("repo " + repoID + " is not one of the session's repos")
 	}
 	view := *run
 	view.WorkspaceID, view.Branch, view.Worktree = extra.WorkspaceID, extra.Branch, extra.Worktree
@@ -451,7 +451,7 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		out := protocol.RunPRFeedbackResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest,
 			Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, CommentsUnavailable: true, Error: status.Error}
 		if s.cfg.Services.GitHub == nil {
-			out.Error = strings.TrimSuffix("checks and review feedback need the run's environment, which is gone: "+err.Error()+"; "+status.Error, "; ")
+			out.Error = strings.TrimSuffix("checks and review feedback need the session's environment, which is gone: "+err.Error()+"; "+status.Error, "; ")
 			return out, nil
 		}
 		// With the run's environment gone, the server reads GitHub with the
@@ -532,7 +532,7 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 		}
 		prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool { return pr.RepoWorkspace != call.repoOwner() })
 		if len(prs) == 0 {
-			return nil, invalidParams("run has no recorded pull request; pass repository and number")
+			return nil, invalidParams("session has no recorded pull request; pass repository and number")
 		}
 		p.Repository, p.Number = prs[0].Repository, prs[0].Number
 	}

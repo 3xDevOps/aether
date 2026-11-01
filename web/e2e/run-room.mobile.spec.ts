@@ -7,7 +7,7 @@ import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
 
-const task = 'mobile release A run details'
+const task = 'mobile release A session details'
 const desktopCols = 132
 const desktopRows = 43
 const desktopSessionID = 'run-room-mobile-desktop'
@@ -49,7 +49,7 @@ async function attach(
   return { ack, close: () => socket.close() }
 }
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('a phone opens Run details as a sheet without resizing the run PTY', async ({
   page,
@@ -96,7 +96,7 @@ test('a phone opens Run details as a sheet without resizing the run PTY', async 
     const beforeOpen = await sessionGeometry()
     const opener = page.getByRole('button', { name: 'Show details', exact: true })
     await opener.tap()
-    const details = page.getByRole('dialog', { name: 'Run details' })
+    const details = page.getByRole('dialog', { name: 'Session details' })
     await expect(details).toBeVisible()
     await expect.poll(async () => {
       const box = await details.boundingBox()
@@ -122,8 +122,8 @@ test('a phone opens Run details as a sheet without resizing the run PTY', async 
 
     // A tap cannot displace the same member's desktop session or open a
     // requester-side confirmation. A takeover requires a continuous hold.
-    const presence = page.getByRole('group', { name: 'Run presence' })
-    await expect(presence.getByText(/^You control in another session since /)).toBeVisible()
+    const presence = page.getByRole('group', { name: 'Session presence' })
+    await expect(presence.getByText(/^You control in another tab since /)).toBeVisible()
     await presence.getByRole('button', { name: 'Take control' }).tap()
     await expect(page.getByRole('alertdialog')).toBeHidden()
     await expect(presence.getByRole('button', { name: 'Take control' })).toBeVisible()
@@ -214,10 +214,10 @@ test('incoming control decisions stay usable over Run details and Captures', asy
   const requester = await page.context().newPage()
   try {
     await requester.goto(`${alice.url}&run=${run.id}`)
-    const requestPresence = requester.getByRole('group', { name: 'Run presence' })
-    await expect(requestPresence.getByText(/^You control in another session/)).toBeVisible()
+    const requestPresence = requester.getByRole('group', { name: 'Session presence' })
+    await expect(requestPresence.getByText(/^You control in another tab/)).toBeVisible()
     const takeControl = requestPresence.getByRole('button', { name: 'Take control', exact: true })
-    const takeover = page.getByRole('alertdialog', { name: 'Run control requested' })
+    const takeover = page.getByRole('alertdialog', { name: 'Session control requested' })
     const deny = takeover.getByRole('button', { name: 'Deny', exact: true })
 
     for (const { surface, width } of [
@@ -233,7 +233,7 @@ test('incoming control decisions stay usable over Run details and Captures', asy
         await page.getByRole('button', { name: 'More', exact: true }).tap()
         await page.getByRole('menuitem', { name: 'Captures…' }).tap()
       }
-      const panel = page.getByRole('dialog', { name: room ? 'Run details' : 'Captures', exact: true })
+      const panel = page.getByRole('dialog', { name: room ? 'Session details' : 'Captures', exact: true })
       await expect(panel).toBeVisible()
       if (room) await panel.getByRole('textbox', { name: 'Add a note' }).fill('Keep this interrupted draft')
       else await panel.getByRole('button', { name: 'Close', exact: true }).focus()

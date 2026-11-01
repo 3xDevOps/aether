@@ -6,7 +6,7 @@ import { listLimit, reads, type Filter, type Listing } from '@/routes/memory/mod
 import { useStore } from '@/store'
 
 const METHOD_NOT_FOUND = -32601
-/** A swarm writing many notes at once gets one re-read, this long after its last write. */
+/** An agent writing many notes at once gets one re-read, this long after its last write. */
 const changeDelay = 250
 
 export type Load =

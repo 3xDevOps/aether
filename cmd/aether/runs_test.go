@@ -21,7 +21,6 @@ func TestRenderRuns(t *testing.T) {
 		{ID: "r2", Status: "needs-attention", Activity: "needs-you", Harness: "claude", MemberID: "m2", AccountMemberID: "m1", RequestedAccountMemberID: "m2",
 			Title: "Title two", Task: "task two"},
 		{ID: "r4", Status: "needs-attention", Activity: "waiting-agents", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Integrate", Task: "task four"},
-		{ID: "r5", Status: "needs-attention", Activity: "needs-you", Reason: "needs input: which?", MissionRole: "worker", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Worker", Task: "task five"},
 		{ID: "r6", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Parked", Task: "task six"},
 		{ID: "r7", Status: "failed", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Ended", Task: "task seven"},
 		{ID: "r8", Status: "needs-attention", Activity: "finished", Review: "ready", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Done", Task: "task eight"},
@@ -30,8 +29,8 @@ func TestRenderRuns(t *testing.T) {
 			Wait: &domain.RunWait{Kind: domain.WaitSourceUnknown}},
 		{ID: "r11", Status: "needs-attention", Activity: "idle", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Legacy", Task: "task eleven"},
 		{ID: "r12", Status: "needs-attention", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Parked", Task: "task twelve"},
-		{ID: "r13", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no token", MissionRole: "worker", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Blocked", Task: "task thirteen"},
-		{ID: "r14", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no key", MissionRole: "worker", Paused: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Paused", Task: "task fourteen"},
+		{ID: "r13", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no token", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Blocked", Task: "task thirteen"},
+		{ID: "r14", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no key", Paused: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Paused", Task: "task fourteen"},
 		{ID: "r15", Status: "needs-attention", Activity: "answered", Reason: "explained the retry policy", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Q&A", Task: "task fifteen"},
 		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", AccountMemberID: "m3", Title: "Title three", Task: "task three",
 			ArchivedAt: &archivedAt},
@@ -47,12 +46,11 @@ func TestRenderRuns(t *testing.T) {
 		wantIDs  []string
 	}{
 		{
-			name: "default hides archived runs",
+			name: "default hides archived sessions",
 			want: "ID   STATUS                           AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
 				"r1   Working                          claude  m1      m1                            Title one  task one\n" +
 				"r2   Needs you                        claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n" +
 				"r4   Waiting for agents               claude  m1      m1                            Integrate  task four\n" +
-				"r5   Waiting for the integrator       claude  m1      m1                            Worker     task five\n" +
 				"r6   Failed                           claude  m1      m1                            Parked     task six\n" +
 				"r7   Failed                           claude  m1      m1                            Ended      task seven\n" +
 				"r8   Ready for review                 claude  m1      m1                            Done       task eight\n" +
@@ -70,7 +68,7 @@ func TestRenderRuns(t *testing.T) {
 			wantIDs:  []string{"r2", "r6", "r8", "r13"},
 		},
 		{
-			name:     "--archived shows only archived runs",
+			name:     "--archived shows only archived sessions",
 			archived: true,
 			wantIDs:  []string{"r3"},
 		},
@@ -87,11 +85,11 @@ func TestRenderRuns(t *testing.T) {
 			if tc.wantIDs != nil {
 				rows := strings.Split(strings.TrimSpace(buf.String()), "\n")
 				if len(rows) != len(tc.wantIDs)+1 {
-					t.Fatalf("renderRuns() rows = %q, want a header and %d runs", rows, len(tc.wantIDs))
+					t.Fatalf("renderRuns() rows = %q, want a header and %d sessions", rows, len(tc.wantIDs))
 				}
 				for i, id := range tc.wantIDs {
 					if fields := strings.Fields(rows[i+1]); len(fields) == 0 || fields[0] != id {
-						t.Errorf("renderRuns() row = %q, want run %s", rows[i+1], id)
+						t.Errorf("renderRuns() row = %q, want session %s", rows[i+1], id)
 					}
 				}
 			}
@@ -223,6 +221,6 @@ func TestLatestReportCostsOneCallForARunThatNeverReported(t *testing.T) {
 		t.Fatalf("reportsOf = %v, want %v", got, want)
 	}
 	if !reflect.DeepEqual(calls, []string{"r1", "r2"}) {
-		t.Fatalf("timeline calls = %v, want one per run", calls)
+		t.Fatalf("timeline calls = %v, want one per session", calls)
 	}
 }

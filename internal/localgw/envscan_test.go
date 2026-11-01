@@ -115,7 +115,7 @@ func TestLocalEnvAgentsShellWarning(t *testing.T) {
 	bin, got := callEnvAgents(t)
 
 	if !strings.Contains(got.Warning, "read PATH from the login shell") || !strings.Contains(got.Warning, "-l -i -c: exit status 1") {
-		t.Errorf("warning = %q, want the failed login shell run named", got.Warning)
+		t.Errorf("warning = %q, want the failed login shell session named", got.Warning)
 	}
 	if len(got.Searched) == 0 || got.Searched[0] != bin {
 		t.Errorf("searched = %v, want it to start with %s", got.Searched, bin)

@@ -39,7 +39,7 @@ func checkDocker(w io.Writer) bool {
 		if strings.Contains(err.Error(), "DOCKER_API_VERSION") {
 			fix = "Unset DOCKER_API_VERSION, or raise it, wherever aether-server runs; upgrading Docker does not change it."
 		}
-		_, _ = fmt.Fprintf(w, "%v\nOnce someone shares their agent account, that person's containers and every run on the account fail on this Docker.\n%s\n\n", err, fix)
+		_, _ = fmt.Fprintf(w, "%v\nOnce someone shares their agent account, that person's containers and every session on the account fail on this Docker.\n%s\n\n", err, fix)
 		return true
 	}
 	_, _ = fmt.Fprintf(w, "Docker does not answer: %v\n", err)

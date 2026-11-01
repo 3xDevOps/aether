@@ -126,7 +126,7 @@ function DisplayNameForm({ client, self, current, reopened }: { client: Api; sel
       }}
     >
       <SectionLabel as="h3">Display name</SectionLabel>
-      <p className="text-ui-sm text-muted">Shown to teammates on your avatar, runs and messages.</p>
+      <p className="text-ui-sm text-muted">Shown to teammates on your avatar, sessions and messages.</p>
       <div className="flex min-w-0 items-center gap-2">
         <Input
           aria-label="Display name"
@@ -165,7 +165,7 @@ function ColorPicker({ client, self, current }: { client: Api; self: string; cur
   return (
     <section aria-label="Your colour" className="flex min-w-0 flex-col gap-2">
       <SectionLabel as="h3">Colour</SectionLabel>
-      <p className="text-ui-sm text-muted">Rings your avatar wherever your presence and runs appear.</p>
+      <p className="text-ui-sm text-muted">Rings your avatar wherever your presence and sessions appear.</p>
       <div className="flex flex-wrap items-center gap-1">
         {presetColors.map((color) => (
           <Button key={color} variant="ghost" size="icon" label={`Set colour ${color}`} aria-pressed={current === color} onClick={() => recolor(color)}>
@@ -274,12 +274,12 @@ function AccountSharing({ client, self }: { client: Api; self: Member }) {
     <section aria-label="Account sharing" className="flex min-w-0 flex-col gap-2">
       <SectionLabel as="h3">Agent account sharing</SectionLabel>
       <div className="flex min-w-0 flex-col">
-        <p className="text-ui-sm text-muted">Teammates you share with can launch runs on your agent logins and quota; their runs stay theirs.</p>
+        <p className="text-ui-sm text-muted">Teammates you share with can launch sessions on your agent logins and quota; their sessions stay theirs.</p>
         <Collapsible>
           <CollapsibleTrigger><span className="text-muted">Learn more</span></CollapsibleTrigger>
           <CollapsibleContent className="flex flex-col gap-2 pt-1 pl-4">
-            <p className="text-ui-sm text-muted">Their runs can use, refresh, replace or log out your agent logins. Your environment, files and GitHub login are not shared, and running agents are not stopped when you revoke.</p>
-            <p className="text-ui-sm text-muted">Except omp: an omp share hands over your whole omp agent directory, where their runs can plant code your own omp sessions run with your home. Share omp only with someone you would give your home to.</p>
+            <p className="text-ui-sm text-muted">Their sessions can use, refresh, replace or log out your agent logins. Your environment, files and GitHub login are not shared, and running agents are not stopped when you revoke.</p>
+            <p className="text-ui-sm text-muted">Except omp: an omp share hands over your whole omp agent directory, where their sessions can plant code your own omp conversations run with your home. Share omp only with someone you would give your home to.</p>
           </CollapsibleContent>
         </Collapsible>
       </div>
@@ -292,8 +292,8 @@ function AccountSharing({ client, self }: { client: Api; self: Member }) {
           {terminalRunning
             ? 'Your Environment was started before you shared, so a'
             : 'Your Environment could not be checked. If it is open, it was started before you shared, so a'}{' '}
-          Claude Code login written there will not reach {firstShare.display_name}&apos;s runs until you stop it and open it again from
-          Environment. Runs you already have running keep the mounts they started with until they end.
+          Claude Code login written there will not reach {firstShare.display_name}&apos;s sessions until you stop it and open it again from
+          Environment. Sessions you already have running keep the mounts they started with until they end.
         </Callout>
       )}
       {failures.map((failure) => <FailureCallout key={failure.id} error={failure.error} onRetry={failure.retry} />)}

@@ -91,8 +91,8 @@ func newFake(t *testing.T) *fakeServer {
 		protocol.MethodCoordMessagesList: returns(protocol.CoordMessagesListResult{}),
 		protocol.MethodWorkspaceTimeline: returns(protocol.WorkspaceTimelineResult{}),
 		protocol.MethodWorkspaceList:     returns(protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws-1", Name: "api"}}}),
-		protocol.MethodMissionList:       returns(protocol.MissionListResult{}),
 		protocol.MethodRunChildren:       returns(protocol.RunChildrenResult{}),
+		protocol.MethodLaunchDefaultsGet: returns(protocol.LaunchDefaultsResult{}),
 		protocol.MethodAccountList: returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-me", DisplayName: "Me"},
 			{ID: "mem-ada", DisplayName: "Ada"}}}),
 	}}
@@ -292,15 +292,12 @@ func TestConnectorToolList(t *testing.T) {
 		}
 	}
 	// An optional value may be sent empty for its default.
-	if want := map[string]string{"aether_launch_run.mode": ",tui,headless,acp", "aether_launch_run.children": ",on,off", "aether_launch_swarm.mode": ",tui,acp",
-		"aether_launch_swarm.workers.mode": ",tui,headless,acp", "aether_activity_summary.period": ",today,yesterday,week",
-		"aether_decide_approval.decision": "allow,deny", "aether_stop_run.outcome": ",merged,abandoned",
+	if want := map[string]string{"aether_launch_session.mode": ",tui,headless,acp", "aether_launch_session.children": ",on,off", "aether_launch_session.saved_defaults": ",apply,ignore", "aether_activity_summary.period": ",today,yesterday,week",
+		"aether_decide_approval.decision": "allow,deny", "aether_stop_session.outcome": ",merged,abandoned",
 		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
 		"aether_memory_add.kind": "decision,convention,gotcha,preference", "aether_pr_merge.method": ",squash,merge,rebase",
-		"aether_replace_integrator.mode": ",tui,acp", "aether_integration_decide.action": "approve,reject,deliver",
-		"aether_run_lifecycle.action": "relaunch,protect,unprotect,archive,restore",
-		"aether_switch_run_mode.mode": "standard,enhanced",
-		"aether_swarm_manage.action":  "release_worker,archive,unarchive"}; !maps.Equal(enums, want) {
+		"aether_session_lifecycle.action": "relaunch,protect,unprotect,archive,restore",
+		"aether_switch_session_mode.mode": "standard,enhanced"}; !maps.Equal(enums, want) {
 		t.Errorf("enums = %v, want %v", enums, want)
 	}
 	connectorTools := slices.DeleteFunc(slices.Clone(Ops), func(o Op) bool { return o.Scope == "" })
@@ -312,15 +309,15 @@ func TestConnectorToolList(t *testing.T) {
 	// and open pull requests, so those tools are open-world.
 	type hint struct{ readOnly, destructive, openWorld bool }
 	hints := map[string]hint{
-		"aether_launch_run": {false, false, true}, "aether_launch_swarm": {false, false, true},
-		"aether_message_run": {false, true, true}, "aether_answer": {false, true, true},
-		"aether_pause_run": {false, false, false}, "aether_resume_run": {false, false, true},
+		"aether_launch_session":  {false, false, true},
+		"aether_message_session": {false, true, true}, "aether_answer": {false, true, true},
+		"aether_pause_session": {false, false, false}, "aether_resume_session": {false, false, true},
 		"aether_mark_reviewed": {false, true, false}, "aether_decide_approval": {false, true, true},
-		"aether_stop_run": {false, true, false}, "aether_cancel_swarm": {false, true, false},
-		"aether_run_lifecycle": {false, false, true}, "aether_switch_run_mode": {false, true, true}, "aether_swarm_manage": {false, true, true}, "aether_handoff_run": {false, true, false},
-		"aether_replace_integrator": {false, true, true}, "aether_integration_decide": {false, true, true},
+		"aether_stop_session":      {false, true, false},
+		"aether_session_lifecycle": {false, false, true}, "aether_switch_session_mode": {false, true, true}, "aether_handoff_session": {false, true, false},
 		"aether_pr_create": {false, false, true}, "aether_pr_merge": {false, true, true},
 		"aether_memory_add": {false, false, false}, "aether_memory_pin": {false, false, false},
+		"aether_watch": {false, false, false}, "aether_unwatch": {false, true, false},
 	}
 	names := map[Scope][]string{}
 	for _, tool := range all {
@@ -342,14 +339,14 @@ func TestConnectorToolList(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"aether_list_workspaces", "aether_list_runs", "aether_get_run", "aether_run_history",
-		"aether_launch_run", "aether_message_run", "aether_stop_run"} {
+	for _, name := range []string{"aether_list_workspaces", "aether_list_sessions", "aether_get_session", "aether_session_history",
+		"aether_launch_session", "aether_message_session", "aether_stop_session"} {
 		if !slices.Contains(names[ScopeRead], name) && !slices.Contains(names[ScopeWrite], name) && !slices.Contains(names[ScopeControl], name) {
 			t.Errorf("%s, served before, is missing", name)
 		}
 	}
-	if want := []string{"aether_cancel_swarm", "aether_decide_approval", "aether_handoff_run", "aether_integration_decide",
-		"aether_pr_create", "aether_pr_merge", "aether_replace_integrator", "aether_stop_run", "aether_swarm_manage", "aether_switch_run_mode"}; !slices.Equal(names[ScopeControl], want) {
+	if want := []string{"aether_decide_approval", "aether_handoff_session",
+		"aether_pr_create", "aether_pr_merge", "aether_stop_session", "aether_switch_session_mode"}; !slices.Equal(names[ScopeControl], want) {
 		t.Errorf("control tools = %v, want %v", names[ScopeControl], want)
 	}
 	if got := list(); len(got) != len(names[ScopeRead]) {
@@ -375,34 +372,34 @@ func TestConnectorReadTools(t *testing.T) {
 		Error: "refresh pull request: gh: rate limited"})
 	cs := connectorSession(t, f)
 
-	text, out := run(t, cs, "aether_list_runs", map[string]any{"query": "LOGIN"})
+	text, out := run(t, cs, "aether_list_sessions", map[string]any{"query": "LOGIN"})
 	runs := out["runs"].([]any)
 	row := runs[0].(map[string]any)
-	if text != "1 runs." || len(runs) != 1 || row["needs_you"] != "The agent asks a question" || row["workspace"] != "api" ||
+	if text != "1 sessions." || len(runs) != 1 || row["needs_you"] != "The agent asks a question" || row["workspace"] != "api" ||
 		row["url"] != "https://aether.example/?run=run-1" || row["untrusted"].(map[string]any)["last_report"] != "waiting: "+injection ||
 		strings.Contains(trusted(t, out), injection) {
-		t.Fatalf("aether_list_runs query = %q %v", text, out)
+		t.Fatalf("aether_list_sessions query = %q %v", text, out)
 	}
 	if got := called(f, protocol.MethodRunList); got[0].params != `{"mine":true}` {
 		t.Fatalf("run.list = %+v, want mine by default", got)
 	}
 	for query, want := range map[string]string{"api parser": "run-2", "edge-parser": "run-2"} {
-		if _, out = run(t, cs, "aether_list_runs", map[string]any{"query": query}); len(out["runs"].([]any)) != 1 || out["runs"].([]any)[0].(map[string]any)["id"] != want {
-			t.Errorf("aether_list_runs query %q = %v, want %s by workspace name or branch", query, out, want)
+		if _, out = run(t, cs, "aether_list_sessions", map[string]any{"query": query}); len(out["runs"].([]any)) != 1 || out["runs"].([]any)[0].(map[string]any)["id"] != want {
+			t.Errorf("aether_list_sessions query %q = %v, want %s by workspace name or branch", query, out, want)
 		}
 	}
-	text, out = run(t, cs, "aether_list_runs", map[string]any{"mine": false, "limit": 1})
-	if runs := out["runs"].([]any); text != "1 of 2 runs." || out["total"] != float64(2) || out["truncated"] != true || len(runs) != 1 ||
+	text, out = run(t, cs, "aether_list_sessions", map[string]any{"mine": false, "limit": 1})
+	if runs := out["runs"].([]any); text != "1 of 2 sessions." || out["total"] != float64(2) || out["truncated"] != true || len(runs) != 1 ||
 		runs[0].(map[string]any)["id"] != "run-2" || runs[0].(map[string]any)["untrusted"].(map[string]any)["title"] != "upgrade the parser" {
-		t.Fatalf("newest run first, cut to the limit = %q %v", text, out)
+		t.Fatalf("newest session first, cut to the limit = %q %v", text, out)
 	}
 
-	text, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run:run-1"})
+	text, out = run(t, cs, "aether_get_session", map[string]any{"run_id": "run:run-1"})
 	untrusted := out["untrusted"].(map[string]any)
-	if text != "Run run-1 is running on your account. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
+	if text != "Session run-1 is running on your account. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
 		out["pr_error"] != "refresh pull request: gh: rate limited" || untrusted["latest_report"].(map[string]any)["summary"] != injection || untrusted["pr_title"] != injection ||
 		out["needs_you"].(map[string]any)["answer_with"] != "aether_answer" || strings.Contains(trusted(t, out), injection) {
-		t.Fatalf("aether_get_run of a search id = %q %v", text, out)
+		t.Fatalf("aether_get_session of a search id = %q %v", text, out)
 	}
 
 	// The run retains seqs 3 to 12; following next_before reads each once.
@@ -422,10 +419,10 @@ func TestConnectorReadTools(t *testing.T) {
 	var seqs []float64
 	args := map[string]any{"run_id": "run-1", "limit": 4}
 	for page := 0; ; page++ {
-		text, out = run(t, cs, "aether_run_history", args)
-		if page == 0 && (text != "4 conversation items of run run-1." || len(out["untrusted"].(map[string]any)["reports"].([]any)) != 1 ||
+		text, out = run(t, cs, "aether_session_history", args)
+		if page == 0 && (text != "4 conversation items of session run-1." || len(out["untrusted"].(map[string]any)["reports"].([]any)) != 1 ||
 			out["truncated_before"] != true || out["note"] != historyExpired) {
-			t.Fatalf("aether_run_history = %q %v", text, out)
+			t.Fatalf("aether_session_history = %q %v", text, out)
 		}
 		frames := out["untrusted"].(map[string]any)["conversation"].([]any)
 		for i := len(frames) - 1; i >= 0; i-- {
@@ -438,15 +435,15 @@ func TestConnectorReadTools(t *testing.T) {
 		args["before"] = next
 	}
 	if want := []float64{12, 11, 10, 9, 8, 7, 6, 5, 4, 3}; !slices.Equal(seqs, want) {
-		t.Fatalf("aether_run_history pages read seqs %v, want %v", seqs, want)
+		t.Fatalf("aether_session_history pages read seqs %v, want %v", seqs, want)
 	}
 	terminalRun := testRun
 	terminalRun.ACP, terminalRun.Mode = false, "tui"
 	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: terminalRun})
 	f.answers[protocol.MethodTerminalHistory] = returns(protocol.TerminalHistoryResult{Lines: []protocol.TerminalHistoryLine{{Text: "$ make"}}, TruncatedBefore: true})
-	if text, out = run(t, cs, "aether_run_history", map[string]any{"run_id": "run-1"}); text != "1 terminal lines of run run-1." ||
+	if text, out = run(t, cs, "aether_session_history", map[string]any{"run_id": "run-1"}); text != "1 terminal lines of session run-1." ||
 		out["truncated_before"] != true || out["note"] != historyExpired {
-		t.Fatalf("aether_run_history of an expired terminal = %q %v", text, out)
+		t.Fatalf("aether_session_history of an expired terminal = %q %v", text, out)
 	}
 	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: testRun})
 
@@ -491,47 +488,13 @@ func TestConnectorReadTools(t *testing.T) {
 		t.Fatalf("a period outside the enum = %q", msg)
 	}
 
-	mission := protocol.Mission{ID: "mis-1", WorkspaceID: "ws-1", Objective: injection, Phase: "active", CreatedAt: "2026-10-22T09:00:00Z"}
-	f.answers[protocol.MethodMissionList] = func(raw json.RawMessage) (any, error) {
-		var p protocol.MissionListParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
-		}
-		if p.Before == "" {
-			return protocol.MissionListResult{Missions: []protocol.Mission{mission}, NextCursor: "c1"}, nil
-		}
-		older := mission
-		older.ID, older.CreatedAt = "mis-0", "2026-10-21T09:00:00Z"
-		return protocol.MissionListResult{Missions: []protocol.Mission{older}}, nil
-	}
-	if text, out = run(t, cs, "aether_get_swarm", nil); text != "2 swarms." || out["swarms"].([]any)[0].(map[string]any)["url"] != "https://aether.example/?page=missions&id=mis-1" ||
-		out["swarms"].([]any)[1].(map[string]any)["id"] != "mis-0" || strings.Contains(trusted(t, out), injection) {
-		t.Fatalf("aether_get_swarm across pages = %q %v", text, out)
-	}
-	f.answers[protocol.MethodMissionShow] = returns(protocol.MissionShowResult{Mission: mission,
-		Tasks: []protocol.Task{{ID: "task-1", Status: "active", Revision: &protocol.TaskRevision{Title: "Tools"}}},
-		Attempts: []protocol.Attempt{{ID: "att-1", RunID: "run-1", TaskID: "task-1", State: "running", Harness: "claude", TakeoverActive: true, TakeoverMemberID: "mem-1"},
-			{ID: "att-2", TaskID: "task-1", State: "failed", Harness: "codex", LastError: injection}},
-		Questions: []protocol.MissionQuestion{{ID: "q-1", Body: "Which branch?"}}})
-	if text, out = run(t, cs, "aether_get_swarm", map[string]any{"swarm_id": "swarm:mis-1"}); text != "Swarm mis-1 is active: 1 tasks, 2 workers, 0 open questions." ||
-		strings.Contains(trusted(t, out), injection) || !strings.Contains(called(f, protocol.MethodMissionShow)[0].params, `"mission_id":"mis-1"`) {
-		t.Fatalf("aether_get_swarm of a search id = %q", text)
-	}
-	// A worker refused before its run existed keeps its attempt and error.
-	workers := out["workers"].([]any)
-	errs := out["untrusted"].(map[string]any)["worker_errors"].([]any)
-	if workers[0].(map[string]any)["control_held_by"] != "mem-1" || workers[1].(map[string]any)["attempt_id"] != "att-2" || workers[1].(map[string]any)["run_id"] != nil ||
-		errs[0].(map[string]any)["attempt_id"] != "att-2" || errs[0].(map[string]any)["last_error"] != injection {
-		t.Fatalf("aether_get_swarm workers = %v, errors %v", workers, errs)
-	}
-
 	f.answers[protocol.MethodRunGitLog] = returns(protocol.RunGitLogResult{Ahead: 2, Commits: []protocol.RunGitCommit{{Short: "abc", Subject: "fix"}},
 		Conflicts: []protocol.RunGitConflict{{Path: "go.mod"}}})
 	f.answers[protocol.MethodRunEvidenceList] = returns(protocol.EvidencePacketListResult{Packets: []protocol.EvidencePacket{{ChangedFiles: []protocol.ChangedFileFact{{Path: "a.go"}}}}})
 	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{Error: "checkout is gone"})
-	if text, out = run(t, cs, "aether_run_changes", map[string]any{"run_id": "run-1", "include_diff": true}); text != "Run run-1: 2 commits ahead, 0 behind, 1 predicted conflicts. 1 changed files in its latest evidence." ||
+	if text, out = run(t, cs, "aether_session_changes", map[string]any{"run_id": "run-1", "include_diff": true}); text != "Session run-1: 2 commits ahead, 0 behind, 1 predicted conflicts. 1 changed files in its latest evidence." ||
 		out["diff_error"] != "checkout is gone" {
-		t.Fatalf("aether_run_changes = %q %v", text, out)
+		t.Fatalf("aether_session_changes = %q %v", text, out)
 	}
 
 	long := strings.Repeat("x", 1000)
@@ -548,18 +511,18 @@ func TestConnectorReadTools(t *testing.T) {
 		t.Fatalf("aether_pr_status of truncated feedback = %q %v", text, out)
 	}
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "MERGED"}, CommentsUnavailable: true})
-	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !strings.Contains(text, "0 reviews, comments unavailable (the run's environment is gone);") ||
+	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !strings.Contains(text, "0 reviews, comments unavailable (the session's environment is gone);") ||
 		strings.Contains(text, "0 comments") || out["comments_unavailable"] != true {
-		t.Fatalf("aether_pr_status of a finished run without comments = %q %v", text, out)
+		t.Fatalf("aether_pr_status of a finished session without comments = %q %v", text, out)
 	}
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "MERGED"},
 		Checks: []protocol.RunPRCheck{{Name: "test", Conclusion: "FAILURE"}}, CommentsUnavailable: true, ReviewsUnavailable: true, Error: "read reviews from GitHub: HTTP 502"})
-	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); text != "PR #7 is MERGED: 0 checks passed, 1 failing, 0 pending; reviews unavailable (read reviews from GitHub: HTTP 502), comments unavailable (the run's environment is gone); merge state unknown." ||
+	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); text != "PR #7 is MERGED: 0 checks passed, 1 failing, 0 pending; reviews unavailable (read reviews from GitHub: HTTP 502), comments unavailable (the session's environment is gone); merge state unknown." ||
 		out["reviews_unavailable"] != true || out["error"] != "read reviews from GitHub: HTTP 502" {
 		t.Fatalf("aether_pr_status whose reviews read failed = %q %v", text, out)
 	}
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Error: "no pull request for branch x"})
-	if msg, _, failed := try(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !failed || !strings.Contains(msg, "no pull request for branch x; aether_message_run") {
+	if msg, _, failed := try(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !failed || !strings.Contains(msg, "no pull request for branch x; aether_message_session") {
 		t.Fatalf("aether_pr_status without a PR = %q", msg)
 	}
 
@@ -568,7 +531,7 @@ func TestConnectorReadTools(t *testing.T) {
 		{RunID: "run-2", With: []protocol.OverlapPeer{{RunID: "run-1", Files: []string{"a.go"}}}}}})
 	text, out = run(t, cs, "aether_overlaps", map[string]any{"run_id": "run-2"})
 	pair := out["pairs"].([]any)[0].(map[string]any)
-	if text != "1 overlapping pairs of active runs." || len(out["pairs"].([]any)) != 1 || pair["runs"].([]any)[1].(map[string]any)["workspace"] != "api" ||
+	if text != "1 overlapping pairs of active sessions." || len(out["pairs"].([]any)) != 1 || pair["runs"].([]any)[1].(map[string]any)["workspace"] != "api" ||
 		pair["untrusted"].(map[string]any)["titles"].([]any)[0] != "Fix login" {
 		t.Fatalf("aether_overlaps = %q %v", text, out)
 	}
@@ -602,14 +565,13 @@ func TestConnectorReadTools(t *testing.T) {
 // result as their text.
 func TestConnectorSearchFetch(t *testing.T) {
 	f := newFake(t)
-	f.answers[protocol.MethodMissionList] = returns(protocol.MissionListResult{Missions: []protocol.Mission{{ID: "mis-1", Objective: "Fix login everywhere"}}})
 	cs := connectorSession(t, f)
 	text, out := run(t, cs, "search", map[string]any{"query": "login fix"})
 	if !sameJSON(t, text, out) || len(out) != 1 {
 		t.Fatalf("search text %q is not its result %v", text, out)
 	}
 	results := out["results"].([]any)
-	if len(results) != 2 || results[0].(map[string]any)["id"] != "run:run-1" || results[1].(map[string]any)["id"] != "swarm:mis-1" {
+	if len(results) != 1 || results[0].(map[string]any)["id"] != "run:run-1" {
 		t.Fatalf("search results = %v", results)
 	}
 	text, out = run(t, cs, "fetch", map[string]any{"id": "run:run-1"})
@@ -641,7 +603,7 @@ func TestConnectorLaunch(t *testing.T) {
 	}
 	cs := connectorSession(t, f, ScopeWrite)
 	args := map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": testRun.Task}
-	text, out := run(t, cs, "aether_launch_run", args)
+	text, out := run(t, cs, "aether_launch_session", args)
 	if out["run_id"] != "run-1" || out["duplicate"] != true || !strings.Contains(text, "instead of launching it again") {
 		t.Fatalf("the same launch within 60s = %q %v", text, out)
 	}
@@ -649,25 +611,25 @@ func TestConnectorLaunch(t *testing.T) {
 		t.Fatalf("a duplicate launch called run.launch: %+v", got)
 	}
 	args["mode"] = "tui"
-	if _, out = run(t, cs, "aether_launch_run", args); out["run_id"] != "run-9" {
-		t.Fatalf("the same task in another mode = %v, want a new run", out)
+	if _, out = run(t, cs, "aether_launch_session", args); out["run_id"] != "run-9" {
+		t.Fatalf("the same task in another mode = %v, want a new session", out)
 	}
 	args["mode"] = ""
-	if _, out = run(t, cs, "aether_launch_run", args); out["duplicate"] != true {
+	if _, out = run(t, cs, "aether_launch_session", args); out["duplicate"] != true {
 		t.Fatalf("the same launch with an empty mode = %v, want the agent's default mode", out)
 	}
 	delete(args, "mode")
 	for _, stopped := range []string{"failed", "interrupted", "abandoned"} {
 		recent.Status = stopped
 		f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{Runs: []protocol.Run{recent}})
-		if _, out = run(t, cs, "aether_launch_run", args); out["run_id"] != "run-9" {
-			t.Fatalf("the same task after a launch that is %s = %v, want a new run", stopped, out)
+		if _, out = run(t, cs, "aether_launch_session", args); out["run_id"] != "run-9" {
+			t.Fatalf("the same task after a launch that is %s = %v, want a new session", stopped, out)
 		}
 	}
 	f.calls = nil
 	args["idempotency_key"] = "k1"
-	text, out = run(t, cs, "aether_launch_run", args)
-	if out["run_id"] != "run-9" || out["replayed"] != true || out["next"] != "poll aether_get_run with run_id" || !strings.Contains(text, "nothing new was launched") {
+	text, out = run(t, cs, "aether_launch_session", args)
+	if out["run_id"] != "run-9" || out["replayed"] != true || out["next"] != "poll aether_get_session with run_id" || !strings.Contains(text, "nothing new was launched") {
 		t.Fatalf("a replayed launch = %q %v", text, out)
 	}
 	if got := f.acted(); got.scope != ScopeWrite || !strings.Contains(got.params, `"idempotency_key":"k1"`) {
@@ -708,7 +670,7 @@ func TestConnectorLaunchRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Go(func() {
-			if _, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_launch_run",
+			if _, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_launch_session",
 				Arguments: map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t"}}); err != nil {
 				t.Error(err)
 			}
@@ -716,7 +678,7 @@ func TestConnectorLaunchRace(t *testing.T) {
 	}
 	wg.Wait()
 	if len(launched) != 1 {
-		t.Fatalf("two overlapping launches started %d runs, want 1", len(launched))
+		t.Fatalf("two overlapping launches started %d sessions, want 1", len(launched))
 	}
 }
 
@@ -739,13 +701,13 @@ func TestConnectorLaunchOutlastsTheTool(t *testing.T) {
 		return f.call(ctx, method, params, out)
 	}, ScopeWrite)
 	args := map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "build the image"}
-	text, out := run(t, cs, "aether_launch_run", args)
-	if out["run_id"] != "run-7" || out["state"] != "starting" || out["idempotency_key"] == "" || out["next"] != "poll aether_get_run with run_id" ||
-		text != "Run run-7 is starting." {
+	text, out := run(t, cs, "aether_launch_session", args)
+	if out["run_id"] != "run-7" || out["state"] != "starting" || out["idempotency_key"] == "" || out["next"] != "poll aether_get_session with run_id" ||
+		text != "Session run-7 is starting." {
 		t.Fatalf("a launch outlasting the tool = %q %v", text, out)
 	}
 	key := fmt.Sprintf(`"idempotency_key":%q`, out["idempotency_key"])
-	text, out = run(t, cs, "aether_launch_run", args)
+	text, out = run(t, cs, "aether_launch_session", args)
 	if out["run_id"] != "run-7" || out["duplicate"] != true || !strings.Contains(text, "already launching") {
 		t.Fatalf("the same launch while the first provisions = %q %v", text, out)
 	}
@@ -801,7 +763,7 @@ func TestConnectorSlowLaunchBurstOnTheWriteLimit(t *testing.T) {
 	for i := range limit {
 		wg.Go(func() {
 			key := fmt.Sprint(i)
-			text, out, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t", "idempotency_key": key})
+			text, out, failed := try(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t", "idempotency_key": key})
 			if failed || out["run_id"] != "run-"+key || out["idempotency_key"] != key {
 				t.Errorf("slow launch %s on a spent write limit = %q %v", key, text, out)
 			}
@@ -812,80 +774,23 @@ func TestConnectorSlowLaunchBurstOnTheWriteLimit(t *testing.T) {
 	mu.Lock()
 	writes, replayErr = 0, &protocol.Error{Code: protocol.CodeDenied, Message: "connector used its write calls"}
 	mu.Unlock()
-	text, out, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t", "idempotency_key": "k"})
+	text, out, failed := try(t, cs, "aether_launch_session", map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t", "idempotency_key": "k"})
 	if failed || out["state"] != "starting" || out["idempotency_key"] != "k" || !strings.Contains(fmt.Sprint(out["error"]), "connector used its write calls") ||
 		!strings.Contains(text, "Looking it up failed: rpc error") {
 		t.Fatalf("a slow launch whose replay failed = %q %v", text, out)
 	}
 }
 
-func TestConnectorSwarmAndMessage(t *testing.T) {
+func TestConnectorMessage(t *testing.T) {
 	f := newFake(t)
 	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{DashboardURL: "https://aether.example", Member: protocol.Member{ID: "mem-bo"}})
-	f.answers[protocol.MethodMissionCreate] = returns(protocol.MissionCreateResult{Mission: protocol.Mission{ID: "mis-1", Phase: "planning", CurrentIntegratorRunID: "run-5"}})
-	f.answers[protocol.MethodAgentList] = returns(protocol.AgentListResult{Agents: []protocol.AgentInfo{
-		{Name: "claude", Enhanced: "adapter"}, {Name: "codex", Enhanced: "adapter", EnhancedInstalled: true},
-		{Name: "gemini", Enhanced: "native", SwarmStandardRefusal: "gemini in Standard mode has no idle wake; start it in Enhanced"},
-	}})
 	cs := connectorSession(t, f, ScopeWrite)
-	if text, _, failed := try(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "harness": "gemini"}); !failed ||
-		!strings.Contains(text, "gemini in Standard mode has no idle wake; start it in Enhanced, which is not installed: aether agent add gemini --enhanced") {
-		t.Fatalf("a gemini integrator with no mode and no Enhanced installed = %q", text)
-	}
-	if text, _, failed := try(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "harness": "claude", "mode": "headless"}); !failed ||
-		!strings.Contains(text, "mode") {
-		t.Fatalf("a headless integrator = %q", text)
-	}
-	text, out := run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "Ship it", "harness": "claude",
-		"workers": []any{map[string]any{"harness": "claude"}, map[string]any{"harness": "codex"}}, "idempotency_key": "s1"})
-	if text != "Launched swarm mis-1 (planning); its integrator is run run-5." || out["url"] != "https://aether.example/?page=missions&id=mis-1" {
-		t.Fatalf("aether_launch_swarm = %q %v", text, out)
-	}
-	var p protocol.MissionCreateParams
-	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1] != (protocol.MissionExecutionChoice{AccountMemberID: "mem-me", Harness: "codex", Mode: "acp"}) || p.Integrator.Mode != "tui" {
-		t.Fatalf("mission.create = %+v", p)
-	}
-	f.calls = nil
-	run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "Ship it with codex", "harness": "codex", "idempotency_key": "s2"})
-	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.Integrator.Mode != "acp" {
-		t.Fatalf("a codex integrator with no mode and Enhanced installed = %+v, want acp", p.Integrator)
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	choice := protocol.MissionExecutionChoice{AccountMemberID: "mem-me", Harness: "claude", Mode: "tui"}
-	earlier := protocol.Mission{ID: "mis-1", Objective: "Ship it", AccountableHumanID: "mem-bo", Phase: "planning", CreatedAt: now,
-		Integrator: protocol.MissionIntegrator(choice), ExecutionChoices: []protocol.MissionExecutionChoice{choice}}
-	other := earlier
-	other.ID, other.AccountableHumanID = "mis-other", "mem-al"
-	f.answers[protocol.MethodMissionList] = returns(protocol.MissionListResult{Missions: []protocol.Mission{other, earlier}})
-	f.calls = nil
-	same := map[string]any{"workspace_id": "ws-1", "objective": "Ship it", "harness": "claude", "mode": "", "workers": []any{map[string]any{"harness": "claude", "mode": ""}}}
-	text, out = run(t, cs, "aether_launch_swarm", same)
-	if out["swarm_id"] != "mis-1" || out["duplicate"] != true || !strings.Contains(text, "instead of launching it again") || len(called(f, protocol.MethodMissionCreate)) != 0 {
-		t.Fatalf("the same swarm again within 60s without a key = %q %v", text, out)
-	}
-	if _, out = run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "Ship it", "harness": "claude",
-		"workers": []any{map[string]any{"harness": "codex"}}}); out["duplicate"] == true {
-		t.Fatalf("the same objective with other workers = %v, want a new swarm", out)
-	}
-	earlier.Phase = "cancelled"
-	f.answers[protocol.MethodMissionList] = returns(protocol.MissionListResult{Missions: []protocol.Mission{earlier}})
-	if _, out = run(t, cs, "aether_launch_swarm", same); out["duplicate"] == true {
-		t.Fatalf("the same swarm after cancelling it = %v, want a new swarm", out)
-	}
-
 	f.calls = nil
 	deliver := "2026-10-22T10:00:45Z"
 	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-1", State: protocol.RoomMessageQueued, DeliverAfter: &deliver}})
-	text, _ = run(t, cs, "aether_message_run", map[string]any{"run_id": "run-1", "message": "use postgres", "idempotency_key": "m1"})
+	text, _ := run(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "use postgres", "idempotency_key": "m1"})
 	if !strings.Contains(text, "queued: the member in control can approve or deny it, else it is delivered at "+deliver) || strings.Contains(text, "msg-1") {
-		t.Fatalf("aether_message_run = %q, want no internal message id", text)
+		t.Fatalf("aether_message_session = %q, want no internal message id", text)
 	}
 	if got := f.acted(); got.params != `{"run_id":"run-1","message":"use postgres","idempotency_key":"m1"}` {
 		t.Fatalf("run.inject = %+v", got)
@@ -893,7 +798,7 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 
 	f.calls = nil
 	f.errs[protocol.MethodServerInfo] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "server busy"}
-	if text, _, failed := try(t, cs, "aether_message_run", map[string]any{"run_id": "run-1", "message": "again", "idempotency_key": "m2"}); !failed ||
+	if text, _, failed := try(t, cs, "aether_message_session", map[string]any{"run_id": "run-1", "message": "again", "idempotency_key": "m2"}); !failed ||
 		len(called(f, protocol.MethodRunInject)) != 0 {
 		t.Fatalf("a message whose lookup fails = %q, sent %v; want it refused before sending", text, called(f, protocol.MethodRunInject))
 	}
@@ -901,7 +806,6 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 
 func TestConnectorAnswerAndDecide(t *testing.T) {
 	items := []protocol.AttentionItem{
-		{Kind: protocol.AttentionKindSwarmQuestion, RunID: "run-1", MissionID: "mis-1", Message: &protocol.AttentionMessage{ID: "q-1", Body: "Which branch?"}},
 		{Kind: protocol.AttentionKindRoomQuestion, RunID: "run-2", WorkspaceID: "ws-1", Message: &protocol.AttentionMessage{ID: "rm-1", Body: "Ready?"}},
 		{Kind: protocol.AttentionKindQuestion, RunID: "run-3", Request: &protocol.AttentionRequest{ID: "req-3", Options: []protocol.AttentionOption{{ID: "accept"}}}},
 		{Kind: protocol.AttentionKindPermission, RunID: "run-4", Request: &protocol.AttentionRequest{ID: "req-4", Title: "Run rm -rf build",
@@ -911,7 +815,6 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 	}
 	f := newFake(t)
 	f.answers[protocol.MethodAttentionList] = returns(protocol.AttentionListResult{Items: items})
-	f.answers[protocol.MethodMissionQuestionAnswer] = returns(protocol.MissionQuestionResult{Question: protocol.MissionQuestion{ID: "q-1"}})
 	f.answers[protocol.MethodRunRoomPost] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-2"}})
 	f.answers[protocol.MethodRunInputRespond] = returns(protocol.RunInputRespondResult{Status: protocol.RunInputRespondAnswered})
 	cs := connectorSession(t, f, ScopeWrite, ScopeControl)
@@ -923,8 +826,6 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 			t.Fatalf("%s %v called %s %s, want %s %s", name, args, got.method, got.params, method, params)
 		}
 	}
-	acted("aether_answer", map[string]any{"run_id": "run-1", "answer_id": "q-1", "answer": "main"}, protocol.MethodMissionQuestionAnswer,
-		`{"question_id":"q-1","answer":"main","idempotency_key":"connector-answer-q-1"}`)
 	acted("aether_answer", map[string]any{"run_id": "run-2", "answer_id": "rm-1", "answer": "yes"}, protocol.MethodRunRoomPost,
 		`{"workspace_id":"ws-1","run_id":"run-2","kind":"reply","body":"yes","correlation_id":"rm-1","idempotency_key":"connector-answer-rm-1"}`)
 	acted("aether_answer", map[string]any{"run_id": "run-3", "answer_id": "req-3", "option_id": "accept", "values": map[string]any{"db": "pg"}},
@@ -932,7 +833,7 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 	acted("aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm -rf build"},
 		protocol.MethodRunInputRespond, `{"run_id":"run-4","request_id":"req-4","option_id":"once"}`)
 	if text, out := run(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm -rf build"}); text !=
-		"Allowed the request once on run run-4: answered." || out["run_id"] != "run-4" || out["answer_id"] != nil {
+		"Allowed the request once on session run-4: answered." || out["run_id"] != "run-4" || out["answer_id"] != nil {
 		t.Fatalf("a decided permission = %q %v, want no answer_id", text, out)
 	}
 
@@ -942,10 +843,10 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 		want string
 	}{
 		{"aether_answer", map[string]any{"run_id": "run-4", "answer_id": "req-4", "option_id": "always"}, "this item is a permission, which is answered with aether_decide_approval"},
-		{"aether_answer", map[string]any{"run_id": "run-1", "answer_id": "gone", "answer": "x"}, "run run-1 has nothing pending for you with that answer_id; it may be answered already; call aether_needs_attention"},
-		{"aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm"}, "action is not the pending request's untrusted.text word for word; call aether_needs_attention"},
+		{"aether_answer", map[string]any{"run_id": "run-2", "answer_id": "gone", "answer": "x"}, "session run-2 has nothing pending for you with that answer_id; it may be answered already; call aether_needs_attention"},
+		{"aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Session rm"}, "action is not the pending request's untrusted.text word for word; call aether_needs_attention"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-7", "answer_id": "req-7", "decision": "allow", "action": strings.Repeat("x", 600) + "…"},
-			"run run-7's request is longer than the connector shows; decide it in the Aether dashboard at https://aether.example/?run=run-7"},
+			"session run-7's request is longer than the connector shows; decide it in the Aether dashboard at https://aether.example/?run=run-7"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-3", "answer_id": "req-3", "decision": "allow", "action": ""}, "this item is a question, which is answered with aether_answer"},
 	} {
 		f.calls = nil
@@ -959,10 +860,10 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 		}
 	}
 
-	f.errs[protocol.MethodRunInputRespond] = &protocol.Error{Code: protocol.CodeConflict, Message: "Bo controls this run", Data: json.RawMessage(`{"reason":"control_held"}`)}
+	f.errs[protocol.MethodRunInputRespond] = &protocol.Error{Code: protocol.CodeConflict, Message: "Bo controls this session", Data: json.RawMessage(`{"reason":"control_held"}`)}
 	if text, _, _ := try(t, cs, "aether_answer", map[string]any{"run_id": "run-3", "answer_id": "req-3", "option_id": "accept"}); text !=
-		"Bo controls this run; ask the member in control to answer, or send your answer to the agent with aether_message_run" {
-		t.Fatalf("an answer while another member controls the run = %q", text)
+		"Bo controls this session; ask the member in control to answer, or send your answer to the agent with aether_message_session" {
+		t.Fatalf("an answer while another member controls the session = %q", text)
 	}
 }
 
@@ -974,7 +875,6 @@ func TestConnectorRunActions(t *testing.T) {
 	ready := testRun
 	ready.Review = "ready"
 	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: ready})
-	f.answers[protocol.MethodMissionCancel] = returns(protocol.MissionCancelResult{Mission: protocol.Mission{ID: "mis-1", Phase: "cancelled"}})
 	cs := connectorSession(t, f, ScopeWrite, ScopeControl)
 	for _, c := range []struct {
 		name   string
@@ -982,12 +882,11 @@ func TestConnectorRunActions(t *testing.T) {
 		method string
 		scope  Scope
 	}{
-		{"aether_pause_run", map[string]any{"run_id": "run-1"}, protocol.MethodRunPause, ScopeWrite},
-		{"aether_resume_run", map[string]any{"run_id": "run-1"}, protocol.MethodRunResume, ScopeWrite},
+		{"aether_pause_session", map[string]any{"run_id": "run-1"}, protocol.MethodRunPause, ScopeWrite},
+		{"aether_resume_session", map[string]any{"run_id": "run-1"}, protocol.MethodRunResume, ScopeWrite},
 		{"aether_mark_reviewed", map[string]any{"run_id": "run-1", "action": "complete"}, protocol.MethodRunReview, ScopeWrite},
-		{"aether_stop_run", map[string]any{"run_id": "run-1"}, protocol.MethodRunKill, ScopeControl},
-		{"aether_stop_run", map[string]any{"run_id": "run-1", "outcome": "merged"}, protocol.MethodRunClose, ScopeControl},
-		{"aether_cancel_swarm", map[string]any{"swarm_id": "mis-1"}, protocol.MethodMissionCancel, ScopeControl},
+		{"aether_stop_session", map[string]any{"run_id": "run-1"}, protocol.MethodRunKill, ScopeControl},
+		{"aether_stop_session", map[string]any{"run_id": "run-1", "outcome": "merged"}, protocol.MethodRunClose, ScopeControl},
 	} {
 		f.calls = nil
 		run(t, cs, c.name, c.args)
@@ -1001,13 +900,13 @@ func TestConnectorRunActions(t *testing.T) {
 
 	f.calls = nil
 	f.errs[protocol.MethodRunGet] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "store busy"}
-	text, out := run(t, cs, "aether_pause_run", map[string]any{"run_id": "run-1"})
-	if !strings.HasPrefix(text, "Paused run run-1; reading its state failed: ") || !strings.HasSuffix(out["state_error"].(string), "store busy") || f.acted().method != protocol.MethodRunPause {
+	text, out := run(t, cs, "aether_pause_session", map[string]any{"run_id": "run-1"})
+	if !strings.HasPrefix(text, "Paused session run-1; reading its state failed: ") || !strings.HasSuffix(out["state_error"].(string), "store busy") || f.acted().method != protocol.MethodRunPause {
 		t.Fatalf("a pause whose state read fails = %q %v, want it reported done", text, out)
 	}
-	f.errs[protocol.MethodRunGet] = &protocol.Error{Code: protocol.CodeNotFound, Message: "run run-x not found"}
-	if text, _, _ := try(t, cs, "aether_get_run", map[string]any{"run_id": "run-x"}); text != "run run-x not found; call aether_list_runs for run ids" {
-		t.Fatalf("an unknown run = %q", text)
+	f.errs[protocol.MethodRunGet] = &protocol.Error{Code: protocol.CodeNotFound, Message: "session run-x not found"}
+	if text, _, _ := try(t, cs, "aether_get_session", map[string]any{"run_id": "run-x"}); text != "session run-x not found; call aether_list_sessions for session ids" {
+		t.Fatalf("an unknown session = %q", text)
 	}
 }
 
@@ -1019,8 +918,8 @@ func TestConnectorMarkReviewedNeedsReadyRun(t *testing.T) {
 	f.answers[protocol.MethodRunReview] = returns(struct{}{})
 	cs := connectorSession(t, f, ScopeWrite)
 	text, _, failed := try(t, cs, "aether_mark_reviewed", map[string]any{"run_id": "run-1", "action": "complete"})
-	if !failed || text != `run run-1 has no reported success awaiting review (review ""); to end it, aether_stop_run, which needs the control scope` {
-		t.Fatalf("completing a running run with a write grant = %q", text)
+	if !failed || text != `session run-1 has no reported success awaiting review (review ""); to end it, aether_stop_session, which needs the control scope` {
+		t.Fatalf("completing a running session with a write grant = %q", text)
 	}
 	if got := called(f, protocol.MethodRunReview); len(got) != 0 {
 		t.Fatalf("a refused review called run.review: %+v", got)

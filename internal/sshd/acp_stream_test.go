@@ -82,7 +82,7 @@ func TestACPStreamRefusesTerminalRuns(t *testing.T) {
 	e := newTestEnv(t, nil)
 	_, ack, err := e.srv.Local(e.member.ID).ACP(t.Context(), protocol.ACPStreamRequest{RunID: string(e.run.ID)})
 	if err == nil || ack.Code != protocol.CodeInvalidParams {
-		t.Fatalf("ACP on a terminal run: %+v, %v", ack, err)
+		t.Fatalf("ACP on a terminal session: %+v, %v", ack, err)
 	}
 }
 

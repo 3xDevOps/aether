@@ -1,7 +1,7 @@
-{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"coord.send: run run_09 is not an authorized peer of run run_01: member mem_01 (collaborator) may not message it: run is protected: only its owner or an admin may message it; run `aether-internal status` to list the runs it can message"}}
-{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"coord.send: unknown run run_09"}}
-{"jsonrpc":"2.0","id":3,"error":{"code":-32004,"message":"coord.send: run run_02 has finished"}}
-{"jsonrpc":"2.0","id":4,"error":{"code":-32003,"message":"coord.send: run run_02 inbox is full (100 unacknowledged messages)"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"coord.send: session run_09 is not an authorized peer of session run_01: member mem_01 (collaborator) may not message it: session is protected: only its owner or an admin may message it; run `aether-internal status` to list the sessions it can message"}}
+{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"coord.send: unknown session run_09"}}
+{"jsonrpc":"2.0","id":3,"error":{"code":-32004,"message":"coord.send: session run_02 has finished"}}
+{"jsonrpc":"2.0","id":4,"error":{"code":-32003,"message":"coord.send: session run_02 inbox is full (100 unacknowledged messages)"}}
 {"jsonrpc":"2.0","id":5,"error":{"code":-32003,"message":"coord.send: rate limit exceeded (burst 5, 1 message per 5s)"}}
 {"jsonrpc":"2.0","id":6,"error":{"code":-32602,"message":"coord.send: body exceeds 4096 bytes"}}
 {"jsonrpc":"2.0","id":7,"error":{"code":-32004,"message":"coord.send: conflict coordination is disabled"}}

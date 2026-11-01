@@ -93,8 +93,10 @@ type Store interface {
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	DeleteMember(ctx context.Context, id domain.MemberID) error
 
-	ShareAccount(ctx context.Context, owner, grantee domain.MemberID) error
-	RevokeAccountShare(ctx context.Context, owner, grantee domain.MemberID) error
+	// ShareAccount and RevokeAccountShare report whether the grant changed:
+	// false for one that already existed or was already absent.
+	ShareAccount(ctx context.Context, owner, grantee domain.MemberID) (bool, error)
+	RevokeAccountShare(ctx context.Context, owner, grantee domain.MemberID) (bool, error)
 	AccountSharedWith(ctx context.Context, owner, grantee domain.MemberID) (bool, error)
 	ListAccountOwners(ctx context.Context, grantee domain.MemberID) ([]*domain.Member, error)
 	ListAccountGrantees(ctx context.Context, owner domain.MemberID) ([]*domain.Member, error)
@@ -130,11 +132,9 @@ type Store interface {
 	// FinishRunByMember is UpdateRunStatus that also clears finish_unopened
 	// in the same write, for the close or kill a member asked for.
 	FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (RunStatusStamp, error)
-	// IntegratorWaiting counts, for the missions run integrates that are not
-	// completed or cancelled, the worker attempts still live and the worker
-	// mail run has not acknowledged that arrived after since (any, when
-	// since is zero).
-	IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (IntegratorWait, error)
+	// UnfinishedChildren counts parent's attached children still queued,
+	// starting or not done, and their mail to parent unread since since.
+	UnfinishedChildren(ctx context.Context, parent domain.RunID, since time.Time) (unfinished, unread int, err error)
 	// LastCoordReportAt is when run last reported an outcome of any kind,
 	// zero when it never did.
 	LastCoordReportAt(ctx context.Context, run domain.RunID) (time.Time, error)
@@ -164,9 +164,6 @@ type Store interface {
 	// SetRunArchived is the narrow, conditional archive/restore mutator;
 	// see its doc comment on the DB implementation for the exact rules.
 	SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time) (bool, error)
-	// SetMissionArchived archives or restores a swarm together with its
-	// runs; see its doc comment on the DB implementation.
-	SetMissionArchived(ctx context.Context, id domain.MissionID, runs []domain.RunID, at *time.Time) (bool, []domain.RunID, error)
 	// ClearRunOutcomeUnseen clears outcome_unseen while owner owns the
 	// run, and reports whether this call changed it.
 	ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner domain.MemberID) (bool, error)
@@ -177,25 +174,11 @@ type Store interface {
 	// from, and reports whether this call changed it.
 	SetRunReview(ctx context.Context, id domain.RunID, review domain.RunReview, from ...domain.RunReview) (RunStatusStamp, bool, error)
 	DeleteRun(ctx context.Context, id domain.RunID) error
-	DeleteMission(ctx context.Context, id domain.MissionID, runs []domain.RunID) error
 	// AddRunSteerer records a member other than the run's owner steering
 	// it, and reports whether this call was the one that added them.
 	AddRunSteerer(ctx context.Context, run domain.RunID, member domain.MemberID) (bool, error)
 	// ListRunSteerers returns those members, ordered by member ID.
 	ListRunSteerers(ctx context.Context, run domain.RunID) ([]*domain.Member, error)
-
-	// Integration candidates are durable aggregate envelopes with indexed
-	// idempotency bindings and optimistic version checks. Candidate payloads
-	// are independent of source runs so run deletion cannot cascade them.
-	CreateIntegrationCandidate(ctx context.Context, c *IntegrationCandidate) error
-	GetIntegrationCandidate(ctx context.Context, id string) (*IntegrationCandidate, error)
-	GetIntegrationCandidateByKey(ctx context.Context, workspace domain.WorkspaceID, actorKey, idempotencyKey string) (*IntegrationCandidate, error)
-	UpdateIntegrationCandidate(ctx context.Context, c *IntegrationCandidate, expectedVersion int64) error
-	ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID, limit int) ([]*IntegrationCandidateSummary, error)
-	ListIntegrationCleanupCandidates(ctx context.Context, now time.Time, limit int) ([]*IntegrationCandidate, error)
-	ListIntegrationCleanupCandidatesAfter(ctx context.Context, now time.Time, afterID string, limit int) ([]*IntegrationCandidate, error)
-	ListIntegrationCandidateIDs(ctx context.Context, workspace domain.WorkspaceID) ([]string, error)
-	DeleteIntegrationCandidate(ctx context.Context, id string, expectedVersion int64) error
 
 	// Profile snapshots are content-addressed per member+harness.
 	// SaveProfileSnapshot assigns ID/CreatedAt when zero; if the digest

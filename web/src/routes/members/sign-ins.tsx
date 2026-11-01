@@ -573,7 +573,7 @@ function Consequences({ plan, shown }: { plan: MergePlan; shown: MergeOutcome })
       {shown.choice && shown.survivor && shown.absorbed && (
         <div className="flex min-w-0 flex-col gap-1">
           <p className="text-ui text-text">
-            {shown.survivor.display_name} survives with its id ({shown.survivor.id}). {shown.absorbed.display_name}&apos;s sign-ins, devices, runs and
+            {shown.survivor.display_name} survives with its id ({shown.survivor.id}). {shown.absorbed.display_name}&apos;s sign-ins, devices, sessions and
             schedules move to it. These settings of {shown.absorbed.display_name} are discarded:
           </p>
           <ul aria-label="Discarded settings" className="list-disc pl-5 text-ui text-text">
@@ -604,7 +604,7 @@ function Side({ title, member }: { title: string; member: MergeMember }) {
     ...(member.public_key_fingerprint ? [['SSH key', member.public_key_fingerprint] as [string, string]] : []),
     ['GitHub', member.identities.length ? member.identities.map((i) => i.login).join(', ') : 'none'],
     ['Devices', member.devices.length ? member.devices.map((d) => `${d.label} (${deviceStatus[d.status].label.toLowerCase()})`).join(', ') : 'none'],
-    ['Runs', String(member.runs)],
+    ['Sessions', String(member.runs)],
     ['Schedules', String(member.schedules)],
     ['Settings', settingsLines(settings, names).join('; ')],
   ]

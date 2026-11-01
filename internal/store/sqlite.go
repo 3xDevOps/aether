@@ -36,6 +36,9 @@ var _ Store = (*DB)(nil)
 // and then writes fails its lock upgrade with SQLITE_BUSY without waiting
 // on busy_timeout whenever another connection writes in between.
 //
+// Deletes overwrite the freed content (secure_delete), so a forgotten
+// preference does not linger in free pages.
+//
 // Commits do not fsync (synchronous NORMAL): the store and the event log
 // share one write lock, so a commit must not hold it across an fsync.
 func Open(path string) (*DB, error) {
@@ -47,7 +50,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("store: create %s: %w", path, closeErr)
 	}
 	dsn := "file:" + url.PathEscape(path) +
-		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
+		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=secure_delete(1)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
@@ -745,8 +748,27 @@ func (d *DB) UpdateMember(ctx context.Context, m *domain.Member) error {
 	return nil
 }
 
+// DeleteMember deletes member id and, recording each, its connectors.
 func (d *DB) DeleteMember(ctx context.Context, id domain.MemberID) error {
-	return d.execDelete(ctx, "delete member", `DELETE FROM members WHERE id = ?`, id)
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin delete member: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = removeConnectors(ctx, tx, `member_id = ?`, id); err != nil {
+		return err
+	}
+	err = notFoundOnZeroRows(tx.ExecContext(ctx, `DELETE FROM members WHERE id = ?`, id))
+	if errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("store: delete member: %w", mapConstraint(err, ErrInUse))
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit delete member: %w", err)
+	}
+	return nil
 }
 
 func (d *DB) GetTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
@@ -809,4 +831,15 @@ func collect[T any](rows *sql.Rows, scan func(interface{ Scan(...any) error }) (
 		return nil, fmt.Errorf("store: iterate rows: %w", err)
 	}
 	return out, nil
+}
+
+func jsonText(v any, fallback string) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	if len(b) == 0 || string(b) == "null" {
+		return fallback, nil
+	}
+	return string(b), nil
 }

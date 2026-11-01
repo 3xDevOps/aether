@@ -244,11 +244,11 @@ describe('activity feed', () => {
     })
     seed()
     render(<ActivityRoute params={{}} client={feedApi([control(4191, alice.id), control(4192, ''), control(4193, bob.id), control(4194, bob.id)])} />)
-    expect(await screen.findByText(/Bob is viewing the run/)).toBeDefined()
+    expect(await screen.findByText(/Bob is viewing the session/)).toBeDefined()
     const rows = within(screen.getByRole('region', { name: 'Activity feed' })).getAllByRole('listitem')
     expect(rows.map((row) => row.textContent?.replace(/^.*ago/, ''))).toEqual([
-      expect.stringContaining('Bob is viewing the run'),
-      expect.stringContaining('Alice viewed the run'),
+      expect.stringContaining('Bob is viewing the session'),
+      expect.stringContaining('Alice viewed the session'),
     ])
     expect(screen.getByText('2 entries')).toBeDefined()
   })
@@ -317,7 +317,7 @@ describe('activity filter', () => {
     render(<ActivityRoute params={{}} client={client} />)
     await screen.findByText(/waiting on a question/)
     await openFilter()
-    await pickOption(screen.getByLabelText('Show'), 'Run title')
+    await pickOption(screen.getByLabelText('Show'), 'Session title')
     await vi.waitFor(() => expect(client.workspaceTimeline).toHaveBeenCalledWith(expect.objectContaining({ types: ['run.title'] })))
     expect(screen.getByRole('button', { name: 'Filter, 1 active' })).toBeDefined()
   })
@@ -340,8 +340,8 @@ describe('activity filter', () => {
     render(<ActivityRoute params={{}} client={client} />)
     await screen.findByText(/waiting on a question/)
     await openFilter()
-    await pickOption(screen.getByLabelText('Run'), 'rewrite the checkout flow')
-    await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Run')))
+    await pickOption(screen.getByLabelText('Session'), 'rewrite the checkout flow')
+    await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Session')))
     await pickOption(screen.getByLabelText('Member'), bob.display_name)
     await vi.waitFor(() =>
       expect(client.workspaceTimeline).toHaveBeenCalledWith(expect.objectContaining({ run_id: 'run_1', member_id: bob.id })),
@@ -354,9 +354,9 @@ describe('activity filter', () => {
     render(<ActivityRoute params={{}} client={feedApi()} />)
     await screen.findByText(/waiting on a question/)
     await openFilter()
-    await pickOption(screen.getByLabelText('Run'), 'rewrite the checkout flow')
+    await pickOption(screen.getByLabelText('Session'), 'rewrite the checkout flow')
     await vi.waitFor(() => expect(useStore.getState().feedFilters.runID).toBe('run_1'))
-    await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Run')))
+    await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Session')))
     await pickOption(screen.getByLabelText('Workspace'), otherWorkspace.name)
     await vi.waitFor(() => {
       const f = useStore.getState().feedFilters

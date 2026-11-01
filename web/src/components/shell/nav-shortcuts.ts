@@ -6,7 +6,6 @@ import { useCapability, useSelfRole } from '@/store/hooks'
 
 /** The `g` sequences whose destination a gateway may not serve. */
 const goTo = {
-  'go-missions': 'missions',
   'go-activity': 'timeline',
   'go-files': 'files',
   'go-agents': 'agents',

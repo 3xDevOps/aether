@@ -73,7 +73,7 @@ func frame(workspace string, live, notes, agentNotes int) (string, string) {
 	head := `<team-memory workspace="` + inline(strings.ReplaceAll(workspace, `"`, "'"), protocol.MemoryBriefTaskBytes) +
 		"\">\n" + coordhooks.MemoryRule + "\n"
 	tail := fmt.Sprintf("%s: aether-internal status. %s (%s): aether-internal memory search <words>\n</team-memory>",
-		count(live, "live run"), count(notes, "team note"), count(agentNotes, "unpinned agent note"))
+		count(live, "live session"), count(notes, "team note"), count(agentNotes, "unpinned agent note"))
 	return head, tail
 }
 
@@ -96,7 +96,7 @@ func (b brief) String() string {
 		}
 	}
 	if len(b.runs) > 0 {
-		fmt.Fprintf(&out, "Recent runs (%dh):\n", int(protocol.MemoryBriefWindow.Hours()))
+		fmt.Fprintf(&out, "Recent sessions (%dh):\n", int(protocol.MemoryBriefWindow.Hours()))
 		for _, line := range b.runs {
 			out.WriteString(line + "\n")
 		}
@@ -106,8 +106,7 @@ func (b brief) String() string {
 }
 
 // runLine says who ran what and how it ended, from server-owned fields
-// and the first line of the task a member typed (or the swarm's
-// objective).
+// and the first line of the task a member typed.
 func runLine(r *store.MemoryBriefRun, now time.Time) string {
 	outcome := string(r.Outcome)
 	if outcome == "" {

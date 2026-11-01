@@ -18,20 +18,13 @@ func TestGuidanceOffersOnlyUsableOutcomes(t *testing.T) {
 		g            Guide
 		want, refuse []string
 	}{
-		{"background worker", Guide{Role: RoleWorker, Background: true},
+		{"background", Guide{Role: RoleBackground, Background: true},
 			[]string{"never report needs-input, waiting or answered", "inbox --wait 30"}, []string{"- needs-input", "- waiting", "- answered"}},
-		{"background integrator", Guide{Role: RoleIntegrator, Background: true},
-			[]string{"never report needs-input, waiting or answered", "mission plan show --wait 30"}, []string{"- needs-input", "- waiting", "- answered"}},
-		{"standard integrator", Guide{Role: RoleIntegrator},
-			[]string{"END EVERY TURN WITH EXACTLY ONE REPORT", "- answered: ", "- needs-input: only", "use needs-input", "never report waiting", "mission plan show --wait 30"},
+		{"standard interactive", Guide{Role: RoleInteractive},
+			[]string{"END EVERY TURN WITH EXACTLY ONE REPORT", "- answered: ", "- needs-input: only", "use needs-input", "never report waiting"},
 			[]string{"- waiting", "--for"}},
-		{"enhanced worker", Guide{Role: RoleWorker, Wake: true},
-			[]string{"END EVERY TURN WITH EXACTLY ONE REPORT", "[--for agents|ci|process]", "- answered: ", "- needs-input: not for workers", "- waiting: ", "ask your integrator"},
-			[]string{"never report waiting", "use needs-input"}},
 		{"enhanced interactive", Guide{Role: RoleInteractive, Wake: true},
 			[]string{"- answered: ", "- waiting: ", "use needs-input", "Not while aether_status shows protected", "reply to the person as message text before the report"}, []string{"without a report"}},
-		{"mission", Guide{Role: RoleMission},
-			[]string{"an integrator uses needs-input, a worker `aether-internal ask`"}, []string{"stop; use needs-input"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			card := RoleCard(tc.g)
@@ -52,7 +45,7 @@ func TestGuidanceOffersOnlyUsableOutcomes(t *testing.T) {
 // The MCP brief must stand alone in the first 512 bytes of instructions, and
 // the role card's reporting contract stays short enough to read every turn.
 func TestBriefFitsEveryLaunch(t *testing.T) {
-	for _, role := range []string{RoleWorker, RoleIntegrator, RoleMission, RoleInteractive, RoleBackground} {
+	for _, role := range []string{RoleInteractive, RoleBackground} {
 		for _, background := range []bool{false, true} {
 			for _, wake := range []bool{false, true} {
 				g := Guide{Role: role, Background: background, Wake: wake && !background}

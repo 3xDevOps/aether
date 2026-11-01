@@ -32,12 +32,12 @@ export function BriefRegion({ brief, open, onRetry }: { brief: Brief; open: bool
     <Collapsible open={open}>
       <CollapsibleContent>
         <section id={regionID} aria-label="Brief" className="flex max-h-[40dvh] min-w-0 flex-col gap-2 overflow-y-auto border-b border-seam px-4 py-3">
-          <p className="text-ui-sm text-muted">What a run you launch in this workspace gets at start, byte for byte.</p>
+          <p className="text-ui-sm text-muted">What a session you launch in this workspace gets at start, byte for byte.</p>
           {brief.kind === 'loading' && <p className="text-ui text-muted">Reading the brief…</p>}
           {brief.kind === 'failed' && <FailureCallout error={brief.message} onRetry={onRetry} />}
           {brief.kind === 'ready' && (brief.text
             ? <CodeBlock className="break-words whitespace-pre-wrap">{brief.text}</CodeBlock>
-            : <p className="text-ui text-muted">Empty: nothing is pinned, no run finished in the last 48 hours and there are no notes.</p>)}
+            : <p className="text-ui text-muted">Empty: nothing is pinned, no session finished in the last 48 hours and there are no notes.</p>)}
         </section>
       </CollapsibleContent>
     </Collapsible>

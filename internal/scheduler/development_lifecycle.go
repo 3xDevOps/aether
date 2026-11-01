@@ -35,7 +35,7 @@ func (s *Scheduler) developmentClosedPath(id domain.RunID) string {
 
 // ErrDevelopmentClosed refuses a new surface in the container of a run that
 // is being closed.
-var ErrDevelopmentClosed = errors.New("development environment was closed; explicitly relaunch the run before starting new surfaces")
+var ErrDevelopmentClosed = errors.New("development environment was closed; explicitly relaunch the session before starting new surfaces")
 
 func (s *Scheduler) checkDevelopmentOpen(id domain.RunID, cid containerruntime.ID) error {
 	data, err := os.ReadFile(s.developmentClosedPath(id))
@@ -156,7 +156,7 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 }
 
 // StopDevelopmentRun is called only after the terminal report/evidence commit.
-// It never clears a mission takeover hold or destroys the run's checkout.
+// It never destroys the run's checkout.
 func (s *Scheduler) StopDevelopmentRun(ctx context.Context, id domain.RunID) error {
 	cid := s.developmentContainer(id)
 	if cid == "" {

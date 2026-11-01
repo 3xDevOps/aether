@@ -32,7 +32,6 @@ type InsightsResult struct {
 	Heatmap      []InsightsHeatmapDay  `json:"heatmap"`
 	ByWorkspace  []InsightsWorkspace   `json:"by_workspace"`
 	ByAgent      []InsightsAgent       `json:"by_agent"`
-	Swarms       InsightsSwarms        `json:"swarms"`
 	Durations    InsightsDurations     `json:"durations"`
 	Cost         InsightsCost          `json:"cost"`
 	PullRequests InsightsPullRequests  `json:"pull_requests"`
@@ -89,14 +88,6 @@ type InsightsAgent struct {
 	Failed   int    `json:"failed"`
 }
 
-type InsightsSwarms struct {
-	Launched      int `json:"launched"`
-	Completed     int `json:"completed"`
-	Cancelled     int `json:"cancelled"`
-	Agents        int `json:"agents"`
-	TasksAccepted int `json:"tasks_accepted"`
-}
-
 type InsightsDurations struct {
 	RunsMeasured          int   `json:"runs_measured"`
 	MedianRunSeconds      int64 `json:"median_run_seconds"`
@@ -130,7 +121,7 @@ type InsightsCostAgent struct {
 	TotalTokens   int64   `json:"total_tokens"`
 }
 
-// InsightsOutcome is how runs or swarms finished. See docs/insights.md for
+// InsightsOutcome is how runs finished. See docs/insights.md for
 // which statuses count as which.
 type InsightsOutcome struct {
 	Done      int `json:"done"`
@@ -143,15 +134,13 @@ type InsightsOutcome struct {
 // empty for "mine".
 type InsightsOutcomes struct {
 	Runs    InsightsOutcome         `json:"runs"`
-	Swarms  InsightsOutcome         `json:"swarms"`
 	Series  []InsightsOutcomeBucket `json:"series"`
 	Members []InsightsMemberOutcome `json:"members"`
 }
 
 type InsightsOutcomeBucket struct {
-	Start  string          `json:"start"`
-	Runs   InsightsOutcome `json:"runs"`
-	Swarms InsightsOutcome `json:"swarms"`
+	Start string          `json:"start"`
+	Runs  InsightsOutcome `json:"runs"`
 }
 
 // InsightsMemberOutcome is one member's share of InsightsOutcomes. Color is
@@ -162,15 +151,13 @@ type InsightsMemberOutcome struct {
 	DisplayName string                  `json:"display_name"`
 	Color       string                  `json:"color"`
 	Runs        InsightsOutcome         `json:"runs"`
-	Swarms      InsightsOutcome         `json:"swarms"`
 	Series      []InsightsOutcomeBucket `json:"series"`
 }
 
 // InsightsSuccess counts what finished in the range and how much of it ended
 // with a merged pull request.
 type InsightsSuccess struct {
-	Runs   InsightsSuccessCount `json:"runs"`
-	Swarms InsightsSuccessCount `json:"swarms"`
+	Runs InsightsSuccessCount `json:"runs"`
 }
 
 type InsightsSuccessCount struct {
@@ -194,7 +181,6 @@ type InsightsRecentRun struct {
 	CreatedAt       string `json:"created_at"`
 	FinishedAt      string `json:"finished_at"`
 	DurationSeconds int64  `json:"duration_seconds"`
-	MissionID       string `json:"mission_id"`
 	PRURL           string `json:"pr_url"`
 	PRState         string `json:"pr_state"`
 }

@@ -96,7 +96,7 @@ func TestDevelopmentReadsRequireSteerAndAccountUse(t *testing.T) {
 	if _, err := local.Call(t.Context(), protocol.MethodDevTerminalList, raw); err == nil || err.Code != protocol.CodeDenied {
 		t.Fatalf("read without account-use = %v", err)
 	}
-	if err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
+	if _, err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := local.Call(t.Context(), protocol.MethodDevTerminalList, raw); err != nil {
@@ -170,7 +170,7 @@ func TestDevelopmentBrowserIdleStreamClosesOnAccountRevocation(t *testing.T) {
 	e := newTestEnv(t, nil)
 	installDevelopmentTestService(e)
 	_, other := addMember(t, e, "browser observer", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
+	if _, err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
@@ -180,7 +180,7 @@ func TestDevelopmentBrowserIdleStreamClosesOnAccountRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = stream.Close() }()
-	if revokeErr := e.store.RevokeAccountShare(t.Context(), e.member.ID, other.ID); revokeErr != nil {
+	if _, revokeErr := e.store.RevokeAccountShare(t.Context(), e.member.ID, other.ID); revokeErr != nil {
 		t.Fatal(revokeErr)
 	}
 	_, err = stream.Read(make([]byte, 1))
@@ -581,7 +581,7 @@ func (s *developmentBrowserStreamService) BrowserFrames(ctx context.Context, _ d
 func TestDevelopmentBrowserStalledSSHTransportReleasesSubscription(t *testing.T) {
 	e := newTestEnv(t, nil)
 	key, member := addMember(t, e, "stalled browser viewer", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(t.Context(), e.member.ID, member.ID); err != nil {
+	if _, err := e.store.ShareAccount(t.Context(), e.member.ID, member.ID); err != nil {
 		t.Fatal(err)
 	}
 	service := &developmentBrowserStreamService{
@@ -605,7 +605,7 @@ func TestDevelopmentBrowserStalledSSHTransportReleasesSubscription(t *testing.T)
 		Data:     []byte("pixels"),
 	}
 	waitDevelopmentSignal(t, raw.blocked, 3*time.Second, "outgoing browser frame")
-	if err := e.store.RevokeAccountShare(t.Context(), e.member.ID, member.ID); err != nil {
+	if _, err := e.store.RevokeAccountShare(t.Context(), e.member.ID, member.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitDevelopmentSignal(t, streamCtx.Done(), 3*time.Second, "browser context cancellation")

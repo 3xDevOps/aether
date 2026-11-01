@@ -43,6 +43,15 @@ func TestRecoveryResolvesUnknownRunUserBeforeTerminalAdoption(t *testing.T) {
 			if closeErr := e.sched.Close(); closeErr != nil {
 				t.Fatal(closeErr)
 			}
+			// A sidecar from before run users were recorded.
+			legacy, err := e.sched.readSidecar(run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy.RunUser = ""
+			if writeErr := e.sched.writeSidecar(legacy); writeErr != nil {
+				t.Fatal(writeErr)
+			}
 			container.spec.User = tc.runUser
 			terminalContainer, err := e.rt.get(runtime.ID(terminal.ContainerID))
 			if err != nil {
@@ -58,7 +67,7 @@ func TestRecoveryResolvesUnknownRunUserBeforeTerminalAdoption(t *testing.T) {
 			unavailable.cfg.Runtime = unavailableRunMetadata{Runtime: e.rt, run: container.id}
 			unavailable.recoverSupervised(t.Context(), stored)
 			if _, adoptErr := unavailable.EnsureTerminal(t.Context(), e.member.ID); adoptErr == nil {
-				t.Fatal("terminal adopted while the live run's identity was unknown")
+				t.Fatal("terminal adopted while the live session's identity was unknown")
 			}
 			if closeErr := unavailable.Close(); closeErr != nil {
 				t.Fatal(closeErr)
@@ -70,7 +79,7 @@ func TestRecoveryResolvesUnknownRunUserBeforeTerminalAdoption(t *testing.T) {
 			adopted, err := recovered.EnsureTerminal(t.Context(), e.member.ID)
 			if tc.conflict {
 				if err == nil {
-					t.Fatal("terminal adopted with a conflicting live run user")
+					t.Fatal("terminal adopted with a conflicting live session user")
 				}
 			} else {
 				if err != nil {
@@ -85,7 +94,7 @@ func TestRecoveryResolvesUnknownRunUserBeforeTerminalAdoption(t *testing.T) {
 				t.Fatal(err)
 			}
 			if persisted.RunUser != tc.runUser {
-				t.Fatalf("persisted run user = %q, want %q", persisted.RunUser, tc.runUser)
+				t.Fatalf("persisted session user = %q, want %q", persisted.RunUser, tc.runUser)
 			}
 			if container.currentState() != "running" || terminalContainer.currentState() != "running" ||
 				recoveredPTY.session(run.ID) == nil {

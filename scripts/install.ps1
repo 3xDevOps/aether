@@ -1156,9 +1156,10 @@ function Invoke-AetherInstall {
         if ($role -eq 'client') {
             Write-Host '  open Aether from the Start menu, or link from a new terminal:'
         }
-        Write-Host '  aether login                   # sign in to the edge'
-        Write-Host '  aether link --claim <code>     # code from server setup or `sudo aether-server edge claim-code`'
-        Write-Host '  aether link <server-host>:2222 # instead, on a tailnet or without the edge'
+        Write-Host '  aether link <server-host>      # on a tailnet: the server''s tailnet name'
+        Write-Host '  aether login                   # otherwise, sign in to the edge, Aether''s relay'
+        Write-Host '  aether link --claim <code>     # with the claim link server setup printed'
+        Write-Host '  aether link ''<invite link>''    # or with an invite link from an admin'
         Write-AetherStatus 'done:' Green ('Aether {0} installed in {1}' -f $release.Tag, (Format-AetherSeconds $total))
     }
     finally {

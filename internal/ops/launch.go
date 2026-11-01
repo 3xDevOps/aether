@@ -14,7 +14,7 @@ import (
 
 // ContractVersion is the version of the ops' inputs and results; it rises
 // when one changes in a way a client that relied on it would notice.
-const ContractVersion = 1
+const ContractVersion = 2
 
 // modeNames are the dashboard's names of the launch modes.
 var modeNames = map[string]string{"tui": "Standard", "headless": "Background", "acp": "Enhanced"}
@@ -84,8 +84,7 @@ func policyOf(order []string, off bool) fallbackPolicy {
 	return fallbackPolicy{Policy: "automatic"}
 }
 
-// choice is an agent a run or swarm role runs: its harness, mode and model
-// on an account. No model is the agent's default.
+// choice is an agent a run runs: its harness, mode and model on an account. No model is the agent's default.
 type choice struct {
 	Harness  string      `json:"harness"`
 	Mode     string      `json:"mode"`
@@ -105,8 +104,7 @@ type repoRef struct {
 }
 
 // launchReceipt is what a launch started and on what, the result field
-// launch of aether_launch_run, aether_launch_swarm,
-// aether_get_run and aether_get_swarm. RequestedAccount is set when usage
+// launch of aether_launch_session and aether_get_session. RequestedAccount is set when usage
 // fallback moved a run off the account asked for.
 type launchReceipt struct {
 	Kind        string `json:"kind"`
@@ -114,17 +112,21 @@ type launchReceipt struct {
 	WorkspaceID string `json:"workspace_id"`
 	*choice
 	RequestedAccount *accountRef               `json:"requested_account,omitempty"`
-	Integrator       *choice                   `json:"integrator,omitempty"`
-	Workers          []choice                  `json:"workers,omitempty"`
 	Fallback         fallbackPolicy            `json:"fallback"`
 	Skipped          []protocol.SkippedAccount `json:"skipped_fallback_accounts,omitempty"`
 	Repos            []repoRef                 `json:"repos,omitempty"`
 	// Children is a run's own child-run setting, on or off; absent follows
 	// its owner's.
-	Children       string `json:"children,omitempty"`
-	Via            string `json:"via,omitempty"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	URL            string `json:"url,omitempty"`
+	Children string `json:"children,omitempty"`
+	// DefaultsApplied are the input fields the member's saved launch
+	// defaults filled, DefaultsSkipped the saved ones it did not use, and
+	// DefaultsUnchecked the ones it used that nothing could check.
+	DefaultsApplied   []string      `json:"defaults_applied,omitempty"`
+	DefaultsSkipped   []defaultSkip `json:"defaults_skipped,omitempty"`
+	DefaultsUnchecked []defaultSkip `json:"defaults_unchecked,omitempty"`
+	Via               string        `json:"via,omitempty"`
+	IdempotencyKey    string        `json:"idempotency_key,omitempty"`
+	URL               string        `json:"url,omitempty"`
 }
 
 func runReceipt(r protocol.Run, l links, book accountBook) *launchReceipt {
@@ -138,53 +140,34 @@ func runReceipt(r protocol.Run, l links, book accountBook) *launchReceipt {
 	return out
 }
 
-func swarmReceipt(m protocol.Mission, l links, book accountBook) *launchReceipt {
-	in := m.Integrator
-	integrator := choiceOf(in.Harness, in.Mode, in.Model, in.AccountMemberID, book)
-	out := &launchReceipt{Kind: "swarm", ID: m.ID, WorkspaceID: m.WorkspaceID, Integrator: &integrator,
-		Fallback: policyOf(m.FallbackAccountMemberIDs, m.NoFallback), URL: l.swarm(m.ID)}
-	for _, c := range m.ExecutionChoices {
-		out.Workers = append(out.Workers, choiceOf(c.Harness, c.Mode, c.Model, c.AccountMemberID, book))
-	}
-	for _, id := range m.ExtraWorkspaceIDs {
-		out.Repos = append(out.Repos, repoRef{WorkspaceID: id})
-	}
-	return out
-}
-
 type launchOptionsInput struct {
 	WorkspaceID     string `json:"workspace_id,omitempty" jsonschema:"add its templates"`
-	Models          string `json:"models,omitempty" jsonschema:"an agent name: add its models"`
+	Models          string `json:"models,omitempty" jsonschema:"an agent: add its models"`
 	AccountMemberID string `json:"account_member_id,omitempty"`
 }
 
 var launchOps = []Op{
 	opOf("aether_launch_options", "Launch options", ScopeRead, true, nextWorkspaces,
-		"Use this when choosing what to launch: workspaces, your accounts with usage, their agents and modes, swarm eligibility, fallback; "+
-			"templates with workspace_id, models with models.", launchOptions).
-		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodAccountList, protocol.MethodAgentList,
+		"Use this when choosing what to launch: workspaces, accounts with usage, agents and modes, fallback, saved defaults.", launchOptions).
+		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodAccountList, protocol.MethodAgentList, protocol.MethodLaunchDefaultsGet,
 		protocol.MethodAccountUsage, protocol.MethodTemplateList, protocol.MethodAgentModels),
 }
 
 // agentRow is an agent on one account. Refused is why a launch on the
-// account would be refused; Modes are the modes a run may start in, and
-// Swarm the modes an integrator or a worker may.
+// account would be refused; Modes are the modes a run may start in.
 type agentRow struct {
 	Name        string   `json:"name"`
 	Installed   bool     `json:"installed"`
 	SignedIn    *bool    `json:"signed_in,omitempty"`
 	DefaultMode string   `json:"default_mode"`
 	Modes       []string `json:"modes"`
-	Integrator  []string `json:"integrator_modes"`
-	Worker      string   `json:"worker_mode,omitempty"`
 	Refused     string   `json:"refused,omitempty"`
 }
 
 // rowOfAgent follows the dashboard's launch dialog: Enhanced needs it
-// installed, a swarm agent needs a mode Aether can wake, and Background
-// never runs an integrator.
+// installed.
 func rowOfAgent(a protocol.AgentInfo) agentRow {
-	row := agentRow{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound, DefaultMode: a.DefaultMode, Modes: []string{"tui", "headless"}, Integrator: []string{}}
+	row := agentRow{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound, DefaultMode: a.DefaultMode, Modes: []string{"tui", "headless"}}
 	switch {
 	case !a.Installed:
 		row.Refused = "not installed"
@@ -198,13 +181,6 @@ func rowOfAgent(a protocol.AgentInfo) agentRow {
 	enhanced := a.Enhanced != "none" && a.EnhancedInstalled
 	if enhanced {
 		row.Modes = append([]string{"acp"}, row.Modes...)
-		row.Integrator = append(row.Integrator, "acp")
-	}
-	if a.SwarmStandardRefusal == "" {
-		row.Integrator = append(row.Integrator, "tui")
-	}
-	if row.Refused == "" {
-		row.Worker = slices.Concat(row.Integrator, []string{"headless"})[0]
 	}
 	return row
 }
@@ -310,6 +286,15 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 			"moves to the usable account with the most usage left. Usage is unknown for agents with no usage row.", fallback.ExhaustedPercent),
 	}
 	summary := fmt.Sprintf("%d workspaces, %d accounts.", len(workspaces), len(rows))
+	var saved protocol.LaunchDefaultsResult
+	if err := c.read(ctx, protocol.MethodLaunchDefaultsGet, nil, &saved); err != nil {
+		out["saved_error"] = err.Error()
+	} else {
+		out["saved"] = saved
+		if saved.Revision > 0 {
+			summary += fmt.Sprintf(" Saved defaults at revision %d, %d unusable.", saved.Revision, len(saved.Invalid))
+		}
+	}
 	if len(ws.Workspaces) > len(workspaces) {
 		out["workspaces_total"] = len(ws.Workspaces)
 	}
@@ -382,7 +367,7 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 	return summary, out, nil
 }
 
-// launchTemplate runs aether_launch_run's template on the caller's own
+// launchTemplate runs aether_launch_session's template on the caller's own
 // account, refused if template_version names one it no longer is;
 // template.launch takes nothing else a run launch does, so naming it is
 // refused rather than dropped.
@@ -418,26 +403,26 @@ func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (stri
 			return "", nil, err
 		}
 	}
-	res, finished, err := launch[protocol.TemplateLaunchResult](ctx, c, protocol.MethodTemplateLaunch, withReason(params, in.Reason), done)
+	res, finished, err := launch[protocol.TemplateLaunchResult](ctx, c, protocol.MethodTemplateLaunch, withReason(params, in.Reason, c.surface, savedFill{}), done)
 	if err != nil && finished {
 		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	if res.Run.ID == "" {
-		return starting("aether_launch_run", params.IdempotencyKey, err)
+		return starting("aether_launch_session", params.IdempotencyKey, err)
 	}
 	receipt := runReceipt(res.Run, l, book)
 	receipt.IdempotencyKey = params.IdempotencyKey
-	out := map[string]any{"run_id": res.Run.ID, "state": res.Run.Status, "url": l.run(res.Run.ID), "launch": receipt, "next": "poll aether_get_run with run_id"}
+	out := map[string]any{"run_id": res.Run.ID, "state": res.Run.Status, "url": l.run(res.Run.ID), "launch": receipt, "next": "poll aether_get_session with run_id"}
 	switch {
 	case dup:
 		out["duplicate"] = true
-		return fmt.Sprintf("You are already launching this template; returning run %s.", res.Run.ID), out, nil
+		return fmt.Sprintf("You are already launching this template; returning session %s.", res.Run.ID), out, nil
 	case !finished:
 		out["state"], out["write"] = "starting", writePending
-		return fmt.Sprintf("Run %s is starting from template %s.", res.Run.ID, in.Template), out, nil
+		return fmt.Sprintf("Session %s is starting from template %s.", res.Run.ID, in.Template), out, nil
 	case res.Replayed:
 		out["replayed"] = true
-		return fmt.Sprintf("This idempotency_key already launched run %s; nothing new was launched.", res.Run.ID), out, nil
+		return fmt.Sprintf("This idempotency_key already launched session %s; nothing new was launched.", res.Run.ID), out, nil
 	}
-	return fmt.Sprintf("Launched run %s from template %s (%s).", res.Run.ID, in.Template, res.Run.Status), out, nil
+	return fmt.Sprintf("Launched session %s from template %s (%s).", res.Run.ID, in.Template, res.Run.Status), out, nil
 }

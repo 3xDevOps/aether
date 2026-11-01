@@ -68,12 +68,12 @@ export function ActivityRoute({ params, client = api }: RouteProps & { client?: 
 
   const fields: FilterField[] = messages
     ? [
-        { label: 'Sender', value: messageFilters.sender, onChange: (sender) => setMessageFilter({ sender }), options: [['', 'Any run'], ...runOptions] },
-        { label: 'Recipient', value: messageFilters.recipient, onChange: (recipient) => setMessageFilter({ recipient }), options: [['', 'Any run'], ...runOptions] },
+        { label: 'Sender', value: messageFilters.sender, onChange: (sender) => setMessageFilter({ sender }), options: [['', 'Any session'], ...runOptions] },
+        { label: 'Recipient', value: messageFilters.recipient, onChange: (recipient) => setMessageFilter({ recipient }), options: [['', 'Any session'], ...runOptions] },
         { label: 'Thread', value: messageFilters.thread, onChange: (thread) => setMessageFilter({ thread }), options: [['', 'Every thread'], ...threads] },
       ]
     : [
-        { label: 'Run', value: filters.runID, onChange: (runID) => setFilters({ runID }), options: [['', 'Every run'], ...runOptions] },
+        { label: 'Session', value: filters.runID, onChange: (runID) => setFilters({ runID }), options: [['', 'Every session'], ...runOptions] },
         { label: 'Member', value: filters.memberID, onChange: (memberID) => setFilters({ memberID }), options: [['', 'Everyone'], ...members.map((m): Option => [m.id, m.display_name])] },
       ]
 

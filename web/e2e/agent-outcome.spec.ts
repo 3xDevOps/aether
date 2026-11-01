@@ -16,7 +16,7 @@ while IFS= read -r line; do
   echo "follow-up received: $line"
 done`
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 async function launch(aether: Aether, task: string) {
   const alice = await aether.member('alice')
@@ -76,7 +76,7 @@ test('a reported success waits in Needs you until answered, and the same run acc
   expect(before.finished_at).toBeNull()
   expect(before.container_retained_until).toBeUndefined()
   await card('Finished').click({ position: { x: 16, y: 12 } })
-  await page.getByRole('tab', { name: 'Session', exact: true }).click()
+  await page.getByRole('tab', { name: 'Chat', exact: true }).click()
   await page.getByRole('textbox', { name: 'Message the agent' }).fill('please check the retry path')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect.poll(async () => {
@@ -126,7 +126,7 @@ test('a completed run inside its grace relaunches from the composer and its grac
   const closed = await read()
   expect(closed.container_retained_until).toBeTruthy()
 
-  await page.getByRole('tab', { name: 'Session', exact: true }).click()
+  await page.getByRole('tab', { name: 'Chat', exact: true }).click()
   await page.getByRole('button', { name: 'Relaunch', exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'Message the agent' })).toBeVisible({ timeout: 60_000 })
   await expect.poll(async () => (await read()).status).toBe('running')

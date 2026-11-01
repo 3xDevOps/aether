@@ -3,11 +3,17 @@ name: Edge image
 # Builds images/edge/Dockerfile on both architectures it ships for and runs
 # scripts/edge-image-smoke.sh on each, natively, and qualifies an upgrade
 # from the previous release with make test-edge-upgrade. ci.yml calls it when
-# scripts/ci-classify-edge.sh says a pull request can change the image;
+# scripts/ci-classify-edge.sh says a pull request can change the image, and
+# skips the upgrade on a pull request: the merge queue and main run it;
 # `gh workflow run edge-image.yml --ref <branch>` forces it for any branch.
 # It pushes nothing and holds no credential beyond a read-only token.
 on:
   workflow_call:
+    inputs:
+      full:
+        description: Also qualify the upgrade from the previous release
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       ref:
@@ -56,6 +62,7 @@ jobs:
         run: sh scripts/edge-image-smoke.sh aether-edge:ci
 
   upgrade:
+    if: ${{ inputs.full != false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

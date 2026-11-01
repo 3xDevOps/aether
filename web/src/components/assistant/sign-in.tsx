@@ -54,7 +54,7 @@ export function AssistantSignIn({ agent, client, onDone }: { agent: AssistantAge
   return (
     <section aria-label={`Sign in to ${agent.display_name}`} className="flex min-h-0 flex-1 flex-col gap-3">
       <p className="text-ui">
-        Sign in to {agent.display_name} for the assistant. The sign-in runs in the assistant's own container and is kept there, apart from your runs, which cannot read or change it. Open the link it prints and follow its prompts.
+        Sign in to {agent.display_name} for the assistant. The sign-in runs in the assistant's own container and is kept there, apart from your sessions, which cannot read or change it. Open the link it prints and follow its prompts.
       </p>
       {refused && <Callout tone="failed" role="alert" title="The sign-in could not start">{refused}</Callout>}
       <TerminalPane controller={controller} className="min-h-64 flex-1" />

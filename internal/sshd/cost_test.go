@@ -128,11 +128,11 @@ func TestWorkspaceBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 	}
 	for _, call := range e.runs.Calls() {
 		if strings.HasPrefix(call, "kill:") || strings.HasPrefix(call, "close:") {
-			t.Fatalf("budget enforcement stopped a running run: %q", call)
+			t.Fatalf("budget enforcement stopped a running session: %q", call)
 		}
 	}
 	var report protocol.CostReportResult
-	eventually(t, "the finished run's usage to settle", func() bool {
+	eventually(t, "the finished session's usage to settle", func() bool {
 		report = protocol.CostReportResult{}
 		if err := control.Call(protocol.MethodCostReport, protocol.CostReportParams{
 			WorkspaceID: string(e.ws.ID),
@@ -142,10 +142,10 @@ func TestWorkspaceBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 		return len(report.Runs) == 1
 	})
 	if !report.Runs[0].Metered || report.Runs[0].CostUSD != 1.25 || report.Total.Unmetered != 0 {
-		t.Fatalf("report = %+v, want the run still metered at $1.25", report)
+		t.Fatalf("report = %+v, want the session still metered at $1.25", report)
 	}
 	if report.Runs[0].MemberID != string(e.member.ID) || len(report.Members) != 1 {
-		t.Fatalf("attribution = %+v, want the run's usage on its owner", report.Members)
+		t.Fatalf("attribution = %+v, want the session's usage on its owner", report.Members)
 	}
 
 	// Only an admin may move the budget.
@@ -170,7 +170,7 @@ func TestWorkspaceBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 		t.Fatalf("run.launch under override: %v", err)
 	}
 	if launched.Run.ID == "" {
-		t.Fatal("override admitted the run but returned nothing")
+		t.Fatal("override admitted the session but returned nothing")
 	}
 }
 

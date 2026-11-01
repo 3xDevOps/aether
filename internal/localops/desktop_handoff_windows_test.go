@@ -13,7 +13,7 @@ import (
 
 func TestHandoffSleeper(t *testing.T) {
 	if os.Getenv("AETHER_HANDOFF_SLEEPER") == "" {
-		t.Skip("runs only as the child of the wait tests")
+		t.Skip("sessions only as the child of the wait tests")
 	}
 	time.Sleep(time.Minute)
 }

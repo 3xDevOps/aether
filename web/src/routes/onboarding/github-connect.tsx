@@ -31,10 +31,10 @@ export function GitHubSection({
   return (
     <section aria-label="Connect GitHub" className="flex min-w-0 flex-col items-start gap-2">
       <p className="text-ui text-text">
-        Runs push branches and open pull requests from the server as you. Commits are signed with a key kept in your
+        Sessions push branches and open pull requests from the server as you. Commits are signed with a key kept in your
         environment, which never leaves the server.
       </p>
-      {connection && <p role="status" className="text-ui text-state-done">Connected in this session as {connection.login}</p>}
+      {connection && <p role="status" className="text-ui text-state-done">Connected as {connection.login}</p>}
       <Button size="sm" variant="secondary" onClick={onOpen}>
         Connect GitHub
       </Button>

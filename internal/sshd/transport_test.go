@@ -104,7 +104,7 @@ func gitExecAs(t *testing.T, e *testEnv, signer ssh.Signer, cmd string) (int, st
 	case errors.As(runErr, &exitErr):
 		return exitErr.ExitStatus(), stderr.String()
 	default:
-		t.Fatalf("run %q: %v", cmd, runErr)
+		t.Fatalf("session %q: %v", cmd, runErr)
 		return 0, ""
 	}
 }
@@ -380,7 +380,7 @@ func TestAttachErrors(t *testing.T) {
 	var ack protocol.AttachResponse
 	readJSONLine(t, r, &ack)
 	if ack.OK || ack.Code != protocol.CodeNotFound {
-		t.Errorf("unknown run ack = %+v, want not-found", ack)
+		t.Errorf("unknown session ack = %+v, want not-found", ack)
 	}
 
 	// Write denied by the gate.

@@ -189,7 +189,7 @@ func (s *Service) fire(ctx context.Context, sc *store.Schedule, at time.Time) {
 		source = "local"
 	}
 	s.publish(ctx, t.WorkspaceID, launched.Run.ID, sc.MemberID,
-		fmt.Sprintf("scheduled run %s from %s %s at %s (%s)",
+		fmt.Sprintf("scheduled session %s from %s %s at %s (%s)",
 			launched.Run.ID, source, launched.Run.BaseBranch,
 			launched.Run.BaseCommit, t.Name))
 
@@ -209,7 +209,7 @@ func (s *Service) allowed(ctx context.Context, member domain.MemberID) error {
 		return fmt.Errorf("member %s is awaiting admin approval", member)
 	}
 	if err := permissions.Check(permissions.Launch, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{}); err != nil {
-		return fmt.Errorf("member %s may no longer launch runs: %w", member, err)
+		return fmt.Errorf("member %s may no longer launch sessions: %w", member, err)
 	}
 	return nil
 }

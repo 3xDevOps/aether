@@ -73,7 +73,7 @@ type ptyGeometry struct{ cols, rows uint }
 func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, error) {
 	ch, reqs, err := c.client.OpenChannel("session", nil)
 	if err != nil {
-		return nil, fmt.Errorf("cli: open session: %w", err)
+		return nil, fmt.Errorf("cli: open ssh channel: %w", err)
 	}
 	exit := make(chan error, 1)
 	go func() { exit <- awaitRequests(reqs) }()

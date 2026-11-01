@@ -18,7 +18,7 @@ export const filters: { value: Filter; label: string; empty: string; search: str
   { value: 'pinned', label: 'Pinned', empty: 'No pinned notes', search: 'Search pinned notes…' },
   { value: 'agent', label: 'Agent notes', empty: 'No agent notes', search: 'Search agent notes…' },
   { value: 'outcomes', label: 'Outcomes', empty: 'No run outcomes', search: 'Search run outcomes…' },
-  { value: 'answers', label: 'Answers', empty: 'No swarm answers', search: 'Search swarm answers…' },
+  { value: 'answers', label: 'Answers', empty: 'No answers', search: 'Search answers…' },
   { value: 'superseded', label: 'Superseded', empty: 'No superseded notes', search: 'Search superseded notes…' },
 ]
 
@@ -55,8 +55,8 @@ export const writableKinds = ['decision', 'convention', 'gotcha', 'preference'] 
 export const sourceLabel: Record<MemorySource, string> = {
   agent: 'Agent note',
   member: 'Member note',
-  report: 'Run report',
-  answer: 'Swarm answer',
+  report: 'Session report',
+  answer: 'Answer',
 }
 
 export function superseded(item: MemoryItem): boolean {

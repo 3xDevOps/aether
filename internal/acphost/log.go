@@ -19,7 +19,7 @@ import (
 
 var ErrLogClosed = errors.New("acphost: item log closed")
 var ErrLogReadOnly = errors.New("acphost: item log opened read-only")
-var ErrHistoryExpired = errors.New("acphost: requested session history has expired")
+var ErrHistoryExpired = errors.New("acphost: requested conversation history has expired")
 
 // HistoryPage describes one atomic snapshot of the retained public items.
 // OldestSeq is the first retained sequence, not necessarily on this page.

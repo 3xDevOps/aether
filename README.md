@@ -93,12 +93,13 @@ your phone or the desktop app. **Not only can you observe and steer your agents,
   agents live, and every action is attributed to the person who took it.
 - Agents run in containers on the server, so they keep working after you close
   your laptop.
-- Each run works on its own git branch. Pull it and review it, or let the agent
+- Each **session**, one agent working on one task, has its own container and
+  git branch. Pull the branch and review it, or let the agent
   push it and open a pull request.
 - You bring your own agent CLIs and logins: Claude Code, Codex, OpenCode and
   [others](docs/harnesses.md). Their configuration and logins live in a
   persistent home on the server.
-- Runs share a team memory of short notes per repository, and a dashboard
+- Sessions share a team memory of short notes per repository, and a dashboard
   assistant answers questions and acts for you with your own agent login.
 - It works for one person too: the first person to link a server becomes its
   administrator.
@@ -106,7 +107,7 @@ your phone or the desktop app. **Not only can you observe and steer your agents,
 ```mermaid
 flowchart LR
     you["Your laptop, phone<br>or desktop app"] -->|"SSH, a tailnet<br>or an edge"| server["Aether server"]
-    server -->|"one container<br>per run"| run["Agent run"]
+    server -->|"one container<br>per session"| run["Agent session"]
     run -->|"commits to"| branch["A git branch<br>you review"]
 ```
 
@@ -120,10 +121,10 @@ Common documentation:
 - [Agents](docs/harnesses.md): which agent CLIs work, how to sign in, and their
   limits.
 - [Teams](docs/teams.md): inviting people, roles and workspaces.
-- [Working across repos](docs/quickstart.md#working-across-repos): one run over
+- [Working across repos](docs/quickstart.md#working-across-repos): one session over
   several workspaces.
 - [Troubleshooting](docs/failure-handling.md): reboots, full disks, stalled
-  runs and dropped connections.
+  sessions and dropped connections.
 
 ## Contributing
 

@@ -318,7 +318,7 @@ func (s *Service) expirePacket(ctx context.Context, p *store.EvidencePacket, exp
 // every packet's transcript, Git ref, and metadata have been removed.
 func (s *Service) PurgeRun(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, cleanup func(context.Context) error) error {
 	if workspace == "" || run == "" {
-		return fmt.Errorf("%w: workspace and run are required", ErrInvalidRequest)
+		return fmt.Errorf("%w: workspace and session are required", ErrInvalidRequest)
 	}
 	lock := s.runLock(run)
 	lock.Lock()
@@ -332,7 +332,7 @@ func (s *Service) PurgeRun(ctx context.Context, workspace domain.WorkspaceID, ru
 	for {
 		page, err := s.store.ListEvidencePackets(cleanupCtx, workspace, run, "", MaxPageSize)
 		if err != nil {
-			return fmt.Errorf("evidence: list run packets: %w", err)
+			return fmt.Errorf("evidence: list session packets: %w", err)
 		}
 		if page == nil || len(page.Items) == 0 {
 			break
@@ -342,7 +342,7 @@ func (s *Service) PurgeRun(ctx context.Context, workspace domain.WorkspaceID, ru
 				continue
 			}
 			if p.WorkspaceID != workspace || p.RunID != run {
-				return errors.New("evidence: run packet scope mismatch")
+				return errors.New("evidence: session packet scope mismatch")
 			}
 			if err := s.purgePacket(cleanupCtx, p); err != nil {
 				return err
@@ -370,7 +370,7 @@ func (s *Service) PurgeRun(ctx context.Context, workspace domain.WorkspaceID, ru
 	}
 	if cleanup != nil {
 		if err := cleanup(cleanupCtx); err != nil {
-			return fmt.Errorf("evidence: run cleanup: %w", err)
+			return fmt.Errorf("evidence: session cleanup: %w", err)
 		}
 	}
 	return nil
@@ -585,26 +585,4 @@ func safePacket(p protocol.EvidencePacket) protocol.EvidencePacket {
 	p.UnresolvedFacts = boundedFacts(p.UnresolvedFacts)
 	p.RelatedRoomMessageIDs = boundedIDs(p.RelatedRoomMessageIDs)
 	return p
-}
-
-// Summary deterministically renders the packet's structured factual fields for
-// handoff or review UI. It intentionally performs no model call and omits
-// storage paths and source bodies.
-func Summary(p protocol.EvidencePacket) string {
-	transcript := "unavailable"
-	for _, source := range p.Sources {
-		if source.Name != "transcript" {
-			continue
-		}
-		if source.Available {
-			transcript = "available"
-			if source.Truncated {
-				transcript = "truncated"
-			}
-		}
-		break
-	}
-	return fmt.Sprintf("objective=%s; revision=%s; changed_files=%d; transcript=%s; unresolved=%d; next_action=%s; provenance=%s",
-		cleanText(p.Objective, MaxObjectiveBytes), p.RetainedRevision, len(p.ChangedFiles), transcript,
-		len(p.UnresolvedFacts), cleanText(p.NextAction, MaxNextActionBytes), cleanText(p.Provenance, MaxProvenanceBytes))
 }

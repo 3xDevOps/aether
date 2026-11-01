@@ -53,9 +53,9 @@ describe('Docker inside runs row', () => {
     seed()
     render(<ServerSection client={client([{ state: 'on' }])} />)
     await settle()
-    expect(screen.getByText('Docker inside runs')).toBeTruthy()
+    expect(screen.getByText('Docker inside sessions')).toBeTruthy()
     expect(screen.getByText('On')).toBeTruthy()
-    expect(screen.getByText('Agents can run docker, compose and buildx in their runs.')).toBeTruthy()
+    expect(screen.getByText('Agents can run docker, compose and buildx in their sessions.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
   })
 
@@ -142,7 +142,7 @@ describe('Docker inside runs row', () => {
     await tick(2000)
     await tick(2000)
     expect(screen.getByText('On')).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toBe('New runs get it now. Reopen your Environment to use it there.')
+    expect(screen.getByRole('status').textContent).toBe('New sessions get it now. Reopen your Environment to use it there.')
     expect(screen.queryByText(/Installing…/)).toBeNull()
   })
 
@@ -157,7 +157,7 @@ describe('Docker inside runs row', () => {
 
     const second = render(<ServerSection client={api} />)
     await settle()
-    expect(screen.getByRole('status').textContent).toBe('New runs get it now. Reopen your Environment to use it there.')
+    expect(screen.getByRole('status').textContent).toBe('New sessions get it now. Reopen your Environment to use it there.')
     second.unmount()
 
     act(() => useStore.setState({ sysboxState: 'installing' }))
@@ -187,7 +187,7 @@ describe('Docker inside runs row', () => {
     const api = client([{ state: 'off' }])
     render(<ServerSection client={api} />)
     await settle()
-    expect(screen.queryByText('Docker inside runs')).toBeNull()
+    expect(screen.queryByText('Docker inside sessions')).toBeNull()
     expect(api.sysboxStatus).not.toHaveBeenCalled()
   })
 
@@ -196,7 +196,7 @@ describe('Docker inside runs row', () => {
     const api = client([{ state: 'off' }])
     render(<ServerSection client={api} />)
     await settle()
-    expect(screen.queryByText('Docker inside runs')).toBeNull()
+    expect(screen.queryByText('Docker inside sessions')).toBeNull()
     expect(api.sysboxStatus).not.toHaveBeenCalled()
   })
 })
@@ -214,7 +214,7 @@ describe('Docker nudge', () => {
     const api = client([{ state: 'off' }])
     render(<SysboxNudge client={api} />)
     await settle()
-    expect(screen.getByText('Let agents use Docker in their runs')).toBeTruthy()
+    expect(screen.getByText('Let agents use Docker in their sessions')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
     await settle()
     expect(api.sysboxInstall).toHaveBeenCalledTimes(1)
@@ -268,7 +268,7 @@ describe('Docker nudge', () => {
     render(<SysboxNudge client={client([{ state: 'off' }])} />)
     await settle()
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(screen.queryByText('Let agents use Docker in their runs')).toBeNull()
+    expect(screen.queryByText('Let agents use Docker in their sessions')).toBeNull()
     const stored = JSON.parse(window.localStorage.getItem('aether.ui') ?? '{}') as { state?: Record<string, unknown> }
     expect(stored.state?.sysboxNudgeDismissed).toBe(true)
   })

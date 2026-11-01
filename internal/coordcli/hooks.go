@@ -27,7 +27,7 @@ Run a native lifecycle hook, reading its JSON event from stdin. Supported
 harnesses: claude, codex, copilot, gemini, cursor, pi, omp, opencode, generic.
 The extension and generic integrations use "context" for plain context text;
 command hooks receive their harness's native JSON. Context/event hooks are
-empty outside an Aether run. Errors go to stderr with a nonzero exit.
+empty outside an Aether session. Errors go to stderr with a nonzero exit.
 
 omp, pi, opencode and generic also accept "wake": read JSON
 {"seen_message_ids":[],"wait_seconds":30} from stdin (wait defaults to 30,
@@ -35,7 +35,7 @@ range 0..30), then make exactly one cancellable server wait. Output is JSON
 with wait_supported, unread_message_ids, wake_admitted and context. Context
 is a trusted inbox instruction only when admitted, never peer message text.
 No hook consumes or acknowledges mail. Unsupported wake servers fail with
-exit 2: stop the receiver and upgrade/relaunch the run, do not retry in a loop.
+exit 2: stop the receiver and upgrade/relaunch the session, do not retry in a loop.
 
 claude also accepts "wake", the asyncRewake hook a managed launch's settings
 run on SessionStart and Stop. It reads Claude Code's hook JSON and waits for
@@ -45,7 +45,7 @@ turn in the idle session. It exits 0 when a prompt, a newer waiter or the end
 of Claude Code ends the wait, and 1 on errors; it never exits 2 otherwise.
 
 Loaded native integrations can wake a live idle session; other command hooks
-cannot. Neither starts an exited run or types into its terminal.
+cannot. Neither starts an exited session or types into its terminal.
 
 "hook file" lists the shipped integrations. With a filename, it writes that
 copyable file to stdout without needing a coordination socket. Merge JSON
@@ -73,7 +73,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	claudeWaiter := harness == "claude" && event == "wake"
 	if os.Getenv(coordtransport.EnhancedEnv) == "1" {
 		if event == "wake" && !claudeWaiter {
-			return ExitUsage, errors.New("hook wake: this is an enhanced run, whose agent Aether wakes with a session prompt; stop this receiver")
+			return ExitUsage, errors.New("hook wake: this is an enhanced session, whose agent Aether wakes with a prompt; stop this receiver")
 		}
 		return ExitOK, nil
 	}
@@ -151,9 +151,6 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		if !stopping && !hasNewMail(notices, seen.Mail) {
 			notices.Unread = 0
 		}
-		if notices.Mission == seen.Mission {
-			notices.Mission = ""
-		}
 		if stopping || notices.Overlap == seen.Overlap {
 			notices.Overlap = ""
 		}
@@ -162,7 +159,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		}
 		defer writeHookNotices(path, announced)
 	}
-	text := hookContext(status, notices, stopping)
+	text := hookContext(notices, stopping)
 	if starting && os.Getenv(coordtransport.RoleCardEnv) != "1" {
 		card := coordhooks.RoleCard(coordhooks.StatusGuide(status))
 		if brief := sessionMemoryBrief(ctx, cfg.Socket, status); brief != "" {
@@ -179,20 +176,16 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	return ExitOK, nil
 }
 
-// hookNotices is the state a hook announced last: unread count, mission
-// phase/questions/generation for an integrator, and overlapping peer files.
+// hookNotices is the state a hook announced last: unread count and
+// overlapping peer files.
 type hookNotices struct {
 	Unread  int      `json:"-"`
 	Mail    []string `json:"mail"`
-	Mission string   `json:"mission"`
 	Overlap string   `json:"overlap"`
 }
 
 func currentHookNotices(status protocol.CoordStatusResult) hookNotices {
 	n := hookNotices{Unread: status.Unread, Mail: status.UnreadMessageIDs}
-	if a := status.Assignment; a != nil {
-		n.Mission = a.IntegratorNotice()
-	}
 	var overlap []string
 	for _, peer := range status.Overlaps {
 		for _, file := range peer.Files {
@@ -269,13 +262,10 @@ func validHookEvent(harness, event string) bool {
 	}
 }
 
-func hookContext(status protocol.CoordStatusResult, notices hookNotices, stopping bool) string {
+func hookContext(notices hookNotices, stopping bool) string {
 	var text strings.Builder
 	if notices.Unread > 0 {
 		text.WriteString(protocol.CoordInboxContext(notices.Unread))
-	}
-	if notices.Mission != "" {
-		text.WriteString(protocol.CoordMissionUpdateContext(status.Assignment.MissionID, nil))
 	}
 	if notices.Overlap != "" && !stopping {
 		text.WriteString(protocol.CoordOverlapContext)

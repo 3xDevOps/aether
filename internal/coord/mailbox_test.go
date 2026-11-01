@@ -36,9 +36,9 @@ func TestSendAuthorizationFollowsTheRadar(t *testing.T) {
 	if err == nil || err.Code != protocol.CodeDenied {
 		t.Fatalf("send without an overlap = %v, want CodeDenied", err)
 	}
-	if want := fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s: member %s (collaborator) "+
-		"may not message it: run is protected: only its owner or an admin may message it; "+
-		"run `aether-internal status` to list the runs it can message", b, a, h.runs[0].MemberID); err.Message != want {
+	if want := fmt.Sprintf("coord.send: session %s is not an authorized peer of session %s: member %s (collaborator) "+
+		"may not message it: session is protected: only its owner or an admin may message it; "+
+		"run `aether-internal status` to list the sessions it can message", b, a, h.runs[0].MemberID); err.Message != want {
 		t.Fatalf("denial message = %q, want %q", err.Message, want)
 	}
 
@@ -56,8 +56,8 @@ func TestSendAuthorizationFollowsTheRadar(t *testing.T) {
 		t.Fatalf("send to a non-overlapping run = %v, want CodeDenied", err)
 	}
 	if err = send(a, "run_does_not_exist"); err == nil || err.Code != protocol.CodeNotFound ||
-		err.Message != "coord.send: unknown run run_does_not_exist" {
-		t.Fatalf("send to an unknown run = %v, want CodeNotFound", err)
+		err.Message != "coord.send: unknown session run_does_not_exist" {
+		t.Fatalf("send to an unknown session = %v, want CodeNotFound", err)
 	}
 
 	// The overlap clears; the grace window opens where it cleared and
@@ -124,7 +124,7 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	for _, target := range []domain.RunID{b, c, d} {
 		_, serr := h.svc.Send(ctx, a, sendParams(target, "ping"))
 		if listed[string(target)] != (serr == nil) {
-			t.Fatalf("run %s listed=%v but send error=%v", target, listed[string(target)], serr)
+			t.Fatalf("session %s listed=%v but send error=%v", target, listed[string(target)], serr)
 		}
 	}
 	if st.Unread != 0 {
@@ -132,85 +132,6 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	}
 	if st, err = h.svc.Status(ctx, c); err != nil || st.Unread != 1 {
 		t.Fatalf("target unread = %d (err %v), want 1", st.Unread, err)
-	}
-}
-
-// TestMissionPeerBeyondTheStatusBoundKeepsItsFiles proves a mission peer
-// that also overlaps is reported with its files and counted once even when
-// the radar's bounded status view leaves it out.
-func TestMissionPeerBeyondTheStatusBoundKeepsItsFiles(t *testing.T) {
-	stub := &missionTransportStub{}
-	total := protocol.CoordMaxStatusPeers + 2
-	h := newHarness(t, total+1, func(c *Config) { c.Mission = stub })
-	worker, integrator := h.run(0), h.run(total)
-	others := make([]domain.RunID, 0, total)
-	for i := 1; i <= total; i++ {
-		others = append(others, h.run(i))
-	}
-	stub.mission = []domain.RunID{worker, integrator}
-	h.peers.hub(worker, others, "src/auth.go")
-
-	st, err := h.svc.Status(context.Background(), worker)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if len(st.Peers) != protocol.CoordMaxStatusPeers || st.PeerTotal != total || !st.PeersTruncated {
-		t.Fatalf("status = %d peers, total %d, truncated %v; want %d, %d, true", len(st.Peers), st.PeerTotal, st.PeersTruncated, protocol.CoordMaxStatusPeers, total)
-	}
-	if p := st.Peers[0]; p.RunID != string(integrator) || p.State != protocol.CoordPeerMission || len(p.Files) != 1 || p.Files[0] != "src/auth.go" {
-		t.Fatalf("first peer = %+v, want the integrator in state mission with src/auth.go", p)
-	}
-}
-
-// TestMissionRunSeesAndMessagesRadarPeers follows the hook context a
-// mission worker reads about a run outside its mission: status lists that
-// run with the shared files after the assignment peers, and the worker can
-// message or ask it, while a run it shares nothing with stays refused.
-func TestMissionRunSeesAndMessagesRadarPeers(t *testing.T) {
-	stub := &missionTransportStub{}
-	h := newHarness(t, 4, func(c *Config) { c.Mission = stub })
-	ctx := context.Background()
-	worker, integrator, outsider, unrelated := h.run(0), h.run(1), h.run(2), h.run(3)
-	h.isolate(3)
-	stub.mission = []domain.RunID{worker, integrator}
-	h.peers.hub(worker, []domain.RunID{integrator, outsider}, "src/auth.go")
-
-	st, err := h.svc.Status(ctx, worker)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if st.Assignment == nil || len(st.Peers) != 2 || st.PeerTotal != 2 || st.PeersTruncated {
-		t.Fatalf("status = %+v, want an assignment and exactly two peers", st)
-	}
-	for i, want := range []struct {
-		run   domain.RunID
-		state string
-	}{{integrator, protocol.CoordPeerMission}, {outsider, protocol.CoordPeerActive}} {
-		p := st.Peers[i]
-		if p.RunID != string(want.run) || p.State != want.state || p.MemberID == "" ||
-			len(p.Files) != 1 || p.Files[0] != "src/auth.go" || p.FileTotal != 1 || p.FilesTruncated {
-			t.Fatalf("peer %d = %+v, want run %s in state %q with src/auth.go", i, p, want.run, want.state)
-		}
-	}
-
-	if _, err = h.svc.Send(ctx, worker, sendParams(integrator, "mission peer")); err != nil {
-		t.Fatalf("send to a mission peer: %v", err)
-	}
-	if _, err = h.svc.Send(ctx, worker, sendParams(outsider, "we both touch auth.go")); err != nil {
-		t.Fatalf("send to an overlapping run outside the mission: %v", err)
-	}
-	if _, err = h.svc.Ask(ctx, worker, protocol.CoordAskParams{
-		ToRunID: string(outsider), Body: "May I take auth.go?", IdempotencyKey: "ask-outsider",
-	}); err != nil {
-		t.Fatalf("ask an overlapping run outside the mission: %v", err)
-	}
-	_, err = h.svc.Send(ctx, worker, sendParams(unrelated, "ping"))
-	if err == nil || err.Code != protocol.CodeDenied ||
-		!strings.HasPrefix(err.Message, fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s: ", unrelated, worker)) {
-		t.Fatalf("send to an unrelated run = %v, want CodeDenied", err)
-	}
-	if st, err = h.svc.Status(ctx, outsider); err != nil || st.Unread != 2 {
-		t.Fatalf("outsider unread = %d (err %v), want 2", st.Unread, err)
 	}
 }
 
@@ -283,8 +204,8 @@ func TestSendRejectsFinishedAndSelfTargets(t *testing.T) {
 	}
 	_, err := h.svc.Send(ctx, a, sendParams(b, "hi-finished"))
 	if err == nil || err.Code != protocol.CodeUnavailable ||
-		err.Message != fmt.Sprintf("coord.send: run %s has finished", b) {
-		t.Fatalf("send to a finished run = %v, want CodeUnavailable", err)
+		err.Message != fmt.Sprintf("coord.send: session %s has finished", b) {
+		t.Fatalf("send to a finished session = %v, want CodeUnavailable", err)
 	}
 	if st, serr := h.svc.Status(ctx, a); serr != nil || len(st.Peers) != 0 || st.PeerTotal != 0 {
 		t.Fatalf("status peers = %+v (err %v), want the finished overlapping run omitted", st, serr)
@@ -328,7 +249,7 @@ func TestInboxBatchAndTokenSemantics(t *testing.T) {
 	}
 	// A token from the other run acknowledges nothing.
 	if _, oerr := h.svc.Inbox(ctx, a, protocol.CoordInboxParams{AckToken: first.AckToken}); oerr != nil {
-		t.Fatalf("Inbox (other run): %v", oerr)
+		t.Fatalf("Inbox (other session): %v", oerr)
 	}
 	if again, aerr := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{}); aerr != nil || len(again.Messages) != 1 {
 		t.Fatalf("after a foreign ack = %+v (err %v), want the batch outstanding", again, aerr)
@@ -434,48 +355,17 @@ func TestGraceWindowRunsFromAWitnessedClear(t *testing.T) {
 	}
 }
 
-// TestSendPeerCap bounds the spray a manufactured overlap edge would buy.
-// The edge itself is computed from the two runs' own diff snapshots, so a
-// run that touches every tracked file is reported as overlapping with
-// every other run in the workspace and every one of them is authorized.
-// What the cap denies is talking to all of them.
-func TestSendPeerCap(t *testing.T) {
-	h := newHarness(t, maxPeers+3)
+// TestSendHasNoPeerCap sends to more distinct runs than status lists or any
+// conversation limit once allowed, as a run that touches every file would
+// reach.
+func TestSendHasNoPeerCap(t *testing.T) {
+	h := newHarness(t, 14)
 	ctx := context.Background()
-	spray := h.run(0)
-	targets := make([]domain.RunID, 0, maxPeers+2)
 	for i := 1; i < len(h.runs); i++ {
-		targets = append(targets, h.run(i))
-	}
-	h.peers.hub(spray, targets, "src/auth.go")
-
-	send := func(to domain.RunID) *protocol.Error {
-		// Step the clock so the send rate, a separate cap, is never what
-		// answers here.
 		h.advance(sendRefill)
-		_, err := h.svc.Send(ctx, spray, sendParams(to, "ping"))
-		return err
-	}
-
-	if st, err := h.svc.Status(ctx, spray); err != nil || len(st.Peers) != len(targets) {
-		t.Fatalf("status peers = %d (err %v), want all %d authorized", len(st.Peers), err, len(targets))
-	}
-	for i, to := range targets[:maxPeers] {
-		if err := send(to); err != nil {
-			t.Fatalf("send to peer %d of %d: %v", i+1, maxPeers, err)
+		if _, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(i), "ping")); err != nil {
+			t.Fatalf("send to session %d: %v", i, err)
 		}
-	}
-	err := send(targets[maxPeers])
-	if err == nil || err.Code != protocol.CodeConflict {
-		t.Fatalf("send to peer %d = %v, want CodeConflict", maxPeers+1, err)
-	}
-	if err = send(targets[maxPeers+1]); err == nil || err.Code != protocol.CodeConflict {
-		t.Fatalf("the cap did not hold for a second new peer: %v", err)
-	}
-	// A conversation already open is unaffected: the cap counts peers, not
-	// messages.
-	if err = send(targets[0]); err != nil {
-		t.Fatalf("send to an already-open peer: %v", err)
 	}
 }
 
@@ -898,7 +788,7 @@ func TestCoordReportPublishesEvidenceOnlyAfterFinalizationOnce(t *testing.T) {
 	case event := <-sub.Events():
 		payload, ok := event.Payload.(events.EvidencePacketPayload)
 		if !ok || payload.PacketID != first.EvidenceRef || event.WorkspaceID != h.workspace || event.RunID != run {
-			t.Fatalf("evidence event = %+v, want packet %q on run %s", event, first.EvidenceRef, run)
+			t.Fatalf("evidence event = %+v, want packet %q on session %s", event, first.EvidenceRef, run)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("coord.report returned without publishing its finalized evidence event")
@@ -962,43 +852,21 @@ func TestCoordOutboxQuarantinesEventIDConflict(t *testing.T) {
 	})
 }
 
-type blockedReportMission struct {
-	missionTransportStub
-	worker     domain.RunID
-	integrator domain.RunID
-}
-
-func (m blockedReportMission) ReportRecipient(_ context.Context, run domain.RunID) (domain.RunID, error) {
-	if run != m.worker {
-		return "", nil
-	}
-	return m.integrator, nil
-}
-
-func (m blockedReportMission) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
-	if run == m.worker {
-		return protocol.CoordMissionAssignment{
-			MissionID: "mission-1", Role: "worker", IntegratorRunID: string(m.integrator),
-		}, nil
-	}
-	return protocol.CoordMissionAssignment{MissionID: "mission-1", Role: "integrator"}, nil
-}
-
-func TestBlockedReportRetriesFullInboxAndPreservesWorkerReason(t *testing.T) {
+func TestBlockedReportRetriesFullInboxAndPreservesChildReason(t *testing.T) {
 	ctx := context.Background()
 	capture := &coordReportEvidenceCapture{id: "blocked-packet"}
 	h := newHarness(t, 2, func(c *Config) { c.Evidence = capture })
-	worker, integrator := h.run(0), h.run(1)
-	h.svc.cfg.Mission = blockedReportMission{worker: worker, integrator: integrator}
+	child, parent := h.run(0), h.run(1)
+	h.svc.cfg.Children = parentOf{child: child, parent: parent}
 	for range protocol.CoordMaxUnread {
 		if err := h.db.AppendRunMessage(ctx, &store.RunMessage{
-			WorkspaceID: h.workspace, FromRun: worker, ToRun: integrator, Body: "earlier message",
+			WorkspaceID: h.workspace, FromRun: child, ToRun: parent, Body: "earlier message",
 		}, protocol.CoordMaxUnread); err != nil {
 			t.Fatalf("fill inbox: %v", err)
 		}
 	}
 	summary := strings.Repeat("x", protocol.CoordMaxSummaryBytes)
-	result, rpcErr := h.svc.CoordReport(ctx, worker, protocol.CoordReportParams{
+	result, rpcErr := h.svc.CoordReport(ctx, child, protocol.CoordReportParams{
 		Outcome: protocol.CoordOutcomeBlocked, Summary: summary, IdempotencyKey: "blocked",
 	})
 	if rpcErr != nil {
@@ -1008,58 +876,58 @@ func TestBlockedReportRetriesFullInboxAndPreservesWorkerReason(t *testing.T) {
 	if err != nil || report.State != store.CoordReportFinalized || report.PublishedAt != nil {
 		t.Fatalf("full-inbox report = %+v, %v; want finalized with publication pending", report, err)
 	}
-	batch, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+	batch, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
 	if rpcErr != nil {
 		t.Fatalf("read earlier messages: %v", rpcErr)
 	}
-	if _, ackErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{AckToken: batch.AckToken}); ackErr != nil {
+	if _, ackErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: batch.AckToken}); ackErr != nil {
 		t.Fatalf("ack earlier messages: %v", ackErr)
 	}
 	if _, _, drainErr := h.svc.drainOutboxPage(ctx); drainErr != nil {
 		t.Fatalf("retry blocked publication: %v", drainErr)
 	}
-	status, rpcErr := h.svc.Status(ctx, integrator)
+	status, rpcErr := h.svc.Status(ctx, parent)
 	if rpcErr != nil || status.Unread != 1 {
 		t.Fatalf("blocked context = %+v, %v; want one pending message", status, rpcErr)
 	}
-	key := "coord-report-blocked:" + result.ReportID + ":" + string(integrator)
-	message, err := h.db.GetRunMessageByIdempotency(ctx, worker, key)
-	if err != nil || message.FromRun != worker || message.Body != summary || message.CorrelationID != result.ReportID ||
+	key := "coord-report-blocked:" + result.ReportID + ":" + string(parent)
+	message, err := h.db.GetRunMessageByIdempotency(ctx, child, key)
+	if err != nil || message.FromRun != child || message.Body != summary || message.CorrelationID != result.ReportID ||
 		message.DeliveredAt != nil || message.AckedAt != nil {
 		t.Fatalf("undelivered blocked message = %+v, %v", message, err)
 	}
-	inbox, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+	inbox, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
 	if rpcErr != nil || len(inbox.Messages) != 1 || inbox.Messages[0].Body != summary ||
-		inbox.Messages[0].FromRunID != string(worker) || inbox.Messages[0].CorrelationID != result.ReportID {
+		inbox.Messages[0].FromRunID != string(child) || inbox.Messages[0].CorrelationID != result.ReportID {
 		t.Fatalf("blocked inbox = %+v, %v", inbox, rpcErr)
 	}
-	if _, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{AckToken: inbox.AckToken}); rpcErr != nil {
+	if _, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{AckToken: inbox.AckToken}); rpcErr != nil {
 		t.Fatalf("ack blocked message: %v", rpcErr)
 	}
-	if err := h.svc.enqueueWorkerReport(ctx, report); err != nil {
+	if err := h.svc.enqueueChildReport(ctx, report); err != nil {
 		t.Fatalf("replay blocked message: %v", err)
 	}
-	if unread, err := h.db.CountUnackedRunMessages(ctx, integrator); err != nil || unread != 0 {
+	if unread, err := h.db.CountUnackedRunMessages(ctx, parent); err != nil || unread != 0 {
 		t.Fatalf("replayed blocked unread = %d, %v; want zero after explicit ack", unread, err)
 	}
 }
 
-func TestWorkerSuccessAndFailureReportsReachTheIntegrator(t *testing.T) {
+func TestChildSuccessAndFailureReportsReachTheParent(t *testing.T) {
 	ctx := context.Background()
 	for _, outcome := range []string{protocol.CoordOutcomeSuccess, protocol.CoordOutcomeFailure} {
 		t.Run(outcome, func(t *testing.T) {
 			h := newHarness(t, 2, func(c *Config) { c.Evidence = &coordReportEvidenceCapture{id: outcome + "-packet"} })
-			worker, integrator := h.run(0), h.run(1)
-			h.svc.cfg.Mission = blockedReportMission{worker: worker, integrator: integrator}
-			result, rpcErr := h.svc.CoordReport(ctx, worker, protocol.CoordReportParams{
+			child, parent := h.run(0), h.run(1)
+			h.svc.cfg.Children = parentOf{child: child, parent: parent}
+			result, rpcErr := h.svc.CoordReport(ctx, child, protocol.CoordReportParams{
 				Outcome: outcome, Summary: outcome + " summary", IdempotencyKey: outcome,
 			})
 			if rpcErr != nil {
 				t.Fatalf("report %s: %v", outcome, rpcErr)
 			}
-			inbox, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+			inbox, rpcErr := h.svc.Inbox(ctx, parent, protocol.CoordInboxParams{})
 			if rpcErr != nil || len(inbox.Messages) != 1 || inbox.Messages[0].Body != outcome+" summary" ||
-				inbox.Messages[0].FromRunID != string(worker) || inbox.Messages[0].CorrelationID != result.ReportID {
+				inbox.Messages[0].FromRunID != string(child) || inbox.Messages[0].CorrelationID != result.ReportID {
 				t.Fatalf("%s inbox = %+v, %v", outcome, inbox, rpcErr)
 			}
 		})

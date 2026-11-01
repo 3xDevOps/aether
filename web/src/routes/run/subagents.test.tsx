@@ -118,7 +118,7 @@ describe('subagents in the session view', () => {
   it('groups consecutive subagents into cards and opens one in the inspector', async () => {
     open()
     acpSocket().open({}, transcript())
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     await openSteps(log, /^Delegated 2 tasks/)
     expect(await within(log).findByRole('button', { name: /2 subagents · 1 stopped/ })).toBeDefined()
     const card = within(log).getByRole('button', { name: 'Find usages, Explore, Done' })
@@ -160,7 +160,7 @@ describe('subagents in the session view', () => {
     await userEvent.click(within(path).getByRole('button', { name: 'Outer' }))
     expect(useStore.getState().route.params.agent).toBe('a1')
     expect(await within(inspector).findByRole('button', { name: 'Inner, Explore, Running' })).toBeDefined()
-    await userEvent.click(within(inspector).getByRole('button', { name: 'Session' }))
+    await userEvent.click(within(inspector).getByRole('button', { name: 'Chat' }))
     expect(useStore.getState().route.params.agent).toBeUndefined()
   })
 
@@ -274,22 +274,22 @@ describe('subagents in the session view', () => {
   it('shows a subagent whose launch is not loaded as a Not loaded card', async () => {
     open()
     acpSocket().open({ oldest_seq: 2 }, [item('turn_start', 1), say(1, 'user', 'Map it'), child(1, 'c1', 'ghost', 'Read billing.js')])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     expect(await within(log).findByRole('button', { name: 'Subagent, Not loaded' })).toBeDefined()
   })
 
   it('shows a not loaded subagent even when no main item of its turn is held', async () => {
     open()
     acpSocket().open({}, [child(1, 'c1', 'ghost', 'Read billing.js')])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     const card = await within(log).findByRole('button', { name: 'Subagent, Not loaded' })
-    expect(within(card).getByText('Its launch is not in the session history · Read billing.js')).toBeDefined()
+    expect(within(card).getByText('Its launch is not in the conversation history · Read billing.js')).toBeDefined()
   })
 
   it('previews a report without Latin letters', async () => {
     open()
     acpSocket().open({}, [item('turn_start', 1), launch(1, 'a1', 'Check', 'completed', { content: [{ type: 'text', text: '## 检查完成' }] })])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     expect(await within(log).findByText('检查完成')).toBeDefined()
   })
 
@@ -297,7 +297,7 @@ describe('subagents in the session view', () => {
     open('a1')
     acpSocket().open({}, [item('turn_start', 1), launch(1, 'a1', 'Find usages', 'in_progress', { raw_input: '{"prompt":"Search the re' })])
     const inspector = await screen.findByRole('dialog', { name: 'Subagent' })
-    expect(await within(inspector).findByText('The launch input is longer than the session log keeps, so its prompt is not available.')).toBeDefined()
+    expect(await within(inspector).findByText('The launch input is longer than the conversation log keeps, so its prompt is not available.')).toBeDefined()
   })
 
   it('says the prompt is unavailable when the stored launch stays cut', async () => {
@@ -307,7 +307,7 @@ describe('subagents in the session view', () => {
     open('a1')
     acpSocket().open({}, [start, cut])
     const inspector = await screen.findByRole('dialog', { name: 'Subagent' })
-    expect(await within(inspector).findByText('The launch input is longer than the session log keeps, so its prompt is not available.')).toBeDefined()
+    expect(await within(inspector).findByText('The launch input is longer than the conversation log keeps, so its prompt is not available.')).toBeDefined()
     expect(api.runACPItem).toHaveBeenCalledWith('run_1', cut.seq)
   })
 
@@ -318,7 +318,7 @@ describe('subagents in the session view', () => {
     expect(await screen.findByRole('complementary', { name: 'Subagent' })).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Show details' }))
     expect(useStore.getState().route.params.agent).toBeUndefined()
-    expect(await screen.findByRole('complementary', { name: 'Run details' })).toBeDefined()
+    expect(await screen.findByRole('complementary', { name: 'Session details' })).toBeDefined()
   })
 
   it('opens the inspector over the run where inline it would leave the run too narrow to read', async () => {
@@ -366,7 +366,7 @@ describe('subagents in the session view', () => {
       launch(1, 'a1', 'Watch CI', 'in_progress', { raw_input }),
       launch(1, 'a1', 'Watch CI', 'completed', { raw_input, content: [{ type: 'text', text: 'Async agent launched successfully.' }] }),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     const card = await within(log).findByRole('button', { name: 'Watch CI, Explore, Launched' })
     expect(within(card).getByText('Launched in the background')).toBeDefined()
     expect(within(log).queryByText('Async agent launched successfully.')).toBeNull()
@@ -381,7 +381,7 @@ describe('subagents in the session view', () => {
       launch(1, 'a2', 'Listing', 'completed', { content: report('- **bold** item') }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     await openSteps(log, /^Delegated 2 tasks/)
     expect(within(await within(log).findByRole('button', { name: 'Coverage, Explore, Done' })).getByText('Coverage report')).toBeDefined()
     expect(within(within(log).getByRole('button', { name: 'Listing, Explore, Done' })).getByText('bold item')).toBeDefined()
@@ -396,7 +396,7 @@ describe('subagents in the session view', () => {
       tool(1, 'e2', 'edit', 'Edit a.go', 'completed', { diffs: [{ path: 'a.go', patch: '+z\n' }] }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     await openSteps(log, /^Delegated 1 task and edited 1 file/)
     await within(log).findByRole('button', { name: /Edit it/ })
     expect(log.textContent).not.toContain('Changed')
@@ -405,7 +405,7 @@ describe('subagents in the session view', () => {
   it('steps and closes subagents without history entries, and ties the group to its cards', async () => {
     open()
     acpSocket().open({}, transcript())
-    const log = await screen.findByRole('log', { name: 'Session' })
+    const log = await screen.findByRole('log', { name: 'Chat' })
     await openSteps(log, /^Delegated 2 tasks/)
     const group = await within(log).findByRole('button', { name: /2 subagents/ })
     const list = document.getElementById(group.getAttribute('aria-controls')!)

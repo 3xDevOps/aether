@@ -60,6 +60,32 @@ type AssistantConfirmation struct {
 	// auto-approval on.
 	OtherMember bool   `json:"other_member,omitempty"`
 	OtherOwner  string `json:"other_owner,omitempty"`
+	// Shown is when the row the summary shows was last updated, for a call
+	// that must act on that version only. It never leaves the server.
+	Shown time.Time `json:"-"`
+	// Reason is the assistant's one line on why it launches, and Task a
+	// template launch's task as its params render it. Both are for the
+	// card only; the call sends neither.
+	Reason string `json:"reason,omitempty"`
+	Task   string `json:"task,omitempty"`
+	// Defaults is what the member's saved launch defaults filled into a
+	// launch, as the assistant's launch tool reported it. It is shown on the
+	// card and decides nothing.
+	Defaults *AssistantDefaultsUse `json:"defaults,omitempty"`
+}
+
+// AssistantDefaultsUse names the launch fields saved defaults filled, each
+// saved choice the launch skipped, and each it used without being able to
+// check it on the launch's account, with the reason.
+type AssistantDefaultsUse struct {
+	Applied   []string               `json:"applied,omitempty"`
+	Skipped   []AssistantDefaultSkip `json:"skipped,omitempty"`
+	Unchecked []AssistantDefaultSkip `json:"unchecked,omitempty"`
+}
+
+type AssistantDefaultSkip struct {
+	Field  string `json:"field"`
+	Reason string `json:"reason"`
 }
 
 type AssistantStatus struct {
@@ -70,6 +96,10 @@ type AssistantStatus struct {
 	Confirmations []AssistantConfirmation `json:"confirmations"`
 	AutoApprove   bool                    `json:"auto_approve"`
 	ShareView     bool                    `json:"share_view"`
+	// PreferencesEnabled lets the assistant read and save the member's
+	// preferences; Temporary keeps this conversation from using them.
+	PreferencesEnabled bool `json:"preferences_enabled"`
+	Temporary          bool `json:"temporary"`
 	// SuggestAutoApprove means the member approved enough cards by hand
 	// that the dashboard may suggest turning auto-approval on.
 	SuggestAutoApprove bool `json:"suggest_auto_approve"`
@@ -87,6 +117,12 @@ const (
 type AssistantSettingsParams struct {
 	AutoApprove *bool `json:"auto_approve,omitempty"`
 	ShareView   *bool `json:"share_view,omitempty"`
+	// PreferencesEnabled turns the assistant's use of preferences on or
+	// off for every conversation.
+	PreferencesEnabled *bool `json:"preferences_enabled,omitempty"`
+	// Temporary sets whether the current conversation is temporary: it
+	// neither reads nor saves preferences. A new conversation clears it.
+	Temporary *bool `json:"temporary,omitempty"`
 	// Suggestion answers the suggestion to turn auto-approval on.
 	Suggestion string `json:"suggestion,omitempty"`
 }
@@ -98,7 +134,9 @@ type AssistantSettings struct {
 	// SuggestionOff means the suggestion will not show again.
 	SuggestionOff bool `json:"suggestion_off"`
 	// ShareView sends the assistant the member's dashboard view context.
-	ShareView bool `json:"share_view"`
+	ShareView          bool `json:"share_view"`
+	PreferencesEnabled bool `json:"preferences_enabled"`
+	Temporary          bool `json:"temporary"`
 }
 
 type AssistantStartParams struct {
@@ -119,35 +157,23 @@ type AssistantViewParams struct {
 // names only, never titles, file contents, drafts or terminal text. Its ids
 // are hints for the assistant's member-scoped tools, never permissions. A
 // prompt with the page removed has no route; Attachments are what the member
-// pointed the message at. LaunchDefaults travel with the page.
+// pointed the message at.
 type AssistantViewContext struct {
-	Version        int                       `json:"version"`
-	CapturedAt     time.Time                 `json:"captured_at"`
-	Route          AssistantViewEntry        `json:"route,omitzero"`
-	OpenFile       *AssistantViewFile        `json:"open_file,omitempty"`
-	Recent         []AssistantViewEntry      `json:"recent,omitempty"`
-	LaunchDefaults []AssistantLaunchDefault  `json:"launch_defaults,omitempty"`
-	Attachments    []AssistantViewAttachment `json:"attachments,omitempty"`
-}
-
-// AssistantLaunchDefault is a mode and model the member's dashboard
-// remembers for an agent from their own launches, newest first.
-type AssistantLaunchDefault struct {
-	Agent string `json:"agent"`
-	Mode  string `json:"mode"`
-	Model string `json:"model,omitempty"`
+	Version     int                       `json:"version"`
+	CapturedAt  time.Time                 `json:"captured_at"`
+	Route       AssistantViewEntry        `json:"route,omitzero"`
+	OpenFile    *AssistantViewFile        `json:"open_file,omitempty"`
+	Recent      []AssistantViewEntry      `json:"recent,omitempty"`
+	Attachments []AssistantViewAttachment `json:"attachments,omitempty"`
 }
 
 // AssistantViewAttachment names one thing a prompt is about. Kind is
-// workspace, run, mission, pr, check, failure or task; the other fields say
+// workspace, run, pr, check or failure; the other fields say
 // which.
 type AssistantViewAttachment struct {
 	Kind        string `json:"kind"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	RunID       string `json:"run_id,omitempty"`
-	MissionID   string `json:"mission_id,omitempty"`
-	TaskID      string `json:"task_id,omitempty"`
-	AttemptID   string `json:"attempt_id,omitempty"`
 	PR          int    `json:"pr,omitempty"`
 	Repository  string `json:"repository,omitempty"`
 	Check       string `json:"check,omitempty"`
@@ -159,7 +185,6 @@ type AssistantViewEntry struct {
 	Name        string    `json:"name"`
 	WorkspaceID string    `json:"workspace_id,omitempty"`
 	RunID       string    `json:"run_id,omitempty"`
-	MissionID   string    `json:"mission_id,omitempty"`
 	Subagent    string    `json:"subagent,omitempty"`
 	View        string    `json:"view,omitempty"`
 	At          time.Time `json:"at,omitzero"`
@@ -281,6 +306,10 @@ type AssistantAction struct {
 }
 
 type AssistantActionTarget struct {
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	RunID       string `json:"run_id,omitempty"`
+	WorkspaceID string       `json:"workspace_id,omitempty"`
+	RunID       string       `json:"run_id,omitempty"`
+	WatchID     string       `json:"watch_id,omitempty"`
+	Watch       *WatchTarget `json:"watch,omitempty"`
+	// PreferenceID is the preference the assistant saved or forgot.
+	PreferenceID string `json:"preference_id,omitempty"`
 }

@@ -379,7 +379,7 @@ func TestEvidenceRejectsMaliciousIdentifiers(t *testing.T) {
 	ctx := context.Background()
 	for _, run := range []domain.RunID{"", "../outside", "a/b", "a\\b", ".."} {
 		if _, err := e.CaptureEvidence(ctx, run, "packet"); err == nil {
-			t.Errorf("CaptureEvidence(%q) accepted malicious run id", run)
+			t.Errorf("CaptureEvidence(%q) accepted malicious session id", run)
 		}
 	}
 	for _, packet := range []string{"", "../outside", "a/b", "a\\b", "..", "a..b"} {
@@ -598,7 +598,7 @@ func TestPublishRunBranchUsesLiveCheckoutHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	if tip, err := e.git(ctx, repo, "rev-parse", "--verify", "refs/heads/"+branch); err != nil || tip != want {
-		t.Fatalf("workspace run branch = %q (%v), want %q", tip, err, want)
+		t.Fatalf("workspace session branch = %q (%v), want %q", tip, err, want)
 	}
 }
 

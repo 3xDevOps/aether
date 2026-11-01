@@ -116,7 +116,7 @@ func TestConfirmServerUpdateNowAcceptsY(t *testing.T) {
 		t.Fatal("\"y\" was not accepted")
 	}
 	got := out.String()
-	for _, want := range []string{"v0.2.0", "2 runs are active", "reattaches", "drop and reconnect"} {
+	for _, want := range []string{"v0.2.0", "2 sessions are active", "reattaches", "drop and reconnect"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("prompt %q is missing %q", got, want)
 		}
@@ -302,21 +302,21 @@ func TestWaitingLine(t *testing.T) {
 			want: "nothing is holding it back; it applies on the next poll",
 		},
 		{
-			name: "one run",
+			name: "one session",
 			in:   &protocol.ServerUpdateWaiting{Runs: 1},
-			want: "waiting: 1 run is still working",
+			want: "waiting: 1 session is still working",
 		},
 		{
-			name: "runs and shells",
+			name: "sessions and shells",
 			in:   &protocol.ServerUpdateWaiting{Runs: 2, Shells: 3},
-			want: "waiting: 2 runs are still working, 3 attached terminals are open",
+			want: "waiting: 2 sessions are still working, 3 attached terminals are open",
 		},
 		{
-			// A paused run looks running in `aether runs`, so it is named
+			// A paused run looks running in `aether sessions`, so it is named
 			// even though it holds nothing back.
-			name: "paused runs are named but excused",
+			name: "paused sessions are named but excused",
 			in:   &protocol.ServerUpdateWaiting{Runs: 1, Paused: 2},
-			want: "waiting: 1 run is still working, 2 paused runs are not holding it back",
+			want: "waiting: 1 session is still working, 2 paused sessions are not holding it back",
 		},
 		{
 			name: "a newer server reporting something this client cannot name",
@@ -373,7 +373,7 @@ func TestPrintServerUpdateStatusPendingSaysWhatItWaitsFor(t *testing.T) {
 	if !strings.Contains(got, "pending update: v0.2.0") {
 		t.Fatalf("status %q does not name the pending update", got)
 	}
-	if !strings.Contains(got, "1 run is still working") || !strings.Contains(got, "1 paused run is not holding it back") {
+	if !strings.Contains(got, "1 session is still working") || !strings.Contains(got, "1 paused session is not holding it back") {
 		t.Fatalf("status %q does not say what it is waiting for", got)
 	}
 }

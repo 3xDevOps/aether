@@ -253,7 +253,7 @@ func edgeClaimCode(w io.Writer, dataDir, edgeURL string, admin domain.MemberID) 
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:\n  %s\n",
+	_, _ = fmt.Fprintf(w, "on your computer, paste it into the Aether app: Connect, Aether relay; in a terminal:\n  %s\n",
 		strings.Join(claimCommands(edgeURL, code), "\n  "))
 	if m != nil {
 		_, _ = fmt.Fprintf(w, "the claim binds the claiming account to admin %s (%s) and approves the claiming device; it creates no member and changes no role\n",

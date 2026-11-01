@@ -165,15 +165,15 @@ func (s *Server) serveSync(ctx context.Context, member domain.MemberID, ch ssh.C
 		return
 	}
 	if run.Status.Terminal() {
-		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: protocol.CodeInvalidState, Error: "run is " + string(run.Status)})
+		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: protocol.CodeInvalidState, Error: "session is " + string(run.Status)})
 		return
 	}
 	if run.Worktree == "" {
-		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: protocol.CodeUnavailable, Error: "run has no worktree"})
+		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: protocol.CodeUnavailable, Error: "session has no worktree"})
 		return
 	}
 	if run.Status == domain.RunRunning && !req.Force {
-		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: protocol.CodeInvalidState, Error: "run is running; the agent may be mid-write (use --force to overlay anyway)"})
+		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: protocol.CodeInvalidState, Error: "session is running; the agent may be mid-write (use --force to overlay anyway)"})
 		return
 	}
 	session, serr := syncSessionID(run.ID)
@@ -234,7 +234,7 @@ func (s *Server) serveSync(ctx context.Context, member domain.MemberID, ch ssh.C
 // sanitized, so nothing that is not plainly one path element can reach
 // mutagen even if run IDs ever change shape.
 func syncSessionID(run domain.RunID) (string, error) {
-	invalid := errors.New("run id is not usable as a sync session identifier")
+	invalid := errors.New("session id is not usable as a sync session identifier")
 	if len(run) == 0 || len(run) > 64 {
 		return "", invalid
 	}
@@ -567,7 +567,7 @@ func (s *Server) syncConflict(ctx context.Context, member domain.MemberID, param
 		ActorID:     member,
 		Payload: events.TimelinePayload{
 			Kind:    events.TimelineNote,
-			Message: "live overlay paused on " + strconv.Itoa(len(p.Files)) + " sync conflict(s); the run worktree is canonical",
+			Message: "live overlay paused on " + strconv.Itoa(len(p.Files)) + " sync conflict(s); the session worktree is canonical",
 		},
 	})
 	return struct{}{}, nil

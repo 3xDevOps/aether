@@ -37,12 +37,12 @@ describe('InsetList', () => {
     render(
       <InsetList>
         <InsetListItem onOpen={open} className="flex-col">
-          <span>run run_1</span>
+          <span>session run_1</span>
           <span>4 KB</span>
         </InsetListItem>
       </InsetList>,
     )
-    const button = screen.getByRole('button', { name: /^run run_1/ })
+    const button = screen.getByRole('button', { name: /^session run_1/ })
     expect(button.getAttribute('class')).toContain('flex-col')
     expect(button.closest('li')!.getAttribute('class')).toContain('hover:bg-hover')
     fireEvent.click(button)

@@ -45,6 +45,18 @@ func (s *Scheduler) ensureScratch(name string) (string, error) {
 	return dir, nil
 }
 
+// ensureOverlay makes the upper and work directories of an isolated run's
+// overlay over layer, beside its /tmp in the run's scratch directory.
+func (s *Scheduler) ensureOverlay(run domain.RunID, layer string) (string, error) {
+	dir := filepath.Join(s.scratchRoot(), string(run), layer)
+	for _, sub := range []string{"upper", "work"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			return "", fmt.Errorf("scheduler: create %s overlay: %w", layer, err)
+		}
+	}
+	return dir, nil
+}
+
 func (s *Scheduler) removeScratch(name string) {
 	if err := s.cfg.RemoveAll(context.Background(), filepath.Join(s.scratchRoot(), name)); err != nil {
 		slog.Warn("scheduler: remove scratch directory", "name", name, "error", err)

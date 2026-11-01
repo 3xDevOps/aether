@@ -140,7 +140,7 @@ func CloneHead(path string) (root, branch string, err error) {
 		return "", "", fmt.Errorf("%s has no commits yet; make your first commit, then try again", root)
 	}
 	if branch = currentBranch(root); branch == "" {
-		return "", "", fmt.Errorf("%s has no branch checked out; check out the branch runs should start from", root)
+		return "", "", fmt.Errorf("%s has no branch checked out; check out the branch sessions should start from", root)
 	}
 	return root, branch, nil
 }

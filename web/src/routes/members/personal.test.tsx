@@ -386,7 +386,7 @@ describe('profile dialog', () => {
 
   describe('after a first share', () => {
     const notice =
-      "Your Environment was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from Environment. Runs you already have running keep the mounts they started with until they end."
+      "Your Environment was started before you shared, so a Claude Code login written there will not reach Bob's sessions until you stop it and open it again from Environment. Sessions you already have running keep the mounts they started with until they end."
     const sharing = (running: boolean) =>
       fakeApi({
         accountList: vi
@@ -432,9 +432,9 @@ describe('profile dialog', () => {
       const [shareBob, shareVera] = await screen.findAllByRole('button', { name: 'Share account' })
       fireEvent.click(shareBob)
       fireEvent.click(shareVera)
-      expect((await screen.findByRole('status')).textContent).toContain("will not reach Vera's runs")
+      expect((await screen.findByRole('status')).textContent).toContain("will not reach Vera's sessions")
       await act(async () => bobShare.answer.resolve({}))
-      expect(screen.getByRole('status').textContent).toContain("will not reach Vera's runs")
+      expect(screen.getByRole('status').textContent).toContain("will not reach Vera's sessions")
     })
 
     it('shows the stop error in the confirmation', async () => {
@@ -460,7 +460,7 @@ describe('profile dialog', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
       const status = await screen.findByRole('status')
       expect(status.textContent).toContain(
-        "Your Environment could not be checked. If it is open, it was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from Environment. Runs you already have running keep the mounts they started with until they end.",
+        "Your Environment could not be checked. If it is open, it was started before you shared, so a Claude Code login written there will not reach Bob's sessions until you stop it and open it again from Environment. Sessions you already have running keep the mounts they started with until they end.",
       )
       expect(within(status).getByRole('button', { name: 'Stop environment' })).toBeDefined()
     })

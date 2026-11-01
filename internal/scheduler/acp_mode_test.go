@@ -175,13 +175,13 @@ func TestComposerModelChoiceIsRecorded(t *testing.T) {
 	}
 	row, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil || row.Model != "" {
-		t.Fatalf("after a mode change the run's model is %q (%v), want none", row.Model, err)
+		t.Fatalf("after a mode change the session's model is %q (%v), want none", row.Model, err)
 	}
 	if err = e.sched.ACPSetOption(t.Context(), run.ID, "model", "opus"); err != nil {
 		t.Fatal(err)
 	}
 	if row, err = e.db.GetRun(t.Context(), run.ID); err != nil || row.Model != "opus" {
-		t.Fatalf("after a model change the run's model is %q (%v), want opus", row.Model, err)
+		t.Fatalf("after a model change the session's model is %q (%v), want opus", row.Model, err)
 	}
 	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()
@@ -287,7 +287,7 @@ func TestComposerEffortChoiceIsRecorded(t *testing.T) {
 	}
 	row, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil || row.Effort != "" {
-		t.Fatalf("after a mode change the run's effort is %q (%v), want none", row.Effort, err)
+		t.Fatalf("after a mode change the session's effort is %q (%v), want none", row.Effort, err)
 	}
 	// The adapter's "default" is the agent's own level, which a run records
 	// as no effort.
@@ -296,7 +296,7 @@ func TestComposerEffortChoiceIsRecorded(t *testing.T) {
 			t.Fatal(err)
 		}
 		if row, err = e.db.GetRun(t.Context(), run.ID); err != nil || row.Effort != pick.want {
-			t.Fatalf("after picking %s the run's effort is %q (%v), want %q", pick.value, row.Effort, err, pick.want)
+			t.Fatalf("after picking %s the session's effort is %q (%v), want %q", pick.value, row.Effort, err, pick.want)
 		}
 		timer := time.NewTimer(3 * time.Second)
 		for published := false; !published; {
@@ -327,11 +327,11 @@ func TestEnhancedRunOfACustomAgentNamedApartFromItsCommand(t *testing.T) {
 		ACPArgs:      []string{"agent", "acp"},
 		ACPMode:      "plan",
 	})
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchACP, "opus", ""); err != nil {
-		t.Fatalf("ValidateMissionLaunch of an Enhanced launch with a model: %v", err)
+	if err := e.sched.ValidateLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchACP, "opus", ""); err != nil {
+		t.Fatalf("ValidateLaunch of an Enhanced launch with a model: %v", err)
 	}
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchTUI, "opus", ""); err == nil {
-		t.Fatal("ValidateMissionLaunch accepted a Standard launch with a model for an agent with no model flag")
+	if err := e.sched.ValidateLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchTUI, "opus", ""); err == nil {
+		t.Fatal("ValidateLaunch accepted a Standard launch with a model for an agent with no model flag")
 	}
 	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "mycursor", domain.LaunchACP, domain.LaunchOptions{Model: "opus"})
 	if err != nil {
@@ -353,17 +353,13 @@ func TestEnhancedRunOfACustomAgentNamedApartFromItsCommand(t *testing.T) {
 	}
 }
 
-func TestEnhancedMissionWorkerOfCursorRunsAgentACP(t *testing.T) {
+func TestEnhancedCursorRunsAgentACPWithItsForceFlag(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t)
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchACP, "gpt-5", ""); err != nil {
-		t.Fatalf("ValidateMissionLaunch of an Enhanced cursor worker with a model: %v", err)
+	if err := e.sched.ValidateLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchACP, "gpt-5", ""); err != nil {
+		t.Fatalf("ValidateLaunch of an Enhanced cursor run with a model: %v", err)
 	}
-	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-		WorkspaceID: e.ws.ID, RunID: "cursor-enhanced-worker", Actor: e.member.ID,
-		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "say pong",
-		Harness: "cursor", Mode: domain.LaunchACP, Model: "gpt-5",
-	})
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "cursor", domain.LaunchACP, domain.LaunchOptions{Model: "gpt-5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,9 +379,9 @@ func TestEnhancedMissionWorkerOfCursorRunsAgentACP(t *testing.T) {
 func TestEnhancedLaunchOfAntigravityIsRefused(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)
-	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", domain.LaunchACP, "", "")
+	err := e.sched.ValidateLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", domain.LaunchACP, "", "")
 	if err == nil {
-		t.Fatal("ValidateMissionLaunch accepted an Enhanced antigravity launch")
+		t.Fatal("ValidateLaunch accepted an Enhanced antigravity launch")
 	}
 	if _, err = e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "antigravity", domain.LaunchACP); err == nil {
 		t.Fatal("Launch accepted an Enhanced antigravity run")

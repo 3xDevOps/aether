@@ -18,7 +18,7 @@ import (
 // provisioning.
 const reportWait = 30 * time.Second
 
-var errProvisioning = errors.New("the run is still provisioning")
+var errProvisioning = errors.New("the session is still provisioning")
 
 // ReportAgentState accepts execution and correlated input independently. An
 // input-only report preserves the last execution report, including an idle hold.
@@ -85,7 +85,7 @@ func (s *Scheduler) applyAgentReportIf(ctx context.Context, run domain.RunID, re
 	defer s.mu.Unlock()
 	entry := s.runs[run]
 	if entry == nil {
-		return nil, fmt.Errorf("scheduler: agent status report for %s: the run has no live container", run)
+		return nil, fmt.Errorf("scheduler: agent status report for %s: the session has no live container", run)
 	}
 	if current != nil && !current(entry) {
 		return nil, nil
@@ -95,7 +95,7 @@ func (s *Scheduler) applyAgentReportIf(ctx context.Context, run domain.RunID, re
 	}
 	if (entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention) ||
 		entry.exitObserved || entry.finalizing || entry.retained || entry.destroyPending {
-		return nil, fmt.Errorf("scheduler: agent status report for %s: the run is no longer active (%s)", run, entry.status)
+		return nil, fmt.Errorf("scheduler: agent status report for %s: the session is no longer active (%s)", run, entry.status)
 	}
 	// The start notice of the turn a stall parked, or of an earlier one, can
 	// arrive after the park. It says nothing new, so it neither releases the
@@ -297,9 +297,9 @@ func (s *Scheduler) publishPendingInputLocked(ctx context.Context, entry *superv
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
 		WorkspaceID: entry.workspaceID,
 		RunID:       entry.runID,
-		Payload:     events.RunInputPayload{PendingInputs: inputList(entry.pendingInputs)},
+		Payload:     events.RunInputPayload{PendingInputs: entry.inputs()},
 	}); err != nil {
-		return fmt.Errorf("scheduler: publish run input: %w", err)
+		return fmt.Errorf("scheduler: publish session input: %w", err)
 	}
 	next := entry.sidecar()
 	next.InputPublishPending = false
@@ -307,7 +307,7 @@ func (s *Scheduler) publishPendingInputLocked(ctx context.Context, entry *superv
 		next.InputStartedAt = nil
 	}
 	if err := s.writeSidecar(next); err != nil {
-		return fmt.Errorf("scheduler: acknowledge run input publication: %w", err)
+		return fmt.Errorf("scheduler: acknowledge session input publication: %w", err)
 	}
 	entry.inputPublishPending = false
 	return nil
@@ -322,14 +322,17 @@ func (s *Scheduler) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	if entry == nil || entry.status.Terminal() || entry.exitObserved || entry.retained || entry.destroyPending {
 		return []domain.RunInputRequest{}
 	}
-	return inputList(slices.Clone(entry.pendingInputs))
+	return entry.inputs()
 }
 
-func inputList(inputs []domain.RunInputRequest) []domain.RunInputRequest {
-	if inputs == nil {
-		return []domain.RunInputRequest{}
+// inputs is a new slice of the run's sudo requests, then its agent's. The
+// caller must hold s.mu.
+func (e *supervised) inputs() []domain.RunInputRequest {
+	out := make([]domain.RunInputRequest, 0, len(e.sudo)+len(e.pendingInputs))
+	for _, request := range e.sudo {
+		out = append(out, request.input)
 	}
-	return inputs
+	return append(out, e.pendingInputs...)
 }
 
 // reduceRunInputs never mutates the stored set. Small bounded sets keep exact

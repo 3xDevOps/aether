@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
+import type { AssistantConfirmation } from '@/lib/assistant-types'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore, type RootState } from '@/store'
 
 /** The methods whose card says what a launch starts and where. */
-const launchMethods = new Set(['run.launch', 'mission.create'])
+const launchMethods = new Set(['run.launch'])
 
 /** Whether `method` starts work, which another member's account may pay for. */
 export function isLaunch(method: string): boolean {
@@ -12,7 +13,6 @@ export function isLaunch(method: string): boolean {
 
 export const hearBack = {
   run: 'Aether notifies you here, on the desktop app and on your phone when it finishes or needs you.',
-  swarm: 'The swarm’s page shows its progress; Aether notifies you when it needs you.',
 }
 
 type Params = Record<string, unknown>
@@ -40,37 +40,50 @@ function fallbackLine(s: RootState, params: Params): string {
   return `Then ${order.map((id) => s.members[id]?.display_name || id).join(', ')}`
 }
 
+const savedFields: Record<string, string> = {
+  harness: 'agent',
+  mode: 'mode',
+  model: 'model',
+  account_member_id: 'account',
+  fallback: 'fallback',
+  fallback_account_member_ids: 'fallback account',
+}
+
 /** The rows a launch card shows, or undefined when `method` launches nothing. */
-export function launchRows(s: RootState, method: string, params: unknown): [string, string][] | undefined {
+export function launchRows(s: RootState, method: string, params: unknown, defaults?: AssistantConfirmation['defaults']): [string, string][] | undefined {
   if (!launchMethods.has(method) || params === null || typeof params !== 'object') return undefined
   const p = params as Params
-  const swarm = method === 'mission.create'
-  const lead = (swarm ? p.integrator : p) as Params | undefined
   const workspace = str(p.workspace_id)
-  const owner = sharer(s, str(lead?.account_member_id))
+  const owner = sharer(s, str(p.account_member_id))
   const extras = Array.isArray(p.extra_workspace_ids) ? p.extra_workspace_ids.filter((id): id is string => typeof id === 'string') : []
   const rows: [string, string][] = [
-    ['Kind', swarm ? 'Swarm: an integrator plans the work for worker runs' : 'Run: one agent on one task'],
+    ['Kind', 'Session: one agent on one task'],
     ['Workspace', [workspace, ...extras].filter(Boolean).map((id) => s.workspaces[id!]?.name ?? id).join(', ')],
-    [swarm ? 'Integrator' : 'Agent', lead ? agentLine(s, lead) : ''],
+    ['Agent', agentLine(s, p)],
     ['Account', owner ? `${owner}'s account, shared with you` : 'Yours'],
     ['Fallback', fallbackLine(s, p)],
   ]
-  if (swarm && Array.isArray(p.execution_choices) && p.execution_choices.length) {
-    const workers = (p.execution_choices as Params[]).map((choice) => {
-      const worker = sharer(s, str(choice.account_member_id))
-      return `${agentLine(s, choice)} on ${worker ? `${worker}'s account` : 'your account'}`
-    })
-    rows.push(['Workers', workers.join('; ')])
+  if (defaults?.applied?.length) rows.push(['From your saved defaults', defaults.applied.map((field) => savedFields[field] ?? field).join(', ')])
+  // Several notes on one field, such as two fallback members that stopped
+  // sharing, share a label, so they are one row.
+  const noted = (notes: { field: string; reason: string }[] | undefined, verb: string) => {
+    const byLabel = new Map<string, string[]>()
+    for (const n of notes ?? []) {
+      const label = `Saved ${savedFields[n.field] ?? n.field} ${verb}`
+      byLabel.set(label, [...(byLabel.get(label) ?? []), n.reason])
+    }
+    for (const [label, reasons] of byLabel) rows.push([label, reasons.join('; ')])
   }
-  const brief = str(swarm ? p.objective : p.task)
-  if (brief) rows.push([swarm ? 'Objective' : 'Task', brief])
-  rows.push(['You hear back', swarm ? hearBack.swarm : hearBack.run])
+  noted(defaults?.skipped, 'not used')
+  noted(defaults?.unchecked, 'not checked')
+  const brief = str(p.task)
+  if (brief) rows.push(['Task', brief])
+  rows.push(['You hear back', hearBack.run])
   return rows.filter(([, value]) => value !== '')
 }
 
-export function useLaunchRows(method: string, params: unknown): [string, string][] | undefined {
-  const key = useStore((s) => JSON.stringify(launchRows(s, method, params) ?? null))
+export function useLaunchRows(method: string, params: unknown, defaults?: AssistantConfirmation['defaults']): [string, string][] | undefined {
+  const key = useStore((s) => JSON.stringify(launchRows(s, method, params, defaults) ?? null))
   return useMemo(() => (JSON.parse(key) as [string, string][] | null) ?? undefined, [key])
 }
 

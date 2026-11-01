@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LocalForwardStartResult } from '@/lib/api'
 import {
-  forwardOAuthCallback,
   oauthCallbackPort,
   openOAuthLink,
   remoteOAuthInstructions,
@@ -36,21 +35,6 @@ describe('OAuth callback forwarding', () => {
   it('does not treat unrelated localhost links as OAuth callbacks', () => {
     expect(oauthCallbackPort('http://localhost:3000/')).toBeNull()
     expect(oauthCallbackPort('not a URL')).toBeNull()
-  })
-
-  it('starts the matching target before reporting the callback port', async () => {
-    const localForwardStart = vi.fn(async () => ({
-      target: 'terminal',
-      port: 1455,
-      local_port: 1455,
-      state: 'active' as const,
-    }))
-    const client = fakeApi({ localForwardStart })
-    const uri =
-      'https://auth.example/?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback'
-
-    await expect(forwardOAuthCallback(client, 'terminal', uri)).resolves.toBe(1455)
-    expect(localForwardStart).toHaveBeenCalledWith('terminal', 1455)
   })
 
   it('holds the authorization page until the callback listener is ready', async () => {

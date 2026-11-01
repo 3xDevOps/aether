@@ -20,7 +20,6 @@ import (
 
 const (
 	retainedCloseReason       = "closed; retained container"
-	retainedCompletionReason  = "worker finished; retained container"
 	retainedExpiredReason     = "retained container expired"
 	retainedUnavailableReason = "retained container unavailable"
 	retainedReclaimedReason   = "retained container reclaimed for disk space"
@@ -106,7 +105,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.startSupervision(entry)
 	}
 	if old.HomeMemberID == "" && old.MemberID != old.AccountMember() {
-		return nil, fmt.Errorf("%w: run %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new run",
+		return nil, fmt.Errorf("%w: session %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new session",
 			ErrInvalidTransition, run)
 	}
 	entry.lifecycleMu.Lock()
@@ -119,7 +118,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, ferr
 	}
 	valid := s.runs[run] == entry && entry.retained && !entry.destroyPending && !entry.evidencePending &&
-		fresh.Mode.Interactive() && !entry.missionAssigned && retainedReason(fresh.Status, fresh.Reason) &&
+		fresh.Mode.Interactive() && retainedReason(fresh.Status, fresh.Reason) &&
 		deadline != nil && time.Now().UTC().Before(*deadline)
 	paused, cid := entry.paused, entry.containerID
 	s.mu.Unlock()
@@ -201,7 +200,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		if _, clearErr := s.cfg.Store.SetRunArchived(ctx, run, nil); clearErr != nil {
 			s.mu.Unlock()
 			s.archiveMu.Unlock()
-			return nil, fmt.Errorf("scheduler: clear archived run before relaunch: %w", clearErr)
+			return nil, fmt.Errorf("scheduler: clear archived session before relaunch: %w", clearErr)
 		}
 		runningRow.ArchivedAt = nil
 	}
@@ -210,7 +209,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			// No restore was published, so clients still show the run as
 			// archived; put the original timer back to match.
 			if _, rearchiveErr := s.cfg.Store.SetRunArchived(context.WithoutCancel(ctx), run, fresh.ArchivedAt); rearchiveErr != nil {
-				updateErr = errors.Join(updateErr, fmt.Errorf("scheduler: re-archive run after failed relaunch: %w", rearchiveErr))
+				updateErr = errors.Join(updateErr, fmt.Errorf("scheduler: re-archive session after failed relaunch: %w", rearchiveErr))
 			}
 		}
 		s.mu.Unlock()
@@ -627,7 +626,7 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 }
 
 // cleanupTerminalSidecars reconciles terminal sidecars. Unexpired retained
-// closes and completed workers keep exact-container ownership; other sidecars
+// closes keep exact-container ownership; other sidecars
 // are destroyed idempotently. Failed destruction never releases ownership.
 func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 	entries, err := os.ReadDir(s.cfg.StateDir)
@@ -710,7 +709,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 			mode = r.Mode
 		}
 		retained := sc.Retained || sc.RetainedUntil != nil
-		if !retained || !retentionValid(mode, sc.MissionAssigned, r.Status, r.Reason) {
+		if !retained || !retentionValid(mode, r.Status, r.Reason) {
 			// An invalid marker's container may still be live: keep ownership
 			// until the sweep confirms Destroy.
 			if derr := s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run); derr != nil {
@@ -765,7 +764,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 		_, waitErr := s.cfg.Runtime.Wait(probeCtx, runtime.ID(sc.ContainerID))
 		cancel()
 		switch {
-		case errors.Is(waitErr, runtime.ErrNotFound), waitErr == nil && !sc.MissionAssigned:
+		case errors.Is(waitErr, runtime.ErrNotFound), waitErr == nil:
 			if derr := s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run); derr != nil {
 				owner := s.installRetainedDestroyOwner(ctx, r, sc)
 				if owner != nil {
@@ -792,7 +791,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 				slog.Warn("scheduler: reload retained run after probe", "run", run, "error", ferr)
 				continue
 			}
-			if !fresh.Status.Terminal() || !retentionValid(mode, sc.MissionAssigned, fresh.Status, fresh.Reason) {
+			if !fresh.Status.Terminal() || !retentionValid(mode, fresh.Status, fresh.Reason) {
 				s.mu.Unlock()
 				continue
 			}
@@ -1432,7 +1431,7 @@ func (s *Scheduler) cleanupLeftoverContainer(ctx context.Context, cid runtime.ID
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {
 		s.recordRunCleanupError(run, cleanupLookupError)
-		return fmt.Errorf("scheduler: load leftover run during recovery: %w", err)
+		return fmt.Errorf("scheduler: load leftover session during recovery: %w", err)
 	}
 	if cid != "" {
 		if derr := s.destroyDevelopmentContainer(ctx, run, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
@@ -1515,8 +1514,7 @@ func (s *Scheduler) admitRecoveryAttachment(ctx context.Context, r *domain.Run, 
 		mode = fresh.Mode
 	}
 	resumeReported := current.Paused && (current.Retained || current.RetainedUntil != nil) &&
-		current.ReportedOutcome != "" && mode.Interactive() &&
-		(!current.MissionAssigned || fresh.MissionRole == "integrator")
+		current.ReportedOutcome != "" && mode.Interactive()
 	// The active row is authoritative if a relaunch won just before this
 	// admission. Do not let a stale retained marker turn this owner into a
 	// terminal cleanup candidate.
@@ -1756,9 +1754,8 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		acp = mode == domain.LaunchACP
 	}
 	// Older servers armed interactive reports for terminal completion. Upgrade
-	// an active owner to a nonterminal outcome instead; workers keep their
-	// mission completion path. A boot-time watermark fences old outbox retries.
-	if mode.Interactive() && (!sc.MissionAssigned || r.MissionRole == "integrator") &&
+	// an active owner to a nonterminal outcome instead. A boot-time watermark fences old outbox retries.
+	if mode.Interactive() &&
 		!r.Status.Terminal() && sc.ReportedOutcome != "" {
 		sc.IdleReason = reportedClose(sc.ReportedOutcome).reason
 		sc.IdleShown = false
@@ -1796,7 +1793,6 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		acp:                 acp,
 		appServer:           sc.AppServer,
 		serverTurn:          sc.ServerTurn,
-		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		reason:              r.Reason,
 		workersReason:       sc.WorkersReason,

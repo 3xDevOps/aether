@@ -40,7 +40,7 @@ function RawEvents({ run, client }: { run: RunRecord; client: Api }) {
       <ol>
         {[...feed].reverse().map((event) => <FeedEntry key={event.id} event={event} />)}
       </ol>
-      {feed.length === 0 && !loading && <p className="text-ui text-muted">Nothing recorded for this run yet.</p>}
+      {feed.length === 0 && !loading && <p className="text-ui text-muted">Nothing recorded for this session yet.</p>}
       {truncated && <p className="text-ui-sm text-muted">Stopped after {pageBudget} entries, so part of this stretch is not shown.</p>}
       {older && (
         <div>
@@ -70,7 +70,7 @@ export function RawEventsDialog({ run, open, onOpenChange, returnTo, client = ap
       >
         <DialogHeader>
           <DialogTitle>Raw events</DialogTitle>
-          <DialogDescription>Everything the server recorded about this run, newest first.</DialogDescription>
+          <DialogDescription>Everything the server recorded about this session, newest first.</DialogDescription>
         </DialogHeader>
         {open && <RawEvents run={run} client={client} />}
       </DialogContent>

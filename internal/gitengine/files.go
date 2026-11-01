@@ -31,7 +31,7 @@ var ErrRevisionConflict = errors.New("gitengine: file revision conflict")
 
 // ErrWorkspaceMismatch reports that a run does not belong to the addressed
 // workspace. It is intentionally distinct so the RPC can reject bad input.
-var ErrWorkspaceMismatch = errors.New("gitengine: workspace and run do not match")
+var ErrWorkspaceMismatch = errors.New("gitengine: workspace and session do not match")
 
 // MaxFileBytes is the maximum dashboard file response or editor write.
 const MaxFileBytes = 64 << 20
@@ -519,7 +519,7 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 			return FileRead{}, err
 		}
 		if meta.Workspace != workspace {
-			return FileRead{}, fmt.Errorf("%w: run belongs to another workspace", ErrWorkspaceMismatch)
+			return FileRead{}, fmt.Errorf("%w: session belongs to another workspace", ErrWorkspaceMismatch)
 		}
 		return writeCheckoutFile(e, checkout, name, content, revision)
 	}
@@ -759,13 +759,13 @@ func (e *Engine) FileDiff(ctx context.Context, run domain.RunID, path string) (P
 
 	dir, err := os.MkdirTemp("", "aether-file-diff-")
 	if err != nil {
-		return Patch{}, fmt.Errorf("gitengine: scratch index for run %s: %w", run, err)
+		return Patch{}, fmt.Errorf("gitengine: scratch index for session %s: %w", run, err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	index := filepath.Join(dir, "index")
 	objects := filepath.Join(dir, "objects")
 	if mkErr := os.MkdirAll(filepath.Join(objects, "info"), 0o700); mkErr != nil {
-		return Patch{}, fmt.Errorf("gitengine: scratch objects for run %s: %w", run, mkErr)
+		return Patch{}, fmt.Errorf("gitengine: scratch objects for session %s: %w", run, mkErr)
 	}
 	checkoutRoot, rootErr := e.openCheckoutRoot(checkout)
 	if rootErr != nil {
@@ -784,19 +784,19 @@ func (e *Engine) FileDiff(ctx context.Context, run domain.RunID, path string) (P
 	defer func() { _ = objectsRoot.Close() }()
 	alternates := filepath.Join(objects, "info", "alternates")
 	if writeErr := os.WriteFile(alternates, []byte(objectsRoot.Name()+"\n"), 0o600); writeErr != nil {
-		return Patch{}, fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, writeErr)
+		return Patch{}, fmt.Errorf("gitengine: scratch alternates for session %s: %w", run, writeErr)
 	}
 	if dataFile, readErr := rootfs.Open(gitRoot, "index"); readErr == nil {
 		data, fileErr := io.ReadAll(dataFile)
 		_ = dataFile.Close()
 		if fileErr != nil {
-			return Patch{}, fmt.Errorf("gitengine: read checkout index for run %s: %w", run, fileErr)
+			return Patch{}, fmt.Errorf("gitengine: read checkout index for session %s: %w", run, fileErr)
 		}
 		if seedErr := os.WriteFile(index, data, 0o600); seedErr != nil {
-			return Patch{}, fmt.Errorf("gitengine: seed scratch index for run %s: %w", run, seedErr)
+			return Patch{}, fmt.Errorf("gitengine: seed scratch index for session %s: %w", run, seedErr)
 		}
 	} else if !errors.Is(readErr, fs.ErrNotExist) {
-		return Patch{}, fmt.Errorf("%w: read checkout index for run %s: %v", ErrInvalidPath, run, readErr)
+		return Patch{}, fmt.Errorf("%w: read checkout index for session %s: %v", ErrInvalidPath, run, readErr)
 	}
 	if err = e.checkCaptureBounds(ctx, run, checkout, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
 		return Patch{}, err
@@ -868,7 +868,7 @@ func (e *Engine) FilesTree(ctx context.Context, workspace domain.WorkspaceID, ru
 			return nil, err
 		}
 		if meta.Workspace != workspace {
-			return nil, fmt.Errorf("%w: run belongs to another workspace", ErrWorkspaceMismatch)
+			return nil, fmt.Errorf("%w: session belongs to another workspace", ErrWorkspaceMismatch)
 		}
 		return e.ListTree(ctx, checkout, "", dir)
 	}
@@ -892,7 +892,7 @@ func (e *Engine) FilesRead(ctx context.Context, workspace domain.WorkspaceID, ru
 			return FileRead{}, err
 		}
 		if meta.Workspace != workspace {
-			return FileRead{}, fmt.Errorf("%w: run belongs to another workspace", ErrWorkspaceMismatch)
+			return FileRead{}, fmt.Errorf("%w: session belongs to another workspace", ErrWorkspaceMismatch)
 		}
 		return e.ReadFileMeta(ctx, checkout, "", path, maxBytes)
 	}

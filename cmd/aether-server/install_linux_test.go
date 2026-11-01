@@ -45,7 +45,7 @@ func TestNextStepsAreBoldOrangeOnATerminal(t *testing.T) {
 	for noColor, want := range map[string]bool{"": true, "1": false} {
 		t.Setenv("NO_COLOR", noColor)
 		master, slave := openPTY(t)
-		if err := printNextSteps(slave, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2222"}), "", true); err != nil {
+		if err := printNextSteps(slave, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2222"}), "", true, ""); err != nil {
 			t.Fatal(err)
 		}
 		_ = slave.Close()

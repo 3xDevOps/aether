@@ -129,7 +129,7 @@ func TestRunMailboxInboxCap(t *testing.T) {
 	}
 }
 
-func TestAppendRunMessageWithPeerConvergesConcurrentSameKey(t *testing.T) {
+func TestAppendRunMessageConvergesConcurrentSameKey(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -151,7 +151,7 @@ func TestAppendRunMessageWithPeerConvergesConcurrentSameKey(t *testing.T) {
 				WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID,
 				Body: "same", Kind: RunMessageKindQuestion, IdempotencyKey: "same-key",
 			}
-			_, err := db.AppendRunMessageWithPeer(ctx, msg, callers, 8, true)
+			_, err := db.AppendRunMessageCreated(ctx, msg, callers)
 			if err != nil {
 				errs <- err
 				return
@@ -174,23 +174,18 @@ func TestAppendRunMessageWithPeerConvergesConcurrentSameKey(t *testing.T) {
 			t.Fatalf("same key converged to IDs %q and %q", wantID, id)
 		}
 	}
-	var messages, peers int
+	var messages int
 	if err := db.db.QueryRowContext(ctx,
 		`SELECT count(*) FROM run_messages WHERE from_run = ? AND idempotency_key = ?`,
 		from.ID, "same-key").Scan(&messages); err != nil {
 		t.Fatalf("count messages: %v", err)
 	}
-	if err := db.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM coord_peers WHERE from_run = ? AND to_run = ?`,
-		from.ID, to.ID).Scan(&peers); err != nil {
-		t.Fatalf("count peers: %v", err)
-	}
-	if messages != 1 || peers != 1 {
-		t.Fatalf("durable counts = messages %d, peers %d; want one each", messages, peers)
+	if messages != 1 {
+		t.Fatalf("durable messages = %d, want one", messages)
 	}
 }
 
-func TestAppendRunMessageWithPeerRejectsConcurrentCrossKindReuse(t *testing.T) {
+func TestAppendRunMessageRejectsConcurrentCrossKindReuse(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -211,7 +206,7 @@ func TestAppendRunMessageWithPeerRejectsConcurrentCrossKindReuse(t *testing.T) {
 				WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID,
 				Body: "cross-kind", Kind: kind, IdempotencyKey: "cross-kind-key",
 			}
-			_, err := db.AppendRunMessageWithPeer(ctx, msg, 10, 8, true)
+			_, err := db.AppendRunMessageCreated(ctx, msg, 10)
 			errs <- err
 		}()
 	}
@@ -669,67 +664,6 @@ func TestRunMailboxRejectsCrossKindIdempotency(t *testing.T) {
 	}, 100)
 	if !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("cross-kind idempotency = %v, want ErrIdempotencyConflict", err)
-	}
-}
-
-func TestCoordPeerAccountingIsAtomicAndSurvivesRestart(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "aether.db")
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	w := mustCreateWorkspace(t, db)
-	m := mustCreateMember(t, db)
-	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
-	blocker := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
-	targets := make([]*domain.Run, 0, 9)
-	for range 9 {
-		targets = append(targets, mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning))
-	}
-	// A failed enqueue must roll back its peer row.
-	if appendErr := db.AppendRunMessage(ctx, &RunMessage{
-		WorkspaceID: w.ID, FromRun: blocker.ID, ToRun: targets[0].ID, Body: "fills inbox",
-	}, 1); appendErr != nil {
-		t.Fatalf("fill target inbox: %v", appendErr)
-	}
-	created, err := db.AppendRunMessageWithPeer(ctx, &RunMessage{
-		WorkspaceID: w.ID, FromRun: from.ID, ToRun: targets[0].ID, Body: "must retry",
-	}, 1, 8, true)
-	if created || !errors.Is(err, ErrInboxFull) {
-		t.Fatalf("failed peer enqueue = created %v, err %v; want no peer and ErrInboxFull", created, err)
-	}
-	var peers int
-	if peerCountErr := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM coord_peers WHERE from_run = ?`, from.ID).Scan(&peers); peerCountErr != nil {
-		t.Fatalf("count rolled-back peers: %v", peerCountErr)
-	}
-	if peers != 0 {
-		t.Fatalf("peer rows after failed enqueue = %d, want 0", peers)
-	}
-	for i, target := range targets[:8] {
-		msg := &RunMessage{
-			WorkspaceID: w.ID, FromRun: from.ID, ToRun: target.ID, Body: fmt.Sprintf("peer-%d", i),
-			IdempotencyKey: fmt.Sprintf("peer-%d", i),
-		}
-		peerCreated, peerErr := db.AppendRunMessageWithPeer(ctx, msg, 100, 8, true)
-		if !peerCreated || peerErr != nil {
-			t.Fatalf("peer %d enqueue = created %v, err %v", i, peerCreated, peerErr)
-		}
-	}
-	if closeErr := db.Close(); closeErr != nil {
-		t.Fatalf("close: %v", closeErr)
-	}
-	db, err = Open(path)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-	created, err = db.AppendRunMessageWithPeer(ctx, &RunMessage{
-		WorkspaceID: w.ID, FromRun: from.ID, ToRun: targets[8].ID, Body: "ninth",
-		IdempotencyKey: "peer-8",
-	}, 100, 8, true)
-	if created || !errors.Is(err, ErrCoordPeerLimit) {
-		t.Fatalf("ninth peer after restart = created %v, err %v; want durable cap", created, err)
 	}
 }
 

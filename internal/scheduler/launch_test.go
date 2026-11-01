@@ -66,7 +66,7 @@ func TestKillAtAdmissionStopsTheLaunch(t *testing.T) {
 	kill := func() {
 		active, err := e.db.ListActiveRuns(ctx)
 		if err != nil || len(active) != 1 {
-			t.Errorf("active runs at admission = %v, %v; want the admitted run", active, err)
+			t.Errorf("active sessions at admission = %v, %v; want the admitted run", active, err)
 			return
 		}
 		admitted = active[0]

@@ -190,7 +190,7 @@ func TestTrustRunHostKeyRecordsEachKeyOnce(t *testing.T) {
 }
 
 // serveRunSSHAck is a server that admits anyone and answers the run-ssh
-// subsystem with a host key line of its choosing and a notice.
+// subsystem with a host key line of its choosing.
 func serveRunSSHAck(t *testing.T, host ssh.Signer, ackKey string) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -225,7 +225,7 @@ func serveRunSSHAck(t *testing.T, host ssh.Signer, ackKey string) string {
 				if _, rerr := protocol.ReadLine(bufio.NewReader(ch)); rerr != nil {
 					return
 				}
-				ack, _ := json.Marshal(protocol.RunSSHResponse{OK: true, HostKey: ackKey, Notice: "this run is a swarm worker\x1b[2J"})
+				ack, _ := json.Marshal(protocol.RunSSHResponse{OK: true, HostKey: ackKey})
 				_, _ = ch.Write(append(ack, '\n'))
 			}
 		}
@@ -270,10 +270,8 @@ func TestRunSSHAcceptsOnlyTheHostKeyTheLinkVerified(t *testing.T) {
 			if string(key.Marshal()) != string(host.PublicKey().Marshal()) {
 				t.Fatalf("RunSSH returned %s, want the server's key", ssh.FingerprintSHA256(key))
 			}
-			// The server's notice reaches the person, without the control
-			// characters that could drive their terminal.
-			if said != "aether: this run is a swarm worker?[2J\n" {
-				t.Fatalf("stderr = %q, want the server's notice", said)
+			if said != "" {
+				t.Fatalf("stderr = %q, want nothing printed", said)
 			}
 		})
 	}

@@ -18,7 +18,7 @@ const agent = `while :; do
   sleep 1
 done`
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 /** xterm asks for a line's links when the pointer reaches the line and applies
  * the answer on the next move, so this moves twice before it clicks. */
@@ -45,7 +45,7 @@ test('a path in the terminal opens that file in the run at its line, and an edit
     (await alice.api.rpc<{ content: string }>('files.read', { workspace_id: workspaces[0].id, run_id: run.id, path: 'README.md' })).content
 
   await page.goto(`${alice.url}&run=${run.id}`)
-  const views = page.getByRole('tablist', { name: 'Run views' })
+  const views = page.getByRole('tablist', { name: 'Session views' })
   const tab = (name: string) => views.getByRole('tab', { name, exact: true })
   const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *)')
   await expect(rows).toContainText('missing.md:3: gone', { timeout: 3 * 60 * 1000 })
@@ -66,15 +66,15 @@ test('a path in the terminal opens that file in the run at its line, and an edit
   await editor.evaluate((node) => node.setAttribute('data-kept', 'yes'))
   await viewer.locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+End')
-  await page.keyboard.type('edited in the run')
+  await page.keyboard.type('edited in the session')
   await viewer.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(read).toBe('# project\nedited in the run')
+  await expect.poll(read).toBe('# project\nedited in the session')
 
   // The save changes the checkout, which drops what the dashboard had read of
   // it. The mark on the tree row says that happened; the editor is the same one.
-  await expect(tree.getByRole('img', { name: 'Changed in this run' })).toBeVisible({ timeout: 60_000 })
+  await expect(tree.getByRole('img', { name: 'Changed in this session' })).toBeVisible({ timeout: 60_000 })
   await expect(editor).toHaveAttribute('data-kept', 'yes')
-  await expect(editor).toContainText('edited in the run')
+  await expect(editor).toContainText('edited in the session')
   await expect(viewer.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
 
   await tab('Changes').click()

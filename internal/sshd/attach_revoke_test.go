@@ -657,7 +657,7 @@ func TestRunShellLeaseIsIndependentOfPrimaryControl(t *testing.T) {
 	}
 	defer func() { _ = first.ch.Close() }()
 	otherSigner, other := addMember(t, e, "Shell member", domain.RoleCollaborator, false)
-	if err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
+	if _, err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	shell, ack := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{
@@ -715,7 +715,7 @@ func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
 		e := revocableEnv(t)
 		installDevelopmentTestService(e)
 		collab, cm := addMember(t, e, "Shell collaborator", domain.RoleCollaborator, false)
-		if err := e.store.ShareAccount(t.Context(), e.member.ID, cm.ID); err != nil {
+		if _, err := e.store.ShareAccount(t.Context(), e.member.ID, cm.ID); err != nil {
 			t.Fatal(err)
 		}
 		c, ack := rawAttachRequest(t, e, collab, protocol.AttachRequest{Shell: "shell", ControlSessionID: "writer"}, true)
@@ -735,7 +735,7 @@ func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
 		e := revocableEnv(t)
 		installDevelopmentTestService(e)
 		collab, cm := addMember(t, e, "Shell viewer", domain.RoleCollaborator, false)
-		if err := e.store.ShareAccount(t.Context(), e.member.ID, cm.ID); err != nil {
+		if _, err := e.store.ShareAccount(t.Context(), e.member.ID, cm.ID); err != nil {
 			t.Fatal(err)
 		}
 		c, ack := rawAttachRequest(t, e, collab, protocol.AttachRequest{Shell: "shell", ReadOnly: true}, true)

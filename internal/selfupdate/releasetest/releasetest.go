@@ -118,13 +118,6 @@ func (r *Release) Requests(path string) int {
 	return r.requests[path]
 }
 
-// Manifest is the manifest served for tag.
-func (r *Release) Manifest(tag string) selfupdate.Manifest {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.manifest(tag)
-}
-
 func (r *Release) manifest(tag string) selfupdate.Manifest {
 	m := selfupdate.Manifest{
 		Schema:      selfupdate.ManifestSchema,

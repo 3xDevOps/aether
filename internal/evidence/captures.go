@@ -184,7 +184,7 @@ func (s *Service) retainCaptures(ctx context.Context, run *domain.Run, key strin
 		return nil, err
 	}
 	if count+len(ids) > MaxCaptures {
-		return nil, errors.New("evidence: run retained capture count limit reached")
+		return nil, errors.New("evidence: session retained capture count limit reached")
 	}
 	dir, err := s.captureDirectory(key)
 	if err != nil {
@@ -251,7 +251,7 @@ func (s *Service) copyCapture(ctx context.Context, dir string, run domain.RunID,
 		return fmt.Errorf("%w: capture metadata exceeds limit", ErrInvalidRequest)
 	}
 	if artifact.Bytes > remaining {
-		return errors.New("evidence: run retained capture byte limit reached")
+		return errors.New("evidence: session retained capture byte limit reached")
 	}
 	tmp, err := s.fs.CreateTemp(dir, ".capture-*")
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,8 +48,24 @@ func (s *Service) UseAssistant(a Assistant) { s.assistant = a }
 // A run relaunched after its watch was done gets a new watch, keyed by the
 // one before, since a done watch never announces the same end twice. A
 // need the run stands in now is taken as seen: the assistant just launched
-// the run or wrote to it, so only the next one is news.
+// the run or wrote to it, so only the next one is news. A live assistant
+// watch on the run's default conditions without the key, such as one
+// aether_watch made an assistant watch, is that watch too.
 func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain.RunID) (protocol.WatchResult, error) {
+	conditions, err := s.normalize(protocol.WatchTargetRun, nil)
+	if err != nil {
+		return protocol.WatchResult{}, err
+	}
+	watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: protocol.WatchTargetRun, RunID: run})
+	if err != nil {
+		return protocol.WatchResult{}, err
+	}
+	if i := slices.IndexFunc(watches, func(w *store.Watch) bool {
+		return w.Source == protocol.WatchSourceAssistant && slices.Equal(w.Conditions, conditions) &&
+			w.State != protocol.WatchDone && w.State != protocol.WatchExpired
+	}); i >= 0 {
+		return s.result(ctx, watches[i])
+	}
 	key := "assistant:" + string(run)
 	for {
 		res, err := s.create(ctx, member, protocol.WatchCreateParams{
@@ -65,7 +82,7 @@ func (s *Service) Follow(ctx context.Context, member domain.MemberID, run domain
 		case protocol.WatchDone:
 			r, err := s.store.GetRun(ctx, run)
 			if err != nil {
-				return protocol.WatchResult{}, fmt.Errorf("run %s: %w", run, err)
+				return protocol.WatchResult{}, fmt.Errorf("session %s: %w", run, err)
 			}
 			if r.Status.Final() {
 				return res, nil
@@ -127,7 +144,7 @@ func (s *Service) baseline(ctx context.Context, w *store.Watch) error {
 }
 
 // ownerPushed reports whether internal/push already pushes n to w's owner
-// as the run's own notification. The owner of a run outside a swarm is
+// as the run's own notification. The owner of a run is
 // pushed what push.needOf finds: every need of it, a reported success
 // while it waits for review and a failure nobody has seen, so only its
 // other ends are news to their devices. A success the owner already put
@@ -135,7 +152,7 @@ func (s *Service) baseline(ctx context.Context, w *store.Watch) error {
 // service, does not announce a standing entered before it started, which
 // a watch evaluated on recovery then pushes itself.
 func ownerPushed(w *store.Watch, run *domain.Run, n Notice, started time.Time) bool {
-	if run == nil || run.MemberID != w.MemberID || run.MissionID != "" {
+	if run == nil || run.MemberID != w.MemberID {
 		return false
 	}
 	if strings.HasPrefix(n.Key, "input:") {

@@ -1,6 +1,7 @@
 // Wire types of assistant.* and /ws/assistant (internal/protocol/assistant.go).
 
 import type { SessionFrame } from '@/lib/session-types'
+import type { WatchTarget } from '@/lib/types'
 
 export type AssistantState = 'setup' | 'idle' | 'installing' | 'starting' | 'running' | 'failed'
 
@@ -22,11 +23,22 @@ export interface AssistantConfirmation {
   /** The call acts on another member's run, owned by `other_owner`: it asks even with auto-approval on. */
   other_member?: boolean
   other_owner?: string
+  /** The assistant's one line on why it launches; shown on the card, never sent with the call. */
+  reason?: string
+  /** A template launch's task as its params render it; shown on the card, never sent with the call. */
+  task?: string
+  /** What the member's saved launch defaults filled into a launch, each saved choice it skipped and each it could not check, with the reason. */
+  defaults?: { applied?: string[]; skipped?: { field: string; reason: string }[]; unchecked?: { field: string; reason: string }[] }
 }
 
 export interface AssistantActionTarget {
   workspace_id?: string
   run_id?: string
+  preference_id?: string
+  /** The watch a `watch.update` or `watch.delete` names. */
+  watch_id?: string
+  /** What a `watch.create` watches. */
+  watch?: WatchTarget
 }
 
 /** The server's record of one assistant action, on a transcript notice; a later record with the same `id` replaces an earlier one. */
@@ -62,6 +74,9 @@ export interface AssistantStatus {
   suggest_auto_approve: boolean
   /** Prompts carry the member's view context. */
   share_view: boolean
+  /** Temporary chat: the assistant neither uses nor saves preferences, and the chat is discarded on New conversation. Absent from a server without it. */
+  temporary?: boolean
+  preferences_enabled?: boolean
 }
 
 export interface AssistantSettings {
@@ -70,6 +85,9 @@ export interface AssistantSettings {
   /** The suggestion will not show again. */
   suggestion_off: boolean
   share_view: boolean
+  /** Use the member's private preferences in the assistant; absent reads as on. */
+  preferences_enabled?: boolean
+  temporary?: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */
@@ -78,6 +96,8 @@ export interface AssistantSettingsParams {
   /** Answers the suggestion: `later` snoozes it, `never` stops it. */
   suggestion?: 'later' | 'never'
   share_view?: boolean
+  preferences_enabled?: boolean
+  temporary?: boolean
 }
 
 export interface AssistantStartParams {
@@ -94,22 +114,18 @@ export interface ViewEntry {
   name: string
   workspace_id?: string
   run_id?: string
-  mission_id?: string
   subagent?: string
   view?: string
   at?: string
 }
 
-export type ViewAttachmentKind = 'workspace' | 'run' | 'mission' | 'pr' | 'check' | 'failure' | 'task'
+export type ViewAttachmentKind = 'workspace' | 'run' | 'pr' | 'check' | 'failure'
 
 /** One thing a prompt is about, by id: never a title, log or file contents. */
 export interface ViewAttachment {
   kind: ViewAttachmentKind
   workspace_id?: string
   run_id?: string
-  mission_id?: string
-  task_id?: string
-  attempt_id?: string
   pr?: number
   /** `owner/name` of the pull request. */
   repository?: string
@@ -128,13 +144,5 @@ export interface ViewContext {
   route?: ViewEntry
   open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
   recent?: ViewEntry[]
-  /** The modes and models the member's launches remembered, newest first. They travel with the page. */
-  launch_defaults?: LaunchDefault[]
   attachments?: ViewAttachment[]
-}
-
-export interface LaunchDefault {
-  agent: string
-  mode: 'tui' | 'acp' | 'headless'
-  model?: string
 }

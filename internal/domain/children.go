@@ -21,27 +21,22 @@ const (
 	ChildRefused   ChildState = "refused"
 )
 
-// ChildLimits bound one tree of child runs. Busy children are provisioning
+// ChildLimits bound a parent's child runs. Busy children are provisioning
 // or working; queued ones wait for a slot.
 type ChildLimits struct {
-	MaxLive  int
-	MaxDepth int
-	MaxTotal int
+	MaxLive int
 }
 
 // MaxChildLimits are the largest values an admin may set.
-var MaxChildLimits = ChildLimits{MaxLive: 64, MaxDepth: 8, MaxTotal: 2000}
+var MaxChildLimits = ChildLimits{MaxLive: 64}
 
 // ChildReservation is one child run a run asked for. RunID is minted at
-// reservation, before the run row exists. TreeKey groups the runs that
-// share one allowance: the swarm's ID for swarm runs and their
-// descendants, otherwise the root run's ID.
+// reservation, before the run row exists. TreeKey is the root run's ID.
 type ChildReservation struct {
 	RunID          RunID
 	ParentRunID    RunID
 	RootRunID      RunID
 	TreeKey        string
-	MissionID      MissionID
 	WorkspaceID    WorkspaceID
 	OwnerID        MemberID
 	AccountID      MemberID
@@ -50,7 +45,6 @@ type ChildReservation struct {
 	Model          string
 	Purpose        string
 	Task           string
-	Depth          int
 	BaseCommit     string
 	BaseBranch     string
 	Fallback       AccountFallback

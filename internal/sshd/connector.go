@@ -366,6 +366,7 @@ func (s *Server) connectorRevoke(ctx context.Context, member domain.MemberID, pa
 	if err := cs.DeleteConnector(ctx, c.ID); err != nil {
 		return nil, rpcError(err)
 	}
+	noteChange(ctx)
 	slog.Info("sshd: connector revoked", "actor", member, "connector", c.ID, "member", c.Member)
 	return protocol.ConnectorRevokeResult{Connector: connectorToWire(c)}, nil
 }

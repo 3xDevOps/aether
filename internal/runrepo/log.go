@@ -60,7 +60,7 @@ func (s *Service) Log(ctx context.Context, run Execution, req LogRequest) (LogRe
 	}
 	if result.Base == "" {
 		if !validOID(req.ForkPoint) {
-			return result, errors.New("runrepo: run has no upstream base: origin/" + req.BaseBranch + " is missing and no fork point is recorded")
+			return result, errors.New("runrepo: session has no upstream base: origin/" + req.BaseBranch + " is missing and no fork point is recorded")
 		}
 		result.Base = req.ForkPoint
 	}

@@ -38,9 +38,6 @@ func TestWatchAnnouncesAReportedSuccessOnceThroughItsReview(t *testing.T) {
 
 	svc, err := watch.New(watch.Config{
 		Store: e.db, Bus: bus, Runs: e.sched, Head: log.LastSeq, Debounce: 20 * time.Millisecond, Tick: 50 * time.Millisecond,
-		Swarm: func(context.Context, *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
-			return nil, "", nil
-		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +78,7 @@ func TestWatchAnnouncesAReportedSuccessOnceThroughItsReview(t *testing.T) {
 	}
 	closed := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if closed.Reason == domain.ReportedSuccessReason {
-		t.Fatalf("completed run reason = %q, want the member's close", closed.Reason)
+		t.Fatalf("completed session reason = %q, want the member's close", closed.Reason)
 	}
 	waitFor(t, "the close evaluated", func() bool {
 		got, getErr := svc.Get(ctx, e.member.ID, created.Watch.ID)

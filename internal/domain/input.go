@@ -9,11 +9,23 @@ import (
 
 // RunInputRequest identifies a pending native interaction without exposing its
 // prompt, answers, paths, or transcript. Identity includes session and kind.
+// Title is set only on a sudo request, which Aether holds itself.
 type RunInputRequest struct {
 	ID        string `json:"id"`
 	SessionID string `json:"session_id"`
 	Kind      string `json:"kind"`
+	Title     string `json:"title,omitempty"`
 }
+
+// A Default run's sudo command waiting for a person is a "permission"
+// request with SudoSessionID, an ID starting with SudoRequestPrefix, and
+// the options SudoAllow and SudoDeny.
+const (
+	SudoSessionID     = "aether-sudo"
+	SudoRequestPrefix = "sudo-"
+	SudoAllow         = "allow-once"
+	SudoDeny          = "deny-once"
+)
 
 // RunInputUpdate changes only input state, never execution state. Clear closes
 // one terminated session; replace is the adapter's complete authoritative set.
@@ -72,6 +84,9 @@ func ValidateRunInputUpdates(updates []RunInputUpdate) error {
 func validateRunInputRequest(request RunInputRequest) error {
 	if !validRunInputID(request.ID) || !validRunInputID(request.SessionID) {
 		return fmt.Errorf("input request requires valid id and session_id (1-%d bytes, no control characters)", MaxRunInputIDBytes)
+	}
+	if request.SessionID == SudoSessionID || request.Title != "" {
+		return fmt.Errorf("input request session_id %q and title belong to Aether's sudo requests", SudoSessionID)
 	}
 	switch request.Kind {
 	case "question", "permission", "form", "extension_ui":

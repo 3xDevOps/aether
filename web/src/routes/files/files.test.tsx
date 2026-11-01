@@ -35,7 +35,7 @@ describe('Files tree', () => {
     render(<FilesRoute params={{}} client={client} />)
 
     expect(await tree().findByRole('button', { name: 'README.md' })).toBeDefined()
-    const checkouts = tree().getByRole('button', { name: /^Run checkouts/ })
+    const checkouts = tree().getByRole('button', { name: /^Session checkouts/ })
     const home = tree().getByRole('button', { name: /^Home ?~$/ })
     expect(checkouts.getAttribute('aria-expanded')).toBe('false')
     expect(home.getAttribute('aria-expanded')).toBe('false')
@@ -78,7 +78,7 @@ describe('Files tree', () => {
       filesTree: vi.fn((params) => (params.run_id ? runTree() : Promise.resolve({ entries: [] }))),
     })
     const openCheckout = async () => {
-      fireEvent.click(await tree().findByRole('button', { name: /^Run checkouts/ }))
+      fireEvent.click(await tree().findByRole('button', { name: /^Session checkouts/ }))
       fireEvent.click(tree().getByRole('button', { name: 'rewrite the checkout flow' }))
     }
     const view = render(<FilesRoute params={{}} client={client} />)
@@ -110,7 +110,7 @@ describe('Files editor', () => {
   async function openAndEdit(client: ReturnType<typeof readmeApi>, runID = '') {
     render(<FilesRoute params={{}} client={client} />)
     if (runID) {
-      fireEvent.click(await tree().findByRole('button', { name: /^Run checkouts/ }))
+      fireEvent.click(await tree().findByRole('button', { name: /^Session checkouts/ }))
       fireEvent.click(tree().getByRole('button', { name: 'rewrite the checkout flow' }))
       await waitFor(() => expect(tree().getAllByRole('button', { name: 'README.md' })).toHaveLength(2))
       fireEvent.click(tree().getAllByRole('button', { name: 'README.md' })[1])

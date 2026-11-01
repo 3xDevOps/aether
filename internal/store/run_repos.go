@@ -12,7 +12,7 @@ import (
 func (d *DB) SetRunRepos(ctx context.Context, id domain.RunID, repos []domain.RunRepo) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: set run repos: begin: %w", err)
+		return fmt.Errorf("store: set session repos: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	for i, repo := range repos {
@@ -21,11 +21,11 @@ func (d *DB) SetRunRepos(ctx context.Context, id domain.RunID, repos []domain.Ru
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, i+1, repo.WorkspaceID, repo.Name, repo.Path, repo.Branch, repo.BaseBranch, repo.BaseCommit, repo.Worktree,
 		); err != nil {
-			return fmt.Errorf("store: set run repos: %w", mapConstraint(err, ErrNotFound))
+			return fmt.Errorf("store: set session repos: %w", mapConstraint(err, ErrNotFound))
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: set run repos: commit: %w", err)
+		return fmt.Errorf("store: set session repos: commit: %w", err)
 	}
 	return nil
 }
@@ -33,19 +33,19 @@ func (d *DB) SetRunRepos(ctx context.Context, id domain.RunID, repos []domain.Ru
 func (d *DB) RunsWithExtraRepo(ctx context.Context, workspace domain.WorkspaceID) ([]domain.RunID, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT run_id FROM run_repos WHERE workspace_id = ? ORDER BY run_id`, workspace)
 	if err != nil {
-		return nil, fmt.Errorf("store: runs with extra repo: %w", err)
+		return nil, fmt.Errorf("store: sessions with extra repo: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck // read-only iteration
 	var ids []domain.RunID
 	for rows.Next() {
 		var id domain.RunID
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("store: scan run with extra repo: %w", err)
+			return nil, fmt.Errorf("store: scan session with extra repo: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: runs with extra repo: %w", err)
+		return nil, fmt.Errorf("store: sessions with extra repo: %w", err)
 	}
 	return ids, nil
 }
@@ -66,7 +66,7 @@ func (d *DB) attachExtras(ctx context.Context, runs ...*domain.Run) error {
 		rows, err = d.db.QueryContext(ctx, `SELECT `+runRepoCols+` FROM run_repos ORDER BY run_id, position`)
 	}
 	if err != nil {
-		return fmt.Errorf("store: read run repos: %w", err)
+		return fmt.Errorf("store: read session repos: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck // read-only iteration
 	byRun := make(map[domain.RunID]*domain.Run, len(runs))
@@ -80,7 +80,7 @@ func (d *DB) attachExtras(ctx context.Context, runs ...*domain.Run) error {
 			repo     domain.RunRepo
 		)
 		if err := rows.Scan(&id, &position, &repo.WorkspaceID, &repo.Name, &repo.Path, &repo.Branch, &repo.BaseBranch, &repo.BaseCommit, &repo.Worktree); err != nil {
-			return fmt.Errorf("store: scan run repo: %w", err)
+			return fmt.Errorf("store: scan session repo: %w", err)
 		}
 		if r := byRun[id]; r != nil {
 			repo.Key = domain.RepoKey(id, position)

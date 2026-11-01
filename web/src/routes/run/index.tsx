@@ -363,7 +363,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
         </Dialog>
       )}
       {inline && detailsOpen && (
-        <aside id="run-details" aria-label="Run details" className="w-80 shrink-0 overflow-y-auto border-l border-seam bg-canvas">
+        <aside id="run-details" aria-label="Session details" className="w-80 shrink-0 overflow-y-auto border-l border-seam bg-canvas">
           {details(true)}
         </aside>
       )}
@@ -385,7 +385,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
             className={mobile ? undefined : 'w-80'}
           >
             <div className="flex min-h-0 flex-col gap-1 overflow-y-auto px-4 pt-4 max-md:p-0">
-              <DialogTitle>Run details</DialogTitle>
+              <DialogTitle>Session details</DialogTitle>
               {details(false)}
             </div>
           </DialogContent>

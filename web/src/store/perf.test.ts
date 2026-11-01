@@ -12,7 +12,7 @@ describe.runIf(process.env.RUN_PERF === '1')('store under an event burst', () =>
   beforeEach(() => StubSocket.install())
   afterEach(() => vi.unstubAllGlobals())
 
-  it(`applies ${events} events over ${runs} runs in a few notifications`, async () => {
+  it(`applies ${events} events over ${runs} sessions in a few notifications`, async () => {
     const store = createRootStore()
     const seeded = Array.from({ length: runs }, (_, i) => run({ id: `run_${i}` }))
     const stop = connect(store, fakeApi({ runList: vi.fn(async () => seeded) }))

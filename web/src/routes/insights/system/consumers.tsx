@@ -77,7 +77,7 @@ export function Consumers({ stats }: { stats: SystemStats }) {
   const used = capacity.capacity > 0 ? (capacity.used / capacity.capacity) * 100 : 0
 
   return (
-    <Section title="Resources by run">
+    <Section title="Resources by session">
       <div className="flex min-w-0 flex-col gap-4 rounded-panel border border-seam p-3 sm:p-4">
         <MetricToggle metric={metric} onChange={setMetric} />
         <div className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2">
@@ -152,7 +152,7 @@ export function Consumers({ stats }: { stats: SystemStats }) {
           <div className="flex min-w-0 flex-col gap-2">
             {selected && (
               <p className="flex flex-wrap items-center gap-x-2 text-ui-sm text-muted">
-                <span>{selected.kind === 'other' ? `Showing ${selected.containers.length} ${selected.containers.length === 1 ? 'run' : 'runs'} in ${selected.label}` : `Showing ${selected.label}`}</span>
+                <span>{selected.kind === 'other' ? `Showing ${selected.containers.length} ${selected.containers.length === 1 ? 'session' : 'sessions'} in ${selected.label}` : `Showing ${selected.label}`}</span>
                 <Button variant="link" onClick={() => setPicked('')}>Show all</Button>
               </p>
             )}

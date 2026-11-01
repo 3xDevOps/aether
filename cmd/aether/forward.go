@@ -15,8 +15,8 @@ import (
 func init() {
 	register(command{
 		name:  "forward",
-		short: "forward a run or Environment port to localhost",
-		usage: "aether forward <run-id|terminal> <port> [--local <port>]",
+		short: "forward a session or Environment port to localhost",
+		usage: "aether forward <session-id|terminal> <port> [--local <port>]",
 		example: "aether forward run-d6ay38tj8j 3000\n" +
 			"aether forward terminal 8080 --local 9090",
 		run: runForward,
@@ -76,10 +76,10 @@ func parseForwardArgs(args []string) (string, int, int, error) {
 		positional = append(positional, arg)
 	}
 	if err := fs.Parse(flags); err != nil {
-		return "", 0, 0, fmt.Errorf("%w\nusage: aether forward <run-id|terminal> <port> [--local <port>]", err)
+		return "", 0, 0, fmt.Errorf("%w\nusage: aether forward <session-id|terminal> <port> [--local <port>]", err)
 	}
 	if len(positional) != 2 {
-		return "", 0, 0, fmt.Errorf("usage: aether forward <run-id|terminal> <port> [--local <port>]")
+		return "", 0, 0, fmt.Errorf("usage: aether forward <session-id|terminal> <port> [--local <port>]")
 	}
 	port, err := strconv.Atoi(positional[1])
 	if err != nil || port < 1 || port > 65535 {

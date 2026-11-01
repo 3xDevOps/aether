@@ -23,6 +23,9 @@ const (
 	BinaryPath = "/opt/aether/aether-server"
 	// CLIPath is the staged coordination CLI path.
 	CLIPath = "/usr/local/bin/aether-internal"
+	// SudoPath mounts the same binary as the sudo shim of Default and
+	// Isolated runs, ahead of the image's /usr/bin/sudo on PATH.
+	SudoPath = "/usr/local/bin/sudo"
 	// SocketPath is the run's v3 coordination socket inside a container.
 	SocketPath      = MountDir + "/" + SocketName
 	NextCommandName = "next-command"

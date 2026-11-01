@@ -88,7 +88,7 @@ export function ReviewBar({
         <p role="status" className={cn('min-w-0 flex-1', tone === 'failed' ? 'text-state-failed' : 'text-text')}>
           {text}{' '}
           <Button variant="link" size="sm" onClick={() => useStore.getState().navigate('run', { runId: run.id, view: 'session' })}>
-            Open the session
+            Open the chat
           </Button>
         </p>
         <Button variant="ghost" size="icon-sm" label="Dismiss" onClick={() => patchReview(key, { sent: undefined })}>

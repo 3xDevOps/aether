@@ -21,8 +21,8 @@ import (
 func init() {
 	register(command{
 		name:    "sync",
-		short:   "live-overlay a local directory onto a run's worktree",
-		usage:   "aether sync --live [--force] <local-dir> <run-id>",
+		short:   "live-overlay a local directory onto a session's worktree",
+		usage:   "aether sync --live [--force] <local-dir> <session-id>",
 		example: "aether sync --live ~/src/app run-d6ay38tj8j",
 		flags:   true,
 		run:     runSync,
@@ -32,15 +32,15 @@ func init() {
 func runSync(args []string) error {
 	fs := newFlagSet("sync")
 	live := fs.Bool("live", false, "bidirectional live overlay (required; the only mode)")
-	force := fs.Bool("force", false, "overlay even while the run is running (the agent may be mid-write)")
+	force := fs.Bool("force", false, "overlay even while the session is running (the agent may be mid-write)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if !*live {
-		return fmt.Errorf("usage: aether sync --live [--force] <local-dir> <run>")
+		return fmt.Errorf("usage: aether sync --live [--force] <local-dir> <session>")
 	}
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: aether sync --live [--force] <local-dir> <run>")
+		return fmt.Errorf("usage: aether sync --live [--force] <local-dir> <session>")
 	}
 	localDir, runID := fs.Arg(0), fs.Arg(1)
 
@@ -88,7 +88,7 @@ func runSync(args []string) error {
 	if err := sess.Start(ctx, runID); err != nil {
 		return err
 	}
-	fmt.Printf("syncing %s <-> run %s (Ctrl-C to stop)\n", sess.LocalDir(), runID)
+	fmt.Printf("syncing %s <-> session %s (Ctrl-C to stop)\n", sess.LocalDir(), runID)
 
 	runErr := sess.Run(ctx)
 	cancel()
@@ -177,7 +177,7 @@ func watchRunStatus(ctx context.Context, conn *cli.Conn, runID string, cancel co
 				continue
 			}
 			if payload.To.Terminal() {
-				fmt.Fprintf(os.Stderr, "aether: run is %s; stopping sync\n", payload.To)
+				fmt.Fprintf(os.Stderr, "aether: session is %s; stopping sync\n", payload.To)
 				return
 			}
 		}

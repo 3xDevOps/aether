@@ -264,8 +264,8 @@ func (s *Scheduler) publishRetentionLocked(run domain.RunID) {
 type finishCause int
 
 const (
-	// causeUnattended is a change no member asked for: an exit, a failure, a
-	// restart, or a swarm completing or stopping its workers.
+	// causeUnattended is a change no member asked for: an exit, a failure or a
+	// restart.
 	causeUnattended finishCause = iota
 	// causeReported is an agent's success or failure report.
 	causeReported
@@ -274,8 +274,7 @@ const (
 )
 
 // memberCause is the cause of a close or kill asked for by actor. CloseRun
-// and Kill carry the member; CompleteMission and CancelMission, the swarm's
-// and its integrator's own endings, carry none.
+// and Kill carry the member.
 func memberCause(actor domain.MemberID) finishCause {
 	if actor == "" {
 		return causeUnattended
@@ -313,7 +312,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	}
 	public, activity := d.reason, d.activity
 	e := s.runs[run]
-	// The workers reason Aether wrote stays its own while the run shows it.
+	// The child-runs reason Aether wrote stays its own while the run shows it.
 	var workersReason string
 	if e != nil {
 		switch {
@@ -327,7 +326,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 			next := e.sidecar()
 			next.WorkersReason = workersReason
 			if writeErr := s.writeSidecar(next); writeErr != nil {
-				return fmt.Errorf("scheduler: persist the workers reason: %w", writeErr)
+				return fmt.Errorf("scheduler: persist the subsessions reason: %w", writeErr)
 			}
 		}
 	}
@@ -414,7 +413,6 @@ type sidecar struct {
 	Mode            domain.LaunchMode `json:"mode,omitempty"`
 	AppServer       bool              `json:"app_server,omitempty"`
 	ServerTurn      bool              `json:"server_turn,omitempty"`
-	MissionAssigned bool              `json:"mission_assigned,omitempty"`
 	Paused          bool              `json:"paused"`
 	KillRequested   bool              `json:"kill_requested"`
 	Retained        bool              `json:"retained,omitempty"`
@@ -502,7 +500,6 @@ func (e *supervised) sidecar() sidecar {
 		Mode:                e.launchMode,
 		AppServer:           e.appServer,
 		ServerTurn:          e.serverTurn,
-		MissionAssigned:     e.missionAssigned,
 		Paused:              e.paused,
 		KillRequested:       e.killRequested,
 		Retained:            e.retained,
@@ -677,4 +674,36 @@ func (s *Scheduler) removeSidecar(run domain.RunID) {
 	}
 	s.releaseCoordination(run)
 	s.removeScratch(string(run))
+}
+
+const stoppedByParentReason = "stopped by parent session "
+
+// killedOutcome is the status a stopped run ends in: a child its parent
+// stopped completed its part, anything else was abandoned.
+func killedOutcome(by domain.RunID) domain.RunStatus {
+	if by != "" {
+		return domain.RunCompleted
+	}
+	return domain.RunAbandoned
+}
+
+func killedReason(by domain.RunID) string {
+	if by != "" {
+		return stoppedByParentReason + string(by)
+	}
+	return "killed"
+}
+
+// stopNoticeLocked names who stopped entry's run, or is empty while no stop was
+// requested.
+func (e *supervised) stopNoticeLocked() string {
+	switch {
+	case !e.killRequested:
+		return ""
+	case e.killBy != "":
+		return "Stopped by its parent session " + string(e.killBy) + "."
+	case e.killActor != "":
+		return "Stopped by a person."
+	}
+	return "Stopped by the server."
 }

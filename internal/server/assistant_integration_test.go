@@ -352,7 +352,7 @@ func TestIntegrationAssistant(t *testing.T) {
 	tooBig := *view
 	tooBig.OpenFile = &protocol.AssistantViewFile{Kind: "workspace", Path: strings.Repeat("a/", 256)}
 	for range 50 {
-		tooBig.Recent = append(tooBig.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), MissionID: strings.Repeat("m", 128)})
+		tooBig.Recent = append(tooBig.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128)})
 	}
 	if perr := env.call(protocol.MethodAssistantView, protocol.AssistantViewParams{ViewContext: &tooBig}, nil); perr != nil {
 		t.Fatalf("assistant.view over the size limit: %v, want it trimmed to fit", perr)

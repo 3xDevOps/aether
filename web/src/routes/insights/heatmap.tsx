@@ -25,7 +25,7 @@ export function Heatmap({ days }: { days: { date: string; runs: number }[] }) {
   const active = days.filter((d) => d.runs > 0).length
   const width = weeks * (cell + gap)
   const label = (d: { date: string; runs: number }) =>
-    `${dayLabel(d.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}: ${plural(d.runs, 'run')}`
+    `${dayLabel(d.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}: ${plural(d.runs, 'session')}`
   const months = days.flatMap((d, i) => (d.date.endsWith('-01') ? [{ col: Math.floor((offset + i) / 7), name: dayLabel(d.date, { month: 'short' }) }] : []))
 
   const move = (index: number) => {
@@ -52,7 +52,7 @@ export function Heatmap({ days }: { days: { date: string; runs: number }[] }) {
       <div className="min-w-0 overflow-x-auto">
         <svg
           role="group"
-          aria-label={`Runs per day for 26 weeks: ${plural(active, 'active day')}, at most ${plural(max, 'run')} on one day. Use the arrow keys to read each day.`}
+          aria-label={`Sessions per day for 26 weeks: ${plural(active, 'active day')}, at most ${plural(max, 'session')} on one day. Use the arrow keys to read each day.`}
           width={width + gutter}
           height={7 * (cell + gap) + 14}
           viewBox={`-${gutter} -14 ${width + gutter} ${7 * (cell + gap) + 14}`}
@@ -95,9 +95,9 @@ export function Heatmap({ days }: { days: { date: string; runs: number }[] }) {
         </svg>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 text-ui-sm text-muted">
-        <p>A day counts every run that was active at some point that day.</p>
+        <p>A day counts every session that was active at some point that day.</p>
         <p className="flex items-center gap-1">
-          <span className="sr-only">Scale from fewer runs to more runs</span>
+          <span className="sr-only">Scale from fewer sessions to more sessions</span>
           <span aria-hidden>Fewer</span>
           {levels.map((fill) => <Swatch key={fill} fill={fill} />)}
           <span aria-hidden>More</span>

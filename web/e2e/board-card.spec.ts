@@ -20,7 +20,7 @@ sleep 2
 /opt/aether/aether-server report pi --json '{"state":"waiting","reason":"agent idle"}'
 sleep 600`
 
-test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
+test.skip(!dockerReachable(), 'a session needs a reachable Docker daemon')
 
 test('an idle agent stays in Working until it asks, then takes a reply from its Needs you card', async ({ page, aether }) => {
   const alice = await aether.member('alice')

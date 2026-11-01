@@ -147,9 +147,9 @@ func (m *SyncManager) Start(localDir, runID string, force bool, dial func(runID 
 		state := e.state
 		m.mu.Unlock()
 		if id == runID {
-			return fmt.Errorf("localops: sync for run %s is already %s", runID, state)
+			return fmt.Errorf("localops: sync for session %s is already %s", runID, state)
 		}
-		return fmt.Errorf("localops: a sync for run %s is already %s; stop it first", id, state)
+		return fmt.Errorf("localops: a sync for session %s is already %s; stop it first", id, state)
 	}
 
 	// Claim the single-session slot with a cancellable placeholder before
@@ -187,7 +187,7 @@ func (m *SyncManager) Start(localDir, runID string, force bool, dial func(runID 
 		sess.Close()
 		cancel()
 		close(entry.done)
-		return fmt.Errorf("localops: sync for run %s was stopped while starting", runID)
+		return fmt.Errorf("localops: sync for session %s was stopped while starting", runID)
 	}
 	entry.state = SyncRunning
 	m.mu.Unlock()
@@ -231,7 +231,7 @@ func (m *SyncManager) Stop(runID string) error {
 	entry, ok := m.sessions[runID]
 	m.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("localops: no sync session for run %s", runID)
+		return fmt.Errorf("localops: no sync running for session %s", runID)
 	}
 	entry.cancel()
 	<-entry.done

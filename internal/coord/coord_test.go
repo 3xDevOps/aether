@@ -171,7 +171,7 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 			Status:      domain.RunRunning,
 		}
 		if rerr := db.CreateRun(ctx, r); rerr != nil {
-			t.Fatalf("create run %d: %v", i, rerr)
+			t.Fatalf("create session %d: %v", i, rerr)
 		}
 		h.runs = append(h.runs, r)
 	}
@@ -229,11 +229,11 @@ func (h *coordHarness) ownBy(i int, owner domain.MemberID, protected bool) {
 	r := h.runs[i]
 	r.MemberID, r.Protected = owner, protected
 	if err := h.db.UpdateRun(context.Background(), r); err != nil {
-		h.t.Fatalf("update run %d: %v", i, err)
+		h.t.Fatalf("update session %d: %v", i, err)
 	}
 }
 
-// isolate gives each run its own protected owner, so only the swarm and
+// isolate gives each run its own protected owner, so only the lineage and
 // radar routes reach it.
 func (h *coordHarness) isolate(runs ...int) {
 	h.t.Helper()

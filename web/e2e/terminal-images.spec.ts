@@ -70,7 +70,7 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>(
     'workspace.list',
   )
-  const task = 'verify image bytes in a live run'
+  const task = 'verify image bytes in a live session'
   const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
     workspace_id: workspaces[0].id,
     harness: 'claude',
@@ -78,7 +78,7 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   })
 
   await page.goto(alice.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: new RegExp(task) }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: new RegExp(task) }).click()
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
   const newShell = page.getByRole('main').getByRole('button', { name: 'New shell' })

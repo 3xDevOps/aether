@@ -55,10 +55,10 @@ func (e *Engine) writeRunMeta(run domain.RunID, meta runMeta) error {
 	}
 	data, err := json.Marshal(meta)
 	if err != nil {
-		return fmt.Errorf("gitengine: encode run metadata for %s: %w", run, err)
+		return fmt.Errorf("gitengine: encode session metadata for %s: %w", run, err)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("gitengine: write run metadata for %s: %w", run, err)
+		return fmt.Errorf("gitengine: write session metadata for %s: %w", run, err)
 	}
 	return nil
 }
@@ -77,14 +77,14 @@ func (e *Engine) readRunMeta(run domain.RunID) (runMeta, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return runMeta{}, fmt.Errorf("%w: %w", ErrRunMetadataNotFound, err)
 		}
-		return runMeta{}, fmt.Errorf("gitengine: run %s has no identity record: %w", run, err)
+		return runMeta{}, fmt.Errorf("gitengine: session %s has no identity record: %w", run, err)
 	}
 	var meta runMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
-		return runMeta{}, fmt.Errorf("gitengine: decode run metadata for %s: %w", run, err)
+		return runMeta{}, fmt.Errorf("gitengine: decode session metadata for %s: %w", run, err)
 	}
 	if meta.Base == "" || meta.Branch == "" || meta.Workspace == "" {
-		return runMeta{}, fmt.Errorf("gitengine: run %s has an incomplete identity record", run)
+		return runMeta{}, fmt.Errorf("gitengine: session %s has an incomplete identity record", run)
 	}
 	return meta, nil
 }
@@ -93,7 +93,7 @@ func (e *Engine) readRunMeta(run domain.RunID) (runMeta, error) {
 // record can never reach a refspec.
 func (e *Engine) checkBranchName(ctx context.Context, branch string) error {
 	if _, err := e.git(ctx, "", "check-ref-format", "refs/heads/"+branch); err != nil {
-		return fmt.Errorf("gitengine: invalid run branch %q: %w", branch, err)
+		return fmt.Errorf("gitengine: invalid session branch %q: %w", branch, err)
 	}
 	return nil
 }
@@ -136,7 +136,7 @@ func (e *Engine) CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID,
 		return "", "", err
 	}
 	if _, statErr := os.Stat(checkoutPath); statErr == nil {
-		return "", "", fmt.Errorf("gitengine: checkout for run %s already exists", run)
+		return "", "", fmt.Errorf("gitengine: checkout for session %s already exists", run)
 	}
 	if len(baseCommit) != 40 || !isSHA(baseCommit) {
 		return "", "", fmt.Errorf("gitengine: base commit %q for branch %q is not a full object id", baseCommit, baseBranch)
@@ -186,7 +186,7 @@ func (e *Engine) CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID,
 	if origin != "" {
 		if _, err := e.git(ctx, checkoutPath, "remote", "set-url", "origin", origin); err != nil {
 			cleanup()
-			return "", "", fmt.Errorf("gitengine: point run %s origin at %s: %w", run, origin, err)
+			return "", "", fmt.Errorf("gitengine: point session %s origin at %s: %w", run, origin, err)
 		}
 	}
 	if err := e.writeRunMeta(run, runMeta{Base: baseCommit, Branch: branch, BaseBranch: baseBranch, Workspace: ws}); err != nil {
@@ -224,7 +224,7 @@ func (e *Engine) uniqueRunBranch(ctx context.Context, repo, base string, run dom
 		return "", err
 	}
 	if !claimed {
-		return "", fmt.Errorf("gitengine: branch %s already exists for run %s", full, run)
+		return "", fmt.Errorf("gitengine: branch %s already exists for session %s", full, run)
 	}
 	return full, nil
 }
@@ -410,14 +410,14 @@ func (e *Engine) publishRunBranch(ctx context.Context, run domain.RunID) (commit
 		return "", err
 	}
 	if _, fetchErr := e.git(ctx, repo, "fetch", "--quiet", scratch, "+"+ref+":"+ref); fetchErr != nil {
-		return "", fmt.Errorf("gitengine: publish run branch %s: %w", run, fetchErr)
+		return "", fmt.Errorf("gitengine: publish session branch %s: %w", run, fetchErr)
 	}
 	after, err := e.git(ctx, repo, "rev-parse", "--verify", ref)
 	if err != nil {
 		return "", err
 	}
 	if after != head {
-		return "", fmt.Errorf("gitengine: published run branch %s resolved to %s, want %s", run, after, head)
+		return "", fmt.Errorf("gitengine: published session branch %s resolved to %s, want %s", run, after, head)
 	}
 	if after != before {
 		e.publishBranch(ctx, run, before, after)
@@ -449,10 +449,10 @@ func (e *Engine) removeRunCheckout(ctx context.Context, run domain.RunID) error 
 		return detachErr
 	}
 	if checkoutErr := e.cfg.RemoveCheckout(ctx, checkout); checkoutErr != nil {
-		return fmt.Errorf("gitengine: remove checkout for run %s: %w", run, checkoutErr)
+		return fmt.Errorf("gitengine: remove checkout for session %s: %w", run, checkoutErr)
 	}
 	if metaErr := os.Remove(meta); metaErr != nil && !errors.Is(metaErr, os.ErrNotExist) {
-		return fmt.Errorf("gitengine: remove run metadata for %s: %w", run, metaErr)
+		return fmt.Errorf("gitengine: remove session metadata for %s: %w", run, metaErr)
 	}
 	return nil
 }

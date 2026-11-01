@@ -38,7 +38,7 @@ func TestRunArchiveRefusedOnNonFinalStatus(t *testing.T) {
 	admin := controlClient(t, e)
 	r := createRunWithStatus(t, e, domain.RunRunning)
 
-	e.runs.setErr(fmt.Errorf("%w: run is %s; only merged, abandoned, failed or interrupted runs can be archived",
+	e.runs.setErr(fmt.Errorf("%w: session is %s; only merged, abandoned, failed or interrupted sessions can be archived",
 		errInvalidTransition, domain.RunRunning))
 	err := admin.Call(protocol.MethodRunArchive,
 		protocol.RunArchiveParams{RunID: string(r.ID), Archived: true}, nil)
@@ -77,7 +77,7 @@ func TestRunArchiveProtectedRunDeniedForCollaborator(t *testing.T) {
 		t.Fatalf("owner archive of protected run: %v", err)
 	}
 	if res.Run.ArchivedAt == nil {
-		t.Fatal("archived run missing archived_at on the wire")
+		t.Fatal("archived session missing archived_at on the wire")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestRunArchiveWireShape(t *testing.T) {
 		t.Fatalf("archive: %v", err)
 	}
 	if archived.Run.ArchivedAt == nil {
-		t.Fatalf("archived run = %+v, want archived_at set", archived.Run)
+		t.Fatalf("archived session = %+v, want archived_at set", archived.Run)
 	}
 
 	var restored protocol.RunResult
@@ -104,7 +104,7 @@ func TestRunArchiveWireShape(t *testing.T) {
 		t.Fatalf("restore: %v", err)
 	}
 	if restored.Run.ArchivedAt != nil {
-		t.Fatalf("restored run wire fields = %+v, want archived_at nil", restored.Run)
+		t.Fatalf("restored session wire fields = %+v, want archived_at nil", restored.Run)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestRunSeenAuthorization(t *testing.T) {
 		t.Fatalf("owner run.seen: %v", err)
 	}
 	if res.Run.ID != string(r.ID) || res.Run.OutcomeUnseen {
-		t.Fatalf("run.seen result = %+v, want run %s with outcome_unseen clear", res.Run, r.ID)
+		t.Fatalf("run.seen result = %+v, want session %s with outcome_unseen clear", res.Run, r.ID)
 	}
 	viewer, vera := addMember(t, e, "Vera", domain.RoleViewer, false)
 	if err := controlAs(t, e, viewer).Call(protocol.MethodRunSeen, protocol.RunSeenParams{RunID: string(r.ID)}, nil); err != nil {
@@ -136,6 +136,6 @@ func TestRunSeenAuthorization(t *testing.T) {
 	var pe *protocol.Error
 	err := owner.Call(protocol.MethodRunSeen, protocol.RunSeenParams{RunID: "run_missing"}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
-		t.Fatalf("run.seen on a missing run = %v, want CodeNotFound", err)
+		t.Fatalf("run.seen on a missing session = %v, want CodeNotFound", err)
 	}
 }

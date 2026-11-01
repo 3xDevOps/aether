@@ -51,18 +51,6 @@ export function remoteOAuthInstructions(
   return { port, command: `aether forward ${target} ${port}` }
 }
 
-/** Starts the local half of an OAuth callback forward when uri names one. */
-export async function forwardOAuthCallback(
-  client: Api,
-  target: string,
-  uri: string,
-): Promise<number | null> {
-  const port = oauthCallbackPort(uri)
-  if (port === null) return null
-  await client.localForwardStart(target, port)
-  return port
-}
-
 /** Opens an OAuth authorization URL only after its callback listener is ready. */
 export function openOAuthLink(
   client: Api,

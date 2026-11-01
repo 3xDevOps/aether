@@ -23,7 +23,7 @@ import { isTerminal, type RunRecord } from '@/store/runs'
 import type { AcpSession } from '@/store/sessions'
 import { sessionLease } from '@/store/session-stream'
 
-const adapterFailed = ['Enhanced session failed', 'Enhanced session ended']
+const adapterFailed = ['Enhanced agent failed', 'Enhanced agent exited']
 const authError = /authentication required|authrequired|not logged in|not signed in/i
 
 export type SessionFailure =
@@ -96,7 +96,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
         size="sm"
         variant="secondary"
         disabled={busy}
-        hint={switchable ? 'Resumes this conversation in the agent’s own terminal' : 'Starts a new Standard run with the same task and closes this one'}
+        hint={switchable ? 'Resumes this conversation in the agent’s own terminal' : 'Starts a new Standard session with the same task and closes this one'}
         onClick={() => (switchable ? void act() : setConfirm(true))}
       >
         Open in Standard
@@ -104,14 +104,14 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Start a Standard run instead?</AlertDialogTitle>
+            <AlertDialogTitle>Start a Standard session instead?</AlertDialogTitle>
             <AlertDialogDescription>
-              This agent cannot move a running session between modes. Aether starts a new Standard run with the same task and closes this one without merging. The conversation so far stays in this run’s history.
+              This agent cannot move a running conversation between modes. Aether starts a new Standard session with the same task and closes this one without merging. The conversation so far stays in this session’s history.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep this run</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void act()}>Start a Standard run</AlertDialogAction>
+            <AlertDialogCancel>Keep this session</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void act()}>Start a Standard session</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -168,7 +168,7 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
           </>
         }
       >
-        <p>{label ? `${label}. ` : ''}Log the agent in from a terminal in this run, then send your message again.</p>
+        <p>{label ? `${label}. ` : ''}Log the agent in from a terminal in this session, then send your message again.</p>
         {methods.length > 0 && (
           <ul className="mt-1 list-disc pl-5 text-ui-sm">
             {methods.map((method) => <li key={method.id}>{method.name}{method.description ? `: ${method.description}` : ''}</li>)}
@@ -195,7 +195,7 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
       title={failure.title}
       actions={
         <>
-          <Button size="sm" disabled={retrying} hint="Pauses and resumes the run, which starts a fresh agent session" onClick={() => void retry()}>
+          <Button size="sm" disabled={retrying} hint="Pauses and resumes the session, which starts the agent again" onClick={() => void retry()}>
             {retrying ? 'Retrying…' : 'Retry Enhanced'}
           </Button>
           <OpenInStandard run={run} switchable={switchable} nav={nav} />

@@ -508,8 +508,8 @@ func main() {
             '[3/3] installing the desktop app (the build output follows)',
             'fixture stdout progress',
             ('      installed {0}' -f $freshDesktop),
-            'aether link --claim <code>',
-            'aether link <server-host>:2222 # instead, on a tailnet or without the edge',
+            'aether link <server-host>      # on a tailnet: the server''s tailnet name',
+            'aether link --claim <code>     # with the claim link server setup printed',
             ('done: Aether {0} installed in ' -f $version))) {
         Assert-AetherTest ($result.Stdout.Contains($expected)) ("fresh install output lacks [{0}]: {1}" -f $expected, $result.Output)
     }

@@ -44,7 +44,7 @@ func workspaceDeletionEnv(t *testing.T, mod func(*Config)) (*testEnv, *gitengine
 			}
 			for _, run := range runs {
 				if !run.Status.Terminal() {
-					return fmt.Errorf("%w: unfinished run %s", store.ErrInUse, run.ID)
+					return fmt.Errorf("%w: unfinished session %s", store.ErrInUse, run.ID)
 				}
 			}
 			for _, run := range runs {

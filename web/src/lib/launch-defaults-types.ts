@@ -1,4 +1,4 @@
-import type { LaunchMode } from '@/lib/types'
+import type { LaunchMode, Permission } from '@/lib/types'
 
 export type FallbackPolicy = 'automatic' | 'ordered' | 'off'
 
@@ -9,6 +9,7 @@ export interface SavedLaunchDefaults {
   /** Empty is the member's own account. */
   account_member_id?: string
   fallback?: { policy: FallbackPolicy; order?: string[] }
+  permission?: Permission
 }
 
 /** `field` is "agent", "agents.<name>", "agents.<name>.mode", "agents.<name>.model", "account_member_id" or "fallback.order". */

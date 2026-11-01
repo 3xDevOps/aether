@@ -42,7 +42,6 @@ const (
 	MemoryFromAgent  MemorySource = "agent"
 	MemoryFromMember MemorySource = "member"
 	MemoryFromReport MemorySource = "report"
-	MemoryFromAnswer MemorySource = "answer"
 )
 
 // A pin costs its brief line: its title plus MemoryPinLineOverhead, which
@@ -325,12 +324,9 @@ func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
 		return false, fmt.Errorf("store: insert memory: %w", err)
 	}
 	if inserted == 0 {
-		existing := `source IN ('agent', 'member') AND workspace_id = ? AND hash = ? AND invalid_at IS NULL`
-		args := []any{m.WorkspaceID, hash}
-		if m.Source == MemoryFromAnswer {
-			existing, args = `source = 'answer' AND source_ref = ?`, []any{m.SourceRef}
-		}
-		if err = tx.QueryRowContext(ctx, `SELECT id FROM memory WHERE `+existing, args...).Scan(&id); err != nil {
+		if err = tx.QueryRowContext(ctx,
+			`SELECT id FROM memory WHERE source IN ('agent', 'member') AND workspace_id = ? AND hash = ? AND invalid_at IS NULL`,
+			m.WorkspaceID, hash).Scan(&id); err != nil {
 			return false, fmt.Errorf("store: insert memory: read the note it duplicates: %w", err)
 		}
 	}
@@ -584,15 +580,15 @@ func (d *DB) DeleteMemory(ctx context.Context, workspace domain.WorkspaceID, id 
 func (d *DB) DeleteMemoryByRun(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, vet func(*Memory) error) ([]string, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store: delete memory of run %s: begin: %w", run, err)
+		return nil, fmt.Errorf("store: delete memory of session %s: begin: %w", run, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	ids, err := vetThenDeleteMemory(ctx, tx, vet, `workspace_id = ? AND run_id = ? AND run_id <> ''`, workspace, run)
 	if err != nil {
-		return nil, fmt.Errorf("store: delete memory of run %s: %w", run, err)
+		return nil, fmt.Errorf("store: delete memory of session %s: %w", run, err)
 	}
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store: delete memory of run %s: commit: %w", run, err)
+		return nil, fmt.Errorf("store: delete memory of session %s: commit: %w", run, err)
 	}
 	return ids, nil
 }
@@ -688,7 +684,7 @@ func (d *DB) CountAgentNotesByRun(ctx context.Context, run domain.RunID) (int, e
 	var n int
 	if err := d.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM memory WHERE run_id = ? AND source = 'agent'`, run).Scan(&n); err != nil {
-		return 0, fmt.Errorf("store: count agent notes of run %s: %w", run, err)
+		return 0, fmt.Errorf("store: count agent notes of session %s: %w", run, err)
 	}
 	return n, nil
 }
@@ -716,8 +712,7 @@ type MemoryBrief struct {
 
 // MemoryBriefRun is a run that finished since the query's Since. Outcome
 // is its standing success or failure report, empty without one. Task is
-// the first line of its task, or of its mission's objective for a swarm
-// run.
+// the first line of its task.
 type MemoryBriefRun struct {
 	ID         domain.RunID
 	MemberName string
@@ -756,11 +751,7 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 			COALESCE((SELECT outcome FROM coord_reports WHERE run_id = r.id AND state = 'finalized'
 				AND outcome IN ('success', 'failure') AND superseded_at IS NULL ORDER BY created_at DESC LIMIT 1), ''),
 			r.branch, COALESCE(pr.number, 0), COALESCE(pr.state, ''), r.finished_at,
-			COALESCE((SELECT objective FROM missions WHERE id IN (
-				SELECT id FROM missions WHERE current_integrator_run_id = r.id
-				UNION SELECT mission_id FROM mission_attempts WHERE run_id = r.id
-				UNION SELECT mission_id FROM mission_integrator_replacements WHERE run_id = r.id
-				UNION SELECT mission_id FROM mission_create_receipts WHERE initial_run_id = r.id) LIMIT 1), r.task)
+			r.task
 		FROM runs r
 		LEFT JOIN members member ON member.id = r.member_id
 		LEFT JOIN run_pull_requests pr ON pr.rowid = (
@@ -768,7 +759,7 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 		WHERE r.workspace_id = ? AND r.finished_at >= ?
 		ORDER BY r.finished_at DESC, r.rowid DESC LIMIT ?`, q.Workspace, since, q.Runs)
 	if err != nil {
-		return nil, fmt.Errorf("store: read memory brief: runs: %w", err)
+		return nil, fmt.Errorf("store: read memory brief: sessions: %w", err)
 	}
 	brief.Runs, err = collect(rows, func(row interface{ Scan(...any) error }) (*MemoryBriefRun, error) {
 		var r MemoryBriefRun
@@ -789,7 +780,7 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM runs WHERE workspace_id = ? AND id <> ? AND status IN (`+placeholders+`)`,
 		append([]any{q.Workspace, q.Self}, statuses...)...).Scan(&brief.LiveRuns); err != nil {
-		return nil, fmt.Errorf("store: read memory brief: live runs: %w", err)
+		return nil, fmt.Errorf("store: read memory brief: live sessions: %w", err)
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE m.source = 'agent' AND m.pinned_at IS NULL)
 		FROM memory m WHERE m.workspace_id = ? AND `+memoryLive, q.Workspace).Scan(&brief.Notes, &brief.AgentNotes); err != nil {
@@ -821,7 +812,7 @@ func (d *DB) latestRunDiff(ctx context.Context, workspace domain.WorkspaceID, ru
 		return nil, "", nil
 	}
 	if err != nil {
-		return nil, "", fmt.Errorf("read the latest diff of run %s: %w", run, err)
+		return nil, "", fmt.Errorf("read the latest diff of session %s: %w", run, err)
 	}
 	var diff struct {
 		Files []struct {
@@ -830,7 +821,7 @@ func (d *DB) latestRunDiff(ctx context.Context, workspace domain.WorkspaceID, ru
 		Head string `json:"head"`
 	}
 	if err := json.Unmarshal([]byte(payload), &diff); err != nil {
-		return nil, "", fmt.Errorf("decode the latest diff of run %s: %w", run, err)
+		return nil, "", fmt.Errorf("decode the latest diff of session %s: %w", run, err)
 	}
 	var files []string
 	for _, f := range diff.Files[:min(len(diff.Files), MemoryMaxFiles)] {
@@ -843,6 +834,14 @@ func (d *DB) latestRunDiff(ctx context.Context, workspace domain.WorkspaceID, ru
 // writes when it is finalized; a blocked report writes none.
 func (d *DB) reportMemory(ctx context.Context, report *CoordReport) (*Memory, error) {
 	if report.Outcome != CoordOutcomeSuccess && report.Outcome != CoordOutcomeFailure {
+		return nil, nil
+	}
+	// An isolated run writes nothing other runs read.
+	var permission domain.Permission
+	if err := d.db.QueryRowContext(ctx, `SELECT permission FROM runs WHERE id = ?`, report.RunID).Scan(&permission); err != nil {
+		return nil, fmt.Errorf("read the permission of session %s: %w", report.RunID, err)
+	}
+	if permission == domain.PermissionIsolated {
 		return nil, nil
 	}
 	body := report.Summary
@@ -872,7 +871,7 @@ func upsertReportMemory(ctx context.Context, tx *sql.Tx, m *Memory) (OutcomeNote
 	err := tx.QueryRowContext(ctx, `SELECT id, pinned_at IS NOT NULL FROM memory
 		WHERE run_id = ? AND source = 'report' AND invalid_at IS NULL`, m.RunID).Scan(&live, &pinned)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return OutcomeNote{}, fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
+		return OutcomeNote{}, fmt.Errorf("store: record session %s outcome in memory: %w", m.RunID, err)
 	}
 	id, ts, err := prepareCreate("note", time.Time{})
 	if err != nil {
@@ -894,22 +893,8 @@ func upsertReportMemory(ctx context.Context, tx *sql.Tx, m *Memory) (OutcomeNote
 		RETURNING id`,
 		id, m.WorkspaceID, m.Kind, m.Scope, m.Source, m.SourceRef, m.Title, m.Body, strings.Join(m.Files, "\n"),
 		m.Commit, MemoryHash(m.Body), now, now, m.RunID).Scan(&note); err != nil {
-		return OutcomeNote{}, fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
+		return OutcomeNote{}, fmt.Errorf("store: record session %s outcome in memory: %w", m.RunID, err)
 	}
 	rewritten := note == live
 	return OutcomeNote{ID: note, Rewritten: rewritten, Unpinned: rewritten && pinned}, nil
-}
-
-// answerMemory prepares the decision note an answer to a mission question
-// writes, attributed to the answering member and the asking run.
-func (d *DB) answerMemory(ctx context.Context, questionID domain.MissionQuestionID, member domain.MemberID, answer string) (*Memory, error) {
-	q, err := d.GetMissionQuestion(ctx, questionID)
-	if err != nil {
-		return nil, err
-	}
-	body, _ := withholdSecret("Q: "+q.Body+" A: "+answer, nil)
-	return &Memory{
-		Kind: MemoryDecision, Scope: MemoryScopeWorkspace, Source: MemoryFromAnswer, SourceRef: string(questionID),
-		Body: body, AuthorID: member, RunID: q.AskedByRunID,
-	}, nil
 }

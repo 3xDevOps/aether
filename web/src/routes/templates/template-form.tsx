@@ -221,7 +221,7 @@ export function DeleteTemplate({
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">Delete {template.name}?</AlertDialogTitle>
           <AlertDialogDescription>
-            The template and its schedule are removed together. Existing runs are not changed.
+            The template and its schedule are removed together. Existing sessions are not changed.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {failure && <FailureCallout error={failure.error} onRetry={failure.unanswered ? onRetry : undefined} />}

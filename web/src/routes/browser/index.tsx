@@ -40,7 +40,7 @@ const compactBelow = 480
 const stateTitles: Record<string, string> = {
   creating: 'Starting the browser',
   paused: 'Browser paused',
-  session_lost: 'Browser session lost',
+  session_lost: 'Browser connection lost',
 }
 
 interface Lease { surface: DevSurface; fence: DevControlFence }
@@ -636,7 +636,7 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
           {lease && <MenuItem onSelect={() => void release()}>Release control</MenuItem>}
           <MenuSeparator />
           <MenuItem disabled={!page} onSelect={() => { leavingMenu.current = true; void ask('close') }}>Close page…</MenuItem>
-          <MenuItem tone="danger" disabled={!surface} onSelect={() => { leavingMenu.current = true; void ask('reset') }}>Reset session…</MenuItem>
+          <MenuItem tone="danger" disabled={!surface} onSelect={() => { leavingMenu.current = true; void ask('reset') }}>Reset browser…</MenuItem>
         </MenuContent>
       </Menu>
       {lease && (
@@ -693,13 +693,13 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
             ? <EmptyState title="Browser unavailable"><span role="alert" className="break-words">{readError}</span></EmptyState>
             : waiting && <div className="grid h-full place-items-center"><Spinner label="Checking the browser" className="size-5" /></div>
           ) : loading || status.state === 'creating' ? (
-            <EmptyState title={<span className="inline-flex items-center gap-2"><Spinner />{stateTitles.creating}</span>}>The first page takes longer: the server is starting a browser beside the run.</EmptyState>
+            <EmptyState title={<span className="inline-flex items-center gap-2"><Spinner />{stateTitles.creating}</span>}>The first page takes longer: the server is starting a browser beside the session.</EmptyState>
           ) : status.available ? (
             <OpenAPage runID={runID} ports={ports} onOpen={openPort} />
           ) : (
             <EmptyState
               title={stateTitles[status.state] ?? 'Browser unavailable'}
-              action={surface && status.state !== 'paused' && <Button variant="secondary" onClick={() => void ask('reset')}>Reset session…</Button>}
+              action={surface && status.state !== 'paused' && <Button variant="secondary" onClick={() => void ask('reset')}>Reset browser…</Button>}
             >
               {status.reason && <span role="alert" className="break-words">{status.reason}</span>}
             </EmptyState>
@@ -726,16 +726,16 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
     <AlertDialog open={confirmation !== null} onOpenChange={(open) => { if (!open && !inFlight.current) setConfirmation(null) }}>
       <AlertDialogContent onCloseAutoFocus={(event) => { event.preventDefault(); menuTrigger.current?.focus() }}>
         <AlertDialogHeader>
-          <AlertDialogTitle>{confirmation?.action === 'close' ? 'Close shared page?' : 'Reset shared browser session?'}</AlertDialogTitle>
+          <AlertDialogTitle>{confirmation?.action === 'close' ? 'Close shared page?' : 'Reset shared browser?'}</AlertDialogTitle>
           <AlertDialogDescription>{confirmation?.action === 'close'
-            ? 'Close this shared page for everyone? Other pages and the browser session remain.'
+            ? 'Close this shared page for everyone? Other pages and the browser remain.'
             : 'All pages, cookies and logins will be lost.'}</AlertDialogDescription>
         </AlertDialogHeader>
         {!confirmationCurrent && <p role="alert" className="text-ui text-state-failed">The browser page or control changed. Cancel and choose the action again.</p>}
         {notice?.tone === 'failed' && <p role="alert" className="break-words text-ui text-state-failed">{notice.text}</p>}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending !== null}>Cancel</AlertDialogCancel>
-          <AlertDialogAction disabled={pending !== null || !confirmationCurrent} onClick={(event) => { event.preventDefault(); confirm() }}>{confirmation?.action === 'close' ? 'Close page' : 'Reset session'}</AlertDialogAction>
+          <AlertDialogAction disabled={pending !== null || !confirmationCurrent} onClick={(event) => { event.preventDefault(); confirm() }}>{confirmation?.action === 'close' ? 'Close page' : 'Reset browser'}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

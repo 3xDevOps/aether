@@ -114,7 +114,7 @@ export function PRFeedback({
       setSending(null)
       setFailed((all) => ({ ...all, [key]: error }))
     }
-    const dropped = window.setTimeout(() => settle('Control of the run did not arrive, so nothing was sent.'), implicitControlWindowMs + 500)
+    const dropped = window.setTimeout(() => settle('Control of the session did not arrive, so nothing was sent.'), implicitControlWindowMs + 500)
     const body = `GitHub feedback on ${pr.repository}#${pr.number} (${pr.url}), ${pr.head_repository}:${pr.head_branch} → ${pr.base_branch}, head ${pr.head_oid}:\n\n${text}`
     agentSend.dispatch(() => {
       clearTimeout(dropped)
@@ -182,7 +182,7 @@ export function PRFeedback({
         )}
         {sendable && (agentSend.blocked ?? agentSend.waits) && (
           <p className="text-ui-sm text-muted">
-            {agentSend.blocked ?? 'What you send from here reaches the agent in 45 s unless the run’s controller decides sooner.'}
+            {agentSend.blocked ?? 'What you send from here reaches the agent in 45 s unless the session’s controller decides sooner.'}
           </p>
         )}
         <section aria-label="Checks" className="grid min-w-0 gap-1.5 text-ui-sm">
@@ -281,7 +281,7 @@ function Sender({
         <span className="min-w-0">
           {text}{' '}
           <Button variant="link" size="sm" onClick={onSession}>
-            Open the session
+            Open the chat
           </Button>
         </span>
       </p>

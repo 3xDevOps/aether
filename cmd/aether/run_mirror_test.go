@@ -52,7 +52,7 @@ func TestCachedBaseLaunchErrorPrintsExactRetry(t *testing.T) {
 		Data:    data,
 	}, params, false)
 	want := "base capture failed: mirror offline\nretry from cached " + accepted + " with:\n" +
-		"  aether run --agent claude --mode background --model opus --effort high --workspace 'ws 1' --account mem_2 --fallback mem_3,mem_4 --cached-base " + accepted + " -- " +
+		"  aether session --agent claude --mode background --model opus --effort high --workspace 'ws 1' --account mem_2 --fallback mem_3,mem_4 --cached-base " + accepted + " -- " +
 		`'-fix API'\''s cache'`
 	if got == nil || got.Error() != want {
 		t.Fatalf("retry error = %v, want %q", got, want)
@@ -104,8 +104,8 @@ func TestLaunchErrorNamesTheRetryWithTheKey(t *testing.T) {
 	params := launchParams("ws_1", "fix it", "claude", "tui", "", "", "", "")
 	params.IdempotencyKey = "k-1"
 	err := launchError(errors.New("protocol: read response: EOF"), params, false)
-	want := "protocol: read response: EOF\nthe launch may still be starting; aether runs lists it. To retry without launching twice, run:\n" +
-		"  aether run --agent claude --mode standard --workspace ws_1 --idempotency-key k-1 -- 'fix it'"
+	want := "protocol: read response: EOF\nthe launch may still be starting; aether sessions lists it. To retry without launching twice, run:\n" +
+		"  aether session --agent claude --mode standard --workspace ws_1 --idempotency-key k-1 -- 'fix it'"
 	if err == nil || err.Error() != want {
 		t.Fatalf("launch error = %v\nwant %q", err, want)
 	}

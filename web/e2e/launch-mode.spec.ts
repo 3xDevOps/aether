@@ -7,7 +7,7 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-test.skip(!dockerReachable(), 'the runs need a reachable Docker daemon')
+test.skip(!dockerReachable(), 'the sessions need a reachable Docker daemon')
 
 test('a run starts in Enhanced unless Standard is picked', async ({ page, aether }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -24,8 +24,8 @@ test('a run starts in Enhanced unless Standard is picked', async ({ page, aether
     return runs.find((r) => r.task === task)?.mode
   }
   const launch = async (task: string, pick?: string) => {
-    await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New run' }).click()
-    const dialog = page.getByRole('dialog', { name: 'New run' })
+    await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New session' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New session' })
     await expect(dialog.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
     const modes = dialog.getByRole('radiogroup', { name: 'Mode' }).getByRole('radio')
     await expect(modes.first()).toHaveAccessibleName('Enhanced')
@@ -34,12 +34,14 @@ test('a run starts in Enhanced unless Standard is picked', async ({ page, aether
     if (pick) await dialog.getByRole('radiogroup', { name: 'Mode' }).getByRole('radio', { name: pick }).click()
     await dialog.getByLabel('Task').fill(task)
     await dialog.getByRole('button', { name: 'Launch', exact: true }).click()
+    // The panel does not block the view, so a run that appears first must not start the next launch inside it.
+    await expect(dialog).toBeHidden()
     await expect(page.getByRole('heading', { name: task, exact: true }).first()).toBeVisible()
   }
 
   await page.goto(alice.url)
   await launch('demo from the dialog')
   expect(await modeOf('demo from the dialog')).toBe('acp')
-  await launch('a standard run', 'Standard')
-  expect(await modeOf('a standard run')).toBe('tui')
+  await launch('a standard session', 'Standard')
+  expect(await modeOf('a standard session')).toBe('tui')
 })

@@ -16,7 +16,7 @@ func (s *Scheduler) applyRunOwnership(_ *domain.Workspace, _ *domain.Run, _ doma
 	if user == "" {
 		return nil
 	}
-	return errors.New("scheduler: non-root run users require a linux host")
+	return errors.New("scheduler: non-root session users require a linux host")
 }
 
 // applyLoginOwnership has nothing to do here: applyRunOwnership already

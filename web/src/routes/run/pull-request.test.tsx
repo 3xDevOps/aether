@@ -92,7 +92,7 @@ it('shows the pull request with its failing checks, and sends one check or one c
   expect(checks.getByText('1 failing · 1 running · 2 passed')).toBeTruthy()
   expect(checks.getAllByRole('listitem').map((item) => item.textContent)).toEqual(['lint · failureSend to agent', 'build · in progress'])
   fireEvent.click(checks.getByRole('button', { name: 'Send to agent' }))
-  expect(await checks.findByRole('status')).toHaveProperty('textContent', 'Sent 1 check to Claude Code. Open the session')
+  expect(await checks.findByRole('status')).toHaveProperty('textContent', 'Sent 1 check to Claude Code. Open the chat')
   expect(vi.mocked(api.runRoomPost).mock.calls[0][0]).toMatchObject({
     run_id: record.id, kind: 'steer_request', control_session_id: 'ctl', control_generation: 3,
     body: `GitHub feedback on acme/app#7 (${pullRequest.url}), acme/app:${status.branch} → main, head ${status.head}:\n\nFailing check: lint\nConclusion: failure\n${lint.url}`,
@@ -123,12 +123,12 @@ it.each<[Partial<RunPRFeedbackResult>, string]>([
 
 it('keeps the server’s error on the row whose send it refused', async () => {
   vi.mocked(api.runPRFeedback).mockResolvedValue(feedback({ checks: [lint] }))
-  vi.mocked(api.runRoomPost).mockRejectedValueOnce(new Error('run.room.post: run is not accepting messages'))
+  vi.mocked(api.runRoomPost).mockRejectedValueOnce(new Error('run.room.post: session is not accepting messages'))
   renderFor()
   fireEvent.click(await screen.findByRole('button', { name: '1 failing' }))
   const panel = within(await screen.findByRole('dialog'))
   fireEvent.click(panel.getByRole('button', { name: 'Send to agent' }))
-  expect((await panel.findByRole('alert')).textContent).toBe('run.room.post: run is not accepting messages')
+  expect((await panel.findByRole('alert')).textContent).toBe('run.room.post: session is not accepting messages')
   expect(panel.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', false)
 })
 
@@ -138,7 +138,7 @@ it('says why nothing can be sent to a run the member may not message', async () 
   renderFor({ protected: true })
   fireEvent.click(await screen.findByRole('button', { name: '1 failing' }))
   const panel = within(await screen.findByRole('dialog'))
-  expect(panel.getByText('This run is protected: only its owner or an admin can message the agent.')).toBeTruthy()
+  expect(panel.getByText('This session is protected: only its owner or an admin can message the agent.')).toBeTruthy()
   expect(panel.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', true)
 })
 
@@ -193,7 +193,7 @@ it('reserves a send while control is on its way, and frees the rows when it neve
     expect(waiting.session.takeControl).toHaveBeenCalledTimes(1)
     expect(second).toHaveProperty('disabled', true)
     act(() => void vi.advanceTimersByTime(10_500))
-    expect(panel.getByRole('alert').textContent).toBe('Control of the run did not arrive, so nothing was sent.')
+    expect(panel.getByRole('alert').textContent).toBe('Control of the session did not arrive, so nothing was sent.')
     expect(api.runRoomPost).not.toHaveBeenCalled()
 
     fireEvent.click(panel.getAllByRole('button', { name: 'Send to agent' })[1])

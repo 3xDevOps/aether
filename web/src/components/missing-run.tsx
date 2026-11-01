@@ -20,14 +20,14 @@ export function MissingRun() {
     // A dead token is not an unreachable server: nothing retries, so show the recorded error.
     return (
       <section
-        aria-label="Run unavailable"
+        aria-label="Session unavailable"
         className="flex h-full min-w-0 w-full items-start px-3 py-3 sm:px-4 sm:py-4"
       >
         <div className="min-w-0 w-full max-w-3xl border-l-2 border-state-failed bg-state-failed/10 px-3 py-2.5 sm:px-4">
           <div className="flex min-w-0 items-start gap-2.5">
             <CircleAlert className="mt-0.5 size-4 shrink-0 text-state-failed" aria-hidden />
             <div className="min-w-0">
-              <h1 className="text-title leading-5">Run unavailable</h1>
+              <h1 className="text-title leading-5">Session unavailable</h1>
               <p
                 role="alert"
                 className="mt-0.5 break-words whitespace-pre-wrap text-ui leading-5 text-muted"
@@ -54,12 +54,12 @@ export function MissingRun() {
     return loading ? (
       <div
         role="status"
-        aria-label="Loading the run"
+        aria-label="Loading the session"
         className="w-full max-w-3xl px-3 py-3 sm:px-4 sm:py-4"
       >
         <div className="flex items-center gap-2">
           <Spinner className="size-4" />
-          <p className="text-ui leading-5 text-muted">Loading run details…</p>
+          <p className="text-ui leading-5 text-muted">Loading session details…</p>
         </div>
         <div className="mt-2 grid gap-1">
           <div className="h-7"><Skeleton className="size-full" /></div>
@@ -71,13 +71,13 @@ export function MissingRun() {
 
   return (
     <section
-      aria-label="Run not found"
+      aria-label="Session not found"
       className="flex h-full min-w-0 w-full items-start px-3 py-3 sm:px-4 sm:py-4"
     >
       <div className="min-w-0 w-full max-w-3xl border-y border-seam/80 px-3 py-2.5 sm:px-4">
-        <h1 className="text-title leading-5">Run not found</h1>
+        <h1 className="text-title leading-5">Session not found</h1>
         <p className="mt-0.5 break-words text-ui leading-5 text-muted">
-          This run is not on the server. It may have been deleted.
+          This session is not on the server. It may have been deleted.
         </p>
         <Button size="sm" className="mt-2" onClick={() => navigate('board')}>
           <ArrowLeft className="size-3.5" aria-hidden />

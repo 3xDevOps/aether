@@ -94,6 +94,6 @@ func TestAccountMoveKeepsTheRunsEgressControl(t *testing.T) {
 	startScheduler(t, sched)
 
 	if spec := e.assertMovedToOwner(t, run.ID, notes); !spec.Egress || spec.Env["HTTPS_PROXY"] != proxy {
-		t.Fatalf("replacement container: Egress %t, HTTPS_PROXY %q; want the run's egress control kept", spec.Egress, spec.Env["HTTPS_PROXY"])
+		t.Fatalf("replacement container: Egress %t, HTTPS_PROXY %q; want the session's egress control kept", spec.Egress, spec.Env["HTTPS_PROXY"])
 	}
 }

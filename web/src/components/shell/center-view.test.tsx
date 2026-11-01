@@ -244,14 +244,14 @@ describe('CenterView route mounting', () => {
   })
 
   it('redirects a page the gateway does not offer once capabilities are known', () => {
-    routeRegistry.current.missions = StubBoard
+    routeRegistry.current.timeline = StubBoard
     useStore.setState({
       hydrated: false,
       capabilities: { gateway: 'remote', methods: ['run.list'], ws: ['events'] },
     })
     render(<CenterView />)
-    setRoute('missions')
-    expect(useStore.getState().route.name).toBe('missions')
+    setRoute('timeline')
+    expect(useStore.getState().route.name).toBe('timeline')
 
     act(() => {
       useStore.setState({ hydrated: true })

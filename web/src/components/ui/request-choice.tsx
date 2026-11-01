@@ -37,9 +37,9 @@ function Digit({ digit, onFill }: { digit: number; onFill: boolean }) {
 export function RequestAction({ label, digit, variant = 'secondary', className, ...props }: Omit<React.ComponentProps<'button'>, 'children'> & {
   label: string
   digit?: number
-  variant?: 'primary' | 'secondary' | 'danger' | 'quiet'
+  variant?: 'primary' | 'secondary' | 'danger' | 'confirm' | 'quiet'
 }) {
-  const filled = variant === 'primary' || variant === 'danger'
+  const filled = variant === 'primary' || variant === 'danger' || variant === 'confirm'
   return (
     <Button
       size="md"

@@ -1,7 +1,7 @@
 # Networking and identity
 
 A client (the `aether` CLI or the dashboard) must reach the server's SSH port,
-`:2222` by default. Git, the control channel, terminals and `ssh` into a run
+`:2222` by default. Git, the control channel, terminals and `ssh` into a session
 ([terminal.md](terminal.md#ssh-and-editors)) all travel over that one
 connection. The server opens no HTTP port unless you set `web-port`
 ([The dashboard](#the-dashboard)). Through an edge it opens no port at all.
@@ -49,10 +49,12 @@ or invite code.
    Give your team the name it prints, such as `my-server.tailnet-name.ts.net`.
 
 2. Run `sudo aether-server setup` ([install.md](install.md#first-boot)). It
-   finds tailscaled and asks `Will people reach this server over the tailnet
-   <name>`. Answer `yes`. The default, no, turns tailnet sign-in off.
+   finds tailscaled, names its tailnet and asks `Use Tailscale to reach this
+   server`. Enter answers yes; no turns tailnet sign-in off. Setup ends by
+   printing the host name to link to.
 
-3. On each client, join the same tailnet and link:
+3. On each client, join the same tailnet and link: in the desktop app's
+   Connect step choose **Tailscale** and enter that name, or run:
 
    ```sh
    sudo tailscale up
@@ -73,7 +75,10 @@ The server asks the local Tailscale daemon who is on the other end of each
 connection, as Tailscale SSH does. The tailnet login becomes the member, and the
 part before the `@` becomes the display name.
 
-- The first tailnet identity to link a fresh server becomes its admin.
+- The first tailnet identity to link a fresh server becomes its admin. Until
+  then, a first admin SSH key is taken only over the tailnet or from the
+  server itself, so a port 2222 open beyond the tailnet cannot be used to take
+  admin first.
 - Everyone after that joins as a pending collaborator. `aether link` prints
   `linked to <server> as <name> (collaborator, pending); an admin runs: aether
   member approve <member-id>`, and every other command fails with `membership
@@ -150,9 +155,11 @@ With no tailnet and no edge, SSH keys and invite codes identify people.
 aether link 192.168.1.50:2222
 ```
 
-The first key to link a fresh server becomes the admin. Without an edge,
-until that first link any key that reaches port 2222 becomes admin, so link
-right after the server starts and keep the port closed to the internet.
+The first key to link a fresh server becomes the admin. Without an edge or
+tailnet sign-in, until that first link any key that reaches port 2222 becomes
+admin, so link right after the server starts and keep the port closed to the
+internet. With tailnet sign-in, the first key must arrive over the tailnet or
+from loopback.
 
 The CLI offers `~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
 `~/.ssh/id_ed25519` if it finds none. For another key:
@@ -221,7 +228,7 @@ There are two dashboards, and they are independent.
 
 | | `aether gui` | Server-hosted |
 | --- | --- | --- |
-| Runs on | Your own machine, on `127.0.0.1` | The server |
+| Sessions on | Your own machine, on `127.0.0.1` | The server |
 | Reaches the server | Over the same SSH link as the CLI | Directly, over HTTPS |
 | Works with | Every path above | Tailscale only |
 | Good for | Computers: has the directory picker and other local actions ([local-gateway.md](local-gateway.md)) | Phones and borrowed laptops: open a URL, already signed in |
@@ -271,19 +278,19 @@ the same connection error as the browser.
 
 ### Notifications
 
-The server-hosted dashboard can notify a device when a run of yours needs you.
-On that device open **Settings** and turn on **Notify this device when a run
+The server-hosted dashboard can notify a device when a session of yours needs you.
+On that device open **Settings** and turn on **Notify this device when a session
 needs me**. The browser asks for permission once. **Send test notification**
 tests the whole path and shows the push service's own error when it fails.
-To hear about runs on Slack instead, including on Android, see
+To hear about sessions on Slack instead, including on Android, see
 [slack.md](slack.md).
 
-A notification goes to a run's owner when the run starts needing them, by the
-rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activity)),
+A notification goes to a session's owner when the session starts needing them, by the
+rule behind **Needs you** ([failure-handling.md](failure-handling.md#session-activity)),
 and to every admin when a workspace's spend rises past its
 [budget](teams.md#budgets):
 
-| The run | The notification says |
+| The session | The notification says |
 | --- | --- |
 | asks for a permission | `Permission: <action>`, or `Permission requested` |
 | asks a question | `Question from the agent` |
@@ -294,21 +301,16 @@ and to every admin when a workspace's spend rises past its
 | fails a turn or reports failure | `Turn failed: <error>`, `Agent failed` or `Agent reported failure, review the result` |
 | reports success | `Agent reported success, review the result` |
 | ends `failed` with a result nobody has seen | `Failed, review the result` |
-| is a swarm's integrator and asks with `aether-internal mission question ask` | `The integrator asks: <question>` |
-| is a swarm's integrator and stops or fails to launch | `Integrator stopped, replace it to continue` or `Integrator failed to launch, replace it to continue` |
-| *(admins, titled with the workspace)* spend reaches the budget's warning or cap | `Budget warning: $8.50 of $10.00 spent` or `Budget reached: $21.00 of $20.00 spent, new runs are refused` |
+| *(admins, titled with the workspace)* spend reaches the budget's warning or cap | `Budget warning: $8.50 of $10.00 spent` or `Budget reached: $21.00 of $20.00 spent, new sessions are refused` |
 
-The two integrator lines go to the swarm's accountable human
-([coordination.md](coordination.md#mission-phases)), not the integrator's
-owner, once per question and once per stopped integrator. A working, waiting
-or stalled run does not notify. A Background run does not notify for a
-question, and a swarm worker notifies only when blocked. One notification per
-run or workspace budget: a newer one replaces the older, and tapping it opens
-the run or the workspace's budget. When a run stops needing you, its
+A working, waiting or stalled session does not notify. A Background session does not notify for a
+question. One notification per
+session or workspace budget: a newer one replaces the older, and tapping it opens
+the session or the workspace's budget. When a session stops needing you, its
 notification is replaced, silently, by `No longer needs you`; a push must
 show something or Safari drops the subscription. While you use a dashboard on any device,
 notifications wait until you have left every dashboard alone for a minute and
-the run still needs you, or the budget is still where it was. Runs the
+the session still needs you, or the budget is still where it was. Runs the
 [assistant](assistant.md#notifications) launched for you also notify you when
 they finish, through the [watch](watches.md#assistant-watches) it keeps on
 them.

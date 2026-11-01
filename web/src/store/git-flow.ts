@@ -333,7 +333,7 @@ export function chooseAction(
 /** Names the files when the checkout's log found them; GitHub alone says only that there are conflicts. */
 export function resolvePrompt(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): string {
   const base = pr ? `origin/${pr.base_branch}` : log?.base_ref ?? 'the base branch'
-  const branch = log?.branch || pr?.head_branch || 'the run branch'
+  const branch = log?.branch || pr?.head_branch || 'the session branch'
   const sameBase = !pr || log?.base_ref === base || log?.base_ref === pr.base_branch
   const paths = sameBase ? (log?.conflicts ?? []).map((conflict) => `- ${conflict.path}`).join('\n') : ''
   const found = paths && log

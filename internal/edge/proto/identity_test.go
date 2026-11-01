@@ -198,16 +198,3 @@ func TestPrincipalValidate(t *testing.T) {
 		}
 	}
 }
-
-func TestParseDeviceStatus(t *testing.T) {
-	for _, s := range []DeviceStatus{DeviceStatusRegistered, DeviceStatusApproved, DeviceStatusPending, DeviceStatusRevoked} {
-		if got, err := ParseDeviceStatus(string(s)); err != nil || got != s {
-			t.Errorf("ParseDeviceStatus(%q) = %q, %v", s, got, err)
-		}
-	}
-	for _, in := range []string{"", "Approved", "authorization_pending", "active"} {
-		if got, err := ParseDeviceStatus(in); err == nil {
-			t.Errorf("ParseDeviceStatus(%q) = %q, want an error", in, got)
-		}
-	}
-}

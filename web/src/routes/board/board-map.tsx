@@ -33,7 +33,7 @@ export function BoardMap({ agentNames }: { agentNames: Record<string, string> })
       agentNames={agentNames}
       empty={error !== null && total === 0 ? (
         <div className="p-4"><Callout role="alert" tone="failed" title="Cannot reach the server">{dead ? error : 'Retrying.'}</Callout></div>
-      ) : loading ? <p role="status" className="p-4 text-ui-sm text-muted">Loading runs…</p> : undefined}
+      ) : loading ? <p role="status" className="p-4 text-ui-sm text-muted">Loading sessions…</p> : undefined}
       actions={
         <>
           <Select value={scope ? 'workspace' : 'all'} onValueChange={(value) => setAllWorkspaces(value === 'all')}>

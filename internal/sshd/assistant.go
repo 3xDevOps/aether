@@ -201,7 +201,7 @@ func (s *Server) assistantSettings(ctx context.Context, member domain.MemberID, 
 	}
 	var settings protocol.AssistantSettings
 	var err error
-	if p.AutoApprove != nil || p.Suggestion != "" {
+	if p.AutoApprove != nil || p.Suggestion != "" || p.PreferencesEnabled != nil || p.Temporary != nil {
 		settings, err = svc.SetSettings(ctx, member, p)
 	} else {
 		settings, err = svc.Settings(ctx, member)

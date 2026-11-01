@@ -84,6 +84,7 @@ func (s *Server) slackUnlink(ctx context.Context, member domain.MemberID, _ json
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	noteChange(ctx)
 	slog.Info("sshd: slack unlinked", "member", member, "slack_user", link.UserID)
 	return protocol.SlackUnlinkResult{Link: link}, nil
 }

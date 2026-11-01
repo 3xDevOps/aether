@@ -58,6 +58,9 @@ const (
 	Handoff Capability = "handoff"
 	// Protect toggles a run's protected flag; owner or admin only.
 	Protect Capability = "protect"
+	// Sudo allows a run's command to run as root in its container, where it
+	// acts on the owner's home and credentials; owner or admin only.
+	Sudo Capability = "sudo"
 	// WorkspaceAdmin is workspace administration (membership, settings);
 	// admin only.
 	WorkspaceAdmin Capability = "workspace_admin"
@@ -113,7 +116,7 @@ func Check(cap Capability, actor Actor, target Target) error {
 		if actor.Role == domain.RoleCollaborator {
 			return nil
 		}
-		return deny("launching runs requires the collaborator role")
+		return deny("launching sessions requires the collaborator role")
 	case Push:
 		if actor.Role == domain.RoleCollaborator {
 			return nil
@@ -123,12 +126,17 @@ func Check(cap Capability, actor Actor, target Target) error {
 		if owner {
 			return nil
 		}
-		return deny("handoff requires the run's owner or an admin")
+		return deny("handoff requires the session's owner or an admin")
 	case Protect:
 		if owner {
 			return nil
 		}
-		return deny("changing run protection requires the run's owner or an admin")
+		return deny("changing session protection requires the session's owner or an admin")
+	case Sudo:
+		if owner {
+			return nil
+		}
+		return deny("allowing a command to run as root requires the session's owner or an admin")
 	case Steer, Kill:
 		if actor.Role != domain.RoleCollaborator {
 			return deny(string(cap) + " requires the collaborator role")
@@ -137,24 +145,24 @@ func Check(cap Capability, actor Actor, target Target) error {
 			return nil
 		}
 		if target.Protected {
-			return deny("run is protected: only its owner or an admin may " + string(cap))
+			return deny("session is protected: only its owner or an admin may " + string(cap))
 		}
 		if target.SteerOthers == domain.SteerOthersAdminsOnly {
-			return deny("workspace restricts " + string(cap) + " of others' runs to their owner and admins")
+			return deny("workspace restricts " + string(cap) + " of others' sessions to their owner and admins")
 		}
 		return nil
 	case Message:
 		if actor.Role != domain.RoleCollaborator {
-			return deny("messaging another run requires the collaborator role")
+			return deny("messaging another session requires the collaborator role")
 		}
 		if owner {
 			return nil
 		}
 		if target.Protected {
-			return deny("run is protected: only its owner or an admin may message it")
+			return deny("session is protected: only its owner or an admin may message it")
 		}
 		if target.SteerOthers == domain.SteerOthersAdminsOnly {
-			return deny("workspace restricts messaging others' runs to their owner and admins")
+			return deny("workspace restricts messaging others' sessions to their owner and admins")
 		}
 		return nil
 	}

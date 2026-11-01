@@ -33,7 +33,7 @@ test("renders a durable report as the agent's outcome without its identifiers", 
   const text = document.body.textContent ?? ''
   expect(text).toContain('The agent reported success:')
   expect(text).toContain('Implemented and verified the change.')
-  expect(text).toContain("Next: Review the worker's saved results")
+  expect(text).toContain("Next: Review the subsession's saved results")
   expect(text).not.toContain('report_01')
   expect(text).not.toContain('evidence_0')
 })

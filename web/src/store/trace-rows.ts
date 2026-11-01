@@ -27,7 +27,7 @@ function rowsBelow(span: Span, level: number, open: OpenState, last: boolean): T
   if (held && held.level === level && held.open === open && held.last === last) return held.rows
   const rows: TraceRow[] = []
   if (isOpen(span, open, last)) {
-    // An integrator's Workers group follows its turns, so the run's last child is not always its last turn.
+    // The Workers group follows a run's turns, so its last child is not always its last turn.
     const lastAt = span.kind === 'run' ? span.children.map((child) => child.kind).lastIndexOf('turn') : span.children.length - 1
     span.children.forEach((child, i) => {
       const lastChild = i === lastAt

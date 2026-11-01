@@ -149,7 +149,7 @@ function ContextPanel({ runID, usage, model, harness, compact, onCompact }: {
           {usage.cost !== undefined && (
             <li className="-mx-2 flex h-8 items-center gap-2 px-2 coarse:h-11">
               <span aria-hidden="true" className="size-2 shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-ui text-muted">Session cost</span>
+              <span className="min-w-0 flex-1 truncate text-ui text-muted">Conversation cost</span>
               <span className="text-ui-sm text-muted tabular-nums">{formatCost(usage.cost, usage.currency)}</span>
             </li>
           )}

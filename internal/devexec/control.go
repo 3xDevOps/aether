@@ -19,6 +19,9 @@ import (
 
 const Command = "dev-exec"
 
+// Attached is RunAttached's helper name.
+const Attached = "run-attached"
+
 const StartupTimeout = 15 * time.Second
 
 // ReapTimeout bounds cleanup after SIGKILL. An unkillable descendant makes the

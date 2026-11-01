@@ -31,11 +31,11 @@ const RunAccountLaunchReason = "launch"
 func (d *DB) SetRunAccount(ctx context.Context, id domain.RunID, account domain.MemberID, reason string, at time.Time) (int, error) {
 	startedAt, err := encodeTime(at)
 	if err != nil {
-		return 0, fmt.Errorf("store: set run account: %w", err)
+		return 0, fmt.Errorf("store: set session account: %w", err)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("store: set run account: begin: %w", err)
+		return 0, fmt.Errorf("store: set session account: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	var (
@@ -50,14 +50,14 @@ func (d *DB) SetRunAccount(ctx context.Context, id domain.RunID, account domain.
 		return 0, ErrNotFound
 	}
 	if err != nil {
-		return 0, fmt.Errorf("store: set run account: %w", err)
+		return 0, fmt.Errorf("store: set session account: %w", err)
 	}
 	if current == "" {
 		current = owner
 	}
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(seq), -1) FROM run_account_segments WHERE run_id = ?`, id).Scan(&last); err != nil {
-		return 0, fmt.Errorf("store: set run account: %w", err)
+		return 0, fmt.Errorf("store: set session account: %w", err)
 	}
 	if domain.MemberID(current) == account {
 		return max(last, 0), nil
@@ -65,12 +65,12 @@ func (d *DB) SetRunAccount(ctx context.Context, id domain.RunID, account domain.
 	insert := `INSERT INTO run_account_segments (run_id, seq, account_member_id, reason, started_at) VALUES (?, ?, ?, ?, ?)`
 	if last < 0 {
 		if _, err := tx.ExecContext(ctx, insert, id, 0, current, RunAccountLaunchReason, launched); err != nil {
-			return 0, fmt.Errorf("store: set run account: %w", err)
+			return 0, fmt.Errorf("store: set session account: %w", err)
 		}
 		last = 0
 	}
 	if _, err := tx.ExecContext(ctx, insert, id, last+1, account, reason, startedAt); err != nil {
-		return 0, fmt.Errorf("store: set run account: %w", mapConstraint(err, ErrNotFound))
+		return 0, fmt.Errorf("store: set session account: %w", mapConstraint(err, ErrNotFound))
 	}
 	switch domain.MemberID(requested) {
 	case "":
@@ -81,10 +81,10 @@ func (d *DB) SetRunAccount(ctx context.Context, id domain.RunID, account domain.
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE runs SET account_member_id = ?, requested_account_member_id = NULLIF(?, '') WHERE id = ?`,
 		account, requested, id); err != nil {
-		return 0, fmt.Errorf("store: set run account: %w", mapConstraint(err, ErrNotFound))
+		return 0, fmt.Errorf("store: set session account: %w", mapConstraint(err, ErrNotFound))
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("store: set run account: commit: %w", err)
+		return 0, fmt.Errorf("store: set session account: commit: %w", err)
 	}
 	return last + 1, nil
 }
@@ -95,7 +95,7 @@ func (d *DB) ListRunAccountSegments(ctx context.Context, id domain.RunID) ([]*Ru
 	rows, err := d.db.QueryContext(ctx,
 		`SELECT seq, account_member_id, reason, started_at FROM run_account_segments WHERE run_id = ? ORDER BY seq`, id)
 	if err != nil {
-		return nil, fmt.Errorf("store: list run account segments: %w", err)
+		return nil, fmt.Errorf("store: list session account segments: %w", err)
 	}
 	return collect(rows, func(row interface{ Scan(...any) error }) (*RunAccountSegment, error) {
 		var (

@@ -41,7 +41,6 @@ var flagSubcommands = []string{
 	"workspace env list", "workspace env set", "workspace env unset", "workspace env import", "workspace env script",
 	"workspace mirror status", "workspace mirror configure", "workspace mirror refresh",
 	"workspace mirror adopt", "workspace mirror disable",
-	"swarm create", "swarm list",
 	"profile push", "profile status", "profile rollback",
 	"member git", "member assistant", "member link",
 	"daemon run", "daemon install",

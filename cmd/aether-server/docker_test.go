@@ -33,10 +33,10 @@ func TestCheckDocker(t *testing.T) {
 			"The server runs every agent in a Docker container, so runs fail until Docker answers.\n" +
 			"Install or start Docker: https://docs.docker.com/engine/install/\n\n"},
 		"too old for subpath mounts": {old, true, old.Error() + "\n" +
-			"Once someone shares their agent account, that person's containers and every run on the account fail on this Docker.\n" +
+			"Once someone shares their agent account, that person's containers and every session on the account fail on this Docker.\n" +
 			"Upgrade Docker: https://docs.docker.com/engine/install/\n\n"},
 		"client pinned below subpath mounts": {pinned, true, pinned.Error() + "\n" +
-			"Once someone shares their agent account, that person's containers and every run on the account fail on this Docker.\n" +
+			"Once someone shares their agent account, that person's containers and every session on the account fail on this Docker.\n" +
 			"Unset DOCKER_API_VERSION, or raise it, wherever aether-server runs; upgrading Docker does not change it.\n\n"},
 	} {
 		t.Run(name, func(t *testing.T) {

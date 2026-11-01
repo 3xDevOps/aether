@@ -65,8 +65,8 @@ export function Composer({
   const pinMoves = Boolean(replaces?.pinned_at)
   const self = useSelf()
   const scopeLabel = pinMoves && replaces?.scope === 'member' && replaces.pinned_by !== self.id
-    ? `Only for ${replaces.pinned_by_name || 'its member'}'s runs' briefs`
-    : "Only for my runs' briefs"
+    ? `Only for ${replaces.pinned_by_name || 'its member'}'s sessions' briefs`
+    : "Only for my sessions' briefs"
 
   useEffect(() => {
     open.current = true
@@ -182,11 +182,11 @@ export function Composer({
           ? 'The pin moves to the replacement, at the note\'s scope.'
           : pin
             ? onlyMe
-              ? 'Your new runs get its title in the brief. Everyone in the workspace can still read it.'
-              : 'Every new run in this workspace gets its title in the brief.'
+              ? 'Your new sessions get its title in the brief. Everyone in the workspace can still read it.'
+              : 'Every new session in this workspace gets its title in the brief.'
             : onlyMe
-              ? 'A pin on it enters only your own runs\' briefs. Everyone in the workspace can still read it.'
-              : 'Every run in this workspace can search it.'}</p>
+              ? 'A pin on it enters only your own sessions\' briefs. Everyone in the workspace can still read it.'
+              : 'Every session in this workspace can search it.'}</p>
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
     </section>
   )

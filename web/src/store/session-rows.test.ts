@@ -181,20 +181,8 @@ describe('session rows from the item log', () => {
     expect(rows).toMatchObject([
       { kind: 'event', text: 'Woken by new agent messages' },
       { kind: 'event', text: 'Turn interrupted', detail: 'The agent connection ended.', tone: 'failed' },
-      { kind: 'event', text: 'New agent session' },
+      { kind: 'event', text: 'New agent conversation' },
       { kind: 'finished', text: 'Cancelled', tone: 'paused' },
-    ])
-  })
-
-  it('labels a swarm wake whether or not it lists what changed', () => {
-    const wake = (what: string) => `Mission update${what}: run /usr/local/bin/aether-internal mission plan show and /usr/local/bin/aether-internal worker list --mission-id m1 before waiting or declaring completion.`
-    const rows = turnRows(turnOf([
-      say(2, 'user', wake('')),
-      say(3, 'user', wake(' (question answered, worker finished)')),
-    ]))
-    expect(rows).toMatchObject([
-      { kind: 'event', text: 'Woken by a swarm update' },
-      { kind: 'event', text: 'Woken by a swarm update' },
     ])
   })
 

@@ -87,7 +87,7 @@ func templateSave(args []string) error {
 	mode := fs.String("mode", "background", launchModeHelp)
 	model := fs.String("model", "", modelHelp)
 	effort := fs.String("effort", "", effortHelp)
-	budget := fs.Float64("budget", 0, "advisory cost hint in USD per run")
+	budget := fs.Float64("budget", 0, "advisory cost hint in USD per session")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	params := kvFlag{}
 	fs.Var(params, "param", "default for a task parameter, name=value (repeatable)")
@@ -159,7 +159,7 @@ func templateDelete(args []string) error {
 	})
 }
 
-// launchTemplate backs `aether run --template`. It reports the immutable base
+// launchTemplate backs `aether session --template`. It reports the immutable base
 // provenance captured for the launched run.
 func launchTemplate(workspace, name string, params kvFlag) error {
 	return withControl(func(c *protocol.Client) error {
@@ -173,7 +173,7 @@ func launchTemplate(workspace, name string, params kvFlag) error {
 		}, &res); err != nil {
 			return err
 		}
-		fmt.Printf("run %s %s (template %s)\n", res.Run.ID, res.Run.Status, name)
+		fmt.Printf("session %s %s (template %s)\n", res.Run.ID, res.Run.Status, name)
 		fmt.Print(formatTemplateBase(res))
 		return nil
 	})

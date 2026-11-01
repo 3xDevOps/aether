@@ -100,18 +100,18 @@ export const pillHint: Record<Pill, string> = {
   queue: 'Queued, runs after this turn.',
   interrupt: 'Stops the agent’s turn and cancels its open requests.',
   'stop-waiting': 'Stops waiting for background work. Tasks already started keep running and can start a new turn.',
-  resume: 'The run is paused. Resume it to continue.',
+  resume: 'The session is paused. Resume it to continue.',
 }
 
 const releasedReason = /^retained container (?:expired|unavailable|reclaimed for disk space)$/
 
 export function composerBlock(run: RunRecord, maySteer: boolean, canReopen: boolean): string | null {
   if (isTerminal(run.status)) {
-    if (canReopen) return 'This run has finished. Relaunch it to continue the chat and files.'
-    return releasedReason.test(run.reason ?? '') ? `This run has finished. ${plainReason(run.reason!)}.` : 'This run has finished.'
+    if (canReopen) return 'This session has finished. Relaunch it to continue the chat and files.'
+    return releasedReason.test(run.reason ?? '') ? `This session has finished. ${plainReason(run.reason!)}.` : 'This session has finished.'
   }
   if (run.status === 'queued' || run.status === 'provisioning') return 'The agent is still starting.'
-  if (!maySteer) return run.protected ? 'This run is protected: only its owner or an admin can message the agent.' : 'You can watch this run but not message the agent.'
+  if (!maySteer) return run.protected ? 'This session is protected: only its owner or an admin can message the agent.' : 'You can watch this session but not message the agent.'
   return null
 }
 
@@ -131,12 +131,12 @@ export function enhancedBlock({ run, maySteer, canReopen, stream, streamError, s
   hasLease: boolean
 }): EnhancedGate | null {
   if (run.switching) return { reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
-  if (run.mode === 'headless') return { reason: 'Background runs take no input.' }
+  if (run.mode === 'headless') return { reason: 'Background sessions take no input.' }
   const base = composerBlock(run, maySteer, canReopen)
   if (base) return { reason: base }
-  if (stream === 'refused') return { reason: streamError ?? 'The session stream was refused.' }
+  if (stream === 'refused') return { reason: streamError ?? 'The agent stream was refused.' }
   if (stream !== 'live') return { reason: 'Connecting to the agent…' }
-  if (!sessionLive) return { reason: 'The agent’s session is not running.' }
+  if (!sessionLive) return { reason: 'The agent is not running.' }
   if (pending > 0 && hasLease) return { reason: 'Answer the request above to continue.', interrupt: true }
   return null
 }

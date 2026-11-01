@@ -31,7 +31,7 @@ function refusalOf(err: unknown): Refusal | undefined {
 }
 
 const whatHappens: Record<'tui' | 'acp', string> = {
-  acp: 'The agent restarts in Enhanced mode with the same conversation. You follow and answer it in the Session view instead of its terminal.',
+  acp: 'The agent restarts in Enhanced mode with the same conversation. You follow and answer it in the Chat view instead of its terminal.',
   tui: 'The agent restarts in its own terminal with the same conversation. You answer it in the Terminal view from then on.',
 }
 

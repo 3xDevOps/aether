@@ -132,7 +132,7 @@ type Config struct {
 	// Config provides authenticated access to the caller's persistent
 	// harness configuration roots. It never accepts a member selector.
 	Config ConfigBackend
-	// AuthorizationMu is shared with mission admission so account and role
+	// AuthorizationMu is shared with child run admission so account and role
 	// revocation cannot race a run launch. New allocates one when omitted.
 	AuthorizationMu *sync.Mutex
 	// Services carries the team-feature service seams; see services.go.
@@ -248,12 +248,6 @@ type Server struct {
 	// caps claimRunSSH applies.
 	runSSHMu    sync.Mutex
 	runSSHConns map[domain.RunID]map[domain.MemberID]int
-
-	// holds counts the live sessions behind each swarm worker's durable
-	// hold (see holdUntil); holdsStop ends their watchers on Close.
-	holdsMu   sync.Mutex
-	holds     map[domain.RunID]map[<-chan struct{}]struct{}
-	holdsStop chan struct{}
 }
 
 // New builds a server, loading (or generating) the host key.
@@ -313,8 +307,6 @@ func New(cfg Config) (*Server, error) {
 		controlFrames:    make(map[domain.MemberID]struct{}),
 		controlAttaches:  make(map[string]map[string]controlAttach),
 		runSSHConns:      make(map[domain.RunID]map[domain.MemberID]int),
-		holds:            make(map[domain.RunID]map[<-chan struct{}]struct{}),
-		holdsStop:        make(chan struct{}),
 		baseCtx:          context.Background(),
 	}
 	sc := &ssh.ServerConfig{PublicKeyCallback: s.authenticate}
@@ -357,6 +349,17 @@ func (s *Server) authenticate(cm ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Perm
 				return nil, &ssh.BannerError{
 					Err:     errors.New("sshd: a fresh server with an edge takes its first admin key only from loopback"),
 					Message: firstAdminBanner(edge.Origin(), cm),
+				}
+			}
+			// Without an edge, a tailnet server's port can still be open
+			// beyond the tailnet, so the first admin key must come over the
+			// tailnet or from loopback too.
+			if s.cfg.WhoIs != nil && !fromLoopback(cm) {
+				if _, err := s.cfg.WhoIs.WhoIs(ctx, cm.RemoteAddr().String()); err != nil {
+					return nil, &ssh.BannerError{
+						Err:     fmt.Errorf("sshd: a fresh tailnet server takes its first admin key only over the tailnet or from loopback: %w", err),
+						Message: "this server has no admin yet and takes the first one over its tailnet: link it from a device on the tailnet, or on the server itself\n",
+					}
 				}
 			}
 			return &ssh.Permissions{Extensions: map[string]string{bootstrapKeyExtension: keyLine}}, nil
@@ -544,7 +547,6 @@ func (s *Server) Close() error {
 	if !s.closed {
 		s.closed = true
 		cancel = s.baseCancel
-		close(s.holdsStop)
 		if s.ln != nil {
 			_ = s.ln.Close()
 		}

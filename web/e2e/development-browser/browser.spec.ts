@@ -94,8 +94,8 @@ test('real shared login, HMR, popups, watcher takeover and stale authority', asy
       await fixture.waitText('Signed out')
       await browserAction(watchPage, 'Screenshot')
       await expect(watchPage.getByRole('article', { name: /^Note \d+: Screenshot of the page$/ })).toBeVisible()
-      await browserAction(watchPage, 'Reset session…')
-      await watchPage.getByRole('alertdialog').getByRole('button', { name: 'Reset session', exact: true }).click()
+      await browserAction(watchPage, 'Reset browser…')
+      await watchPage.getByRole('alertdialog').getByRole('button', { name: 'Reset browser', exact: true }).click()
       await expect.poll(async () => (await fixture.member.api.rpc<{ session_id: string }>('dev.browser.status', { run_id: fixture.runID })).session_id).not.toBe(stalePage.session_id)
       // The new session is free: the address bar opens its first page with no button in between.
       await expect(watchPage.getByRole('heading', { name: 'Open a page', exact: true })).toBeVisible()

@@ -85,7 +85,7 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		// A git killed by the deadline reports "signal: killed", not the
 		// deadline.
-		return Patch{}, fmt.Errorf("gitengine: render diff for run %s: %w: %w", run, ctx.Err(), err)
+		return Patch{}, fmt.Errorf("gitengine: render diff for session %s: %w: %w", run, ctx.Err(), err)
 	}
 	return patch, err
 }
@@ -140,7 +140,7 @@ func (e *Engine) livePatch(ctx context.Context, run domain.RunID, checkout, base
 	}
 	dir, err := os.MkdirTemp("", "aether-patch-")
 	if err != nil {
-		return Patch{}, fmt.Errorf("gitengine: scratch index for run %s: %w", run, err)
+		return Patch{}, fmt.Errorf("gitengine: scratch index for session %s: %w", run, err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	index, err := scratchIndex(dir, checkout, run)
@@ -149,7 +149,7 @@ func (e *Engine) livePatch(ctx context.Context, run domain.RunID, checkout, base
 	}
 	if snapshotObjects != "" {
 		if err = addAlternate(dir, snapshotObjects); err != nil {
-			return Patch{}, fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
+			return Patch{}, fmt.Errorf("gitengine: scratch alternates for session %s: %w", run, err)
 		}
 	}
 	if _, _, addErr := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); addErr != nil {
@@ -215,7 +215,7 @@ func (e *Engine) recordedStoreLocked(ctx context.Context, run domain.RunID, chec
 	}
 	// Rendering never recreates an explicitly deleted history store.
 	if _, statErr := os.Stat(store); statErr != nil {
-		return "", fmt.Errorf("%w: run %s has no snapshot store", ErrSnapshotTreeMissing, run)
+		return "", fmt.Errorf("%w: session %s has no snapshot store", ErrSnapshotTreeMissing, run)
 	}
 	// Quiet pre-upgrade runs migrate their published boundary on a read.
 	if _, err = os.Stat(filepath.Join(store, lastTreeFile)); err == nil {
@@ -253,7 +253,7 @@ func (e *Engine) recordedStoreLocked(ctx context.Context, run domain.RunID, chec
 			}
 		}
 		if !recorded {
-			return "", fmt.Errorf("%w: endpoints are not recorded for run %s", ErrSnapshotTreeMissing, run)
+			return "", fmt.Errorf("%w: endpoints are not recorded for session %s", ErrSnapshotTreeMissing, run)
 		}
 	}
 	return store, nil

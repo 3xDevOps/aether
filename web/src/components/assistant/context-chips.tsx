@@ -9,7 +9,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import type { ViewAttachment, ViewContext, ViewEntry } from '@/lib/assistant-types'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { modeLabel } from '@/routes/run/agent-name'
 import { useStore, type RootState } from '@/store'
 import { assistantShareView, draftConflict, nextViewContext, saveShareView, viewContextKey } from '@/store/view-context'
 
@@ -24,8 +23,7 @@ interface Row {
 
 /** An attachment that names the page itself: one chip shows both, the payload still carries both. */
 function samePage(route: ViewEntry, attachment: ViewAttachment): boolean {
-  if (attachment.kind === 'run') return route.run_id !== undefined && attachment.run_id === route.run_id
-  return attachment.kind === 'mission' && route.run_id === undefined && route.mission_id !== undefined && attachment.mission_id === route.mission_id
+  return attachment.kind === 'run' && route.run_id !== undefined && attachment.run_id === route.run_id
 }
 
 /** The chips come from the payload itself, so they cannot show what the next message does not send. */
@@ -59,9 +57,6 @@ function rows(s: RootState, payload: ViewContext): Row[] {
   if (file) list.push({ kind: 'Open file', label: file.path, ids: [file.workspace_id, file.run_id].filter(Boolean).join(' · ') })
   if (payload.recent?.length) {
     list.push({ kind: 'Recent pages', label: `${payload.recent.length}`, ids: payload.recent.map((entry) => entryIds(entry) || entry.name).join(', ') })
-  }
-  if (payload.launch_defaults?.length) {
-    list.push({ kind: 'Launch choices', label: payload.launch_defaults.map((d) => [d.agent, d.model, modeLabel[d.mode]].filter(Boolean).join(' ')).join(', '), ids: '' })
   }
   payload.attachments?.forEach((attachment, index) => list.push(attachmentRow(s, attachment, index)))
   return list
