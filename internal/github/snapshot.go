@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +20,9 @@ const (
 	pageSize      = 100
 	maxPages      = 10
 	reviewBodyMax = 2000
+	// requiredRetry is how long a refused read of branch protection or
+	// rulesets stands before it is asked again.
+	requiredRetry = 10 * time.Minute
 )
 
 // Snapshot is one read of a pull request, the check runs and commit statuses
@@ -31,12 +35,16 @@ type Snapshot struct {
 	State    string     `json:"state"`
 	MergedAt *time.Time `json:"merged_at,omitempty"`
 	Draft    bool       `json:"draft,omitempty"`
+	ClosedAt *time.Time `json:"closed_at,omitempty"`
 	Title    string     `json:"title"`
 	URL      string     `json:"html_url"`
 	HeadSHA  string     `json:"head_sha"`
 	BaseRef  string     `json:"base_ref"`
 	// ReviewRequested is whether any user or team review request is open.
 	ReviewRequested bool `json:"review_requested"`
+	// HeadSince is when the caller first read HeadSHA; PullRequestSnapshot
+	// leaves it unset.
+	HeadSince time.Time `json:"head_since,omitzero"`
 
 	CheckRuns []CheckRun     `json:"check_runs"`
 	Suites    []CheckSuite   `json:"check_suites"`
@@ -49,6 +57,14 @@ type Snapshot struct {
 	// example a fine-grained token without Actions read. A cancelled run then
 	// stays counted.
 	WorkflowsUnreadable string `json:"workflows_unreadable,omitempty"`
+	// Required is the status checks BaseRef's branch protection and
+	// rulesets require, read by RequiredChecks; RequiredRead is whether they
+	// were. RequiredUnreadable is GitHub's answer when either source was
+	// refused; that source's last read requirements then stand, and every
+	// check counts when none are known.
+	Required           []RequiredCheck `json:"required_checks,omitempty"`
+	RequiredRead       bool            `json:"required_read,omitempty"`
+	RequiredUnreadable string          `json:"required_unreadable,omitempty"`
 
 	Pages []Page `json:"pages"`
 }
@@ -56,11 +72,14 @@ type Snapshot struct {
 // Page is one conditional GET of a snapshot. Count is how many items of the
 // matching Snapshot list the page contributed, in request order; Full is
 // whether GitHub returned a whole page before any items were dropped.
+// Refused is GitHub's answer when it refused the page at RefusedAt.
 type Page struct {
-	Path  string `json:"path"`
-	ETag  string `json:"etag"`
-	Count int    `json:"count"`
-	Full  bool   `json:"full,omitempty"`
+	Path      string    `json:"path"`
+	ETag      string    `json:"etag"`
+	Count     int       `json:"count"`
+	Full      bool      `json:"full,omitempty"`
+	Refused   string    `json:"refused,omitempty"`
+	RefusedAt time.Time `json:"refused_at,omitzero"`
 }
 
 type CheckRun struct {
@@ -70,9 +89,19 @@ type CheckRun struct {
 	Conclusion  string     `json:"conclusion,omitempty"`
 	SuiteID     int64      `json:"check_suite_id"`
 	App         string     `json:"app"`
+	AppID       int64      `json:"app_id,omitempty"`
 	URL         string     `json:"html_url"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// RequiredCheck is a status check context the base branch requires. AppID,
+// when positive, is the app that must report it. Source is "branch" for classic
+// branch protection or "rules" for rulesets.
+type RequiredCheck struct {
+	Context string `json:"context"`
+	AppID   int64  `json:"app_id,omitempty"`
+	Source  string `json:"source"`
 }
 
 // CheckSuite is one app's suite on the head commit. GitHub creates a suite
@@ -84,6 +113,9 @@ type CheckSuite struct {
 	App        string `json:"app"`
 	AppSlug    string `json:"app_slug"`
 	Runs       int    `json:"latest_check_runs_count"`
+	// UpdatedAt is when GitHub last changed the suite, as when it was
+	// queued or rerequested.
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
 // WorkflowRun ties a GitHub Actions check suite to the workflow it ran.
@@ -147,6 +179,7 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 		State    string     `json:"state"`
 		MergedAt *time.Time `json:"merged_at"`
 		Draft    bool       `json:"draft"`
+		ClosedAt *time.Time `json:"closed_at"`
 		Head     struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -163,16 +196,18 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 	}
 	header, notModified, err := fetch(ctx, pullPath, etag, &pull)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, &PullRequestError{Err: err}
 	}
 	if notModified {
 		snap.State, snap.MergedAt, snap.Draft, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = prev.State, prev.MergedAt, prev.Draft, prev.Title, prev.URL, prev.HeadSHA, prev.BaseRef
+		snap.ClosedAt = prev.ClosedAt
 		snap.ReviewRequested = prev.ReviewRequested
 	} else {
 		if pull.Number != number || pull.State != "open" && pull.State != "closed" || !validSHA(pull.Head.SHA) || !strings.HasPrefix(pull.URL, "https://github.com/") {
 			return Snapshot{}, errors.New("github: API returned invalid pull request metadata")
 		}
 		snap.State, snap.MergedAt, snap.Draft, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = pull.State, pull.MergedAt, pull.Draft, pull.Title, pull.URL, pull.Head.SHA, pull.Base.Ref
+		snap.ClosedAt = pull.ClosedAt
 		snap.ReviewRequested = len(pull.RequestedReviewers)+len(pull.RequestedTeams) > 0
 		if snap.MergedAt != nil {
 			snap.State = "merged"
@@ -189,45 +224,15 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 	if prev != nil {
 		prevRuns, prevSuites, prevStatuses, prevReviews, prevWorkflows = prev.CheckRuns, prev.Suites, prev.Statuses, prev.Reviews, prev.Workflows
 	}
-	type checkRunsPage struct {
-		CheckRuns []struct {
-			ID          int64      `json:"id"`
-			Name        string     `json:"name"`
-			Status      string     `json:"status"`
-			Conclusion  *string    `json:"conclusion"`
-			URL         string     `json:"html_url"`
-			StartedAt   *time.Time `json:"started_at"`
-			CompletedAt *time.Time `json:"completed_at"`
-			Suite       struct {
-				ID int64 `json:"id"`
-			} `json:"check_suite"`
-			App struct {
-				Name string `json:"name"`
-			} `json:"app"`
-		} `json:"check_runs"`
-	}
-	runs, pages, err := paginate(ctx, fetch, commit+"/check-runs?", prev, prevRuns, "check runs", nil, func(page checkRunsPage) []CheckRun {
-		out := make([]CheckRun, 0, len(page.CheckRuns))
-		for _, r := range page.CheckRuns {
-			run := CheckRun{ID: r.ID, Name: r.Name, Status: r.Status, SuiteID: r.Suite.ID, App: r.App.Name, URL: r.URL, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt}
-			if r.Conclusion != nil {
-				run.Conclusion = *r.Conclusion
-			}
-			out = append(out, run)
-		}
-		return out
-	})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	snap.CheckRuns, snap.Pages = runs, append(snap.Pages, pages...)
-
+	// Suites are read first: a suite read as completed had all its runs
+	// created before the runs are read.
 	type checkSuitesPage struct {
 		CheckSuites []struct {
-			ID         int64   `json:"id"`
-			Status     string  `json:"status"`
-			Conclusion *string `json:"conclusion"`
-			Runs       int     `json:"latest_check_runs_count"`
+			ID         int64      `json:"id"`
+			Status     string     `json:"status"`
+			Conclusion *string    `json:"conclusion"`
+			Runs       int        `json:"latest_check_runs_count"`
+			UpdatedAt  *time.Time `json:"updated_at"`
 			App        struct {
 				Name string `json:"name"`
 				Slug string `json:"slug"`
@@ -241,6 +246,9 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 			if r.Conclusion != nil {
 				suite.Conclusion = *r.Conclusion
 			}
+			if r.UpdatedAt != nil {
+				suite.UpdatedAt = *r.UpdatedAt
+			}
 			out = append(out, suite)
 		}
 		return out
@@ -249,6 +257,40 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 		return Snapshot{}, err
 	}
 	snap.Suites, snap.Pages = suites, append(snap.Pages, pages...)
+
+	type checkRunsPage struct {
+		CheckRuns []struct {
+			ID          int64      `json:"id"`
+			Name        string     `json:"name"`
+			Status      string     `json:"status"`
+			Conclusion  *string    `json:"conclusion"`
+			URL         string     `json:"html_url"`
+			StartedAt   *time.Time `json:"started_at"`
+			CompletedAt *time.Time `json:"completed_at"`
+			Suite       struct {
+				ID int64 `json:"id"`
+			} `json:"check_suite"`
+			App struct {
+				ID   int64  `json:"id"`
+				Name string `json:"name"`
+			} `json:"app"`
+		} `json:"check_runs"`
+	}
+	runs, pages, err := paginate(ctx, fetch, commit+"/check-runs?", prev, prevRuns, "check runs", nil, func(page checkRunsPage) []CheckRun {
+		out := make([]CheckRun, 0, len(page.CheckRuns))
+		for _, r := range page.CheckRuns {
+			run := CheckRun{ID: r.ID, Name: r.Name, Status: r.Status, SuiteID: r.Suite.ID, App: r.App.Name, AppID: r.App.ID, URL: r.URL, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt}
+			if r.Conclusion != nil {
+				run.Conclusion = *r.Conclusion
+			}
+			out = append(out, run)
+		}
+		return out
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snap.CheckRuns, snap.Pages = runs, append(snap.Pages, pages...)
 
 	if slices.ContainsFunc(runs, func(run CheckRun) bool {
 		return run.Conclusion == "cancelled" && slices.ContainsFunc(runs, func(newer CheckRun) bool {
@@ -315,6 +357,162 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 	}
 	snap.Reviews, snap.Pages = reviews, append(snap.Pages, pages...)
 	return snap, nil
+}
+
+// RequiredChecks reads the checks snap.BaseRef requires from its classic
+// branch protection and from the rulesets that apply to it, conditionally
+// against prev. Both answer anyone who can read the repository; a 403 or 404
+// from either is recorded in RequiredUnreadable, keeps what prev read from
+// that source, and is not asked again for requiredRetry.
+func (s *Service) RequiredChecks(ctx context.Context, token string, prev, snap *Snapshot) error {
+	if prev != nil && (prev.Repo != snap.Repo || prev.BaseRef != snap.BaseRef) {
+		prev = nil
+	}
+	type protection struct {
+		Protected  bool `json:"protected"`
+		Protection *struct {
+			RequiredStatusChecks *struct {
+				EnforcementLevel string `json:"enforcement_level"`
+				Checks           []struct {
+					Context string `json:"context"`
+					AppID   *int64 `json:"app_id"`
+				} `json:"checks"`
+			} `json:"required_status_checks"`
+		} `json:"protection"`
+	}
+	type rule struct {
+		Type       string `json:"type"`
+		Parameters struct {
+			RequiredStatusChecks []struct {
+				Context       string `json:"context"`
+				IntegrationID int64  `json:"integration_id"`
+			} `json:"required_status_checks"`
+		} `json:"parameters"`
+	}
+	snap.Required, snap.RequiredRead, snap.RequiredUnreadable = nil, true, ""
+	snap.Pages = slices.DeleteFunc(slices.Clone(snap.Pages), func(p Page) bool {
+		return p.Path == snap.requiredPath("branch") || p.Path == snap.requiredPath("rules")
+	})
+	var refusals []string
+	for _, source := range requiredSources {
+		path := snap.requiredPath(source)
+		var kept []RequiredCheck
+		if prev != nil {
+			for _, c := range prev.Required {
+				if c.Source == source {
+					kept = append(kept, c)
+				}
+			}
+		}
+		old, cached := prev.page(path)
+		if cached && old.Refused != "" && time.Since(old.RefusedAt) < requiredRetry {
+			refusals = append(refusals, old.Refused)
+			snap.Required, snap.Pages = append(snap.Required, kept...), append(snap.Pages, old)
+			continue
+		}
+		etag := ""
+		if cached && old.Refused == "" {
+			etag = old.ETag
+		}
+		var (
+			found       []RequiredCheck
+			hidden      bool
+			header      http.Header
+			notModified bool
+			err         error
+		)
+		if source == "branch" {
+			var record protection
+			header, notModified, err = s.fetch(ctx, token, path, etag, &record)
+			hidden = record.Protected && record.Protection == nil
+			if record.Protection != nil && record.Protection.RequiredStatusChecks != nil && record.Protection.RequiredStatusChecks.EnforcementLevel != "off" {
+				for _, c := range record.Protection.RequiredStatusChecks.Checks {
+					check := RequiredCheck{Context: c.Context, Source: source}
+					if c.AppID != nil {
+						check.AppID = *c.AppID
+					}
+					found = append(found, check)
+				}
+			}
+		} else {
+			var record []rule
+			header, notModified, err = s.fetch(ctx, token, path, etag, &record)
+			links := header.Values("Link")
+			// An ETag covers one page, so rules that fill the first are
+			// read again whole.
+			if len(record) == pageSize {
+				header.Del("ETag")
+			}
+			for number := 2; err == nil && !notModified; number++ {
+				for _, r := range record {
+					if r.Type == "required_status_checks" {
+						for _, c := range r.Parameters.RequiredStatusChecks {
+							found = append(found, RequiredCheck{Context: c.Context, AppID: c.IntegrationID, Source: source})
+						}
+					}
+				}
+				if _, more := nextLink(links); !more {
+					break
+				}
+				if number > maxPages {
+					return fmt.Errorf("github: branch %s has more than %d rules", snap.BaseRef, maxPages*pageSize)
+				}
+				var page http.Header
+				record = nil
+				page, _, err = s.fetch(ctx, token, path+"&page="+strconv.Itoa(number), "", &record)
+				links = page.Values("Link")
+			}
+		}
+		refused := ""
+		var apiErr *APIError
+		switch {
+		case errors.As(err, &apiErr) && (apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound):
+			refused = apiErr.Error()
+		case err != nil:
+			return err
+		case notModified:
+			found = kept
+		case hidden:
+			refused = "GitHub shows branch " + snap.BaseRef + " as protected but not its protection to this login"
+		}
+		if refused != "" {
+			refusals = append(refusals, refused)
+			snap.Required = append(snap.Required, kept...)
+			snap.Pages = append(snap.Pages, Page{Path: path, Count: len(kept), Refused: refused, RefusedAt: time.Now()})
+			continue
+		}
+		snap.Required = append(snap.Required, found...)
+		snap.Pages = append(snap.Pages, Page{Path: path, ETag: etagOf(header, etag, notModified), Count: len(found)})
+	}
+	snap.RequiredUnreadable = strings.Join(refusals, "; ")
+	return nil
+}
+
+// requiredSources are RequiredCheck.Source values: classic branch
+// protection, then rulesets.
+var requiredSources = []string{"branch", "rules"}
+
+func (s *Snapshot) requiredPath(source string) string {
+	branch := url.PathEscape(s.BaseRef)
+	if source == "rules" {
+		return "/repos/" + s.Repo + "/rules/branches/" + branch + "?per_page=" + strconv.Itoa(pageSize)
+	}
+	return "/repos/" + s.Repo + "/branches/" + branch
+}
+
+// KeepRequired carries prev's required checks into s without reading them,
+// so a later RequiredChecks still asks conditionally. RequiredRead stays
+// false, so a ci watch reusing s reads them again.
+func (s *Snapshot) KeepRequired(prev *Snapshot) {
+	if prev == nil || prev.Repo != s.Repo || prev.BaseRef != s.BaseRef {
+		return
+	}
+	s.Required, s.RequiredUnreadable = prev.Required, prev.RequiredUnreadable
+	for _, source := range requiredSources {
+		if p, ok := prev.page(s.requiredPath(source)); ok {
+			s.Pages = append(s.Pages, p)
+		}
+	}
 }
 
 // paginate walks per_page=100 pages of base, conditionally against the pages
@@ -406,17 +604,42 @@ func validSHA(sha string) bool {
 	return true
 }
 
-// Checks counts check runs and commit statuses on the head commit.
+// Checks counts the check runs and commit statuses on the head commit
+// that the base branch requires, or every one when it requires none or its
+// requirements cannot be read.
 type Checks struct {
 	Passed  int `json:"passed"`
 	Failed  int `json:"failed"`
 	Pending int `json:"pending"`
-	// Final is true once at least one check exists and none is pending. A
-	// commit whose checks have not been created yet is not final.
+	// Cancelled counts cancelled check runs that nothing reran.
+	Cancelled int `json:"cancelled"`
+	// RequiredOnly is whether only required checks are counted.
+	RequiredOnly bool `json:"required_only"`
+	// Missing names required checks nothing has reported yet.
+	Missing []string `json:"missing,omitempty"`
+	// FailedNames, CancelledNames and PendingNames hold one name per
+	// counted check run or status; a suite still to create runs has none.
+	FailedNames    []string `json:"failed_names,omitempty"`
+	CancelledNames []string `json:"cancelled_names,omitempty"`
+	PendingNames   []string `json:"pending_names,omitempty"`
+	// Suites counts, within Pending, suites that may still create check
+	// runs but have none pending; EmptySuites those of them with no check
+	// run at all.
+	Suites      int `json:"suites,omitempty"`
+	EmptySuites int `json:"empty_suites,omitempty"`
+	// All counts every check when RequiredOnly; nil otherwise.
+	All *Checks `json:"all,omitempty"`
+	// DoneAt is when the last counted check finished.
+	DoneAt time.Time `json:"done_at,omitzero"`
+	// Final is true once at least one check is counted, none is pending
+	// and no required check is missing. A commit whose checks have not been
+	// created yet is not final.
 	Final bool `json:"final"`
-	// Key changes with the head commit and with every check run or status ID
-	// and final conclusion, so a failed run followed by a passing rerun, or a
-	// run updated in place, yields a new key.
+	// Key changes with the head commit and with every counted check run or
+	// status ID and final conclusion, so a failed run followed by a passing
+	// rerun, or a run updated in place, yields a new key. When RequiredOnly
+	// it also changes with the missing names, and not with checks the base
+	// branch does not require.
 	Key string `json:"key"`
 }
 
@@ -439,7 +662,8 @@ func (s Snapshot) CurrentRuns() []CheckRun {
 	})
 }
 
-// WaitingSuites are the suites Checks counts as one pending check each.
+// WaitingSuites are the suites Checks counts as one pending check each
+// when every check counts.
 func (s Snapshot) WaitingSuites() []CheckSuite {
 	running := map[int64]bool{}
 	for _, run := range s.CurrentRuns() {
@@ -447,52 +671,147 @@ func (s Snapshot) WaitingSuites() []CheckSuite {
 			running[run.SuiteID] = true
 		}
 	}
-	return slices.DeleteFunc(slices.Clone(s.Suites), func(suite CheckSuite) bool { return !s.waiting(suite, running) })
+	read := s.readRuns()
+	return slices.DeleteFunc(slices.Clone(s.Suites), func(suite CheckSuite) bool {
+		return !suite.incomplete(running) && !suite.unread(read)
+	})
 }
 
-func (s Snapshot) waiting(suite CheckSuite, running map[int64]bool) bool {
+// readRuns maps each suite to the distinct check runs read for it.
+func (s Snapshot) readRuns() map[int64]map[string]bool {
+	read := map[int64]map[string]bool{}
+	for _, run := range s.CheckRuns {
+		if read[run.SuiteID] == nil {
+			read[run.SuiteID] = map[string]bool{}
+		}
+		read[run.SuiteID][run.App+"/"+run.Name] = true
+	}
+	return read
+}
+
+func (suite CheckSuite) incomplete(running map[int64]bool) bool {
 	return suite.Status != "completed" && !running[suite.ID] && (suite.AppSlug == "github-actions" || suite.Runs > 0)
 }
 
-// Checks counts CurrentRuns and the commit statuses. An incomplete suite
-// with no pending run counts as one pending check when it belongs to GitHub
-// Actions or already has runs; other apps can leave a zero-run suite queued
-// forever.
+func (suite CheckSuite) unread(read map[int64]map[string]bool) bool {
+	return suite.Status == "completed" && len(read[suite.ID]) < suite.Runs
+}
+
+// Checks counts CurrentRuns and the commit statuses. A suite that may
+// still create check runs counts as one pending check: an incomplete one
+// with no pending run when it belongs to GitHub Actions or already has
+// runs (other apps can leave a zero-run suite queued forever), and a
+// completed one with more runs than were read. When only required checks
+// count, an incomplete suite counts only while a required check is missing;
+// a completed one still counts, since a run not read may be a required one.
 func (s Snapshot) Checks() Checks {
-	var c Checks
+	all := s.tally(false)
+	if len(s.Required) == 0 {
+		return all
+	}
+	c := s.tally(true)
+	c.All = &all
+	return c
+}
+
+// WithoutSuites is c with its waiting suites no longer pending, or only
+// those with no check run when emptyOnly. GitHub leaves a GitHub Actions
+// suite queued forever when path or branch filters skip every workflow.
+func (c Checks) WithoutSuites(emptyOnly bool) Checks {
+	drop := c.Suites
+	if emptyOnly {
+		drop = c.EmptySuites
+	}
+	c.Pending, c.Suites, c.EmptySuites = c.Pending-drop, c.Suites-drop, 0
+	c.Final = c.final()
+	return c
+}
+
+func (c Checks) final() bool {
+	return c.Passed+c.Failed+c.Cancelled > 0 && c.Pending == 0 && len(c.Missing) == 0
+}
+
+func (s Snapshot) tally(requiredOnly bool) Checks {
+	c := Checks{RequiredOnly: requiredOnly}
+	matches := func(r RequiredCheck, name string, appID int64) bool {
+		return r.Context == name && (r.AppID <= 0 || appID == 0 || r.AppID == appID)
+	}
+	required := func(name string, appID int64) bool {
+		return !c.RequiredOnly || slices.ContainsFunc(s.Required, func(r RequiredCheck) bool { return matches(r, name, appID) })
+	}
+	type check struct {
+		name  string
+		appID int64
+	}
+	var reported []check
 	current := s.CurrentRuns()
 	ids := make([]string, 0, len(current)+len(s.Statuses))
 	running := map[int64]bool{}
 	for _, run := range current {
+		if !required(run.Name, run.AppID) {
+			continue
+		}
+		reported = append(reported, check{run.Name, run.AppID})
 		ids = append(ids, "c"+strconv.FormatInt(run.ID, 10)+"="+run.Conclusion)
 		switch {
 		case run.Status != "completed":
 			c.Pending++
+			c.PendingNames = append(c.PendingNames, run.Name)
 			running[run.SuiteID] = true
 		case run.Conclusion == "success" || run.Conclusion == "neutral" || run.Conclusion == "skipped":
 			c.Passed++
+		case run.Conclusion == "cancelled":
+			c.Cancelled++
+			c.CancelledNames = append(c.CancelledNames, run.Name)
 		default:
 			c.Failed++
+			c.FailedNames = append(c.FailedNames, run.Name)
 		}
-	}
-	for _, suite := range s.Suites {
-		if s.waiting(suite, running) {
-			c.Pending++
-			ids = append(ids, "q"+strconv.FormatInt(suite.ID, 10))
+		if run.CompletedAt != nil && run.CompletedAt.After(c.DoneAt) {
+			c.DoneAt = *run.CompletedAt
 		}
 	}
 	for _, status := range s.Statuses {
+		if !required(status.Context, 0) {
+			continue
+		}
+		reported = append(reported, check{status.Context, 0})
 		ids = append(ids, "s"+strconv.FormatInt(status.ID, 10)+"="+status.State)
 		switch status.State {
 		case "success":
 			c.Passed++
 		case "pending":
 			c.Pending++
+			c.PendingNames = append(c.PendingNames, status.Context)
 		default:
 			c.Failed++
+			c.FailedNames = append(c.FailedNames, status.Context)
+		}
+		if status.UpdatedAt.After(c.DoneAt) {
+			c.DoneAt = status.UpdatedAt
 		}
 	}
-	c.Final = len(ids) > 0 && c.Pending == 0
+	if c.RequiredOnly {
+		for _, r := range s.Required {
+			if !slices.ContainsFunc(reported, func(k check) bool { return matches(r, k.name, k.appID) }) && !slices.Contains(c.Missing, r.Context) {
+				c.Missing = append(c.Missing, r.Context)
+				ids = append(ids, "m"+r.Context)
+			}
+		}
+		slices.Sort(c.Missing)
+	}
+	read := s.readRuns()
+	for _, suite := range s.Suites {
+		if suite.incomplete(running) && (!c.RequiredOnly || len(c.Missing) > 0) || suite.unread(read) {
+			c.Pending++
+			c.Suites++
+			if suite.Runs == 0 {
+				c.EmptySuites++
+			}
+			ids = append(ids, "q"+strconv.FormatInt(suite.ID, 10))
+		}
+	}
+	c.Final = c.final()
 	slices.Sort(ids)
 	sum := sha256.Sum256([]byte(strings.Join(ids, ",")))
 	c.Key = s.HeadSHA + ":" + hex.EncodeToString(sum[:8])

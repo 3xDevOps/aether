@@ -17,13 +17,14 @@ import (
 
 // prSnapshots reads one pull request as it stands. Satisfied by *PRs.
 type prSnapshots interface {
-	Snapshot(ctx context.Context, member domain.MemberID, repo string, number int, fresh bool) (github.Snapshot, error)
+	Snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci, fresh bool) (github.Snapshot, error)
 }
 
 // Snapshot reads repo#number with member's GitHub credentials, as
-// Evaluate does; fresh skips the read other watches made moments ago.
-func (p *PRs) Snapshot(ctx context.Context, member domain.MemberID, repo string, number int, fresh bool) (github.Snapshot, error) {
-	snap, _, err := p.snapshot(ctx, member, strings.ToLower(repo), number, fresh)
+// Evaluate does, with the checks the base branch requires when ci; fresh
+// skips the read other watches made moments ago.
+func (p *PRs) Snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci, fresh bool) (github.Snapshot, error) {
+	snap, _, err := p.snapshot(ctx, member, strings.ToLower(repo), number, ci, false, fresh)
 	return snap, err
 }
 
@@ -45,7 +46,7 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 	if !ok {
 		return r, fmt.Errorf("%w: this server does not read pull requests", errWaitUnreadable)
 	}
-	snap, err := src.Snapshot(ctx, home, w.Repo, w.Number, fresh)
+	snap, err := src.Snapshot(ctx, home, w.Repo, w.Number, w.Kind == protocol.WaitKindPRChecks, fresh)
 	if err != nil {
 		var pe *prError
 		if errors.As(err, &pe) && (!pe.transient || pe.noLogin) {
@@ -53,16 +54,11 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 		}
 		return r, err
 	}
-	checks := snap.Checks()
-	cancelled := 0
-	for _, run := range snap.CurrentRuns() {
-		if run.Status == "completed" && run.Conclusion == "cancelled" {
-			cancelled++
-		}
-	}
+	checks := countedChecks(snap, w.CreatedAt, now)
 	r.observed = protocol.WaitObserved{
 		PRState: snap.State, HeadSHA: snap.HeadSHA,
-		Checks: &protocol.WaitChecks{Passed: checks.Passed, Failed: checks.Failed - cancelled, Pending: checks.Pending, Cancelled: cancelled},
+		Checks: &protocol.WaitChecks{Passed: checks.Passed, Failed: checks.Failed, Pending: checks.Pending, Cancelled: checks.Cancelled,
+			RequiredOnly: checks.RequiredOnly},
 	}
 	merged := snap.MergedAt != nil
 	if merged {
@@ -92,8 +88,14 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 		// A head other than the bound one counts only with checks that
 		// finished after the wait began, so a force-push back to an old
 		// commit is no verdict.
-		final := checks.Final && (onBound || !named && after(checksDone(snap), w.CreatedAt))
+		ours := onBound || !named && after(checks.DoneAt, w.CreatedAt)
+		final := checks.Final && ours
+		// A failure needs no missing required check to report.
+		failed := ours && checks.Pending == 0 && checks.Failed > 0
 		on := " on head commit " + short(snap.HeadSHA) + " (all checks)"
+		if checks.RequiredOnly {
+			on = " on head commit " + short(snap.HeadSHA) + " (required checks)"
+		}
 		r.observation = checks.Key
 		if named && onBound {
 			r.observation = headSeen
@@ -102,19 +104,21 @@ func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.
 		case named && !onBound && (w.Observation == headSeen || now.Sub(w.CreatedAt) > namedHeadGrace):
 			r.done, r.outcome, r.observation = true, "superseded", "superseded:"+snap.HeadSHA
 			r.summary = "head commit is " + short(snap.HeadSHA) + ", not " + short(r.head) + ", and its checks are not read"
-		case snap.State == "closed" && !merged && !final:
+		case snap.State == "closed" && !merged && !final && !failed:
 			r.done, r.outcome, r.observation = true, "closed", "closed"
 			r.summary = ref + " closed without merging before its checks finished"
 		case named && !onBound:
 			r.summary = "head commit is " + short(snap.HeadSHA) + "; waiting for checks on " + short(r.head)
-		case final && checks.Failed > cancelled:
+		case failed:
 			r.done, r.outcome, r.summary = true, "failed", counts+on
-			r.detail = "failing checks: " + strings.Join(failedChecks(snap), ", ")
-		case final && cancelled > 0:
+			r.detail = "failing checks: " + names(checks.FailedNames)
+		case final && checks.Cancelled > 0:
 			r.done, r.outcome, r.summary = true, "cancelled", counts+on
 		case final:
 			r.done, r.outcome, r.summary = true, "passed", counts+on
-		case checks.Passed+checks.Failed+checks.Pending == 0:
+		case len(checks.Missing) > 0:
+			r.summary = counts + on + "; required checks not reported: " + names(checks.Missing)
+		case checks.Passed+checks.Failed+checks.Cancelled+checks.Pending == 0:
 			r.summary = "no checks on head commit " + short(snap.HeadSHA) + " yet"
 		default:
 			r.summary = counts + on

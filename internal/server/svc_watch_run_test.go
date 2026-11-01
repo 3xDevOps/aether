@@ -36,7 +36,7 @@ func (*pullRequest) Evaluate(context.Context, watch.PRCheck) (watch.PRResult, er
 	return watch.PRResult{}, nil
 }
 
-func (p *pullRequest) Snapshot(_ context.Context, _ domain.MemberID, repo string, number int, _ bool) (github.Snapshot, error) {
+func (p *pullRequest) Snapshot(_ context.Context, _ domain.MemberID, repo string, number int, _, _ bool) (github.Snapshot, error) {
 	run := github.CheckRun{ID: 1, Name: "test", Status: "in_progress", SuiteID: 9, App: "GitHub Actions"}
 	if p.done.Load() {
 		at := time.Now()
