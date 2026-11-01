@@ -5,6 +5,8 @@ package runtime
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -290,5 +292,71 @@ func TestDockerManagedExecForgottenByDocker(t *testing.T) {
 	}
 	if _, err := forgetful.RecoverExec(ctx, stopped); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("recover a forgotten exec in a stopped container = %v; want ErrNotFound", err)
+	}
+}
+
+// TestDockerManagedExecHelperLost: Docker still records an exec whose helper
+// died and took its state with it. The command is gone and its exit status
+// lost: recovery, status and stop all say so at once instead of failing as
+// unavailable forever, and a live exec beside it keeps running.
+func TestDockerManagedExecHelperLost(t *testing.T) {
+	d := newTestDocker(t)
+	binary := buildStagedHelper(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	id := createContainer(t, d, Spec{
+		Name:  fmt.Sprintf("it-lost-exec-%d", time.Now().UnixNano()),
+		Image: testImage, TTY: true,
+		Command: []string{"/bin/sh", "-c", "exec sleep 300"},
+		Mounts:  []Mount{{HostPath: binary, ContainerPath: coordtransport.CLIPath, ReadOnly: true}},
+	})
+	if err := d.Start(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	start := func(key string) ManagedExec {
+		t.Helper()
+		execution, err := d.StartExecPipe(ctx, id, ExecSpec{CreationKey: key, Argv: []string{"sleep", "300"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := execution.Detach(); err != nil {
+			t.Fatal(err)
+		}
+		return execution
+	}
+	live, lost := start("live"), start("lost")
+	sum := sha256.Sum256([]byte("lost"))
+	stateDir := "/tmp/.aether-devexec-" + hex.EncodeToString(sum[:20])
+	if code, _, stderr, err := d.Exec(ctx, id, []string{"/bin/sh", "-c", "pkill -KILL -f 'run-pipe lost' && rm -rf " + stateDir}, ""); err != nil || code != 0 {
+		t.Fatalf("kill the helper and remove its state: code=%d stderr=%q err=%v", code, stderr, err)
+	}
+	for {
+		info, err := d.cli.ExecInspect(ctx, lost.Identity().ExecID, client.ExecInspectOptions{})
+		if err != nil {
+			t.Fatalf("Docker forgot the exec: %v", err)
+		}
+		if !info.Running {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if _, err := d.RecoverExec(ctx, lost.Identity()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("recover an exec whose helper left no record = %v; want ErrNotFound", err)
+	}
+	if state, err := lost.Status(ctx); !errors.Is(err, ErrNotFound) || state.Exited {
+		t.Fatalf("status of an exec whose helper left no record = %+v, %v; want ErrNotFound and no exit status", state, err)
+	}
+	began := time.Now()
+	if status, err := lost.Stop(ctx, 0); !errors.Is(err, ErrNotFound) || time.Since(began) > 5*time.Second {
+		t.Fatalf("stop an exec whose helper left no record = %+v, %v after %s; want ErrNotFound at once", status, err, time.Since(began))
+	}
+
+	recovered, err := d.RecoverExec(ctx, live.Identity())
+	if err != nil {
+		t.Fatalf("recover the live exec: %v", err)
+	}
+	if state, err := recovered.Status(ctx); err != nil || !state.Running {
+		t.Fatalf("live exec beside a lost one = %+v, %v", state, err)
 	}
 }

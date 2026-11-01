@@ -118,11 +118,17 @@ func (d *Docker) RecoverExec(ctx context.Context, identity ExecIdentity) (Manage
 		return nil, fmt.Errorf("%w: incomplete identity", ErrExecUnavailable)
 	}
 	execution := &dockerManagedExec{docker: d, identity: identity}
-	_, forgotten, err := execution.inspect(ctx)
+	info, forgotten, err := execution.inspect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if forgotten != nil {
+		return execution, nil
+	}
+	if !info.Running {
+		if _, err := execution.exitRecord(ctx); err != nil {
+			return nil, err
+		}
 		return execution, nil
 	}
 	if _, err := execution.control(ctx, "status", 0); err != nil {
@@ -247,9 +253,9 @@ func (e *dockerManagedExec) Status(ctx context.Context) (ExecState, error) {
 	}
 	final := forgotten
 	if final == nil {
-		read, err := e.control(ctx, "status", 0)
+		read, err := e.exitRecord(ctx)
 		if err != nil {
-			return state, fmt.Errorf("%w: command exit record unavailable: %w", ErrExecUnavailable, err)
+			return state, err
 		}
 		final = &read
 	}
@@ -258,6 +264,21 @@ func (e *dockerManagedExec) Status(ctx context.Context) (ExecState, error) {
 	}
 	state.Running, state.Exited, state.ExitCode = false, true, final.ExitCode
 	return state, nil
+}
+
+// exitRecord reads the final record of an exec Docker saw end. The exec's
+// process is its helper, whose command dies with it, so a helper that left
+// neither a supervisor nor a record proves the command gone with its exit
+// status lost.
+func (e *dockerManagedExec) exitRecord(ctx context.Context) (devexec.State, error) {
+	final, err := e.control(ctx, "status", 0)
+	if errors.Is(err, devexec.ErrNoSupervisor) {
+		return final, fmt.Errorf("%w: command exit record unavailable: %w: %w", ErrExecUnavailable, ErrNotFound, err)
+	}
+	if err != nil {
+		return final, fmt.Errorf("%w: command exit record unavailable: %w", ErrExecUnavailable, err)
+	}
+	return final, nil
 }
 
 func (e *dockerManagedExec) Wait(ctx context.Context) (ExitStatus, error) {
@@ -289,11 +310,19 @@ func (e *dockerManagedExec) Stop(ctx context.Context, grace time.Duration) (Exit
 	stopCtx, cancel := context.WithTimeout(ctx, devexec.StartupTimeout+grace+devexec.ReapTimeout)
 	defer cancel()
 	ctx = stopCtx
-	if _, _, err := e.inspect(ctx); err != nil {
+	info, forgotten, err := e.inspect(ctx)
+	if err != nil {
 		return ExitStatus{}, err
 	}
-	if _, err := e.control(ctx, "stop", grace); err != nil {
-		return ExitStatus{}, err
+	if forgotten != nil {
+		info.Running = forgotten.Running && !forgotten.Exited
+	}
+	// An exec Docker saw end has no supervisor left to stop; its record or
+	// its loss is the answer.
+	if info.Running {
+		if _, err := e.control(ctx, "stop", grace); err != nil {
+			return ExitStatus{}, err
+		}
 	}
 	return e.Wait(ctx)
 }

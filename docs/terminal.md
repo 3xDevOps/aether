@@ -430,7 +430,8 @@ Docker restarted with `live-restore` forgets every exec but not its
 processes: Aether then reads a terminal's state from its exec helper in the
 container, so a running terminal is never reported exited and `terminal
 stop` still stops it. A terminal whose process is provably gone, because its
-container stopped or its exec helper died without recording an exit, reads
+container stopped or its exec helper died without recording an exit (whether
+or not Docker still remembers the exec), reads
 **exited** with the reason; stopping it removes it without taking control
 first, and closing the session is not blocked by it.
 
