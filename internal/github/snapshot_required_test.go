@@ -320,3 +320,14 @@ func TestPullRequestSnapshotNotFound(t *testing.T) {
 		t.Fatalf("recorded 404 = %v", err)
 	}
 }
+
+// Dropping waiting suites applies to every check too, so the counts shown
+// beside a required-only decision agree with it.
+func TestWithoutSuitesAlsoDropsThemFromEveryCheck(t *testing.T) {
+	all := Checks{Passed: 1, Pending: 2, Suites: 2, EmptySuites: 1}
+	c := Checks{Passed: 1, Pending: 1, Suites: 1, EmptySuites: 1, RequiredOnly: true, All: &all}
+	got := c.WithoutSuites(false)
+	if got.Pending != 0 || got.All.Pending != 0 || got.All.Suites != 0 || all.Pending != 2 {
+		t.Fatalf("WithoutSuites = %+v, all %+v; want no suite pending in either, the input untouched", got, *got.All)
+	}
+}
