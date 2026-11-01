@@ -110,9 +110,9 @@ func (s *Scheduler) attachTerminalLocked(ctx context.Context, run domain.RunID, 
 		state := client.State()
 		key := ptyhost.RunShellSession(run, terminal.ID)
 		// Earlier server processes answered the terminal queries in the
-		// output they were sent.
+		// output up to state.Answered.
 		err = host.ResumeDevelopmentSession(ctx, key, client, uint(state.Cols), uint(state.Rows),
-			ptyhost.TerminalPosition{Epoch: next.Epoch, Sequence: ptyhost.TerminalSequence(client.From())}, ptyhost.TerminalSequence(state.Sent))
+			ptyhost.TerminalPosition{Epoch: next.Epoch, Sequence: ptyhost.TerminalSequence(client.From())}, ptyhost.TerminalSequence(state.Answered))
 		if err == nil {
 			terminal.Generation = s.cfg.PTY.SessionGeneration(key)
 			terminal.Cols, terminal.Rows = uint(state.Cols), uint(state.Rows)

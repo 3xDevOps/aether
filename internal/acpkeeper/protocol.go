@@ -67,6 +67,7 @@ const (
 	frameOutput    = "out"
 	frameInput     = "in"
 	frameResize    = "resize"
+	frameAnswered  = "answered"
 )
 
 // Refusal codes.
@@ -134,13 +135,13 @@ type State struct {
 // the terminal started, and its geometry.
 type TermState struct {
 	// Start is the offset of the oldest retained byte, End the offset after
-	// the newest, and Sent the offset up to which earlier attachers were
-	// sent the output.
-	Start uint64 `json:"start"`
-	End   uint64 `json:"end"`
-	Sent  uint64 `json:"sent"`
-	Cols  uint16 `json:"cols"`
-	Rows  uint16 `json:"rows"`
+	// the newest, and Answered the offset up to which earlier attachers
+	// answered the terminal queries in the output.
+	Start    uint64 `json:"start"`
+	End      uint64 `json:"end"`
+	Answered uint64 `json:"answered"`
+	Cols     uint16 `json:"cols"`
+	Rows     uint16 `json:"rows"`
 }
 
 // Prompt is a session/prompt in flight when its attacher went away. Turn is

@@ -21,11 +21,13 @@ type TermClient struct {
 	out   *io.PipeReader
 	in    *io.PipeWriter
 	done  chan struct{}
+	kick  chan struct{}
 	wmu   sync.Mutex
 
-	mu   sync.Mutex
-	exit *Exit
-	err  error
+	mu       sync.Mutex
+	exit     *Exit
+	err      error
+	answered uint64
 }
 
 // AttachTerm sends hello over conn, asking to replay output from offset
@@ -46,9 +48,44 @@ func AttachTerm(ctx context.Context, conn io.ReadWriteCloser, hello Hello, from 
 	}
 	out, in := io.Pipe()
 	c := &TermClient{conn: conn, br: br, state: *state.Term, from: min(max(from, state.Term.Start), state.Term.End),
-		out: out, in: in, done: make(chan struct{})}
+		out: out, in: in, done: make(chan struct{}), kick: make(chan struct{}, 1)}
 	go c.read()
+	go c.answerLoop()
 	return c, nil
+}
+
+// Answered reports that the terminal queries in the output before offset
+// seq were answered, their replies written to Stdin. It does not block.
+func (c *TermClient) Answered(seq uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if seq <= c.answered {
+		return
+	}
+	c.answered = seq
+	select {
+	case c.kick <- struct{}{}:
+	default:
+	}
+}
+
+// answerLoop tells the keeper what Answered reported, after the replies
+// Stdin sent before.
+func (c *TermClient) answerLoop() {
+	var told uint64
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-c.kick:
+		}
+		c.mu.Lock()
+		seq := c.answered
+		c.mu.Unlock()
+		if seq > told && c.send(frame{T: frameAnswered, Seq: seq}) == nil {
+			told = seq
+		}
+	}
 }
 
 // State is what the keeper's welcome reported.

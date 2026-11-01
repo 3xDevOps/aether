@@ -100,10 +100,12 @@ func TestTermReattachReplaysFromOffset(t *testing.T) {
 	if got := readN(t, first.Stdout(), 18); got != "$ make\r\nbuilding\r\n" {
 		t.Fatalf("first attacher read %q", got)
 	}
+	// The server answered the queries in only the first 10 bytes it read.
+	first.Answered(10)
 	p.eventually(t, func() bool {
 		k.mu.Lock()
 		defer k.mu.Unlock()
-		return k.sent == 18
+		return k.answered == 10
 	})
 	// The server goes away; the program keeps writing.
 	_ = first.Close()
@@ -113,7 +115,7 @@ func TestTermReattachReplaysFromOffset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st := second.State(); st.Start != 0 || st.End != 24 || st.Sent != 18 || second.From() != 8 {
+	if st := second.State(); st.Start != 0 || st.End != 24 || st.Answered != 10 || second.From() != 8 {
 		t.Fatalf("welcome state %+v from %d", st, second.From())
 	}
 	// Reads stop at the welcome's End, so a caller can tell replay from new

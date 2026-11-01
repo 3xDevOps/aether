@@ -142,6 +142,18 @@ func (s *session) queueProtocolReplyLocked(data string) {
 	}
 }
 
+// answerer is an attachment that keeps the position up to which the terminal
+// queries in the output were answered, for a later server process.
+type answerer interface{ Answered(uint64) }
+
+// answeredLocked reports the output position to an answerer once every
+// reply to the output before it was written.
+func (s *session) answeredLocked() {
+	if a, ok := s.att.(answerer); ok && s.ring != nil && len(s.protocolPending) == 0 && !s.answering {
+		a.Answered(uint64(s.ring.position().Sequence))
+	}
+}
+
 func (s *session) respond() {
 	for {
 		select {
@@ -154,6 +166,7 @@ func (s *session) respond() {
 			failure := s.protocolErr
 			data := s.protocolPending
 			s.protocolPending = nil
+			s.answering = len(data) != 0
 			ended := s.ended || s.stopped
 			s.mu.Unlock()
 			if ended {
@@ -178,6 +191,10 @@ func (s *session) respond() {
 			if len(data) == 0 {
 				break
 			}
+			s.mu.Lock()
+			s.answering = false
+			s.answeredLocked()
+			s.mu.Unlock()
 		}
 	}
 }

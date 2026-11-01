@@ -48,8 +48,9 @@ type Term struct {
 	// buf holds the output from offset end-len(buf) to end.
 	buf []byte
 	end uint64
-	// sent is the offset up to which an attacher was sent the output.
-	sent       uint64
+	// answered is the offset up to which an attacher answered the
+	// terminal queries in the output.
+	answered   uint64
 	cols, rows uint16
 	exit       *Exit
 	ended      chan struct{}
@@ -149,6 +150,12 @@ func (t *Term) ServeConn(conn io.ReadWriteCloser) {
 			t.input(a, f.Data)
 		case frameResize:
 			t.resize(a, f.Cols, f.Rows)
+		case frameAnswered:
+			t.mu.Lock()
+			if t.att == a {
+				t.answered = max(t.answered, min(f.Seq, t.end))
+			}
+			t.mu.Unlock()
 		}
 	}
 	t.mu.Lock()
@@ -178,7 +185,7 @@ func (t *Term) attach(conn io.ReadWriteCloser, h frame) (*termAttacher, *frame) 
 	t.gen = h.Gen
 	// Ack names the offset the attacher replays from.
 	cursor := min(max(h.Ack, t.start()), t.end)
-	state := State{Term: &TermState{Start: t.start(), End: t.end, Sent: t.sent, Cols: t.cols, Rows: t.rows}}
+	state := State{Term: &TermState{Start: t.start(), End: t.end, Answered: t.answered, Cols: t.cols, Rows: t.rows}}
 	a := &termAttacher{gen: h.Gen, conn: conn, cursor: cursor, ctrl: []frame{{T: frameWelcome, V: Version, Gen: h.Gen, State: &state}}}
 	t.att = a
 	t.cond.Broadcast()
@@ -250,7 +257,6 @@ func (t *Term) send(a *termAttacher) {
 			}
 			t.cond.Wait()
 		}
-		sent := a.cursor
 		t.mu.Unlock()
 		var err error
 		for _, f := range batch {
@@ -262,9 +268,6 @@ func (t *Term) send(a *termAttacher) {
 			err = w.Flush()
 		}
 		t.mu.Lock()
-		if err == nil {
-			t.sent = max(t.sent, sent)
-		}
 		if a.exited && err == nil {
 			t.endOnce.Do(func() { close(t.ended) })
 		}
