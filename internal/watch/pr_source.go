@@ -210,7 +210,8 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 	}
 	defer p.unlock(m)
 	var prev *github.Snapshot
-	checkedAt, recent := p.now(), false
+	var checkedAt time.Time
+	recent := false
 	saved, err := p.store.WatchPRSnapshot(ctx, member, repo, number)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -244,6 +245,9 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 	data, err := json.Marshal(snap)
 	if err != nil {
 		return github.Snapshot{}, false, err
+	}
+	if checkedAt.IsZero() {
+		checkedAt = p.now()
 	}
 	if err = p.store.SaveWatchPRSnapshot(ctx, &store.WatchPRSnapshot{MemberID: member, Repo: repo, Number: number, Snapshot: data, CheckedAt: checkedAt}); err != nil {
 		return github.Snapshot{}, false, err

@@ -724,6 +724,10 @@ func (c Checks) WithoutSuites(emptyOnly bool) Checks {
 	}
 	c.Pending, c.Suites, c.EmptySuites = c.Pending-drop, c.Suites-drop, 0
 	c.Final = c.final()
+	if c.All != nil {
+		all := c.All.WithoutSuites(emptyOnly)
+		c.All = &all
+	}
 	return c
 }
 
