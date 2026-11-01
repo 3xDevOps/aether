@@ -251,7 +251,7 @@ The connector has these tools and no others:
 | --- | --- | --- |
 | `aether_list_workspaces` | Workspaces, and agents (installed, signed in, Enhanced) | `read` |
 | `aether_launch_options` | What you can launch and on which account: workspaces, your accounts with their usage, each account's agents and modes, fallback, a workspace's templates, and an agent's models when asked for ([Launch options](#launch-options)) | `read` |
-| `aether_list_sessions`, `aether_get_session` | Your sessions (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one session with what it waits on, its latest report and its pull request; `evidence: true` adds [progress evidence](#progress-evidence) | `read` |
+| `aether_list_sessions`, `aether_get_session` | Your sessions (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one session with what it waits on, its `wait_conditions`, its latest report and its pull request; `evidence: true` adds [progress evidence](#progress-evidence) | `read` |
 | `aether_session_history` | A page of a session's conversation (Enhanced) or terminal, with its reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your sessions did today, yesterday or this week, in your time zone | `read` |
@@ -297,7 +297,11 @@ sessions wait, and a watch's receipt, observed state and notices included, comes
 under an `untrusted` field; outside it are only
 fixed labels such as `The agent asks a question`, ids, states, counts, times,
 links, workspace and agent names, branch names, file paths and the server's own
-errors. Untrusted text is cut to 200 characters for titles, check names, commit
+errors. A session's `wait_conditions` keep the parsed spec, kind,
+repository, number, target session, state, outcome, observed checks and times
+outside it; each condition's summary, detail and the errors GitHub or delivery
+returned sit under `untrusted.wait_conditions`, by id. A list row's
+`waiting_until` holds the specs still pending. Untrusted text is cut to 200 characters for titles, check names, commit
 subjects, a list row's reason or last report, and a watch notice's title and body; 300 for each pull request review or
 comment; 2000 for a conversation item;
 12000 for a diff; and 600 for everything else, such as tasks, reports,

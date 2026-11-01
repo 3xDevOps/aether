@@ -564,7 +564,7 @@ You are Aether session <session-id> (role: interactive). Before acting, run the 
 END EVERY TURN WITH EXACTLY ONE REPORT, as your last action: `aether-internal report --outcome <o> [--for agents|ci|process] --summary "<one line>"` (or aether_report with a new idempotency_key each turn).
 Write your reply to the person as message text before the report; neither your thinking nor the summary is shown as your reply.
 - answered: you replied or discussed, nothing pending.
-- waiting: work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. Mail or your next prompt resumes you, never CI or a process finishing. Not while aether_status shows protected: mail never wakes a protected session, so wait in your turn.
+- waiting: work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. Mail or your next prompt resumes you. Waiting on a PR, its checks or another session? Add --until (until in aether_report; conditions in report --help) and the server wakes you when one resolves. Nothing else wakes you when CI or a process finishes; never ask people to message you when it lands. Not while aether_status shows protected: mail never wakes a protected session, so wait in your turn.
 - needs-input: only a question a human must answer; the reply comes as your next prompt.
 - blocked: a human must act, such as missing access or a broken environment; not a way to wait.
 - success | failure: the work you own is verified done or cannot be done; the session stays open for follow-up. Success shows the session as Ready for review until the user marks it complete or later.
@@ -1372,7 +1372,9 @@ What a report does depends on the session:
   the session's inbox once, which wakes it. A new waiting report with
   `--until` replaces the conditions; waiting without it keeps them; any
   other report, a person's prompt or a relaunch cancels them
-  ([session waits](watches.md#session-waits)). A parent with unfinished
+  ([session waits](watches.md#session-waits)). Session details shows them
+  under **Waiting until**
+  ([dashboard-frontend.md](dashboard-frontend.md#details)). A parent with unfinished
   subsessions shows `waiting-agents` at turn end without reporting it, as
   [Subsessions](#subsessions) describes.
 - **Answered report.** `aether-internal report answered --summary '<what you
