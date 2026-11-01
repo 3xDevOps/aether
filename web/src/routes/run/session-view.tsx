@@ -272,7 +272,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   })
   const announcement = useAnnouncement(run, rows, session, agentName)
 
-  const ctx = useRowContext(run, agent, nav)
+  const ctx = useRowContext(run, agent, nav, room)
 
   const count = flat.length + (older ? 1 : 0)
   const focusedIndex = focused === null ? -1 : flat.findIndex((item) => item.key === focused)

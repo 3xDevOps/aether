@@ -15,8 +15,8 @@ export function DecisionButtons({ decide }: { decide: (approve: boolean) => Prom
     : late ? stillWaiting : approve ? 'Approving…' : 'Denying…'
   return (
     <>
-      <RequestAction label={label(false)} disabled={pending !== null} onClick={() => press(false)} />
-      <RequestAction label={label(true)} variant="primary" disabled={pending !== null} onClick={() => press(true)} />
+      <RequestAction label={label(false)} variant="danger" disabled={pending !== null} onClick={() => press(false)} />
+      <RequestAction label={label(true)} variant="confirm" disabled={pending !== null} onClick={() => press(true)} />
     </>
   )
 }

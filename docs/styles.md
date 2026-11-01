@@ -109,7 +109,7 @@ state lines, badges, callouts and request cards:
 
 Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark;
 `bg-accent-soft` likewise. `text-on-failed` is the text on a `bg-state-failed`
-fill. Diffs use `text-diff-add`/`text-diff-del` (the done and failed colours)
+fill, and `text-on-done` on a `bg-state-done` fill. Diffs use `text-diff-add`/`text-diff-del` (the done and failed colours)
 and `bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
 
 Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
@@ -145,6 +145,7 @@ than restyling it.
 | `secondary` | Seam border on `bg-raised`, `shadow-button` | Other actions |
 | `ghost` | Muted text, `bg-hover-chrome` on hover | Toolbar and icon buttons |
 | `danger` | `bg-state-failed`, `text-on-failed` | Confirming a destructive action |
+| `confirm` | `bg-state-done`, `text-on-done` | Approve, beside a `danger` Deny |
 | `link` | Accent text, underline on hover | Inline actions that read as links |
 | `quiet` | Muted text; `text-text` and an underline on hover | Inline secondary actions inside muted copy |
 
@@ -356,7 +357,7 @@ when a listed file already complies, so the lists only shrink.
 
 The same file checks contrast in both themes: `text` and `text-muted` on
 every surface, `text` on `selection`, accent text on canvas and chrome,
-`on-accent` on the accent fill, `on-failed` on the failed fill, and the
+`on-accent` on the accent fill, `on-failed` and `on-done` on their fills, and the
 states and diff colours on canvas at 4.5:1; control borders, `icon-faint`
 and the agent colours on canvas at 3:1. It also checks that every `text-*`
 and `bg-*` class in `components/ui/` names a token defined in `index.css`.

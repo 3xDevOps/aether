@@ -208,6 +208,7 @@
   --state-done: #1a7a36;
   --state-paused: #6e6e6e;
   --on-failed: #ffffff;
+  --on-done: #ffffff;
 
   --series-1: #2a78d6;
   --series-2: #eb6834;
@@ -273,6 +274,7 @@
   --state-done: #45c26a;
   --state-paused: #8a8a8a;
   --on-failed: #141516;
+  --on-done: #141516;
 
   --series-1: #3987e5;
   --series-2: #d95926;
@@ -359,6 +361,7 @@
   --color-icon-faint: var(--icon-faint);
   --color-on-accent: var(--on-accent);
   --color-on-failed: var(--on-failed);
+  --color-on-done: var(--on-done);
   --color-selection: var(--selection);
   --color-state-working: var(--state-working);
   --color-state-needs-you: var(--state-needs-you);
