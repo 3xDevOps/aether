@@ -327,8 +327,10 @@ func TestDockerManagedExecHelperLost(t *testing.T) {
 	live, lost := start("live"), start("lost")
 	sum := sha256.Sum256([]byte("lost"))
 	stateDir := "/tmp/.aether-devexec-" + hex.EncodeToString(sum[:20])
-	if code, _, stderr, err := d.Exec(ctx, id, []string{"/bin/sh", "-c", "pkill -KILL -f 'run-pipe lost' && rm -rf " + stateDir}, ""); err != nil || code != 0 {
-		t.Fatalf("kill the helper and remove its state: code=%d stderr=%q err=%v", code, stderr, err)
+	for _, argv := range [][]string{{"pkill", "-KILL", "-f", "run-pipe lost"}, {"rm", "-rf", stateDir}} {
+		if code, _, stderr, err := d.Exec(ctx, id, argv, ""); err != nil || code != 0 {
+			t.Fatalf("%v: code=%d stderr=%q err=%v", argv, code, stderr, err)
+		}
 	}
 	for {
 		info, err := d.cli.ExecInspect(ctx, lost.Identity().ExecID, client.ExecInspectOptions{})
