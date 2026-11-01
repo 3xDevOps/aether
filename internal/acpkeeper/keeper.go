@@ -23,6 +23,10 @@ const DefaultRetain = 32 << 20
 // read its stdin.
 const agentQueueLimit = 2 * maxLine
 
+// deliveredTags bounds the tags a keeper reports. A tag this many tagged
+// requests old names one whose server long recorded where it went.
+const deliveredTags = 256
+
 // Config describes the adapter a keeper relays.
 type Config struct {
 	// Token authenticates attachers. Only the server that started the
@@ -68,6 +72,11 @@ type Keeper struct {
 	closeAgent  bool
 	// inputErr is why the adapter's stdin took no more writes.
 	inputErr error
+	// tags name the newest tagged requests that reached the agent, oldest
+	// first. An ack or an attach does not forget them: a server records a
+	// delivery after it handled the request's answer, and may die between
+	// the two.
+	tags []string
 }
 
 // retained is one agent-to-client frame: an ACP message, or the adapter's
@@ -91,7 +100,6 @@ type outgoing struct {
 	gen       uint64
 	id        json.RawMessage
 	method    string
-	tag       string
 	turn      int64
 	sessionID string
 	answer    []byte
@@ -438,7 +446,7 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 	}
 	k.gen = h.Gen
 	k.ackLocked(h.Ack)
-	state := State{Initialize: k.init, Session: k.session, SessionID: k.sessionID, Stderr: string(k.stderr)}
+	state := State{Initialize: k.init, Session: k.session, SessionID: k.sessionID, Stderr: string(k.stderr), Delivered: slices.Clone(k.tags)}
 	// Answers belong to the attacher that asked; a prompt's answer stays
 	// for the attacher that adopts the prompt.
 	kept := k.frames[:0]
@@ -454,9 +462,6 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 	var prompt int64
 	for _, id := range slices.Sorted(maps.Keys(k.out)) {
 		e := k.out[id]
-		if e.tag != "" {
-			state.Delivered = append(state.Delivered, e.tag)
-		}
 		if e.method != acp.AgentMethodSessionPrompt {
 			delete(k.out, id)
 			continue
@@ -519,7 +524,11 @@ func (k *Keeper) fromAttacher(a *attacher, f frame) {
 			return
 		}
 		k.nextID = id
-		k.out[id] = &outgoing{gen: a.gen, id: h.ID, method: h.Method, tag: f.Tag, turn: f.Turn, sessionID: h.Params.SessionID}
+		k.out[id] = &outgoing{gen: a.gen, id: h.ID, method: h.Method, turn: f.Turn, sessionID: h.Params.SessionID}
+		if f.Tag != "" {
+			k.tags = append(k.tags, f.Tag)
+			k.tags = k.tags[max(0, len(k.tags)-deliveredTags):]
+		}
 	case h.response():
 		if !k.unanswered[string(h.ID)] || !k.queueLocked(a, line) {
 			return

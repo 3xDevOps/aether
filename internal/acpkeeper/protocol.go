@@ -92,8 +92,7 @@ type frame struct {
 	Seq uint64          `json:"seq,omitempty"`
 	M   json.RawMessage `json:"m,omitempty"`
 	// Tag names what a client-to-agent request delivers, such as a room
-	// message id; the keeper reports the tags of requests it forwarded for
-	// an attacher that is gone.
+	// message id; the keeper reports the tags of the requests it forwarded.
 	Tag string `json:"tag,omitempty"`
 	// Turn is the item log's turn a session/prompt starts.
 	Turn int64 `json:"turn,omitempty"`
@@ -123,8 +122,8 @@ type State struct {
 	// Prompt is the session/prompt an earlier attacher sent whose answer no
 	// attacher acked; AdoptMethod takes it over.
 	Prompt *Prompt `json:"prompt,omitempty"`
-	// Delivered are the tags of requests earlier attachers sent that reached
-	// the agent and whose answer no attacher acked.
+	// Delivered are the tags of the newest tagged requests that reached the
+	// agent, answered or not.
 	Delivered []string `json:"delivered,omitempty"`
 	Stderr    string   `json:"stderr,omitempty"`
 	// Term is a terminal keeper's state.

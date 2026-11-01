@@ -12,6 +12,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -493,26 +495,48 @@ func TestSameIDAcrossGenerations(t *testing.T) {
 	}
 }
 
-func TestDeliveredTagsAreUnackedRequests(t *testing.T) {
+func TestDeliveredTagsOutliveAcksAndAttaches(t *testing.T) {
 	t.Parallel()
 	a := newAgent(t, 0)
 	first := a.rawAttach()
 
-	first.send(frame{T: frameRPC, M: json.RawMessage(req("1", "room/send")), Tag: "t1"})
-	kid := a.recvReq("room/send")
+	first.send(frame{T: frameRPC, M: json.RawMessage(req("1", "session/prompt")), Tag: "t1"})
+	kid := a.recvReq("session/prompt")
 	a.send(resp(kid, `{}`))
 	answered := first.next()
+	// The server acks the answer, then dies before it records the delivery.
 	first.send(frame{T: frameAck, Seq: answered.Seq})
+	waitAcked(t, a.k, answered.Seq)
 
 	first.send(frame{T: frameRPC, M: json.RawMessage(req("2", "room/send")), Tag: "t2"})
-	kid = a.recvReq("room/send")
-	a.send(resp(kid, `{}`))
-	first.next()
+	a.recvReq("room/send")
 	_ = first.conn.Close()
 
+	// So does the next server, before it records what the keeper reported.
 	second := a.attach(2)
-	if got := second.State().Delivered; len(got) != 1 || got[0] != "t2" {
-		t.Fatalf("State.Delivered = %v, want [t2]", got)
+	if got := second.State().Delivered; !slices.Equal(got, []string{"t1", "t2"}) {
+		t.Fatalf("State.Delivered = %v, want [t1 t2]", got)
+	}
+	_ = second.Close()
+	if got := a.attach(3).State().Delivered; !slices.Equal(got, []string{"t1", "t2"}) {
+		t.Fatalf("State.Delivered after a second attach = %v, want [t1 t2]", got)
+	}
+}
+
+func TestDeliveredTagsKeepTheNewest(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	r := a.rawAttach()
+	var want []string
+	for i := range deliveredTags + 3 {
+		tag := fmt.Sprintf("t%d", i)
+		r.send(frame{T: frameRPC, M: json.RawMessage(req(strconv.Itoa(i+1), "room/send")), Tag: tag})
+		a.recvReq("room/send")
+		want = append(want, tag)
+	}
+	_ = r.conn.Close()
+	if got := a.attach(2).State().Delivered; !slices.Equal(got, want[3:]) {
+		t.Fatalf("State.Delivered = %v, want the newest %d", got, deliveredTags)
 	}
 }
 
