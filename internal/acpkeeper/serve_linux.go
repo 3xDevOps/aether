@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,6 +30,9 @@ const exitHandover = 30 * time.Second
 // then on it uses no stdio of its own, which is the stream of an exec that
 // ends with the server that started it. It returns the adapter's exit code.
 func Serve(socket, user string, argv []string) int {
+	// The child's parent-death signal follows the thread that starts it.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if err := undumpable(); err != nil {
 		fmt.Fprintln(os.Stderr, "acp-keeper:", err)
 		return 125

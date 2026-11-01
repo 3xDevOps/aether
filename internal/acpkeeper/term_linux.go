@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,6 +30,9 @@ const termDrain = time.Second
 // the keeper hangs the terminal up, as stopping a terminal exec does. It
 // returns the program's exit code.
 func ServeTerm(socket, user, home string, cols, rows uint16, argv []string) int {
+	// The child's parent-death signal follows the thread that starts it.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	fail := func(code int, err error) int {
 		fmt.Fprintln(os.Stderr, "acp-keeper:", err)
 		return code
