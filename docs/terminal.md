@@ -139,8 +139,11 @@ eight files per message.
   assistant, `aether message` or a connector, also arrives at once while you
   are the controller.
 - A message from anyone else waits 45 seconds (**Delivers in 45 s unless the
-  controller decides sooner.**). The controller sees it in **Details → Needs
-  you** with **Approve** and **Deny**.
+  controller decides sooner.**). It shows in the chat with a border in the
+  sender's color that empties clockwise as the 45 seconds run out. Under it the
+  controller gets **Deny** and **Approve**. While nobody controls the session,
+  anyone else who may steer gets **Take control to decide**. **Details → Needs
+  you** lists it too.
 - The row ends as **Sent**, **Not sent**, **Delivery uncertain**, **Denied** or
   **Cancelled**. **Sent** means the terminal accepted the write, not that the
   agent read it.

@@ -21,6 +21,7 @@ const buttonVariants = cva(
         secondary: 'border border-seam bg-raised text-text shadow-button hover:not-aria-disabled:bg-hover-chrome hover:not-aria-disabled:shadow-button-hover',
         ghost: 'text-muted hover:not-aria-disabled:bg-hover-chrome hover:not-aria-disabled:text-text',
         danger: 'bg-state-failed text-on-failed hover:not-aria-disabled:bg-state-failed/90',
+        confirm: 'bg-state-done text-on-done hover:not-aria-disabled:bg-state-done/90',
         link: 'relative text-accent underline-offset-2 hover:not-aria-disabled:underline coarse:after:absolute coarse:after:inset-x-0 coarse:after:top-1/2 coarse:after:h-11 coarse:after:-translate-y-1/2',
         quiet: 'relative text-muted underline-offset-2 hover:not-aria-disabled:text-text hover:not-aria-disabled:underline coarse:after:absolute coarse:after:inset-x-0 coarse:after:top-1/2 coarse:after:h-11 coarse:after:-translate-y-1/2',
       },
@@ -36,13 +37,13 @@ const buttonVariants = cva(
     compoundVariants: [
       { variant: ['link', 'quiet'], className: 'h-auto px-0 coarse:h-auto coarse:px-0' },
       // Only a fine pointer presses in: a finger covers the control it taps, so touch darkens it instead.
-      { variant: ['primary', 'secondary', 'ghost', 'danger'], className: 'pointer-fine:active:not-aria-disabled:scale-press coarse:active:not-aria-disabled:brightness-[0.96]' },
+      { variant: ['primary', 'secondary', 'ghost', 'danger', 'confirm'], className: 'pointer-fine:active:not-aria-disabled:scale-press coarse:active:not-aria-disabled:brightness-[0.96]' },
     ],
     defaultVariants: { variant: 'primary', size: 'md' },
   },
 )
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'link' | 'quiet'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'confirm' | 'link' | 'quiet'
 
 export type ButtonProps = React.ComponentProps<'button'> & {
   variant?: Variant
