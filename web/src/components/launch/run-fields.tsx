@@ -140,7 +140,7 @@ export function RunFields({
           ? 'Required. A Background session starts with this task and takes no input.'
           : 'Optional. Leave it blank to open the agent with no prompt.'}
       >
-        <Textarea className="max-h-[min(28rem,60vh)] [field-sizing:content]" autoFocus={autoFocus} required={mode === 'headless'} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
+        <Textarea className="max-h-48 [field-sizing:content]" autoFocus={autoFocus} required={mode === 'headless'} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => onTask(event.target.value)} />
       </FormField>
       {agents === null ? (
         <p className="text-ui-sm text-muted">Loading agents…</p>
