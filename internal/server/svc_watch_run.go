@@ -42,7 +42,9 @@ func init() {
 
 // storeWaitConditions is the scheduler's view of a run's wait conditions,
 // read from the store the watch service keeps them in, so it is there
-// from the scheduler's first judgement after a start.
+// from the scheduler's first judgement after a start. It leaves out what
+// a read found and its error: the scheduler's wait reaches every
+// workspace member, and those came from the owner's GitHub login.
 type storeWaitConditions struct{ db *store.DB }
 
 func (w storeWaitConditions) RunWaits(ctx context.Context, run domain.RunID) ([]scheduler.WaitCondition, error) {
@@ -53,9 +55,9 @@ func (w storeWaitConditions) RunWaits(ctx context.Context, run domain.RunID) ([]
 	out := make([]scheduler.WaitCondition, 0, len(waits))
 	for _, c := range waits {
 		out = append(out, scheduler.WaitCondition{
-			Spec: c.Spec, CreatedAt: c.CreatedAt, State: c.WaitState, Summary: c.Summary,
+			Spec: c.Spec, CreatedAt: c.CreatedAt, State: c.WaitState,
 			LastCheckedAt: timeOf(c.LastCheckAt), SourceCheckedAt: timeOf(c.SourceCheckedAt), NextCheckAt: timeOf(c.NextCheckAt),
-			ConsecutiveFailures: c.Failures, LastError: c.Error, ResolvedAt: timeOf(c.ResolvedAt), DeliveredAt: timeOf(c.DeliveredAt),
+			ConsecutiveFailures: c.Failures, ResolvedAt: timeOf(c.ResolvedAt), DeliveredAt: timeOf(c.DeliveredAt),
 			LastDeliveryError: c.DeliveryError,
 		})
 	}

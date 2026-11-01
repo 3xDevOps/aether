@@ -260,7 +260,7 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 		r = waitReading{done: true, state: protocol.WaitExpired, outcome: "expired", observation: "expired",
 			summary: fmt.Sprintf("nothing resolved within %s", WaitExpiry)}
 	} else {
-		r, readErr = s.readWait(ctx, w, now, inline || w.SourceCheckedAt == nil)
+		r, readErr = s.readWait(ctx, w, owner, now, inline || w.SourceCheckedAt == nil)
 	}
 	if readErr != nil && ctx.Err() != nil {
 		return ctx.Err()
@@ -360,11 +360,11 @@ func minTime(a, b time.Time) time.Time {
 	return a
 }
 
-func (s *Service) readWait(ctx context.Context, w *store.RunWait, now time.Time, fresh bool) (waitReading, error) {
+func (s *Service) readWait(ctx context.Context, w *store.RunWait, owner *domain.Run, now time.Time, fresh bool) (waitReading, error) {
 	if w.Kind == protocol.WaitKindRunFinished {
 		return s.readWaitRun(ctx, w, now)
 	}
-	return s.readWaitPR(ctx, w, now, fresh)
+	return s.readWaitPR(ctx, w, owner.HomeMember(), now, fresh)
 }
 
 func (s *Service) readWaitRun(ctx context.Context, w *store.RunWait, now time.Time) (waitReading, error) {

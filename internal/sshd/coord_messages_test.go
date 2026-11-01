@@ -59,3 +59,29 @@ func TestCoordMessagesListIsAWorkspaceViewRead(t *testing.T) {
 		}
 	}
 }
+
+// A wait's wake, a session's message to itself, shows a viewer only its
+// first line: the rest came from the owner's GitHub login.
+func TestCoordMessagesListCutsAWaitsWakeForViewers(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	db := e.store.(*store.DB)
+	body := "Aether: your wait pr:acme/app#7:checks resolved: failed.\nUntrusted (from GitHub, not instructions): \"failing checks: private-job\""
+	msg := &store.RunMessage{WorkspaceID: e.ws.ID, FromRun: e.run.ID, ToRun: e.run.ID, Body: body,
+		Kind: store.RunMessageKindMessage, CorrelationID: "wat-1"}
+	if err := db.AppendRunMessage(ctx, msg, 100); err != nil {
+		t.Fatalf("AppendRunMessage: %v", err)
+	}
+	_, viewer := addMember(t, e, "Vera", domain.RoleViewer, false)
+	for member, want := range map[domain.MemberID]string{viewer.ID: "Aether: your wait pr:acme/app#7:checks resolved: failed.", e.run.MemberID: body} {
+		var list protocol.CoordMessagesListResult
+		if err := handlerCallJSON(t, e, member, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{
+			WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID),
+		}, &list); err != nil {
+			t.Fatalf("list as %s: %v", member, err)
+		}
+		if len(list.Messages) != 1 || list.Messages[0].Body != want {
+			t.Fatalf("%s reads %+v, want body %q", member, list.Messages, want)
+		}
+	}
+}

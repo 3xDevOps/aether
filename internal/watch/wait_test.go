@@ -909,3 +909,32 @@ func (h *waitHarness) awaitWake(run domain.RunID) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+type loginPR struct {
+	mergedPR
+	read chan domain.MemberID
+}
+
+func (p loginPR) Snapshot(ctx context.Context, member domain.MemberID, repo string, number int, fresh bool) (github.Snapshot, error) {
+	p.read <- member
+	return p.mergedPR.Snapshot(ctx, member, repo, number, fresh)
+}
+
+// A session handed to another member, here bob, keeps reading its pull
+// request waits with the GitHub login of ada, whose home it runs in.
+func TestAHandedOffSessionReadsWithItsHomeLogin(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	pr := loginPR{read: make(chan domain.MemberID, 8)}
+	h.pr = pr
+	h.restart()
+	owner := &domain.Run{WorkspaceID: h.ws.ID, MemberID: h.bob.ID, HomeMemberID: h.ada.ID, Task: "Ship", Harness: "claude",
+		Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	if err := h.db.CreateRun(h.ctx, owner); err != nil {
+		t.Fatal(err)
+	}
+	h.mustReport(owner, "pr:acme/app#7:merged")
+	if got := <-pr.read; got != h.ada.ID {
+		t.Fatalf("read with %s, want the home member %s", got, h.ada.ID)
+	}
+}

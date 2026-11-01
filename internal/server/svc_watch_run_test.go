@@ -53,7 +53,7 @@ func (fullInbox) NotifyRun(context.Context, domain.RunID, domain.RunID, string, 
 }
 
 // The scheduler reads a pull request wait as the watch service keeps it: a
-// pending one with its fresh source read, and a resolved one whose wake
+// pending one with its fresh source read but not what the read found, and a resolved one whose wake
 // cannot be written with that error and no delivery, which #604 judges a
 // broken wait.
 func TestTheSchedulerReadsTheRunsWaitConditions(t *testing.T) {
@@ -118,8 +118,8 @@ func TestTheSchedulerReadsTheRunsWaitConditions(t *testing.T) {
 	}
 	c := conditions[0]
 	if c.Spec != spec.Spec || c.State != protocol.WaitPending || c.SourceCheckedAt.IsZero() || c.LastCheckedAt.IsZero() ||
-		!c.NextCheckAt.After(c.SourceCheckedAt) || c.CreatedAt.IsZero() || c.Summary == "" || !c.ResolvedAt.IsZero() {
-		t.Fatalf("pending condition = %+v, want pending with its source read and next check", c)
+		!c.NextCheckAt.After(c.SourceCheckedAt) || c.CreatedAt.IsZero() || c.Summary != "" || !c.ResolvedAt.IsZero() {
+		t.Fatalf("pending condition = %+v, want pending with its source read and next check, and no summary", c)
 	}
 
 	pr.done.Store(true)

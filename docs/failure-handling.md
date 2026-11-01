@@ -80,18 +80,21 @@ evidence:
 
 | `wait.kind` | When | What you see | Needs you |
 | --- | --- | --- | --- |
-| `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way. | The state, and `<condition>: <status> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
-| `source_unknown` | A pending condition was not read within twice its poll interval, or its reads fail. | `Waiting for CI (status unknown)` and `<condition>: status unknown (last read 12m ago): <error>`. The last status is not shown as current. | No. Aether keeps retrying. |
-| `system_fault` | A condition errored or expired, for example the pull request is gone, and the agent is being told. | `Waiting for CI (wait fault)` and the condition's error. | No. The agent decides what to do next. |
+| `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way. | The state, and `<condition> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
+| `source_unknown` | A pending condition was not read within twice its poll interval, or its reads fail. | `Waiting for CI (status unknown)` and `<condition>: status unknown (last read 12m ago)`. | No. Aether keeps retrying. |
+| `system_fault` | A condition errored or expired, for example the pull request is gone, and the agent is being told. | `Waiting for CI (wait fault)` and the condition. | No. The agent decides what to do next. |
 | `system_fault` | A condition resolved, errored or expired, and its wake was not delivered within 5 minutes. | `Needs you`, reason `wait broken: <condition> resolved, but the agent was not woken`, and the delivery error. | Yes. The agent will not move on its own. Send it a message. |
-| `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`, and the last read error. | Yes. |
+| `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`. | Yes. |
 | `system_fault` | Every read of the session's conditions failed for an hour, counted from the first failure or from the wait's report if later. A read that succeeds starts the hour over, and so does a server restart. Before that the wait is `source_unknown`. | `Needs you`, reason `wait broken: cannot read this session's wait conditions for over 1h, so the agent will not be woken`, and the read error. | Yes. |
 | `unverified` | The agent named no condition, or only ones that left pending before its current turn or whose wake was delivered. Once delivered, including a condition that resolved inside the agent's own report, the session waits on its agent, not on the condition. | The state, as described above. It goes stale like a wait with no condition. | No. |
 
-The dashboard words the same evidence as "Waiting on <condition>: <status>
-· checked 2m ago", "Waiting on <condition>: status unknown since 01:10 —
-<error>" or "Wait fault: <condition> — <error>"
-([dashboard-frontend.md](dashboard-frontend.md#session-state)).
+The dashboard words the same evidence as "Waiting on <condition> · checked
+2m ago", "Waiting on <condition>: status unknown since 01:10" or "Wait
+fault: <condition>" ([dashboard-frontend.md](dashboard-frontend.md#session-state)).
+`wait` reaches every workspace member, so it never holds what a read found
+or its error: those come from the owner's GitHub login and are in the
+session's `wait_conditions`, which only its owner and admins read in full
+([session waits](watches.md#session-waits)).
 
 A broken wait is the only one that needs you, because only then can nothing
 but a person move the session. While another of its conditions is still pending

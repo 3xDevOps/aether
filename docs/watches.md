@@ -243,8 +243,9 @@ aether-internal report --outcome waiting --for ci \
 ```
 
 Each `--until` (at most 4) becomes a watch the session owns: `source` `agent`,
-`owner_run_id` the reporting session, and the session member's GitHub login and
-workspace access. A session records at most 30 waiting reports with `--until`
+`owner_run_id` the reporting session, and the session member's workspace
+access. Pull requests are read with the GitHub login of the member whose
+home the session runs in, its launcher, even after a handoff. A session records at most 30 waiting reports with `--until`
 an hour; the next is refused with that error.
 
 | Condition | Resolves | Outcome |
@@ -288,6 +289,8 @@ Delivery is claimed before it is written, retried with the same backoff as
 evaluation and keyed by the condition and its outcome, so a retry, a
 restart or a late event never wakes the session twice for one report. A paused session gets the message, and resuming it wakes it. A
 session that ended gets nothing. Web Push is never sent for session waits.
+`coord.messages.list` shows a member who is not the session's owner or an
+admin only the wake's first line, the condition and how it ended.
 
 | `state` | Meaning |
 | --- | --- |

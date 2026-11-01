@@ -27,23 +27,25 @@ func (p *PRs) Snapshot(ctx context.Context, member domain.MemberID, repo string,
 	return snap, err
 }
 
-// readWaitPR reads a pr_merged or pr_checks wait. A pull request GitHub
-// says is gone or that the member cannot read with their login resolves it
-// in the error state; any other failure is retried.
+// readWaitPR reads a pr_merged or pr_checks wait with the GitHub login of
+// home, the member whose home the agent runs in, so a handoff never lends
+// the agent another member's login. A pull request GitHub says is gone or
+// that home cannot read with their login resolves it in the error state;
+// any other failure is retried.
 //
 // A checks wait resolves only on its head commit: the one its condition
 // names, else the head at its first read, made afresh. An unnamed wait
 // also resolves on a later head whose checks finished after it began. A
 // named head that a push replaced before its checks finished resolves as
 // superseded; one not yet seen is waited for, up to namedHeadGrace.
-func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, now time.Time, fresh bool) (waitReading, error) {
+func (s *Service) readWaitPR(ctx context.Context, w *store.RunWait, home domain.MemberID, now time.Time, fresh bool) (waitReading, error) {
 	ref := fmt.Sprintf("%s#%d", w.Repo, w.Number)
 	r := waitReading{link: "https://github.com/" + w.Repo + "/pull/" + strconv.Itoa(w.Number)}
 	src, ok := s.pr.(prSnapshots)
 	if !ok {
 		return r, fmt.Errorf("%w: this server does not read pull requests", errWaitUnreadable)
 	}
-	snap, err := src.Snapshot(ctx, w.MemberID, w.Repo, w.Number, fresh)
+	snap, err := src.Snapshot(ctx, home, w.Repo, w.Number, fresh)
 	if err != nil {
 		var pe *prError
 		if errors.As(err, &pe) && (!pe.transient || pe.noLogin) {
