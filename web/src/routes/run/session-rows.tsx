@@ -2,6 +2,8 @@ import { memo, useLayoutEffect, useMemo, useRef } from 'react'
 import type * as React from 'react'
 import { MessageRow as AgentMessage } from '@/components/messages/message-row'
 import { MessageAttachments } from '@/components/messages/message-images'
+import { DecisionButtons } from '@/components/decision-buttons'
+import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
 import { LinkedText, Markdown } from '@/components/ui/markdown'
@@ -10,15 +12,18 @@ import { RequestCard } from '@/components/ui/request-card'
 import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { AssistantRow, EventRow, LiveActivityRow, MessageRow } from '@/components/ui/timeline'
 import { playEntrance, type Entrance } from '@/lib/motion'
-import { memberName } from '@/lib/member-name'
+import { memberName, resolveMember } from '@/lib/member-name'
+import { allowed } from '@/lib/permissions'
 import { inputHint } from '@/lib/run-requests'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
 import { NoteMessage } from '@/routes/run/note-thread'
+import type { RunRoom } from '@/routes/run/room'
 import { DeliveryCountdown, requestCardID } from '@/routes/run/requests'
 import { hasDetail, MoreSteps, StepDetail, StepsBlockHeader, StepView } from '@/routes/run/session-steps'
 import { SubagentGroup } from '@/routes/run/subagent-cards'
 import { useStore } from '@/store'
+import { useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { SessionRow } from '@/store/session-rows'
 import type { Step, StepsRow, WorkItem } from '@/store/session-steps'
@@ -124,11 +129,20 @@ export interface RowContext {
   hasAgentTerminal: boolean
   openTerminal: () => void
   reveal: RunNavigation['reveal']
+  /** How the viewer settles another member's queued message, when they may. */
+  steer?: { decide: (messageID: string, approve: boolean) => Promise<void> } | { takeControl: () => void }
 }
 
-export function useRowContext(run: RunRecord, agent: AgentTerminal, nav: RunNavigation): RowContext {
-  const latest = useRef({ agent, nav })
-  latest.current = { agent, nav }
+export function useRowContext(run: RunRecord, agent: AgentTerminal, nav: RunNavigation, room?: RunRoom): RowContext {
+  const self = useSelf()
+  const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
+  const free = useStore((s) => (run.controller_member_id !== undefined ? !run.controller_member_id : !s.roomStatus[run.id]?.controller))
+  const latest = useRef({ agent, nav, room })
+  latest.current = { agent, nav, room }
+  const steer = !room ? undefined
+    : agent.localControl ? 'decide'
+      : free && agent.steerable && !agent.controlUnavailable && allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers }) ? 'take-control'
+        : undefined
   return useMemo(() => ({
     runID: run.id,
     task: run.task,
@@ -140,7 +154,10 @@ export function useRowContext(run: RunRecord, agent: AgentTerminal, nav: RunNavi
       if (!current.localControl && !current.controlUnavailable) current.session.takeControl()
     },
     reveal: (id) => latest.current.nav.reveal(id),
-  }), [run.id, run.task, run.member_id, agent.hasAgentTerminal])
+    steer: steer === 'decide' ? { decide: (id, approve) => latest.current.room!.decide(id, approve ? 'approve' : 'deny') }
+      : steer === 'take-control' ? { takeControl: () => latest.current.agent.session.takeControl() }
+        : undefined,
+  }), [run.id, run.task, run.member_id, agent.hasAgentTerminal, steer])
 }
 
 function MailRow({ messageID, runID }: { messageID: string; runID: string }) {
@@ -153,10 +170,23 @@ function UserRow({ row, ctx, name }: { row: Extract<SessionRow, { kind: 'user' }
   const self = useStore((s) => s.info?.member.id)
   const body = row.body.startsWith(`${ctx.task}\n\n`) ? ctx.task : row.body
   const authorID = row.authorID ?? (row.images?.length || row.files?.length ? undefined : ctx.ownerID)
+  const color = useStore((s) => (authorID ? resolveMember(s, authorID).member?.color : undefined))
   const author = authorID === self && !row.via ? undefined : `${authorID ? name(authorID) : 'User'}${row.via ? ` via ${row.via}` : ''}`
+  const other = authorID !== undefined && authorID !== self
+  const asking = other && row.deliverAfter !== undefined
+  const steer = asking ? ctx.steer : undefined
   return (
     <MessageRow
       author={author}
+      border={other ? { color, ...(asking && { from: row.at, until: row.deliverAfter }) } : undefined}
+      actions={authorID && steer && (
+        <>
+          <Avatar name={name(authorID)} color={color} size="header" />
+          {'decide' in steer
+            ? <DecisionButtons decide={(approve) => steer.decide(row.id, approve)} />
+            : <RequestAction label="Take control to decide" onClick={steer.takeControl} />}
+        </>
+      )}
       attachments={row.images?.length || row.files?.length ? <MessageAttachments runID={ctx.runID} images={row.images} files={row.files} /> : undefined}
       meta={
         <>

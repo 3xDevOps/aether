@@ -1,12 +1,11 @@
 import { type CSSProperties, type RefObject, useEffect, useId, useRef, useState } from 'react'
-import { LoaderCircle, Moon, Plus, Sparkle, Terminal } from '@/components/icons'
+import { LoaderCircle, Plus } from '@/components/icons'
 import { type LastLaunch, quickLaunch, savedRefused, useLastLaunch } from '@/components/launch/quick-launch'
 import { modeLabel } from '@/components/launch/modes'
 import { splitShape } from '@/components/shell/split-shape'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button, type ButtonProps } from '@/components/ui/button'
 import { SlideOut, useLingering } from '@/components/ui/slide-out'
-import type { LaunchMode } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const height = 28
@@ -20,8 +19,6 @@ const fine = splitShape(height, lean)
 const coarse = splitShape(coarseHeight, coarseLean)
 const ringReach = 4
 const ring = [4, 2].map((grow) => ({ fine: splitShape(height, lean, grow, ringReach), coarse: splitShape(coarseHeight, coarseLean, grow, ringReach) }))
-
-const modeIcon: Record<LaunchMode, typeof Terminal> = { acp: Sparkle, tui: Terminal, headless: Moon }
 
 function clip(first: boolean, shape: { fine: typeof fine; coarse: typeof coarse }): CSSProperties {
   const pick = first ? 'first' : 'second'
@@ -100,14 +97,13 @@ export function SplitNewRun({ blocked, shortcut, onOpen }: {
     setBusy(false)
   }
 
-  const ModeIcon = last ? modeIcon[last.mode] : null
   return (
     <div role="group" aria-label="New session" className="flex min-w-0 flex-1 items-center">
       <Half first label="New session" hint={blocked ?? `New session · ${shortcut}`} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && onOpen()} className="pl-1 pr-3">
         <Plus />
         New session
       </Half>
-      {last && ModeIcon && (
+      {last && (
         <>
           <Half
             first={false}
@@ -125,12 +121,7 @@ export function SplitNewRun({ blocked, shortcut, onOpen }: {
           >
             {busy
               ? <LoaderCircle aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
-              : (
-                  <>
-                    <AgentGlyph agent={last.harness} className="size-3.5 text-on-accent" />
-                    <ModeIcon aria-hidden className="size-3 text-on-accent" />
-                  </>
-                )}
+              : <AgentGlyph agent={last.harness} className="size-3.5 text-on-accent" />}
           </Half>
           {lingering && <LaunchPreview id={previewID} open={previewTop !== null} top={shownTop.current} last={last} needsTask={needsTask} />}
         </>

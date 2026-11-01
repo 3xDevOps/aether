@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from '@/components/icons'
 import { type Tone, StatusDot } from '@/components/ui/status-dot'
+import { prefersReducedMotion, useElementSize } from '@/lib/hooks'
 import { cn, focusRingInset } from '@/lib/utils'
 
 const collapsedLines = 8
@@ -48,22 +49,71 @@ export function ClampedBody({ children, className }: { children: React.ReactNode
   )
 }
 
+const bubbleRadius = 14
+const borderWidth = 1.5
+
+function bubbleOutline(width: number, height: number): string {
+  const inset = borderWidth / 2
+  const r = Math.min(bubbleRadius, width / 2, height / 2) - inset
+  const [left, top, right, bottom] = [inset, inset, width - inset, height - inset]
+  const arc = (x: number, y: number) => `A${r} ${r} 0 0 1 ${x} ${y}`
+  return `M${width / 2} ${top}H${right - r}${arc(right, top + r)}V${bottom - r}${arc(right - r, bottom)}H${left + r}${arc(left, bottom - r)}V${top + r}${arc(left + r, top)}Z`
+}
+
+/** Given `from` and `until`, the border empties clockwise from the top as that time runs out. */
+function BubbleBorder({ color, from, until }: { color?: string; from?: string; until?: string }) {
+  const [box, { width, height }] = useElementSize<HTMLDivElement>()
+  const path = useRef<SVGPathElement>(null)
+  useLayoutEffect(() => {
+    if (!from || !until || prefersReducedMotion()) return
+    const start = Date.parse(from)
+    const animation = path.current?.animate([{ strokeDashoffset: 0 }, { strokeDashoffset: -100 }], {
+      duration: Math.max(0, Date.parse(until) - start),
+      delay: start - Date.now(),
+      easing: 'linear',
+      fill: 'forwards',
+    })
+    return () => animation?.cancel()
+  }, [from, until])
+  return (
+    <div ref={box} aria-hidden className="pointer-events-none absolute inset-0">
+      <svg className="absolute inset-0 size-full">
+        <path
+          ref={path}
+          d={width > 0 ? bubbleOutline(width, height) : undefined}
+          pathLength={100}
+          fill="none"
+          strokeWidth={borderWidth}
+          strokeOpacity={0.8}
+          strokeDasharray={until ? '100 100' : undefined}
+          style={{ stroke: color ?? 'var(--color-seam)' }}
+        />
+      </svg>
+    </div>
+  )
+}
+
 export function MessageRow({
   author,
   meta,
   children,
   attachments,
+  border,
+  actions,
 }: {
   author?: React.ReactNode
   meta?: React.ReactNode
   children: React.ReactNode
   attachments?: React.ReactNode
+  border?: { color?: string; from?: string; until?: string }
+  actions?: React.ReactNode
 }) {
   return (
     <div data-slot="message-row" className="ml-auto flex w-fit max-w-[85%] min-w-0 flex-col items-end gap-1">
-      <div className="max-w-full min-w-0 rounded-composer bg-chrome px-3.5 py-2">
+      <div className="relative max-w-full min-w-0 rounded-composer bg-chrome px-3.5 py-2">
         <ClampedBody>{children}</ClampedBody>
         {attachments}
+        {border && <BubbleBorder {...border} />}
       </div>
       {(author || meta) && (
         <div className="flex max-w-full min-w-0 items-center gap-1.5 px-1 text-ui-sm text-muted tabular-nums">
@@ -71,6 +121,7 @@ export function MessageRow({
           {meta}
         </div>
       )}
+      {actions && <div className="flex max-w-full min-w-0 flex-wrap items-center justify-end gap-2 px-1">{actions}</div>}
     </div>
   )
 }
