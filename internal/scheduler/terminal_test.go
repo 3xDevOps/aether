@@ -918,8 +918,8 @@ func TestEnsureTerminalRecreatesBlockedRootTerminal(t *testing.T) {
 			if second.ContainerID == first.ContainerID {
 				t.Fatal("the root terminal was kept")
 			}
-			if _, err := e.rt.get(runtime.ID(first.ContainerID)); !errors.Is(err, runtime.ErrNotFound) {
-				t.Fatalf("root terminal container = %v, want destroyed", err)
+			if _, getErr := e.rt.get(runtime.ID(first.ContainerID)); !errors.Is(getErr, runtime.ErrNotFound) {
+				t.Fatalf("root terminal container = %v, want destroyed", getErr)
 			}
 			replacement, err := e.rt.get(runtime.ID(second.ContainerID))
 			if err != nil {
