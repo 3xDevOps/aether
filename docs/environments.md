@@ -123,7 +123,10 @@ pushed to a registry.
   stops. Save first to keep unsaved changes.
 - Upgrading to the release with [permission tiers](security.md#permission-tiers)
   changes the environment's user from root to uid `1000`, so each environment
-  is recreated once at its next open. Save first to keep unsaved changes.
+  is recreated once at its next open. An environment still running as root
+  through the upgrade is stopped and recreated at the first open after a
+  session of yours holds your home as uid `1000`, since both cannot write it
+  under different users. Save first to keep unsaved changes.
 
 ## Reset to standard
 
