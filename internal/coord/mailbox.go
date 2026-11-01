@@ -557,10 +557,10 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
-	if err = s.endWaits(context.WithoutCancel(ctx), run, p.Outcome, report.CreatedAt); err != nil {
-		return protocol.CoordReportResult{}, internalError(method, err)
-	}
 	if report.State == store.CoordReportFinalized && report.PublishedAt != nil {
+		if err = s.endWaits(context.WithoutCancel(ctx), run, p.Outcome, report.CreatedAt); err != nil {
+			return protocol.CoordReportResult{}, internalError(method, err)
+		}
 		return coordReportResult(report), nil
 	}
 
@@ -607,6 +607,9 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	}
 	if report.State != store.CoordReportFinalized {
 		return protocol.CoordReportResult{}, internalError(method, errors.New("coord report did not finalize"))
+	}
+	if err = s.endWaits(context.WithoutCancel(ctx), run, p.Outcome, report.CreatedAt); err != nil {
+		return protocol.CoordReportResult{}, internalError(method, err)
 	}
 	if report.PublishedAt != nil {
 		if err := s.enqueueChildReport(ctx, report); err != nil {

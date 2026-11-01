@@ -402,7 +402,8 @@ func (d *DB) EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cau
 }
 
 // endRunWaitsWhere ends the pending waits that match where, and drops the
-// undelivered wakes of the woken ones. It returns both.
+// undelivered wakes of the woken ones, which then end in state too, so a
+// wake nobody will deliver never reads as a broken wait. It returns both.
 func endRunWaitsWhere(ctx context.Context, tx *sql.Tx, where string, args []any, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error) {
 	at, err := encodeTime(now)
 	if err != nil {
@@ -415,8 +416,10 @@ func endRunWaitsWhere(ctx context.Context, tx *sql.Tx, where string, args []any,
 		append([]any{"Not delivered: " + cause, at}, args...)...); err != nil {
 		return nil, fmt.Errorf("store: end waits: drop wakes: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, `UPDATE watches SET wait_delivery_next_at = NULL, wait_delivery_error = ?, version = version + 1
-		WHERE wait_delivery_next_at IS NOT NULL AND `+where+` RETURNING `+runWaitColumns, append([]any{"Not delivered: " + cause}, args...)...)
+	rows, err := tx.QueryContext(ctx, `UPDATE watches SET wait_delivery_next_at = NULL, wait_delivery_error = ?,
+		wait_state = ?, wait_cause = ?, wait_ended_by = ?, version = version + 1
+		WHERE wait_delivery_next_at IS NOT NULL AND `+where+` RETURNING `+runWaitColumns,
+		append([]any{"Not delivered: " + cause, state, cause, by}, args...)...)
 	if err != nil {
 		return nil, fmt.Errorf("store: end waits: drop wakes: %w", err)
 	}

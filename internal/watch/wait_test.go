@@ -707,6 +707,28 @@ func TestAPromptDropsAWakeNotYetWritten(t *testing.T) {
 	}
 }
 
+// A member cancelling a wait whose wake is not yet written cancels it,
+// with who did, so it never reads as resolved with its wake lost.
+func TestCancellingAnUndeliveredWakeEndsItCancelled(t *testing.T) {
+	t.Parallel()
+	h := newWaitHarness(t)
+	owner, target := h.run(h.ada, "Integrate"), h.run(h.ada, "Build")
+	h.inbox.fail.Store(true)
+	h.mustReport(owner, finished(target.ID))
+	h.status(target, domain.RunCompleted, "", "")
+	h.eventually("a failed attempt", func() bool { return h.only(owner.ID).DeliveryAttempts >= 1 })
+	w, err := h.svc.CancelRunWait(h.ctx, owner.ID, h.only(owner.ID).ID, h.ada.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.State != protocol.WaitCancelled || w.EndedByMemberID != string(h.ada.ID) || w.DeliveredAt != "" {
+		t.Fatalf("cancelled = %+v, want cancelled by ada with no delivery", w)
+	}
+	if got := h.only(owner.ID); got.State != protocol.WaitCancelled {
+		t.Fatalf("wait = %+v, want it to stay cancelled", got)
+	}
+}
+
 func (h *waitHarness) waitRows(run domain.RunID) int {
 	h.t.Helper()
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(h.path)+"?_pragma=busy_timeout(5000)")
