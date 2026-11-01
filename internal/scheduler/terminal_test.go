@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -852,5 +853,81 @@ func TestExitedTerminalCleanupRetainsStateForRetry(t *testing.T) {
 	}
 	if !status.Running || len(status.Tabs) != 1 || status.Tabs[0] != terminalTabMain {
 		t.Fatalf("restarted terminal status = %+v, want running main tab", status)
+	}
+}
+
+// A terminal still running as root after the upgrade to unprivileged
+// environments is recreated with the member's mapping once a live session of
+// theirs holds the home. A terminal running as another non-root user stays
+// refused, and the session's reservation is kept either way.
+func TestEnsureTerminalRecreatesBlockedRootTerminal(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		user      string
+		recreated bool
+	}{
+		"root":          {"", true},
+		"other mapping": {"2000:2000", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := newTestEnv(t, nil)
+			first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+			if err != nil {
+				t.Fatalf("EnsureTerminal: %v", err)
+			}
+			container, err := e.rt.get(runtime.ID(first.ContainerID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			container.mu.Lock()
+			container.spec.User = tc.user
+			container.spec.Fingerprint = "created by an earlier server"
+			container.mu.Unlock()
+			if closeErr := e.sched.Close(); closeErr != nil {
+				t.Fatalf("Close before recovery: %v", closeErr)
+			}
+
+			recovered := e.newScheduler(t, e.rt, newFakePTY())
+			live := &credentialUserReservation{home: e.member.ID, user: unprivilegedUser, owner: "live session run-live"}
+			recovered.credentialUsers = map[*credentialUserReservation]struct{}{live: {}}
+			startScheduler(t, recovered)
+			waitFor(t, "terminal recovery", func() bool {
+				return recovered.lookupTerminal(e.member.ID) != nil
+			})
+
+			second, err := recovered.EnsureTerminal(t.Context(), e.member.ID)
+			recovered.mu.Lock()
+			_, kept := recovered.credentialUsers[live]
+			recovered.mu.Unlock()
+			if !kept {
+				t.Fatal("the live session's reservation was dropped")
+			}
+			if !tc.recreated {
+				if err == nil || !strings.Contains(err.Error(), "resolved user "+tc.user) {
+					t.Fatalf("EnsureTerminal = %v, want the identity conflict", err)
+				}
+				if running, _ := recovered.terminalContainerRunning(t.Context(), runtime.ID(first.ContainerID), 50*time.Millisecond); !running {
+					t.Fatal("a terminal with a conflicting non-root user was stopped")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("EnsureTerminal over a root terminal: %v", err)
+			}
+			if second.ContainerID == first.ContainerID {
+				t.Fatal("the root terminal was kept")
+			}
+			if _, err := e.rt.get(runtime.ID(first.ContainerID)); !errors.Is(err, runtime.ErrNotFound) {
+				t.Fatalf("root terminal container = %v, want destroyed", err)
+			}
+			replacement, err := e.rt.get(runtime.ID(second.ContainerID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if replacement.spec.User != unprivilegedUser {
+				t.Fatalf("replacement user = %q, want %q", replacement.spec.User, unprivilegedUser)
+			}
+		})
 	}
 }

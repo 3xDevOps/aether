@@ -129,10 +129,20 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 			}
 		} else {
 			terminal := terminalFromSupervision(existing)
-			if err := s.ensureTerminalReady(ctx, existing, terminal); err != nil {
+			err := s.ensureTerminalReady(ctx, existing, terminal)
+			if err == nil {
+				return terminal, nil
+			}
+			if !s.legacyRootTerminalBlocked(existing) {
 				return nil, err
 			}
-			return terminal, nil
+			// Environments run unprivileged, so a terminal still running as
+			// root was started before that upgrade. Stopped, it fails the
+			// fingerprint below and is recreated with the members' mapping.
+			slog.Warn("scheduler: recreate a root environment terminal blocked by the member's live containers", "member", member, "container", existing.containerID, "error", err)
+			if stopErr := s.stopTerminalLocked(ctx, member); stopErr != nil {
+				return nil, errors.Join(err, stopErr)
+			}
 		}
 	}
 	m, err := s.cfg.Store.GetMember(ctx, member)
@@ -576,7 +586,16 @@ func (s *Scheduler) checkTerminalOwnership(sup *terminalSupervision) error {
 	return nil
 }
 
+func (s *Scheduler) legacyRootTerminalBlocked(sup *terminalSupervision) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return sup.ownershipBlocked && !sup.metadataPending && sup.runUser == ""
+}
+
 func terminalOwnershipConflict(member domain.MemberID, other *credentialUserReservation, user string) error {
+	if user == "" {
+		user = "root"
+	}
 	return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
 		member, other.owner, other.user, user)
 }
