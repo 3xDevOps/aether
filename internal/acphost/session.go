@@ -408,6 +408,13 @@ func (s *Session) open(ctx context.Context) error {
 // sessionOptionsLocked takes the agent's models, modes and options from its
 // session/new, session/resume or session/load result.
 func (s *Session) sessionOptionsLocked(res sessionResult) {
+	s.seedOptionsLocked(res)
+	s.publishOptionsLocked()
+}
+
+// seedOptionsLocked takes the option catalog from a session result without
+// recording it.
+func (s *Session) seedOptionsLocked(res sessionResult) {
 	s.options.model = legacyOptions(res.Models, "availableModels", "modelId", "currentModelId")
 	s.options.mode = legacyOptions(res.Modes, "availableModes", "id", "currentModeId")
 	// Resume/load may have already delivered config updates. If the response
@@ -420,7 +427,7 @@ func (s *Session) sessionOptionsLocked(res sessionResult) {
 	if s.options.mode.current == "" {
 		s.options.mode.current = s.state.Mode
 	}
-	s.replaceOptionsLocked(options)
+	s.options.replace(options)
 }
 
 // SessionID is the agent session id to store for a later restore.

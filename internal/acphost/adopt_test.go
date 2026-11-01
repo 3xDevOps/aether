@@ -1,7 +1,9 @@
 package acphost
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -138,5 +140,51 @@ func TestASessionThatWasNotAdoptedIsReplayed(t *testing.T) {
 	case <-s.Replayed():
 	default:
 		t.Fatal("a new session waits for a replay")
+	}
+}
+
+func TestAdoptionKeepsTheLastRecordedSelections(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	var res struct {
+		ConfigOptions []map[string]any `json:"configOptions"`
+	}
+	if err := json.Unmarshal(m.fix.SessionNew, &res); err != nil {
+		t.Fatal(err)
+	}
+	for _, option := range res.ConfigOptions {
+		switch option["id"] {
+		case "model":
+			option["currentValue"] = "opus"
+		case "mode":
+			option["currentValue"] = "plan"
+		}
+	}
+	selected, err := json.Marshal(res.ConfigOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/run.items.jsonl"
+	log, err := OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range []Item{{Kind: KindConfigOptions, ConfigOptions: selected}, {Kind: KindModeChange, Mode: "plan"}, {Kind: KindTurnStart, Turn: 1}} {
+		if err := log.Append(&it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := startMock(t, m, Config{LogPath: path, Adopt: &Adoption{
+		Initialize: m.fix.Initialize, Session: m.fix.SessionNew, SessionID: m.sessionID(), PromptTurn: 1,
+	}})
+	st := s.State()
+	if st.Mode != "plan" || !bytes.Equal(st.ConfigOptions, selected) {
+		t.Fatalf("adopted mode %q, options %s; want plan and %s", st.Mode, st.ConfigOptions, selected)
+	}
+	its := items(t, s)
+	if n := len(ofKind(its, KindConfigOptions)) + len(ofKind(its, KindModeChange)); n != 2 {
+		t.Fatalf("the adoption recorded the selections again: %+v", its)
 	}
 }
