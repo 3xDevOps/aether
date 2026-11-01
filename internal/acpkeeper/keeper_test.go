@@ -75,6 +75,7 @@ type agent struct {
 	t           *testing.T
 	k           *Keeper
 	out         *io.PipeWriter
+	stdin       *io.PipeReader
 	in          chan string
 	stdinClosed chan struct{}
 	pumped      chan struct{}
@@ -85,7 +86,7 @@ func newAgent(t *testing.T, retain int) *agent {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	a := &agent{
-		t: t, out: outW, in: make(chan string, 64),
+		t: t, out: outW, stdin: inR, in: make(chan string, 64),
 		stdinClosed: make(chan struct{}), pumped: make(chan struct{}),
 		k: New(Config{Token: token, AgentIn: inW, Retain: retain, Logger: slog.New(slog.DiscardHandler)}),
 	}
@@ -763,4 +764,18 @@ func TestAcksOnlyWhatWasHandled(t *testing.T) {
 	}
 	c.Writer().(interface{ Handled(uint64) }).Handled(1)
 	waitAcked(t, a.k, 1)
+}
+
+func TestAnAdapterInputThatFailsEndsTheAttachment(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	p := a.attach(1)
+	_ = a.stdin.CloseWithError(errors.New("adapter closed its stdin"))
+	p.write(req("1", "session/prompt"))
+	if !isClosed(t, p.lines) {
+		t.Fatal("the attachment outlived a failed write to the adapter")
+	}
+	if re := a.refusal(Hello{Gen: 2, Token: token}); re.Code != RefusedInput || !strings.Contains(re.Message, "adapter closed its stdin") {
+		t.Fatalf("refusal %+v, want %q with the write error", re, RefusedInput)
+	}
 }

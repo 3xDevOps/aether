@@ -66,6 +66,8 @@ type Keeper struct {
 	toAgent     [][]byte
 	toAgentSize int
 	closeAgent  bool
+	// inputErr is why the adapter's stdin took no more writes.
+	inputErr error
 }
 
 // retained is one agent-to-client frame: an ACP message, or the adapter's
@@ -150,10 +152,16 @@ func (k *Keeper) writeAgent() {
 		k.toAgent = k.toAgent[1:]
 		k.toAgentSize -= len(line)
 		k.mu.Unlock()
-		if _, err := k.cfg.AgentIn.Write(line); err != nil {
-			k.cfg.Logger.Warn("acpkeeper: write to the agent", "error", err)
-		}
+		_, err := k.cfg.AgentIn.Write(line)
 		k.mu.Lock()
+		if err != nil {
+			k.cfg.Logger.Warn("acpkeeper: write to the agent; refusing attachers", "error", err)
+			k.inputErr = err
+			k.toAgent, k.toAgentSize, k.closeAgent = nil, 0, true
+			if k.att != nil {
+				k.dropLocked(k.att)
+			}
+		}
 	}
 }
 
@@ -419,6 +427,8 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 		return nil, refuse(RefusedOverflow, "")
 	case k.exit != nil:
 		return nil, refuse(RefusedExited, "the agent's ACP server exited with code "+strconv.Itoa(k.exit.Code))
+	case k.inputErr != nil:
+		return nil, refuse(RefusedInput, "write to the agent's ACP server: "+k.inputErr.Error())
 	}
 	if old := k.att; old != nil {
 		// The sender tells it and then drops it.
@@ -525,6 +535,10 @@ func (k *Keeper) fromAttacher(a *attacher, f frame) {
 // reading it while a stuck queue grows past its limit costs a its
 // attachment.
 func (k *Keeper) queueLocked(a *attacher, line []byte) bool {
+	if k.inputErr != nil {
+		k.dropLocked(a)
+		return false
+	}
 	if k.toAgentSize+len(line)+1 > agentQueueLimit {
 		k.cfg.Logger.Warn("acpkeeper: the agent does not read its input; dropping the attacher", "queued", k.toAgentSize)
 		k.dropLocked(a)

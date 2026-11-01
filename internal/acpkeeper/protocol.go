@@ -83,6 +83,8 @@ const (
 	RefusedOverflow = "overflow"
 	// RefusedExited: the adapter exited.
 	RefusedExited = "exited"
+	// RefusedInput: the adapter's stdin takes no more writes.
+	RefusedInput = "input"
 )
 
 type frame struct {
