@@ -81,7 +81,7 @@ export interface RunInputRequest {
   title?: string
 }
 
-export type WaitKind = 'pr_merged' | 'pr_checks' | 'run_finished'
+export type WaitConditionKind = 'pr_merged' | 'pr_checks' | 'run_finished'
 export type WaitState = 'pending' | 'resolved' | 'cancelled' | 'superseded' | 'expired' | 'error'
 
 export interface WaitChecks {
@@ -105,7 +105,7 @@ export interface WaitCondition {
   id: string
   revision: number
   spec: string
-  kind: WaitKind
+  kind: WaitConditionKind
   repo?: string
   number?: number
   run_id?: string
