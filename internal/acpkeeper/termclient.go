@@ -4,11 +4,25 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"time"
 )
+
+// termWriteTimeout bounds a write to the keeper, and termFenceWait the wait
+// for the keeper to confirm a fence, whatever the caller's context allows.
+const (
+	termWriteTimeout = 5 * time.Second
+	termFenceWait    = 2 * time.Second
+)
+
+// ContextWriter bounds and interrupts one write without closing the stream.
+type ContextWriter interface {
+	WriteContext(context.Context, []byte) (int, error)
+}
 
 // TermClient is a server's attachment to a terminal keeper. It serves as the
 // terminal's runtime attachment: Stdout yields the PTY's output from the
@@ -23,11 +37,19 @@ type TermClient struct {
 	done  chan struct{}
 	kick  chan struct{}
 	wmu   sync.Mutex
+	// imu serializes input; inputSeq numbers its frames.
+	imu      sync.Mutex
+	inputSeq uint64
 
 	mu       sync.Mutex
 	exit     *Exit
 	err      error
 	answered uint64
+	// inputDone and fenced are the keeper's newest in_done and fenced
+	// frames; inputKick wakes the writer waiting for them.
+	inputDone frame
+	fenced    uint64
+	inputKick chan struct{}
 }
 
 // AttachTerm sends hello over conn, asking to replay output from offset
@@ -48,7 +70,7 @@ func AttachTerm(ctx context.Context, conn io.ReadWriteCloser, hello Hello, from 
 	}
 	out, in := io.Pipe()
 	c := &TermClient{conn: conn, br: br, state: *state.Term, from: min(max(from, state.Term.Start), state.Term.End),
-		out: out, in: in, done: make(chan struct{}), kick: make(chan struct{}, 1)}
+		out: out, in: in, done: make(chan struct{}), kick: make(chan struct{}, 1), inputKick: make(chan struct{}, 1)}
 	go c.read()
 	go c.answerLoop()
 	return c, nil
@@ -82,7 +104,7 @@ func (c *TermClient) answerLoop() {
 		c.mu.Lock()
 		seq := c.answered
 		c.mu.Unlock()
-		if seq > told && c.send(frame{T: frameAnswered, Seq: seq}) == nil {
+		if seq > told && c.send(context.Background(), frame{T: frameAnswered, Seq: seq}) == nil {
 			told = seq
 		}
 	}
@@ -103,11 +125,11 @@ func (c *TermClient) Stdout() io.Reader { return c.out }
 
 func (c *TermClient) Stderr() io.Reader { return strings.NewReader("") }
 
-func (c *TermClient) Resize(_ context.Context, cols, rows uint) error {
+func (c *TermClient) Resize(ctx context.Context, cols, rows uint) error {
 	if cols == 0 || rows == 0 || cols > 65535 || rows > 65535 {
 		return fmt.Errorf("acpkeeper: terminal dimensions must be between 1 and 65535")
 	}
-	return c.send(frame{T: frameResize, Cols: uint16(cols), Rows: uint16(rows)})
+	return c.send(ctx, frame{T: frameResize, Cols: uint16(cols), Rows: uint16(rows)})
 }
 
 // Close ends the attachment; the keeper keeps the terminal running.
@@ -137,21 +159,107 @@ func (c *TermClient) Err() error {
 type termInput struct{ c *TermClient }
 
 func (w termInput) Write(p []byte) (int, error) {
-	for i := 0; i < len(p); i += termChunk {
-		if err := w.c.send(frame{T: frameInput, Data: p[i:min(i+termChunk, len(p))]}); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), termWriteTimeout)
+	defer cancel()
+	return w.WriteContext(ctx, p)
+}
+
+// WriteContext returns once the program took p, or once the keeper confirmed
+// that the rest of p never reaches it. When the keeper confirms neither in
+// time, the attachment ends, which ends its input.
+func (w termInput) WriteContext(ctx context.Context, p []byte) (int, error) {
+	c := w.c
+	c.imu.Lock()
+	defer c.imu.Unlock()
+	for i := 0; i < len(p); {
+		chunk := p[i:min(i+termChunk, len(p))]
+		c.inputSeq++
+		seq := c.inputSeq
+		if err := c.send(ctx, frame{T: frameInput, Seq: seq, Data: chunk}); err != nil {
 			return i, err
+		}
+		done, err := c.awaitInput(ctx, seq)
+		if err != nil {
+			return i, err
+		}
+		i += done.N
+		switch {
+		case done.Error != "":
+			return i, fmt.Errorf("acpkeeper: write to the terminal: %s", done.Error)
+		case done.N < len(chunk):
+			return i, fmt.Errorf("acpkeeper: write to the terminal: %w", io.ErrShortWrite)
 		}
 	}
 	return len(p), nil
 }
 
+// awaitInput waits for the keeper's in_done for input frame seq. When ctx
+// ends first, it fences the frame.
+func (c *TermClient) awaitInput(ctx context.Context, seq uint64) (frame, error) {
+	if done, err := c.waitInput(ctx, seq, false); err == nil || ctx.Err() == nil {
+		return done, err
+	}
+	fenceCtx, cancel := context.WithTimeout(context.Background(), termFenceWait)
+	defer cancel()
+	err := c.send(fenceCtx, frame{T: frameFence, Seq: seq})
+	if err == nil {
+		var done frame
+		if done, err = c.waitInput(fenceCtx, seq, true); err == nil {
+			if done.Seq == seq {
+				return done, nil
+			}
+			return frame{}, fmt.Errorf("acpkeeper: write to the terminal: %w", ctx.Err())
+		}
+	}
+	_ = c.Close()
+	return frame{}, fmt.Errorf("acpkeeper: the keeper did not confirm the terminal input stopped, so the attachment ended: %w", errors.Join(ctx.Err(), err))
+}
+
+// waitInput returns the in_done for frame seq or, with fenced set, an empty
+// frame once the keeper confirmed it fenced seq.
+func (c *TermClient) waitInput(ctx context.Context, seq uint64, fenced bool) (frame, error) {
+	for {
+		c.mu.Lock()
+		done, fence := c.inputDone, c.fenced
+		c.mu.Unlock()
+		switch {
+		case done.Seq == seq:
+			return done, nil
+		case fenced && fence >= seq:
+			return frame{}, nil
+		}
+		select {
+		case <-c.inputKick:
+		case <-c.done:
+			return frame{}, fmt.Errorf("acpkeeper: write to the terminal: %w", c.Err())
+		case <-ctx.Done():
+			return frame{}, fmt.Errorf("acpkeeper: write to the terminal: %w", ctx.Err())
+		}
+	}
+}
+
 // Close leaves the PTY open for later input, as a runtime attachment does.
 func (termInput) Close() error { return nil }
 
-func (c *TermClient) send(f frame) error {
+// send writes f within ctx and termWriteTimeout. A write cut off part way
+// leaves the stream unframed, so it ends the attachment.
+func (c *TermClient) send(ctx context.Context, f frame) error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
-	if err := encodeFrame(c.conn, f); err != nil {
+	b, err := json.Marshal(f)
+	if err != nil {
+		return fmt.Errorf("acpkeeper: write to the keeper: %w", err)
+	}
+	b = append(b, '\n')
+	ctx, cancel := context.WithTimeout(ctx, termWriteTimeout)
+	defer cancel()
+	if w, ok := c.conn.(ContextWriter); ok {
+		_, err = w.WriteContext(ctx, b)
+	} else {
+		_, err = c.conn.Write(b)
+	}
+	if err != nil {
+		_ = c.Close()
 		return fmt.Errorf("acpkeeper: write to the keeper: %w", err)
 	}
 	return nil
@@ -197,6 +305,18 @@ func (c *TermClient) read() {
 		case framePreempted:
 			err = ErrPreempted
 			return
+		case frameInputDone, frameFenced:
+			c.mu.Lock()
+			if f.T == frameFenced {
+				c.fenced = max(c.fenced, f.Seq)
+			} else {
+				c.inputDone = f
+			}
+			c.mu.Unlock()
+			select {
+			case c.inputKick <- struct{}{}:
+			default:
+			}
 		}
 	}
 }

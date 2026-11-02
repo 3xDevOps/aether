@@ -17,6 +17,10 @@ const DefaultTermRetain = 2 << 20
 // termChunk bounds the data of one output or input frame.
 const termChunk = 32 << 10
 
+// termInputQueue bounds the input an attacher queued for a program that does
+// not read it; a client sends one input frame at a time.
+const termInputQueue = 4 * termChunk
+
 // ErrInputFull is a TermConfig.Input that cannot take more input yet.
 var ErrInputFull = errors.New("the terminal's input is full")
 
@@ -55,10 +59,6 @@ type Term struct {
 	exit       *Exit
 	ended      chan struct{}
 	endOnce    sync.Once
-
-	// in serializes writes to the PTY, which block while the program does
-	// not read its input.
-	in sync.Mutex
 }
 
 type termAttacher struct {
@@ -66,6 +66,11 @@ type termAttacher struct {
 	conn   io.ReadWriteCloser
 	cursor uint64
 	ctrl   []frame
+	// input is the input frames the program has yet to take, oldest
+	// first; none at or below fence reaches it.
+	input     []frame
+	inputSize int
+	fence     uint64
 	// exited is set once the attacher was sent the program's exit.
 	exited, preempted, gone bool
 }
@@ -133,6 +138,7 @@ func (t *Term) ServeConn(conn io.ReadWriteCloser) {
 		return
 	}
 	go t.send(a)
+	go t.feed(a)
 	for {
 		line, err := readLine(br)
 		if errors.Is(err, errLineTooLong) {
@@ -147,7 +153,9 @@ func (t *Term) ServeConn(conn io.ReadWriteCloser) {
 		}
 		switch f.T {
 		case frameInput:
-			t.input(a, f.Data)
+			t.queueInput(a, f)
+		case frameFence:
+			t.fenceInput(a, f.Seq)
 		case frameResize:
 			t.resize(a, f.Cols, f.Rows)
 		case frameAnswered:
@@ -192,27 +200,84 @@ func (t *Term) attach(conn io.ReadWriteCloser, h frame) (*termAttacher, *frame) 
 	return a, nil
 }
 
-func (t *Term) input(a *termAttacher, data []byte) {
-	t.in.Lock()
-	defer t.in.Unlock()
-	for len(data) > 0 {
-		// Input never blocks, so the check holds across the write: no input
-		// of a preempted attacher reaches the program after a newer one
-		// attached.
-		t.mu.Lock()
-		if t.att != a {
+func (t *Term) queueInput(a *termAttacher, f frame) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.att != a || f.Seq <= a.fence {
+		return
+	}
+	if a.inputSize+len(f.Data) > termInputQueue {
+		t.cfg.Logger.Warn("acpkeeper: the attacher queued more terminal input than the program takes; dropping it", "limit", termInputQueue)
+		t.dropLocked(a)
+		return
+	}
+	a.input = append(a.input, f)
+	a.inputSize += len(f.Data)
+	t.cond.Broadcast()
+}
+
+// fenceInput drops the attacher's input up to frame seq that has not
+// reached the program, and tells the attacher none of it will.
+func (t *Term) fenceInput(a *termAttacher, seq uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	a.fence = max(a.fence, seq)
+	kept := a.input[:0]
+	for _, f := range a.input {
+		if f.Seq > a.fence {
+			kept = append(kept, f)
+			continue
+		}
+		a.inputSize -= len(f.Data)
+	}
+	clear(a.input[len(kept):])
+	a.input = kept
+	a.ctrl = append(a.ctrl, frame{T: frameFenced, Seq: seq})
+	t.cond.Broadcast()
+}
+
+// feed writes the attacher's input to the program, one frame at a time, and
+// reports how much of each reached it. Input never blocks, so the checks
+// hold across each write: no input of a preempted attacher, or fenced
+// input, reaches the program afterwards.
+func (t *Term) feed(a *termAttacher) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for {
+		for len(a.input) == 0 && !a.gone {
+			t.cond.Wait()
+		}
+		if a.gone {
+			return
+		}
+		f := a.input[0]
+		var n int
+		var err error
+		for n < len(f.Data) && t.att == a && !a.gone && f.Seq > a.fence {
+			var w int
+			w, err = t.cfg.Input.Write(f.Data[n:])
+			n += max(w, 0)
+			if !errors.Is(err, ErrInputFull) {
+				if err != nil {
+					t.cfg.Logger.Warn("acpkeeper: write to the terminal", "error", err)
+					break
+				}
+				continue
+			}
 			t.mu.Unlock()
-			return
-		}
-		n, err := t.cfg.Input.Write(data)
-		t.mu.Unlock()
-		data = data[max(n, 0):]
-		if errors.Is(err, ErrInputFull) {
 			time.Sleep(10 * time.Millisecond)
-		} else if err != nil {
-			t.cfg.Logger.Warn("acpkeeper: write to the terminal", "error", err)
-			return
+			t.mu.Lock()
 		}
+		if len(a.input) > 0 && a.input[0].Seq == f.Seq {
+			a.input = a.input[1:]
+			a.inputSize -= len(f.Data)
+		}
+		done := frame{T: frameInputDone, Seq: f.Seq, N: n}
+		if err != nil && !errors.Is(err, ErrInputFull) {
+			done.Error = err.Error()
+		}
+		a.ctrl = append(a.ctrl, done)
+		t.cond.Broadcast()
 	}
 }
 

@@ -358,7 +358,7 @@ func TestRefusals(t *testing.T) {
 	if re := a.refusal(Hello{Gen: 3, Token: "wrong"}); re.Code != RefusedToken {
 		t.Fatalf("code %q, want %q", re.Code, RefusedToken)
 	}
-	_, f := a.rawHello(frame{V: 2, Gen: 3, Token: token})
+	_, f := a.rawHello(frame{V: Version + 1, Gen: 3, Token: token})
 	if f.T != frameRefused || f.Code != RefusedVersion {
 		t.Fatalf("got %+v, want refused %q", f, RefusedVersion)
 	}

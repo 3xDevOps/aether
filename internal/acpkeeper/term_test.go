@@ -223,9 +223,11 @@ func TestTermDropsAPreemptedAttachersPendingInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = old.Stdin().Write([]byte("stale")); err != nil {
-		t.Fatal(err)
-	}
+	stale := make(chan error, 1)
+	go func() {
+		_, writeErr := old.Stdin().Write([]byte("stale"))
+		stale <- writeErr
+	}()
 	select {
 	case <-p.tried:
 	case <-time.After(timeout):
@@ -235,11 +237,42 @@ func TestTermDropsAPreemptedAttachersPendingInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = <-stale; !errors.Is(err, ErrPreempted) {
+		t.Fatalf("the preempted attacher's write = %v", err)
+	}
 	close(p.open)
 	if _, err = current.Stdin().Write([]byte("fresh")); err != nil {
 		t.Fatal(err)
 	}
 	p.eventually(t, func() bool { return p.in.String() == "fresh" })
+}
+
+func TestTermInputThatTimesOutNeverReachesTheProgram(t *testing.T) {
+	t.Parallel()
+	p := &fullPTY{open: make(chan struct{}), tried: make(chan struct{})}
+	k := NewTerm(TermConfig{Token: token, Input: p, Resize: p.resize, Cols: 80, Rows: 24})
+	c, err := attachTerm(t, k, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	w := c.Stdin().(ContextWriter)
+	if _, err := w.WriteContext(ctx, []byte("stale")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a write the program never took = %v", err)
+	}
+	if err := c.Resize(context.Background(), 100, 30); err != nil {
+		t.Fatal(err)
+	}
+	close(p.open)
+	if _, err := w.WriteContext(context.Background(), []byte("fresh")); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if got := p.in.String(); got != "fresh" {
+		t.Fatalf("the program got %q", got)
+	}
 }
 
 func TestTermRefusesAWrongTokenAndAnACPKeeper(t *testing.T) {

@@ -28,7 +28,7 @@ const (
 	// Version is the frame protocol this build speaks. A keeper refuses a
 	// hello for any other version, which sends the server back to
 	// stopping the adapter and restoring its session.
-	Version = 1
+	Version = 2
 	// AdoptMethod is the request an attacher sends in place of the
 	// session/prompt an earlier attacher left unanswered. The keeper answers
 	// it with that prompt's answer and forwards nothing to the agent.
@@ -68,6 +68,9 @@ const (
 	frameInput     = "in"
 	frameResize    = "resize"
 	frameAnswered  = "answered"
+	frameInputDone = "in_done"
+	frameFence     = "fence"
+	frameFenced    = "fenced"
 )
 
 // Refusal codes.
@@ -109,6 +112,8 @@ type frame struct {
 	Exit  *Exit  `json:"exit,omitempty"`
 
 	Data []byte `json:"data,omitempty"`
+	// N is how many bytes of an input frame reached the program.
+	N    int    `json:"n,omitempty"`
 	Cols uint16 `json:"cols,omitempty"`
 	Rows uint16 `json:"rows,omitempty"`
 }

@@ -291,3 +291,10 @@ type bridgeConn struct{ att runtime.Attachment }
 func (c bridgeConn) Read(p []byte) (int, error)  { return c.att.Stdout().Read(p) }
 func (c bridgeConn) Write(p []byte) (int, error) { return c.att.Stdin().Write(p) }
 func (c bridgeConn) Close() error                { return c.att.Stdin().Close() }
+
+func (c bridgeConn) WriteContext(ctx context.Context, p []byte) (int, error) {
+	if w, ok := c.att.Stdin().(runtime.ContextWriter); ok {
+		return w.WriteContext(ctx, p)
+	}
+	return c.Write(p)
+}
