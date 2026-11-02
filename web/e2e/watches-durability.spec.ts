@@ -104,27 +104,26 @@ test('a watch survives a server crash without repeating a notice and notices the
   await alice.api.rpc('run.inject', { run_id: runID, message: 'ask permission', idempotency_key: `crash-1-${runID}` })
   await expect.poll(async () => (await needs(alice, watch.id)).length, { timeout: 60_000 }).toBe(1)
 
-  // The crash ends the turn, so the permission request is gone and the run
-  // waits for a message: one new need, and nothing for the state the run
-  // was in before the scheduler reconciled it.
+  // The agent outlives the crash under its keeper, so the permission request
+  // stays open: the restarted server must not notice the same need again.
   await aether.server.restart()
   await expect.poll(async () => {
     try {
-      return (await needs(alice, watch.id)).length
+      return (await alice.api.rpc<WatchGet>('watch.get', { watch_id: watch.id })).watch.state
     } catch {
-      return -1
+      return ''
     }
-  }, { timeout: 60_000, message: 'the restarted server notices the interrupted turn' }).toBe(2)
-  const afterCrash = await settledNeeds(alice, watch.id)
-  expect(afterCrash.map((n) => n.body)).toEqual(['Turn interrupted, send a message to continue', 'Permission requested: rm -rf build'])
-  expect((await alice.api.rpc<WatchGet>('watch.get', { watch_id: watch.id })).watch.state).toBe('active')
+  }, { timeout: 60_000, message: 'the restarted server serves the watch' }).toBe('active')
+  await allow(page, alice, runID)
+  await expect.poll(async () => (await alice.api.rpc<WatchGet>('watch.get', { watch_id: watch.id })).watch.observed.need ?? '').toBe('')
+  expect((await settledNeeds(alice, watch.id)).map((n) => n.body)).toEqual(['Permission requested: rm -rf build'])
 
   await alice.api.rpc('run.inject', { run_id: runID, message: 'ask permission', idempotency_key: `crash-2-${runID}` })
-  await expect.poll(async () => (await needs(alice, watch.id)).length, { timeout: 60_000 }).toBe(3)
-  expect(await settledNeeds(alice, watch.id)).toHaveLength(3)
+  await expect.poll(async () => (await needs(alice, watch.id)).length, { timeout: 60_000 }).toBe(2)
+  expect(await settledNeeds(alice, watch.id)).toHaveLength(2)
 
   await page.goto(`${alice.url}&page=settings&id=watches&watch=${watch.id}`)
-  await expect(page.getByRole('dialog').getByRole('region', { name: 'Notifications' }).getByRole('list', { name: 'Delivery' })).toHaveCount(3)
+  await expect(page.getByRole('dialog').getByRole('region', { name: 'Notifications' }).getByRole('list', { name: 'Delivery' })).toHaveCount(2)
   await testInfo.attach('watch after a server crash', { body: await page.screenshot(), contentType: 'image/png' })
 })
 
