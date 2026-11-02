@@ -113,6 +113,7 @@ type outgoing struct {
 	method    string
 	turn      int64
 	sessionID string
+	tag       string
 	answer    []byte
 }
 
@@ -273,6 +274,11 @@ func (k *Keeper) fromAgent(line []byte) {
 		if !present(h.Error) {
 			k.recordLocked(e, h.Result)
 		}
+		if e.tag != "" && refused(e.method, h) {
+			if i := slices.Index(k.tags, e.tag); i >= 0 {
+				k.tags = slices.Delete(k.tags, i, i+1)
+			}
+		}
 		answer, err := withID(line, e.id)
 		if err != nil {
 			k.cfg.Logger.Warn("acpkeeper: dropped an agent answer", "error", err)
@@ -329,6 +335,20 @@ func (k *Keeper) subagentLocked(line []byte) {
 	k.subagentIDs[id] = true
 	k.subagents = append(k.subagents, n.Params)
 	k.subagentsSize += len(n.Params)
+}
+
+// refused reports whether the agent's answer to a request other than a
+// session/prompt says it did not take what the request delivers: an error,
+// or a steer it answered promptRequired, which the server sends again as a
+// prompt. A session/prompt delivered its input once it reached the agent.
+func refused(method string, h rpcHead) bool {
+	if method == acp.AgentMethodSessionPrompt {
+		return false
+	}
+	var r struct {
+		Outcome string `json:"outcome"`
+	}
+	return present(h.Error) || json.Unmarshal(h.Result, &r) == nil && r.Outcome == "promptRequired"
 }
 
 // recordLocked keeps what a later attacher needs instead of initializing and
@@ -576,7 +596,7 @@ func (k *Keeper) fromAttacher(a *attacher, f frame) {
 			return
 		}
 		k.nextID = id
-		k.out[id] = &outgoing{gen: a.gen, id: h.ID, method: h.Method, turn: f.Turn, sessionID: h.Params.SessionID}
+		k.out[id] = &outgoing{gen: a.gen, id: h.ID, method: h.Method, turn: f.Turn, sessionID: h.Params.SessionID, tag: f.Tag}
 		if f.Tag != "" {
 			k.tags = append(k.tags, f.Tag)
 			k.tags = k.tags[max(0, len(k.tags)-deliveredTags):]

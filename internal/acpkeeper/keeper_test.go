@@ -523,6 +523,24 @@ func TestDeliveredTagsOutliveAcksAndAttaches(t *testing.T) {
 	}
 }
 
+func TestARefusedSteersTagIsNotDelivered(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	r := a.rawAttach()
+	for i, outcome := range []string{"injected", "promptRequired"} {
+		r.send(frame{T: frameRPC, M: json.RawMessage(req(strconv.Itoa(i+1), "_session/steering")), Tag: outcome})
+		a.send(resp(a.recvReq("_session/steering"), `{"outcome":"`+outcome+`"}`))
+		r.next()
+	}
+	r.send(frame{T: frameRPC, M: json.RawMessage(req("3", "room/send")), Tag: "refused"})
+	a.send(`{"jsonrpc":"2.0","id":` + a.recvReq("room/send") + `,"error":{"code":-32603,"message":"no"}}`)
+	r.next()
+	_ = r.conn.Close()
+	if got := a.attach(2).State().Delivered; !slices.Equal(got, []string{"injected"}) {
+		t.Fatalf("State.Delivered = %v, want [injected]", got)
+	}
+}
+
 func TestDeliveredTagsKeepTheNewest(t *testing.T) {
 	t.Parallel()
 	a := newAgent(t, 0)
