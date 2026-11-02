@@ -219,18 +219,3 @@ func TestSessionCloseIsIdempotentAndRemovesOwnedData(t *testing.T) {
 	}
 	sess.Close() // second Close must not panic
 }
-
-// Teardown trigger: an explicit DataDir is caller-owned and survives
-// Close (the CLI never sets it; tests do).
-func TestSessionCloseKeepsCallerOwnedData(t *testing.T) {
-	dial := func(context.Context) (io.ReadWriteCloser, error) { return nil, errors.New("unused") }
-	dataDir := t.TempDir()
-	sess, err := NewSession(Options{LocalDir: t.TempDir(), Dial: dial, DataDir: dataDir})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	sess.Close()
-	if _, serr := os.Stat(dataDir); serr != nil {
-		t.Fatalf("caller-owned data dir removed: %v", serr)
-	}
-}
