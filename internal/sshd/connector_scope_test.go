@@ -11,6 +11,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -19,6 +20,28 @@ func TestConnectorMethodScopesNameRegisteredMethods(t *testing.T) {
 	for method := range connectorMethodScopes {
 		if _, ok := methodHandlers[method]; !ok {
 			t.Errorf("connectorMethodScopes lists %s, which no handler serves", method)
+		}
+	}
+}
+
+// A connector granted an op's scope, and read, can make every call the op
+// declares: the server admits each method under read or under that scope.
+// Write and control are separate boxes, so a control op cannot lean on
+// write.
+func TestOpsMethodsFitTheirConnectorScope(t *testing.T) {
+	for _, o := range ops.Ops {
+		if o.Scope == "" {
+			continue
+		}
+		for _, method := range o.Methods {
+			scopes, ok := connectorMethodScopes[method]
+			if !ok {
+				t.Errorf("%s calls %s, which the server refuses to every connector", o.Name, method)
+				continue
+			}
+			if !slices.Contains(scopes, ConnectorScopeRead) && !slices.Contains(scopes, string(o.Scope)) {
+				t.Errorf("%s (scope %s) calls %s, which needs %v", o.Name, o.Scope, method, scopes)
+			}
 		}
 	}
 }

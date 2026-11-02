@@ -74,7 +74,7 @@ func TestPreferencesAreOwnerOnly(t *testing.T) {
 		if _, perr := connector.Call(context.Background(), method, params); perr == nil || perr.Code != protocol.CodeDenied {
 			t.Errorf("%s from a connector = %v, want denied", method, perr)
 		}
-		if _, ok := ConnectorMethodScopes(method); ok {
+		if _, ok := connectorMethodScopes[method]; ok {
 			t.Errorf("%s has connector scopes", method)
 		}
 	}

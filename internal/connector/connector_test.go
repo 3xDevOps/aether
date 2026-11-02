@@ -30,7 +30,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -299,28 +298,6 @@ func TestConnectorLaunchOnSharedAccount(t *testing.T) {
 	}
 	if text := r.Content[0].(*mcp.TextContent).Text; !r.IsError || !strings.Contains(text, "member "+string(bo.ID)+" has not shared their account with you") {
 		t.Fatalf("launch on an unshared account = %v %s", r.IsError, text)
-	}
-}
-
-// A connector granted an op's scope, and read, can make every call the op
-// declares: the server admits each method under read or under that scope.
-// Write and control are separate boxes, so a control op cannot lean on
-// write.
-func TestOpsMethodsFitTheirConnectorScope(t *testing.T) {
-	for _, o := range ops.Ops {
-		if o.Scope == "" {
-			continue
-		}
-		for _, method := range o.Methods {
-			scopes, ok := sshd.ConnectorMethodScopes(method)
-			if !ok {
-				t.Errorf("%s calls %s, which the server refuses to every connector", o.Name, method)
-				continue
-			}
-			if !slices.Contains(scopes, sshd.ConnectorScopeRead) && !slices.Contains(scopes, string(o.Scope)) {
-				t.Errorf("%s (scope %s) calls %s, which needs %v", o.Name, o.Scope, method, scopes)
-			}
-		}
 	}
 }
 
