@@ -24,6 +24,10 @@ import (
 // attacher to ack the exit.
 const exitHandover = 30 * time.Second
 
+// adapterDrain bounds how long a keeper whose adapter exited reads output a
+// descendant still holding the adapter's stdout or stderr open writes.
+const adapterDrain = 5 * time.Second
+
 // Serve runs the keeper process: it reads its token from the first line of
 // stdin, listens on socket in a new directory only its user can enter, starts
 // argv as user, a "uid:gid" or empty for its own, and prints "ready". From
@@ -68,14 +72,21 @@ func Serve(socket, user string, argv []string) int {
 		fmt.Fprintln(os.Stderr, "acp-keeper:", err)
 		return 125
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Not StdoutPipe, whose read end Wait closes as soon as the adapter
+	// exits, before its last output is read.
+	stdout, w, err := os.Pipe()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "acp-keeper:", err)
 		return 125
 	}
+	defer func() { _ = stdout.Close() }()
+	cmd.Stdout = w
 	k := New(Config{Token: token, AgentIn: stdin})
 	cmd.Stderr = k.Stderr()
-	if err := cmd.Start(); err != nil {
+	cmd.WaitDelay = adapterDrain
+	err = cmd.Start()
+	_ = w.Close()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "acp-keeper: start", argv[0]+":", err)
 		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
 			return 127
@@ -102,9 +113,13 @@ func Serve(socket, user string, argv []string) int {
 			go k.ServeConn(conn)
 		}
 	}()
-	if err := k.Pump(stdout); err != nil {
-		k.cfg.Logger.Warn("acpkeeper: read the agent's output", "error", err)
-	}
+	pumped := make(chan struct{})
+	go func() {
+		defer close(pumped)
+		if err := k.Pump(stdout); err != nil && !errors.Is(err, os.ErrClosed) {
+			k.cfg.Logger.Warn("acpkeeper: read the agent's output", "error", err)
+		}
+	}()
 	code := 0
 	if err := cmd.Wait(); err != nil {
 		var exit *exec.ExitError
@@ -115,6 +130,13 @@ func Serve(socket, user string, argv []string) int {
 		if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 			code = 128 + int(status.Signal())
 		}
+	}
+	select {
+	case <-pumped:
+	case <-time.After(adapterDrain):
+		k.cfg.Logger.Warn("acpkeeper: a process the agent started still holds its output open")
+		_ = stdout.Close()
+		<-pumped
 	}
 	k.Exited(code)
 	select {

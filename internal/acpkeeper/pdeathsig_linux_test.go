@@ -84,3 +84,33 @@ func TestEndedKeeperThreadsDoNotKillTheChild(t *testing.T) {
 		})
 	}
 }
+
+func TestKeeperReportsTheExitOfAnAdapterWhoseChildHoldsItsOutput(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "pid")
+	cmd := exec.Command(os.Args[0], filepath.Join(dir, "acp", "k", "sock"), "sh", "-c", `sleep 60 & echo $! >"$0"; exit 3`, pidFile)
+	cmd.Env = append(os.Environ(), "ACPKEEPER_TEST_ENTRY=acp")
+	cmd.Stdin = strings.NewReader("token\n")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		if raw, err := os.ReadFile(pidFile); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	select {
+	case <-exited:
+	case <-time.After(adapterDrain + 10*time.Second):
+		t.Fatal("the keeper never reported the adapter's exit")
+	}
+	if code := cmd.ProcessState.ExitCode(); code != 3 {
+		t.Fatalf("keeper exit code = %d, want the adapter's 3", code)
+	}
+}

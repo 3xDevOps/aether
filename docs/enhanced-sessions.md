@@ -307,7 +307,8 @@ this turn's prompt reached the agent. Send it again.`
 The server cannot reattach when the keeper or the agent exited, when the agent
 wrote more than 32 MiB while no server read it, when the keeper speaks another
 protocol version, or when the server stopped before the agent's conversation
-opened. It then logs **Agent restarted** with the reason, stops the keeper and
+opened. An agent counts as exited 5 seconds after its process ends, even if
+a command it started still holds its output open. The server then logs **Agent restarted** with the reason, stops the keeper and
 the agent, and restores the conversation in a fresh one, as **Reopen** after
 Close, a failed Close and **Retry Enhanced** always do. A turn cut off that way
 ends with a **Turn interrupted** notice, its pending permission requests are
