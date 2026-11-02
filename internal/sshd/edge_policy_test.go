@@ -356,7 +356,7 @@ func TestLinkedIdentityCreatesNoDevice(t *testing.T) {
 
 // withDevice is the context of a connection that signed in with dev.
 func withDevice(member domain.MemberID, dev *domain.Device) context.Context {
-	return context.WithValue(context.Background(), connIdentityKey{}, connIdentity{member: member, device: dev.ID, deviceKey: dev.Credential})
+	return context.WithValue(context.Background(), connIdentityKey{}, connIdentity{member: member, device: dev.ID})
 }
 
 // Under approved-devices a connection whose only credential is a device

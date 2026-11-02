@@ -19,23 +19,19 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// deviceIDExtension and deviceKeyExtension carry the edge device a
-// connection authenticated with, alongside memberIDExtension.
-const (
-	deviceIDExtension  = "aether-device-id"
-	deviceKeyExtension = "aether-device-key"
-)
+// deviceIDExtension carries the edge device a connection authenticated
+// with, alongside memberIDExtension.
+const deviceIDExtension = "aether-device-id"
 
-// connIdentity is who an authenticated connection is. device and deviceKey
-// are set on connections that authenticated with an edge device key,
-// relayed or direct. clientVersion and legacyClient come from the SSH
-// banner; see parseClientBanner. connector and connectorClient are set on
-// a ChatGPT or Claude connector's calls, whose device is the one its
-// pairing code was minted on.
+// connIdentity is who an authenticated connection is. device is set on
+// connections that authenticated with an edge device key, relayed or
+// direct. clientVersion and legacyClient come from the SSH banner; see
+// parseClientBanner. connector and connectorClient are set on a ChatGPT
+// or Claude connector's calls, whose device is the one its pairing code
+// was minted on.
 type connIdentity struct {
 	member          domain.MemberID
 	device          domain.DeviceID
-	deviceKey       string
 	clientVersion   string
 	legacyClient    bool
 	connector       string
@@ -229,9 +225,8 @@ func claimRefusal(err error) error {
 func edgeConnIdentity(_ context.Context, sconn *ssh.ServerConn) (connIdentity, error) {
 	ext := sconn.Permissions.Extensions
 	id := connIdentity{
-		member:    domain.MemberID(ext[memberIDExtension]),
-		device:    domain.DeviceID(ext[deviceIDExtension]),
-		deviceKey: ext[deviceKeyExtension],
+		member: domain.MemberID(ext[memberIDExtension]),
+		device: domain.DeviceID(ext[deviceIDExtension]),
 	}
 	if id.member == "" || id.device == "" {
 		return connIdentity{}, errors.New("sshd: relayed connection authenticated without a member and device")
@@ -241,9 +236,8 @@ func edgeConnIdentity(_ context.Context, sconn *ssh.ServerConn) (connIdentity, e
 
 func devicePermissions(member domain.MemberID, dev *domain.Device) *ssh.Permissions {
 	return &ssh.Permissions{Extensions: map[string]string{
-		memberIDExtension:  string(member),
-		deviceIDExtension:  string(dev.ID),
-		deviceKeyExtension: dev.Credential,
+		memberIDExtension: string(member),
+		deviceIDExtension: string(dev.ID),
 	}}
 }
 

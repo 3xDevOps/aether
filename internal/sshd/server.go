@@ -700,7 +700,7 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn, cfg *ssh.ServerConfi
 func (s *Server) directIdentity(ctx context.Context, sconn *ssh.ServerConn) (connIdentity, error) {
 	ext := sconn.Permissions.Extensions
 	if member := domain.MemberID(ext[memberIDExtension]); member != "" {
-		return connIdentity{member: member, device: domain.DeviceID(ext[deviceIDExtension]), deviceKey: ext[deviceKeyExtension]}, nil
+		return connIdentity{member: member, device: domain.DeviceID(ext[deviceIDExtension])}, nil
 	}
 	if code, ok := sconn.Permissions.Extensions[inviteCodeExtension]; ok {
 		keyLine := sconn.Permissions.Extensions[inviteKeyExtension]
