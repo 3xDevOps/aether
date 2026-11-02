@@ -64,7 +64,6 @@ function overlay(markup: string): void {
   onTestFinished(() => host.remove())
 }
 
-/** Moves the palette's selection down to the named row, as a keyboard user would. */
 function arrowTo(search: HTMLElement, name: string): void {
   const row = screen.getByRole('option', { name })
   for (const _ of screen.getAllByRole('option')) {
