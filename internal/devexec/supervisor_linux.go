@@ -58,14 +58,28 @@ func Run(key, claim string, tty bool, argv []string) (int, error) {
 	if _, err := directChildren(); err != nil {
 		return 125, fmt.Errorf("discover owned descendants: %w", err)
 	}
-	if err := os.Mkdir(stateDir(key), 0o700); err != nil {
+	group, err := controlGroup()
+	if err != nil {
+		return 125, err
+	}
+	// The owned command does not inherit it.
+	if err = os.Unsetenv(ControlGroupEnv); err != nil {
+		return 125, err
+	}
+	if err = os.Mkdir(stateDir(key), 0o700); err != nil {
 		return 125, fmt.Errorf("reserve single-use execution identity: %w", err)
 	}
-	listener, err := net.Listen("unix", filepath.Join(stateDir(key), "control.sock"))
+	socket := filepath.Join(stateDir(key), "control.sock")
+	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		return 125, err
 	}
 	defer func() { _ = listener.Close() }()
+	// The group may enter, not list or change, the directory, and connect
+	// to the socket.
+	if err = errors.Join(shareWith(stateDir(key), group, 0o710), shareWith(socket, group, 0o660)); err != nil {
+		return 125, fmt.Errorf("share execution control with gid %d: %w", group, err)
+	}
 	calls := make(chan controlCall)
 	done := make(chan struct{})
 	defer close(done)
@@ -91,7 +105,7 @@ func Run(key, claim string, tty bool, argv []string) (int, error) {
 		if cause != nil {
 			state.Error = cause.Error()
 		}
-		return code, errors.Join(cause, saveState(state))
+		return code, errors.Join(cause, saveState(state, group))
 	}
 	beginKill := func() error {
 		if killing || child == nil {
@@ -168,7 +182,7 @@ func Run(key, claim string, tty bool, argv []string) (int, error) {
 				}
 				startup.Stop()
 				state.Running = true
-				if err := saveState(state); err != nil {
+				if err := saveState(state, group); err != nil {
 					response = state
 					response.Error = err.Error()
 					call.reply(response)

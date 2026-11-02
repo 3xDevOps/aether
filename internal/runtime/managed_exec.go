@@ -26,7 +26,8 @@ type ManagedExecRuntime interface {
 }
 
 // ExecSpec inherits the container's configured user and environment. A
-// non-empty User, such as "0", runs it as that user instead. An empty
+// non-empty User, such as "0", runs it as that user instead; the group of a
+// configured "uid:gid" may then still read its state and stop it. An empty
 // WorkingDir inherits its configured working directory. Argv is executed
 // directly; callers wanting shell syntax must explicitly use /bin/sh -c.
 // Cols and Rows size StartExecTTY's terminal; StartExecPipe ignores them.

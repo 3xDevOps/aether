@@ -397,3 +397,52 @@ func TestDevelopmentTerminalLeaseSurvivesSchedulerRestart(t *testing.T) {
 		t.Fatal("input reached a terminal that exited during the restart")
 	}
 }
+
+func TestDevelopmentTerminalOfAPausedSessionReconnectsOnResume(t *testing.T) {
+	e := newKeptTerminalEnv(t)
+	rt := e.sched.cfg.Runtime.(*terminalTestRuntime)
+	run, _ := e.launchFake(t, "kept-paused")
+	terminal := startTestTerminal(t, e, run.ID, "server")
+	target := terminalTestTarget(terminal)
+	var keeper *testTermKeeper
+	for _, k := range rt.keeperTerms {
+		keeper = k
+	}
+	if err := e.sched.Pause(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The server restarts while the session is paused: it forgets the
+	// terminal and recovers it from the registry.
+	if err := e.sched.DetachDevelopmentTerminals(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	delete(e.sched.runShellTerminals, run.ID)
+	e.sched.mu.Unlock()
+	if err := e.sched.RecoverDevelopmentTerminals(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	keeper.output(t, "made\r\n")
+
+	if err := e.sched.Resume(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	agent := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
+	listed, err := terminalTestCall(t, e.sched, run.ID, agent, protocol.MethodDevTerminalList, protocol.DevTerminalListParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := listed.(protocol.DevTerminalListResult).Terminals; len(got) != 1 || got[0].Process.State != "running" {
+		t.Fatalf("terminals after resume = %+v", got)
+	}
+	if result, waitErr := terminalTestCall(t, e.sched, run.ID, agent, protocol.MethodDevTerminalWait, protocol.DevTerminalWaitParams{
+		DevTerminalTarget: target, Contains: "made", TimeoutMS: 2000}); waitErr != nil || !result.(protocol.DevTerminalWaitResult).Matched {
+		t.Fatalf("wait after resume = %+v, %v", result, waitErr)
+	}
+	fence := terminalTestFence(t, e, run.ID, terminal, agent, "after-resume", false)
+	if _, err = terminalTestCall(t, e.sched, run.ID, agent, protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{
+		DevTerminalTarget: target, DevControlFence: fence, Kind: "text", Text: "ls\r"}); err != nil {
+		t.Fatalf("input after resume: %v", err)
+	}
+	keeper.eventually(t, "the input", func() bool { return strings.HasSuffix(keeper.input.String(), "ls\r") })
+}

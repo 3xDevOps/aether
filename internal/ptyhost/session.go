@@ -108,8 +108,11 @@ type session struct {
 	// answered: a resumed terminal replays output whose queries were.
 	quiet           TerminalSequence
 	protocolPending []byte
-	protocolWake    chan struct{}
-	protocolErr     error
+	// answering is set while respond writes replies it took from
+	// protocolPending.
+	answering    bool
+	protocolWake chan struct{}
+	protocolErr  error
 
 	// pendingEcho is the echo the terminal still owes for input the server
 	// wrote to the agent - an injected line, or a member's keystrokes. The
@@ -275,6 +278,7 @@ func (s *session) commitOutputLocked(p []byte) {
 	for c := range s.clients {
 		c.enqueue(p)
 	}
+	s.answeredLocked()
 }
 
 // commitPendingOutputLocked applies output withheld while a resize RPC was in

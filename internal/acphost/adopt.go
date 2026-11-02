@@ -41,7 +41,7 @@ func (s *Session) adopt(openTurn bool) error {
 	started := LastItem(s.log, KindTurnStart)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessionOptionsLocked(res)
+	s.seedOptionsLocked(res)
 	s.restoreStateLocked()
 	s.inputsLocked()
 	switch {

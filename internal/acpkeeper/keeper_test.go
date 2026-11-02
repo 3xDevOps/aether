@@ -12,6 +12,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +77,7 @@ type agent struct {
 	t           *testing.T
 	k           *Keeper
 	out         *io.PipeWriter
+	stdin       *io.PipeReader
 	in          chan string
 	stdinClosed chan struct{}
 	pumped      chan struct{}
@@ -85,7 +88,7 @@ func newAgent(t *testing.T, retain int) *agent {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	a := &agent{
-		t: t, out: outW, in: make(chan string, 64),
+		t: t, out: outW, stdin: inR, in: make(chan string, 64),
 		stdinClosed: make(chan struct{}), pumped: make(chan struct{}),
 		k: New(Config{Token: token, AgentIn: inW, Retain: retain, Logger: slog.New(slog.DiscardHandler)}),
 	}
@@ -492,26 +495,48 @@ func TestSameIDAcrossGenerations(t *testing.T) {
 	}
 }
 
-func TestDeliveredTagsAreUnackedRequests(t *testing.T) {
+func TestDeliveredTagsOutliveAcksAndAttaches(t *testing.T) {
 	t.Parallel()
 	a := newAgent(t, 0)
 	first := a.rawAttach()
 
-	first.send(frame{T: frameRPC, M: json.RawMessage(req("1", "room/send")), Tag: "t1"})
-	kid := a.recvReq("room/send")
+	first.send(frame{T: frameRPC, M: json.RawMessage(req("1", "session/prompt")), Tag: "t1"})
+	kid := a.recvReq("session/prompt")
 	a.send(resp(kid, `{}`))
 	answered := first.next()
+	// The server acks the answer, then dies before it records the delivery.
 	first.send(frame{T: frameAck, Seq: answered.Seq})
+	waitAcked(t, a.k, answered.Seq)
 
 	first.send(frame{T: frameRPC, M: json.RawMessage(req("2", "room/send")), Tag: "t2"})
-	kid = a.recvReq("room/send")
-	a.send(resp(kid, `{}`))
-	first.next()
+	a.recvReq("room/send")
 	_ = first.conn.Close()
 
+	// So does the next server, before it records what the keeper reported.
 	second := a.attach(2)
-	if got := second.State().Delivered; len(got) != 1 || got[0] != "t2" {
-		t.Fatalf("State.Delivered = %v, want [t2]", got)
+	if got := second.State().Delivered; !slices.Equal(got, []string{"t1", "t2"}) {
+		t.Fatalf("State.Delivered = %v, want [t1 t2]", got)
+	}
+	_ = second.Close()
+	if got := a.attach(3).State().Delivered; !slices.Equal(got, []string{"t1", "t2"}) {
+		t.Fatalf("State.Delivered after a second attach = %v, want [t1 t2]", got)
+	}
+}
+
+func TestDeliveredTagsKeepTheNewest(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	r := a.rawAttach()
+	var want []string
+	for i := range deliveredTags + 3 {
+		tag := fmt.Sprintf("t%d", i)
+		r.send(frame{T: frameRPC, M: json.RawMessage(req(strconv.Itoa(i+1), "room/send")), Tag: tag})
+		a.recvReq("room/send")
+		want = append(want, tag)
+	}
+	_ = r.conn.Close()
+	if got := a.attach(2).State().Delivered; !slices.Equal(got, want[3:]) {
+		t.Fatalf("State.Delivered = %v, want the newest %d", got, deliveredTags)
 	}
 }
 
@@ -763,4 +788,18 @@ func TestAcksOnlyWhatWasHandled(t *testing.T) {
 	}
 	c.Writer().(interface{ Handled(uint64) }).Handled(1)
 	waitAcked(t, a.k, 1)
+}
+
+func TestAnAdapterInputThatFailsEndsTheAttachment(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	p := a.attach(1)
+	_ = a.stdin.CloseWithError(errors.New("adapter closed its stdin"))
+	p.write(req("1", "session/prompt"))
+	if !isClosed(t, p.lines) {
+		t.Fatal("the attachment outlived a failed write to the adapter")
+	}
+	if re := a.refusal(Hello{Gen: 2, Token: token}); re.Code != RefusedInput || !strings.Contains(re.Message, "adapter closed its stdin") {
+		t.Fatalf("refusal %+v, want %q with the write error", re, RefusedInput)
+	}
 }

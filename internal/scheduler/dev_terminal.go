@@ -50,6 +50,9 @@ type runTerminalSet struct {
 	ContainerID runtime.ID              `json:"container_id"`
 	Closed      bool                    `json:"closed"`
 	Terminals   map[string]*runTerminal `json:"terminals"`
+	// deferred is set while the recovery of terminals waits for the paused
+	// container, which takes no exec, to resume.
+	deferred bool
 }
 
 type runTerminal struct {
@@ -133,8 +136,18 @@ func (s *Scheduler) persistRunTerminalsLocked(run domain.RunID, set *runTerminal
 func (s *Scheduler) loadRunTerminalsLocked(ctx context.Context, run domain.RunID) (*runTerminalSet, error) {
 	s.mu.Lock()
 	set := s.runShellTerminals[run]
+	entry := s.runs[run]
+	paused := entry != nil && entry.paused
 	s.mu.Unlock()
 	if set != nil {
+		if set.deferred && !paused {
+			set.deferred = false
+			for _, terminal := range set.Terminals {
+				if terminal.Exec == nil && !terminal.ContainerEnded && !terminal.Gone {
+					s.recoverRunTerminalLocked(ctx, run, set, terminal)
+				}
+			}
+		}
 		return set, nil
 	}
 	set = &runTerminalSet{Version: 1, RunID: run, Terminals: make(map[string]*runTerminal)}
@@ -159,37 +172,14 @@ func (s *Scheduler) loadRunTerminalsLocked(ctx context.Context, run domain.RunID
 				terminal.Identity.ContainerID == "" || terminal.Identity.ExecID == "" || terminal.Identity.CreationKey == "" || terminal.Identity.ClaimToken == "" {
 				return nil, fmt.Errorf("invalid persisted terminal identity")
 			}
-			if terminal.ContainerEnded || terminal.Gone {
-				continue
+			switch {
+			case terminal.ContainerEnded || terminal.Gone:
+			case paused:
+				set.deferred = true
+				terminal.Unavailable = "the session is paused; the terminal reconnects when it resumes"
+			default:
+				s.recoverRunTerminalLocked(ctx, run, set, terminal)
 			}
-			managed, ok := s.cfg.Runtime.(runtime.ManagedExecRuntime)
-			if !ok {
-				terminal.Unavailable = "runtime does not support execution recovery"
-				continue
-			}
-			terminal.Exec, err = managed.RecoverExec(ctx, terminal.Identity)
-			if err != nil {
-				terminal.Exec = nil
-				terminal.Unavailable = err.Error()
-				if errors.Is(err, runtime.ErrNotFound) {
-					terminalGone(terminal, err)
-				}
-				continue
-			}
-			state, statusErr := terminal.Exec.Status(ctx)
-			if statusErr != nil {
-				terminal.Unavailable = statusErr.Error()
-				continue
-			}
-			terminal.State = state
-			terminal.Unavailable = "PTY unavailable after recovery; execution was not reattached or restarted"
-			if terminal.Keeper != nil && state.Running {
-				if attachErr := s.attachTerminalLocked(ctx, run, set, terminal); attachErr != nil {
-					slog.Warn("scheduler: reattach to a terminal's keeper", "run", run, "terminal", id, "error", attachErr)
-					terminal.Unavailable = "reattach to the terminal's keeper: " + attachErr.Error()
-				}
-			}
-			s.restoreTerminalLease(run, set, terminal)
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, err
@@ -201,6 +191,39 @@ func (s *Scheduler) loadRunTerminalsLocked(ctx context.Context, run domain.RunID
 	s.runShellTerminals[run] = set
 	s.mu.Unlock()
 	return set, nil
+}
+
+// recoverRunTerminalLocked takes over terminal's exec, and its keeper if it
+// has one, from an earlier server process.
+func (s *Scheduler) recoverRunTerminalLocked(ctx context.Context, run domain.RunID, set *runTerminalSet, terminal *runTerminal) {
+	managed, ok := s.cfg.Runtime.(runtime.ManagedExecRuntime)
+	if !ok {
+		terminal.Unavailable = "runtime does not support execution recovery"
+		return
+	}
+	execution, err := managed.RecoverExec(ctx, terminal.Identity)
+	if err != nil {
+		terminal.Unavailable = err.Error()
+		if errors.Is(err, runtime.ErrNotFound) {
+			terminalGone(terminal, err)
+		}
+		return
+	}
+	terminal.Exec = execution
+	state, statusErr := terminal.Exec.Status(ctx)
+	if statusErr != nil {
+		terminal.Unavailable = statusErr.Error()
+		return
+	}
+	terminal.State = state
+	terminal.Unavailable = "PTY unavailable after recovery; execution was not reattached or restarted"
+	if terminal.Keeper != nil && state.Running {
+		if attachErr := s.attachTerminalLocked(ctx, run, set, terminal); attachErr != nil {
+			slog.Warn("scheduler: reattach to a terminal's keeper", "run", run, "terminal", terminal.ID, "error", attachErr)
+			terminal.Unavailable = "reattach to the terminal's keeper: " + attachErr.Error()
+		}
+	}
+	s.restoreTerminalLease(run, set, terminal)
 }
 
 // terminalGone records that the runtime proved terminal's exec gone, with

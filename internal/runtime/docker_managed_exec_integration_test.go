@@ -295,6 +295,47 @@ func TestDockerManagedExecForgottenByDocker(t *testing.T) {
 	}
 }
 
+// TestDockerManagedExecAsAnotherUserStopsAsTheContainers: a build before
+// ExecIdentity.User runs control execs as the container's user. It can still
+// recover and stop an exec that runs as root, such as an ACP keeper, so a
+// rollback to it does not leave that exec running.
+func TestDockerManagedExecAsAnotherUserStopsAsTheContainers(t *testing.T) {
+	d := newTestDocker(t)
+	binary := buildStagedHelper(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	id := createContainer(t, d, Spec{
+		Name:  fmt.Sprintf("it-root-exec-%d", time.Now().UnixNano()),
+		Image: testImage, TTY: true, User: "1000:1000",
+		Command: []string{"/bin/sh", "-c", "exec sleep 300"},
+		Mounts:  []Mount{{HostPath: binary, ContainerPath: coordtransport.CLIPath, ReadOnly: true}},
+	})
+	if err := d.Start(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	execution, err := d.StartExecPipe(ctx, id, ExecSpec{CreationKey: "root", User: "0", Argv: []string{"sleep", "300"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = execution.Detach(); err != nil {
+		t.Fatal(err)
+	}
+	identity := execution.Identity()
+	identity.User = ""
+	recovered, err := d.RecoverExec(ctx, identity)
+	if err != nil {
+		t.Fatalf("recover a root exec as the container's user: %v", err)
+	}
+	status, err := recovered.Stop(ctx, time.Second)
+	if err != nil || status.Code != 143 {
+		t.Fatalf("stop a root exec as the container's user = %+v, %v; want SIGTERM exit 143", status, err)
+	}
+	// Only the container's own sleep is left.
+	if _, out, _, err := d.Exec(ctx, id, []string{"pgrep", "-x", "sleep"}, ""); err != nil || strings.Count(out, "\n") != 1 {
+		t.Fatalf("sleep processes after the stop = %q, %v; want only the container's", out, err)
+	}
+}
+
 // TestDockerManagedExecHelperLost: Docker still records an exec whose helper
 // died and took its state with it. The command is gone and its exit status
 // lost: recovery, status and stop all say so at once instead of failing as

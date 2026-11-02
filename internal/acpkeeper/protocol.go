@@ -67,6 +67,7 @@ const (
 	frameOutput    = "out"
 	frameInput     = "in"
 	frameResize    = "resize"
+	frameAnswered  = "answered"
 )
 
 // Refusal codes.
@@ -83,6 +84,8 @@ const (
 	RefusedOverflow = "overflow"
 	// RefusedExited: the adapter exited.
 	RefusedExited = "exited"
+	// RefusedInput: the adapter's stdin takes no more writes.
+	RefusedInput = "input"
 )
 
 type frame struct {
@@ -90,8 +93,7 @@ type frame struct {
 	Seq uint64          `json:"seq,omitempty"`
 	M   json.RawMessage `json:"m,omitempty"`
 	// Tag names what a client-to-agent request delivers, such as a room
-	// message id; the keeper reports the tags of requests it forwarded for
-	// an attacher that is gone.
+	// message id; the keeper reports the tags of the requests it forwarded.
 	Tag string `json:"tag,omitempty"`
 	// Turn is the item log's turn a session/prompt starts.
 	Turn int64 `json:"turn,omitempty"`
@@ -121,8 +123,8 @@ type State struct {
 	// Prompt is the session/prompt an earlier attacher sent whose answer no
 	// attacher acked; AdoptMethod takes it over.
 	Prompt *Prompt `json:"prompt,omitempty"`
-	// Delivered are the tags of requests earlier attachers sent that reached
-	// the agent and whose answer no attacher acked.
+	// Delivered are the tags of the newest tagged requests that reached the
+	// agent, answered or not.
 	Delivered []string `json:"delivered,omitempty"`
 	Stderr    string   `json:"stderr,omitempty"`
 	// Term is a terminal keeper's state.
@@ -133,13 +135,13 @@ type State struct {
 // the terminal started, and its geometry.
 type TermState struct {
 	// Start is the offset of the oldest retained byte, End the offset after
-	// the newest, and Sent the offset up to which earlier attachers were
-	// sent the output.
-	Start uint64 `json:"start"`
-	End   uint64 `json:"end"`
-	Sent  uint64 `json:"sent"`
-	Cols  uint16 `json:"cols"`
-	Rows  uint16 `json:"rows"`
+	// the newest, and Answered the offset up to which earlier attachers
+	// answered the terminal queries in the output.
+	Start    uint64 `json:"start"`
+	End      uint64 `json:"end"`
+	Answered uint64 `json:"answered"`
+	Cols     uint16 `json:"cols"`
+	Rows     uint16 `json:"rows"`
 }
 
 // Prompt is a session/prompt in flight when its attacher went away. Turn is
