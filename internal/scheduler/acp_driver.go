@@ -544,6 +544,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		}}}
 	}
 	r := &acpRun{exec: exec, keeper: keeper, bridge: bridge, stderr: stderr}
+	// The keeper's replay can end a turn before setRun, and turnState needs
+	// the published session to forward a child run's last message.
+	published := make(chan struct{})
 	sess, err := acphost.Start(ctx, stdout, stdin, acphost.Config{
 		LogPath:        d.s.cfg.PTY.ItemLogPath(runID),
 		Cwd:            d.s.cfg.WorktreeMount,
@@ -557,6 +560,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		AgentCommand:   adapter[0],
 		TitleLookup:    titleLookup,
 		OnState: func(st acphost.TurnState) {
+			<-published
 			// A turn the driver ends by closing its session reports
 			// interrupted, which would ask the member to continue a run
 			// they closed.
@@ -588,6 +592,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		Adopt:      adopt,
 	})
 	if err != nil {
+		close(published)
 		r.release()
 		if stopErr := d.stopExec(exec); stopErr != nil {
 			slog.Warn("scheduler: stop the failed ACP server", "run", runID, "error", stopErr)
@@ -640,6 +645,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		d.reconnected(entry)
 	}
 	d.setRun(runID, r)
+	close(published)
 	go d.watch(entry, r)
 	c := d.s.coordinationSeam()
 	if c != nil && c.enabled && !oneShot {
