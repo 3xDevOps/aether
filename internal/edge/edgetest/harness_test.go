@@ -815,7 +815,7 @@ func (s *serverNode) start() {
 			_ = db.Close()
 		})
 	}
-	s.id, s.db, s.ssh, s.agent, s.bus = agent.ServerID(), db, srv, agent, bus
+	s.id, s.db, s.ssh, s.agent, s.bus = edgeproto.ServerID(hostKey.PublicKey()), db, srv, agent, bus
 	s.waitEnrolled()
 	s.addr = srv.Addr().String()
 }
