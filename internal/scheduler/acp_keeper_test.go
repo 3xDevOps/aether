@@ -202,6 +202,25 @@ func TestEnhancedRunWithoutAKeeperRunsItsAdapterDirectly(t *testing.T) {
 	waitItems(t, s, run.ID, "a turn in the restored session", turnEnded("end_turn", 2))
 }
 
+func TestEnhancedRunDoesNotStartASecondAgentBesideAKeeperItCouldNotStop(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	rt.onAttach = func() error {
+		rt.all()[0].stopErr = errors.New("acpRuntime: stop is stuck")
+		return errors.New("acpRuntime: the bridge failed")
+	}
+	run := e.launchACP(t, "say pong")
+	items := waitItems(t, e.sched, run.ID, "the failure", hasNotice("Enhanced agent failed"))
+	if execs := rt.all(); len(execs) != 1 {
+		t.Fatalf("%d agents run, want only the keeper's", len(execs))
+	}
+	if !slices.ContainsFunc(items, func(it acphost.Item) bool {
+		return it.Kind == acphost.KindNotice && strings.Contains(it.Notice.Description, "could not be stopped")
+	}) {
+		t.Fatal("the failure does not say the keeper could not be stopped")
+	}
+}
+
 func hasNotice(title string) func([]acphost.Item) bool {
 	return func(items []acphost.Item) bool {
 		return slices.ContainsFunc(items, func(it acphost.Item) bool {
@@ -386,7 +405,10 @@ func TestReattachedWaitsWhileAResumedRunReattaches(t *testing.T) {
 	<-next.RecoveryReady()
 	var during collab.Reattach
 	rt.mu.Lock()
-	rt.onAttach = func() { _, during = next.Reattached(run.ID) }
+	rt.onAttach = func() error {
+		_, during = next.Reattached(run.ID)
+		return nil
+	}
 	rt.mu.Unlock()
 	if err := next.Resume(t.Context(), run.ID, e.member.ID); err != nil {
 		t.Fatal(err)

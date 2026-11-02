@@ -56,21 +56,30 @@ func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed 
 	record := &keeperRecord{Socket: socket, Token: rand.Text()}
 	identity := exec.Identity()
 	if err = d.persist(entry, func() { entry.agentExec, entry.agentKeeper = &identity, record }); err != nil {
+		err = fmt.Errorf("record the keeper: %w", err)
 		if stopErr := d.stopExec(exec); stopErr != nil {
-			slog.Warn("scheduler: stop the unrecorded ACP keeper", "run", entry.runID, "error", stopErr)
+			return nil, errors.Join(err, keeperNotStopped(stopErr))
 		}
-		return nil, fmt.Errorf("record the keeper: %w", err)
+		return nil, err
 	}
 	stderr, copied, err := keeperReady(ctx, exec, record.Token)
 	if err != nil {
+		err = fmt.Errorf("start %s under its keeper: %w", adapter[0], err)
 		if stopErr := d.stopExec(exec); stopErr != nil {
-			slog.Warn("scheduler: stop the failed ACP keeper", "run", entry.runID, "error", stopErr)
+			return nil, errors.Join(err, keeperNotStopped(stopErr))
 		}
 		<-copied
-		return nil, adapterError(fmt.Errorf("start %s under its keeper: %w", adapter[0], err), stderr)
+		return nil, adapterError(err, stderr)
 	}
 	return exec, nil
 }
+
+// errKeeperNotStopped marks a failed keeper start whose keeper, and the
+// agent it may have started, could not be stopped: starting the agent again
+// would run two.
+var errKeeperNotStopped = errors.New("the keeper that failed to start could not be stopped, so Aether did not start the agent again")
+
+func keeperNotStopped(err error) error { return fmt.Errorf("%w: %w", errKeeperNotStopped, err) }
 
 // keeperReady hands a keeper exec its token and waits until it listens, then
 // detaches from the exec, whose stdio the keeper no longer uses and which
@@ -115,12 +124,12 @@ func (d *acpDriver) startKept(ctx context.Context, entry *supervised, managed ru
 	}
 	keeper, bridge, err := d.attachKeeper(ctx, entry, managed, cid)
 	if err != nil {
+		err = fmt.Errorf("attach to %s's keeper: %w", adapter[0], err)
 		if stopErr := d.stopExec(exec); stopErr != nil {
-			slog.Warn("scheduler: stop the ACP keeper", "run", entry.runID, "error", stopErr)
-		} else {
-			d.forget(entry, exec)
+			return nil, nil, nil, errors.Join(err, keeperNotStopped(stopErr))
 		}
-		return nil, nil, nil, fmt.Errorf("attach to %s's keeper: %w", adapter[0], err)
+		d.forget(entry, exec)
+		return nil, nil, nil, err
 	}
 	return exec, keeper, bridge, nil
 }

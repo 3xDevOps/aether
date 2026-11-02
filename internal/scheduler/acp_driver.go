@@ -508,6 +508,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		if err == nil {
 			break
 		}
+		if errors.Is(err, errKeeperNotStopped) {
+			return err
+		}
 		// A container staged before keepers existed has a binary without
 		// one: its adapter runs as before and ends with this process.
 		slog.Warn("scheduler: run the agent's ACP server under a keeper", "run", entry.runID, "error", err)

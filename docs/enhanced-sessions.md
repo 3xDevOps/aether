@@ -328,7 +328,10 @@ whose container a server without keepers created runs its adapter without
 one, and every restart restores its conversation as above until the container
 is recreated. **Reopen**, **Retry Enhanced**, Pause and resume reuse the
 container; a new session, or an account switch at a usage limit, gets a new
-container with a keeper. Rolling the server back to a build without keepers
+container with a keeper. When a new keeper fails to start and Aether cannot
+stop it, the session fails with **Enhanced agent failed** and `the keeper that
+failed to start could not be stopped`, instead of running the adapter without
+a keeper beside one the keeper may have started. Rolling the server back to a build without keepers
 stops each keeper with its agent and restores the conversation as above.
 
 Restoration depends on the agent's own saved conversation and login. Check the
