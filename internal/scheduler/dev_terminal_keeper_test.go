@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -395,6 +397,50 @@ func TestDevelopmentTerminalLeaseSurvivesSchedulerRestart(t *testing.T) {
 	if _, err = terminalTestCall(t, recovered, run.ID, agent, protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{
 		DevTerminalTarget: terminalTestTarget(ended), DevControlFence: endedFence, Kind: "text", Text: "ls\r"}); err == nil {
 		t.Fatal("input reached a terminal that exited during the restart")
+	}
+}
+
+func TestDevelopmentTerminalLeaseThatFailedToSaveIsNotSavedLater(t *testing.T) {
+	e := newKeptTerminalEnv(t)
+	run, _ := e.launchFake(t, "kept-lease-save")
+	first := startTestTerminal(t, e, run.ID, "first")
+	second := startTestTerminal(t, e, run.ID, "second")
+	surface := func(d protocol.DevTerminal) control.Surface {
+		return control.Surface{Kind: control.SurfaceTerminal, ID: d.TerminalID, Incarnation: d.Incarnation}
+	}
+	held := control.SurfaceLease{Generation: 1, Holder: &control.SurfaceHolder{Kind: control.PrincipalRunAgent, SessionID: "held"}}
+	if err := e.sched.PersistDevelopmentLease(run.ID, surface(first), held); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(e.sched.runTerminalsPath(run.ID))
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rejected := control.SurfaceLease{Generation: 2, Holder: &control.SurfaceHolder{Kind: control.PrincipalRunAgent, SessionID: "rejected"}}
+	if err := e.sched.PersistDevelopmentLease(run.ID, surface(first), rejected); err == nil {
+		t.Fatal("saved a lease into an unwritable registry")
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.PersistDevelopmentLease(run.ID, surface(second), held); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	delete(e.sched.runShellTerminals, run.ID)
+	e.sched.mu.Unlock()
+	lock := e.sched.lockForShell(run.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	set, err := e.sched.loadRunTerminalsLocked(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := set.Terminals[first.TerminalID].Control; got == nil || got.Holder.SessionID != "held" {
+		t.Fatalf("saved lease = %+v", got)
 	}
 }
 

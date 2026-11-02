@@ -167,8 +167,13 @@ func (s *Scheduler) PersistDevelopmentLease(run domain.RunID, surface control.Su
 	if terminal == nil || terminal.Incarnation != surface.Incarnation || terminal.Keeper == nil {
 		return nil
 	}
+	previous := terminal.Control
 	terminal.Control = &lease
-	return s.persistRunTerminalsLocked(run, set)
+	if err := s.persistRunTerminalsLocked(run, set); err != nil {
+		terminal.Control = previous
+		return err
+	}
+	return nil
 }
 
 // restoreTerminalLease reinstates the lease an earlier server process
