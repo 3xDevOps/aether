@@ -9,11 +9,16 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 )
 
 // markEvery bounds how many frames a Client hands acphost between handled
 // markers while the keeper keeps sending.
 const markEvery = 64
+
+// closeAckWait bounds how long Close waits for a write to the keeper in
+// flight before its final ack.
+const closeAckWait = time.Second
 
 // ErrLost ends a client whose keeper connection closed without the
 // adapter's exit or a detach: the keeper may still run.
@@ -284,14 +289,17 @@ func (c *Client) ackLoop() {
 	}
 }
 
+// flushAck acks what acphost handled. It holds wmu from reading the seq to
+// the end of the write, so a write in flight is one Close can wait out.
 func (c *Client) flushAck() {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
 	c.mu.Lock()
-	seq := c.seq
-	due := seq > c.acked
-	c.acked = max(c.acked, seq)
+	seq, due := c.seq, c.seq > c.acked
+	c.acked = max(c.acked, c.seq)
 	c.mu.Unlock()
 	if due {
-		_ = c.send(frame{T: frameAck, Seq: seq})
+		_ = encodeFrame(c.conn, frame{T: frameAck, Seq: seq})
 	}
 }
 
@@ -329,18 +337,18 @@ func (c *Client) Detach(ctx context.Context) error {
 	}
 }
 
-// Close acks the output acphost handled, unless a write to the keeper is
-// stuck, and ends the attachment without waiting for the keeper.
+// Close acks the output acphost handled, after any write to the keeper in
+// flight unless it is stuck for closeAckWait, and ends the attachment
+// without waiting for the keeper.
 func (c *Client) Close() error {
-	if c.wmu.TryLock() {
-		c.mu.Lock()
-		seq, due := c.seq, c.seq > c.acked
-		c.acked = max(c.acked, c.seq)
-		c.mu.Unlock()
-		if due {
-			_ = encodeFrame(c.conn, frame{T: frameAck, Seq: seq})
-		}
-		c.wmu.Unlock()
+	acked := make(chan struct{})
+	go func() {
+		c.flushAck()
+		close(acked)
+	}()
+	select {
+	case <-acked:
+	case <-time.After(closeAckWait):
 	}
 	err := c.conn.Close()
 	_ = c.out.CloseWithError(io.ErrClosedPipe)

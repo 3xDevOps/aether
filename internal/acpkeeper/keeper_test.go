@@ -808,6 +808,57 @@ func TestAcksOnlyWhatWasHandled(t *testing.T) {
 	waitAcked(t, a.k, 1)
 }
 
+// heldConn holds the first write after hold is closed until release is.
+type heldConn struct {
+	net.Conn
+	hold, held, release chan struct{}
+}
+
+func (c *heldConn) Write(p []byte) (int, error) {
+	select {
+	case <-c.hold:
+		select {
+		case c.held <- struct{}{}:
+			<-c.release
+		default:
+		}
+	default:
+	}
+	return c.Conn.Write(p)
+}
+
+func TestCloseAcksWhatWasHandledBehindAnAckInFlight(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	conn := &heldConn{Conn: a.conn(), hold: make(chan struct{}), held: make(chan struct{}, 1), release: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	c, err := Attach(ctx, conn, Hello{Gen: 1, Token: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := make(chan string, 8)
+	go func() {
+		sc := bufio.NewScanner(c.Reader())
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	a.send(note(1))
+	a.send(note(2))
+	// The marker follows once both notes count as handed.
+	for marker := fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"seq":2}}`, HandledMethod); next(t, lines) != marker; {
+	}
+	handled := c.Writer().(interface{ Handled(uint64) })
+	close(conn.hold)
+	handled.Handled(1)
+	<-conn.held
+	handled.Handled(2)
+	time.AfterFunc(100*time.Millisecond, func() { close(conn.release) })
+	_ = c.Close()
+	waitAcked(t, a.k, 2)
+}
+
 func TestAnAdapterInputThatFailsEndsTheAttachment(t *testing.T) {
 	t.Parallel()
 	a := newAgent(t, 0)
