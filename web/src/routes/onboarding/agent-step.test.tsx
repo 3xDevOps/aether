@@ -20,7 +20,7 @@ const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
   ws: ['events', 'attach', 'terminal'],
-  local: ['link.status', 'link.repo', 'env.agents'],
+  local: ['link.status', 'link.repo'],
 }
 
 function seed(caps: GatewayCapabilities = localCaps) {
