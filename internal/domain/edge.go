@@ -17,8 +17,7 @@ type Identity struct {
 // DeviceID identifies a Device.
 type DeviceID string
 
-// DeviceStatus is where a device stands in approval. The values are the
-// edge protocol's device statuses.
+// DeviceStatus is where a device stands in approval.
 type DeviceStatus string
 
 const (
