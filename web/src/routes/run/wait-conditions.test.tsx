@@ -94,6 +94,13 @@ describe('waiting until', () => {
     expect(useStore.getState().runs.run_1?.wait_conditions).toEqual(newer)
   })
 
+  it('shows a target only ever read with failures as not yet verified', () => {
+    const failing = run({ wait_conditions: [wait({ source_checked_at: undefined, consecutive_failures: 1, last_error: 'GitHub: 502 Bad Gateway' })] })
+    setUp(failing)
+    render(<WaitConditions run={toRecord(failing)} inset={false} client={fakeApi()} />)
+    expect(screen.getByRole('region', { name: 'Waiting until' }).textContent).toContain('Last verifiedNot yet')
+  })
+
   it('offers no Cancel on a server without run.wait.cancel, and nothing for a run that never waited', () => {
     const waiting = run({ wait_conditions: [wait({})] })
     setUp(waiting, ['run.get'])

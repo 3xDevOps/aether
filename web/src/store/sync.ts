@@ -562,7 +562,9 @@ export async function applyEvent(
     case 'run.children': {
       if (ev.type === 'run.children') touchChildren(ev.run_id)
       try {
-        store.getState().upsertRun(await client.runGet(ev.run_id))
+        const run = await client.runGet(ev.run_id)
+        if (signal?.aborted) return false
+        store.getState().upsertRun(run)
       } catch (err) {
         if (!(err instanceof ApiError && err.status === 404)) {
           noteUnreachable(store, client, err, signal)

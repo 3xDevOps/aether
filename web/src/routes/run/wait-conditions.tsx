@@ -82,7 +82,7 @@ function WaitRow({ wait, runID, mayCancel, client }: { wait: WaitCondition; runI
   const badge = wait.state === 'resolved' && wait.outcome
     ? wait.outcome.charAt(0).toUpperCase() + wait.outcome.slice(1).replaceAll('-', ' ')
     : stateLabel[wait.state]
-  const verified = wait.source_checked_at ?? wait.last_checked_at
+  const verified = wait.source_checked_at
   const failures = wait.consecutive_failures
   const checks = wait.observed.checks
   const attempts = `${wait.delivery_attempts} ${wait.delivery_attempts === 1 ? 'attempt' : 'attempts'}`

@@ -1184,6 +1184,19 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1?.wait_conditions).toEqual(waits)
   })
 
+  it('drops a run.wait.changed reread answered after its connection was replaced', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const before = store.getState().runs.run_1
+    const abort = new AbortController()
+    const runGet = vi.fn(async () => {
+      abort.abort()
+      return run({ wait_conditions: [] })
+    })
+    expect(await applyEvent(store, statusEvent({ seq: 7, type: 'run.wait.changed', payload: { wait_id: 'wait_1', state: 'resolved' } }), fakeApi({ runGet }), abort.signal)).toBe(false)
+    expect(store.getState().runs.run_1).toBe(before)
+  })
+
   it('hydrates an unknown run before applying its retention metadata', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
