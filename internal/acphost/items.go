@@ -206,6 +206,9 @@ type Request struct {
 	URL        string          `json:"url,omitempty"`
 	Status     string          `json:"status"`
 	Answer     string          `json:"answer,omitempty"`
+	// RPCID is the agent's JSON-RPC id for the request, which the keeper
+	// sends again unchanged.
+	RPCID string `json:"rpc_id,omitempty"`
 }
 
 // Option is one answer a person can pick. Kind is the ACP permission option

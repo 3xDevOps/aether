@@ -145,10 +145,24 @@ func (g gatedReader) Read(p []byte) (int, error) {
 func (c *Conn) relay(dst *io.PipeWriter, src io.Reader) {
 	br := bufio.NewReaderSize(src, 64<<10)
 	lineStart := true
+	var line []byte
 	for {
 		chunk, err := br.ReadSlice('\n')
 		if len(chunk) > 0 {
 			ended := chunk[len(chunk)-1] == '\n'
+			if lineStart {
+				if cap(line) > 64<<10 {
+					line = nil
+				}
+				line = line[:0]
+			}
+			if len(line) < maxLine {
+				line = append(line, chunk...)
+			}
+			if ended {
+				// Before the SDK sees the request, whose handler takes its id.
+				c.noteRequest(line)
+			}
 			// Matched before the SDK sees the answer, which can start the
 			// next prompt.
 			answered := ended && lineStart && c.w.answersPrompt(chunk)
@@ -175,4 +189,43 @@ func (c *Conn) relay(dst *io.PipeWriter, src io.Reader) {
 			return
 		}
 	}
+}
+
+// maxLine is the longest line the SDK reads.
+const maxLine = 10 << 20
+
+// noteRequest records the JSON-RPC id of an agent request that waits for a
+// person, for its handler.
+func (c *Conn) noteRequest(line []byte) {
+	if !bytes.Contains(line, []byte(acp.ClientMethodSessionRequestPermission)) && !bytes.Contains(line, []byte(acp.ClientMethodElicitationCreate)) {
+		return
+	}
+	var m struct {
+		rpcHead
+		Params json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal(line, &m) != nil || len(m.ID) == 0 ||
+		(m.Method != acp.ClientMethodSessionRequestPermission && m.Method != acp.ClientMethodElicitationCreate) {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rpcIDs[string(m.Params)] = append(c.rpcIDs[string(m.Params)], string(m.ID))
+}
+
+// takeRPCID returns the JSON-RPC id noteRequest recorded for the request
+// with params, the oldest first among identical ones.
+func (c *Conn) takeRPCID(params json.RawMessage) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ids := c.rpcIDs[string(params)]
+	if len(ids) == 0 {
+		return ""
+	}
+	if len(ids) == 1 {
+		delete(c.rpcIDs, string(params))
+	} else {
+		c.rpcIDs[string(params)] = ids[1:]
+	}
+	return ids[0]
 }

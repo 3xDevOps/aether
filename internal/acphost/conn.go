@@ -173,6 +173,9 @@ type Conn struct {
 	// reuse holds the ids an adopted session's log gives requests still
 	// pending, for the agent's requests the keeper sends again.
 	reuse []Request
+	// rpcIDs holds the JSON-RPC ids of the agent's requests, by params, from
+	// when relay reads them until their handler takes them.
+	rpcIDs map[string][]string
 	// replayed is closed once the keeper has sent every one of them again,
 	// the wait for that ran out, or the pending requests were cancelled.
 	replayed     chan struct{}
@@ -193,6 +196,7 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 		pending:    make(map[string]*pendingRequest),
 		resolved:   make(map[string]bool),
 		children:   make(map[string]childLink),
+		rpcIDs:     make(map[string][]string),
 		announced:  make(chan struct{}),
 		cancelled:  make(chan struct{}),
 		replayed:   make(chan struct{}),
@@ -559,9 +563,9 @@ func (c *Conn) handle(ctx context.Context, method string, params json.RawMessage
 		c.events.authStatus(n.AuthStatus)
 		return nil, nil
 	case acp.ClientMethodSessionRequestPermission:
-		return c.permission(ctx, params)
+		return c.permission(ctx, params, c.takeRPCID(params))
 	case acp.ClientMethodElicitationCreate:
-		return c.elicitation(ctx, params)
+		return c.elicitation(ctx, params, c.takeRPCID(params))
 	case acp.ClientMethodElicitationComplete:
 		return nil, nil
 	}
@@ -668,7 +672,7 @@ func (c *Conn) awaitSession(ctx context.Context, sid string, cancelled <-chan st
 	}
 }
 
-func (c *Conn) permission(ctx context.Context, params json.RawMessage) (any, *acp.RequestError) {
+func (c *Conn) permission(ctx context.Context, params json.RawMessage, rpcID string) (any, *acp.RequestError) {
 	var p struct {
 		SessionID string                 `json:"sessionId"`
 		ToolCall  json.RawMessage        `json:"toolCall"`
@@ -693,7 +697,7 @@ func (c *Conn) permission(ctx context.Context, params json.RawMessage) (any, *ac
 	if u := toolCallUpdateFrom(p.ToolCall); u != nil {
 		c.events.update(parent, u)
 	}
-	req := Request{Kind: RequestPermission, Title: tc.Title, ToolCallID: tc.ToolCallID}
+	req := Request{Kind: RequestPermission, Title: tc.Title, ToolCallID: tc.ToolCallID, RPCID: rpcID}
 	if req.Title == "" {
 		req.Title = "Permission requested"
 	}
@@ -731,7 +735,7 @@ func toolCallUpdateFrom(toolCall json.RawMessage) json.RawMessage {
 
 var elicitationOptions = []Option{{ID: "accept", Name: "Accept"}, {ID: "decline", Name: "Decline"}}
 
-func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *acp.RequestError) {
+func (c *Conn) elicitation(ctx context.Context, params json.RawMessage, rpcID string) (any, *acp.RequestError) {
 	var p struct {
 		SessionID       *string         `json:"sessionId"`
 		Mode            string          `json:"mode"`
@@ -755,7 +759,7 @@ func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *a
 			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 		}
 	}
-	req := Request{Title: p.Message, ToolCallID: p.ToolCallID, Options: elicitationOptions}
+	req := Request{Title: p.Message, ToolCallID: p.ToolCallID, Options: elicitationOptions, RPCID: rpcID}
 	switch p.Mode {
 	case "form":
 		req.Kind, req.Schema = RequestQuestion, p.RequestedSchema
@@ -783,7 +787,7 @@ func (c *Conn) wait(ctx context.Context, req Request, cancelled <-chan struct{})
 	req.Status = RequestPending
 	c.mu.Lock()
 	if i := slices.IndexFunc(c.reuse, func(r Request) bool {
-		return r.Kind == req.Kind && r.ToolCallID == req.ToolCallID && r.Title == req.Title
+		return r.RPCID != "" && r.RPCID == req.RPCID
 	}); i >= 0 {
 		req.ID = c.reuse[i].ID
 		c.reuse = slices.Delete(c.reuse, i, i+1)

@@ -71,7 +71,7 @@ func pendingLog(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := &Request{ID: "req-1", Kind: RequestPermission, Title: "rm -rf build", ToolCallID: "t1", Status: RequestPending,
+	req := &Request{ID: "req-1", Kind: RequestPermission, Title: "rm -rf build", ToolCallID: "t1", Status: RequestPending, RPCID: "1",
 		Options: []Option{{ID: "allow", Name: "Allow", Kind: "allow_once"}, {ID: "reject", Name: "Reject", Kind: "reject_once"}}}
 	for _, it := range []Item{{Kind: KindTurnStart, Turn: 1}, {Kind: KindRequest, Turn: 1, Request: req}} {
 		if err := log.Append(&it); err != nil {
@@ -116,6 +116,63 @@ func TestAnAnswerBeforeTheKeepersReplayReachesTheAgent(t *testing.T) {
 	}
 	if res := <-got; res != `{"outcome":{"optionId":"allow","outcome":"selected"}}` {
 		t.Fatalf("agent got %s", res)
+	}
+}
+
+func TestReplayedRequestsKeepTheirIDsByTheAgentsRequestID(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	schema := func(field string) json.RawMessage {
+		return json.RawMessage(`{"type":"object","properties":{"` + field + `":{"type":"string"}}}`)
+	}
+	path := t.TempDir() + "/run.items.jsonl"
+	log, err := OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two questions alike but for their schemas, logged in the opposite order
+	// to the agent's request ids.
+	for _, it := range []Item{{Kind: KindTurnStart, Turn: 1},
+		{Kind: KindRequest, Turn: 1, Request: &Request{ID: "req-1", Kind: RequestQuestion, Title: "Which?", Schema: schema("tag"), Options: elicitationOptions, Status: RequestPending, RPCID: "2"}},
+		{Kind: KindRequest, Turn: 1, Request: &Request{ID: "req-2", Kind: RequestQuestion, Title: "Which?", Schema: schema("branch"), Options: elicitationOptions, Status: RequestPending, RPCID: "1"}},
+	} {
+		if err := log.Append(&it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := startMock(t, m, Config{LogPath: path, Adopt: &Adoption{
+		Initialize: m.fix.Initialize, Session: m.fix.SessionNew, SessionID: m.sessionID(), PromptTurn: 1, ReplayWait: time.Minute,
+	}})
+	replies := map[string]chan string{"branch": make(chan string, 1), "tag": make(chan string, 1)}
+	for i, field := range []string{"branch", "tag"} {
+		go func() {
+			res, err := m.request(context.Background(), acp.ClientMethodElicitationCreate, map[string]any{
+				"sessionId": m.sessionID(), "mode": "form", "message": "Which?", "requestedSchema": schema(field),
+			})
+			if err != nil {
+				replies[field] <- err.Error()
+				return
+			}
+			replies[field] <- string(res)
+		}()
+		waitFor(t, "the replayed question", func() bool {
+			s.conn.mu.Lock()
+			defer s.conn.mu.Unlock()
+			return len(s.conn.pending) == i+1
+		})
+	}
+	if err := s.Answer("req-2", "accept", map[string]any{"branch": "main"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-replies["branch"]:
+		if got != `{"action":"accept","content":{"branch":"main"}}` {
+			t.Fatalf("the branch question got %s", got)
+		}
+	case got := <-replies["tag"]:
+		t.Fatalf("the branch question's answer reached the tag question: %s", got)
 	}
 }
 
