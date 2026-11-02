@@ -260,6 +260,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     if (p.children === 'off') return <><Who id={e.actor_id} /> turned subsessions off for this session</>
     return 'Subsessions follow the owner’s setting'
   },
+  'run.wait.changed': (p) => `A wait condition is now ${typeof p.state === 'string' ? p.state : 'changed'}`,
   'run.protected': (p, e) => <><Who id={e.actor_id} /> {p.protected ? 'protected the session' : 'removed the session’s protection'}</>,
   'run.controller': (p, e) => {
     if (p.member_id) return <><Who id={p.member_id} /> took control</>

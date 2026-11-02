@@ -2195,7 +2195,14 @@ view has the header's primary action and **More**. Appearance has explicit
 **Use system theme**, **Use light theme** and **Use dark theme** commands
 that set the same persisted preference as Settings.
 
-The palette ranks with cmdk's default scorer. The pinned local cmdk patch
+The palette ranks with cmdk's default scorer. A command matches on its label
+followed by its aliases, `Command.value` in `src/lib/commands.ts` (a
+destination's `keywords` in `src/lib/surfaces.ts`), so a label that starts
+with the query outranks an alias match: "delete" ranks **Delete session**
+above **Close session…**. cmdk matches subsequences, so check that a new
+alias does not pull a destructive command into an unrelated query; typing
+never runs a command, and Enter on a confirmed verb opens its confirmation.
+The pinned local cmdk patch
 in `patches/cmdk@1.1.1.patch` stays because stock cmdk 1.1.1 leaves the
 input's `aria-activedescendant` unset for the initial selection and stale
 after filtering, and spreads caller props before that attribute, so no
@@ -4359,6 +4366,32 @@ whatever opened it. Sections (`details.tsx`):
   decision or reply locks only its own card ([Actions](#actions)). With none of
   these, one card with the needs-you reason and the header's action as a
   secondary button, or "Nothing is waiting on you."
+- **Waiting until**, when the session carries `wait_conditions`: what its
+  agent reported waiting `--until` ([session waits](watches.md#session-waits)),
+  pending first, then the last resolved list. Each row has the pull request
+  link (`<owner>/<repo>#<n>`, to GitHub) or the session link, cut to two
+  lines, then "merged", "checks final" or "finished", and a badge: how a
+  resolved condition resolved ("Passed", "Merged", "Abandoned", "Reported
+  success"), or the state (Pending, Cancelled, Replaced, Expired,
+  Unreadable). Under it: the condition's summary and detail unless they
+  repeat the error; the pull request state, head commit, session status and
+  checks the server last read, as **Required checks** when the base branch
+  requires them, else **Checks** ("4 passed, 0 failed, 1 running", or "None
+  reported yet"); **Last verified**; **Next check** while it is still
+  ahead; **Failures** ("3 in a row: <error>") with the source's own error;
+  **Resolved**; **Delivery** ("Delivered to the agent", "Waiting to be
+  delivered", or "Not delivered after N attempts: <error>"); why it ended,
+  "Cancelled by <name>" or "Cancelled by you" when a person cancelled it;
+  and when a pending one gives up. Only the session's owner and admins get
+  what the server read and the errors. The server publishes
+  `run.wait.changed` only when a result changes, not on every read, so a
+  next check already past is left out rather than called overdue; the
+  state line's `wait` is the server's own judgment of a stale read
+  ([session state](#session-state)). **Cancel** (`run.wait.cancel`, for
+  whoever may steer the session) ends a pending condition and shows the
+  result, unless the linked server or member changed meanwhile or a newer
+  read already replaced that condition. The section rereads the session on
+  every `run.wait.changed` event.
 - **Subsessions**, where the server offers `run.children` and the session has
   any: every descendant, nearest first and indented by depth, with its
   purpose, state, agent and model, "On `<name>`'s account" plus "(fallback

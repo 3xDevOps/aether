@@ -94,7 +94,11 @@ fault: <condition>" ([dashboard-frontend.md](dashboard-frontend.md#session-state
 `wait` reaches every workspace member, so it never holds what a read found
 or its error: those come from the owner's GitHub login and are in the
 session's `wait_conditions`, which only its owner and admins read in full
-([session waits](watches.md#session-waits)).
+([session waits](watches.md#session-waits)). Session details lists each
+condition under **Waiting until** with what the server last read, when it
+checks next, its failures and whether the wake reached the agent, and
+**Cancel** ends a pending one
+([dashboard-frontend.md](dashboard-frontend.md#details)).
 
 A broken wait is the only one that needs you, because only then can nothing
 but a person move the session. While another of its conditions is still pending
