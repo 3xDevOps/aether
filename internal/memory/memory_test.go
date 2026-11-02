@@ -636,7 +636,7 @@ func TestBriefDropsPinsOnlyPastBudgets(t *testing.T) {
 	var extra []*store.Memory
 	for i := range 50 {
 		extra = append(extra, &store.Memory{ID: fmt.Sprintf("note-bypass%05d", i), Kind: store.MemoryConvention,
-			Scope: store.MemoryScopeWorkspace, Title: strings.Repeat("z", protocol.MemoryMaxTitleBytes), PinnedByName: "Dana"})
+			Scope: store.MemoryScopeWorkspace, Title: strings.Repeat("z", store.MemoryMaxTitleBytes), PinnedByName: "Dana"})
 	}
 	svc, err := New(Config{Store: bypassedPins{DB: f.db, extra: extra}, Bus: f.bus, Log: f.log})
 	if err != nil {
