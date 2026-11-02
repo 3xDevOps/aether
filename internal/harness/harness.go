@@ -312,10 +312,6 @@ type Profile struct {
 	LocalRoot string
 	// DenyNames are basenames always excluded from profile snapshots.
 	DenyNames []string
-	// User is an explicit numeric "uid:gid" run user for images whose
-	// configured user is named rather than numeric; empty resolves from
-	// the image (see ResolveUser).
-	User string
 	// SteerSubmit ends a steering message written to stdin. Empty means one
 	// Enter; opencode needs a second Enter to send.
 	SteerSubmit string
@@ -894,17 +890,9 @@ func (p Profile) ContainerLocalRoot(user string) string {
 }
 
 // ResolveUser resolves the numeric uid:gid the container and host-side
-// ownership share; override wins. A bare uid implies gid = uid so the
-// checkout is never handed to the root group, and a named image user needs
-// the profile to supply the mapping.
-func ResolveUser(override, imageUser string) (string, error) {
-	if override != "" {
-		u, ok := normalizeUser(override)
-		if !ok {
-			return "", fmt.Errorf("harness: profile user %q must be numeric uid:gid", override)
-		}
-		return u, nil
-	}
+// ownership share. A bare uid implies gid = uid so the checkout is never
+// handed to the root group, and a named image user is refused.
+func ResolveUser(imageUser string) (string, error) {
 	if imageUser == "" {
 		return "0:0", nil
 	}

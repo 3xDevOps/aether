@@ -100,7 +100,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			return nil, fmt.Errorf("scheduler: saved environment image %q is missing from the runtime; run aether env reset to return to the standard image", image)
 		}
 	}
-	user, err := s.resolveContainerUser(ctx, image, profile)
+	user, err := s.resolveContainerUser(ctx, image)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: resolve environment user: %w", err)
 	}
@@ -440,7 +440,7 @@ func (s *Scheduler) protectConfiguredLegacyCaches(ctx context.Context, memberID 
 	workspaces = append(workspaces, nil)
 	var paths []string
 	for _, profile := range profiles {
-		user, err := s.resolveContainerUser(ctx, image, profile)
+		user, err := s.resolveContainerUser(ctx, image)
 		if err != nil {
 			return err
 		}
