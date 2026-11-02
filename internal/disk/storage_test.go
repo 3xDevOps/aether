@@ -66,10 +66,7 @@ func TestMeasureDoesNotFollowSymlinkEscapes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	u, err := Measure(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	u := components(dir)
 	if u.HomeBytes+u.DatabaseBytes+u.WorktreeBytes+u.OtherBytes+u.RepoBytes+u.TranscriptBytes+u.EvidenceBytes != 0 {
 		t.Fatalf("symlink target bytes were inventoried: %+v", u)
 	}
@@ -98,10 +95,7 @@ func TestMeasureRootAliasDoesNotStealHomeOwnership(t *testing.T) {
 	if err := os.Symlink("homes", filepath.Join(dir, "alias")); err != nil {
 		t.Fatal(err)
 	}
-	u, err := Measure(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	u := components(dir)
 	if u.HomeBytes != 4 || u.OtherBytes != 0 || len(u.Entries) != 1 || u.Entries[0].Kind != "home" || u.Entries[0].Key != "member" {
 		t.Fatalf("alias stole real ownership: %+v", u)
 	}
@@ -117,10 +111,7 @@ func TestMeasureAggregatesTranscriptSegments(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	u, err := Measure(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	u := components(dir)
 	if u.TranscriptBytes != 16 || len(u.Entries) != 1 || u.Entries[0].Kind != "transcript" || u.Entries[0].Key != "run" || u.Entries[0].Bytes != 16 {
 		t.Fatalf("transcript segments were not aggregated: %+v", u)
 	}

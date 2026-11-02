@@ -83,14 +83,6 @@ const (
 	databaseFile   = "aether.db"
 )
 
-func Measure(dataDir string) (Usage, error) {
-	u, err := filesystem(dataDir)
-	if err != nil {
-		return Usage{}, err
-	}
-	return u.withComponents(components(dataDir)), nil
-}
-
 func components(dataDir string) Usage {
 	var u Usage
 	root, err := os.OpenRoot(dataDir)
