@@ -12,14 +12,14 @@ One continuous take, roughly 25-40 seconds, no cuts and no narration. The point
 is that the work happens somewhere else and comes back as a branch.
 
 1. **Launch** (~5s) - `aether session "add a health check endpoint" --agent claude`
-   in a terminal. The run ID prints.
-2. **Watch** (~15s) - `aether gui`, then the dashboard: the run card moving
+   in a terminal. The session ID prints.
+2. **Watch** (~15s) - `aether gui`, then the dashboard: the session card moving
    through the board, the live terminal mirror with the agent actually working,
    the diff timeline picking up changed files.
 3. **Message** (~5s) - optional but the best moment if it fits: `aether message`
    from the terminal and the colored banner appearing in the dashboard's
    terminal view a second later.
-4. **Pull** (~8s) - back in the terminal, `aether pull <run>` and then
+4. **Pull** (~8s) - back in the terminal, `aether pull <session>` and then
    `git diff main...aether/aether/run-<slug>-<id>` showing real code.
 
 Cut it before anything hangs. If the agent takes a long pause, record again -
@@ -34,7 +34,7 @@ do not speed up the middle, because a sped-up terminal reads as fake.
 - Use a real repo with recognizable file names. Do not use the `fake` harness
   for the published demo - the point is a real agent - but do rehearse the
   timing with it first.
-- Clear the board of unrelated runs, and use a display name that is not
+- Clear the board of unrelated sessions, and use a display name that is not
   `admin`.
 - No tokens on screen. `aether gui` puts one in the URL bar: hide the address
   bar, or crop it out.
@@ -66,8 +66,7 @@ repo front page. Levers, in the order to reach for them: shorten the take, drop
 to 10-12 fps, scale to 1000px wide, reduce the palette
 (`palettegen=max_colors=64`).
 
-Commit the GIF, replace the placeholder comment and the "Demo recording wanted"
-note in the README with the image, and delete this paragraph's obligation from
+Commit the GIF, replace the placeholder comment in the README with the image, and delete this paragraph's obligation from
 the top of this file.
 
 ## Restoration verification captures
@@ -76,8 +75,8 @@ These screenshots are browser verification evidence, not the live-agent demo
 described above:
 
 - `run-map-restored.png`: the actual Board, run cards and store with
-  deterministic fixture runs, including child runs, a paused run and a
-  failed run. No live gateway was connected.
+  deterministic fixture sessions, including subsessions, a paused session
+  and a failed session. No live gateway was connected.
 - `launch-splash-restored.png`: the restored animation paused at 700ms by a
   temporary browser harness. Production animation timings were unchanged.
 - `launch-splash-lifecycle.png`: 27 browser checkpoints covering the minimum

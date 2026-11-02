@@ -108,7 +108,7 @@ aether forward terminal <port>               # a port in your environment
 aether forward <session-id> 5173 --local 8080    # on another local port
 ```
 
-`run:<run-id>` names the same session as `<run-id>`. The command forwards until
+`run:<session-id>` names the same session as `<session-id>`. The command forwards until
 it is interrupted.
 
 In the dashboard, a session's **Browser** view lists the ports the session is
@@ -202,7 +202,7 @@ the tailnet.
 For the local backend, a replay-safe call that fails on transport (a server
 restart or dropped network) redials once and retries once before surfacing
 `-32004` (unavailable). A method unsafe to run twice is not replayed: one
-whose second session creates a duplicate (`run.launch`, `template.launch`,
+whose second run creates a duplicate (`run.launch`, `template.launch`,
 `workspace.add`, `member.invite`), repeats an external side effect
 (`server.update`, `terminal.exec`, `github.connect`, `run.git.*`,
 `run.pr.*`, `dev.*`), or fails where the first succeeded (`run.delete`,
@@ -420,7 +420,7 @@ These transport bounds do not automatically replay a development mutation.
 The dashboard browses recorded output through
 `POST /api/v1/terminal.history`. Like every gateway RPC, it uses the local
 bearer token or server-side Tailscale WhoIs identity; the guarded method also
-requires **View** permission for the named run. A member who cannot view the
+requires **View** permission for the named session. A member who cannot view the
 session cannot page or search its transcript.
 
 The request names `run_id`, an optional opaque `before` cursor returned as
@@ -545,7 +545,7 @@ the one asked for, and holds that one; after a mid-session move it holds the
 account the session first used, and is absent again if the session moves back to
 it. Each move publishes a `run.account` event `{account_member_id,
 previous_account_member_id, requested_account_member_id}` carrying the same
-fields. A headless Claude run whose output reports the usage limit
+fields. A headless Claude session whose output reports the usage limit
 publishes `run.usage_limit` `{message}` with the agent's message. `run.launch`
 takes the fallback policy as `fallback_account_member_ids` (member IDs, tried
 in order) or `no_fallback: true`; omitting both orders the launcher's
@@ -605,7 +605,7 @@ They take an optional `effort` in the same places: one of the agent's
 control characters, a leading `-`, or more than 32 bytes is `-32602` with
 `effort "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 32 bytes`;
 a level the agent does not list, or an effort for an agent with no effort flag
-outside an Enhanced session, is refused with the scheduler's error. Run
+outside an Enhanced session, is refused with the scheduler's error. Session
 snapshots and templates carry `effort`, omitted when empty; a composer change
 publishes `run.effort` with `{"effort": "<level>"}`.
 
@@ -615,7 +615,7 @@ Another value is `-32602` with
 `run.launch: permission "x" is not root, default or isolated`. `server.info`
 lists the `permission` feature when `run.launch` takes it; an older server
 drops it and runs the agent as root. Session snapshots carry `permission`, and
-`launch.defaults` keeps the `permission` the launch form preselects.
+`launch.defaults.set` saves the `permission` the launch form preselects.
 
 `run.launch` takes an optional `extra_workspace_ids`:
 other workspaces checked out at `/repos/<name>` in the session. An empty id, the primary workspace or a repeated
@@ -924,7 +924,7 @@ authoritative if that request later returns an older option snapshot.
 A mode-only notification preserves that mode without discarding accepted model,
 effort or other option changes returned by the request.
 
-A session whose session is not running answers `-32004` with the reason.
+A session whose Enhanced agent is not running answers `-32004` with the reason.
 `run.mode.switch` also takes a Standard session, needs **Steer**, and while
 anyone holds the session's control needs that lease (`-32003` otherwise). It
 answers `-32002` with the real error as the message and a `data.reason` the
@@ -1068,7 +1068,7 @@ The dashboard also calls these methods through the same route:
 | `server.sysbox.install` | none; admin only | the same status. Starts the installer in the background, one at a time; a call while one runs returns `installing`. Poll `server.sysbox.status` until `on`, `unsupported` or `failed`. The server then uses Sysbox for new containers at once. Never retried after a transport failure. While it runs, `server.update` answers `-32003` |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
 | `insights.get` | `{"workspace_id":"","scope":"mine"\|"everyone","from":"<RFC3339>","to":"<RFC3339>","time_zone":"America/Los_Angeles"}` | `{"generated_at":"...","from":"...","to":"...","time_zone":"...","bucket":"day"\|"week","totals":Totals,"previous":Totals,"series":[{"start":"2026-10-09","launched":3,"completed":2,"merged":1,"failed":0,"interrupted":0,"abandoned":0}],"heatmap":[{"date":"2026-04-20","runs":2}],"by_workspace":[{"workspace_id":"...","name":"...","launched":4,"finished":3,"failed":1}],"by_agent":[{"harness":"claude","model":"","launched":4,"finished":3,"failed":1}],"durations":{"runs_measured":9,"median_run_seconds":1260,"p90_run_seconds":4100,"state_runs_measured":6,"median_working_seconds":900,"median_waiting_seconds":240,"median_response_seconds":75},"cost":{"metered_runs":3,"unmetered_runs":6,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000,"by_agent":[{"harness":"claude","metered_runs":3,"unmetered_runs":0,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000}]},"pull_requests":{"opened":2,"merged":1},"success":{"runs":{"succeeded":4,"finished":9}},"outcomes":{"runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}],"members":[{"member_id":"...","display_name":"...","color":"#e6194b","runs":Outcome,"series":[{"start":"2026-10-09","runs":Outcome}]}]},"recent":[{"run_id":"...","title":"...","workspace_id":"...","status":"completed","reason":"","harness":"claude","model":"","created_at":"...","finished_at":"...","duration_seconds":1200,"pr_url":"","pr_state":""}],"needs_you":2,"coverage":{"state_times_since":"...","pull_requests_since":""}}`; `Outcome` is `{"done","failed","abandoned"}`; `outcomes.members` is filled only for `scope` `everyone`. `Totals` is `{"launched","completed","merged","failed","interrupted","abandoned","killed","active","finished"}`. What each number counts is in [insights.md](insights.md) |
-| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","login_command":"claude auth login","login_kind":"interactive","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-adapters); `default_mode` is `acp` when `enhanced_installed` is true, else `tui`, the mode a `run.launch` without `mode` starts in; `executable` is the command the agent sessions, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `login_command` is the vendor's sign-in command `aether agent login` types, `login_kind` is `device` when it prints a URL and code and needs nothing typed back, else `interactive`; both are absent for a member-defined agent. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
+| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","login_command":"claude auth login","login_kind":"interactive","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-adapters); `default_mode` is `acp` when `enhanced_installed` is true, else `tui`, the mode a `run.launch` without `mode` starts in; `executable` is the command the agent runs, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `login_command` is the vendor's sign-in command `aether agent login` types, `login_kind` is `device` when it prints a URL and code and needs nothing typed back, else `interactive`; both are absent for a member-defined agent. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
 | `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"fallback"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds an older or fallback list. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#choose-a-model) |
 | `agent.install` | `{"name":"claude","enhanced":true}` (`enhanced` optional) | `{"log_tail":"...","installed":true,"enhanced_installed":true,"error":"the install command exited 1"}` - runs a shipped agent's install command, and its adapter's with `enhanced`, in the caller's environment terminal, starting it if needed; `error` is set when the command failed. Needs the launch capability. Answers within 10 minutes; one install per member at a time, a second answers `-32003` |
 | `agent.remove` | `{"name":"claude"}` | `{"removed":["~/.local/bin/claude","~/.local/bin/claude-agent-acp"]}` - removes an agent from the caller's own environment so new sessions cannot start it. A shipped name (it wins over a member's definition of the same name; `custom` is not removable) deletes its `~/.local/bin` links, the Enhanced adapter's too; `removed` lists those that existed, and none existing answers `-32602` `agent "claude" is not installed in your environment: ~/.local/bin/claude does not exist`. Any other name deletes the caller's definition and answers `{}`, or `-32602` `you have no agent "x"; aether agent list shows yours`. `-32004` `persistent homes are not enabled` without member homes. Needs the launch capability; refused with `-32003` while an install or a harness update runs in the home. Package files, logins and settings stay. Not replayed on a transport failure |
@@ -1187,7 +1187,7 @@ anything.
 
 ### Session branch and pull request methods
 
-These session native `git` and `gh` in a live session's container, as the session's
+These run native `git` and `gh` in a live session's container, as the session's
 account, like the other `run.git.*` and `run.pr.*` methods. `run.git.log`
 needs view; `run.pr.merge` needs push and steering, re-checked before every
 command. A session whose container is gone fails with `-32002`
@@ -1383,7 +1383,7 @@ path, a `..` or empty segment, a backslash, or a NUL byte is refused.
 
 | Method | Does |
 | --- | --- |
-| `home.tree` | Lists the immediate subsessions of a directory, sorted by name, with nothing left out: dotfiles, agent runtime folders, and credential files are listed. `kind` is `dir`, `file`, or `link` for a symlink; sockets, FIFOs, and devices are omitted. `locked` marks a credential file. |
+| `home.tree` | Lists the immediate children of a directory, sorted by name, with nothing left out: dotfiles, agent runtime folders, and credential files are listed. `kind` is `dir`, `file`, or `link` for a symlink; sockets, FIFOs, and devices are omitted. `locked` marks a credential file. |
 | `home.read` | Reads one file with the rules and result of `config.read`. |
 | `home.write` | Saves complete UTF-8 text with the revision rules of `config.write`. An empty `revision` creates the file as `0644`, with any missing parent directories, and refuses an existing one. |
 | `home.mkdir` | Creates one directory, `0700`. Its parent must exist and the name must be free. |
@@ -1436,7 +1436,7 @@ admission.
 `config.roots` returns each agent's `runtime_ignores` and
 `credential_names`. `runtime_ignores` contains case-sensitive patterns
 anchored at the agent's directory; one matches a path and everything below
-it, `*` matches any session of characters within one name, and trailing slashes
+it, `*` matches any run of characters within one name, and trailing slashes
 are ignored for matching. These lists are per agent, so a runtime file
 ignored for Claude is not implicitly ignored for OMP or a member-defined
 custom agent. Known credential names wherever they occur in a path, and every
@@ -1586,7 +1586,7 @@ A cumulative response after checkout cleanup is the last recorded snapshot,
 not a live filesystem read, and carries `recorded:true`. It is measured
 against the tree of the effective base that snapshot's stats used, which the
 snapshot store records in the same ref transaction that publishes the
-snapshot, so the pair never splits. Stopping a session's watcher, as run
+snapshot, so the pair never splits. Stopping a session's watcher, as session
 completion does, takes one last snapshot first, so the final `run.diff` and
 the recorded diff include changes made in the seconds before the stop.
 
@@ -1787,7 +1787,7 @@ exceeds the 64 MiB limit`.
   what gh, or the container that could not run it, printed - prefixed with
   `gh --version exited <code>` when the status is `broken`, and the output
   after it when there was any. A gh that
-  cannot do the login also carries `remedy`, the command the member sessions,
+  cannot do the login also carries `remedy`, the command the member runs,
   and `admin_remedy`, what a server admin has to run first when the
   server's own standard image is the one without a usable gh:
 
@@ -2137,7 +2137,7 @@ the server snapshot from loading.
   change, answers `-32002` too, carrying git's message, because the member
   fixes it in their own repository. Only a failed fetch - an unreachable
   server, a key git could not use - answers `-32603`.
-- Every git command that dials a remote is bounded at ten minutes and sessions
+- Every git command that dials a remote is bounded at ten minutes and runs
   with `GIT_TERMINAL_PROMPT=0`, so git cannot block on its own credential
   prompt. The bound covers the compare and the push separately, so a
   `repo.push` that compares and then pushes can take twenty minutes;
@@ -2289,7 +2289,7 @@ the server snapshot from loading.
   against `checksums.txt`, staged beside the binary and renamed over it,
   exactly as the command does. On macOS with a directory this account
   cannot write (`admin-prompt`) the route is longer, and its one privileged
-  step sessions outside this process:
+  step runs outside this process:
 
   1. It downloads and verifies the release as the user into a private
      staging directory, `<user cache>/aether/update`
@@ -2304,7 +2304,7 @@ the server snapshot from loading.
      through. Aether never sees your password.`), and the system's own
      last line, "Touch ID or enter your password to allow this." The
      password or Touch ID match goes to macOS's authorization service;
-     nothing is stored, piped, or logged by Aether. Root sessions one fixed
+     nothing is stored, piped, or logged by Aether. Root runs one fixed
      `sh` command made of
      system tools - a `0600` temp file in the destination directory, a
      copy, a SHA-256 check against the digest baked into the command text,
@@ -2395,8 +2395,8 @@ the temp directory so it never holds the app directory open), and exits
     that changed nothing, and restart the app for nothing), or `no signed
     release is published yet; this aether stays on <version>` when no
     release has a signed manifest and the server names none.
-  - `-32003` (conflict, 409): `an update is already running in this
-    gateway` - a second click from another tab while the dialog is up.
+  - `-32003` (conflict, 409): `a release lookup or install is already
+    running in this gateway` - a second click from another tab while the dialog is up.
   - `-32004` (unavailable, 503): everything else, carrying the real
     message after an `install <tag>: ` prefix - a download or checksum
     error, osascript failing to start, root's checksum check failing
@@ -2486,7 +2486,7 @@ workspace receives it; a client shows it only to the member in `member_id`.
 
 ```json
 {"type":"assistant.notice","payload":{"member_id":"mem_...","run_id":"run_...",
- "kind":"needs_input","title":"Run \"Fix flaky login test\" needs your input",
+ "kind":"needs_input","title":"Session \"Fix flaky login test\" needs your input",
  "body":"Question: Which database should the test use?"}}
 ```
 
@@ -2633,7 +2633,8 @@ resize, control, geometry, and acknowledgements.
 
    A write attach requires **steer** permission and otherwise refuses with
    `-32001`; an unknown session is `-32000`. A `queued`, `provisioning`, or
-   `running` session without a session is `-32004` rather than a held socket.
+   `running` session whose terminal is not live is `-32004` rather than a held
+   socket.
    A finished session remains readable through its snapshot or raw replay,
    depending on `screen`.
 
@@ -2800,7 +2801,7 @@ not create new shell tabs.
 
 The session item log of a session with `acp: true` ([enhanced-sessions.md](enhanced-sessions.md)):
 the items already logged after the client's cursor, then each new one as the
-agent sends it. Any other session is refused with `-32602` and `run <run_id>
+agent sends it. Any other session is refused with `-32602` and `session <run_id>
 does not run its agent over ACP`. Every frame is JSON text.
 
 1. Client sends one header frame. `write` asks for the session's control lease
@@ -2893,8 +2894,8 @@ does not run its agent over ACP`. Every frame is JSON text.
    the seven-second review expires.
 
 The socket closes **1012** `session stream ended; resubscribe with
-after_seq` when the session ends or restarts, when the session has no session
-and one starts, or when the client falls 1024 items behind: reconnect with
+after_seq` when the session ends or restarts, when the session has no agent
+conversation and one starts, or when the client falls 1024 items behind: reconnect with
 your last `seq`. It closes **1008** when membership is withdrawn. Losing
 Steer only drops the lease, as on an interactive attach: the server sends a
 `control` frame with `revocation_reason:"permission"` and the socket stays
@@ -2904,7 +2905,7 @@ open as a viewer. A session accepts at most 32 of these sockets at once; the nex
 ### `GET /ws/terminal?tab=<tab>`
 
 The member environment terminal uses the same binary-output and JSON-control
-framing as run attaches. The `tab` query is `main` or a client-selected name
+framing as session attaches. The `tab` query is `main` or a client-selected name
 matching `^[a-z0-9-]{1,32}$`.
 
 With `assistant_login=claude` or `assistant_login=codex` the stream is that

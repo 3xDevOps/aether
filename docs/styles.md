@@ -119,7 +119,7 @@ of a Board card, through `AgentGlyph colored`.
 Member colours are the only arbitrary server data applied inline: avatar
 rings, the owner rail in session lists, the owner mark on sidebar session rows and
 member names on conflict chips.
-Identity colour never replaces run-state colour.
+Identity colour never replaces session-state colour.
 
 ## Primitives
 
@@ -227,7 +227,7 @@ The other primitives with motion or a fixed size:
   shows three rows, then **N more**, whose rows fade in 30ms apart; a row
   that opens its detail takes a `bg-hover` fill on hover. The card's focus
   outline sits inside its border, so a scrolling parent never clips it, and
-  the Session dock draws the frame on its scroll box so the frame stays
+  the Chat dock draws the frame on its scroll box so the frame stays
   closed around the sticky footer. `RequestFooter` (`request-choice.tsx`) is the `bg-chrome` band that sticks
   to the bottom of a scrolling parent; `RequestPills` are its 26px **How
   long** pills (34px coarse) on a `bg-hover-chrome` track, the chosen one
@@ -261,9 +261,8 @@ Insights > System charts use recharts through `ChartContainer` in
 `web/src/components/ui/chart.tsx`, with recharts' animation off. Marks use
 `fill-*` and `stroke-*` token utilities or `currentColor`, never inline
 colours. Outcomes use the session state tokens (`state-done`, `state-failed`,
-`state-paused`). A neutral count such as sessions launched is outlined in
-`stroke-icon-faint` on `fill-chrome`, so it never reads as the solid paused
-grey. A sequential scale steps one hue: `fill-accent` at 25%, 50%, 75% and
+`state-paused`). A neutral count such as sessions launched is a `fill-icon-faint` bar on a
+`fill-chrome` track, so it never reads as the solid paused grey. A sequential scale steps one hue: `fill-accent` at 25%, 50%, 75% and
 100% over `fill-chrome` for zero. Every colour has a text legend, and every
 mark is named by its own label or a summary, so nothing depends on colour
 alone. Axis and legend text stays at `text-ui-xs` or `text-ui-sm` in
@@ -530,7 +529,7 @@ primitives retain their props, events, refs and accessibility contracts.
 
 The session header shows one primary action for the session's state, a **Details**
 toggle and **More**; destructive verbs stay last in **More**, behind their
-existing gates and confirmations. The view switch (Session, Trace on an
+existing gates and confirmations. The view switch (Chat, Trace on an
 Enhanced session, Terminal, Changes, Files, Browser) is a segmented tab list. A session with a pull request ends
 that row with its number as a muted link and its check state as a ghost
 button led by a `StatusDot`: failed, working, done or neutral. Details is a 320px side panel at
@@ -544,7 +543,7 @@ line. The roster scrolls horizontally, and below 34rem watchers show as avatars 
 below 30rem **Multiplayer** as its icon.
 Takeover progress uses `state-failed` with `on-failed` text in both themes.
 One session-owned holder decision dialog sits above every sheet and dialog.
-Request cards are neutral, with a needs-you dot in the header; the Session
+Request cards are neutral, with a needs-you dot in the header; the Chat
 transcript column is 736px wide with no row borders and no card around a
 block of steps. In it a person's message is a `bg-chrome` bubble at the
 right, at most 85% wide, with `rounded-composer`; everything the agent wrote
@@ -594,7 +593,7 @@ literal time or curve.
   session's details box wipes in from the row it docks to.
 - `Collapsible` bodies glide their height, clipped only while they move, and
   unmount once shut.
-- The Session request dock fades a request that left `pending` out over
+- The Chat request dock fades a request that left `pending` out over
   200ms, then glides its height (`--duration-glide`) to the next card, which
   fades in over 250ms, or to nothing. A preview that arrives late glides the
   card open; nothing animates on hydration.
@@ -606,7 +605,7 @@ literal time or curve.
   a group can hold hundreds of rows.
 - Only rows added after the first render enter: `animate-entrance` fades in
   and rises 4px. `playEntrance` staggers a burst by `--stagger-row` (30ms) up
-  to the eighth row; the rest arrive with it. The Session list plays it only
+  to the eighth row; the rest arrive with it. The Chat list plays it only
   for rows new since its last render: a streamed burst of at most eight, or
   the steps a viewer just opened, never a first load, replay or history page.
   A streaming answer's new Markdown blocks fade in from `--blur-fade` over

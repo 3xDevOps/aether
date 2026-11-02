@@ -12,7 +12,7 @@ A notice is information only. A watch never answers, approves, merges or
 grants anything.
 
 Only you see and change your watches. Admins see only their own. The
-conditions an agent waits on are watches its run owns; they are described in
+conditions an agent waits on are watches its session owns; they are described in
 [Session waits](#session-waits) and never appear in `watch.list`.
 
 ## Targets and conditions
@@ -260,7 +260,7 @@ Without one, an existing live watch on the same target with the same
 conditions is returned, and resumed if paused; with `source` `assistant` it
 becomes an assistant watch, so its notices also reach your assistant
 conversation. `receipt` is one line such as
-`Watching run fix-login for: needs you, finished. Push: 2 devices. Expires
+`Watching session fix-login for: needs you, finished. Push: 2 devices. Expires
 Nov 9.`, and says `in-app only` when push is off or no device is subscribed.
 
 The `watch.changed` event `{watch_id, member_id, notification_id}` tells the
@@ -337,7 +337,7 @@ admin only the wake's first line, the condition and how it ended.
 | `pending` | Read as above. A failing read keeps it pending: `consecutive_failures`, `last_error` and `last_error_at` record it, and it retries with backoff. |
 | `resolved` | A condition resolved; `outcome` says how. Wakes the session, or is returned in the report. |
 | `error` | The target can never be read: GitHub answers 404 or moved, the member has no usable GitHub login, or the session was deleted. `last_error` says which. Wakes the session, or is returned in the report. |
-| `expired` | Nothing resolved within 7 days. Wakes the run. |
+| `expired` | Nothing resolved within 7 days. Wakes the session. |
 | `cancelled` | `ended_cause` says why: another condition of the same report resolved first, the session reported another outcome, a person sent a prompt, the session was relaunched or ended, or its member lost access. A report, prompt or relaunch cancels only conditions registered before it, so one the agent registers in answer stays; a prompt cancels them before it reaches the agent, and is refused if that fails. `run.wait.cancel` sets it to `cancelled` and `ended_by_member_id` to the member who cancelled. An undelivered wake is dropped with it. |
 
 A waiting report with `--until` takes effect, and replaces the session's pending

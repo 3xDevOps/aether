@@ -116,7 +116,7 @@ flowchart LR
 [docs/README.md](docs/README.md) lists every guide and defines Aether's terms.  
 
 Common documentation:
-- [Quickstart](docs/quickstart.md): from install to your first reviewed run.
+- [Quickstart](docs/quickstart.md): from install to your first reviewed session.
 - [Install](docs/install.md): every platform, upgrades and removal.
 - [Agents](docs/harnesses.md): which agent CLIs work, how to sign in, and their
   limits.

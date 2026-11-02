@@ -145,7 +145,7 @@ The receiver follows these rules:
   is not yet notified. Check the session and the user's Stop and approval state
   immediately before the call.
 - Use one receiver for the root session. Replacing a session cancels the old
-  receiver and discards late responses. Subsessions never take the mailbox.
+  receiver and discards late responses. Child sessions never take the mailbox.
 - A human Stop stops the receiver until the host's documented user-resume event.
 - Do not wake during an approval wait or a busy turn. Wait for successful
   settlement, then start the next check with `wait_seconds: 0`.

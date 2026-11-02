@@ -143,7 +143,7 @@ After 15 minutes the code expires and the command fails with
 the authorization. Running the command again while a code is pending shows the
 same code.
 
-A member who is not an admin gets `github.oauth.start requires the admin role`
+A member who is not an admin gets `github.oauth.start: permission denied: workspace administration requires the admin role`
 and logs in by hand instead. The environment needs `gh` 2.81.0 or newer (the
 standard image has one). In `aether terminal`, run:
 
@@ -178,7 +178,7 @@ identity in `~/.gitconfig` in step with your name and address.
 | --- | --- |
 | `github: not logged in to github.com in the environment terminal; run aether github connect: HTTP 401: Bad credentials` | Run `aether github connect`. The line ends with gh's own reason. |
 | `github: the gh login on github.com lacks the admin:ssh_signing_key scope; run gh auth refresh -h github.com -s admin:ssh_signing_key in the environment terminal` | Run the command it names. Nothing in the home was changed. |
-| `github: the signing key registered on the account does not match this member's key (fingerprint SHA256:... not listed)` | Run `aether github connect` again. |
+| `github: gh ssh-key list on the account does not include the signing key Aether generated for this member (SHA256:...); this is not about your own GitHub keys` | Run `aether github connect` again. |
 | `github: gh is not on PATH in the environment terminal; ask a server admin to run aether server update, then run aether terminal stop and open the terminal again: ...` | See [No gh in the environment](#no-gh-in-the-environment). |
 | `github: the gh in the environment terminal is too old to check the login: 2.81.0 is the oldest gh that answers auth status --json; ...` | See [No gh in the environment](#no-gh-in-the-environment). |
 

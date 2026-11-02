@@ -426,7 +426,7 @@ Team memory is a store of short notes per workspace, kept in
 `memory_fts`). A note holds its text, its kind (decision, convention,
 gotcha, preference or outcome), up to 20 file paths it cites, the member it
 is attributed to, the session, agent and commit it came from, and who pinned
-it and when. Notes reach the store three ways:
+it and when. Notes reach the store two ways:
 
 - An agent writes one with `aether-internal memory add`, or a member with
   `aether memory add`: at most 1024 bytes of text.
@@ -450,9 +450,9 @@ server: there is no embedding service and no model call.
 
 Notes are scanned with gitleaks. A note an agent or member writes is refused
 when gitleaks finds a secret, with the rule and the line:col it matched. A
-report or answer with a secret is still recorded, with its text replaced by
+report with a secret is still recorded, with its text replaced by
 `(withheld: gitleaks rule <rule> at <line:col>)`. gitleaks only finds the
-secrets it has rules for, so keep credentials out of reports and answers.
+secrets it has rules for, so keep credentials out of reports.
 
 Notes do not expire. A collaborator or admin deletes one with
 `aether memory rm <id>`, or every note attributed to a session with `aether memory rm --run <session>`. Deleting a session deletes its unpinned notes; pinned notes stay until
@@ -461,7 +461,7 @@ search unless asked for with `--all`, until it is removed. Removing a member
 keeps the notes attributed to them.
 
 Before a release migrates the schema, `aether-server update` and **Update
-now** copy the database to `<data-dir>/aether.db.pre-update` and delete
+now** copy the database to `<data-dir>/server-update/aether.db.pre-update` and delete
 that copy once the new release has started. A note deleted while the copy
 exists is still in it, and a rollback restores it.
 
@@ -538,7 +538,7 @@ which no other app can hold and which grants nothing.
 - Evidence: deleting a session, or the packet's 30-day expiry, removes its
   evidence packets at once. The Git objects they retained stay in the
   workspace repository until one background `git gc` runs there, 30 seconds
-  after the last such removal in that workspace. A gc that fails or sessions
+  after the last such removal in that workspace. A gc that fails or runs
   past 5 minutes logs `gitengine: evidence prune failed` and is retried at
   the next hourly evidence sweep or server start.
 

@@ -536,7 +536,7 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `/ws/terminal?assistant_login=<agent>`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
-  the session Session's `TimelineRow` and `useFlatRows`, with the Session's
+  the Chat view's `TimelineRow` and `useFlatRows`, with its
   open blocks, and the constant row context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
   newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
   runs and reads **Stopping…** while `assistant.cancel` is in flight, so a
@@ -1200,8 +1200,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   likewise skips an unknown session, and on a known one replaces
   `account_member_id` and `requested_account_member_id` with the payload's, so
   the header names the new account at once. `run.children` re-reads its session,
-  which carries the session's own subsession setting, `child_refused` and
-  `detached`.
+  which carries the session's own subsession setting and `detached`.
   `run.retention` also fetches an unknown session, then replaces only its runtime
   deadline and cleanup metadata. It does not re-fetch known sessions or change
   `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or
@@ -1367,8 +1366,8 @@ is hidden. A group of more than 60 cards renders only the cards its scroll
 shows (`card-list.tsx`, virtua).
 
 In a flat session list (`run-list.tsx`) a root lists its subsessions
-under it with a toggle naming the count (**Show 2 subsessions
-**). Subsessions start shown, and a folded one that needs you still shows. Nested rows add the model to the
+under it with a toggle naming the count (**Show 2
+subsessions**). Subsessions start shown, and a folded one that needs you still shows. Nested rows add the model to the
 agent.
 
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
@@ -1441,7 +1440,7 @@ server drops the reply.
 
 **Finished footer.** **Archived (n)** swaps Finished for archived sessions in
 scope (Mine applies); **Back to Finished** returns. Archived sessions have no
-automatic deletion countdown. **More finished-run actions** (`…`, in the Finished
+automatic deletion countdown. **More finished-session actions** (`…`, in the Finished
 heading, only when it has an item) holds **Archive closed sessions…** and, for
 admins, **Free retained containers…**. Both open the
 store-hosted confirmations (`src/components/palette/clear-done-dialog.tsx`,
@@ -1798,7 +1797,7 @@ a `run.review` event under the same `status_seq` rule.
 **Review** is the owner's answer to a reported success
 ([failure-handling.md](failure-handling.md#review)). `run.review` with
 `action` `complete` closes a live session as `completed` (or records it on a
-`completed` run) and sets `review` to `accepted`; `later` sets it to `later`
+`completed` session) and sets `review` to `accepted`; `later` sets it to `later`
 and leaves the session where it is. Both return `{"run": Run}` and need the same
 permission as `run.close`.
 
@@ -1837,8 +1836,7 @@ they come from the room, which the session's `state` does not cover, so push and
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
-Needs you row does. A control hold waits since the attempt's
-`takeover_since`.
+Needs you row does.
 
 A device waiting for approval is not a session, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device
@@ -2052,9 +2050,9 @@ It is reached from the workspace switcher, `g` then `l` and the palette's
 `src/lib/commands.ts` holds the commands as data: an id, label, icon,
 capability gate, optional confirmation and call. Session verbs (`runCommands`):
 **Pause session** / **Resume session**, **Send a message to the agent…**, **Forward a
-port…** (local gateway), **Close session…**, **Kill run**, **Delete run**, **Free
-container…**, **Archive run** / **Restore run**, **Protect run** /
-**Unprotect run**, **Relaunch**, **Pull branch** (local gateway) and **Hand
+port…** (local gateway), **Close session…**, **Kill session**, **Delete session**, **Free
+container…**, **Archive session** / **Restore session**, **Protect session** /
+**Unprotect session**, **Relaunch**, **Pull branch** (local gateway) and **Hand
 off to <member>**. Pull branch fetches the session branch into the linked
 repository; unless you are already on that branch, its toast offers **Switch
 to it** (`pull.switch`, which refuses a dirty checkout with git's own
@@ -2319,10 +2317,10 @@ does not mark it invalid, and the saved fallback policy fills the fallback
 list, keeping only listed accounts. A launch never saves the account or the
 fallback; **Save as my default** under **Options** does, and says "Saved
 for every device." until the account or fallback changes again. It saves the fallback list as the session sends
-it, without the selected account. **Session**, **Default mode** and **Set up** on
+it, without the selected account. **Run**, **Default mode** and **Set up** on
 Agents, and the onboarding wizard, save their agent and mode the same way
 (`rememberChoice`); **Default mode** leaves the preselected agent alone.
-Agents reads the saved choices too, and its **Default mode** and **Session** use
+Agents reads the saved choices too, and its **Default mode** and **Run** use
 the saved mode, else this browser's. Saves
 run one at a time, each from the last one's answer; a save after the
 signed-in member changes is refused, and a failed save reads the choices
@@ -2368,12 +2366,12 @@ heading reads "Neither you nor <owner> has an agent installed." and the note
 says the session uses the owner's login and the caller's installation, or the
 owner's when the caller has none.
 
-Where the server offers `run.children.allow`, the form has a **Child
-sessions** select: **Use my setting** (naming it, "(off)"), **Allow for this
-session** and **Off for this session**, sent as `run.launch` `subsessions: "on"` or
-`"off"`; the first sends nothing.
+Where the server offers `run.children.allow`, the form has a **Subsessions**
+switch that starts at the owner's setting and names it. A choice that differs
+from the setting is sent as `run.launch` `children: "on"` or `"off"` for this
+session alone; a Background launch disables the switch.
 
-Below the select, **Options** holds the [usage
+Below the switch, **Options** holds the [usage
 fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
 **Fall back to another account** checkbox and the **Fallback accounts** list,
 each account with a checkbox and
@@ -2436,7 +2434,7 @@ and Trace mount only while shown, so a hidden Browser streams no screencast
 and a hidden Trace derives nothing and ticks no clock.
 
 The Browser can also sit beside the other three views instead of being a tab:
-its toolbar's **Show beside Session** (**Show beside Terminal** on a Standard
+its toolbar's **Show beside Chat** (**Show beside Terminal** on a Standard
 session) docks it at the right of the frame with a divider, and **Show the Browser
 as a tab** puts it back. The choice and the divider's position are view
 preferences (`browserBeside`, `browserBesideWidth`, persisted). Docked, it
@@ -2486,7 +2484,7 @@ allows, "On `<name>`'s account (fallback)" when the session carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
 a `run.account` event updates it live when the session moves), the reason, and
 the owner. The state's dot and label are the Workflow chip's, on the row
-below. A subsession adds a `nav "Run lineage"` row under the header: its
+below. A subsession adds a `nav "Session lineage"` row under the header: its
 root and parent as links, then "This subsession", and **Detached** once it
 no longer counts toward its parent. The reason takes only the room left over, so a long command never
 moves or hides the branch; the owner goes below 32rem, and the mode word
@@ -2499,7 +2497,7 @@ The actions, in order:
    the label the condition names in `lib/needs-you.ts`, the same one the board
    card and sidebar row show, performed inside the frame: **Reply** focuses the
    Chat composer, **Open terminal** switches to Terminal and asks for the
-   lease, **Answer** focuses the docked request on Session or reveals the
+   lease, **Answer** focuses the docked request on Chat or reveals the
    question's card in Details, **Review message** reveals the queued message's
    card in Details, and **Review** opens Changes for a finish. On the Terminal view there is no terminal action in
    the header; the toolbar has **Take control**. Session rows and Details cards
@@ -2509,7 +2507,7 @@ The actions, in order:
    session verb from `lib/commands.ts` except **Send a message to the agent…**,
    which the composer replaces, then **Hand off…**, the mode switch,
    **Open in editor…**, **Captures…** and **Raw events…**, then **Close
-   session…**, **Kill run** and **Delete run** after a separator. Kill, Delete
+   session…**, **Kill session** and **Delete session** after a separator. Kill, Delete
    and **Free container…** confirm first. Where the server offers
    `run.children.allow`, the owner of a live session also gets
    **Allow subsessions** (`run.children.allow` `on`), and the owner or an
@@ -2595,7 +2593,7 @@ with their member name and `Avatar`, protection and the existing
 `ControlButton`: take a free lease, release it, or hold for three seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
-beside **You control** or **You control in another session since <time>**.
+beside **You control** or **You control in another tab since <time>**.
 That text appears when `run.room.status` names your member with a
 `control_session_id` other than this tab's: another tab, device or
 `aether attach`, held since the lease's `acquired_at`.
@@ -2676,7 +2674,7 @@ from `next_seq`, which a backward page sets to the head. The list is
 are in [Session control](terminal.md#session-control). A refused send or image upload
 shows the error above the textarea (`role="alert"`, **Dismiss**); Details
 shows only the failures of its own actions. Details' **Agent messages**
-section ends with **Hide from Session** (**Show in Session** once hidden),
+section ends with **Hide from Chat** (**Show in Chat** once hidden),
 which drops those messages from the timeline; the choice is per session, in
 `hiddenAgentMessages`, until the page reloads. `Esc` in an empty composer focuses the list's
 viewport; the next `Esc` is the session's `leave-run`.
@@ -3008,7 +3006,7 @@ reported, and the window grew since, used splits into **Earlier context** and
 **Latest turn**; after a compaction or once that turn is trimmed it is one
 **Used** row. Pointing at a legend row or a cell dims the other cells and
 swaps the headline and footer to that row; touch and a single category skip
-this. **Session cost** shows only when the agent reported one. The single
+this. **Conversation cost** shows only when the agent reported one. The single
 `role="meter"` is the headline inside the popover. **Compact** appears only when
 the agent advertises `/compact`; it puts `/compact ` in the message box and
 focuses it, so **Send** (or the pill's steer and queue rules) still decides
@@ -3136,8 +3134,8 @@ view already holds; nothing new is read from the agent:
 | Subsession | its `started_at`, else `created_at` | `finished_at`, else now |
 
 A subagent whose launch is not held starts at its first held item and sits
-in that item's turn, or under the session when that turn is not held either. A session's subsessions
-sessions join the Workers group as spans from their creation
+in that item's turn, or under the session when that turn is not held either. A session's
+subsessions join the Subsessions group as spans from their creation
 (or start) to their end, drawn failed or stopped by their status; they come
 from the sessions the dashboard already holds, so a new subsession appears at once.
 
@@ -3194,8 +3192,8 @@ The details open beside the bar, or as a bottom sheet on a phone: the kind
 ("Tool call · Bash", "Turn 4 · autonomous"), state, duration, start and
 end ("+43s", the clock time in its tooltip), exit code, spans below, files
 changed, context window, the command and the stop reason or exit code of a
-failure. **Open subagent**, **Show in Session** (switches views and scrolls
-the Session to that row, opening its block of steps and any fold that hides
+failure. **Open subagent**, **Show in Chat** (switches views and scrolls
+the Chat to that row, opening its block of steps and any fold that hides
 the step; for a wait still open, focuses the docked request), **Open subsession**, **Zoom to this span** and **Copy command** act on it.
 
 While earlier history is not held, the view reads up to 5 older pages
@@ -3815,7 +3813,7 @@ both what it renders and the overlap set the conflict chips read.
   An open editor's text is sent in place of the pinned text; an empty one
   leaves the pinned text as it is. A sent or queued review clears the comments
   it carried, except one changed while the request was out, and leaves "Sent 2
-  comments to <agent>." with **Open the session**; the receipt reads the room
+  comments to <agent>." with **Open the chat**; the receipt reads the room
   message from the store, so a later denial or failed delivery replaces it. A
   send the server refuses, cannot deliver or cannot vouch for keeps every
   comment and shows the server's error in the bar, beside the reason when the
@@ -3851,7 +3849,7 @@ both what it renders and the overlap set the conflict chips read.
   conclusion and link, or the comment with its author, lines, commit and
   diff hunk. The server returns no log for a check, so none is sent; the
   link is what the agent reads it from. The row then shows the receipt, "Sent
-  1 check to Claude Code." with **Open the session**, or the server's error
+  1 check to Claude Code." with **Open the chat**, or the server's error
   with the button still there. One send is out at a time: the other rows'
   buttons are disabled from the click until the server answers, including
   while the owner's tab is taking control, and a send whose control never
@@ -4041,10 +4039,10 @@ dev.browser.status: scheduler: the session has no live environment: the session 
 - **Viewport**, a menu: **Fit the pane**, **Desktop** 1280 × 800, **Tablet**
   820 × 1180, **Phone** 390 × 844. In a pane narrower than 480px the same
   choices head the **Browser actions** menu instead.
-- **Show beside Session** / **Show the Browser as a tab**, only on a frame
+- **Show beside Chat** / **Show the Browser as a tab**, only on a frame
   wide enough for both.
 - **Browser actions**: **New page**, **Screenshot**, **Release control**
-  while this tab drives, **Close page…** and **Reset session…**.
+  while this tab drives, **Close page…** and **Reset browser…**.
 - Who is driving, when it is not nobody; see Control below.
 
 A second page or a popup adds a `tablist` named "Pages" under the toolbar;
@@ -4228,7 +4226,7 @@ address-bar shortcut uses the same record with an empty address.
 
 Switching to another session view or closing the dashboard detaches observation
 only. The app, pages and login continue according to the session's lifetime.
-**Close page…** and **Reset session…** take the lease like any other action
+**Close page…** and **Reset browser…** take the lease like any other action
 and then confirm in the shared `AlertDialog`. Close removes the selected page
 for everyone while leaving the other pages and the session; Reset destroys
 shared pages, cookies and logins. Each confirmation captures the session and
@@ -4351,11 +4349,11 @@ device run.
 ### Details
 
 While the session's row holds 320px for it plus `minReadableWidth` (560px),
-Details is a 320px `complementary "Run details"` beside the view, toggled by
+Details is a 320px `complementary "Session details"` beside the view, toggled by
 the header button or `Mod+.` and remembered (`detailsOpen`, persisted). When
 the row narrows, for example when the assistant docks, the inline panel goes
 and comes back once there is room again. Narrower rows open it as a side sheet and
-phones as a bottom sheet, each a `dialog "Run details"` that returns focus to
+phones as a bottom sheet, each a `dialog "Session details"` that returns focus to
 whatever opened it. Sections (`details.tsx`):
 
 - **Needs you**: `RequestCard`s for pending native inputs, teammate messages
@@ -5092,7 +5090,7 @@ Home listing from the store (`refreshHome`), so each open folder is reread;
 watches the home: a file an agent writes shows after a refresh.
 
 A name is typed where the entry sits. **New file** and **New folder** open
-the folder and put `NameRow` first among its subsessions, with the entry's
+the folder and put `NameRow` first among its children, with the entry's
 icon; **Rename**, or F2 on a focused row, replaces the row's label with a
 field holding the name, its stem selected. Enter commits, and a new file
 then opens in the editor. Escape or leaving the field cancels. A name is one
@@ -6268,7 +6266,7 @@ desktop/CLI handoff. Each step's action row holds its filled button, so on a
 phone the top bar's **New session** is an icon throughout onboarding.
 
 Each step is a file: `connect-step.tsx` (with `edge-link.tsx`),
-`repository-step.tsx`, `agent-step.tsx` and `first-session-step.tsx`, all built on
+`repository-step.tsx`, `agent-step.tsx` and `first-run-step.tsx`, all built on
 `Step` from `layout.tsx`, which draws the step's `<section aria-label>`, its
 title and lead line, and the sticky action row. Git identity is
 `git-identity.tsx`, a form rather than a step. The shared

@@ -178,7 +178,7 @@ another.
 ## What it sees
 
 Each message carries a short description of what your dashboard shows, so "why
-is this stuck?" works without ids: the page you are on, the workspace and run,
+is this stuck?" works without ids: the page you are on, the workspace and session,
 the open session view, the open file's path (never its contents), the last 8
 pages you visited, and the mode and model you last launched each agent with
 from this browser while signed in as you (up to 4, newest first). It never holds titles, file
@@ -286,7 +286,7 @@ call waiting for your approval is one line above the approval card. It also
 says whether you approved it or auto-approval passed it, and links to the session,
 pull request or environment. A failure shows the server's error as is.
 **Retry** adds `Retry: <what it tried>` to the message box for you to edit and
-send. A launch card adds what started, such as `run · api · Claude Code opus ·
+send. A launch card adds what started, such as `session · api · Claude Code opus ·
 your account`. A session the assistant launched that is still going reads
 **Working in the background** with how you hear back; it keeps running after
 you close the panel. Reads fold
@@ -404,8 +404,8 @@ is `/root`:
 rm -rf ~/.aether/assistant ~/.claude/projects/*--aether-assistant
 ```
 
-Codex sessions from that time are in `~/.codex/sessions` together with your
-sessions' sessions.
+Codex sessions from that time are in `~/.codex/sessions` together with the
+Codex sessions your Aether sessions wrote.
 
 ## Preferences
 
@@ -421,7 +421,7 @@ and connected apps such as ChatGPT cannot reach them.
   most 3 per message and you keep at most 200. Saving text you already keep
   for the same workspace, or for all of them, fails with
   `already remembered as preference <id>`.
-- **What it can quote:** only a session of whole words you typed in your latest
+- **What it can quote:** only a run of whole words you typed in your latest
   message, stored as you wrote them. It refuses paraphrases, anything
   gitleaks flags as a secret, and text it treats as pasted: lines starting
   with `>` and the lines after them up to a blank line, fenced code blocks
