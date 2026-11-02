@@ -2,8 +2,8 @@ name: Promote edge to stable
 
 # Moves ghcr.io/3xdevops/aether-edge:stable to a published release's image,
 # by copying the exact index the release signed and attested. It never
-# builds and never moves stable to an older release. docs/install.md,
-# Promoting an edge release to stable, describes when to run it.
+# builds and never moves stable to an older release. CONTRIBUTING.md,
+# Edge releases and the signing key, describes when to run it.
 on:
   workflow_dispatch:
     inputs:

@@ -139,7 +139,7 @@ func readUpgrade(root string) (upgrade, error) {
 		record("the SHA-256 of "+name, u.Files[name], hex.EncodeToString(sum[:]))
 	}
 	if len(stale) > 0 {
-		return upgrade{}, fmt.Errorf("%s is out of date: %s; decide whether upgrading across this change needs a manual step or a higher min_upgrade_from (docs/install.md, Edge upgrade record), then record the new values",
+		return upgrade{}, fmt.Errorf("%s is out of date: %s; decide whether upgrading across this change needs a manual step or a higher min_upgrade_from (CONTRIBUTING.md, Edge releases and the signing key), then record the new values",
 			upgradePath, strings.Join(stale, "; "))
 	}
 	return u, nil
