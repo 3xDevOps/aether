@@ -16,7 +16,7 @@ func TestDiscoverExcludesRegistryCredentials(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "keychain"), "k")
 	mustWrite(t, filepath.Join(root, "commands", "review.md"), "# review\n")
 
-	files, err := Discover(t.Context(), "claude", nil)
+	files, _, err := DiscoverFiles(t.Context(), "claude", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestDiscoverIgnoreFilePatternsAndPrecedence(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "tmp", "x.txt"), "x")
 	mustWrite(t, filepath.Join(root, IgnoreFileName), "*.log\ntmp/\n!keep.log\n")
 
-	files, err := Discover(t.Context(), "claude", nil)
+	files, _, err := DiscoverFiles(t.Context(), "claude", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestDiscoverNegationCannotReincludeDenied(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "auth.json"), `{"token":"no"}`)
 	mustWrite(t, filepath.Join(root, IgnoreFileName), "*\n!settings.json\n!.credentials.json\n!auth.json\n")
 
-	files, err := Discover(t.Context(), "claude", nil)
+	files, _, err := DiscoverFiles(t.Context(), "claude", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestDiscoverAllowSecretSucceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustWrite(t, filepath.Join(root, "settings.json"), string(fixture))
-	files, err := Discover(t.Context(), "claude", []string{"settings.json"})
+	files, _, err := DiscoverFiles(t.Context(), "claude", []string{"settings.json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestDiscoverAllowSecretCarriesVendoredFile(t *testing.T) {
 	rel := vendoredFixture("6.3.0")
 	mustWrite(t, filepath.Join(root, filepath.FromSlash(rel)), string(secret))
 
-	files, err := Discover(t.Context(), "claude", []string{rel})
+	files, _, err := DiscoverFiles(t.Context(), "claude", []string{rel})
 	if err != nil {
 		t.Fatal(err)
 	}
