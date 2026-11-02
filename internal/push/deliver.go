@@ -18,9 +18,8 @@ const (
 // is set when it did not take the message; a device the push service
 // reports gone is unsubscribed, as every send does.
 type DeviceResult struct {
-	Endpoint string
-	Status   string
-	Err      error
+	Status string
+	Err    error
 }
 
 // Message is a notification for Deliver. URL is the dashboard path a click
@@ -68,7 +67,7 @@ func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message
 	}
 	results := make([]DeviceResult, 0, len(subs))
 	for _, sub := range subs {
-		r := DeviceResult{Endpoint: sub.Endpoint, Status: DeviceDelivered}
+		r := DeviceResult{Status: DeviceDelivered}
 		if err := s.send(ctx, sub, payload, topic, urgency); err != nil {
 			r.Status, r.Err = DeviceFailed, err
 		}

@@ -37,7 +37,6 @@ type Service struct {
 	bus    events.Bus
 	roster *roster
 	ttl    time.Duration
-	now    func() time.Time
 
 	wg   sync.WaitGroup
 	stop context.CancelFunc
@@ -63,7 +62,6 @@ func New(cfg Config) (*Service, error) {
 		bus:    cfg.Bus,
 		roster: newRoster(cfg.TTL, cfg.now),
 		ttl:    cfg.TTL,
-		now:    cfg.now,
 	}, nil
 }
 

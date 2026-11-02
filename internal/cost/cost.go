@@ -80,10 +80,9 @@ type MemberRollup struct {
 // Report is a workspace's cost attribution: the workspace total, the
 // per-member split, and the per-run records behind both.
 type Report struct {
-	Workspace domain.WorkspaceID
-	Total     Rollup
-	Members   []MemberRollup
-	Runs      []*store.RunCost
+	Total   Rollup
+	Members []MemberRollup
+	Runs    []*store.RunCost
 }
 
 // Roll aggregates a workspace's run records into a report: one row per
@@ -91,8 +90,8 @@ type Report struct {
 // the rollups count it, by segment 0. Members
 // are ordered by ID so the output is stable; runs keep the order of their
 // first record (the store lists them oldest first).
-func Roll(workspace domain.WorkspaceID, records []*store.RunCost) Report {
-	rep := Report{Workspace: workspace}
+func Roll(records []*store.RunCost) Report {
+	var rep Report
 	runs := map[domain.RunID]*store.RunCost{}
 	byMember := map[domain.MemberID]*Rollup{}
 	for _, c := range records {

@@ -149,7 +149,6 @@ type member struct {
 
 type session struct {
 	agent      string
-	harnessID  string
 	generation int64
 	identity   string
 	acp        *acphost.Session
@@ -526,7 +525,7 @@ func (s *Service) openSession(ctx context.Context, m *member, agent string, laun
 		_ = acpSess.Close()
 		return nil, errors.Join(fmt.Errorf("assistant: record the session: %w", err), stopExec(exec))
 	}
-	return &session{agent: agent, harnessID: record.HarnessSessionID, generation: row.Generation, identity: record.ExecIdentity, acp: acpSess, exec: exec, ended: make(chan struct{})}, nil
+	return &session{agent: agent, generation: row.Generation, identity: record.ExecIdentity, acp: acpSess, exec: exec, ended: make(chan struct{})}, nil
 }
 
 // stopStale stops the adapter row records, which an earlier session or server

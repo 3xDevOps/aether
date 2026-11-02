@@ -25,7 +25,7 @@ func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
 		// A PTY-only run: never measured, so it adds a run and nothing else.
 		{RunID: "r4", MemberID: "bob"},
 	}
-	rep := Roll("ws1", records)
+	rep := Roll(records)
 
 	if rep.Total.Runs != 4 || rep.Total.Metered != 3 || rep.Total.Unmetered != 1 {
 		t.Fatalf("total run counts = %+v, want 4 runs / 3 metered / 1 unmetered", rep.Total)
@@ -52,7 +52,7 @@ func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
 	}
 
 	// An empty workspace is not advisory: nothing is missing.
-	if empty := Roll("ws2", nil); empty.Total.Runs != 0 || empty.Total.Advisory() {
+	if empty := Roll(nil); empty.Total.Runs != 0 || empty.Total.Advisory() {
 		t.Fatalf("empty rollup = %+v, want zero and not advisory", empty.Total)
 	}
 }
@@ -224,7 +224,7 @@ func TestBudgetStateTransitions(t *testing.T) {
 // workspace over it - the state is a floor and says so.
 func TestUnmeteredSpendNeverCountsTowardTheCap(t *testing.T) {
 	budget := &store.WorkspaceBudget{WorkspaceID: "ws1", LimitUSD: 10}
-	spend := Roll("ws1", []*store.RunCost{
+	spend := Roll([]*store.RunCost{
 		{RunID: "r1", MemberID: "ada", CostUSD: 9, Metered: true},
 		{RunID: "r2", MemberID: "ada"},
 		{RunID: "r3", MemberID: "ada"},
