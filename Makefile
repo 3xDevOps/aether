@@ -61,8 +61,7 @@ INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
   grep -rl --include='*_test.go' -E '^//go:build .*integration' . \
   | xargs -n1 dirname | sed -e 's|^\./||' -e 's|^|./|' | sort -u))
 
-# Every package, minus TEST_SKIP. Assigned lazily - only `test` reads it. CI
-# shards the unit tests by setting TEST_PKGS or TEST_SKIP.
+# Every package, minus TEST_SKIP. Assigned lazily - only `test` reads it.
 TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|.|'))
 
 # Race detector for `test`. The SQLite driver is transpiled C, which the
@@ -71,8 +70,8 @@ TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|
 # wait on a timer or a socket overlap instead of queueing behind GOMAXPROCS.
 TEST_RACE ?= -race
 
-# Release matrix. The server and the edge are Linux-only by design (see the
-# v1 cut-line); the CLI additionally ships for macOS and Windows clients.
+# Release matrix. The server and the edge are Linux-only by design; the CLI
+# additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
 EDGE_PLATFORMS   := linux/amd64 linux/arm64
 CLI_PLATFORMS    := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
