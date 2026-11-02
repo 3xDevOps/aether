@@ -348,17 +348,54 @@ func TestEnhancedRunNeverReattachesToTheAgentThatLostItsSession(t *testing.T) {
 func TestReattachedWaitsForAPausedRunsKeeper(t *testing.T) {
 	t.Parallel()
 	s := &Scheduler{runs: map[domain.RunID]*supervised{
-		"paused":  {paused: true, agentKeeper: &keeperRecord{}},
-		"adopted": {keeperAdopted: true, keeperDelivered: []string{"m1"}},
-		"fresh":   {paused: true},
+		"paused":   {paused: true, agentKeeper: &keeperRecord{}},
+		"resuming": {resuming: true, agentKeeper: &keeperRecord{}},
+		"adopted":  {keeperAdopted: true, keeperDelivered: []string{"m1"}},
+		"fresh":    {paused: true},
 	}}
-	for run, want := range map[domain.RunID]collab.Reattach{"paused": collab.Undecided, "adopted": collab.Adopted, "fresh": collab.Restored, "gone": collab.Restored} {
+	for run, want := range map[domain.RunID]collab.Reattach{"paused": collab.Undecided, "resuming": collab.Undecided, "adopted": collab.Adopted, "fresh": collab.Restored, "gone": collab.Restored} {
 		if _, got := s.Reattached(run); got != want {
 			t.Errorf("Reattached(%s) = %v, want %v", run, got, want)
 		}
 	}
 	if delivered, _ := s.Reattached("adopted"); !slices.Equal(delivered, []string{"m1"}) {
 		t.Errorf("delivered = %v, want [m1]", delivered)
+	}
+}
+
+func TestReattachedWaitsWhileAResumedRunReattaches(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err := e.sched.Pause(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	next, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = next.Close() })
+	startScheduler(t, next)
+	<-next.RecoveryReady()
+	var during collab.Reattach
+	rt.mu.Lock()
+	rt.onAttach = func() { _, during = next.Reattached(run.ID) }
+	rt.mu.Unlock()
+	if err := next.Resume(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if during != collab.Undecided {
+		t.Fatalf("Reattached while the resume reattached = %v, want undecided", during)
+	}
+	if _, got := next.Reattached(run.ID); got != collab.Adopted {
+		t.Fatalf("Reattached after the resume = %v, want adopted", got)
 	}
 }
 

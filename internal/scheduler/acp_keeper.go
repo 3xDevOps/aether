@@ -226,8 +226,8 @@ func (d *acpDriver) reattach(ctx context.Context, entry *supervised, managed run
 
 // Reattached reports whether this server process adopted run's session from
 // the agent's keeper, with the tags of the requests an earlier server process
-// left with the agent. A paused run with a keeper is undecided until it
-// resumes.
+// left with the agent. A paused run with a keeper is undecided until its
+// resume reconnected.
 func (s *Scheduler) Reattached(run domain.RunID) (delivered []string, state collab.Reattach) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -236,7 +236,7 @@ func (s *Scheduler) Reattached(run domain.RunID) (delivered []string, state coll
 		return nil, collab.Restored
 	case entry.keeperAdopted:
 		return entry.keeperDelivered, collab.Adopted
-	case entry.paused && entry.agentKeeper != nil:
+	case (entry.paused || entry.resuming) && entry.agentKeeper != nil:
 		return nil, collab.Undecided
 	}
 	return nil, collab.Restored

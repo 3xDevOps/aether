@@ -51,6 +51,8 @@ type acpRuntime struct {
 	// stuckStdin keeps adapters' stdin open when their keeper closes it, as
 	// an adapter that stopped reading it would.
 	stuckStdin atomic.Bool
+	// onAttach runs as an attach exec starts.
+	onAttach func()
 }
 
 type stdinCloser struct {
@@ -164,7 +166,11 @@ func (r *acpRuntime) attach(id runtime.ID, spec runtime.ExecSpec) (runtime.Manag
 	r.mu.Lock()
 	k := r.keepers[spec.Argv[3]]
 	r.bridges = append(r.bridges, spec)
+	onAttach := r.onAttach
 	r.mu.Unlock()
+	if onAttach != nil {
+		onAttach()
+	}
 	if k == nil {
 		return nil, fmt.Errorf("acpRuntime: no keeper at %s", spec.Argv[3])
 	}

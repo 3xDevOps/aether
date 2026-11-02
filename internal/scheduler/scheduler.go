@@ -413,6 +413,8 @@ type supervised struct {
 	// one left with the agent, once this one reattached to its keeper.
 	keeperDelivered []string
 	keeperAdopted   bool
+	// resuming is set while Resume reconnects to the agent's keeper.
+	resuming bool
 	// spendMu orders charge calls; uncharged holds the tokens of a spend
 	// whose publish failed.
 	spendMu   sync.Mutex
