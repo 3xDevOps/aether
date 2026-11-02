@@ -41,7 +41,6 @@ export const eventLabel = {
   'member.changed': 'Member renames',
   'member.device': 'Devices',
   'member.merged': 'Member merges',
-  'profile.change': 'Agent profiles',
   'memory.change': 'Team memory',
   'watch.changed': 'Watches',
 } satisfies Record<string, string>

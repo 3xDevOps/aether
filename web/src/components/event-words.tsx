@@ -185,12 +185,6 @@ const deviceWords: Record<string, string> = {
   revoked: 'A device was revoked',
 }
 
-const profileWords: Record<string, string> = {
-  put: 'saved',
-  rollback: 'rolled back',
-  pin: 'pinned',
-}
-
 // An absent or empty `with` means the run's overlaps cleared.
 function overlapLine(peers: unknown): string {
   if (!Array.isArray(peers) || peers.length === 0) return 'No longer edits the same files as another session'
@@ -304,7 +298,6 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'member.changed': (p, e) => <MemberRenamed member={p.member_id} actor={e.actor_id} name={p.display_name} />,
   'member.merged': (p) => <>Merged a member into <Who id={p.survivor_id} object /></>,
   'member.device': (p) => deviceWords[text(p.status)] ?? 'A device changed',
-  'profile.change': (p, e) => <><Who id={p.member ?? e.actor_id} /> {profileWords[text(p.action)] ?? 'changed'} the {text(p.harness) || 'agent'} profile</>,
   'memory.change': memoryLine,
   'watch.changed': (p) => (p.notification_id ? 'A watch sent you a notice' : 'A watch changed'),
 }
