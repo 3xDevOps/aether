@@ -62,8 +62,6 @@ export interface CommandDeps {
 export interface Command {
   id: string
   label: string
-  /** The button's label; its tooltip carries the full one. */
-  short?: string
   Icon: LucideIcon
   /** Words the palette matches after the label: aliases, or a handoff target's id. */
   value?: string
@@ -318,7 +316,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       list.push({
         id: 'resume',
         label: 'Resume session',
-        short: 'Resume',
         Icon: Play,
       value: 'continue unpause',
         done: 'Resumed',
@@ -330,7 +327,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       list.push({
         id: 'pause',
         label: 'Pause session',
-        short: 'Pause',
         Icon: Pause,
       value: 'hold suspend',
         done: 'Paused',
@@ -341,7 +337,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'inject',
       label: 'Send a message to the agent…',
-      short: 'Message',
       Icon: MessageSquarePlus,
       value: 'chat steer prompt',
       perform: (d) => d.openDialog('inject', id),
@@ -350,7 +345,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       list.push({
         id: 'forward',
         label: 'Forward a port…',
-        short: 'Forward',
         Icon: Cable,
       value: 'tunnel expose localhost preview',
         perform: (d) => d.openForwardDialog(`run:${id}`),
@@ -363,7 +357,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'watch',
       label: 'Watch…',
-      short: 'Watch',
       Icon: Eye,
       value: 'notify follow alert subscribe',
       perform: (d) => d.openDialog('watch', id),
@@ -375,7 +368,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'complete',
       label: 'Mark complete',
-      short: 'Mark complete',
       Icon: Check,
       value: 'done accept',
       done: 'Marked complete',
@@ -399,7 +391,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       list.push({
         id: 'not-yet',
         label: 'Not yet: keep the session open',
-        short: 'Not yet',
         Icon: Hourglass,
         done: 'Kept open',
         predict: () => ({ runID: id, record: { review: 'later' } }),
@@ -413,7 +404,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'close',
       label: 'Close session…',
-      short: 'Close',
       Icon: CircleCheck,
       value: 'delete remove end finish',
       perform: (d) => d.openDialog('close', id),
@@ -424,7 +414,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'kill',
       label: 'Kill session',
-      short: 'Kill',
       Icon: Square,
       value: 'stop',
       done: 'Killed',
@@ -444,7 +433,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'delete',
       label: 'Delete session',
-      short: 'Delete',
       Icon: Trash2,
       done: 'Deleted',
       confirm: {
@@ -471,7 +459,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'release',
       label: 'Free container…',
-      short: 'Free container',
       Icon: PackageX,
       value: 'release cleanup',
       done: 'Freed container',
@@ -491,7 +478,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       list.push({
         id: 'restore',
         label: 'Restore session',
-        short: 'Restore',
         Icon: ArchiveRestore,
       value: 'unarchive',
         done: 'Restored',
@@ -502,7 +488,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       list.push({
         id: 'archive',
         label: 'Archive session',
-        short: 'Archive',
         Icon: Archive,
       value: 'hide',
         done: 'Archived',
@@ -516,7 +501,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'protect',
       label: run.protected ? 'Unprotect session' : 'Protect session',
-      short: run.protected ? 'Unprotect' : 'Protect',
       Icon: run.protected ? ShieldOff : Shield,
       done: run.protected ? 'Unprotected' : 'Protected',
       predict: () => ({ runID: id, record: { protected: !run.protected } }),
@@ -531,7 +515,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'relaunch',
       label: 'Relaunch',
-      short: 'Relaunch',
       Icon: RefreshCw,
       value: 'restart rerun reopen',
       done: 'Relaunched',
@@ -542,7 +525,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'pull',
       label: 'Pull branch',
-      short: 'Pull',
       Icon: Download,
       value: 'fetch git',
       disabled: !run.last_commit,
@@ -570,7 +552,6 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'ask-assistant',
       label: ask.label,
-      short: ask.draft,
       Icon: Sparkles,
       value: 'assistant fix stuck why',
       perform: () => useStore.getState().askAssistant({ draft: ask.draft, attachments: [{ kind: 'run', workspace_id: run.workspace_id, run_id: id, label: id }] }),
