@@ -38,7 +38,7 @@ export function useTypingSignal(runID: string, body: string): void {
 }
 
 /** Who else is typing in this run, dropping each name when its entry expires. */
-export function useTypers(runID: string): string[] {
+function useTypers(runID: string): string[] {
   const self = useSelf()
   const entries = useStore((s) => s.typing[runID])
   const [now, setNow] = useState(() => Date.now())

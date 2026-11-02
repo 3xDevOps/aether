@@ -1,7 +1,7 @@
 import { needsYouBelow, startsOpen, type WorkflowNode } from '@/store/workflow'
 
 /** Deeper levels collapse into one Nested workflow row that opens in place. */
-export const maxDepth = 4
+const maxDepth = 4
 
 export interface WorkflowRow {
   /** Unique among rows: a surfaced row carries its folded ancestor's id. */

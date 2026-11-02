@@ -20,7 +20,7 @@ import { agentStateWord, openAgent } from '@/routes/run/subagent-cards'
 import { useStore } from '@/store'
 
 /** Past this many lanes only those near the viewport render. */
-export const windowAbove = 60
+const windowAbove = 60
 const axisHeight = 28
 const overscan = 400
 /** Half the "now" chip and a little air: tick labels this close to it would sit under it. */
@@ -64,7 +64,7 @@ function LaneKeys({ onOpen, onReply }: { onOpen: () => void; onReply?: () => voi
   return null
 }
 
-export interface LanesViewProps {
+interface LanesViewProps {
   model: LanesModel
   edges: LaneEdge[]
   edgeInput: Omit<EdgesInput, 'focus' | 'hidden'>

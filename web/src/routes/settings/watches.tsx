@@ -25,7 +25,7 @@ function sorted(watches: Watch[]): Watch[] {
   return [...watches].sort((a, b) => order[a.state] - order[b.state] || b.updated_at.localeCompare(a.updated_at))
 }
 
-export function conditionsText(watch: Pick<Watch, 'target' | 'conditions'>): string {
+function conditionsText(watch: Pick<Watch, 'target' | 'conditions'>): string {
   return watch.conditions.map((condition) => conditionLabel(watch.target.kind, condition)).join(', ')
 }
 

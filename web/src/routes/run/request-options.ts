@@ -49,7 +49,7 @@ export function plainHeadline({ who, verb, rest }: Headline): string {
 
 const optionRank = (option: SessionOption) => (option.kind === 'allow_once' ? 0 : option.kind === 'allow_always' ? 2 : 1)
 
-export function orderedOptions(options: SessionOption[]): SessionOption[] {
+function orderedOptions(options: SessionOption[]): SessionOption[] {
   return [...options].sort((a, b) => optionRank(a) - optionRank(b))
 }
 
@@ -62,7 +62,7 @@ export interface Choice {
   digit?: number
 }
 
-export type ChoicePlan =
+type ChoicePlan =
   | { kind: 'pills'; once: Choice; always: Choice; deny?: Choice; extras: Choice[] }
   | { kind: 'buttons'; choices: (Choice & { primary: boolean })[] }
 

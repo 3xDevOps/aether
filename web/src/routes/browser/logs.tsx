@@ -13,7 +13,7 @@ const pollInterval = 2000
 /** The companion keeps 100 rows of each kind per page; this is both. */
 const kept = 200
 
-export interface BrowserLogs {
+interface BrowserLogs {
   entries: LogEntry[]
   /** Why the last read failed. */
   error: string

@@ -29,7 +29,7 @@ import type { RunRecord } from '@/store/runs'
 
 const menuFiles = 100
 
-export const noTree =
+const noTree =
   'This server did not record a tree for this snapshot, so changes since then cannot be shown.'
 
 /** Why a checkpoint cannot be compared against, or undefined when it can. A

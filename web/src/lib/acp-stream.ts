@@ -51,7 +51,7 @@ const policy = 1008
 const releaseWaitMs = 2000
 
 /** Where a stream connects and what its header says; a run's by default. */
-export interface SessionEndpoint {
+interface SessionEndpoint {
   url: () => string
   header: (afterSeq: number) => Record<string, unknown>
 }

@@ -10,7 +10,7 @@ export type Motion = { duration: DurationToken; easing: EasingToken; delay?: Tim
 const cache = new Map<string, string>()
 
 /** A token's computed value; empty where no stylesheet defines it, as under jsdom. */
-export function readToken(name: string): string {
+function readToken(name: string): string {
   const hit = cache.get(name)
   if (hit !== undefined) return hit
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()

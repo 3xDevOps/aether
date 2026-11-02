@@ -19,7 +19,7 @@ function sourceSummary(packet: EvidencePacket): string {
   return `${available}/${sources.length} sources available${truncated ? `, ${truncated} truncated` : ''}`
 }
 
-export interface EvidenceDrawerProps {
+interface EvidenceDrawerProps {
   runID: string
   workspaceID: string
   client?: Api

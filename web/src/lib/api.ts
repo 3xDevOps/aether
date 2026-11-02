@@ -226,7 +226,7 @@ import type {
 import type { AssistantSettings, AssistantSettingsParams, AssistantStartParams, AssistantStatus, ViewContext } from '@/lib/assistant-types'
 import type { SessionHistory, SessionItem, SessionLease } from '@/lib/session-types'
 
-export const API_BASE = '/api/v1'
+const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
 export const MAX_TERMINAL_FILE_BYTES = 64 * 1024 * 1024
 export const TERMINAL_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
@@ -453,7 +453,7 @@ export interface LocalForwardStartResult extends LocalForward {
   state: 'active'
 }
 
-export interface LocalForwardStopResult {
+interface LocalForwardStopResult {
   target: string
   port: number
   state: 'stopped'
@@ -488,7 +488,7 @@ async function failure(
 }
 
 /** WebSocket URL for a gateway path, carrying the bearer token when set. */
-export function socketURL(path: string): string {
+function socketURL(path: string): string {
   const url = new URL(path, window.location.href)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   const token = bearer()

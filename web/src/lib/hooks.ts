@@ -64,7 +64,7 @@ export function useElementSize<T extends HTMLElement>(): [(node: T | null) => vo
 
 export const coarsePointer = '(pointer: coarse)'
 
-export const belowSm = '(max-width: 639px)'
+const belowSm = '(max-width: 639px)'
 
 /** A finger on a screen narrower than `sm`: a phone, not a touch laptop. */
 export const phoneScreen = `${coarsePointer} and ${belowSm}`

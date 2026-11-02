@@ -24,7 +24,7 @@ function DialogOverlay({ className, ...props }: React.ComponentProps<typeof Dial
 
 const bottomSheet = 'inset-x-0 bottom-[var(--keyboard-inset,0px)] max-h-[calc(85dvh-var(--keyboard-inset,0px))] rounded-b-none border-x-0 border-b-0 pb-[calc(1rem+env(safe-area-inset-bottom))] animate-sheet-up'
 
-export type DialogVariant = 'center' | 'bottom' | 'side'
+type DialogVariant = 'center' | 'bottom' | 'side'
 
 export function dialogContentClass(variant: DialogVariant = 'center', side: 'left' | 'right' = 'right') {
   return cn(
@@ -125,8 +125,6 @@ export {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogOverlay,
-  DialogPortal,
   DialogTitle,
   DialogTrigger,
 }

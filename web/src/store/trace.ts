@@ -430,7 +430,7 @@ export function startsOpen(span: Span, last: boolean): boolean {
   }
 }
 
-export function needsAttention(span: Span): boolean {
+function needsAttention(span: Span): boolean {
   return span.status === 'failed' || span.status === 'waiting'
 }
 

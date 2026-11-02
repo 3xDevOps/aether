@@ -81,10 +81,10 @@ export interface RunInputRequest {
   title?: string
 }
 
-export type WaitConditionKind = 'pr_merged' | 'pr_checks' | 'run_finished'
+type WaitConditionKind = 'pr_merged' | 'pr_checks' | 'run_finished'
 export type WaitState = 'pending' | 'resolved' | 'cancelled' | 'superseded' | 'expired' | 'error'
 
-export interface WaitChecks {
+interface WaitChecks {
   passed: number
   failed: number
   pending: number
@@ -92,7 +92,7 @@ export interface WaitChecks {
   required_only: boolean
 }
 
-export interface WaitObserved {
+interface WaitObserved {
   pr_state?: string
   head_sha?: string
   merged_at?: string
@@ -369,7 +369,7 @@ export interface InsightsRun {
   pr_state: string
 }
 
-export interface InsightsCostAgent {
+interface InsightsCostAgent {
   harness: string
   metered_runs: number
   unmetered_runs: number
@@ -396,13 +396,13 @@ export interface InsightsOutcome {
   abandoned: number
 }
 
-export interface InsightsOutcomeBucket {
+interface InsightsOutcomeBucket {
   /** A local date, YYYY-MM-DD, as in the series. */
   start: string
   runs: InsightsOutcome
 }
 
-export interface InsightsMemberOutcome {
+interface InsightsMemberOutcome {
   member_id: string
   display_name: string
   /** The member's profile color. */

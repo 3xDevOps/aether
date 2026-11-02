@@ -157,13 +157,13 @@ export function locate(lines: PatchLine[], quote: PatchLine[]): number {
   return matches.length === 1 ? matches[0] : -1
 }
 
-export interface Placed {
+interface Placed {
   comment: ReviewComment
   start: number
   end: number
 }
 
-export interface FileReview {
+interface FileReview {
   placed: Placed[]
   /** Written on this diff, on lines it no longer shows. */
   outdated: ReviewComment[]
@@ -188,7 +188,7 @@ export function lineLabel(lines: PatchLine[]): string {
   return `${start === end ? start : `${start}-${end}`}${added.length > 0 ? '' : ' (removed)'}`
 }
 
-export function quoteLines(lines: PatchLine[]): string[] {
+function quoteLines(lines: PatchLine[]): string[] {
   return lines.map((line) => linePrefix[line.kind] + line.text)
 }
 
@@ -206,7 +206,7 @@ export function fenced(language: string, lines: string[]): string {
   return [`${fence}${language}`, ...lines, fence].join('\n')
 }
 
-export interface ReviewEntry {
+interface ReviewEntry {
   comment: ReviewComment
   /** The lines as the diff on screen shows them now, or as written when it does not. */
   lines: PatchLine[]

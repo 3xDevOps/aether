@@ -25,7 +25,7 @@ type TerminalImageIdentity = {
   enabled: boolean
 }
 
-export type TerminalImageProps = {
+type TerminalImageProps = {
   terminal: Terminal | null
   imageTarget?: string
   imageTargetKey?: string

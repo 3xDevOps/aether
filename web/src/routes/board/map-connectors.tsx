@@ -1,7 +1,7 @@
 import type { MapLine, MapPoint, MapUnit } from '@/routes/board/map-layout'
 
 /** An orthogonal polyline as an SVG path whose corners turn on arcs of `radius`. */
-export function roundedPath({ points, radius }: MapLine): string {
+function roundedPath({ points, radius }: MapLine): string {
   const toward = (from: MapPoint, to: MapPoint, distance: number) => {
     const length = Math.hypot(to.x - from.x, to.y - from.y)
     const step = Math.min(distance, length / 2)

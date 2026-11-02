@@ -5,7 +5,7 @@ import type { SysboxStatus } from '@/lib/types'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 
-export const SYSBOX_POLL_MS = 2000
+const SYSBOX_POLL_MS = 2000
 
 const ROOT_COMMAND = 'sudo aether-server sysbox install'
 

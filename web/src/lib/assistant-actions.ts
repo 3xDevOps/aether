@@ -178,7 +178,7 @@ function linkTarget(link: string): ActionTarget | undefined {
   return { kind: /\/pull\/\d+/.test(url.pathname) ? 'pr' : 'link', id: url.href, url: url.href }
 }
 
-export function runTarget(id: string): ActionTarget {
+function runTarget(id: string): ActionTarget {
   return { kind: 'run', id, route: { name: 'run', params: { runId: id } } }
 }
 
@@ -246,7 +246,7 @@ function recordApproval(saved: AssistantActionRecord): Approval | undefined {
  * expired card, a pending confirmation for the same method, and the
  * approval note written before the call ran.
  */
-export function actionOutcome(
+function actionOutcome(
   entry: Pick<WorkItem, 'status' | 'waiting'>,
   error: string | undefined,
   awaiting: boolean,
@@ -276,7 +276,7 @@ export function actionOutcome(
 }
 
 /** Records are keyed by the id of the event their notice shows as, calls by their step id. */
-export interface TranscriptFacts {
+interface TranscriptFacts {
   records: Map<string, AssistantActionRecord>
   calls: Map<string, SessionToolCall>
 }

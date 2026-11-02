@@ -98,7 +98,7 @@ export const keybindings = [
   { id: 'card-open', keys: 'o', scope: 'card', label: 'Open the focused card' },
 ] as const satisfies readonly Keybinding[]
 
-export type KeybindingID = (typeof keybindings)[number]['id']
+type KeybindingID = (typeof keybindings)[number]['id']
 
 type Handler = (event: KeyboardEvent) => void
 type ScopeHandlers<S extends KeyScope> = Partial<
@@ -116,7 +116,7 @@ function pressesOf(binding: Keybinding) {
 
 /** A chord needs a modifier beyond Shift. Chords are matched while the event
  * is still capturing, before a terminal's own handler turns them into input. */
-export function isChord(binding: Keybinding): boolean {
+function isChord(binding: Keybinding): boolean {
   return pressesOf(binding)[0]![0].some((modifier) => modifier !== 'Shift')
 }
 

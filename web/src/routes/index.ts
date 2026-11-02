@@ -18,4 +18,4 @@ import '@/routes/team'
 import '@/routes/templates'
 import '@/routes/workspaces'
 
-export { lookupRoute, registerRoute, type RouteProps } from '@/routes/registry'
+export { lookupRoute } from '@/routes/registry'

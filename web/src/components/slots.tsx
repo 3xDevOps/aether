@@ -12,11 +12,11 @@ export interface CardSlotProps {
 }
 
 /** Every slot and the props its contributors receive. */
-export interface SlotPropsMap {
+interface SlotPropsMap {
   'card:meta': CardSlotProps
 }
 
-export type SlotName = keyof SlotPropsMap
+type SlotName = keyof SlotPropsMap
 
 type AnyProps = Record<string, unknown>
 type Entry = { id: string; view: ComponentType<AnyProps> }

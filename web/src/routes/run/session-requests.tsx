@@ -42,7 +42,7 @@ export function AnsweredText({ request, command }: { request: SessionRequest; co
  * The tool call a request asks about. A subagent's calls live in the agents
  * index rather than the main turns, so `owner` names the subagent then.
  */
-export function findToolItem(session: AcpSession | undefined, id: string | undefined): { item: SessionItem; owner?: string } | undefined {
+function findToolItem(session: AcpSession | undefined, id: string | undefined): { item: SessionItem; owner?: string } | undefined {
   if (!session || !id) return undefined
   for (let t = session.turns.length - 1; t >= 0; t--) {
     const items = session.turns[t]!.items
@@ -58,7 +58,7 @@ export function findToolItem(session: AcpSession | undefined, id: string | undef
   return undefined
 }
 
-export function useToolItem(sessionID: string, id: string | undefined): { item?: SessionItem; subagent?: string } {
+function useToolItem(sessionID: string, id: string | undefined): { item?: SessionItem; subagent?: string } {
   const item = useStore((s) => findToolItem(s.acpSessions[sessionID], id)?.item)
   const subagent = useStore((s) => {
     const session = s.acpSessions[sessionID]
@@ -74,7 +74,7 @@ export function requestAnnouncement(session: AcpSession | undefined, request: Se
   return `${plainHeadline(requestHeadline(request, found?.item.tool_call, owner ? agentLabel(owner) : who))} ${request.title}`
 }
 
-export function HeadlineText({ headline }: { headline: Headline }) {
+function HeadlineText({ headline }: { headline: Headline }) {
   return <>{headline.who} <span className="font-normal text-muted">{headline.verb}</span> {headline.rest}</>
 }
 
@@ -83,7 +83,7 @@ function Source({ call }: { call: SessionToolCall }) {
   return <><Icon aria-hidden /><span className="min-w-0 truncate">{call.tool_name}</span></>
 }
 
-export interface Answering {
+interface Answering {
   busy: string | null
   error?: string
   answer: (optionID: string, values?: Record<string, unknown>) => void

@@ -1,6 +1,6 @@
 import { Monitor, Smartphone, Tablet, type LucideIcon } from '@/components/icons'
 
-export interface ViewportSize {
+interface ViewportSize {
   width: number
   height: number
 }

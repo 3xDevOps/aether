@@ -10,9 +10,9 @@
 import { act } from '@testing-library/react'
 
 /** What a screen's input is: a finger is coarse, a mouse is fine. */
-export type Pointer = 'coarse' | 'fine'
+type Pointer = 'coarse' | 'fine'
 
-export interface Screen {
+interface Screen {
   /** Defaults to the height jsdom already reports. */
   height?: number
   /** Defaults to a mouse. */

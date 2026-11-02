@@ -47,7 +47,7 @@ function polygon(vertices: Vertex[], height: number): string {
   return `polygon(${points.join(',')})`
 }
 
-export type SplitShape = { first: string; second: string }
+type SplitShape = { first: string; second: string }
 
 /** The two halves' clip paths, grown by `grow` px on every side; the controls are `height` px tall. */
 export function splitShape(height: number, lean: number, grow = 0, pad = 0): SplitShape {

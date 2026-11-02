@@ -20,11 +20,11 @@ const limitReason = `People can run ${maxOwnShells} shells in a session; the age
 
 export const shellPollMs = (visible: boolean) => (visible ? 2_000 : 10_000)
 
-export const shellControlKey = (runID: string, terminal: Pick<DevTerminal, 'terminal_id' | 'incarnation'>) =>
+const shellControlKey = (runID: string, terminal: Pick<DevTerminal, 'terminal_id' | 'incarnation'>) =>
   `${runID}:${terminal.terminal_id}:${terminal.incarnation}`
 
 /** The server names an unnamed shell `tab-N`, and keeps that id for its life. */
-export function shellName(terminal: DevTerminal): string {
+function shellName(terminal: DevTerminal): string {
   const numbered = /^tab-(\d+)$/.exec(terminal.name)
   return numbered ? `Shell ${numbered[1]}` : terminal.name
 }

@@ -26,11 +26,11 @@ import { sessionLease } from '@/store/session-stream'
 const adapterFailed = ['Enhanced agent failed', 'Enhanced agent exited']
 const authError = /authentication required|authrequired|not logged in|not signed in/i
 
-export type SessionFailure =
+type SessionFailure =
   | { kind: 'adapter'; title: string; detail?: string; seq?: number }
   | { kind: 'auth'; detail?: string; seq?: number }
 
-export function sessionFailure(session: AcpSession | undefined): SessionFailure | null {
+function sessionFailure(session: AcpSession | undefined): SessionFailure | null {
   if (!session) return null
   let notice: SessionItem | undefined
   scan: for (let t = session.turns.length - 1; t >= 0; t--) {

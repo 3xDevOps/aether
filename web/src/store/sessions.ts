@@ -27,9 +27,9 @@ import { stepsBlock, type WorkItem } from '@/store/session-steps'
 import type { SliceCreator } from '@/store/slice'
 import { indexItems, localItem, noAgents, replaceAgentItem, trimAgents, type AgentIndex } from '@/store/subagents'
 
-export type { Delivery, SessionRow }
+export type { SessionRow }
 
-export const sessionEventTypes = ['run.agent', 'workspace.timeline', 'run.status']
+const sessionEventTypes = ['run.agent', 'workspace.timeline', 'run.status']
 
 const residentEvents = 2000
 const pageSize = 1000
@@ -94,7 +94,7 @@ export interface SessionsSlice {
   toggleAgentMessages: (runID: string) => void
 }
 
-export const residentSessions = 3
+const residentSessions = 3
 export const keptItems = 200
 
 let touches = 0
@@ -394,7 +394,7 @@ export function roomFiles(m: Pick<RoomMessage, 'attachments'>): string[] | undef
   return files?.length ? files : undefined
 }
 
-export interface SessionSources {
+interface SessionSources {
   run: RunRecord
   events: Event[]
   room: RoomMessage[]

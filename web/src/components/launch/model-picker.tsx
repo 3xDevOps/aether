@@ -13,7 +13,7 @@ import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
 /** The models `harness` offers on the account, fetched the first time a field shows them. */
-export function useAgentModels(harness: string, accountMemberID?: string) {
+function useAgentModels(harness: string, accountMemberID?: string) {
   const key = `${accountMemberID ?? ''}/${harness}`
   const supported = useCapability().hasMethod('agent.models')
   const entry = useStore((s) => s.agentModels[key])

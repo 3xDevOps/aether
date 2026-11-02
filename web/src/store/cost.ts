@@ -102,7 +102,7 @@ function readBudget(store: RootStore, client: Api, workspaceID: string, delay: n
 /** Worst first: a warning anywhere outranks every workspace that is fine. */
 const severity: BudgetState[] = ['exceeded', 'warn', 'ok']
 
-export interface CostTotals {
+interface CostTotals {
   costUSD: number
   state: BudgetState
   /** Some spend is unmetered, so the total is a floor, not a measurement. */

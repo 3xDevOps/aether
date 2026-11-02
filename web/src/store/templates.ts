@@ -6,7 +6,7 @@ import { sameIdentity, useStore } from '@/store'
 
 export const saveKey = (kind: 'template' | 'schedule', workspaceID: string, name: string) => JSON.stringify([kind, workspaceID, name])
 
-export type Lists = { templates: Template[] | null; schedules: Schedule[] }
+type Lists = { templates: Template[] | null; schedules: Schedule[] }
 type Changes = { seq: number; templates: Map<string, number>; schedules: Map<string, number>; reads: number; applied: Record<keyof Lists, number> }
 
 // Outlive the Templates route, so an action sent before leaving it still holds Delete and Unschedule, and lands on the list, after coming back.
@@ -80,7 +80,7 @@ export function sendSave<T>(key: string, send: () => Promise<T>): { sent: Promis
   return { sent, latest: () => latestSave.get(key) === order }
 }
 
-export const byName = (a: Template, b: Template) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+const byName = (a: Template, b: Template) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
 
 export function withTemplate(list: Template[] | null, name: string, next?: Template): Template[] | null {
   if (!list) return next ? [next] : list
@@ -97,7 +97,7 @@ export function withSchedule(list: Schedule[], template: string, next?: Schedule
  * Returns a merge for a list read sent now: entries changed here after it was sent, or with a save still unanswered, keep their shown value, since the read may predate the change.
  * It returns null, to keep the shown list, for an answer to a read sent before the last one applied or before the signed-in identity changed.
  */
-export function sinceRead<T>(workspaceID: string, kind: 'templates' | 'schedules', name: (item: T) => string) {
+function sinceRead<T>(workspaceID: string, kind: 'templates' | 'schedules', name: (item: T) => string) {
   const since = changesIn(workspaceID)
   const sent = since.seq
   const order = ++since.reads

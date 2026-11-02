@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useStore } from '@/store'
 
-export const temporaryBanner = "Temporary: the assistant won't read or save your preferences until New conversation."
+const temporaryBanner = "Temporary: the assistant won't read or save your preferences until New conversation."
 
 export function TemporaryChatToggle({ temporary }: { temporary: boolean }) {
   const [busy, setBusy] = useState(false)

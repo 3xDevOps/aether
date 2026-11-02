@@ -21,7 +21,7 @@ useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) usePatches.setState({}, true)
 })
 
-export async function loadRepoPatch(runID: string, repo: string, client: Pick<Api, 'runPatch'> = api): Promise<void> {
+async function loadRepoPatch(runID: string, repo: string, client: Pick<Api, 'runPatch'> = api): Promise<void> {
   const key = keyOf(runID, repo)
   if (inflight.has(key)) return
   inflight.add(key)
@@ -38,7 +38,7 @@ export async function loadRepoPatch(runID: string, repo: string, client: Pick<Ap
   }
 }
 
-export interface RepoChangesData {
+interface RepoChangesData {
   files: PatchFile[]
   truncated: boolean
   loading: boolean

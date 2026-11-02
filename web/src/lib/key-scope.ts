@@ -4,7 +4,7 @@ export type KeyScope = 'global' | 'run' | 'browser' | 'card' | 'request' | 'comp
  * once, so their relative order only settles a tie the table forbids. */
 const depth: Record<KeyScope, number> = { composer: 0, request: 1, browser: 1, card: 2, run: 2, global: 3 }
 
-export interface ScopeEntry {
+interface ScopeEntry {
   scope: KeyScope
   /** Read at dispatch, so a handler that appears after mount (a permission
    * landing with hydration) is live without remounting. */

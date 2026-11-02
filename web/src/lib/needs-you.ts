@@ -100,7 +100,7 @@ function condition(spec: Spec): NeedsYouCondition {
   }
 }
 
-export function isEnhanced(run: Pick<Run, 'acp'>): boolean {
+function isEnhanced(run: Pick<Run, 'acp'>): boolean {
   return run.acp === true
 }
 

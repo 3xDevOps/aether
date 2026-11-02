@@ -4,7 +4,7 @@
 // the fixture honest without spending a browser on it.
 
 /** One call's failure, carrying the gateway's own error text. */
-export class GatewayError extends Error {
+class GatewayError extends Error {
   constructor(
     readonly status: number,
     readonly path: string,

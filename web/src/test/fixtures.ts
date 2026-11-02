@@ -146,7 +146,7 @@ export const template: Template = {
   created_at: '2026-08-14T09:00:00Z',
 }
 
-export function schedule(over: Partial<Schedule> = {}): Schedule {
+function schedule(over: Partial<Schedule> = {}): Schedule {
   return {
     id: 'sch_1',
     workspace_id: workspace.id,

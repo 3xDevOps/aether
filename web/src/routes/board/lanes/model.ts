@@ -110,7 +110,7 @@ export interface LanesModel {
   inWindow: number
 }
 
-export const sectionOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
+const sectionOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
 const groupRank = Object.fromEntries(sectionOrder.map((group, i) => [group, i])) as Record<RunGroup, number>
 const familyChildrenOpen = 8
 const agentDepth = 4

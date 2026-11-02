@@ -29,7 +29,7 @@ export const pageBudget = maxPages * feedPage
  * Presence is keyed on (member, workspace), so this is the only workspace a
  * heartbeat may claim: beating every one would show the user online where they never looked.
  */
-export function focusedWorkspace(state: RootState): string {
+function focusedWorkspace(state: RootState): string {
   const { params } = state.route
   if (params.workspaceId) return params.workspaceId
   if (params.runId) return state.runs[params.runId]?.workspace_id ?? ''
@@ -204,7 +204,7 @@ export async function olderFeed(store: RootStore, client: Api = api): Promise<vo
   if (store.getState().feedRequest === id) store.getState().extendFeed(until, true)
 }
 
-export async function drain(store: RootStore, client: Api = api): Promise<void> {
+async function drain(store: RootStore, client: Api = api): Promise<void> {
   const s = store.getState()
   if (!s.feedFilters.workspaceID) return
   s.setFeedLoading(true)

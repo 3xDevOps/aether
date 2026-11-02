@@ -49,7 +49,7 @@ function stateOf(status: RunStatus, state?: string): SegmentState {
   return outcomeState(status) ?? 'running'
 }
 
-export interface SegmentInput {
+interface SegmentInput {
   run: RunRecord
   /** The viewer's presentation of the run now. */
   shown: PresentationState

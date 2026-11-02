@@ -55,7 +55,7 @@ export interface RunTree extends RunRow {
   childRuns?: TreeSummary
 }
 
-export interface RunGroups {
+interface RunGroups {
   'needs-you': RunTree[]
   working: RunTree[]
   review: RunTree[]

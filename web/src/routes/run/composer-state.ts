@@ -115,7 +115,7 @@ export function composerBlock(run: RunRecord, maySteer: boolean, canReopen: bool
   return null
 }
 
-export interface EnhancedGate {
+interface EnhancedGate {
   reason: string
   interrupt?: boolean
 }

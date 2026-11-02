@@ -31,7 +31,7 @@ export const tasks = {
   stale: 'Split the cart service',
 } as const
 
-export type Kind = keyof typeof tasks
+type Kind = keyof typeof tasks
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
 

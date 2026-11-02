@@ -11,9 +11,9 @@ import { CommentCard } from '@/routes/diff/comment-card'
 import { linePrefix, type FileStatus, type PatchFile, type PatchLine } from '@/routes/diff/parse'
 import { addComment, commentable, growComment, placeComments, reach, useFileComments, written, type ReviewComment } from '@/routes/diff/review'
 
-export const largeFile = 500
+const largeFile = 500
 /** A file whose patch text is longer than this starts closed, whatever its line count. */
-export const largeText = 256 * 1024
+const largeText = 256 * 1024
 
 export function collapsedByDefault(file: PatchFile): boolean {
   return file.contentLines > largeFile || file.size > largeText || file.status === 'binary' || file.status === 'deleted'
@@ -45,7 +45,7 @@ export function Counts({ additions, deletions }: { additions: number; deletions:
 }
 
 /** The run whose review a file's lines join, and the comparison on screen: '' for All changes, else its scope. */
-export interface ReviewTarget {
+interface ReviewTarget {
   runID: string
   scope: string
 }

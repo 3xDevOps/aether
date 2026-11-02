@@ -19,7 +19,7 @@ import { useStore } from '@/store'
 import { rememberChoice } from '@/store/launch-defaults'
 import { type Capability, useIsAdmin } from '@/store/hooks'
 
-export const addAgentSubStep = '@custom'
+const addAgentSubStep = '@custom'
 
 export function AgentStep({
   client,

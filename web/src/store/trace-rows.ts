@@ -1,6 +1,6 @@
 import { startsOpen, surfacedBelow, type Span } from '@/store/trace'
 
-export type OpenState = Readonly<Record<string, boolean>>
+type OpenState = Readonly<Record<string, boolean>>
 
 export interface TraceRow {
   /** Unique among rows: a surfaced row carries its folded ancestor's id. */
@@ -16,7 +16,7 @@ export interface TraceRow {
   parentKey?: string
 }
 
-export function isOpen(span: Span, open: OpenState, last: boolean): boolean {
+function isOpen(span: Span, open: OpenState, last: boolean): boolean {
   return open[span.id] ?? startsOpen(span, last)
 }
 
@@ -70,7 +70,7 @@ export function flattenTrace(root: Span, open: OpenState): TraceRow[] {
 /** tool, overlap and dense: one, two, or three or more tool calls at once. */
 export type SegmentTone = 'model' | 'tool' | 'overlap' | 'dense' | 'failed' | 'wait'
 
-export interface BarSegment {
+interface BarSegment {
   from: number
   /** Null while it runs. */
   to: number | null

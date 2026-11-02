@@ -24,7 +24,7 @@ export interface TrackedPR {
 }
 
 /** An answer that reaches this many entries of a kind may have left some out. */
-export const feedbackLimit = 100
+const feedbackLimit = 100
 
 const none: TrackedPR = {}
 const usePullRequests = create<Record<string, TrackedPR>>(() => ({}))

@@ -515,7 +515,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   )
 }
 
-export function NotesLink({ href }: { href: string }) {
+function NotesLink({ href }: { href: string }) {
   return (
     <a
       href={href}

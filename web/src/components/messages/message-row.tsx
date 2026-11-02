@@ -10,7 +10,7 @@ import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
 /** Overrides a participant's label; undefined keeps it. */
-export type ParticipantLabel = (runID: string, run: RunRecord | undefined) => string | undefined
+type ParticipantLabel = (runID: string, run: RunRecord | undefined) => string | undefined
 
 const kinds: Record<RunMessageKind, { icon: LucideIcon; word: string }> = {
   message: { icon: MessageSquare, word: 'Message' },

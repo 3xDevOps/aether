@@ -203,7 +203,7 @@ function RunLabel({ lane, agentName, compact, now, mail }: { lane: RunLane; agen
   )
 }
 
-export interface LaneRowProps {
+interface LaneRowProps {
   lane: Lane
   top: number
   height: number

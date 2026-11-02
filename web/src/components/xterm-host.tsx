@@ -89,7 +89,7 @@ function installServerResponder(terminal: Terminal, ownsResponses: () => boolean
   return () => registrations.forEach((registration) => registration.dispose())
 }
 
-export interface XtermOptions {
+interface XtermOptions {
   enabled?: boolean
   /** Follow the shared PTY without contributing this pane's size. */
   follow?: boolean

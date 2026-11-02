@@ -5,7 +5,7 @@ export interface DevRunParams {
   run_id: string
 }
 
-export interface DevCapability {
+interface DevCapability {
   available: boolean
   reason?: string
 }
@@ -124,7 +124,7 @@ export interface DevTerminalScreenParams extends DevTerminalTarget {
   expected_screen_revision?: number
 }
 
-export interface DevTerminalCell {
+interface DevTerminalCell {
   text: string
   width: number
   foreground?: string

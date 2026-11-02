@@ -11,7 +11,7 @@ export const repoRoot = path.resolve(
   fileURLToPath(new URL('../../..', import.meta.url)),
 )
 
-export interface Binaries {
+interface Binaries {
   /** `aether-server`, run as a child process on a loopback SSH port. */
   server: string
   /** `aether`, run as `aether gui` to serve the dashboard. */

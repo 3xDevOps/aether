@@ -24,7 +24,7 @@ interface Inviting {
   created?: InvitationResult
 }
 
-export function MembersPage({ tab, client = api }: { tab: Tab; client?: Api }) {
+function MembersPage({ tab, client = api }: { tab: Tab; client?: Api }) {
   const caps = useCapability()
   const isAdmin = useIsAdmin()
   const navigate = useStore((s) => s.navigate)

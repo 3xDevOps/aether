@@ -92,7 +92,7 @@ function AgentsSkeleton() {
   )
 }
 
-export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
+function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const { agents, error, reload } = useAgentList(client, true)
   useLaunchDefaultsRead(client)

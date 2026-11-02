@@ -107,7 +107,7 @@ export interface RunCommandContext {
   predicting?: boolean
 }
 
-export interface BoardCommandContext {
+interface BoardCommandContext {
   cap: Capability
   /** Null before hydration. */
   self: { id: string | null; role: Member['role'] | null }
@@ -612,7 +612,7 @@ export function closeCommand(runID: string, outcome: 'merged' | 'abandoned'): Co
 }
 
 /** A run whose agent reported success and that its owner has not marked complete. */
-export function completable(run: RunRecord): boolean {
+function completable(run: RunRecord): boolean {
   return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review !== 'accepted')
 }
 
@@ -633,7 +633,7 @@ export function canLaunch({
   return cap.hasMethod('run.launch') && allowed('launch', { id: null, role })
 }
 
-export const unlinkedReason = 'Link this computer to a server first'
+const unlinkedReason = 'Link this computer to a server first'
 
 /** An unlinked gateway serves only onboarding, so nothing can launch yet. */
 export function launchBlocked(linkStatus: Pick<LinkStatus, 'server_configured'> | null): string | undefined {

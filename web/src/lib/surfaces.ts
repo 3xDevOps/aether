@@ -16,7 +16,7 @@ import {
 } from '@/components/icons'
 import type { Capability } from '@/store/hooks'
 
-export interface Surface {
+interface Surface {
   /** The route name `navigate` takes. */
   name: string
   label: string
