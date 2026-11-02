@@ -1,5 +1,6 @@
 import { memo, useId } from 'react'
 import { AgentCard, AgentEntry, duration, WorkGroup } from '@/components/ui/timeline'
+import { Shimmer } from '@/components/ui/shimmer'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { useClock } from '@/lib/clock'
 import { redirectRoute } from '@/lib/url-state'
@@ -69,7 +70,7 @@ function Progress({ runID, agent, state }: { runID: string; agent: Subagent; sta
   const activity = agent.latest ? activityLabel(agent.latest) : undefined
   switch (state) {
     case 'running':
-      return <span className="live-shimmer">{activity ?? (agent.call?.task ? 'Running in the background' : agent.activeSeq !== undefined ? 'Working' : 'Starting')}</span>
+      return <Shimmer text={activity ?? (agent.call?.task ? 'Running in the background' : agent.activeSeq !== undefined ? 'Working' : 'Starting')} className="block w-fit max-w-full truncate" />
     case 'done':
       return <>{report ?? 'Finished'}</>
     case 'failed':

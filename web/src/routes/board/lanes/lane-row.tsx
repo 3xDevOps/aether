@@ -5,6 +5,7 @@ import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Shimmer } from '@/components/ui/shimmer'
 import { StatusDot, toneClasses, type Tone } from '@/components/ui/status-dot'
 import { compactAge, elapsed } from '@/lib/format'
 import { stateLabel, stateTone, stateWords } from '@/lib/status'
@@ -130,7 +131,7 @@ function RunBar({ lane, g, now }: { lane: RunLane; g: LaneGeometry; now: number 
       <Segments segments={lane.segments} outcome={lane.outcome} g={g} height={g.metrics.bar} className={working ? 'border-r-2 border-state-working' : undefined}>
         <span className="relative flex h-full min-w-0 items-center gap-1.5 px-2 text-ui-sm font-medium whitespace-nowrap text-text">
           <StatusDot tone={stateTone[card.state]} />
-          <span className={cn('min-w-0 overflow-hidden', working && 'live-shimmer')}>{g.compact ? lane.title : barText(lane)}</span>
+          {working ? <Shimmer text={g.compact ? lane.title : barText(lane)} className="min-w-0 overflow-hidden" /> : <span className="min-w-0 overflow-hidden">{g.compact ? lane.title : barText(lane)}</span>}
         </span>
         {needs && box && box.width > 200 && (
           <span aria-hidden className="absolute top-1/2 right-1 flex h-4.5 -translate-y-1/2 items-center gap-1 rounded-chip bg-raised px-1.5 text-ui-xs font-medium text-state-needs-you shadow-button">
