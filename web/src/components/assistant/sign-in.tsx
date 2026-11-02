@@ -52,12 +52,15 @@ export function AssistantSignIn({ agent, client, onDone }: { agent: AssistantAge
     }
   }, [agent.name, client, geometry, terminal])
   return (
-    <section aria-label={`Sign in to ${agent.display_name}`} className="flex min-h-0 flex-1 flex-col gap-3">
+    <section aria-label={`Sign in to ${agent.display_name}`} className="flex flex-col gap-3">
       <p className="text-ui">
         Sign in to {agent.display_name} for the assistant. The sign-in runs in the assistant's own container and is kept there, apart from your sessions, which cannot read or change it. Open the link it prints and follow its prompts.
       </p>
       {refused && <Callout tone="failed" role="alert" title="The sign-in could not start">{refused}</Callout>}
-      <TerminalPane controller={controller} className="min-h-64 flex-1" />
+      {/* The fit addon sizes the terminal from this box, so its height must not follow the terminal's. */}
+      <div className="h-[min(32rem,70dvh)] min-h-64">
+        <TerminalPane controller={controller} />
+      </div>
       <div>
         <Button size="sm" variant={ended ? 'primary' : 'secondary'} onClick={onDone}>{ended ? 'Done' : 'Close'}</Button>
       </div>
