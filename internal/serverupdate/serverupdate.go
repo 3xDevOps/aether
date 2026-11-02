@@ -217,14 +217,10 @@ func (s *Service) disabled(reason string) *Service {
 	return s
 }
 
-// Capable reports whether this process can replace its own binary and
-// restart onto it. The directory permissions are probed rather than
-// assumed: an install can be moved to an unprivileged unit without the
-// server being rebuilt.
-func (s *Service) Capable() bool { return s.incapableReason() == "" }
-
-// incapableReason is why this server cannot update itself, empty when it
-// can.
+// incapableReason is why this process cannot replace its own binary and
+// restart onto it, empty when it can. The directory permissions are
+// probed rather than assumed: an install can be moved to an unprivileged
+// unit without the server being rebuilt.
 func (s *Service) incapableReason() string {
 	if s.incapable != "" {
 		return s.incapable
