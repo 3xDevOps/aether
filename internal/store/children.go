@@ -76,7 +76,7 @@ const terminalStatuses = `'completed', 'merged', 'abandoned', 'failed', 'interru
 const childCols = `rc.run_id, rc.parent_run_id, rc.root_run_id, rc.tree_key, rc.workspace_id,
 	rc.owner_member_id, rc.account_member_id, rc.harness, rc.mode, rc.model, rc.purpose, rc.task,
 	rc.base_commit, rc.base_branch, rc.fallback_disabled, rc.fallback_order, rc.idempotency_key, rc.request_hash, rc.state,
-	rc.detached, rc.error, rc.end_notified, rc.created_at, rc.started_at`
+	rc.detached, rc.error, rc.end_notified, rc.created_at`
 
 // childReported holds for a reservation whose run's latest word is a
 // finalized success or failure report, before its run parks on it, and that
@@ -103,19 +103,17 @@ func scanChild(row interface{ Scan(...any) error }) (*domain.ChildReservation, e
 		c         domain.ChildReservation
 		order     string
 		createdAt int64
-		startedAt *int64
 	)
 	if err := row.Scan(&c.RunID, &c.ParentRunID, &c.RootRunID, &c.TreeKey, &c.WorkspaceID,
 		&c.OwnerID, &c.AccountID, &c.Harness, &c.Mode, &c.Model, &c.Purpose, &c.Task,
 		&c.BaseCommit, &c.BaseBranch, &c.Fallback.Disabled, &order, &c.IdempotencyKey, &c.RequestHash, &c.State,
-		&c.Detached, &c.Error, &c.EndNotified, &createdAt, &startedAt); err != nil {
+		&c.Detached, &c.Error, &c.EndNotified, &createdAt); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(order), &c.Fallback.Order); err != nil {
 		return nil, fmt.Errorf("store: decode subsession fallback order: %w", err)
 	}
 	c.CreatedAt = decodeTime(createdAt)
-	c.StartedAt = decodeTimePtr(startedAt)
 	return &c, nil
 }
 
@@ -304,10 +302,9 @@ func (d *DB) ChildCounts(ctx context.Context, parent domain.RunID) (ChildCounts,
 }
 
 func (d *DB) SetChildState(ctx context.Context, run domain.RunID, to domain.ChildState, errText string, from ...domain.ChildState) error {
-	query := `UPDATE run_children SET state = ?, error = ?,
-		started_at = CASE WHEN ? = 'started' THEN ? ELSE started_at END
+	query := `UPDATE run_children SET state = ?, error = ?
 		WHERE run_id = ? AND state IN (?` + repeatPlaceholders(len(from)-1) + `)`
-	args := []any{to, errText, to, time.Now().UTC().UnixNano(), run}
+	args := []any{to, errText, run}
 	for _, s := range from {
 		args = append(args, s)
 	}
