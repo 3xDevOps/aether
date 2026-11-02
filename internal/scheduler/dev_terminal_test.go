@@ -34,6 +34,7 @@ type terminalTestRuntime struct {
 	gone        map[string]bool
 	// failAttach is how many more keeper bridges fail to start.
 	failAttach int
+	loseReady  bool
 }
 
 type terminalTestExec struct {

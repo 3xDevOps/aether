@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,8 +13,10 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acpkeeper"
 	"github.com/3xDevOps/Aether/internal/control"
+	"github.com/3xDevOps/Aether/internal/coordcli"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -29,7 +32,7 @@ type terminalKeeper struct {
 // startKeptTerminal runs spec's command under a terminal keeper as the
 // container's user and returns the keeper's exec once it listens. A command
 // the keeper cannot start fails with its *runtime.ExecExitError;
-// errNoTerminalKeeper reports a staged binary that cannot run a keeper.
+// errNoTerminalKeeper reports a staged binary that proved it has no keeper.
 func (s *Scheduler) startKeptTerminal(ctx context.Context, managed runtime.ManagedExecRuntime, live LiveRun, spec runtime.ExecSpec) (runtime.ManagedExec, *terminalKeeper, error) {
 	info, err := s.cfg.Runtime.Inspect(ctx, live.ContainerID)
 	if err != nil {
@@ -63,8 +66,23 @@ func (s *Scheduler) startKeptTerminal(ctx context.Context, managed runtime.Manag
 		return nil, nil, fmt.Errorf("start the terminal keeper: %w", errors.Join(adapterError(err, stderr), stopErr))
 	case exit.Code == 126 || exit.Code == 127:
 		return nil, nil, &runtime.ExecExitError{Code: exit.Code}
+	case keeperUnsupported(err):
+		return nil, nil, fmt.Errorf("%w: %w", errNoTerminalKeeper, adapterError(err, stderr))
 	}
-	return nil, nil, fmt.Errorf("%w: %w", errNoTerminalKeeper, adapterError(err, stderr))
+	// The keeper may have started the command before its ready was lost.
+	return nil, nil, fmt.Errorf("start the terminal keeper: %w", adapterError(err, stderr))
+}
+
+// keeperUnsupported reports whether err is the answer of a staged binary
+// that has no keeper command: aether-internal's unknown-command error.
+func keeperUnsupported(err error) bool {
+	var out *keeperOutputError
+	if !errors.As(err, &out) {
+		return false
+	}
+	var envelope coordcli.Envelope
+	return json.Unmarshal([]byte(out.line), &envelope) == nil && !envelope.OK && envelope.Error != nil &&
+		envelope.Error.Code == protocol.CodeMethodNotFound && envelope.Error.Message == "unknown command: "+acpkeeper.Command
 }
 
 // envHome is the HOME env sets, if any.

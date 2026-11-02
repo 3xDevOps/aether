@@ -432,6 +432,10 @@ A shell started by a server without terminal keepers, or in a container whose
 staged binary predates them, keeps running through a restart, but its screen,
 output and input are gone. It reads `PTY unavailable after recovery;
 execution was not reattached or restarted`; stop it and start another.
+Aether starts a terminal without a keeper only when the staged binary answers
+`unknown command: acp-keeper`. Any other keeper failure fails `terminal start`
+with `start the terminal keeper: <error>`, because the keeper may already
+have started the command.
 
 Docker restarted with `live-restore` forgets every exec but not its
 processes: Aether then reads a terminal's state from its exec helper in the

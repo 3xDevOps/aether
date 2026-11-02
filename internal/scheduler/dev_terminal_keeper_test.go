@@ -111,6 +111,11 @@ func (r *terminalTestRuntime) startKeeperExec(container runtime.ID, spec runtime
 	r.executions[spec.CreationKey] = execution
 	socket := spec.Argv[3]
 	switch {
+	case spec.Argv[2] == "term" && r.loseReady:
+		// The keeper starts the command, but its ready never arrives.
+		stdout, w := io.Pipe()
+		_ = w.Close()
+		execution.start = &keeperStart{stdout: stdout, ready: w}
 	case spec.Argv[2] == "term" && r.keepers:
 		k := &testTermKeeper{exec: execution}
 		stdout, ready := io.Pipe()
@@ -136,12 +141,15 @@ func (r *terminalTestRuntime) startKeeperExec(container runtime.ID, spec runtime
 			_ = client.Close()
 		}()
 	default:
-		// A staged binary without a terminal keeper prints its usage and
-		// exits.
+		// A staged binary without keepers answers as aether-internal does
+		// to a command it does not know.
 		stdout, w := io.Pipe()
-		_ = w.Close()
+		go func() {
+			_, _ = io.WriteString(w, `{"schema_version":"1","ok":false,"error":{"code":-32601,"message":"unknown command: acp-keeper"}}`+"\n")
+			_ = w.Close()
+		}()
 		execution.start = &keeperStart{stdout: stdout, ready: w}
-		process.endProcess(125)
+		process.endProcess(2)
 	}
 	return execution, nil
 }
@@ -287,6 +295,23 @@ func TestDevelopmentTerminalReattachesAfterAFailedReattach(t *testing.T) {
 	}
 	if got = list(); got.Process.State != "running" || got.Incarnation != terminal.Incarnation {
 		t.Fatalf("terminal after a second refresh = %+v; want it reattached", got)
+	}
+}
+
+func TestDevelopmentTerminalWhoseKeeperLostItsReadyDoesNotRunAgain(t *testing.T) {
+	e := newKeptTerminalEnv(t)
+	rt := e.sched.cfg.Runtime.(*terminalTestRuntime)
+	rt.loseReady = true
+	run, _ := e.launchFake(t, "kept-lost-ready")
+	_, err := terminalTestCall(t, e.sched, run.ID, control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID},
+		protocol.MethodDevTerminalStart, protocol.DevTerminalStartParams{Name: "job", Cols: 12, Rows: 3, Command: []string{"make", "deploy"}})
+	if err == nil {
+		t.Fatal("start succeeded without the keeper's ready")
+	}
+	rt.fakeRuntime.mu.Lock()
+	defer rt.fakeRuntime.mu.Unlock()
+	if len(rt.execCalls) != 0 {
+		t.Fatalf("the command started again without a keeper: %+v", rt.execCalls)
 	}
 }
 

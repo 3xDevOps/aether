@@ -101,7 +101,7 @@ func keeperReady(ctx context.Context, exec runtime.ManagedExec, token string) (s
 		}
 		line, rerr := bufio.NewReader(att.Stdout()).ReadString('\n')
 		if rerr == nil && strings.TrimSpace(line) != "ready" {
-			rerr = fmt.Errorf("unexpected keeper output %q", line)
+			rerr = &keeperOutputError{line: line}
 		}
 		ready <- rerr
 	}()
@@ -115,6 +115,12 @@ func keeperReady(ctx context.Context, exec runtime.ManagedExec, token string) (s
 	}
 	return stderr, done, err
 }
+
+// keeperOutputError is a keeper exec whose first line of output is not
+// "ready".
+type keeperOutputError struct{ line string }
+
+func (e *keeperOutputError) Error() string { return fmt.Sprintf("unexpected keeper output %q", e.line) }
 
 // startKept starts adapter under a new keeper and attaches to it.
 func (d *acpDriver) startKept(ctx context.Context, entry *supervised, managed runtime.ManagedExecRuntime, cid runtime.ID, adapter []string) (runtime.ManagedExec, *acpkeeper.Client, runtime.ManagedExec, error) {
