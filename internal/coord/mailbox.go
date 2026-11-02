@@ -476,8 +476,12 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if summary == "" {
 		return protocol.CoordReportResult{}, invalidParams(method, "summary is required")
 	}
+	specs, problem := parseUntil(p.Outcome, p.Until)
+	if problem != "" {
+		return protocol.CoordReportResult{}, invalidParams(method, problem)
+	}
 	if p.Outcome == protocol.CoordOutcomeNeedsInput || p.Outcome == protocol.CoordOutcomeWaiting || p.Outcome == protocol.CoordOutcomeAnswered {
-		return s.reportState(ctx, run, p, summary)
+		return s.reportState(ctx, run, p, summary, specs)
 	}
 	if len(p.EvidenceRefs) >= protocol.CoordMaxEvidenceRefs {
 		return protocol.CoordReportResult{}, invalidParams(method,
@@ -554,6 +558,9 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
 	if report.State == store.CoordReportFinalized && report.PublishedAt != nil {
+		if err = s.endWaits(context.WithoutCancel(ctx), run, p.Outcome, report.CreatedAt); err != nil {
+			return protocol.CoordReportResult{}, internalError(method, err)
+		}
 		return coordReportResult(report), nil
 	}
 
@@ -600,6 +607,9 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	}
 	if report.State != store.CoordReportFinalized {
 		return protocol.CoordReportResult{}, internalError(method, errors.New("coord report did not finalize"))
+	}
+	if err = s.endWaits(context.WithoutCancel(ctx), run, p.Outcome, report.CreatedAt); err != nil {
+		return protocol.CoordReportResult{}, internalError(method, err)
 	}
 	if report.PublishedAt != nil {
 		if err := s.enqueueChildReport(ctx, report); err != nil {

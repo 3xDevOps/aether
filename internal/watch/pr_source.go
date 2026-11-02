@@ -115,6 +115,9 @@ type prError struct {
 	transient bool
 	gone      bool
 	retryAt   time.Time
+	// noLogin marks a member whose GitHub login is missing or rejected, not
+	// one GitHub did not answer for.
+	noLogin bool
 }
 
 func (e *prError) Error() string { return e.msg }
@@ -130,7 +133,9 @@ func (e *prError) RetryAt() time.Time { return e.retryAt }
 const connectFix = "run aether github connect on your computer, or use Onboarding → Agent → GitHub → Connect GitHub in the dashboard"
 
 func credentialsError(err error) *prError {
-	return &prError{msg: "no usable GitHub login in your Aether home (" + err.Error() + "); " + connectFix, transient: true}
+	var api *github.APIError
+	unanswered := errors.Is(err, github.ErrUnreachable) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &api) && api.Status >= 500
+	return &prError{msg: "no usable GitHub login in your Aether home (" + err.Error() + "); " + connectFix, transient: true, noLogin: !unanswered}
 }
 
 func (p *PRs) member(id domain.MemberID) *prMember {
@@ -194,10 +199,11 @@ func (p *PRs) limited(m *prMember, err *github.RateLimitError) *prError {
 
 // snapshot reads repo#number with member's credentials, conditionally
 // against the last read, which it reuses outright when it is younger than
-// prReuse; when ci and that read skipped the required checks, it reads only
-// those. create is a read for watch.create, which a 403 or 404 refuses at
-// once. moved reports a fresh read that differs from the last one.
-func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci, create bool) (snap github.Snapshot, moved bool, err error) {
+// prReuse unless fresh; when ci and that read skipped the required checks,
+// it reads only those. create is a read for watch.create, which a 403 or
+// 404 refuses at once. moved reports a fresh read that differs from the
+// last one.
+func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string, number int, ci, create, fresh bool) (snap github.Snapshot, moved bool, err error) {
 	m := p.member(member)
 	if err = p.lock(ctx, m); err != nil {
 		return github.Snapshot{}, false, err
@@ -214,7 +220,7 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 	default:
 		var s github.Snapshot
 		if json.Unmarshal(saved.Snapshot, &s) == nil {
-			if recent = p.now().Sub(saved.CheckedAt) < prReuse; recent && (!ci || s.RequiredRead) {
+			if recent = !fresh && p.now().Sub(saved.CheckedAt) < prReuse; recent && (!ci || s.RequiredRead) {
 				return s, false, nil
 			}
 			prev = &s
@@ -338,7 +344,7 @@ func (p *PRs) Validate(ctx context.Context, member domain.MemberID, target proto
 		_, err := p.token(ctx, member, m, false)
 		return "", err
 	}
-	snap, _, err := p.snapshot(ctx, member, strings.ToLower(target.Repo), target.Number, false, true)
+	snap, _, err := p.snapshot(ctx, member, strings.ToLower(target.Repo), target.Number, false, true, false)
 	if err != nil {
 		return "", err
 	}
@@ -373,7 +379,7 @@ func (p *PRs) Evaluate(ctx context.Context, check PRCheck) (PRResult, error) {
 	busy := false
 	ci := slices.Contains(check.Conditions, protocol.WatchCI)
 	for i, t := range targets {
-		snap, moved, err := p.snapshot(ctx, check.Member, t.repo, t.number, ci, false)
+		snap, moved, err := p.snapshot(ctx, check.Member, t.repo, t.number, ci, false, false)
 		if err == nil && t.run != "" {
 			err = p.refreshRun(ctx, t, snap)
 		}

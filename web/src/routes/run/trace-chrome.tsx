@@ -2,6 +2,7 @@ import type * as React from 'react'
 import { Ellipsis } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
+import { Shimmer } from '@/components/ui/shimmer'
 import { Tooltip } from '@/components/ui/tooltip'
 import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -52,7 +53,7 @@ export function TraceStatsStrip({
 }) {
   const floor = partial ? '≥' : ''
   const cells: [string, React.ReactNode][] = [
-    ['Duration', <span className={cn(live && 'live-shimmer')}>{spanDuration(root, now)}</span>],
+    ['Duration', live ? <Shimmer text={spanDuration(root, now)} className="block w-fit max-w-full truncate" /> : spanDuration(root, now)],
     ['Turns', `${floor}${stats.turns}`],
     ['Tool calls', `${floor}${stats.tools}`],
   ]

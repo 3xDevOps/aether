@@ -71,7 +71,7 @@ line. The base coordination method set is:
 | `coord.inbox` | optional `ack_token`, optional `wait_seconds` | oldest-first `messages` and the `ack_token` for that batch |
 | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
-| `coord.report` | `outcome`, `summary`, optional `waiting_for` and `evidence_refs`, `idempotency_key` | outcome, summary and next action; for success, failure and blocked also the durable `report_id`, evidence references, and automatic `evidence_ref` |
+| `coord.report` | `outcome`, `summary`, optional `waiting_for`, `until` and `evidence_refs`, `idempotency_key` | outcome, summary and next action; for success, failure and blocked also the durable `report_id`, evidence references, and automatic `evidence_ref` |
 
 The six advertised coordination methods are unchanged. Native hooks use
 `coord.hook.status`, an internal endpoint with a separate request budget, not
@@ -1297,7 +1297,8 @@ allowed set, or the workspace budget.
 `--outcome` is exactly one of `success`, `failure`, `blocked`,
 `needs-input`, `waiting`, or `answered`; it may instead be the first argument, as in
 `aether-internal report waiting`. `--for` is `agents`, `ci` or `process`
-and is valid only with `waiting`. A non-empty summary is required. `--evidence-ref` may be
+and is valid only with `waiting`, as is `--until` (see the waiting report
+below). A non-empty summary is required. `--evidence-ref` may be
 repeated, and `--summary-file` accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 
@@ -1311,7 +1312,7 @@ reports and their evidence remain in history.
 
 **Every report takes a fresh idempotency key.** A key belongs to the first
 report that used it, whatever the outcome. Reusing it retries that report:
-the same outcome, `--for` and summary return the same receipt, and anything
+the same outcome, `--for`, `--until` and summary return the same receipt, and anything
 else fails with `CodeConflict` (`-32003`) (`idempotency_key "<key>" was used
 with different report inputs; use a new key for a new report`). A `waiting`,
 `answered` or `needs-input` report that cannot take effect is refused with an
@@ -1398,9 +1399,24 @@ What a report does depends on the session:
   native pi, omp or OpenCode integrations); elsewhere nothing wakes the
   agent when a reply arrives, so it waits inside its turn with
   `inbox --wait 30`, and a Background session's turn end finishes the session.
-  Nothing re-prompts the agent when CI or a process finishes. A parent with
-  unfinished subsessions shows `waiting-agents` at turn end without reporting
-  it, as [Subsessions](#subsessions) describes.
+  Nothing re-prompts the agent when a process finishes. For a pull request,
+  its checks or another session, add `--until <condition>` (repeatable, at
+  most 4; `until` in `aether_report`): `pr:<owner>/<repo>#<n>:merged`,
+  `pr:<owner>/<repo>#<n>:checks[@<head-sha>]` or `run:<run-id>:finished`.
+  The server parses each strictly, never the summary, and refuses a bad one
+  with `CodeInvalidParams` naming it and the grammar. It also refuses
+  `--until` with another outcome, a session that is not in this workspace or
+  is the reporting session itself, a server that does not read pull
+  requests, and a session past 30 such reports an hour. A condition already
+  resolved comes back in the result's `resolved` list, and `next_action`
+  says to act on it now. Otherwise, when the first condition resolves, fails
+  or expires (7 days), the server writes what it saw and what to do next to
+  the session's inbox once, which wakes it. A new waiting report with
+  `--until` replaces the conditions; waiting without it keeps them; any
+  other report, a person's prompt or a relaunch cancels them
+  ([session waits](watches.md#session-waits)). A parent with unfinished
+  subsessions shows `waiting-agents` at turn end without reporting it, as
+  [Subsessions](#subsessions) describes.
 - **Answered report.** `aether-internal report answered --summary '<what you
   replied>'` ends a turn that replied or discussed with nothing pending. At
   turn end the session shows the summary as its reason with state `answered`

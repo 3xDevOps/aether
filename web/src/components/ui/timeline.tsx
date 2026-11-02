@@ -14,6 +14,7 @@ import {
   Trash2,
   type LucideIcon,
 } from '@/components/icons'
+import { Shimmer } from '@/components/ui/shimmer'
 import { type Tone, StatusDot } from '@/components/ui/status-dot'
 import { prefersReducedMotion, useElementSize } from '@/lib/hooks'
 import { cn, focusRingInset } from '@/lib/utils'
@@ -252,12 +253,12 @@ export function AgentEntry({ dot, label, state, onOpen }: { dot: React.ReactNode
   )
 }
 
-export function LiveActivityRow({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+export function LiveActivityRow({ tone, children }: { tone: Tone; children: string }) {
   const working = tone === 'working'
   return (
     <div data-slot="live-row" data-tone={tone} className="flex h-7 min-w-0 items-center text-ui-sm">
       <span className="flex w-6 shrink-0 justify-center"><StatusDot tone={tone} pulse={working} /></span>
-      <span className={cn('min-w-0 truncate', working ? 'live-shimmer' : tone === 'needs-you' ? 'text-text' : 'text-muted')}>{children}</span>
+      {working ? <Shimmer text={children} className="min-w-0 truncate" /> : <span className={cn('min-w-0 truncate', tone === 'needs-you' ? 'text-text' : 'text-muted')}>{children}</span>}
     </div>
   )
 }

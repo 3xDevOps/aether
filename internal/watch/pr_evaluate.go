@@ -42,17 +42,8 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 	if snap.HeadSince.After(start) {
 		start = snap.HeadSince
 	}
-	active := start
-	for _, suite := range snap.Suites {
-		if suite.UpdatedAt.After(active) {
-			active = suite.UpdatedAt
-		}
-	}
 	age := now.Sub(start)
-	checks := snap.Checks()
-	if now.Sub(active) >= suitesWaitMax {
-		checks = checks.WithoutSuites(false)
-	}
+	checks := countedChecks(snap, start, now)
 	counts := func(c github.Checks) protocol.WatchCheckCounts {
 		return protocol.WatchCheckCounts{Passed: c.Passed, Failed: c.Failed, Pending: c.Pending, Cancelled: c.Cancelled}
 	}
@@ -144,6 +135,22 @@ func evaluatePR(snap github.Snapshot, conditions []string, since, now time.Time)
 }
 
 // after compares at GitHub's one-second resolution.
+// countedChecks is snap's checks, with no suite pending once none changed
+// for suitesWaitMax since start.
+func countedChecks(snap github.Snapshot, start, now time.Time) github.Checks {
+	active := start
+	for _, suite := range snap.Suites {
+		if suite.UpdatedAt.After(active) {
+			active = suite.UpdatedAt
+		}
+	}
+	checks := snap.Checks()
+	if now.Sub(active) >= suitesWaitMax {
+		checks = checks.WithoutSuites(false)
+	}
+	return checks
+}
+
 func after(t, since time.Time) bool { return !t.Before(since.Truncate(time.Second)) }
 
 func names(list []string) string {

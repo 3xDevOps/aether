@@ -26,11 +26,19 @@ var (
 	// ErrMoved matches an APIError for HTTP 301: the repository was renamed
 	// or transferred, and retrying the old owner/name never succeeds.
 	ErrMoved = errors.New("github: repository moved")
+	// ErrUnreachable matches a request that got no answer from GitHub: the
+	// network failed or it timed out.
+	ErrUnreachable = errors.New("github: unreachable")
 	// ErrSSO matches an APIError for an HTTP 403 GitHub sent with
 	// X-GitHub-SSO: the organization enforces SAML single sign-on and the
 	// token is not authorized for it.
 	ErrSSO = errors.New("github: token not authorized for SAML SSO")
 )
+
+type unreachableError string
+
+func (e unreachableError) Error() string        { return string(e) }
+func (e unreachableError) Is(target error) bool { return target == ErrUnreachable }
 
 // APIError is a non-200 GitHub response. Message is GitHub's own error text,
 // bounded and with the request token redacted.

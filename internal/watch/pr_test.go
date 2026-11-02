@@ -947,7 +947,7 @@ func TestPRCIReadAfterAnotherWatchsReadsRequirements(t *testing.T) {
 	}
 	read := func(ci bool) github.Snapshot {
 		t.Helper()
-		snap, _, err := prs.snapshot(p.ctx, p.ada.ID, "acme/app", 7, ci, false)
+		snap, _, err := prs.snapshot(p.ctx, p.ada.ID, "acme/app", 7, ci, false, false)
 		if err != nil {
 			t.Fatal(err)
 		}

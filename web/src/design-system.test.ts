@@ -204,3 +204,30 @@ describe('primitive colour utilities', () => {
     expect(missing, 'Tailwind generates no class for these; add the token to index.css').toEqual([])
   })
 })
+
+// An animation that never stops runs on every frame of every working session.
+// Chromium runs transform and opacity on the compositor; anything else, such as
+// a tweened custom property, a background position, or on an <svg> even the
+// scale, translate and rotate properties, restyles and repaints on the main
+// thread for as long as the agent works.
+describe('endless animations', () => {
+  const sheets = ['index.css', 'motion.css'].map((file) => readFileSync(path.join(src, file), 'utf8')).join('\n')
+  const keyframes = new Map(
+    [...sheets.matchAll(/@keyframes ([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*[^{}]*)\}/g)].map((m) => [m[1], m[2]]),
+  )
+  const endless = [...new Set([...sheets.matchAll(/(?:animation|--animate-[\w-]+):\s*([\w-]+)[^;]*\binfinite\b/g)].map((m) => m[1]))]
+    .filter((name) => keyframes.has(name))
+
+  it('clips the shimmer band, whose translated box would otherwise widen a scroller', () => {
+    expect(sheets.match(/\.live-shimmer \{[^}]*\}/)?.[0]).toContain('overflow: clip')
+  })
+
+  it('finds the live shimmer among them', () => {
+    expect(endless).toEqual(expect.arrayContaining(['live-shimmer-band', 'live-shimmer-copy', 'trace-live', 'breathe']))
+  })
+
+  it.each(endless)('%s animates only what the compositor runs', (name) => {
+    const properties = new Set([...keyframes.get(name)!.matchAll(/([\w-]+)\s*:/g)].map((m) => m[1]))
+    expect([...properties].filter((p) => p !== 'opacity' && p !== 'transform')).toEqual([])
+  })
+})
