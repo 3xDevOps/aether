@@ -1,12 +1,17 @@
 package scheduler
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func shortProvisionalGrace(t *testing.T) {
@@ -76,4 +81,61 @@ func TestEnhancedChildRunForwardsItsLastMessageToItsParent(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestEnhancedChildRunForwardsATurnItsKeeperEndedDuringARestart(t *testing.T) {
+	shortProvisionalGrace(t)
+	e, _ := newACPEnv(t)
+	c, binDir := withCoordination(t, e)
+	parent := e.launchACP(t, "parent")
+	child := launchChildRun(t, e, parent, "fake", domain.LaunchACP, "k")
+	waitItems(t, e.sched, child.ID, "the child's first turn", turnEnded("end_turn", 1))
+	release := filepath.Join(t.TempDir(), "release")
+	prompt := acpmock.PromptRunPrefix + "while [ ! -e " + release + " ]; do sleep 0.02; done; echo replayed"
+	if _, err := e.sched.Inject(t.Context(), child.ID, e.member.ID, domain.AgentPrompt{Text: prompt}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the child's second turn", func() bool {
+		sess := e.sched.acp.session(child.ID)
+		return sess != nil && sess.State().TurnInFlight
+	})
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The turn ends while no server is attached; the keeper replays its end.
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	// The adopted session then records its id after it opens, slowly, so the
+	// keeper's replay ends the turn before the session is published.
+	if err := e.db.SetRunAgentSession(t.Context(), child.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	cfg := e.cfg
+	cfg.Store = slowAgentSessionStore{e.cfg.Store}
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	next, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = next.Close() })
+	next.UseCoordination(c, binDir)
+	startScheduler(t, next)
+	waitFor(t, "the replayed turn's message at the parent", func() bool {
+		for _, call := range c.provisionalReports() {
+			if call.run == child.ID && strings.Contains(call.message, "replayed") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+type slowAgentSessionStore struct{ store.Store }
+
+func (s slowAgentSessionStore) SetRunAgentSession(ctx context.Context, id domain.RunID, session string) error {
+	time.Sleep(time.Second)
+	return s.Store.SetRunAgentSession(ctx, id, session)
 }

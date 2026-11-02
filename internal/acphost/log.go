@@ -511,6 +511,36 @@ func RunningTaskCalls(log *Log) ([]Item, error) {
 	}
 }
 
+// PendingRequests are the requests the log shows pending since its last
+// reset, oldest first.
+func PendingRequests(log *Log) []Request {
+	var pending []Request
+	seen := map[string]bool{}
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil || len(items) == 0 {
+			break
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			it := items[i]
+			if it.Kind == KindReset {
+				slices.Reverse(pending)
+				return pending
+			}
+			if it.Kind != KindRequest || seen[it.Request.ID] {
+				continue
+			}
+			seen[it.Request.ID] = true
+			if it.Request.Status == RequestPending {
+				pending = append(pending, *it.Request)
+			}
+		}
+		before = items[0].Seq
+	}
+	slices.Reverse(pending)
+	return pending
+}
+
 // Answered reports whether the agent answered a prompt since the log's last
 // reset other than by failing it, as it does when it refuses one.
 func Answered(log *Log) bool {

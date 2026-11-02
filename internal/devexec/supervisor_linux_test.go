@@ -68,6 +68,10 @@ func TestSupervisorSubprocess(t *testing.T) {
 		_, _ = fmt.Fprintf(os.Stdout, "received:%s", line)
 		_, _ = fmt.Fprintln(os.Stderr, "diagnostic")
 		os.Exit(19)
+	case "env":
+		_, _ = fmt.Fprintf(os.Stdout, "group=%s\n", os.Getenv(ControlGroupEnv))
+		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+		os.Exit(0)
 	case "input":
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
@@ -563,4 +567,49 @@ func TestControlCancellationUnblocksConnectedRequest(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("connected control ignored cancellation until its startup deadline")
 	}
+}
+
+func TestSupervisorSharesControlWithItsGroup(t *testing.T) {
+	key := t.TempDir()
+	claim := "test-attempt"
+	group := os.Getgid()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSupervisorSubprocess$", "--", "run-pipe", key, claim,
+		os.Args[0], "-test.run=^TestSupervisorSubprocess$", "--", "env")
+	cmd.Env = append(os.Environ(), "AETHER_DEVEXEC_SUBPROCESS=1", ControlGroupEnv+"="+strconv.Itoa(group))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait(); _ = os.RemoveAll(stateDir(key)) })
+	if _, err = Control(t.Context(), key, Request{ExecID: "test-exec", ClaimToken: claim, Action: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	if line, _ := bufio.NewReader(stdout).ReadString('\n'); line != "group=\n" {
+		t.Fatalf("the owned command saw %q; want no %s", line, ControlGroupEnv)
+	}
+	// The group may enter the directory, connect and read, but not list,
+	// replace or rewrite anything.
+	for name, want := range map[string]os.FileMode{
+		stateDir(key): os.ModeDir | 0o710,
+		filepath.Join(stateDir(key), "control.sock"): os.ModeSocket | 0o660,
+		filepath.Join(stateDir(key), "state.json"):   0o640,
+	} {
+		info, err := os.Lstat(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st := info.Sys().(*syscall.Stat_t)
+		if info.Mode() != want || int(st.Gid) != group || int(st.Uid) != os.Getuid() {
+			t.Errorf("%s: mode %v, owner %d:%d; want %v, %d:%d", name, info.Mode(), st.Uid, st.Gid, want, os.Getuid(), group)
+		}
+	}
+	_ = stdin.Close()
 }

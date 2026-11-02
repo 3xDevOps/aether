@@ -1044,13 +1044,17 @@ func (d *Docker) Inspect(ctx context.Context, id ID) (ContainerInfo, error) {
 	for i, m := range info.Container.Mounts {
 		targets[i] = m.Destination
 	}
-	return ContainerInfo{
+	out := ContainerInfo{
 		Image:        info.Container.Config.Image,
 		User:         info.Container.Config.User,
 		Env:          append([]string(nil), info.Container.Config.Env...),
 		MountTargets: targets,
 		Fingerprint:  info.Container.Config.Labels[labelFingerprint],
-	}, nil
+	}
+	if st := info.Container.State; st != nil && (st.Status == container.StateExited || st.Status == container.StateDead) {
+		out.Exited, out.ExitCode = true, st.ExitCode
+	}
+	return out, nil
 }
 
 // InitPID returns the host PID of the container's init process, or 0 when the

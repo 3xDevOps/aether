@@ -251,7 +251,7 @@ func (m modeSwitch) restoreEnhanced(ctx context.Context) error {
 // leaves the Enhanced session failed, as an adapter crash would.
 func (m modeSwitch) reopenEnhanced(ctx context.Context) error {
 	m.s.acp.connect(ctx, m.entry, openSwitch)
-	if _, err := m.s.acp.live(m.entry.runID); err != nil {
+	if _, err := m.s.acp.live(ctx, m.entry.runID); err != nil {
 		return fmt.Errorf("restore the Enhanced agent's conversation: %w", err)
 	}
 	return nil

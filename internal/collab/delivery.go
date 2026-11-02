@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
@@ -147,12 +148,14 @@ func (s *Service) inject(ctx context.Context, msg *store.RoomMessage, actor *dom
 	if s.cfg.Inject == nil {
 		return "", ErrNoInjector
 	}
-	return s.cfg.Inject(ctx, run.ID, actor.ID, prompt, steer, func(err error) {
-		s.agentDelivered(context.WithoutCancel(ctx), msg.ID, err)
+	return s.cfg.Inject(ctx, run.ID, actor.ID, prompt, steer, func(deliveryErr error) {
+		if err := s.agentDelivered(context.WithoutCancel(ctx), msg.ID, deliveryErr); err != nil {
+			slog.Warn("collab: record the agent's delivery of a queued message", "message", msg.ID, "error", err)
+		}
 	})
 }
 
-func (s *Service) agentDelivered(ctx context.Context, id string, deliveryErr error) {
+func (s *Service) agentDelivered(ctx context.Context, id string, deliveryErr error) error {
 	ctx, cancel := context.WithTimeout(ctx, agentDeliveryTimeout)
 	defer cancel()
 	var failure *store.RoomMessageFailure
@@ -170,8 +173,9 @@ func (s *Service) agentDelivered(ctx context.Context, id string, deliveryErr err
 		}
 	}
 	if err != nil {
-		slog.Warn("collab: record the agent's delivery of a queued message", "message", id, "error", err)
+		return fmt.Errorf("collab: record the agent's delivery of message %s: %w", id, err)
 	}
+	return nil
 }
 
 func (s *Service) dropAgentQueued(ctx context.Context) error {
@@ -189,6 +193,81 @@ func (s *Service) dropAgentQueued(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// settleAgentQueued settles the steers an earlier server process left queued
+// behind an agent turn: delivered when the agent's keeper reported they
+// reached the agent, sent again when the session was adopted and they did
+// not, and not sent when the session was restored. It leaves those of a
+// paused run queued. settled holds the steers earlier calls settled, which a
+// redelivery can leave queued; unsaved holds those whose settlement failed to
+// save, with the delivery error to save again, so none is sent twice. It
+// reports whether a later call has any left to settle.
+func (s *Service) settleAgentQueued(ctx context.Context, settled map[string]bool, unsaved map[string]error) (bool, error) {
+	var errs []error
+	for id, deliveryErr := range unsaved {
+		if err := s.agentDelivered(ctx, id, deliveryErr); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		delete(unsaved, id)
+	}
+	queued, err := s.cfg.Store.ListAgentQueuedRoomMessages(ctx, s.bootAt)
+	if err != nil {
+		return true, errors.Join(append(errs, fmt.Errorf("collab: list messages queued before the restart: %w", err))...)
+	}
+	undecided := false
+	for _, msg := range queued {
+		if settled[msg.ID] {
+			continue
+		}
+		delivered, state := s.cfg.Reattached(msg.RunID)
+		if state == Undecided {
+			undecided = true
+			continue
+		}
+		settled[msg.ID] = true
+		var deliveryErr error
+		switch {
+		case state == Restored:
+			deliveryErr = acphost.ErrClosed
+		case slices.Contains(delivered, msg.ID):
+		default:
+			var settle bool
+			if settle, deliveryErr = s.redeliver(ctx, msg); !settle {
+				continue
+			}
+		}
+		if err := s.agentDelivered(ctx, msg.ID, deliveryErr); err != nil {
+			unsaved[msg.ID] = deliveryErr
+			errs = append(errs, err)
+		}
+	}
+	return undecided || len(unsaved) > 0, errors.Join(errs...)
+}
+
+// redeliver sends a steer that never reached the agent to its adopted
+// session again, as the next prompt. It reports whether the steer is
+// settled now, and with what delivery error; a steer queued behind the
+// agent's turn settles when the agent takes it.
+func (s *Service) redeliver(ctx context.Context, msg *store.RoomMessage) (bool, error) {
+	run, err := s.cfg.Runs.GetRun(ctx, msg.RunID)
+	var actor *domain.Member
+	if err == nil {
+		actor, err = s.cfg.Runs.GetMember(ctx, msg.ActorID)
+	}
+	var receipt Receipt
+	var outcome string
+	if err == nil {
+		receipt, outcome, err = s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, nil), false)
+	}
+	switch {
+	case err != nil:
+		return true, fmt.Errorf("collab: send again after the restart: %w", err)
+	case receipt != ReceiptSent:
+		return true, acphost.ErrClosed
+	}
+	return outcome != acphost.OutcomeQueued, nil
 }
 
 // DeliverDue delivers every bounded page of overdue steer requests. It is

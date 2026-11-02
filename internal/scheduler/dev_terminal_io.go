@@ -307,6 +307,9 @@ func (s *Scheduler) developmentTerminalStop(ctx context.Context, run domain.RunI
 	}
 	stopCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	if cleared, err := s.clearGoneTerminal(stopCtx, run, params.DevTerminalTarget, authorize, &result); cleared || err != nil {
+		return result, err
+	}
 	surface := control.Surface{Kind: control.SurfaceTerminal, ID: params.TerminalID, Incarnation: params.Incarnation}
 	err := s.cfg.Control.AdmitSurface(string(run), surface, principal, params.ControlSessionID, params.ControlGeneration, func() error {
 		lock := s.lockForShell(run)
@@ -338,6 +341,41 @@ func (s *Scheduler) developmentTerminalStop(ctx context.Context, run domain.RunI
 		return result, nil
 	}
 	return result, err
+}
+
+// clearGoneTerminal removes the target terminal when the runtime proves its
+// exec gone. Nothing is left to stop or control, so it needs neither a
+// control lease nor a live run.
+func (s *Scheduler) clearGoneTerminal(ctx context.Context, run domain.RunID, target protocol.DevTerminalTarget, authorize func() error, result *protocol.DevTerminalStopResult) (bool, error) {
+	lock := s.lockForShell(run)
+	lock.Lock()
+	defer lock.Unlock()
+	set, err := s.loadRunTerminalsLocked(ctx, run)
+	if err != nil {
+		return false, err
+	}
+	terminal, err := terminalTarget(set, target)
+	if err != nil {
+		return false, err
+	}
+	if terminal.Exec == nil && !terminalEnded(terminal) {
+		s.recoverTerminalExecLocked(ctx, terminal)
+	}
+	if !terminal.Gone {
+		return false, nil
+	}
+	if err := authorize(); err != nil {
+		return true, err
+	}
+	_ = s.cfg.PTY.StopSession(ctx, ptyhost.RunShellSession(run, terminal.ID))
+	_ = releaseTerminal(terminal)
+	delete(set.Terminals, terminal.ID)
+	if err := s.persistRunTerminalsLocked(run, set); err != nil {
+		set.Terminals[terminal.ID] = terminal
+		return true, err
+	}
+	*result = protocol.DevTerminalStopResult{Terminal: terminalDescription(terminal), Stopped: true}
+	return true, nil
 }
 
 func encodeTerminalInput(params protocol.DevTerminalInputParams, screen ptyhost.ScreenObservation) ([]byte, error) {

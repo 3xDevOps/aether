@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -615,5 +616,103 @@ func TestSessionGeometryPublishesOnlyAcceptedResize(t *testing.T) {
 	}
 	if _, _, _, err := h.SessionGeometry(key); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("stopped geometry = %v", err)
+	}
+}
+
+func TestResumedDevelopmentContinuesPositionAndAnswersOnlyNewQueries(t *testing.T) {
+	h, err := New(Config{TranscriptDir: t.TempDir(), DefaultCols: 12, DefaultRows: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	key := RunShellSession("resumed-run", "t1")
+	att := newFakeAtt()
+	t.Cleanup(func() { _ = att.inR.Close(); _ = att.inW.Close(); _ = att.outW.Close() })
+	input := att.captureStdin()
+	// The terminal's bytes 100 to 110 replay a query an earlier server
+	// already answered; the live query after them still needs an answer.
+	replay := "ab\x1b[6ncdefg"
+	at := TerminalPosition{Epoch: "epoch-1", Sequence: 100}
+	end := at.Sequence + TerminalSequence(len(replay))
+	go func() {
+		for _, b := range []byte(replay) {
+			_, _ = att.outW.Write([]byte{b})
+		}
+	}()
+	if err = h.ResumeDevelopmentSession(context.Background(), key, att, 12, 3, at, end, end); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := h.ReadSessionOutput(key, OutputRequest{After: &TerminalPosition{Epoch: "epoch-1", Sequence: end}})
+	if err != nil || resumed.MissingCursor {
+		t.Fatalf("output after the cursor at the replay's end = %+v, %v; want it readable once resumed", resumed, err)
+	}
+	att.writeOutput(t, "\x1b[c")
+	want := "\x1b[?1;2c"
+	deadline := time.After(time.Second)
+	for input.String() != want {
+		select {
+		case <-deadline:
+			t.Fatalf("replies = %q, want only %q", input.String(), want)
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	generation := h.SessionGeneration(key)
+	out, err := h.ReadSessionOutput(key, OutputRequest{Generation: generation, After: &TerminalPosition{Epoch: "epoch-1", Sequence: 102}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.MissingCursor || string(out.Data) != replay[2:]+"\x1b[c" || out.Next.Sequence != 100+TerminalSequence(len(replay))+3 {
+		t.Fatalf("output after the pre-restart cursor = %+v", out)
+	}
+	if old, err := h.ReadSessionOutput(key, OutputRequest{Generation: generation, After: &TerminalPosition{Epoch: "epoch-1", Sequence: 50}}); err != nil || !old.Truncated || old.Start != at {
+		t.Fatalf("output before the replayed window = %+v, %v; want it truncated to the window", old, err)
+	}
+}
+
+// answeringAtt records the answered positions a session reports.
+type answeringAtt struct {
+	*fakeAtt
+	answered atomic.Uint64
+}
+
+func (a *answeringAtt) Answered(seq uint64) { a.answered.Store(max(a.answered.Load(), seq)) }
+
+func TestDevelopmentSessionReportsOnlyAnsweredOutput(t *testing.T) {
+	h, err := New(Config{TranscriptDir: t.TempDir(), DefaultCols: 12, DefaultRows: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	key := RunShellSession("answered-run", "t1")
+	att := &answeringAtt{fakeAtt: newFakeAtt()}
+	t.Cleanup(func() { _ = att.inR.Close(); _ = att.inW.Close(); _ = att.outW.Close() })
+	if err = h.ResumeDevelopmentSession(context.Background(), key, att, 12, 3, TerminalPosition{Epoch: "epoch-1"}, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	waitAnswered := func(want uint64) {
+		t.Helper()
+		deadline := time.After(time.Second)
+		for att.answered.Load() != want {
+			select {
+			case <-deadline:
+				t.Fatalf("answered %d, want %d", att.answered.Load(), want)
+			default:
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}
+	att.writeOutput(t, "ab")
+	waitAnswered(2)
+	// Nothing reads the terminal's input yet, so the cursor reply waits.
+	att.writeOutput(t, "\x1b[6ncd")
+	time.Sleep(50 * time.Millisecond)
+	if got := att.answered.Load(); got != 2 {
+		t.Fatalf("answered %d before the reply was written, want 2", got)
+	}
+	input := att.captureStdin()
+	waitAnswered(8)
+	if input.String() != "\x1b[1;3R" {
+		t.Fatalf("reply %q", input.String())
 	}
 }

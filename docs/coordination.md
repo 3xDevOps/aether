@@ -258,6 +258,44 @@ not mean that a peer has read the message or understood it. A timed-out
 request may have succeeded; retry it with the same idempotency key and use the
 returned receipt.
 
+### Calls across a server restart
+
+The client dials the session's socket once per attempt. During a server stop,
+update re-exec or rollback the socket is refused or missing until the next
+server rebinds it, which happens at boot before the scheduler reattaches
+agents. The client retries with backoff (100 ms doubling to 2 s) for up to
+60 seconds, which covers a normal restart and a boot that applies store
+migrations; `serverupdate` gives a new binary five minutes before it rolls
+back, so a longer outage still returns `-32004`.
+
+What is repeated depends on whether the request can have reached the server:
+
+- Never delivered (dial refused, or socket path missing for up to 2 s from the first miss, a failed write, or `session is
+  closing` from a server that is shutting down): every method is retried.
+- Sent, then the connection was lost: retried only for reads (`coord.status`,
+  `coord.inbox`, `memory.search`, `dev.terminal.output`, and the
+  like) and any request carrying an
+  `idempotency_key`. The key is chosen once per call, so every attempt carries
+  the same one, and the server stores it in its database, so it dedupes across
+  a restart. A cut `coord.inbox` response loses and duplicates nothing: the
+  unacknowledged batch comes back under the same token. A retried
+  `inbox --wait N` waits only for what is left of the N seconds, so restarts
+  do not lengthen the call beyond N plus the time the server was down.
+- Sent, no key, not a read (`memory.add`, `dev.terminal.start`,
+  `dev.terminal.input`, `dev.terminal.screenshot`, `dev.browser.screenshot`,
+  `dev.browser.action`, `child.cancel` and the like): not repeated. Screenshots
+  write a new capture artifact per call, so they count as writes. The error
+  is `-32004` and reads `the request was sent before the connection failed, so
+  it may already have applied; check its effect before repeating it`. Inspect
+  with the matching read (`dev.terminal.output`, `child.list`) before sending
+  again.
+
+Once any attempt may have delivered the request, that stays true for the
+rest of the call: every later failure, including a refused dial, reports it
+as sent. When the window runs out the `-32004` message says `the request was not
+delivered and nothing applied` or `the request was sent and may already have
+applied`.
+
 Aether does not type automated coordination messages into terminals. There
 are five ways to notice mail:
 
@@ -821,7 +859,11 @@ when finished. Re-observe stale ownership instead of blindly replaying input
 or stealing a human's control. Input is fenced by incarnation and controller,
 not redraw revisions. A viewer attach does not impose geometry; resize is an
 explicit controlled action. Releasing control or detaching does not stop the
-app; `terminal stop` stops the owned process group.
+app; `terminal stop` stops the owned process group. A server restart does not
+either: the terminal keeps its process, and output cursors, input and `wait`
+continue once the server is back
+([terminal.md](terminal.md#reconnects-and-server-updates)). `terminal stop` on a
+terminal whose process is provably gone removes it without a control lease.
 
 Browser startup is lazy and works on a standard **headless Ubuntu server**.
 There is no X11, Wayland, Xvfb, desktop session, host browser or disabled

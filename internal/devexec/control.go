@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -23,6 +24,17 @@ const Command = "dev-exec"
 const Attached = "run-attached"
 
 const StartupTimeout = 15 * time.Second
+
+// ControlGroupEnv names the numeric gid whose members may read a helper's
+// state and connect to its control socket, which stay the helper user's. A
+// server that runs control execs as the container's user, as builds before
+// ExecIdentity.User did, can then still stop an execution that runs as
+// another user.
+const ControlGroupEnv = "AETHER_DEVEXEC_CONTROL_GROUP"
+
+// ErrNoSupervisor is an execution without a running supervisor or a final
+// record: its command no longer runs and its exit status is lost.
+var ErrNoSupervisor = errors.New("execution control unavailable")
 
 // ReapTimeout bounds cleanup after SIGKILL. An unkillable descendant makes the
 // execution unavailable; it must never be reported as successfully stopped.
@@ -125,7 +137,7 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 			return state, nil
 		}
 		if request.Action != "start" && request.Action != "stop" {
-			return State{}, fmt.Errorf("execution control unavailable: %w", err)
+			return State{}, fmt.Errorf("%w: %w", ErrNoSupervisor, err)
 		}
 		select {
 		case <-ctx.Done():
@@ -135,7 +147,8 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 	}
 }
 
-func saveState(state State) error {
+// saveState writes state readable by the members of group, unless it is -1.
+func saveState(state State, group int) error {
 	data, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -144,5 +157,33 @@ func saveState(state State) error {
 	if err := os.WriteFile(name+".new", data, 0o600); err != nil {
 		return err
 	}
+	if err := shareWith(name+".new", group, 0o640); err != nil {
+		return err
+	}
 	return os.Rename(name+".new", name)
+}
+
+// controlGroup is the gid ControlGroupEnv names, -1 for none.
+func controlGroup() (int, error) {
+	value := os.Getenv(ControlGroupEnv)
+	if value == "" {
+		return -1, nil
+	}
+	gid, err := strconv.Atoi(value)
+	if err != nil || gid < 0 {
+		return -1, fmt.Errorf("%s %q is not a numeric gid", ControlGroupEnv, value)
+	}
+	return gid, nil
+}
+
+// shareWith gives group the access mode grants it to name, unless group is
+// -1.
+func shareWith(name string, group int, mode os.FileMode) error {
+	if group < 0 {
+		return nil
+	}
+	if err := os.Chown(name, -1, group); err != nil {
+		return err
+	}
+	return os.Chmod(name, mode)
 }

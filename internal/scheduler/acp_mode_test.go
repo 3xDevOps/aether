@@ -51,6 +51,7 @@ func TestRestoredEnhancedRunKeepsItsRecordedMode(t *testing.T) {
 	if err = e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
+	rt.dropAdapters(t)
 
 	cfg := e.cfg
 	cfg.PTY = newFakePTY()

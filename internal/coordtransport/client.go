@@ -7,8 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"math"
 	"net"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,21 +116,19 @@ func Call(ctx context.Context, socket, method string, params, result any) error 
 
 // client speaks coordination wire v3 on the run's unix socket.
 //
-// It dials per tool call and closes the connection again. That is the whole
-// reconnection strategy: a server restart rebinds the socket to a new inode,
-// so a held connection would have to be re-dialled anyway; the server caps
-// how many connections one run may hold and drops silent ones after an idle
-// timeout, and a connection that lives for exactly one request is inside
-// both limits without any bookkeeping.
+// It dials per tool call and closes the connection again: a server restart
+// rebinds the socket to a new inode, so a held connection would have to be
+// re-dialled anyway, and a connection that lives for exactly one request
+// stays inside the server's per-run cap and idle timeout. Across a restart
+// the call itself is retried; see retry.go.
 type client struct{ socket string }
 
-// call sends one request and reads its response. Every local socket failure
-// - a missing socket, a refused connection, an EOF or broken pipe from a
-// server that restarted or refused the connection over its per-run cap -
-// becomes CodeUnavailable, which is what the agent needs to know: not
-// reachable now, keep working, try again. Errors the server itself returned
-// pass through with their own code and message, so the agent sees the wire
-// contract verbatim.
+// call sends one request, retrying across a server restart where that is
+// safe, and decodes its response. A failure that outlives the retry window
+// - a missing socket, a refused connection, an EOF or broken pipe -
+// becomes CodeUnavailable, whose message says whether the request may
+// already have applied. Errors the server itself returned pass through with
+// their own code and message, so the agent sees the wire contract verbatim.
 func (c *client) call(ctx context.Context, method string, params, result any) error {
 	req := protocol.Request{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: method}
 	if params != nil {
@@ -143,13 +145,102 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 	if strings.HasPrefix(method, "dev.") && len(line)+1 > 64<<10 {
 		return &coordError{Code: protocol.CodeInvalidParams, Message: method + ": request exceeds 64 KiB"}
 	}
+	line = append(line, '\n')
+	safe := repeatable(method, req.Params)
+	timeout := callTimeout(method, params)
+	wait := 0
+	if longPoll(method) && params != nil {
+		wait = pollWaitSeconds(params)
+	}
 
-	ctx, cancel := context.WithTimeout(ctx, callTimeout(method, params))
+	started, delay := time.Now(), retryInitialDelay
+	var missingSince time.Time
+	everSent := false
+	for attempts := 0; ; attempts++ {
+		if attempts > 0 && wait > 0 {
+			// A retried long poll waits only for what is left of the
+			// caller's wait, so restarts do not stretch the call.
+			remaining := max(0, wait-int(math.Ceil(time.Since(started).Seconds())))
+			if line, err = withWait(req, remaining); err != nil {
+				return internalError(method, err)
+			}
+			timeout = callMargin + time.Duration(remaining)*time.Second
+		}
+		sent, err := c.attempt(ctx, timeout, method, line, result)
+		if err == nil {
+			return nil
+		}
+		everSent = everSent || sent
+		if !retryable(err) {
+			var f *transportFailure
+			if errors.As(err, &f) {
+				if everSent {
+					return unavailableSent(method, f.cause)
+				}
+				return unavailable(method, f.cause)
+			}
+			return err
+		}
+		if everSent && !safe {
+			return ambiguous(method, err)
+		}
+		var window time.Duration
+		if errors.Is(err, fs.ErrNotExist) {
+			if missingSince.IsZero() {
+				missingSince = time.Now()
+			}
+			window = missingSocketWindow - time.Since(missingSince)
+		} else {
+			missingSince = time.Time{}
+			window = retryWindow - time.Since(started)
+		}
+		if window <= 0 || ctx.Err() != nil {
+			if everSent {
+				return unavailableSent(method, err)
+			}
+			return unavailableUnsent(method, err)
+		}
+		select {
+		case <-ctx.Done():
+			if everSent {
+				return unavailableSent(method, err)
+			}
+			return unavailableUnsent(method, err)
+		case <-time.After(min(delay, window)):
+		}
+		delay = min(delay*2, retryMaxDelay)
+	}
+}
+
+// withWait returns req's request line with its params' wait_seconds set to
+// seconds.
+func withWait(req protocol.Request, seconds int) ([]byte, error) {
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(req.Params, &fields); err != nil {
+		return nil, err
+	}
+	fields["wait_seconds"] = json.RawMessage(strconv.Itoa(seconds))
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	req.Params = raw
+	line, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	return append(line, '\n'), nil
+}
+
+// attempt makes one dial-write-read round trip. sent is false only when the
+// request provably never reached the server as a complete line.
+func (c *client) attempt(ctx context.Context, timeout time.Duration, method string, line []byte, result any) (sent bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.socket)
 	if err != nil {
-		return unavailable(method, err)
+		return false, &transportFailure{cause: err}
 	}
 	defer conn.Close() //nolint:errcheck // read side of a connection being discarded
 	// A cancelled context has to end the round trip, not just stop anyone
@@ -158,11 +249,13 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
 	if deadline, ok := ctx.Deadline(); ok {
 		if derr := conn.SetDeadline(deadline); derr != nil {
-			return unavailable(method, derr)
+			return false, unavailable(method, derr)
 		}
 	}
-	if _, werr := conn.Write(append(line, '\n')); werr != nil {
-		return unavailable(method, werr)
+	// A failed Write delivered less than the whole line, and the server
+	// acts only on a newline-terminated line.
+	if _, werr := conn.Write(line); werr != nil {
+		return false, &transportFailure{cause: werr}
 	}
 	var responseReader io.Reader = conn
 	if strings.HasPrefix(method, "dev.") {
@@ -172,21 +265,26 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 	}
 	raw, err := protocol.ReadLine(bufio.NewReader(responseReader))
 	if err != nil {
-		return unavailable(method, err)
+		return true, &transportFailure{cause: err, timedOut: ctx.Err() != nil || errors.Is(err, os.ErrDeadlineExceeded)}
 	}
 	var resp protocol.Response
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return internalError(method, fmt.Errorf("decode response: %w", err))
+		return true, internalError(method, fmt.Errorf("decode response: %w", err))
 	}
 	if resp.Error != nil {
-		return &coordError{Code: resp.Error.Code, Message: resp.Error.Message, Data: resp.Error.Data}
+		ce := &coordError{Code: resp.Error.Code, Message: resp.Error.Message, Data: resp.Error.Data}
+		if ce.Code == protocol.CodeUnavailable && strings.HasSuffix(ce.Message, protocol.CoordRunClosingSuffix) {
+			// The server refused before acting, while shutting down.
+			return false, &transportFailure{cause: ce}
+		}
+		return true, ce
 	}
 	if result != nil {
 		if err := json.Unmarshal(resp.Result, result); err != nil {
-			return internalError(method, fmt.Errorf("decode result: %w", err))
+			return true, internalError(method, fmt.Errorf("decode result: %w", err))
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // coordError is a coordination failure carrying the Aether error code that

@@ -103,6 +103,10 @@ var errHostClosed = errors.New("ptyhost: host closed")
 // loop to flush buffered output to a client that has stopped reading.
 const drainTimeout = 5 * time.Second
 
+// resumeReplayWait bounds how long ResumeDevelopmentSession waits for the
+// replayed output.
+const resumeReplayWait = 5 * time.Second
+
 // Host manages one persistent PTY session per key.
 type Host struct {
 	historyCursorKey [32]byte
@@ -263,7 +267,7 @@ func (h *Host) Close() error {
 // The session survives zero attachments; when the agent exits (stdout EOF)
 // it enters the ended state and stays queryable until StopSession.
 func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error {
-	return h.startSession(ctx, key, att, false, h.cfg.DefaultCols, h.cfg.DefaultRows)
+	return h.startSession(ctx, key, att, false, h.cfg.DefaultCols, h.cfg.DefaultRows, nil, 0)
 }
 
 // StartDevelopmentSession adopts a run shell launched at cols by rows and opts
@@ -278,10 +282,59 @@ func (h *Host) StartDevelopmentSession(ctx context.Context, key SessionKey, att 
 	if err := validateScreenDimensions(cols, rows); err != nil {
 		return err
 	}
-	return h.startSession(ctx, key, att, true, cols, rows)
+	return h.startSession(ctx, key, att, true, cols, rows, nil, 0)
 }
 
-func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Attachment, development bool, initialCols, initialRows uint) error {
+// ResumeDevelopmentSession starts a run shell's session on att, a terminal
+// whose output continues at position: the first byte att yields is the one
+// after it. Terminal queries in the output up to quiet are not answered
+// again, since att replays them. It returns once the session's output
+// reached through, the end of what att replays, so a cursor an earlier
+// server handed out is readable; or once the session ended, or after
+// resumeReplayWait.
+func (h *Host) ResumeDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment, cols, rows uint, position TerminalPosition, quiet, through TerminalSequence) error {
+	if !strings.HasPrefix(string(key), "run-shell:") {
+		return errors.New("ptyhost: development session must be a run shell")
+	}
+	if err := validateScreenDimensions(cols, rows); err != nil {
+		return err
+	}
+	if position.Epoch == "" {
+		return errors.New("ptyhost: resumed terminal epoch is required")
+	}
+	if err := h.startSession(ctx, key, att, true, cols, rows, &position, quiet); err != nil {
+		return err
+	}
+	s := h.lookup(key)
+	if s == nil {
+		return nil
+	}
+	timer := time.NewTimer(resumeReplayWait)
+	defer timer.Stop()
+	for {
+		s.mu.Lock()
+		reached := s.currentPositionLocked().Sequence
+		if s.stopped || s.ended || reached >= through {
+			s.mu.Unlock()
+			return nil
+		}
+		if s.changed == nil {
+			s.changed = make(chan struct{})
+		}
+		changed := s.changed
+		s.mu.Unlock()
+		select {
+		case <-changed:
+		case <-timer.C:
+			slog.Warn("ptyhost: resumed terminal is still replaying its output; earlier cursors may read as missing until it finishes", "session", key, "reached", reached, "through", through)
+			return nil
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Attachment, development bool, initialCols, initialRows uint, resume *TerminalPosition, quiet TerminalSequence) error {
 	// Reserve the key before touching the transcript file so a losing
 	// duplicate StartSession can never truncate the winner's transcript.
 	if err := h.reserve(key); err != nil {
@@ -311,6 +364,9 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 	var screen *terminalScreen
 	position := TerminalPosition{Epoch: epoch}
 	recoveredTranscript := false
+	if resume != nil {
+		position, resumeID = *resume, string(resume.Epoch)
+	}
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
 		if isRun {
 			recovered, _, recoveredPosition, _, checkpointErr := loadCurrentCheckpoint(path, false)
@@ -423,6 +479,11 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 		revision:         1,
 		geometryRevision: 1,
 		development:      development,
+		quiet:            quiet,
+	}
+	if resume != nil {
+		// The output before position is not retained here.
+		s.ring.seed(nil, position)
 	}
 	if development {
 		s.enableProtocolResponder()

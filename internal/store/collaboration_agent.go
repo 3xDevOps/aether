@@ -86,6 +86,22 @@ func (d *DB) DropAgentQueuedRoomMessages(ctx context.Context, failure *RoomMessa
 	return ids, nil
 }
 
+// ListAgentQueuedRoomMessages lists the steers that were queued behind an
+// agent turn before before, oldest first.
+func (d *DB) ListAgentQueuedRoomMessages(ctx context.Context, before time.Time) ([]*RoomMessage, error) {
+	beforeN, err := encodeTime(before)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := d.db.QueryContext(ctx, `SELECT `+roomMessageCols+` FROM room_messages
+		WHERE state = ? AND agent_delivery = ? AND updated_at < ? ORDER BY created_at, rowid`,
+		RoomMessageSent, AgentQueued, beforeN)
+	if err != nil {
+		return nil, fmt.Errorf("store: list queued room messages: %w", err)
+	}
+	return collect(rows, scanRoomMessage)
+}
+
 func affected(res sql.Result) (bool, error) {
 	n, err := res.RowsAffected()
 	if err != nil {

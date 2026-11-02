@@ -302,6 +302,7 @@ type RoomMessageStore interface {
 	// with a failure as not_sent. It returns false when it was settled before.
 	SettleRoomMessageAgentDelivery(context.Context, string, *RoomMessageFailure) (bool, error)
 	DropAgentQueuedRoomMessages(context.Context, *RoomMessageFailure) ([]string, error)
+	ListAgentQueuedRoomMessages(context.Context, time.Time) ([]*RoomMessage, error)
 }
 
 // OpenRoomRequestStore reads what a run's room waits on.

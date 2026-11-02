@@ -90,6 +90,10 @@ type ContainerInfo struct {
 	MountTargets []string
 	// Fingerprint is the Spec.Fingerprint the container was created with.
 	Fingerprint string
+	// Exited reports that the container's main process has ended; ExitCode is
+	// its exit status. A created or running container is not exited.
+	Exited   bool
+	ExitCode int
 }
 
 // Spec describes one run container, engine-neutrally: the image,

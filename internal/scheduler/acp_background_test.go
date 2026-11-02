@@ -180,7 +180,7 @@ func TestBackgroundRunOverACPFailsWhenItsSettingIsRefused(t *testing.T) {
 
 func TestBackgroundRunOverACPContinuesAfterRestart(t *testing.T) {
 	t.Parallel()
-	e, _ := newBackgroundEnv(t, enhancedAgent, true)
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
 	run := e.launchBackground(t, enhancedAgent, acpmock.PromptWait)
 	waitFor(t, "the turn", func() bool {
 		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
@@ -188,6 +188,7 @@ func TestBackgroundRunOverACPContinuesAfterRestart(t *testing.T) {
 	if err := e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
+	rt.dropAdapters(t)
 
 	cfg := e.cfg
 	cfg.PTY = newFakePTY()
@@ -221,6 +222,7 @@ func TestBackgroundRunOverACPResendsTaskToANewSession(t *testing.T) {
 	if err := e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
+	rt.dropAdapters(t)
 	rt.fixture.Initialize = json.RawMessage(`{"protocolVersion":1,"agentCapabilities":{}}`)
 
 	cfg := e.cfg
@@ -408,7 +410,7 @@ func TestEnhancedClaudeRunRestoredWithATaskPendingIsInterrupted(t *testing.T) {
 	delay := acpmock.BackgroundDelay
 	acpmock.BackgroundDelay = time.Hour
 	t.Cleanup(func() { acpmock.BackgroundDelay = delay })
-	e, _ := newACPEnv(t)
+	e, rt := newACPEnv(t)
 	run := e.launchClaudeACP(t, acpmock.PromptBackground)
 	waitFor(t, "the turn to end with background work pending", func() bool {
 		sess := e.sched.acp.session(run.ID)
@@ -421,6 +423,7 @@ func TestEnhancedClaudeRunRestoredWithATaskPendingIsInterrupted(t *testing.T) {
 	if err := e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
+	rt.dropAdapters(t)
 
 	cfg := e.cfg
 	cfg.PTY = newFakePTY()
