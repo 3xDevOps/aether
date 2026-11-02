@@ -63,9 +63,6 @@ const (
 	// TypeTyping signals that the acting member is typing in a run's
 	// composer. It is ephemeral: never persisted and carries no sequence.
 	TypeTyping Type = "run.typing"
-	// TypeApproval carries approval-inbox activity: a permission request
-	// surfacing or a member deciding it.
-	TypeApproval Type = "workspace.approval"
 	// TypeTimeline carries workspace timeline entries, including steering
 	// acts (inject, pause, kill, handoff) and free-form notes.
 	TypeTimeline Type = "workspace.timeline"
@@ -80,10 +77,6 @@ const (
 	// it; runs without one degrade to the PTY + diff timeline and no
 	// feature may hard-require these events.
 	TypeAgentEvent Type = "run.agent"
-	// TypeProfile records a member+harness profile snapshot change
-	// (put, rollback, or pin). Publishing still requires a WorkspaceID;
-	// callers without one skip the bus rather than inventing a workspace.
-	TypeProfile Type = "profile.change"
 	// TypeSyncConflict signals a paused live file overlay: concurrent
 	// local and run-worktree edits to the same paths. The overlay writes
 	// conflict twins and stops; resuming is rerunning `aether sync`.
@@ -410,25 +403,6 @@ type Ephemeral interface {
 
 func (TypingPayload) Ephemeral() {}
 
-// ApprovalDecision is the state of an approval-inbox request.
-type ApprovalDecision string
-
-const (
-	ApprovalRequested ApprovalDecision = "requested"
-	ApprovalApproved  ApprovalDecision = "approved"
-	ApprovalDenied    ApprovalDecision = "denied"
-)
-
-// ApprovalPayload carries approval-inbox activity. RequestID ties the
-// decision events back to the originating request.
-type ApprovalPayload struct {
-	RequestID string           `json:"request_id"`
-	Action    string           `json:"action"`
-	Decision  ApprovalDecision `json:"decision"`
-}
-
-func (ApprovalPayload) EventType() Type { return TypeApproval }
-
 // TimelineKind classifies a workspace timeline entry.
 type TimelineKind string
 
@@ -527,27 +501,6 @@ type AgentEventPayload struct {
 
 func (AgentEventPayload) EventType() Type { return TypeAgentEvent }
 
-// ProfileAction is a profile.change payload action.
-type ProfileAction string
-
-const (
-	ProfileActionPut      ProfileAction = "put"
-	ProfileActionRollback ProfileAction = "rollback"
-	ProfileActionPin      ProfileAction = "pin"
-)
-
-// ProfilePayload records a profile snapshot mutation. The bus still
-// requires WorkspaceID on the envelope; the profile service skips publish
-// when it has no workspace rather than inventing one.
-type ProfilePayload struct {
-	Member     domain.MemberID          `json:"member"`
-	Harness    string                   `json:"harness"`
-	SnapshotID domain.ProfileSnapshotID `json:"snapshot_id"`
-	Action     ProfileAction            `json:"action"`
-}
-
-func (ProfilePayload) EventType() Type { return TypeProfile }
-
 // SyncConflictPayload reports a live-overlay sync conflict. The overlay
 // session is paused when this is published; Files are the conflicted
 // paths relative to the sync roots, and Members are the affected members
@@ -615,7 +568,6 @@ type MemoryAction string
 const (
 	MemoryActionAdd       MemoryAction = "add"
 	MemoryActionRewrite   MemoryAction = "rewrite"
-	MemoryActionAnswer    MemoryAction = "answer"
 	MemoryActionSupersede MemoryAction = "supersede"
 	MemoryActionPin       MemoryAction = "pin"
 	MemoryActionUnpin     MemoryAction = "unpin"
@@ -624,8 +576,7 @@ const (
 
 // MemoryChangePayload names the note and the member who acted; an agent's
 // write, and a report's outcome note, name the run's owner here and the run
-// in the envelope's RunID. An answer names the member who answered and the
-// run that asked.
+// in the envelope's RunID.
 type MemoryChangePayload struct {
 	Action  MemoryAction    `json:"action"`
 	NoteID  string          `json:"note_id"`
@@ -651,11 +602,9 @@ var payloadCodecs = map[Type]func([]byte) (Payload, error){
 	TypeRunCost:        decodeAs[RunCostPayload],
 	TypePresence:       decodeAs[PresencePayload],
 	TypeTyping:         decodeAs[TypingPayload],
-	TypeApproval:       decodeAs[ApprovalPayload],
 	TypeTimeline:       decodeAs[TimelinePayload],
 	TypeGitBranch:      decodeAs[GitBranchPayload],
 	TypeAgentEvent:     decodeAs[AgentEventPayload],
-	TypeProfile:        decodeAs[ProfilePayload],
 	TypeSyncConflict:   decodeAs[SyncConflictPayload],
 	TypeRoomMessage:    decodeAs[RoomMessagePayload],
 	TypeEvidencePacket: decodeAs[EvidencePacketPayload],

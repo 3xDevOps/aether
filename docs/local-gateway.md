@@ -1159,11 +1159,10 @@ its budget and pinning or replacing a replaced note are `-32003`; a bad
 kind, source, scope, size or limit is `-32602`; an unknown note is `-32000`. The exact
 messages are in [memory.md](memory.md#limits). Each write
 publishes a `memory.change` event,
-`{"action":"add"|"rewrite"|"answer"|"supersede"|"pin"|"unpin"|"rm","note_id":"...","actor_id":"..."}`,
+`{"action":"add"|"rewrite"|"supersede"|"pin"|"unpin"|"rm","note_id":"...","actor_id":"..."}`,
 which `/ws/events` streams with `"types":["memory.change"]`. A captured
 outcome note publishes `add`, or `rewrite` when a later report rewrites
-it, and an answer note `answer`
-([memory.md](memory.md#what-is-captured-automatically)).
+it ([memory.md](memory.md#what-is-captured-automatically)).
 
 ### Preference methods
 

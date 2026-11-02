@@ -64,9 +64,7 @@ type File struct {
 	Content []byte
 }
 
-// Service is the transport-agnostic profile snapshot API. A Bus is not
-// wired here: Event requires WorkspaceID, and Put/Rollback have none, so
-// they skip publish rather than inventing a workspace.
+// Service is the transport-agnostic profile snapshot API.
 type Service struct {
 	store store.Store
 }
