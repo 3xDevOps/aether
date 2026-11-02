@@ -308,7 +308,7 @@ func TestHookStatusPreservesReadOnlyStatusAuthorization(t *testing.T) {
 	a, b := h.run(0), h.run(1)
 	h.peers.pair(a, b, "shared.go")
 	request := func(run domain.RunID, method string) protocol.Response {
-		return h.svc.handle(ctx, run, []byte(`{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`))
+		return h.svc.handleParsed(ctx, run, protocol.Request{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: method}, protocol.Response{})
 	}
 	if _, err := h.svc.Send(ctx, b, sendParams(a, "pending message")); err != nil {
 		t.Fatal(err)

@@ -503,16 +503,9 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 	}
 }
 
-// handle dispatches only explicitly allowlisted run methods. Human control
-// methods and caller-selected run identities are never reachable here.
-func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) protocol.Response {
-	req, resp, valid := protocol.ParseRequest(line)
-	if !valid {
-		return resp
-	}
-	return s.handleParsed(ctx, run, req, resp)
-}
-
+// handleParsed dispatches only explicitly allowlisted run methods. Human
+// control methods and caller-selected run identities are never reachable
+// here.
 func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protocol.Request, resp protocol.Response) protocol.Response {
 	var (
 		result any
