@@ -162,6 +162,9 @@ type Config struct {
 	// Outcomes is where an ordinary run's published coord.report lands: the
 	// scheduler. Nil leaves the run's status to its process and hooks.
 	Outcomes OutcomeSink
+	// Until keeps the conditions a waiting report registers with until.
+	// Nil refuses until.
+	Until UntilRegistry
 	// Sudo runs a Default run's sudo commands (the scheduler); nil leaves
 	// run.sudo unavailable.
 	Sudo SudoRunner

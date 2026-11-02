@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -93,6 +94,11 @@ const (
 	// ReminderReply is the reply to Aether's report reminder, which the
 	// mock cannot act on.
 	ReminderReply = "nothing to report"
+	// PromptRun followed by a shell command on the same line runs it in
+	// the agent's container, as an agent's tool call would, replies with
+	// its output and ends the turn. Lines after it, such as the run's
+	// instructions, are ignored.
+	PromptRun = "run: "
 )
 
 // BackgroundDelay is how long after PromptBackground's turn ends its
@@ -486,6 +492,15 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		case <-ctx.Done():
 		}
 		return map[string]any{"stopReason": "cancelled"}, nil
+	}
+	if command, ok := strings.CutPrefix(text, PromptRun); ok {
+		command, _, _ = strings.Cut(command, "\n")
+		out, err := exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
+		if err != nil {
+			out = append(out, []byte("\n"+err.Error())...)
+		}
+		a.text(ctx, string(out))
+		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	if strings.HasPrefix(text, coordhooks.ReportReminderLead) {
 		// The mock cannot run aether-internal.

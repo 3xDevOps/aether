@@ -68,6 +68,8 @@ func reportSchema() (*jsonschema.Schema, error) {
 		"success | failure: the work you own is verified done or cannot be done. " +
 		"Which outcomes this session may use depends on its role and launch; the server refuses the others and your instructions list them."
 	schema.Properties["waiting_for"].Enum = []any{protocol.CoordWaitingForAgents, protocol.CoordWaitingForCI, protocol.CoordWaitingForProcess}
+	maxUntil := protocol.CoordMaxUntil
+	schema.Properties["until"].MaxItems = &maxUntil
 	return schema, nil
 }
 
@@ -171,6 +173,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 			"answered means " + coordhooks.AnsweredUse + " It shows the session as Answered, never needs a member and takes no evidence_refs. " +
 			"needs-input is only for a question a human must answer: the summary is that question, shown as the Needs you reason at turn end; end your turn after it. It takes no evidence_refs and is refused for Background sessions. " +
 			"waiting means " + coordhooks.WaitingUse + " The next turn clears it. It takes no evidence_refs. " +
+			"With waiting, until lists up to 4 conditions (" + protocol.WaitGrammar + "); one already resolved comes back in resolved, so act on it in this turn; otherwise Aether writes to your inbox and wakes you once when the first resolves, fails or expires, and a new waiting report with until replaces them. " +
 			"success and failure end the work you own: a Background session has one per launch, and an interactive session stays open for follow-up. " +
 			"blocked means a human must intervene and shows the summary as the Needs you reason at turn end. " +
 			"The shell command `aether-internal skill` lists your role's rules. An explicit idempotency_key is required: choose a fresh one for each new report, answered, waiting and needs-input included, and reuse it only to retry the same report; the same key with another outcome or summary is refused. The server captures evidence for success, failure and blocked before accepting them.",

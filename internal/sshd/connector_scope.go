@@ -75,6 +75,7 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodRunRoomPost:       scopeWrite,
 	protocol.MethodRunInputRespond:   {ConnectorScopeWrite, ConnectorScopeControl},
 	protocol.MethodRunPause:          scopeWrite,
+	protocol.MethodRunWaitCancel:     scopeWrite,
 	protocol.MethodRunResume:         scopeWrite,
 	protocol.MethodRunReview:         scopeWrite,
 	protocol.MethodRunProtect:        scopeWrite,

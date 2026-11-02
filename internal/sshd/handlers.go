@@ -269,7 +269,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	return run, nil
 }
 
-func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runList(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.RunListParams](params)
 	if perr != nil {
 		return nil, perr
@@ -301,6 +301,7 @@ func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.Raw
 		return nil, rpcError(err)
 	}
 	out := make([]protocol.Run, 0, len(runs))
+	listed := make([]*domain.Run, 0, len(runs))
 	for _, r := range runs {
 		if p.MemberID != "" && r.MemberID != domain.MemberID(p.MemberID) {
 			continue
@@ -309,11 +310,15 @@ func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.Raw
 			continue
 		}
 		out = append(out, s.runSnapshot(r))
+		listed = append(listed, r)
+	}
+	if err := s.fillWaitConditions(ctx, member, listed, out); err != nil {
+		return nil, rpcError(err)
 	}
 	return protocol.RunListResult{Runs: out}, nil
 }
 
-func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := runIDParams(params)
 	if perr != nil {
 		return nil, perr
@@ -326,7 +331,11 @@ func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawM
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := protocol.RunResult{Run: s.runSnapshot(run)}
+	snap := []protocol.Run{s.runSnapshot(run)}
+	if err := s.fillWaitConditions(ctx, member, []*domain.Run{run}, snap); err != nil {
+		return nil, rpcError(err)
+	}
+	out := protocol.RunResult{Run: snap[0]}
 	for _, pr := range prs {
 		out.PullRequests = append(out.PullRequests, protocol.RecordedPullRequest{Repo: string(pr.RepoWorkspace), Repository: pr.Repository,
 			Number: pr.Number, URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, CheckedAt: pr.ObservedAt})
