@@ -65,7 +65,7 @@ export interface Command {
   /** The button's label; its tooltip carries the full one. */
   short?: string
   Icon: LucideIcon
-  /** Extra words the palette's fuzzy match should see (handoff targets). */
+  /** Words the palette matches after the label: aliases, or a handoff target's id. */
   value?: string
   /** Success toast and failure-toast prefix; set only on gateway calls. */
   done?: string
@@ -285,7 +285,7 @@ export function handoffCommands({ run, members, self }: RunCommandContext): Comm
     id: `handoff:${m.id}`,
     label: `Hand off to ${m.display_name}`,
     Icon: UserPlus,
-    value: `hand off ${m.display_name} ${m.id}`,
+    value: `transfer reassign ${m.id}`,
     done: `Handed off to ${m.display_name}`,
     perform: (d: CommandDeps) => d.api.runHandoff(run.id, m.id),
   }))
@@ -320,6 +320,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         label: 'Resume session',
         short: 'Resume',
         Icon: Play,
+      value: 'continue unpause',
         done: 'Resumed',
         predict: () => ({ runID: id, paused: false }),
         perform: (d) => d.api.runResume(id),
@@ -331,6 +332,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         label: 'Pause session',
         short: 'Pause',
         Icon: Pause,
+      value: 'hold suspend',
         done: 'Paused',
         predict: () => ({ runID: id, paused: true }),
         perform: (d) => d.api.runPause(id),
@@ -341,6 +343,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Send a message to the agent…',
       short: 'Message',
       Icon: MessageSquarePlus,
+      value: 'chat steer prompt',
       perform: (d) => d.openDialog('inject', id),
     })
     if (cap.hasLocal('forward.start')) {
@@ -349,6 +352,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         label: 'Forward a port…',
         short: 'Forward',
         Icon: Cable,
+      value: 'tunnel expose localhost preview',
         perform: (d) => d.openForwardDialog(`run:${id}`),
       })
     }
@@ -361,7 +365,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Watch…',
       short: 'Watch',
       Icon: Eye,
-      value: 'watch notify follow alert subscribe',
+      value: 'notify follow alert subscribe',
       perform: (d) => d.openDialog('watch', id),
     })
   }
@@ -373,6 +377,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Mark complete',
       short: 'Mark complete',
       Icon: Check,
+      value: 'done accept',
       done: 'Marked complete',
       predict: () => ({
         runID: id,
@@ -410,6 +415,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Close session…',
       short: 'Close',
       Icon: CircleCheck,
+      value: 'delete remove end finish',
       perform: (d) => d.openDialog('close', id),
     })
   }
@@ -420,6 +426,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Kill session',
       short: 'Kill',
       Icon: Square,
+      value: 'stop',
       done: 'Killed',
       confirm: {
         title: 'Kill this session?',
@@ -466,6 +473,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Free container…',
       short: 'Free container',
       Icon: PackageX,
+      value: 'release cleanup',
       done: 'Freed container',
       confirm: {
         title: 'Free this session’s container?',
@@ -485,6 +493,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         label: 'Restore session',
         short: 'Restore',
         Icon: ArchiveRestore,
+      value: 'unarchive',
         done: 'Restored',
         predict: () => ({ runID: id, record: { archived_at: undefined } }),
         perform: (d) => d.api.runArchive(id, false),
@@ -495,6 +504,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         label: 'Archive session',
         short: 'Archive',
         Icon: Archive,
+      value: 'hide',
         done: 'Archived',
         predict: () => ({ runID: id, record: { archived_at: new Date().toISOString() } }),
         perform: (d) => d.api.runArchive(id, true),
@@ -523,6 +533,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Relaunch',
       short: 'Relaunch',
       Icon: RefreshCw,
+      value: 'restart rerun reopen',
       done: 'Relaunched',
       perform: (d) => d.api.runRelaunch(id),
     })
@@ -533,6 +544,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Pull branch',
       short: 'Pull',
       Icon: Download,
+      value: 'fetch git',
       disabled: !run.last_commit,
       done: 'Pulled branch',
       report: (result) => {
@@ -560,7 +572,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: ask.label,
       short: ask.draft,
       Icon: Sparkles,
-      value: 'assistant ask fix stuck why',
+      value: 'assistant fix stuck why',
       perform: () => useStore.getState().askAssistant({ draft: ask.draft, attachments: [{ kind: 'run', workspace_id: run.workspace_id, run_id: id, label: id }] }),
     })
   }
@@ -649,7 +661,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       id: 'connectors',
       label: 'Connect ChatGPT or Claude',
       Icon: Cable,
-      value: 'connect chatgpt claude connector mcp',
+      value: 'connector mcp',
       perform: (d) => d.navigate('settings', { section: 'connectors' }),
     })
   }
@@ -658,13 +670,13 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       id: 'assistant',
       label: 'Ask Aether',
       Icon: Sparkles,
-      value: 'assistant ask question help',
+      value: 'assistant question help chat',
       perform: () => useStore.getState().setAssistantOpen(true),
     }, {
       id: 'assistant-page',
       label: 'Ask about this page',
       Icon: Sparkles,
-      value: 'assistant ask this page context',
+      value: 'assistant context',
       perform: () => useStore.getState().askAssistant({ draft: '', page: true }),
     })
   }
@@ -673,6 +685,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       id: 'launch',
       label: 'New session…',
       Icon: Rocket,
+      value: 'launch start create',
       perform: (d) => d.openDialog('launch'),
     })
   }
@@ -690,6 +703,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       id: 'clear-done',
       label: 'Archive closed sessions…',
       Icon: Archive,
+      value: 'clear cleanup',
       perform: (d) => d.openDialog('clear-done'),
     })
   }
@@ -698,6 +712,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       id: 'release-finished',
       label: 'Free retained containers…',
       Icon: PackageX,
+      value: 'release cleanup',
       perform: (d) => d.openDialog('release-finished'),
     })
   }
@@ -706,18 +721,21 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       id: 'theme-system',
       label: 'Use system theme',
       Icon: Monitor,
+      value: 'appearance mode',
       perform: (d) => d.setTheme('system'),
     },
     {
       id: 'theme-light',
       label: 'Use light theme',
       Icon: Sun,
+      value: 'appearance mode',
       perform: (d) => d.setTheme('light'),
     },
     {
       id: 'theme-dark',
       label: 'Use dark theme',
       Icon: Moon,
+      value: 'appearance mode',
       perform: (d) => d.setTheme('dark'),
     },
   )

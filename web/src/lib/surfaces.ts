@@ -32,7 +32,7 @@ export interface Surface {
 export function surfaces(cap: Capability, admin = false): Surface[] {
   const list: Surface[] = [{ name: 'board', label: 'Board', Icon: LayoutGrid, place: 'nav' }]
   if (cap.hasMethod('workspace.timeline'))
-    list.push({ name: 'timeline', label: 'Activity', Icon: History, place: 'nav' })
+    list.push({ name: 'timeline', label: 'Activity', Icon: History, place: 'nav', keywords: 'log history events timeline' })
   // A server older than insights.get still reports disk use, which Insights › System shows.
   if (cap.hasMethod('insights.get') || cap.hasMethod('server.disk'))
     list.push({ name: 'insights', label: 'Insights', Icon: ChartColumn, place: 'nav', keywords: 'Statistics outcomes' })
@@ -41,14 +41,14 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
   if (cap.hasMethod('files.tree') || cap.hasMethod('home.tree'))
     list.push({ name: 'files', label: 'Files', Icon: FolderTree, place: 'nav' })
   if (cap.hasWS('terminal'))
-    list.push({ name: 'environment', label: 'Environment', Icon: SquareTerminal, place: 'nav' })
+    list.push({ name: 'environment', label: 'Environment', Icon: SquareTerminal, place: 'nav', keywords: 'terminal shell console container' })
   if (cap.hasMethod('agent.list'))
     list.push({ name: 'agents', label: 'Agents', Icon: Bot, place: 'nav', keywords: 'Agent config files configuration' })
   if (cap.hasMethod('template.save'))
     list.push({ name: 'templates', label: 'Templates', Icon: FileText, place: 'nav' })
   if (cap.hasMethod('member.list'))
-    list.push({ name: 'members', label: 'Members', Icon: Users, place: admin ? 'admin' : 'palette', tabs: ['devices'] })
-  list.push({ name: 'settings', label: 'Settings', Icon: Settings, place: 'admin' })
+    list.push({ name: 'members', label: 'Members', Icon: Users, place: admin ? 'admin' : 'palette', tabs: ['devices'], keywords: 'invite people team' })
+  list.push({ name: 'settings', label: 'Settings', Icon: Settings, place: 'admin', keywords: 'preferences options' })
   if (cap.hasMethod('member.device.list'))
     list.push({ name: 'devices', label: 'Members › Devices', Icon: MonitorSmartphone, place: 'palette', keywords: 'Devices' })
   if (cap.hasMethod('workspace.list'))
