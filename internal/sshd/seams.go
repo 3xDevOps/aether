@@ -147,8 +147,6 @@ type RunController interface {
 	// RefreshMemberCoAuthors rewrites the co-author list of every live run
 	// that credits member, after their git identity changed.
 	RefreshMemberCoAuthors(ctx context.Context, member domain.MemberID)
-	EnsureRunShellTab(ctx context.Context, run domain.RunID, tab string, cols, rows uint) error
-	EnsureRunShellTabReserved(ctx context.Context, run domain.RunID, tab string, cols, rows uint) (ptyhost.ShellTabReservation, error)
 	EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
 	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
 	// StartAssistantLogin runs agent's sign-in for the member's assistant

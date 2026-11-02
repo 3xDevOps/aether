@@ -185,8 +185,6 @@ type MessageStore interface {
 	// unacknowledged messages; retries with the same sender/key return the
 	// original row without creating another message.
 	AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int) error
-	// GetRunMessage returns one persisted message.
-	GetRunMessage(ctx context.Context, id string) (*RunMessage, error)
 	// GetRunMessageByIdempotency returns the sender's prior message for key,
 	// regardless of kind, so callers can reject cross-kind reuse.
 	GetRunMessageByIdempotency(ctx context.Context, from domain.RunID, key string) (*RunMessage, error)
@@ -209,12 +207,10 @@ type MessageStore interface {
 	RetireRunMessages(ctx context.Context, to domain.RunID) error
 	CoordReportedSince(ctx context.Context, run domain.RunID, since time.Time) (bool, error)
 	RetireProvisionalReports(ctx context.Context, from, to domain.RunID, cutoff time.Time) error
-	AppendCoordReport(ctx context.Context, report *CoordReport) error
 	ReserveCoordReport(ctx context.Context, report *CoordReport) (bool, error)
 	FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool, error)
 	GetCoordReport(ctx context.Context, id string) (*CoordReport, error)
 	GetCoordReportByIdempotency(ctx context.Context, run domain.RunID, key string) (*CoordReport, error)
-	GetCoordReportPublication(ctx context.Context, id string) (*CoordReportPublication, error)
 	ListPendingCoordReportPublications(ctx context.Context, limit int) ([]*CoordReportPublication, error)
 	MarkCoordReportPublished(ctx context.Context, id, eventID string) error
 	RecordCoordStateReport(ctx context.Context, report *CoordStateReport) (bool, error)

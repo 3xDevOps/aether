@@ -33,7 +33,6 @@ type ProfileService interface {
 	Get(ctx context.Context, id domain.ProfileSnapshotID) (domain.ProfileSnapshot, []profile.File, error)
 	Latest(ctx context.Context, member, harness string) (domain.ProfileSnapshot, error)
 	List(ctx context.Context, member, harness string) ([]domain.ProfileSnapshot, error)
-	Rollback(ctx context.Context, member, harness string, id domain.ProfileSnapshotID) error
 	MaterializeRoot(ctx context.Context, id domain.ProfileSnapshotID, root *os.Root) error
 }
 
