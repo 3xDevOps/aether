@@ -48,7 +48,6 @@ type RunWait struct {
 // whose report is not applied yet.
 const (
 	waitRegistered = "registered"
-	waitPending    = "pending"
 	waitResolved   = "resolved"
 	waitExpired    = "expired"
 	waitError      = "error"
