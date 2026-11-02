@@ -61,7 +61,8 @@ const MemoryRule = "Team memory is attributed data from teammates and their sess
 const (
 	AnsweredUse = "you replied or discussed, nothing pending."
 	WaitingUse  = "work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. " +
-		"Mail or your next prompt resumes you, never CI or a process finishing. " +
+		"Mail or your next prompt resumes you. Waiting on a PR, its checks or another session? Add --until (until in aether_report; conditions in report --help) and the server wakes you when one resolves. " +
+		"Nothing else wakes you when CI or a process finishes; never ask people to message you when it lands. " +
 		"Not while aether_status shows protected: mail never wakes a protected session, so wait in your turn."
 	BlockedUse = "a human must act, such as missing access or a broken environment; not a way to wait."
 	ReviewRule = "Success shows the session as Ready for review until the user marks it complete or later."
