@@ -318,15 +318,6 @@ func (c *Checker) fresh() (Check, error, bool) {
 	return Check{}, nil, false
 }
 
-// Last returns the cached answer and its error without dialing, expired or
-// not: its CheckedAt is when it was produced. ok is false before the first
-// check finishes.
-func (c *Checker) Last() (out Check, err error, ok bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.cached, c.err, !c.expires.IsZero()
-}
-
 func (c *Checker) liveLocked() bool {
 	return !c.expires.IsZero() && c.now().Before(c.expires)
 }

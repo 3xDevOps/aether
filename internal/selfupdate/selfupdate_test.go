@@ -61,7 +61,7 @@ func stageFrom(t *testing.T, srv *httptest.Server, asset string) (string, error)
 	if err != nil {
 		return dst, err
 	}
-	staged, err := Stage(t.Context(), m, asset, dst)
+	staged, err := stageIn(t.Context(), m, asset, dst, filepath.Dir(dst))
 	if err != nil {
 		return dst, err
 	}
@@ -154,7 +154,7 @@ func TestStageRejectsMissingAsset(t *testing.T) {
 	m := manifestFor("v1.3.0", map[string][]byte{"aether-linux-amd64": []byte("x")})
 	m.baseURL = srv.URL
 	dst := filepath.Join(t.TempDir(), "aether")
-	_, err := Stage(t.Context(), m, "aether-linux-amd64", dst)
+	_, err := stageIn(t.Context(), m, "aether-linux-amd64", dst, filepath.Dir(dst))
 	if err == nil || !strings.Contains(err.Error(), "404 Not Found") {
 		t.Fatalf("err = %v, want the 404", err)
 	}
