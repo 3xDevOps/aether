@@ -78,7 +78,11 @@ func (s *Session) adopt(openTurn bool) error {
 		s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "interrupted"})
 		s.stateLocked(TurnState{Reason: "interrupted"})
 	default:
-		s.stateLocked(TurnState{})
+		// The background tasks the log left live still hold the session.
+		s.settleLocked()
+		if !s.reported.Working {
+			s.stateLocked(TurnState{})
+		}
 	}
 	return nil
 }

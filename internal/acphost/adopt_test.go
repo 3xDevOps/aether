@@ -305,3 +305,36 @@ func TestAdoptionKeepsTheTurnsStartTime(t *testing.T) {
 		t.Fatalf("adopted turn states %+v; want the turn started at %v", rec.turns, started)
 	}
 }
+
+func TestAdoptionBetweenTurnsKeepsLiveTasksWorking(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	path := t.TempDir() + "/run.items.jsonl"
+	log, err := OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range []Item{{Kind: KindTurnStart, Turn: 1},
+		{Kind: KindBackground, Turn: 1, Tasks: []Task{{ID: "wf-1", Type: "local_workflow", Holds: true}}},
+		{Kind: KindTurnEnd, Turn: 1, StopReason: "end_turn"},
+	} {
+		if err := log.Append(&it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, rec := startMock(t, m, Config{LogPath: path, ClaudeCode: true, Adopt: &Adoption{
+		Initialize: m.fix.Initialize, Session: m.fix.SessionNew, SessionID: m.sessionID(),
+	}})
+	waitFor(t, "the adopted state", func() bool {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		return len(rec.states) > 0
+	})
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if !slices.Equal(rec.states, []string{"working:background"}) {
+		t.Fatalf("adopted states %v; want working:background", rec.states)
+	}
+}
