@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/rootfs"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -260,32 +262,66 @@ func chownTree(dir string, uid, gid int, protected map[inodeKey]struct{}) error 
 // whole home, and a chown rewrites the inode even when nothing changes.
 // Live containers and git write while it walks, so an entry may vanish.
 func chownRoot(root *os.Root, uid, gid int, protected map[inodeKey]struct{}) error {
-	return fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
-		if errors.Is(err, fs.ErrNotExist) && name != "." {
-			return nil
+	dir, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	var st unix.Stat_t
+	if err := unix.Fstat(int(dir.Fd()), &st); err != nil {
+		return fmt.Errorf("stat .: %w", err)
+	}
+	if int(st.Uid) != uid || int(st.Gid) != gid {
+		if err := unix.Fchown(int(dir.Fd()), uid, gid); err != nil {
+			return fmt.Errorf("chown .: %w", err)
 		}
-		if err != nil {
-			return err
-		}
-		info, err := root.Lstat(name)
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		st := info.Sys().(*syscall.Stat_t)
-		if int(st.Uid) == uid && int(st.Gid) == gid {
-			return nil
+	}
+	return chownEntries(dir, ".", uid, gid, protected)
+}
+
+// chownEntries stats and chowns every entry relative to dir's descriptor, so
+// an entry costs one stat however deep it sits; resolving each path from the
+// root again made a launch's pass several times slower. It descends without
+// following a symlink: a directory swapped for a link mid-walk is skipped.
+func chownEntries(dir *os.File, rel string, uid, gid int, protected map[inodeKey]struct{}) error {
+	fd := int(dir.Fd())
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", rel, err)
+	}
+	for _, name := range names {
+		var st unix.Stat_t
+		if err := unix.Fstatat(fd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			if errors.Is(err, unix.ENOENT) {
+				continue
+			}
+			return fmt.Errorf("stat %s: %w", path.Join(rel, name), err)
 		}
 		// Writable caches and homes may contain links to files outside
 		// the mount. Never mutate another link's ownership.
-		if _, ok := protected[inodeKey{st.Dev, st.Ino}]; d.Type().IsRegular() && (ok || st.Nlink > 1) {
-			return nil
+		_, protectedLink := protected[inodeKey{st.Dev, st.Ino}]
+		shared := st.Mode&unix.S_IFMT == unix.S_IFREG && (protectedLink || st.Nlink > 1)
+		if (int(st.Uid) != uid || int(st.Gid) != gid) && !shared {
+			if err := unix.Fchownat(fd, name, uid, gid, unix.AT_SYMLINK_NOFOLLOW); err != nil && !errors.Is(err, unix.ENOENT) {
+				return fmt.Errorf("chown %s: %w", path.Join(rel, name), err)
+			}
 		}
-		if err := root.Lchown(name, uid, gid); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if st.Mode&unix.S_IFMT != unix.S_IFDIR {
+			continue
+		}
+		subfd, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("open %s: %w", path.Join(rel, name), err)
+		}
+		sub := os.NewFile(uintptr(subfd), name)
+		err = chownEntries(sub, path.Join(rel, name), uid, gid, protected)
+		_ = sub.Close()
+		if err != nil {
 			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
