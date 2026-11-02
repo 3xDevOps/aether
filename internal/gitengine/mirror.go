@@ -72,7 +72,6 @@ const (
 	MirrorErrorDiverged       MirrorErrorKind = "diverged"
 	MirrorErrorCASConflict    MirrorErrorKind = "cas-conflict"
 	MirrorErrorNoCandidate    MirrorErrorKind = "no-candidate"
-	MirrorErrorUnsupported    MirrorErrorKind = "unsupported"
 	MirrorErrorFailed         MirrorErrorKind = "error"
 )
 
