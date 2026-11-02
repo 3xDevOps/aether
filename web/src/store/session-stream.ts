@@ -11,7 +11,6 @@ import { batchNotifications } from '@/store/batch'
 interface Owned {
   stream: SessionStream
   users: number
-  sessionID: string
   autoWrite: boolean
   askedWrite: boolean
   autoRequest: boolean
@@ -53,7 +52,7 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
   } else {
     const sessionID = controlSession(runID)
     const created: Owned = {
-      users: 1, sessionID, autoWrite, askedWrite: false, autoRequest: false, autoRetries: 0,
+      users: 1, autoWrite, askedWrite: false, autoRequest: false, autoRetries: 0,
       stream: null as unknown as SessionStream, stopWatch: () => {}, askOnce: () => {},
     }
     entry = created

@@ -18,7 +18,6 @@ export interface ActionTarget {
 
 export interface AssistantAction {
   id: string
-  callID: string
   tool: string
   read: boolean
   at: string
@@ -398,7 +397,6 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
   const draft = (entry: WorkItem, tool: string, block: string): AssistantAction => {
     const action: AssistantAction = {
       id: entry.id,
-      callID: entry.id.slice(entry.id.indexOf(':') + 1),
       tool,
       read: isRead(tool),
       at: entry.at,

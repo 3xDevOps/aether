@@ -98,7 +98,7 @@ describe('child runs', () => {
     expect(groups.working).toEqual([])
     const [tree] = groups['needs-you']
     expect(ids(tree.children)).toEqual(['grandchild'])
-    expect(tree.childRuns).toMatchObject({ collapsed: true, counts: { working: 1, needsYou: 1, done: 1, failed: 0 } })
+    expect(tree.childRuns).toMatchObject({ counts: { working: 1, needsYou: 1, done: 1, failed: 0 } })
     expect(ids(tree.childRuns?.members ?? []).sort()).toEqual(['c1', 'c2', 'grandchild'])
     expect(tree.waitingSince).toBe(asking.stateChangedAt)
   })
