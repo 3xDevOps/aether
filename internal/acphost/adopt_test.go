@@ -276,3 +276,32 @@ func TestAdoptionKeepsTheSubagentsTheKeeperReported(t *testing.T) {
 		t.Fatalf("the permission's tool call %+v", tc)
 	}
 }
+
+func TestAdoptionKeepsTheTurnsStartTime(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	started := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	path := t.TempDir() + "/run.items.jsonl"
+	log, err := OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Append(&Item{Kind: KindTurnStart, Turn: 1, Time: started}); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, rec := startMock(t, m, Config{LogPath: path, Adopt: &Adoption{
+		Initialize: m.fix.Initialize, Session: m.fix.SessionNew, SessionID: m.sessionID(), PromptTurn: 1,
+	}})
+	waitFor(t, "the adopted turn's state", func() bool {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		return len(rec.turns) > 0
+	})
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if !rec.turns[0].TurnStartedAt.Equal(started) || !s.State().TurnStartedAt.Equal(started) {
+		t.Fatalf("adopted turn states %+v; want the turn started at %v", rec.turns, started)
+	}
+}

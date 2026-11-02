@@ -60,12 +60,15 @@ func (s *Session) adopt(openTurn bool) error {
 	s.seedOptionsLocked(res)
 	s.restoreStateLocked()
 	s.inputsLocked()
+	// A report the agent sent during the turn, before the restart, is not
+	// older than the turn.
+	s.turnAt = started.Time
 	switch {
 	case openTurn && started.Autonomous:
-		s.autonomous, s.turnAt, s.lastUpdate = true, time.Now(), time.Now()
+		s.autonomous, s.lastUpdate = true, time.Now()
 		s.settleLocked()
 	case openTurn && a.PromptTurn == started.Turn:
-		s.turnActive, s.turnAt = true, time.Now()
+		s.turnActive = true
 		s.stateLocked(TurnState{Working: true, Reason: "prompt"})
 		go s.runTurn(nil, &turnAck{done: make(chan struct{})}, func() {})
 	case openTurn:
