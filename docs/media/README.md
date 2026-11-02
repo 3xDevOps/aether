@@ -66,8 +66,7 @@ repo front page. Levers, in the order to reach for them: shorten the take, drop
 to 10-12 fps, scale to 1000px wide, reduce the palette
 (`palettegen=max_colors=64`).
 
-Commit the GIF, replace the placeholder comment and the "Demo recording wanted"
-note in the README with the image, and delete this paragraph's obligation from
+Commit the GIF, replace the placeholder comment in the README with the image, and delete this paragraph's obligation from
 the top of this file.
 
 ## Restoration verification captures

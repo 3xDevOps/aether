@@ -482,7 +482,7 @@ agent), 4 when it is parked with nothing pending, because its turn ended with
 an `answered` report or no report or it went silent, and a message continues it (`aether message
 <session-id> "<reply>"`), 5 when its wait broke (a condition it waited on resolved
 and the wake never reached the agent, or its source went unread for an hour; see [Waits Aether can
-check](failure-handling.md#waits-aether-can-check)), and 124 on timeout. Before exiting it prints `run
+check](failure-handling.md#waits-aether-can-check)), and 124 on timeout. Before exiting it prints `session
 <session-id> <state>: <reason>`, with the state as `aether sessions` labels it. It keeps waiting
 while the session waits on agents, CI or a process. When Aether cannot vouch for that wait
 it says so once on stderr: `session <session-id> still waits, but <condition>: status

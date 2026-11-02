@@ -286,7 +286,7 @@ call waiting for your approval is one line above the approval card. It also
 says whether you approved it or auto-approval passed it, and links to the session,
 pull request or environment. A failure shows the server's error as is.
 **Retry** adds `Retry: <what it tried>` to the message box for you to edit and
-send. A launch card adds what started, such as `run · api · Claude Code opus ·
+send. A launch card adds what started, such as `session · api · Claude Code opus ·
 your account`. A session the assistant launched that is still going reads
 **Working in the background** with how you hear back; it keeps running after
 you close the panel. Reads fold

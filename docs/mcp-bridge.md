@@ -58,8 +58,8 @@ The bridge's MCP `instructions` are the session's role card (see
 [Agent instructions](coordination.md#agent-instructions)). When
 `AETHER_ROLE_CARD=1`, which Aether sets on the bridge when the ACP system
 prompt already carries the card, they are only a brief of under 512 bytes:
-report success or failure when the work the agent owns is done or cannot be
-done, needs-input only for a question a human must answer (Background
+report answered when it replied and nothing is pending, success or failure
+when the work the agent owns is done or cannot be done, needs-input only for a question a human must answer (Background
 sessions are told never to), blocked when a human must intervene,
 and waiting when it ends its turn to await agents, CI or a process, or, where nothing resumes an idle session, never waiting but waiting
 for mail in the turn with `aether_inbox`; never report while still working;
@@ -96,7 +96,7 @@ surface.
 | `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, optional `waiting_for`, optional `until`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 | `aether_memory_search` | `memory.search`, or `memory.show` with `id` | optional `query`, `id`, `kind`, `file`, `all` | up to 10 `items`, best first; with `id`, that note as the one item and its supersede `chain` |
 | `aether_memory_add` | `memory.add` | `kind`, `text`, optional `files`, `supersedes`, `scope` | the stored `item`, `duplicate`, up to 3 `similar` live notes |
-| `aether_subsession_options` | `child.options` | optional `harness` | `allowed`, the refusal `reason`, `scope`, `limits`, `busy`, `queued`, `total`, each `choice` with its `status` |
+| `aether_subsession_options` | `child.options` | optional `harness` | `allowed`, the refusal `reason`, `owner_member_id`, `limits`, `busy`, `queued`, each `choice` with its `status` |
 | `aether_subsession_start` | `child.start` | `harness`, `purpose`, `task`, `idempotency_key`, optional `model`, `mode`, `account_member_id` | the subsession and `next` |
 | `aether_subsessions` | `child.list` | optional `run_id` | `children` |
 | `aether_subsession_cancel` | `child.cancel` | `run_id` | the subsession |
@@ -161,11 +161,11 @@ instead of a target session ID and routes only to the original question sender.
 The question establishes the reply relationship; it cannot authorize an
 unrelated message or cross a workspace boundary.
 
-`aether_report` accepts only `success`, `failure`, `blocked`, `needs-input`
-and `waiting`, which its input schema enumerates, and requires a non-empty
+`aether_report` accepts only `success`, `failure`, `blocked`, `needs-input`,
+`waiting` and `answered`, which its input schema enumerates, and requires a non-empty
 summary. Every coordination tool field has a schema description, and the
 `aether_report` description leads with the rule that subagents and spawned
-workflows never report. `needs-input` and `waiting` take no `evidence_refs`.
+workflows never report. `needs-input`, `waiting` and `answered` take no `evidence_refs`.
 `waiting` marks a turn the agent ends while work it started goes on; the
 next turn clears it. `waiting_for` is `agents` (the default), `ci` or
 `process`, which the schema enumerates, and is valid only with `waiting`;

@@ -604,13 +604,13 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 | `homes/<member>/` | Each member's persistent home: installed agents, agent logins, uploaded configuration, and their GitHub token. |
 | `signing-keys/` | Each member's private commit signing key, which no container mounts. Without a backup, each member runs `aether github connect` again for a new key. |
 | `workspace-secrets/` | Secret workspace variables in plain text, readable only by the server's user. |
-| `mirrors/`, `profiles/` | Source mirror settings and deploy keys, and agent profile snapshots. |
+| `mirrors/` | Source mirror settings and deploy keys. |
 | `server-update/` | Update state, and the database copy taken before an update that changes its schema. |
 | `home-caches/`, `scratch/` | Package caches and each container's `/tmp`. Rebuildable; no backup needed. |
 
 The other directories hold internal server state. To recover a server, back
 up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`, `homes/`,
-`signing-keys/`, `profiles/`, `mirrors/` and `workspace-secrets/`.
+`signing-keys/`, `mirrors/` and `workspace-secrets/`.
 
 > [!WARNING]
 > These backups hold every member's agent logins, GitHub tokens and signing
@@ -619,8 +619,9 @@ up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`, `homes/`,
 > ([security.md](security.md#github-credentials-and-signing-keys)).
 
 Recordings and diff history stay until you delete the session, so watch the disk.
-Keep the path short: one too deep for Unix sockets under `coord/` (about 100
-characters) logs `coordination unavailable for this session`. For agents you do
+Keep the path short: one too deep for Unix sockets under `coord/` (over 107
+bytes) fails every launch with `coord: socket path <path> is <n> bytes, over
+the 107-byte limit: use a shorter state directory`. For agents you do
 not trust, mount the data directory `nosuid,nodev` ([security.md](security.md)).
 
 ## Uninstalling

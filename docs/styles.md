@@ -261,9 +261,8 @@ Insights > System charts use recharts through `ChartContainer` in
 `web/src/components/ui/chart.tsx`, with recharts' animation off. Marks use
 `fill-*` and `stroke-*` token utilities or `currentColor`, never inline
 colours. Outcomes use the session state tokens (`state-done`, `state-failed`,
-`state-paused`). A neutral count such as sessions launched is outlined in
-`stroke-icon-faint` on `fill-chrome`, so it never reads as the solid paused
-grey. A sequential scale steps one hue: `fill-accent` at 25%, 50%, 75% and
+`state-paused`). A neutral count such as sessions launched is a `fill-icon-faint` bar on a
+`fill-chrome` track, so it never reads as the solid paused grey. A sequential scale steps one hue: `fill-accent` at 25%, 50%, 75% and
 100% over `fill-chrome` for zero. Every colour has a text legend, and every
 mark is named by its own label or a summary, so nothing depends on colour
 alone. Axis and legend text stays at `text-ui-xs` or `text-ui-sm` in

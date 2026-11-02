@@ -104,7 +104,7 @@ command prints `saved <tag>`, then `new sessions and terminals start from this
 environment`. The image is stored on the server's Docker daemon and is never
 pushed to a registry.
 
-- New sessions, workspace shells and the next environment open use the saved image.
+- New sessions and the next environment open use the saved image.
   Running containers keep theirs.
 - Each save replaces the previous one. To fix a bad save, repair it and save
   again, or reset.
@@ -231,7 +231,7 @@ An admin can also set the limits from **Settings → Server → Session limits**
 which calls `server.run_limits`. Limits saved there replace the flags for
 containers created afterwards, one field at a time; clear a field to fall
 back to the flag or the default. A single session overrides both under
-**Resource limits** in the launch dialog's **Session** tab (`limits` on
+**Resource limits** in the **New session** launch panel (`limits` on
 `run.launch`; CPUs, memory in GiB, processes). An empty field follows the
 server limit.
 

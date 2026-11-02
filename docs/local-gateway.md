@@ -615,7 +615,7 @@ Another value is `-32602` with
 `run.launch: permission "x" is not root, default or isolated`. `server.info`
 lists the `permission` feature when `run.launch` takes it; an older server
 drops it and runs the agent as root. Session snapshots carry `permission`, and
-`launch.defaults` keeps the `permission` the launch form preselects.
+`launch.defaults.set` saves the `permission` the launch form preselects.
 
 `run.launch` takes an optional `extra_workspace_ids`:
 other workspaces checked out at `/repos/<name>` in the session. An empty id, the primary workspace or a repeated
@@ -2395,8 +2395,8 @@ the temp directory so it never holds the app directory open), and exits
     that changed nothing, and restart the app for nothing), or `no signed
     release is published yet; this aether stays on <version>` when no
     release has a signed manifest and the server names none.
-  - `-32003` (conflict, 409): `an update is already running in this
-    gateway` - a second click from another tab while the dialog is up.
+  - `-32003` (conflict, 409): `a release lookup or install is already
+    running in this gateway` - a second click from another tab while the dialog is up.
   - `-32004` (unavailable, 503): everything else, carrying the real
     message after an `install <tag>: ` prefix - a download or checksum
     error, osascript failing to start, root's checksum check failing
@@ -2486,7 +2486,7 @@ workspace receives it; a client shows it only to the member in `member_id`.
 
 ```json
 {"type":"assistant.notice","payload":{"member_id":"mem_...","run_id":"run_...",
- "kind":"needs_input","title":"Run \"Fix flaky login test\" needs your input",
+ "kind":"needs_input","title":"Session \"Fix flaky login test\" needs your input",
  "body":"Question: Which database should the test use?"}}
 ```
 
@@ -2801,7 +2801,7 @@ not create new shell tabs.
 
 The session item log of a session with `acp: true` ([enhanced-sessions.md](enhanced-sessions.md)):
 the items already logged after the client's cursor, then each new one as the
-agent sends it. Any other session is refused with `-32602` and `run <run_id>
+agent sends it. Any other session is refused with `-32602` and `session <run_id>
 does not run its agent over ACP`. Every frame is JSON text.
 
 1. Client sends one header frame. `write` asks for the session's control lease

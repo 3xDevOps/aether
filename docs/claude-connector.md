@@ -34,8 +34,8 @@ Recheck them before submitting; the quotes below are what they said then.
 | Claude Code | "Claude Code declares `http://localhost/callback` and `http://127.0.0.1/callback` in its Client ID Metadata Document" ([authentication](https://claude.com/docs/connectors/building/authentication)) | **Refused**: the server requires an https redirect on the client's own host. Claude Code cannot connect. See [Claude Code](#claude-code) |
 | Refresh | "Rotate refresh tokens for public-client connections"; invalid ones return `invalid_grant` ([authentication](https://claude.com/docs/connectors/building/authentication)) | Rotated on each use; reusing a rotated token a minute or more later revokes the connector; `invalid_grant` (code, live) |
 | Timeouts | "up to 10 seconds for a response from your OAuth discovery, registration, and token endpoints" ([authentication](https://claude.com/docs/connectors/building/authentication)) | The server bounds token handling to 5 seconds; the edge relays it (code) |
-| Egress | "Anthropic's outbound traffic to your server originates from `160.79.104.0/21`." ([authentication](https://claude.com/docs/connectors/building/authentication)) | No allowlist on the edge. Strict `Origin` checks reject Anthropic ([testing](https://claude.com/docs/connectors/building/testing)); the server's MCP handler uses Go's cross-origin protection, so confirm live calls pass |
-| Tool names | "Tool names must be 64 characters or fewer." ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | Longest is 23 (code) |
+| Egress | "Anthropic's outbound traffic to your server originates from `160.79.104.0/21`." ([authentication](https://claude.com/docs/connectors/building/authentication)) | No allowlist on the edge. Strict `Origin` checks reject Anthropic ([testing](https://claude.com/docs/connectors/building/testing)); the server's MCP handler runs no `Origin` check |
+| Tool names | "Tool names must be 64 characters or fewer." ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | Longest is 26 (code) |
 | Tool hints | "Every tool must include a `title` and the applicable hint: `readOnlyHint: true` for read-only tools, and `destructiveHint: true` for tools that modify or delete data." ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | Every tool has a title and all three hints; `TestConnectorToolList` checks them ([Tool hints](chatgpt-plugin.md#tool-hints)) |
 | No catch-all | "Don't ship a catch-all `api_request` tool with a `method` parameter." ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | One tool per operation (code) |
 | Errors | "generic errors such as "Internal Server Error" or "Bad Request" with no detail fail review" ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | Errors carry the server's message ([connectors.md](connectors.md#troubleshooting)) |
@@ -110,7 +110,7 @@ directory connectors"
    `https://edge.onaether.dev/mcp`, no advanced settings.
 2. **Connect**, sign in at the edge, pick the demo server, **Allow** with
    both scopes.
-3. Check the connector shows **Connected** and all 26 tools appear under
+3. Check the connector shows **Connected** and all 32 tools appear under
    **Tool permissions**, read tools without a confirmation prompt.
 4. Run every [example prompt](#the-listing) and each tool at least once
    through **+ → Connectors**. Revoke the connector afterwards (`aether mcp
