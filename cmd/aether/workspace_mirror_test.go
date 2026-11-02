@@ -87,7 +87,7 @@ func TestParseWorkspaceMirrorGuards(t *testing.T) {
 		t.Fatalf("adopt without confirmation = %v", err)
 	}
 	adopt, err := parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7", "--commit", commit, "--yes"})
-	if err != nil || adopt.generation != 7 || adopt.commit != commit || !adopt.yes {
+	if err != nil || adopt.generation != 7 || adopt.commit != commit {
 		t.Fatalf("adopt options = %+v, %v", adopt, err)
 	}
 	if _, err = parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7", "--yes"}); err == nil || !strings.Contains(err.Error(), "--commit is required") {
@@ -116,7 +116,7 @@ func TestParseWorkspaceMirrorGuards(t *testing.T) {
 		t.Fatalf("disable without confirmation = %v", disableGuardErr)
 	}
 	disable, err := parseWorkspaceMirrorDisableArgs([]string{"--workspace", "app", "--yes"})
-	if err != nil || disable.workspace != "app" || !disable.yes {
+	if err != nil || disable.workspace != "app" {
 		t.Fatalf("disable options = %+v, %v", disable, err)
 	}
 }

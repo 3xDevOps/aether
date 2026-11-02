@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/3xDevOps/Aether/internal/syncd"
 	"github.com/3xDevOps/Aether/internal/testhome"
@@ -114,16 +113,15 @@ func TestGitRemoteLeavesSSHCommandAloneForDirectLinks(t *testing.T) {
 	}
 }
 
-func TestPullCommandRunsEdgeSSHOnlyForEdgeHosts(t *testing.T) {
-	coords := protocol.RunPullResult{WorkspaceID: "ws_1", Branch: "aether/run-1"}
-	_, edge, err := PullCommand(t.TempDir(), "aether", cli.EdgeHost(testServerID), coords)
+func TestFetchCommandRunsEdgeSSHOnlyForEdgeHosts(t *testing.T) {
+	edge, err := fetchCommand(t.TempDir(), cli.GitURL("aether", cli.EdgeHost(testServerID), "ws_1"), "aether/run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.ContainsFunc(edge.Env, func(e string) bool { return strings.HasPrefix(e, "GIT_SSH_COMMAND=") }) {
 		t.Fatal("an edge fetch sessions without GIT_SSH_COMMAND")
 	}
-	_, direct, err := PullCommand(t.TempDir(), "aether", "host:2222", coords)
+	direct, err := fetchCommand(t.TempDir(), cli.GitURL("aether", "host:2222", "ws_1"), "aether/run-1")
 	if err != nil {
 		t.Fatal(err)
 	}

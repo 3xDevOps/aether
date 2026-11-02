@@ -113,19 +113,12 @@ type Staged struct {
 	committed bool
 }
 
-// Stage downloads the asset m lists, verifies its size and sha256 against
-// m, and writes it next to dst with mode 0755. It changes nothing the
-// running system can see; Commit does that. The caller must call Discard
-// (Commit or not) so a staged file never outlives the attempt.
-func Stage(ctx context.Context, m Manifest, asset, dst string) (*Staged, error) {
-	// Beside dst, so the final rename is atomic (same filesystem) and
-	// never leaves a half-written binary on PATH.
-	return stageIn(ctx, m, asset, dst, filepath.Dir(dst))
-}
-
-// stageIn is Stage with the staging directory chosen by the caller: dst's
-// own directory when it is writable, a private directory of the user's
-// when root has to make the copy.
+// stageIn downloads the asset m lists, verifies its size and sha256
+// against m, and writes it into dir with mode 0755: dst's own directory
+// when it is writable, a private directory of the user's when root has to
+// make the copy. It changes nothing the running system can see; Commit
+// does that. The caller must call Discard (Commit or not) so a staged file
+// never outlives the attempt.
 func stageIn(ctx context.Context, m Manifest, asset, dst, dir string) (*Staged, error) {
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dst)+".update-*")
 	if err != nil {

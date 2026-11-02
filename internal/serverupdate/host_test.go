@@ -48,7 +48,7 @@ func TestServiceWithoutAHostCannotTouchTheMachine(t *testing.T) {
 	if svc.cfg.Host.Exec != nil || svc.cfg.Host.Restart != nil || svc.cfg.Host.UnderSystemd != nil {
 		t.Fatalf("a service built with no Host has host controls: %+v", svc.cfg.Host)
 	}
-	if svc.Capable() {
+	if svc.incapableReason() == "" {
 		t.Fatal("a service with no host controls reports itself capable")
 	}
 	for _, when := range []string{protocol.ServerUpdateNow, protocol.ServerUpdateIdle} {
@@ -127,7 +127,7 @@ func TestPartialHostIsNoHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if svc.Capable() {
+	if svc.incapableReason() == "" {
 		t.Fatal("a Host with only Exec set reports itself capable")
 	}
 }
@@ -161,7 +161,7 @@ func TestUnresolvableBinaryDisablesRatherThanFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New returned an error instead of degrading: %v", err)
 	}
-	if svc.Capable() {
+	if svc.incapableReason() == "" {
 		t.Fatal("a service that could not resolve its binary reports itself capable")
 	}
 	status, err := svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
