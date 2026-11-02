@@ -415,7 +415,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Close session…',
       short: 'Close',
       Icon: CircleCheck,
-      value: 'delete end finish',
+      value: 'delete remove end finish',
       perform: (d) => d.openDialog('close', id),
     })
   }

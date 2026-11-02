@@ -579,6 +579,7 @@ describe('command palette', () => {
       ['start', 'New session…', 'New session…'],
       ['kill', 'Kill session', 'Kill session'],
       ['stop', 'Kill session', 'Kill session'],
+      ['remove', 'Close session…', 'Close session…'],
       ['preferences', 'Settings', 'Settings'],
       ['terminal', 'Environment', 'Environment'],
       ['logs', 'Activity', 'Activity'],
