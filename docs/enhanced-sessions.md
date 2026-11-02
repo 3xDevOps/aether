@@ -292,7 +292,9 @@ keeper of their own and keep their output, input and exit status through it
 process reattaches and adopts the conversation: the turn in flight keeps
 streaming, an open permission request or question stays open under the same
 id, background tasks and commands the agent's shell tool started keep
-running, and nothing is sent to the agent twice. A message queued behind the
+running, and nothing is sent to the agent twice. A turn that ended while no
+server was attached still ends before what the agent sent after it, such as a
+background task's follow-up turn. A message queued behind the
 turn is sent again once the server is back, unless it already reached the
 agent; one queued for a paused session waits until the session resumes. An
 answer, cancel or message sent while the new server is still recovering

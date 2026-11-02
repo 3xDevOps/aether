@@ -422,6 +422,45 @@ func TestAdoptPromptAnsweredAfterAdoption(t *testing.T) {
 	a.barrier(second)
 }
 
+func TestAdoptedAnswerKeepsItsPlace(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	first := a.attach(1)
+	first.write(req("1", "session/prompt"))
+	kid := a.recvReq("session/prompt")
+	_ = first.Close()
+	a.send(resp(kid, promptDone))
+	a.send(note(1))
+
+	second := a.attach(2)
+	second.write(req("7", AdoptMethod))
+	if h := head(t, second.next()); string(h.ID) != "7" || string(h.Result) != promptDone {
+		t.Fatalf("first line after adoption is not the adopted answer: %+v", h)
+	}
+	second.wantNext(note(1))
+	a.barrier(second)
+}
+
+func TestHeldAnswerStopsHoldingWithoutAdoption(t *testing.T) {
+	t.Parallel()
+	a := newAgent(t, 0)
+	a.k.cfg.adoptWait = 50 * time.Millisecond
+	first := a.attach(1)
+	first.write(req("1", "session/prompt"))
+	kid := a.recvReq("session/prompt")
+	_ = first.Close()
+	a.send(resp(kid, promptDone))
+	a.send(note(1))
+
+	second := a.attach(2)
+	second.wantNext(note(1))
+	second.write(req("7", AdoptMethod))
+	if h := head(t, second.next()); string(h.ID) != "7" || string(h.Result) != promptDone {
+		t.Fatalf("late adoption got %+v, want the answer under id 7", h)
+	}
+	a.barrier(second)
+}
+
 func TestAdoptWithNothingInFlight(t *testing.T) {
 	t.Parallel()
 	a := newAgent(t, 0)

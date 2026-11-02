@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -32,6 +33,11 @@ const subagentBytes = 4 << 20
 // requests old names one whose server long recorded where it went.
 const deliveredTags = 256
 
+// adoptWait bounds how long a prompt's answer holds back what the agent
+// sent after it while an attacher has not adopted the prompt. A server whose
+// log already ended that turn never adopts it.
+const adoptWait = 5 * time.Second
+
 // Config describes the adapter a keeper relays.
 type Config struct {
 	// Token authenticates attachers. Only the server that started the
@@ -42,6 +48,8 @@ type Config struct {
 	// Retain bounds unacked agent output; zero means DefaultRetain.
 	Retain int
 	Logger *slog.Logger
+	// adoptWait replaces the package's adoptWait when set.
+	adoptWait time.Duration
 }
 
 // Keeper relays one adapter's stdio to at most one attacher at a time.
@@ -103,7 +111,11 @@ type retained struct {
 	// its own.
 	owner uint64
 	out   int64
-	exit  *Exit
+	// held marks the answer to a prompt no attacher has adopted yet. It
+	// keeps its place in the stream: nothing after it is sent until an
+	// attacher adopts the prompt or adoptWait runs out.
+	held bool
+	exit *Exit
 }
 
 // outgoing is a client request the keeper forwarded under its own id.
@@ -138,6 +150,9 @@ func New(cfg Config) *Keeper {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if cfg.adoptWait <= 0 {
+		cfg.adoptWait = adoptWait
 	}
 	k := &Keeper{
 		cfg:         cfg,
@@ -291,6 +306,11 @@ func (k *Keeper) fromAgent(line []byte) {
 			k.appendLocked(&retained{line: answer, owner: e.gen, out: id})
 		case e.method != acp.AgentMethodSessionPrompt:
 			delete(k.out, id)
+		default:
+			k.appendLocked(&retained{line: answer, out: id, held: true})
+			if k.att != nil {
+				k.holdLocked(k.att)
+			}
 		}
 	default:
 		k.subagentLocked(line)
@@ -519,18 +539,6 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 	k.gen = h.Gen
 	k.ackLocked(h.Ack)
 	state := State{Initialize: k.init, Session: k.session, SessionID: k.sessionID, Stderr: string(k.stderr), Delivered: slices.Clone(k.tags), Subagents: slices.Clone(k.subagents)}
-	// Answers belong to the attacher that asked; a prompt's answer stays
-	// for the attacher that adopts the prompt.
-	kept := k.frames[:0]
-	for _, r := range k.frames {
-		if r.owner != 0 {
-			k.size -= len(r.line)
-			continue
-		}
-		kept = append(kept, r)
-	}
-	clear(k.frames[len(kept):])
-	k.frames = kept
 	var prompt int64
 	for _, id := range slices.Sorted(maps.Keys(k.out)) {
 		e := k.out[id]
@@ -546,6 +554,23 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 	if prompt != 0 {
 		state.Prompt = &Prompt{Turn: k.out[prompt].turn}
 	}
+	// Answers belong to the attacher that asked; a prompt's answer stays
+	// where the agent sent it, for the attacher that adopts the prompt.
+	kept := k.frames[:0]
+	held := false
+	for _, r := range k.frames {
+		switch {
+		case r.out != 0 && r.out == prompt:
+			r.owner, r.held = 0, true
+			held = true
+		case r.owner != 0 || r.held:
+			k.size -= len(r.line)
+			continue
+		}
+		kept = append(kept, r)
+	}
+	clear(k.frames[len(kept):])
+	k.frames = kept
 	a := &attacher{gen: h.Gen, conn: conn, cursor: k.acked}
 	for _, r := range k.frames {
 		if r.seq <= k.acked && r.request != "" && k.unanswered[r.request] {
@@ -554,6 +579,9 @@ func (k *Keeper) attach(conn io.ReadWriteCloser, h frame) (*attacher, *frame) {
 	}
 	a.ctrl = []frame{{T: frameWelcome, V: Version, Gen: h.Gen, State: &state}}
 	k.att = a
+	if held {
+		k.holdLocked(a)
+	}
 	k.cond.Broadcast()
 	return a, nil
 }
@@ -652,14 +680,22 @@ func (k *Keeper) adoptLocked(a *attacher, id json.RawMessage) {
 			continue
 		}
 		e.gen, e.id = a.gen, id
-		if e.answer != nil {
-			answer, err := withID(e.answer, id)
-			if err == nil {
-				e.answer = answer
-				k.appendLocked(&retained{line: answer, owner: a.gen, out: key})
-				return
-			}
+		if e.answer == nil {
+			return
 		}
+		answer, err := withID(e.answer, id)
+		if err != nil {
+			return
+		}
+		e.answer = answer
+		if i := slices.IndexFunc(k.frames, func(r *retained) bool { return r.held && r.out == key }); i >= 0 {
+			r := k.frames[i]
+			k.size += len(answer) - len(r.line)
+			r.line, r.owner, r.held = answer, a.gen, false
+			k.cond.Broadcast()
+			return
+		}
+		k.appendLocked(&retained{line: answer, owner: a.gen, out: key})
 		return
 	}
 	answer, _ := json.Marshal(map[string]any{
@@ -667,6 +703,30 @@ func (k *Keeper) adoptLocked(a *attacher, id json.RawMessage) {
 		"error": acp.RequestError{Code: -32002, Message: ErrNothingToAdopt.Error()},
 	})
 	k.appendLocked(&retained{line: answer, owner: a.gen})
+}
+
+// holdLocked lets a's held prompt answer stop holding back the agent's
+// later output once adoptWait runs out. A later adoption still gets the
+// answer, after that output.
+func (k *Keeper) holdLocked(a *attacher) {
+	time.AfterFunc(k.cfg.adoptWait, func() {
+		k.mu.Lock()
+		defer k.mu.Unlock()
+		if k.att != a {
+			return
+		}
+		kept := k.frames[:0]
+		for _, r := range k.frames {
+			if r.held {
+				k.size -= len(r.line)
+				continue
+			}
+			kept = append(kept, r)
+		}
+		clear(k.frames[len(kept):])
+		k.frames = kept
+		k.cond.Broadcast()
+	})
 }
 
 // send writes the attacher's frames in order until it is gone.
@@ -717,6 +777,9 @@ func (k *Keeper) pendingLocked(a *attacher) []frame {
 	}
 	a.resend = nil
 	for _, r := range k.frames {
+		if r.held {
+			break
+		}
 		if r.seq <= a.cursor || (r.owner != 0 && r.owner != a.gen) {
 			continue
 		}
