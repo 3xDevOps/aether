@@ -120,7 +120,7 @@ func (f *fakeCoord) seen() []protocol.Request {
 // send the second read before the first read's acknowledgement exists, and
 // the batch is legitimately redelivered. Retrying is what a real agent
 // does; asserting a fixed call count races the promotion.
-func (f *fakeCoord) readUntilAcked(t *testing.T, cs *mcp.ClientSession, token string, out *inboxOutput) []protocol.Request {
+func (f *fakeCoord) readUntilAcked(t *testing.T, cs *mcp.ClientSession, token string, out *protocol.CoordInboxResult) []protocol.Request {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -154,7 +154,7 @@ func (f *fakeCoord) readUntilAcked(t *testing.T, cs *mcp.ClientSession, token st
 // result, so a read issued immediately afterwards can race the promotion
 // and be handed the same batch again. At-least-once delivery makes that
 // correct, not a failure, so the test retries the way an agent would.
-func readUntilEmpty(t *testing.T, cs *mcp.ClientSession, out *inboxOutput) {
+func readUntilEmpty(t *testing.T, cs *mcp.ClientSession, out *protocol.CoordInboxResult) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
