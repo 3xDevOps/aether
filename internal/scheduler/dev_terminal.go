@@ -32,7 +32,7 @@ import (
 // accidentally expose ordinary, unmanaged ExecTTY as a development terminal.
 type DevelopmentPTYHost interface {
 	StartDevelopmentSession(context.Context, ptyhost.SessionKey, runtime.Attachment, uint, uint) error
-	ResumeDevelopmentSession(context.Context, ptyhost.SessionKey, runtime.Attachment, uint, uint, ptyhost.TerminalPosition, ptyhost.TerminalSequence) error
+	ResumeDevelopmentSession(context.Context, ptyhost.SessionKey, runtime.Attachment, uint, uint, ptyhost.TerminalPosition, ptyhost.TerminalSequence, ptyhost.TerminalSequence) error
 	ObserveSession(ptyhost.SessionKey) (ptyhost.ScreenObservation, error)
 	SessionGeometry(ptyhost.SessionKey) (uint, uint, uint64, error)
 	ReadSessionOutput(ptyhost.SessionKey, ptyhost.OutputRequest) (ptyhost.OutputObservation, error)

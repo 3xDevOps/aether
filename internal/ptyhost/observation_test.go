@@ -633,10 +633,19 @@ func TestResumedDevelopmentContinuesPositionAndAnswersOnlyNewQueries(t *testing.
 	// already answered; the live query after them still needs an answer.
 	replay := "ab\x1b[6ncdefg"
 	at := TerminalPosition{Epoch: "epoch-1", Sequence: 100}
-	if err = h.ResumeDevelopmentSession(context.Background(), key, att, 12, 3, at, at.Sequence+TerminalSequence(len(replay))); err != nil {
+	end := at.Sequence + TerminalSequence(len(replay))
+	go func() {
+		for _, b := range []byte(replay) {
+			_, _ = att.outW.Write([]byte{b})
+		}
+	}()
+	if err = h.ResumeDevelopmentSession(context.Background(), key, att, 12, 3, at, end, end); err != nil {
 		t.Fatal(err)
 	}
-	att.writeOutput(t, replay)
+	resumed, err := h.ReadSessionOutput(key, OutputRequest{After: &TerminalPosition{Epoch: "epoch-1", Sequence: end}})
+	if err != nil || resumed.MissingCursor {
+		t.Fatalf("output after the cursor at the replay's end = %+v, %v; want it readable once resumed", resumed, err)
+	}
 	att.writeOutput(t, "\x1b[c")
 	want := "\x1b[?1;2c"
 	deadline := time.After(time.Second)
@@ -678,7 +687,7 @@ func TestDevelopmentSessionReportsOnlyAnsweredOutput(t *testing.T) {
 	key := RunShellSession("answered-run", "t1")
 	att := &answeringAtt{fakeAtt: newFakeAtt()}
 	t.Cleanup(func() { _ = att.inR.Close(); _ = att.inW.Close(); _ = att.outW.Close() })
-	if err = h.ResumeDevelopmentSession(context.Background(), key, att, 12, 3, TerminalPosition{Epoch: "epoch-1"}, 0); err != nil {
+	if err = h.ResumeDevelopmentSession(context.Background(), key, att, 12, 3, TerminalPosition{Epoch: "epoch-1"}, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	waitAnswered := func(want uint64) {

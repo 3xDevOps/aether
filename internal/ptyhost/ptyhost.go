@@ -103,6 +103,10 @@ var errHostClosed = errors.New("ptyhost: host closed")
 // loop to flush buffered output to a client that has stopped reading.
 const drainTimeout = 5 * time.Second
 
+// resumeReplayWait bounds how long ResumeDevelopmentSession waits for the
+// replayed output.
+const resumeReplayWait = 5 * time.Second
+
 // Host manages one persistent PTY session per key.
 type Host struct {
 	historyCursorKey [32]byte
@@ -284,8 +288,11 @@ func (h *Host) StartDevelopmentSession(ctx context.Context, key SessionKey, att 
 // ResumeDevelopmentSession starts a run shell's session on att, a terminal
 // whose output continues at position: the first byte att yields is the one
 // after it. Terminal queries in the output up to quiet are not answered
-// again, since att replays them.
-func (h *Host) ResumeDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment, cols, rows uint, position TerminalPosition, quiet TerminalSequence) error {
+// again, since att replays them. It returns once the session's output
+// reached through, the end of what att replays, so a cursor an earlier
+// server handed out is readable; or once the session ended, or after
+// resumeReplayWait.
+func (h *Host) ResumeDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment, cols, rows uint, position TerminalPosition, quiet, through TerminalSequence) error {
 	if !strings.HasPrefix(string(key), "run-shell:") {
 		return errors.New("ptyhost: development session must be a run shell")
 	}
@@ -295,7 +302,36 @@ func (h *Host) ResumeDevelopmentSession(ctx context.Context, key SessionKey, att
 	if position.Epoch == "" {
 		return errors.New("ptyhost: resumed terminal epoch is required")
 	}
-	return h.startSession(ctx, key, att, true, cols, rows, &position, quiet)
+	if err := h.startSession(ctx, key, att, true, cols, rows, &position, quiet); err != nil {
+		return err
+	}
+	s := h.lookup(key)
+	if s == nil {
+		return nil
+	}
+	timer := time.NewTimer(resumeReplayWait)
+	defer timer.Stop()
+	for {
+		s.mu.Lock()
+		reached := s.currentPositionLocked().Sequence
+		if s.stopped || s.ended || reached >= through {
+			s.mu.Unlock()
+			return nil
+		}
+		if s.changed == nil {
+			s.changed = make(chan struct{})
+		}
+		changed := s.changed
+		s.mu.Unlock()
+		select {
+		case <-changed:
+		case <-timer.C:
+			slog.Warn("ptyhost: resumed terminal is still replaying its output; earlier cursors may read as missing until it finishes", "session", key, "reached", reached, "through", through)
+			return nil
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
 
 func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Attachment, development bool, initialCols, initialRows uint, resume *TerminalPosition, quiet TerminalSequence) error {
