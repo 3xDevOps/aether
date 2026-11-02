@@ -1,0 +1,1 @@
+{"name":"main","protected":true,"protection":{"enabled":true,"required_status_checks":{"checks":[],"contexts":[],"enforcement_level":"off"}},"protection_url":"https://api.github.com/repos/react/react/branches/main/protection"}

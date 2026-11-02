@@ -2105,7 +2105,7 @@ export interface WatchObserved {
   phase?: string
   pr_state?: string
   head_sha?: string
-  checks?: { passed: number; failed: number; pending: number }
+  checks?: { passed: number; failed: number; pending: number; cancelled?: number }
   review_state?: string
 }
 
