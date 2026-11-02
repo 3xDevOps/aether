@@ -21,7 +21,7 @@ type Result struct {
 	Flags    Flags         `json:"flags"`
 	Pass     bool          `json:"pass"`
 	Calls    []ToolCall    `json:"calls"`
-	// Briefs are the task or objective of each launch, for manual review.
+	// Briefs are the task of each launch, for manual review.
 	Briefs []string `json:"briefs,omitempty"`
 	Answer string   `json:"answer"`
 	// Model is the model that wrote most of the output, as the harness reports it.

@@ -480,7 +480,7 @@ func (s *Server) launchNames(ctx context.Context, defaults *protocol.AssistantDe
 		return launchNames{}, rpcErr
 	}
 	n := launchNames{member: s.Member, accounts: map[string]string{}, workspaces: map[string]string{}}
-	if defaults != nil && slices.ContainsFunc(defaults.Applied, func(f string) bool { return f == "account_member_id" || f == "workers.account_member_id" }) {
+	if defaults != nil && slices.Contains(defaults.Applied, "account_member_id") {
 		var saved protocol.LaunchDefaultsResult
 		if rpcErr := s.call(ctx, protocol.MethodLaunchDefaultsGet, nil, &saved); rpcErr != nil {
 			return launchNames{}, rpcErr
@@ -647,7 +647,7 @@ const maxReason = 200
 // savedApplied are the launch fields ops may say saved defaults filled, and
 // savedSkippable those it may say it skipped or could not check.
 var (
-	savedApplied   = []string{"harness", "mode", "model", "account_member_id", "fallback", "permission", "workers.account_member_id"}
+	savedApplied   = []string{"harness", "mode", "model", "account_member_id", "fallback", "permission"}
 	savedSkippable = []string{"harness", "mode", "model", "fallback_account_member_ids"}
 )
 
