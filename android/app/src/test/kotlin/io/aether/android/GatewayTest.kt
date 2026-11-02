@@ -10,7 +10,7 @@ class GatewayTest {
     @Test
     fun theGatewaysLineIsTheHandshake() {
         assertEquals(
-            Handshake("http://127.0.0.1:41233/?token=aB3_-xY9", "127.0.0.1:41233"),
+            Handshake("http://127.0.0.1:41233/?token=aB3_-xY9"),
             parseHandshake(line),
         )
         assertEquals(parseHandshake(line), parseHandshake("  $line\n"))
