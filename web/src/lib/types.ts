@@ -1967,23 +1967,6 @@ export interface ServerUpdatePayload {
 }
 
 
-/** env.agents: one setup-capable agent's local availability. */
-export interface LocalAgentStatus {
-  name: string
-  installed: boolean
-}
-
-/** env.agents. `repo_path` is set when the link config knows exactly one repository folder. */
-export interface EnvAgentsResult {
-  agents: LocalAgentStatus[]
-  /** The folders the gateway looked in, so an empty result can say where. */
-  searched: string[]
-  /** Why the login shell could not be asked for its PATH; set only when
-   * the probe failed and just the standard folders were checked. */
-  warning?: string
-  repo_path?: string
-}
-
 export interface AssistantNoticePayload {
   member_id: string
   run_id: string

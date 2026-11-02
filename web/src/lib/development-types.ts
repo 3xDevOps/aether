@@ -55,11 +55,6 @@ export interface DevControlReleaseResult {
   released: boolean
 }
 
-export interface DevOutputCursor {
-  epoch: string
-  sequence: number
-}
-
 export interface DevTerminalTarget extends DevRunParams {
   terminal_id: string
   incarnation: string
@@ -98,82 +93,6 @@ export interface DevTerminalStartResult {
   terminal: DevTerminal
 }
 
-export interface DevTerminalOutputParams extends DevTerminalTarget {
-  after?: DevOutputCursor
-  max_bytes?: number
-  format?: 'text' | 'raw'
-}
-
-export interface DevTerminalOutputResult {
-  terminal: DevTerminal
-  start: DevOutputCursor
-  next: DevOutputCursor
-  position: DevOutputCursor
-  text?: string
-  /** Bounded raw terminal bytes encoded as base64, not a screenshot. */
-  data?: string
-  missing_cursor: boolean
-  truncated: boolean
-  more: boolean
-}
-
-export interface DevTerminalScreenParams extends DevTerminalTarget {
-  row_offset?: number
-  max_cells?: number
-  column_offset?: number
-  expected_screen_revision?: number
-}
-
-interface DevTerminalCell {
-  text: string
-  width: number
-  foreground?: string
-  background?: string
-  bold?: boolean
-  dim?: boolean
-  italic?: boolean
-  underline?: boolean
-  underline_style?: number
-  underline_color?: string
-  blink?: boolean
-  inverse?: boolean
-  hidden?: boolean
-  strikethrough?: boolean
-  overline?: boolean
-  protected?: boolean
-}
-
-export interface DevTerminalRow {
-  text: string
-  wrapped: boolean
-  cells: DevTerminalCell[]
-}
-
-export interface DevTerminalCursor {
-  x: number
-  y: number
-  visible: boolean
-}
-
-export interface DevTerminalScreenResult {
-  terminal: DevTerminal
-  position: DevOutputCursor
-  screen_revision: number
-  geometry_revision: number
-  alternate: boolean
-  cursor: DevTerminalCursor
-  text: string
-  lines: DevTerminalRow[]
-  row_offset: number
-  column_offset: number
-  next_row?: number
-  next_column?: number
-  truncated: boolean
-  unsupported_graphics?: string[]
-  protocol_error?: string
-  palette?: string[]
-}
-
 export type DevTerminalScreenshotParams = DevTerminalTarget
 
 export interface DevTerminalScreenshotResult {
@@ -209,26 +128,6 @@ export interface DevTerminalResizeResult {
   terminal: DevTerminal
   screen_revision: number
   geometry_revision: number
-}
-
-export interface DevTerminalWaitParams extends DevTerminalTarget {
-  after_output?: DevOutputCursor
-  after_screen_revision?: number
-  contains?: string
-  exit?: boolean
-  timeout_ms: number
-}
-
-export interface DevTerminalWaitResult {
-  terminal: DevTerminal
-  position: DevOutputCursor
-  screen_revision: number
-  geometry_revision: number
-  matched: boolean
-  timed_out: boolean
-  missing_cursor: boolean
-  truncated: boolean
-  protocol_error?: string
 }
 
 export interface DevTerminalStopParams extends DevTerminalTarget, DevControlFence {
@@ -298,11 +197,6 @@ export interface DevBrowserNavigateParams extends DevBrowserPageTarget, DevContr
 
 export interface DevBrowserNavigateResult {
   page: DevBrowserPage
-}
-
-export interface DevBrowserSnapshotParams extends DevBrowserPageTarget {
-  max_nodes?: number
-  max_chars?: number
 }
 
 export interface DevBrowserNode {
@@ -407,13 +301,6 @@ export interface DevBrowserViewportResult {
   page: DevBrowserPage
 }
 
-export interface DevBrowserWaitParams extends DevBrowserPageTarget {
-  condition: 'text' | 'visible' | 'hidden' | 'url' | 'load'
-  node_id?: string
-  text?: string
-  timeout_ms: number
-}
-
 export interface DevBrowserWaitResult {
   page: DevBrowserPage
   matched: boolean
@@ -510,20 +397,8 @@ export interface DevArtifactListResult {
   truncated: boolean
 }
 
-export interface DevArtifactGetParams extends DevRunParams {
+interface DevArtifactGetParams extends DevRunParams {
   artifact_id: string
-}
-
-export interface DevArtifactGetResult {
-  artifact: DevArtifact
-}
-
-export interface DevArtifactDeleteParams extends DevRunParams {
-  artifact_id: string
-}
-
-export interface DevArtifactDeleteResult {
-  deleted: boolean
 }
 
 export interface DevArtifactRetainParams extends DevRunParams {

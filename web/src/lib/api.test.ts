@@ -141,31 +141,3 @@ describe('environment terminal methods', () => {
     })
   })
 })
-
-describe('local setup methods', () => {
-  beforeEach(() => {
-    window.sessionStorage.setItem('aether.token', 'tok_stored')
-  })
-  afterEach(() => {
-    vi.unstubAllGlobals()
-    window.sessionStorage.clear()
-  })
-
-  it('reads the detected agents over the local gateway', async () => {
-    const fetchSpy = fakeFetch({
-      agents: [{ name: 'claude', installed: true }],
-      searched: ['/usr/local/bin'],
-      repo_path: '/src/repo',
-    })
-    vi.stubGlobal('fetch', fetchSpy)
-
-    const detected = await api.envAgents()
-
-    expect(fetchSpy.mock.calls[0][0]).toBe('/local/v1/env.agents')
-    expect(detected).toEqual({
-      agents: [{ name: 'claude', installed: true }],
-      searched: ['/usr/local/bin'],
-      repo_path: '/src/repo',
-    })
-  })
-})

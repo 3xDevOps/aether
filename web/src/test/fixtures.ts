@@ -410,7 +410,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     serverInfo: vi.fn(async () => serverInfo),
     serverEdge: vi.fn(async () => needsOverride('serverEdge')),
     serverEdgeClaimCode: vi.fn(async () => needsOverride('serverEdgeClaimCode')),
-    workspaceGet: vi.fn(async () => workspace),
     memberList: vi.fn(async () => ({ members: [alice, bob] })),
     accountUsage: vi.fn(async (): Promise<UsageResult> => ({
       account_member_id: alice.id,
@@ -499,8 +498,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       terminals.set(run_id, inventory)
       return { terminal: { ...terminal, process: { ...terminal.process } } }
     }),
-    devTerminalOutput: vi.fn<Api['devTerminalOutput']>(async () => needsOverride('devTerminalOutput')),
-    devTerminalScreen: vi.fn<Api['devTerminalScreen']>(async () => needsOverride('devTerminalScreen')),
     devTerminalScreenshot: vi.fn<Api['devTerminalScreenshot']>(async () => needsOverride('devTerminalScreenshot')),
     devTerminalInput: vi.fn<Api['devTerminalInput']>(async (params) => {
       if (findTerminal(params).process.state !== 'running') throw new Error('Test terminal is not running')
@@ -512,7 +509,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       terminals.get(params.run_id)!.set(params.terminal_id, terminal)
       return { terminal, screen_revision: 1, geometry_revision: 1 }
     }),
-    devTerminalWait: vi.fn<Api['devTerminalWait']>(async () => needsOverride('devTerminalWait')),
     devTerminalStop: vi.fn<Api['devTerminalStop']>(async (params) => {
       const current = findTerminal(params)
       const terminal: DevTerminal = { ...current, process: { state: 'stopped' } }
@@ -553,12 +549,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     devBrowserPages: vi.fn<Api['devBrowserPages']>(async () => ({ pages: [] })),
     devBrowserOpen: vi.fn<Api['devBrowserOpen']>(async () => needsOverride('devBrowserOpen')),
     devBrowserNavigate: vi.fn<Api['devBrowserNavigate']>(async () => needsOverride('devBrowserNavigate')),
-    devBrowserSnapshot: vi.fn<Api['devBrowserSnapshot']>(async () => needsOverride('devBrowserSnapshot')),
     devBrowserInspect: vi.fn<Api['devBrowserInspect']>(async () => needsOverride('devBrowserInspect')),
     devBrowserAction: vi.fn<Api['devBrowserAction']>(async () => needsOverride('devBrowserAction')),
     devBrowserScreenshot: vi.fn<Api['devBrowserScreenshot']>(async () => needsOverride('devBrowserScreenshot')),
     devBrowserViewport: vi.fn<Api['devBrowserViewport']>(async () => needsOverride('devBrowserViewport')),
-    devBrowserWait: vi.fn<Api['devBrowserWait']>(async () => needsOverride('devBrowserWait')),
     devBrowserConsole: vi.fn<Api['devBrowserConsole']>(async () => ({
       entries: [], next: 0, missing_cursor: false, truncated: false,
     })),
@@ -568,8 +562,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     devBrowserReset: vi.fn<Api['devBrowserReset']>(async () => needsOverride('devBrowserReset')),
     devBrowserClose: vi.fn<Api['devBrowserClose']>(async () => needsOverride('devBrowserClose')),
     devArtifactList: vi.fn<Api['devArtifactList']>(async () => ({ artifacts: [], truncated: false })),
-    devArtifactGet: vi.fn<Api['devArtifactGet']>(async () => needsOverride('devArtifactGet')),
-    devArtifactDelete: vi.fn<Api['devArtifactDelete']>(async () => needsOverride('devArtifactDelete')),
     devArtifactRetain: vi.fn<Api['devArtifactRetain']>(async () => needsOverride('devArtifactRetain')),
     devPortList: vi.fn<Api['devPortList']>(async () => ({ ports: [] })),
     devArtifactDownload: vi.fn<Api['devArtifactDownload']>(async () => needsOverride('devArtifactDownload')),
@@ -902,15 +894,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       version: 'v1.3.0',
       requested_by: alice.id,
       requested_at: '2026-08-14T10:06:00Z',
-    })),
-    envAgents: vi.fn(async () => ({
-      agents: [
-        { name: 'claude', installed: true },
-        { name: 'codex', installed: false },
-        { name: 'pi', installed: false },
-      ],
-      searched: ['/usr/local/bin', '/home/alice/.local/bin'],
-      repo_path: '/src/repo',
     })),
     ...over,
   }

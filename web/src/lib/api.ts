@@ -30,7 +30,6 @@ import type {
   EdgePath,
   EdgeServer,
   EdgeStatus,
-  EnvAgentsResult,
   EnvSaveResult,
   EvidenceGetResult,
   EvidencePacketListResult,
@@ -136,11 +135,7 @@ import type {
   SystemStatsResult,
 } from '@/lib/types'
 import type {
-  DevArtifactDeleteParams,
-  DevArtifactDeleteResult,
   DevArtifactDownloadRequest,
-  DevArtifactGetParams,
-  DevArtifactGetResult,
   DevArtifactListParams,
   DevArtifactListResult,
   DevArtifactRetainParams,
@@ -165,15 +160,11 @@ import type {
   DevBrowserResetResult,
   DevBrowserScreenshotParams,
   DevBrowserScreenshotResult,
-  DevBrowserSnapshotParams,
-  DevBrowserSnapshotResult,
   DevBrowserStatusParams,
   DevBrowserStatusResult,
   DevBrowserStreamRequest,
   DevBrowserViewportParams,
   DevBrowserViewportResult,
-  DevBrowserWaitParams,
-  DevBrowserWaitResult,
   DevControlAcquireParams,
   DevControlAcquireResult,
   DevControlReleaseParams,
@@ -186,20 +177,14 @@ import type {
   DevTerminalInputResult,
   DevTerminalListParams,
   DevTerminalListResult,
-  DevTerminalOutputParams,
-  DevTerminalOutputResult,
   DevTerminalResizeParams,
   DevTerminalResizeResult,
-  DevTerminalScreenParams,
-  DevTerminalScreenResult,
   DevTerminalScreenshotParams,
   DevTerminalScreenshotResult,
   DevTerminalStartParams,
   DevTerminalStartResult,
   DevTerminalStopParams,
   DevTerminalStopResult,
-  DevTerminalWaitParams,
-  DevTerminalWaitResult,
 } from '@/lib/development-types'
 import type {
   RunGitCommitParams,
@@ -585,18 +570,12 @@ export const api = {
     call<DevTerminalListResult>('dev.terminal.list', params),
   devTerminalStart: (params: DevTerminalStartParams) =>
     call<DevTerminalStartResult>('dev.terminal.start', params),
-  devTerminalOutput: (params: DevTerminalOutputParams) =>
-    call<DevTerminalOutputResult>('dev.terminal.output', params),
-  devTerminalScreen: (params: DevTerminalScreenParams) =>
-    call<DevTerminalScreenResult>('dev.terminal.screen', params),
   devTerminalScreenshot: (params: DevTerminalScreenshotParams) =>
     call<DevTerminalScreenshotResult>('dev.terminal.screenshot', params),
   devTerminalInput: (params: DevTerminalInputParams) =>
     call<DevTerminalInputResult>('dev.terminal.input', params),
   devTerminalResize: (params: DevTerminalResizeParams) =>
     call<DevTerminalResizeResult>('dev.terminal.resize', params),
-  devTerminalWait: (params: DevTerminalWaitParams) =>
-    call<DevTerminalWaitResult>('dev.terminal.wait', params),
   devTerminalStop: (params: DevTerminalStopParams) =>
     call<DevTerminalStopResult>('dev.terminal.stop', params),
   devBrowserStatus: (params: DevBrowserStatusParams) =>
@@ -607,8 +586,6 @@ export const api = {
     call<DevBrowserPagesResult>('dev.browser.pages', params),
   devBrowserNavigate: (params: DevBrowserNavigateParams) =>
     call<DevBrowserNavigateResult>('dev.browser.navigate', params),
-  devBrowserSnapshot: (params: DevBrowserSnapshotParams) =>
-    call<DevBrowserSnapshotResult>('dev.browser.snapshot', params),
   /** Reads the element under a point. It needs no control of the Browser.
    * A companion older than the server answers -32601 with the reason. */
   devBrowserInspect: (params: DevBrowserInspectParams) =>
@@ -619,8 +596,6 @@ export const api = {
     call<DevBrowserScreenshotResult>('dev.browser.screenshot', params),
   devBrowserViewport: (params: DevBrowserViewportParams) =>
     call<DevBrowserViewportResult>('dev.browser.viewport', params),
-  devBrowserWait: (params: DevBrowserWaitParams) =>
-    call<DevBrowserWaitResult>('dev.browser.wait', params),
   devBrowserConsole: (params: DevBrowserConsoleParams) =>
     call<DevBrowserConsoleResult>('dev.browser.console', params),
   devBrowserNetwork: (params: DevBrowserNetworkParams) =>
@@ -639,10 +614,6 @@ export const api = {
     call<DevControlReleaseResult>('dev.control.release', params, undefined, true),
   devArtifactList: (params: DevArtifactListParams) =>
     call<DevArtifactListResult>('dev.artifact.list', params),
-  devArtifactGet: (params: DevArtifactGetParams) =>
-    call<DevArtifactGetResult>('dev.artifact.get', params),
-  devArtifactDelete: (params: DevArtifactDeleteParams) =>
-    call<DevArtifactDeleteResult>('dev.artifact.delete', params),
   devArtifactRetain: (params: DevArtifactRetainParams) =>
     call<DevArtifactRetainResult>('dev.artifact.retain', params),
   devPortList: (params: DevPortListParams) =>
@@ -874,10 +845,6 @@ export const api = {
     call<{ workspace: Workspace }>('workspace.add', params).then(
       (r) => r.workspace,
     ),
-  workspaceGet: (workspaceID: string) =>
-    call<{ workspace: Workspace }>('workspace.get', {
-      workspace_id: workspaceID,
-    }).then((r) => r.workspace),
   workspaceListFull: () =>
     call<{ workspaces: Workspace[] }>('workspace.list').then(
       (r) => r.workspaces,
@@ -1112,9 +1079,6 @@ export const api = {
   localUpdateApply: () => local<UpdateApplyResult>('update.apply'),
   /** Progress of a desktop-app rebuild started by update.apply. */
   localUpdateStatus: () => local<UpdateBuildStatus>('update.status'),
-  /** Which setup-capable agents this machine has on PATH, plus the
-   * linked repository folder when the gateway knows exactly one. */
-  envAgents: () => local<EnvAgentsResult>('env.agents'),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
   terminalHistory: (params: TerminalHistoryParams, signal?: AbortSignal) =>
     call<TerminalHistoryResult>('terminal.history', params, signal),
