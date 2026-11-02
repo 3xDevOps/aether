@@ -75,10 +75,15 @@ type keeperStart struct {
 	k      *testTermKeeper
 	stdout *io.PipeReader
 	ready  *io.PipeWriter
+	// exited is a process that ended without reading its stdin.
+	exited bool
 }
 
 func (a *keeperStart) Stdin() io.WriteCloser { return a }
 func (a *keeperStart) Write(p []byte) (int, error) {
+	if a.exited {
+		return 0, io.ErrClosedPipe
+	}
 	if a.k != nil {
 		a.k.term = acpkeeper.NewTerm(acpkeeper.TermConfig{Token: strings.TrimSpace(string(p)), Input: a.k, Resize: a.k.resize, Cols: 12, Rows: 3})
 		go func() { _, _ = io.WriteString(a.ready, "ready\n") }()
@@ -142,13 +147,13 @@ func (r *terminalTestRuntime) startKeeperExec(container runtime.ID, spec runtime
 		}()
 	default:
 		// A staged binary without keepers answers as aether-internal does
-		// to a command it does not know.
+		// to a command it does not know, and exits before reading its token.
 		stdout, w := io.Pipe()
 		go func() {
 			_, _ = io.WriteString(w, `{"schema_version":"1","ok":false,"error":{"code":-32601,"message":"unknown command: acp-keeper"}}`+"\n")
 			_ = w.Close()
 		}()
-		execution.start = &keeperStart{stdout: stdout, ready: w}
+		execution.start = &keeperStart{stdout: stdout, ready: w, exited: true}
 		process.endProcess(2)
 	}
 	return execution, nil

@@ -95,13 +95,15 @@ func keeperReady(ctx context.Context, exec runtime.ManagedExec, token string) (s
 	}()
 	ready := make(chan error, 1)
 	go func() {
-		if _, werr := io.WriteString(att.Stdin(), token+"\n"); werr != nil {
-			ready <- fmt.Errorf("hand the keeper its token: %w", werr)
-			return
-		}
+		// A binary without a keeper answers and exits without reading its
+		// stdin, so its answer is read even when the token cannot be written.
+		_, werr := io.WriteString(att.Stdin(), token+"\n")
 		line, rerr := bufio.NewReader(att.Stdout()).ReadString('\n')
-		if rerr == nil && strings.TrimSpace(line) != "ready" {
+		switch {
+		case rerr == nil && strings.TrimSpace(line) != "ready":
 			rerr = &keeperOutputError{line: line}
+		case werr != nil:
+			rerr = fmt.Errorf("hand the keeper its token: %w", werr)
 		}
 		ready <- rerr
 	}()
