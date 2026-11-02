@@ -39,6 +39,9 @@ const destinationCommandIDs: Record<string, true> = {
 
 const navigationCommandIDs = new Set(['board', 'overview', 'connectors'])
 
+// The label leads so a canonical match outscores an alias.
+const searchValue = (command: Command) => (command.value ? `${command.label} ${command.value}` : command.label)
+
 /** Rendered inside CommandDialog, which supplies the cmdk root. */
 export function PaletteBody({
   onDone,
@@ -101,7 +104,7 @@ export function PaletteBody({
   const item = (command: Command) => (
     <CommandItem
       key={command.id}
-      value={command.value ?? command.label}
+      value={searchValue(command)}
       disabled={command.disabled}
       onSelect={() => {
         if (command.confirm && focused) {
@@ -133,12 +136,12 @@ export function PaletteBody({
     ? [...runCommands(focusedContext), ...handoffCommands(focusedContext)]
     : []
   const browseOrder = [
-    ...navigationCommands.map((command) => command.value ?? command.label),
+    ...navigationCommands.map(searchValue),
     ...goTo.map(({ value }) => value),
     ...runItems.map(({ value }) => value),
     ...workspaceItems.map(({ value }) => value),
-    ...focusedCommands.map((command) => command.value ?? command.label),
-    ...boardActions.map((command) => command.value ?? command.label),
+    ...focusedCommands.map(searchValue),
+    ...boardActions.map(searchValue),
   ]
 
   return (

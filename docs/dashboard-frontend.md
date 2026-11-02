@@ -2195,7 +2195,14 @@ view has the header's primary action and **More**. Appearance has explicit
 **Use system theme**, **Use light theme** and **Use dark theme** commands
 that set the same persisted preference as Settings.
 
-The palette ranks with cmdk's default scorer. The pinned local cmdk patch
+The palette ranks with cmdk's default scorer. A command matches on its label
+followed by its aliases, `Command.value` in `src/lib/commands.ts` (a
+destination's `keywords` in `src/lib/surfaces.ts`), so a label that starts
+with the query outranks an alias match: "delete" ranks **Delete session**
+above **Close session…**. cmdk matches subsequences, so check that a new
+alias does not pull a destructive command into an unrelated query; typing
+never runs a command, and Enter on a confirmed verb opens its confirmation.
+The pinned local cmdk patch
 in `patches/cmdk@1.1.1.patch` stays because stock cmdk 1.1.1 leaves the
 input's `aria-activedescendant` unset for the initial selection and stale
 after filtering, and spreads caller props before that attribute, so no

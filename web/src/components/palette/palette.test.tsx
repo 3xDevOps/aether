@@ -559,6 +559,73 @@ describe('command palette', () => {
     expect(api.runLaunch).not.toHaveBeenCalled()
   })
 
+  describe('aliases', () => {
+    beforeEach(() => {
+      useStore.setState({
+        route: { name: 'run', params: { runId: active.id } },
+        pausedRuns: { [active.id]: false },
+        capabilities: { gateway: 'local', methods: ['*'], ws: ['terminal'], local: ['forward.start'] },
+      })
+    })
+
+    async function search(query: string): Promise<(string | null)[]> {
+      open()
+      await userEvent.type(await screen.findByRole('combobox'), query)
+      return screen.queryAllByRole('option').map((option) => option.textContent)
+    }
+
+    it.each([
+      ['launch', 'Launch from a template…', 'New session…'],
+      ['start', 'New session…', 'New session…'],
+      ['kill', 'Kill session', 'Kill session'],
+      ['stop', 'Kill session', 'Kill session'],
+      ['preferences', 'Settings', 'Settings'],
+      ['terminal', 'Environment', 'Environment'],
+      ['logs', 'Activity', 'Activity'],
+      ['dark mode', 'Use dark theme', 'Use dark theme'],
+      ['chat', 'Ask Aether', 'Send a message to the agent…'],
+      ['messages', 'Send a message to the agent…', 'Send a message to the agent…'],
+      ['tunnel', 'Forward a port…', 'Forward a port…'],
+    ])('"%s" ranks %s first and finds %s without running anything', async (query, first, found) => {
+      const names = await search(query)
+      expect(names[0]).toBe(first)
+      expect(names).toContain(found)
+      expect(api.runKill).not.toHaveBeenCalled()
+      expect(api.runDelete).not.toHaveBeenCalled()
+      expect(api.runPause).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['terminal', 'Kill session'],
+      ['start', 'Kill session'],
+      ['done', 'Delete session'],
+    ])('keeps "%s" from reaching %s', async (query, absent) => {
+      expect(await search(query)).not.toContain(absent)
+    })
+
+    it('opens the kill confirmation, not the kill, when Enter takes the "stop" match', async () => {
+      const names = await search('stop')
+      expect(names[0]).toBe('Kill session')
+      fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' })
+      expect(within(await screen.findByRole('alertdialog')).getByText('Kill this session?')).toBeTruthy()
+      expect(api.runKill).not.toHaveBeenCalled()
+    })
+
+    it('offers no Relaunch by "restart" on a live session', async () => {
+      expect(await search('restart')).not.toContain('Relaunch')
+    })
+
+    it('offers Kill session by "stop" only with a session in view', async () => {
+      useStore.setState({ route: { name: 'board', params: {} } })
+      expect(await search('stop')).not.toContain('Kill session')
+    })
+
+    it('says so when nothing matches', async () => {
+      expect(await search('output')).toEqual([])
+      expect(screen.getByText('No commands, sessions, or workspaces match.')).toBeTruthy()
+    })
+  })
+
   it('hides New run from a role that cannot launch', async () => {
     useStore.setState({
       capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
@@ -847,6 +914,8 @@ describe('command palette', () => {
       },
     })
     open()
+    await userEvent.type(await screen.findByRole('combobox'), 'restart')
+    expect(api.runRelaunch).not.toHaveBeenCalled()
 
     fireEvent.click(await screen.findByText('Relaunch'))
 
