@@ -70,7 +70,7 @@ function Progress({ runID, agent, state }: { runID: string; agent: Subagent; sta
   const activity = agent.latest ? activityLabel(agent.latest) : undefined
   switch (state) {
     case 'running':
-      return <Shimmer text={activity ?? (agent.call?.task ? 'Running in the background' : agent.activeSeq !== undefined ? 'Working' : 'Starting')} className="block truncate" />
+      return <Shimmer text={activity ?? (agent.call?.task ? 'Running in the background' : agent.activeSeq !== undefined ? 'Working' : 'Starting')} className="block w-fit max-w-full truncate" />
     case 'done':
       return <>{report ?? 'Finished'}</>
     case 'failed':

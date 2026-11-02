@@ -251,6 +251,7 @@
      compositor (docs/styles.md, "Session state and motion"). */
   .live-shimmer {
     position: relative;
+    overflow: clip;
     color: var(--text-muted);
   }
 

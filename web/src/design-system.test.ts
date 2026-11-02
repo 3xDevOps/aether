@@ -218,6 +218,10 @@ describe('endless animations', () => {
   const endless = [...new Set([...sheets.matchAll(/(?:animation|--animate-[\w-]+):\s*([\w-]+)[^;]*\binfinite\b/g)].map((m) => m[1]))]
     .filter((name) => keyframes.has(name))
 
+  it('clips the shimmer band, whose translated box would otherwise widen a scroller', () => {
+    expect(sheets.match(/\.live-shimmer \{[^}]*\}/)?.[0]).toContain('overflow: clip')
+  })
+
   it('finds the live shimmer among them', () => {
     expect(endless).toEqual(expect.arrayContaining(['live-shimmer-band', 'live-shimmer-copy', 'trace-live', 'breathe']))
   })

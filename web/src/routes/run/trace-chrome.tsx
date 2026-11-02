@@ -53,7 +53,7 @@ export function TraceStatsStrip({
 }) {
   const floor = partial ? '≥' : ''
   const cells: [string, React.ReactNode][] = [
-    ['Duration', live ? <Shimmer text={spanDuration(root, now)} className="block truncate" /> : spanDuration(root, now)],
+    ['Duration', live ? <Shimmer text={spanDuration(root, now)} className="block w-fit max-w-full truncate" /> : spanDuration(root, now)],
     ['Turns', `${floor}${stats.turns}`],
     ['Tool calls', `${floor}${stats.tools}`],
   ]
