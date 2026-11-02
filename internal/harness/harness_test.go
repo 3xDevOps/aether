@@ -75,7 +75,7 @@ func TestCustomProfileIsEmpty(t *testing.T) {
 	if !ok {
 		t.Fatal("custom profile missing")
 	}
-	if len(p.TUIArgs) != 0 || len(p.HeadlessArgs) != 0 || len(p.CredentialPaths) != 0 || len(p.EnvPassthrough) != 0 || p.User != "" || p.LocalRoot != "" || len(p.DenyNames) != 0 {
+	if len(p.TUIArgs) != 0 || len(p.HeadlessArgs) != 0 || len(p.CredentialPaths) != 0 || len(p.EnvPassthrough) != 0 || p.LocalRoot != "" || len(p.DenyNames) != 0 {
 		t.Fatalf("custom profile must be empty, got %+v", p)
 	}
 }
@@ -514,40 +514,35 @@ func TestHomeRelative(t *testing.T) {
 func TestResolveUser(t *testing.T) {
 	tests := []struct {
 		name      string
-		override  string
 		imageUser string
 		want      string
 		wantErr   bool
 	}{
-		{"empty image user is root", "", "", "0:0", false},
-		{"numeric uid implies same gid", "", "1000", "1000:1000", false},
-		{"numeric uid:gid accepted", "", "1000:100", "1000:100", false},
-		{"named user rejected", "", "node", "", true},
-		{"named group rejected", "", "1000:staff", "", true},
-		{"empty uid rejected", "", ":100", "", true},
-		{"profile override wins", "1234:1234", "node", "1234:1234", false},
-		{"profile override normalized", "1234", "node", "1234:1234", false},
-		{"named profile override rejected", "node:node", "", "", true},
-		{"chown sentinel uid rejected", "", "4294967295", "", true},
-		{"chown sentinel gid rejected", "", "1000:4294967295", "", true},
-		{"uid past 32 bits rejected", "", "4294967296", "", true},
-		{"max valid uid accepted", "", "4294967294", "4294967294:4294967294", false},
-		{"sentinel profile override rejected", "4294967295:0", "", "", true},
+		{"empty image user is root", "", "0:0", false},
+		{"numeric uid implies same gid", "1000", "1000:1000", false},
+		{"numeric uid:gid accepted", "1000:100", "1000:100", false},
+		{"named user rejected", "node", "", true},
+		{"named group rejected", "1000:staff", "", true},
+		{"empty uid rejected", ":100", "", true},
+		{"chown sentinel uid rejected", "4294967295", "", true},
+		{"chown sentinel gid rejected", "1000:4294967295", "", true},
+		{"uid past 32 bits rejected", "4294967296", "", true},
+		{"max valid uid accepted", "4294967294", "4294967294:4294967294", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ResolveUser(tt.override, tt.imageUser)
+			got, err := ResolveUser(tt.imageUser)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("ResolveUser(%q, %q) = %q, want error", tt.override, tt.imageUser, got)
+					t.Fatalf("ResolveUser(%q) = %q, want error", tt.imageUser, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("ResolveUser(%q, %q): %v", tt.override, tt.imageUser, err)
+				t.Fatalf("ResolveUser(%q): %v", tt.imageUser, err)
 			}
 			if got != tt.want {
-				t.Fatalf("ResolveUser(%q, %q) = %q, want %q", tt.override, tt.imageUser, got, tt.want)
+				t.Fatalf("ResolveUser(%q) = %q, want %q", tt.imageUser, got, tt.want)
 			}
 		})
 	}

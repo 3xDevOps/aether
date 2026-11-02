@@ -37,13 +37,11 @@ const (
 // EnvironmentPlan is the complete, server-assembled container environment.
 // Host paths in Mounts are derived only from configured server roots.
 type EnvironmentPlan struct {
-	Purpose     EnvironmentPurpose
 	Image       string
 	Env         map[string]string
 	SetupScript string
 	User        string
 	Home        string
-	Path        string
 	Mounts      []runtime.Mount
 	// Worktrees are not Mounts because a mount is chowned wholesale, which a
 	// checkout of hard-linked objects must not be.
@@ -100,7 +98,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			return nil, fmt.Errorf("scheduler: saved environment image %q is missing from the runtime; run aether env reset to return to the standard image", image)
 		}
 	}
-	user, err := s.resolveContainerUser(ctx, image, profile)
+	user, err := s.resolveContainerUser(ctx, image)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: resolve environment user: %w", err)
 	}
@@ -139,10 +137,10 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	}
 	env["PATH"] = localBin + ":" + pathValue
 	plan := &EnvironmentPlan{
-		Purpose: purpose, Image: image, Env: env,
+		Image: image, Env: env,
 		SetupScript: setupScript,
 		SecretEnv:   slices.Sorted(maps.Keys(secrets)),
-		User:        user, Home: home, Path: env["PATH"],
+		User:        user, Home: home,
 		Egress: purpose == EnvironmentPurposeRun && (ws.Environment.Egress.On || isolated),
 		Sudo:   purpose == EnvironmentPurposeTerminal || (run != nil && run.Permission == domain.PermissionRoot),
 	}
@@ -199,7 +197,6 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				// After the image's directories too: the launcher's own
 				// executables win, and the owner's fill the gaps.
 				env["PATH"] += ":" + path.Join(home, accountBin)
-				plan.Path = env["PATH"]
 			}
 		}
 		pins, err := s.pinnedLogins(ctx, member.ID, homePath, home, plan.Mounts)
@@ -440,7 +437,7 @@ func (s *Scheduler) protectConfiguredLegacyCaches(ctx context.Context, memberID 
 	workspaces = append(workspaces, nil)
 	var paths []string
 	for _, profile := range profiles {
-		user, err := s.resolveContainerUser(ctx, image, profile)
+		user, err := s.resolveContainerUser(ctx, image)
 		if err != nil {
 			return err
 		}

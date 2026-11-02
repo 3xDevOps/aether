@@ -150,14 +150,14 @@ func TestHostileCheckoutCannotExecuteDuringEvidenceAndDiff(t *testing.T) {
 		t.Fatalf("evidence patch lost raw payload content:\n%s", evidencePatch.Text)
 	}
 
-	first, err := e.writeSnapshotTree(ctx, "run-hostile-evidence", checkout)
+	first, err := e.writeSnapshotTreeLocked(ctx, "run-hostile-evidence", checkout)
 	if err != nil {
 		t.Fatalf("first snapshot: %v", err)
 	}
 	if writeErr := os.WriteFile(filepath.Join(checkout, "payload"), []byte("payload changed\n"), 0o644); writeErr != nil {
 		t.Fatal(writeErr)
 	}
-	second, err := e.writeSnapshotTree(ctx, "run-hostile-evidence", checkout)
+	second, err := e.writeSnapshotTreeLocked(ctx, "run-hostile-evidence", checkout)
 	if err != nil {
 		t.Fatalf("second snapshot: %v", err)
 	}
@@ -512,7 +512,7 @@ func TestEvidenceSnapshotBoundsRejectsOversizedTree(t *testing.T) {
 	if truncateErr := os.Truncate(path, MaxEvidenceInputBytes+1); truncateErr != nil {
 		t.Fatal(truncateErr)
 	}
-	tree, err := e.writeSnapshotTree(t.Context(), "run-snapshot-large", checkout)
+	tree, err := e.writeSnapshotTreeLocked(t.Context(), "run-snapshot-large", checkout)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -226,14 +226,6 @@ func renameAsideTranscript(path string) error {
 	return nil
 }
 
-// readCastTail decodes output events from the bounded tail of an asciinema
-// v2 transcript. A partial first line is discarded because the read window
-// may begin in the middle of a JSON event.
-func readCastTail(path string, maxBytes int) ([]byte, error) {
-	out, _, err := readCastTailWindow(path, maxBytes, maxBytes*8)
-	return out, err
-}
-
 // readCastTailWindow bounds both decoded output and bytes read from disk.
 // JSON escaping expands one terminal byte to at most six cast bytes; the
 // small extra margin covers event framing without making a giant event a

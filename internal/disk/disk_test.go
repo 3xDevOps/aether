@@ -57,10 +57,7 @@ func seedDataDir(t *testing.T) string {
 }
 
 func TestMeasureAccountsForEachGrowingDirectory(t *testing.T) {
-	got, err := Measure(seedDataDir(t))
-	if err != nil {
-		t.Fatalf("Measure: %v", err)
-	}
+	got := components(seedDataDir(t))
 	if got.WorktreeBytes != seededWorktreeBytes {
 		t.Errorf("worktree bytes = %d, want %d (the checkout's own files, not the pack it "+
 			"hardlinks from the bare repo)", got.WorktreeBytes, seededWorktreeBytes)
@@ -75,19 +72,13 @@ func TestMeasureAccountsForEachGrowingDirectory(t *testing.T) {
 		t.Errorf("repo bytes = %d, want %d (the whole bare repo tree, including the shared pack)",
 			got.RepoBytes, seededRepoBytes)
 	}
-	if got.TotalBytes == 0 || got.FreeBytes == 0 {
-		t.Errorf("filesystem reading = %+v, want a real total and free", got)
-	}
 }
 
 // Run checkouts are `git clone --local` hardlink clones, so a walk that
 // sums sizes per pathname charges every shared object twice and the gauge
 // claims a repo and its one clone hold twice the space they do.
 func TestMeasureCountsAHardlinkedObjectOnce(t *testing.T) {
-	got, err := Measure(seedDataDir(t))
-	if err != nil {
-		t.Fatalf("Measure: %v", err)
-	}
+	got := components(seedDataDir(t))
 	onDisk := uint64(seededWorktreeBytes + seededTranscriptBytes + seededDatabaseBytes + seededRepoBytes)
 	total := got.WorktreeBytes + got.TranscriptBytes + got.DatabaseBytes + got.RepoBytes
 	if total != onDisk {
@@ -98,14 +89,8 @@ func TestMeasureCountsAHardlinkedObjectOnce(t *testing.T) {
 
 // An empty data directory has no component failures.
 func TestMeasureToleratesMissingDirectories(t *testing.T) {
-	got, err := Measure(t.TempDir())
-	if err != nil {
-		t.Fatalf("Measure on an empty data dir: %v", err)
-	}
+	got := components(t.TempDir())
 	if got.WorktreeBytes != 0 || got.TranscriptBytes != 0 || got.DatabaseBytes != 0 || got.RepoBytes != 0 {
 		t.Errorf("components on an empty data dir = %+v, want zeroes", got)
-	}
-	if got.TotalBytes == 0 {
-		t.Error("filesystem total is zero on an empty data dir")
 	}
 }

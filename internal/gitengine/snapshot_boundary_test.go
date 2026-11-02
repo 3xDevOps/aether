@@ -27,7 +27,7 @@ func TestSnapshotRevertRetainsEveryChangedTree(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(content+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+		tree, err := e.writeSnapshotTreeLocked(ctx, "run1", checkout)
 		if err != nil {
 			t.Fatal(err)
 		}

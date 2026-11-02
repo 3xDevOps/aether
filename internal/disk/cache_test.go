@@ -57,8 +57,8 @@ func (g *gatedCache) read(t *testing.T) Usage {
 	if err != nil {
 		t.Fatalf("Usage: %v", err)
 	}
-	if u.TotalBytes == 0 {
-		t.Fatal("reading has no filesystem total, want fresh headroom")
+	if u.TotalBytes == 0 || u.FreeBytes == 0 {
+		t.Fatalf("reading has filesystem total %d and free %d, want fresh headroom", u.TotalBytes, u.FreeBytes)
 	}
 	return u
 }
