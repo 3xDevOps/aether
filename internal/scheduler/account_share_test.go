@@ -551,13 +551,13 @@ func (e *shareEnv) startLoginChown(t *testing.T) (done <-chan error, login, last
 	if err := os.MkdirAll(deepest, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	const files = 5000
+	const files = 20000
 	for i := range files {
-		if err := os.WriteFile(filepath.Join(deepest, fmt.Sprintf("%04d", i)), nil, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(deepest, fmt.Sprintf("%05d", i)), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	last = filepath.Join(deepest, fmt.Sprintf("%04d", files-1))
+	last = filepath.Join(deepest, fmt.Sprintf("%05d", files-1))
 	entry := &supervised{runID: "recipient", memberID: e.member.ID}
 	mounts := []runtime.Mount{{HostPath: e.ownerHome, Subpath: ".omp/agent", ContainerPath: "/home/aether/.omp/agent"}}
 	result := make(chan error, 1)
@@ -575,8 +575,8 @@ func (e *shareEnv) startLoginChown(t *testing.T) (done <-chan error, login, last
 	return result, login, last
 }
 
-// A long chown of one member's shared login holds that member's home, and
-// nothing else: the rest of the scheduler keeps working during the walk.
+// A chown of one member's shared login holds that member's home, and nothing
+// else: another member's launch goes ahead while that home is held.
 func TestLoginChownHoldsOnlyTheOwnersHome(t *testing.T) {
 	t.Parallel()
 	if os.Geteuid() != 0 {
@@ -584,23 +584,25 @@ func TestLoginChownHoldsOnlyTheOwnersHome(t *testing.T) {
 	}
 	e := newShareEnv(t, nil)
 	done, _, last := e.startLoginChown(t)
-	if _, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "beside the chown", "fake", domain.LaunchTUI); err != nil {
-		t.Fatalf("launch during another member's login chown: %v", err)
-	}
 	lock := e.sched.homeLock(e.owner.ID)
 	held := !lock.TryLock()
 	if !held {
 		lock.Unlock()
 	}
-	// Read last: still unchowned, so both checks above ran during the walk.
+	// Read last: still unchowned, so the check above ran during the walk.
 	if ownerOf(t, last) != 0 {
-		t.Fatal("the launch waited for another member's login chown")
+		t.Fatal("login pass finished before its lock could be checked")
 	}
 	if !held {
 		t.Fatal("the login chown runs without the owner's home lock")
 	}
 	if err := <-done; err != nil {
 		t.Fatalf("login chown: %v", err)
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "beside the chown", "fake", domain.LaunchTUI); err != nil {
+		t.Fatalf("launch while another member's home is held: %v", err)
 	}
 }
 
