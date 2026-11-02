@@ -64,6 +64,16 @@ function overlay(markup: string): void {
   onTestFinished(() => host.remove())
 }
 
+/** Moves the palette's selection down to the named row, as a keyboard user would. */
+function arrowTo(search: HTMLElement, name: string): void {
+  const row = screen.getByRole('option', { name })
+  for (const _ of screen.getAllByRole('option')) {
+    if (row.getAttribute('aria-selected') === 'true') return
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+  }
+  expect(row.getAttribute('aria-selected')).toBe('true')
+}
+
 function SearchButton() {
   return <button type="button" onClick={() => useStore.getState().togglePalette(true)}>Search</button>
 }
@@ -519,6 +529,37 @@ describe('command palette', () => {
     await waitFor(() => expect(useStore.getState().route.name).toBe('run'))
   })
 
+  it('finds Close session by "delete" below Delete session, and only opens its confirmation on Enter', async () => {
+    useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
+    open()
+    const search = await screen.findByRole('combobox')
+    await userEvent.type(search, 'Delete')
+
+    const names = screen.getAllByRole('option').map((option) => option.textContent)
+    expect(names.indexOf('Delete session')).toBe(0)
+    expect(names).toContain('Close session…')
+    expect(screen.getByRole('option', { name: 'Delete session' }).getAttribute('aria-selected')).toBe('true')
+
+    arrowTo(search, 'Close session…')
+    fireEvent.keyDown(search, { key: 'Enter' })
+
+    expect(await screen.findByText('Close this session?')).toBeTruthy()
+    expect(api.runDelete).not.toHaveBeenCalled()
+    expect(api.runKill).not.toHaveBeenCalled()
+  })
+
+  it('finds New session by "launch" and opens the launch form on Enter', async () => {
+    open()
+    const search = await screen.findByRole('combobox')
+    await userEvent.type(search, 'LAUNCH')
+
+    arrowTo(search, 'New session…')
+    fireEvent.keyDown(search, { key: 'Enter' })
+
+    expect(await screen.findByLabelText('Target workspace')).toBeTruthy()
+    expect(api.runLaunch).not.toHaveBeenCalled()
+  })
+
   it('hides New run from a role that cannot launch', async () => {
     useStore.setState({
       capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
@@ -529,6 +570,8 @@ describe('command palette', () => {
     })
     open()
     await screen.findByText('Open the board')
+    expect(screen.queryByText('New session…')).toBeNull()
+    await userEvent.type(screen.getByRole('combobox'), 'launch')
     expect(screen.queryByText('New session…')).toBeNull()
   })
 

@@ -410,6 +410,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       label: 'Close session…',
       short: 'Close',
       Icon: CircleCheck,
+      value: 'close session delete remove end finish',
       perform: (d) => d.openDialog('close', id),
     })
   }
@@ -673,6 +674,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       id: 'launch',
       label: 'New session…',
       Icon: Rocket,
+      value: 'new session launch start create',
       perform: (d) => d.openDialog('launch'),
     })
   }
