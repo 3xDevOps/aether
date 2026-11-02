@@ -187,13 +187,10 @@ func callTool(t *testing.T, cs *mcp.ClientSession, name string, args map[string]
 	return string(out)
 }
 
-// tokenAnswer is the token endpoint's answer: tokens, or an RFC 6749
-// error.
+// tokenAnswer is the token endpoint's answer.
 type tokenAnswer struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	Error        string `json:"error"`
-	Description  string `json:"error_description"`
 }
 
 // TestConnectorThroughTheEdge adds a server as a custom connector at its
