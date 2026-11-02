@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { CodeBlock } from '@/components/ui/code'
 import { CopyButton } from '@/components/ui/copy-button'
 import { Highlighted } from '@/components/ui/markdown'
+import { Shimmer } from '@/components/ui/shimmer'
 import { StatusDot } from '@/components/ui/status-dot'
 import { cn, focusRingInset } from '@/lib/utils'
 import { parsePatch, type PatchFile } from '@/routes/diff/parse'
@@ -27,9 +28,11 @@ export function PlanEntries({ entries, live }: { entries: PlanEntry[]; live: boo
                 : entry.status === 'in_progress' ? <StatusDot tone="working" pulse={live} label="In progress" />
                 : <span role="img" aria-label="To do" className="size-1.5 rounded-full border border-icon-faint" />}
             </span>
-            <span className={cn('min-w-0 py-0.5 break-words', entry.status === 'completed' ? 'text-muted' : entry.status === 'in_progress' && live ? 'live-shimmer' : 'text-text')}>
-              {entry.content}
-            </span>
+            {entry.status === 'in_progress' && live ? <Shimmer text={entry.content} className="min-w-0 py-0.5 break-words" /> : (
+              <span className={cn('min-w-0 py-0.5 break-words', entry.status === 'completed' ? 'text-muted' : 'text-text')}>
+                {entry.content}
+              </span>
+            )}
           </li>
         ))}
       </ol>

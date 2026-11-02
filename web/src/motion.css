@@ -7,13 +7,6 @@
   inherits: false;
 }
 
-/* The shimmer band's position, registered so a keyframe can tween it. */
-@property --shimmer-pos {
-  syntax: '<length-percentage>';
-  inherits: false;
-  initial-value: 0%;
-}
-
 @theme static {
   --ease-hover: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
@@ -174,10 +167,10 @@
   /* A third-width fill crossing its track, for work with no known progress. */
   @keyframes progress-sweep {
     from {
-      translate: -100% 0;
+      transform: translateX(-100%);
     }
     to {
-      translate: 300% 0;
+      transform: translateX(300%);
     }
   }
   @keyframes pop-in {
@@ -198,7 +191,7 @@
   }
   @keyframes bob {
     to {
-      translate: 0 -3px;
+      transform: translateY(-3px);
     }
   }
 }
@@ -249,32 +242,57 @@
   @keyframes breathe {
     50% {
       opacity: var(--opacity-muted);
-      scale: 0.67;
+      transform: scale(0.67);
     }
   }
 
   /* The live row: a light band crosses muted text, then rests for the
-     remainder of the period. */
+     remainder of the period. Only transforms move it, so it stays on the
+     compositor (docs/styles.md, "Session state and motion"). */
   .live-shimmer {
-    background: linear-gradient(
-        90deg,
-        var(--text-muted) calc(var(--shimmer-pos) - 30px),
-        var(--text) var(--shimmer-pos),
-        var(--text-muted) calc(var(--shimmer-pos) + 30px)
-      )
-      0 0 / 100% 100%;
-    background-clip: text;
-    color: transparent;
-    animation: live-shimmer var(--duration-pulse) var(--ease-linear) infinite;
+    position: relative;
+    color: var(--text-muted);
   }
 
-  @keyframes live-shimmer {
+  .live-shimmer-band {
+    position: absolute;
+    inset: 0;
+    padding: inherit;
+    text-overflow: inherit;
+    pointer-events: none;
+    user-select: none;
+    mask-image: linear-gradient(90deg, transparent calc(50% - 30px), #000 50%, transparent calc(50% + 30px));
+    animation: live-shimmer-band var(--duration-pulse) var(--ease-linear) infinite;
+  }
+
+  .live-shimmer-band::after {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    padding: inherit;
+    overflow: hidden;
+    text-overflow: inherit;
+    color: var(--text);
+    animation: live-shimmer-copy var(--duration-pulse) var(--ease-linear) infinite;
+  }
+
+  @keyframes live-shimmer-band {
     from {
-      --shimmer-pos: -30px;
+      transform: translateX(calc(-50% - 30px));
     }
     87.5%,
     to {
-      --shimmer-pos: calc(100% + 30px);
+      transform: translateX(calc(50% + 30px));
+    }
+  }
+
+  @keyframes live-shimmer-copy {
+    from {
+      transform: translateX(calc(50% + 30px));
+    }
+    87.5%,
+    to {
+      transform: translateX(calc(-50% - 30px));
     }
   }
 
@@ -307,10 +325,8 @@
       animation: none;
     }
 
-    .live-shimmer {
-      animation: none;
-      background: none;
-      color: var(--text-muted);
+    .live-shimmer-band {
+      display: none;
     }
   }
 }
@@ -337,13 +353,30 @@
 
   /* A running bar: the live shimmer's band crosses the fill. */
   .trace-live {
+    overflow: hidden;
+  }
+
+  .trace-live::after {
+    content: '';
+    position: absolute;
+    inset: 0;
     background-image: linear-gradient(
       90deg,
-      transparent calc(var(--shimmer-pos) - 28px),
-      color-mix(in srgb, var(--state-working) 35%, transparent) var(--shimmer-pos),
-      transparent calc(var(--shimmer-pos) + 28px)
+      transparent calc(50% - 28px),
+      color-mix(in srgb, var(--state-working) 35%, transparent) 50%,
+      transparent calc(50% + 28px)
     );
-    animation: live-shimmer var(--duration-pulse) var(--ease-linear) infinite;
+    animation: trace-live var(--duration-pulse) var(--ease-linear) infinite;
+  }
+
+  @keyframes trace-live {
+    from {
+      transform: translateX(calc(-50% - 28px));
+    }
+    87.5%,
+    to {
+      transform: translateX(calc(50% + 28px));
+    }
   }
 
   /* History before the first held item: a hatch, so it never reads as idle time. */
@@ -356,9 +389,8 @@
       transition: none;
     }
 
-    .trace-live {
-      animation: none;
-      background-image: none;
+    .trace-live::after {
+      display: none;
     }
   }
 }

@@ -3,6 +3,7 @@ import { Bot, Brain, FileText, Globe, ListTodo, Search, Wrench, type LucideIcon 
 import { Button } from '@/components/ui/button'
 import { LinkedText, Markdown } from '@/components/ui/markdown'
 import { DiffBlock, OutputTail, PlanEntries, ToolValue } from '@/components/ui/session-blocks'
+import { Shimmer } from '@/components/ui/shimmer'
 import { Spinner } from '@/components/ui/spinner'
 import { StatusDot } from '@/components/ui/status-dot'
 import { IconStack, StepChip, StepChipToggle, StepLine, StepRow, StepsHeader, StepsLiveMark, StepStatus } from '@/components/ui/steps'
@@ -61,8 +62,8 @@ export function StepsBlockHeader({ row, open, runID }: { row: StepsRow; open: bo
       onToggle={() => useStore.getState().setSessionRow(runID, row.id, !open)}
       lead={live ? <StepsLiveMark tone={live.tone} /> : <IconStack icons={row.icons.map(iconOf)} />}
       label={(
-        <TextSwap className="grid min-w-0" layerClassName={live ? (live.tone === 'working' ? 'truncate live-shimmer' : 'truncate text-text') : 'truncate'}>
-          {label}
+        <TextSwap className="grid min-w-0" swapKey={label} layerClassName={live && live.tone !== 'working' ? 'truncate text-text' : 'truncate'}>
+          {live?.tone === 'working' ? <Shimmer text={label} className="block truncate" /> : label}
         </TextSwap>
       )}
       meta={(
@@ -154,7 +155,7 @@ function LookupStep({ id, entries, first, last, live, runID }: { id: string; ent
   return (
     <StepRow mark={<Icon />} first={first} last={last}>
       <StepLine trailing={running ? <Spinner label="Running" className="text-state-working" /> : failed > 0 ? <span className="shrink-0 text-ui-sm text-state-failed">{failed} failed</span> : undefined}>
-        <span className={running && live ? 'live-shimmer' : undefined}>{running ? running.label : workSummary(entries.map((entry) => entry.tool))}</span>
+        {running && live ? <Shimmer text={running.label} className="block truncate" /> : <span>{running ? running.label : workSummary(entries.map((entry) => entry.tool))}</span>}
       </StepLine>
       <div className="flex flex-wrap gap-1.5 pb-2">
         {shown.map((entry) => <LookupChip key={entry.id} entry={entry} />)}
@@ -173,7 +174,7 @@ function ThoughtStep({ id, text, streaming, first, last, live, runID }: { id: st
   return (
     <StepRow mark={<Brain />} tall first={first} last={last}>
       <StepLine expanded={open} onToggle={toggle}>
-        {streaming ? <span className={live ? 'live-shimmer' : undefined}>Thinking</span> : 'Thought'}
+        {streaming ? (live ? <Shimmer text="Thinking" className="block truncate" /> : <span>Thinking</span>) : 'Thought'}
       </StepLine>
       <div className="pb-2">
         {open ? <Markdown text={text} muted live={streaming} /> : <p className="line-clamp-2 text-ui-sm break-words text-muted">{preview}</p>}

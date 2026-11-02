@@ -351,6 +351,9 @@ glide and fade stop.
 | No opacity on rows | `opacity-*` in `components/shell/` and `routes/board/`; a receding row uses `text-muted` |
 | Token names | Colour names that are not tokens and render nothing: `background`, `foreground`, `card`, `popover`, `sidebar`, `primary`, `secondary`, `muted-foreground`, `destructive`, `input`, `ring`, `border`, `toolbar-hover`, `field`, and `state-attention`, `-success`, `-warn`, `-waiting`, `-needs-attention`, `-idle` |
 
+It also fails when a looping keyframe in `index.css` or `motion.css`
+animates anything but `transform` and `opacity`.
+
 A rule can carry a legacy list of files that predate it; only no bare
 buttons still has one. The test also fails
 when a listed file already complies, so the lists only shrink.
@@ -651,6 +654,14 @@ literal time or curve.
   glides `--trace-scale` and `--trace-origin` over `--duration-glide`; the
   first measured layout after the view opens jumps into place. Unfolded
   rows enter with `animate-entrance`, unless more than eight arrive at once.
+
+A looping animation animates only `transform` and `opacity`, which Chromium
+runs on the compositor. A tweened custom property, a background position, or
+`scale`, `translate` or `rotate` on an `<svg>` restyles and repaints on every
+frame for as long as an agent works. So `live-shimmer` (`Shimmer` in
+`web/src/components/ui/shimmer.tsx`) draws its band as a bright copy of the
+text, the band's `::after` from `data-text`, masked to 60px: the band slides
+right while the copy slides left by as much, so the glyphs hold still.
 
 Under `prefers-reduced-motion: reduce` every animation and transition stops:
 overlays and sheets appear, indicators and bodies jump, the pulse holds, the

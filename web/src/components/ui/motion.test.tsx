@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { ProgressBar } from '@/components/ui/progress-bar'
+import { Shimmer } from '@/components/ui/shimmer'
 import { SlidingIndicator } from '@/components/ui/sliding-indicator'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TextSwap } from '@/components/ui/text-swap'
@@ -163,6 +164,15 @@ describe('tab indicator', () => {
     expect(glide.cancel).toHaveBeenCalled()
     expect(document.querySelector<HTMLElement>('[data-slot="sliding-indicator"]')!.style.left).toBe('80px')
   })
+})
+
+test('a shimmer shows its text once, with the bright copy hidden from assistive technology', () => {
+  const { container } = render(<p><Shimmer text="Reading billing.js" /></p>)
+  expect(container.textContent).toBe('Reading billing.js')
+  expect(screen.getByText('Reading billing.js')).toBeDefined()
+  const band = container.querySelector<HTMLElement>('.live-shimmer-band')!
+  expect(band.getAttribute('aria-hidden')).toBe('true')
+  expect(band.dataset.text).toBe('Reading billing.js')
 })
 
 describe('text swap', () => {
