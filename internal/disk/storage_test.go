@@ -201,9 +201,6 @@ func TestCachePoolsShareGlobalInodeAccountingWithoutFollowingLinks(t *testing.T)
 	for _, entry := range u.Entries {
 		if entry.Kind == "cache" {
 			entries[entry.Key] = entry.Bytes
-			if entry.ReclaimableBytes != nil {
-				t.Fatal("apparent size is not a physical reclaimability promise")
-			}
 		}
 	}
 	if entries["launcher/runs"] != 17 || entries["launcher/terminal"] != 13 {

@@ -152,10 +152,11 @@ function Owners({ disk }: { disk: DiskUsage }) {
                   {entry.owner_kind}{name ? ` ${name}` : ''}{id ? ` (${id})` : ''} · {entry.kind}{entry.pool ? ` (${entry.pool})` : ''} · {formatBytes(entry.bytes)}
                 </span>
                 <span>{entry.reason}</span>
-                <span>
-                  Reclaimable: {known(entry.reclaimable_bytes)}
-                  {entry.retained_until && <> · {entry.kind === 'cache' ? 'Age target' : 'Retained until'} <time dateTime={entry.retained_until}>{new Date(entry.retained_until).toLocaleString()}</time></>}
-                </span>
+                {entry.retained_until && (
+                  <span>
+                    {entry.kind === 'cache' ? 'Age target' : 'Retained until'} <time dateTime={entry.retained_until}>{new Date(entry.retained_until).toLocaleString()}</time>
+                  </span>
+                )}
                 {entry.error && <span className="whitespace-pre-wrap">{entry.error}</span>}
               </InsetListItem>
             )

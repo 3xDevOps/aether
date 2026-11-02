@@ -1700,8 +1700,8 @@ a failed measurement while the previous sizes stay.
 Admins additionally receive an optional `entries` array, bounded to the
 largest 50 measured owners; `truncated` indicates clipping. Each entry has
 `kind`, `owner_kind` (`run`, `member`, `workspace` or `server`), optional
-`owner_id`, `bytes` and `reason`, with optional `reclaimable_bytes`,
-`retained_until` (ISO 8601), `pool` and `error`. Cache pools are `runs` or
+`owner_id`, `bytes` and `reason`, with optional `retained_until` (ISO
+8601), `pool` and `error`. Cache pools are `runs` or
 `terminal`, owned by the immutable launcher rather than a shared login account.
 Their deadline is an age target: byte pressure may reclaim eligible inactive
 caches earlier. Entries attribute the category

@@ -127,8 +127,7 @@ func (s *Server) serverDisk(ctx context.Context, member domain.MemberID, _ json.
 		for _, entry := range usage.Entries[:min(len(usage.Entries), 50)] {
 			wire := protocol.ServerDiskEntry{
 				Kind: entry.Kind, OwnerKind: entry.OwnerKind, OwnerID: entry.OwnerID, Pool: entry.Pool,
-				Bytes: entry.Bytes, ReclaimableBytes: entry.ReclaimableBytes,
-				Reason: entry.Reason, Error: entry.Error,
+				Bytes: entry.Bytes, Reason: entry.Reason, Error: entry.Error,
 			}
 			if entry.RetainedUntil != nil {
 				wire.RetainedUntil = entry.RetainedUntil.UTC().Format(time.RFC3339Nano)
