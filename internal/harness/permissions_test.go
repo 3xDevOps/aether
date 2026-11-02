@@ -67,9 +67,6 @@ func TestEveryShippedAgentRunsWithoutPermissionPrompts(t *testing.T) {
 			if want.flag == "" && want.permissionEnv == nil && !want.optOut {
 				t.Fatal("no way to turn its permission prompts off")
 			}
-			if p.NoPermissionPrompt != want.optOut {
-				t.Errorf("NoPermissionPrompt = %v, want %v", p.NoPermissionPrompt, want.optOut)
-			}
 			if want.flag != "" {
 				argvs := map[string][]string{"tui": p.TUIArgs, "headless": p.HeadlessArgs}
 				// A terminal resuming through the app-server keeps the

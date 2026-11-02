@@ -293,9 +293,6 @@ type Profile struct {
 	Env map[string]string
 	// PermissionEnv turns off the prompts of an agent with no flag for it.
 	PermissionEnv map[string]string
-	// NoPermissionPrompt declares an agent that never asks, so it has no
-	// permission setting to apply.
-	NoPermissionPrompt bool
 	// CredentialPaths is the allowlist of paths an account share exposes from
 	// the owner's home. Resolve them with LoginPaths.
 	CredentialPaths []string
@@ -485,24 +482,23 @@ var profiles = map[string]Profile{
 		UpdateScript: withAdapterUpdate(npmUpdateScript("@openai/codex", "codex", `*" $latest"`), codexACP),
 	},
 	"pi": {
-		Name:               "pi",
-		DisplayName:        "pi",
-		TUIArgs:            []string{"pi", TaskPlaceholder},
-		HeadlessArgs:       []string{"pi", "-p", TaskPlaceholder},
-		ACPArgs:            []string{piACP.Binary},
-		ACPInstall:         piACP,
-		ModelArgs:          []string{"--model", ModelPlaceholder},
-		EffortArgs:         []string{"--thinking", EffortPlaceholder},
-		EffortLevels:       []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"},
-		NoPermissionPrompt: true,
-		EnvPassthrough:     []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
-		CredentialPaths:    []string{".pi/agent/auth.json"},
-		LocalRoot:          ".pi",
-		DenyNames:          []string{"auth.json", "oauth.json"},
-		InstructionArgs:    []string{"--append-system-prompt", InstructionsPlaceholder},
-		Capabilities:       Capabilities{Status: ReporterFull, Hooks: HooksManaged, IdleWake: true},
-		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
-		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		Name:            "pi",
+		DisplayName:     "pi",
+		TUIArgs:         []string{"pi", TaskPlaceholder},
+		HeadlessArgs:    []string{"pi", "-p", TaskPlaceholder},
+		ACPArgs:         []string{piACP.Binary},
+		ACPInstall:      piACP,
+		ModelArgs:       []string{"--model", ModelPlaceholder},
+		EffortArgs:      []string{"--thinking", EffortPlaceholder},
+		EffortLevels:    []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"},
+		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		CredentialPaths: []string{".pi/agent/auth.json"},
+		LocalRoot:       ".pi",
+		DenyNames:       []string{"auth.json", "oauth.json"},
+		InstructionArgs: []string{"--append-system-prompt", InstructionsPlaceholder},
+		Capabilities:    Capabilities{Status: ReporterFull, Hooks: HooksManaged, IdleWake: true},
+		StatusArgs:      []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
+		StatusFiles:     map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent; else echo \"npm is not in this environment's PATH, and pi installs through npm\" >&2; false; fi",
 		LoginCommand:  "pi",
