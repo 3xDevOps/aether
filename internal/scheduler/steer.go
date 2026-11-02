@@ -562,9 +562,7 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 	entry.resuming = acp
 	s.mu.Unlock()
 	s.setPaused(entry, false)
-	if err := s.RecoverDevelopmentTerminals(ctx, run); err != nil {
-		slog.Warn("scheduler: recover the terminals of a resumed session", "run", run, "error", err)
-	}
+	terminalsErr := s.RecoverDevelopmentTerminals(ctx, run)
 	if acp {
 		s.acp.resumeAfterPause(ctx, entry)
 		s.mu.Lock()
@@ -575,6 +573,9 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 		s.appServer.resumeAfterPause(entry)
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineResume, "")
+	if terminalsErr != nil {
+		return fmt.Errorf("the session resumed, but its terminals were not recovered: %w", terminalsErr)
+	}
 	return nil
 }
 

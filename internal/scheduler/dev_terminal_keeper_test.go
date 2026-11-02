@@ -444,6 +444,27 @@ func TestDevelopmentTerminalLeaseThatFailedToSaveIsNotSavedLater(t *testing.T) {
 	}
 }
 
+func TestResumeReportsTerminalsItCouldNotRecover(t *testing.T) {
+	e := newKeptTerminalEnv(t)
+	run, _ := e.launchFake(t, "kept-unrecoverable")
+	startTestTerminal(t, e, run.ID, "server")
+	if err := e.sched.Pause(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	delete(e.sched.runShellTerminals, run.ID)
+	e.sched.mu.Unlock()
+	if err := os.WriteFile(e.sched.runTerminalsPath(run.ID), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.Resume(t.Context(), run.ID, e.member.ID); err == nil || !strings.Contains(err.Error(), "decode terminal registry") {
+		t.Fatalf("resume with an unreadable terminal registry: %v", err)
+	}
+	if e.sched.Paused(run.ID) {
+		t.Fatal("the session stayed paused")
+	}
+}
+
 func TestDevelopmentTerminalOfAPausedSessionReconnectsOnResume(t *testing.T) {
 	e := newKeptTerminalEnv(t)
 	rt := e.sched.cfg.Runtime.(*terminalTestRuntime)
