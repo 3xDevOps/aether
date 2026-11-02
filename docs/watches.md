@@ -281,8 +281,12 @@ aether-internal report --outcome waiting --for ci \
 Each `--until` (at most 4) becomes a watch the session owns: `source` `agent`,
 `owner_run_id` the reporting session, and the session member's workspace
 access. Pull requests are read with the GitHub login of the member whose
-home the session runs in, its launcher, even after a handoff. A session records at most 30 waiting reports with `--until`
-an hour; the next is refused with that error.
+home the session runs in, its launcher, even after a handoff. Every read,
+`merged` included, also reads the head commit's checks, so that login needs
+the access a [`pr` watch](#pull-requests-and-ci) needs; a refused read
+retries, and after an hour the wait is broken and the session needs you. A
+session records at most 30 waiting reports with `--until` an hour; the next
+is refused with that error.
 
 | Condition | Resolves | Outcome |
 | --- | --- | --- |
