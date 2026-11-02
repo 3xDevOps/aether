@@ -4,7 +4,7 @@ Aether does not install or bundle coding agents. You install the agent CLI in
 your [environment](environments.md) (your own persistent container shell) and
 sign in with the vendor's own login. Sessions then launch that CLI inside a
 container. This guide lists which agents work, how to sign in to each, and what
-does not work. Terms such as run, subsession and workspace are in the
+does not work. Terms such as session, subsession and workspace are in the
 [glossary](README.md#concepts).
 
 ## Supported agents
@@ -175,7 +175,7 @@ terminal. Attach with `aether attach <session>` and finish it there.
 Installing `codex`, `pi`, `copilot` or `gemini` needs `npm`. If `npm` is not on
 the environment's `PATH`, the install fails with, for example,
 `npm is not in this environment's PATH, and codex installs through npm`. The
-dashboard's **Set up** and `aether agent add` without a terminal the
+dashboard's **Set up** and `aether agent add` without a terminal run the
 install under `mktemp` and `timeout`, so the image must provide both. Without
 them it fails with `timeout: not found` and exit status 127.
 
@@ -246,7 +246,7 @@ the server's environment signs in Background sessions only. Codex ignores
 key** comes filled in with it. Codex reads no base-URL variable; for a gateway,
 set `openai_base_url` in `~/.codex/config.toml`.
 
-A Standard Codex run starts `codex app-server` in the session's container and
+A Standard Codex session starts `codex app-server` in the session's container and
 attaches the Codex terminal to it with `codex --remote`. Aether follows the same
 session through that app-server: Codex reports the start and end of each turn,
 and mail and your messages from the dashboard or `aether message` arrive as a
@@ -491,12 +491,12 @@ error instead of moving.
 `--mode`, the server starts Enhanced where the agent's Enhanced mode is
 installed on the launch's account, and Standard otherwise.
 
-- Standard sessions the agent's terminal UI in a persistent PTY. `aether attach
+- Standard runs the agent's terminal UI in a persistent PTY. `aether attach
   <session>` puts you in it. After the agent exits, the container opens a login
   shell, and the session stays open until you Close, Kill or Delete it.
-- Enhanced sessions the agent over ACP next to a login shell. Close and reopen work
+- Enhanced runs the agent over ACP next to a login shell. Close and reopen work
   like Standard.
-- Background sessions the agent once. On exit Aether commits and publishes the
+- Background runs the agent once. On exit Aether commits and publishes the
   branch, records `completed` or `failed`, and destroys the container. It cannot
   be reopened. `codex`, `omp`, `opencode`, `copilot`, `gemini` and `cursor` run
   the task over ACP when their server is installed
@@ -519,7 +519,7 @@ launches pass these flags:
 | `cursor` | `agent --force --trust {task}` | `agent -p --force --trust {task}` |
 | `antigravity` | `agy --dangerously-skip-permissions --prompt-interactive={task}` | `agy --dangerously-skip-permissions --print={task}` |
 
-A Standard Codex run attaches its command to `codex app-server`
+A Standard Codex session attaches its command to `codex app-server`
 ([Codex](#codex)).
 
 OpenCode has no such flag, so every OpenCode launch gets
@@ -682,7 +682,7 @@ Hooks work only for a coordinated session that has a task, in Standard mode. A
 taskless launch, a Background session, a session with `--conflict-coordination=false`,
 and an agent whose command an administrator overrode do not get them. Enhanced
 sessions do not use hooks: the server prompts the idle session instead. So does a
-Standard Codex run, through its app-server, with or without a task: the server
+Standard Codex session, through its app-server, with or without a task: the server
 prompts the session with the inbox notice, as a new turn when idle and as a
 steer mid-turn. Without any of these, the agent reads mail only when it runs
 `aether-internal inbox`.

@@ -184,7 +184,7 @@ CI runs on every pull request. One that changes only `docs/` or root-level
 `*.md` files runs the public audit and nothing else, and the edge image and
 Windows desktop jobs run only when their paths change
 ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)). Inside an
-Aether run, unset the session's `AETHER_*` variables before testing, or some
+Aether session, unset its `AETHER_*` variables before testing, or some
 tests fail
 ([how](docs/testing.md#running-the-docker-suites-inside-a-session)).
 
@@ -284,7 +284,7 @@ come with no checksums, and nothing installs them for you:
 
 ```sh
 gh run list --workflow ci.yml --branch main --event push --status success --limit 1
-gh run download <session-id> --name binaries-go --dir aether-main
+gh run download <run-id> --name binaries-go --dir aether-main
 ```
 
 ## Go back to a release
@@ -442,7 +442,7 @@ has the local check and how to force the CI jobs on a branch.
 
 Commit messages, pull request titles and code style follow
 [AGENTS.md](AGENTS.md#commits). Update the guide in `docs/` that a change
-affects in the same pull request. An agent working inside an Aether run ends
+affects in the same pull request. An agent working inside an Aether session ends
 every pull request description with `Opened from Aether session <session id>`, using
 the `run_id` that `aether-internal status` reports.
 
@@ -461,7 +461,7 @@ never put live credentials in a report.
 Maintainers release by pushing a tag: `vMAJOR.MINOR.PATCH` with an optional
 `-alpha.N`, `-beta.N` or `-rc.N`. The tag's exact commit needs a successful
 `CI` run from a push to `main`; a pull request run, a merge queue run or
-another commit's session does not count. From a `main` checkout with `gh` and
+another commit's run does not count. From a `main` checkout with `gh` and
 `jq`:
 
 ```sh
@@ -489,7 +489,7 @@ installer too when OpenSSL 3 is present. Images carry Sigstore build
 attestations. Windows and macOS binaries are not code-signed.
 
 A failure before publishing leaves at most a draft: fix the cause and run
-`gh run rerun <session-id> --failed`. Published assets are never replaced, so a
+`gh run rerun <run-id> --failed`. Published assets are never replaced, so a
 bad published release needs a new tag.
 
 <details>

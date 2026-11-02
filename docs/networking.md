@@ -228,7 +228,7 @@ There are two dashboards, and they are independent.
 
 | | `aether gui` | Server-hosted |
 | --- | --- | --- |
-| Sessions on | Your own machine, on `127.0.0.1` | The server |
+| Runs on | Your own machine, on `127.0.0.1` | The server |
 | Reaches the server | Over the same SSH link as the CLI | Directly, over HTTPS |
 | Works with | Every path above | Tailscale only |
 | Good for | Computers: has the directory picker and other local actions ([local-gateway.md](local-gateway.md)) | Phones and borrowed laptops: open a URL, already signed in |
@@ -310,7 +310,7 @@ the session or the workspace's budget. When a session stops needing you, its
 notification is replaced, silently, by `No longer needs you`; a push must
 show something or Safari drops the subscription. While you use a dashboard on any device,
 notifications wait until you have left every dashboard alone for a minute and
-the session still needs you, or the budget is still where it was. Runs the
+the session still needs you, or the budget is still where it was. Sessions the
 [assistant](assistant.md#notifications) launched for you also notify you when
 they finish, through the [watch](watches.md#assistant-watches) it keeps on
 them.

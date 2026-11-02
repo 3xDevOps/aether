@@ -126,7 +126,7 @@ can push branches and open pull requests.
 | `aether_resume_session` | no | no | yes | The agent goes on working and can push |
 | `aether_mark_reviewed` | no | yes | no | `complete` closes the session, which cannot be reopened; records state on the server only |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
-| `aether_stop_session` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
+| `aether_stop_session` | no | yes | no | Ends or closes sessions on the user's server; cannot be undone |
 | `aether_session_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |
 | `aether_switch_session_mode` | no | yes | yes | Discards the turn in progress; the switched agent goes on working |
 | `aether_handoff_session` | no | yes | no | Only the teammate can hand the session back |
@@ -252,7 +252,7 @@ a session from launch to acting on it.
 
 | # | Step | Prompt | tools_triggered | expected_behavior |
 | --- | --- | --- | --- | --- |
-| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_launch_options`, `aether_launch_session` | After confirmation, starts one session and returns its id, state and dashboard link |
+| 1 | Launch | Launch a Claude Code session in the aether-demo workspace to add a Contributing section to README.md. | `aether_launch_options`, `aether_launch_session` | After confirmation, starts one session and returns its id, state and dashboard link |
 | 2 | Track | What changed in my Aether sessions since we last checked? | `aether_changes` | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
 | 3 | Coordinate | Which sessions touch the same files as the Contributing section session? | `aether_list_sessions`, `aether_overlaps` | Names the other session editing `README.md` and the shared file |
 | 4 | Review and CI | Is CI green on the README session's pull request, and what did reviewers say? | `aether_list_sessions`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |
@@ -338,7 +338,7 @@ plaintext in memory while relaying.
 | --- | --- | --- |
 | Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token, and no query on `/mcp/authorize`, `/connectors/choose` or `/signin` | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
 | Edge journal | A request the edge refuses before relaying, with its path and, from outside the trusted proxies, the client IP; an internal relay failure with its error; failed TLS handshakes with the client IP. No body or token | `MaxRetentionSec=` in journald, per [edge.md](edge.md) |
-| Edge database | The edge account (GitHub user id, login, verified primary email, display name), hashed browser sign-ins, the servers the account reached, and one edge-wide total of relayed bytes per month | Account until deleted; sessions 30 days after last use; byte totals never deleted ([privacy.md](privacy.md#what-an-edge-stores)) |
+| Edge database | The edge account (GitHub user id, login, verified primary email, display name), hashed browser sign-ins, the servers the account reached, and one edge-wide total of relayed bytes per month | Account until deleted; sign-ins 30 days after last use; byte totals never deleted ([privacy.md](privacy.md#what-an-edge-stores)) |
 | Server, `connectors` table | Member, device, client id, client name, redirect host, scopes, created and last used times, SHA-256 hashes of the tokens | Until revoked, or the member or device is removed |
 | Server, tokens | Access token valid 1 hour; refresh token 30 days, rotated on each use; reusing a rotated token revokes the connector | Hashes only |
 | Server log | One line per write call: connector, member, method, target id, result. Lines when a connector is authorized, created or revoked. Read calls are not logged | Server operator's log retention |

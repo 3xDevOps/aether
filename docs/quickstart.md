@@ -471,7 +471,7 @@ aether logs run-d6ay38tj8j
 aether sessions run-d6ay38tj8j
 aether answer run-d6ay38tj8j req-7 allow-1
 aether publish run-d6ay38tj8j
-aether close session-d6ay38tj8j --outcome merged
+aether close run-d6ay38tj8j --outcome merged
 aether pull run-d6ay38tj8j
 ```
 

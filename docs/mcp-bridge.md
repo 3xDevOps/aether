@@ -241,7 +241,7 @@ and MCP assets through a server restart. When the container is destroyed,
 Aether releases the coordination directory and mailbox after required evidence
 capture.
 The coordination disable setting remains effective. When it is off, no session
-socket or usable MCP bridge is provided: bridge calls and run-bound CLI
+socket or usable MCP bridge is provided: bridge calls and session-bound CLI
 operations return unavailable. Every newly created managed container still
 receives the staged CLI, but without a session socket it can provide only general
 help or non-session skill guidance. Existing mounted assets become inert; the
@@ -266,7 +266,7 @@ with `mine` filters to the socket's member.
 | Reversible | `aether_pause_session`, `aether_resume_session`, `aether_watch` |
 | Confirmed | `aether_launch_session`, `aether_message_session`, `aether_answer`, `aether_decide_approval`, `aether_stop_session`, `aether_save_environment`, `aether_save_launch_defaults`, `aether_session_lifecycle`, `aether_switch_session_mode`, `aether_handoff_session`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin`, `aether_unwatch` |
 
-A confirmed call blocks until the member approves it in the dashboard, or sessions
+A confirmed call blocks until the member approves it in the dashboard, or runs
 at once when the member turned on [auto-approval](assistant.md#auto-approval),
 except that a message to or stop of another member's session always waits for a
 click, and an answer, an approval decision, a template launch,

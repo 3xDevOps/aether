@@ -24,7 +24,7 @@ the server.
 
 The server must have tailnet sign-in on. `aether-server setup` turns it on when
 you answer yes to its tailnet question ([install.md](install.md#first-boot)).
-The teammate joins your tailnet and sessions:
+The teammate joins your tailnet and runs:
 
 ```sh
 aether link my-server
@@ -285,7 +285,7 @@ aether workspace mirror refresh --workspace myproject
 is enough) or `deploy-key` (Aether prints a public key to add as a read-only
 deploy key). A new mirror starts pending: verify it and adopt its first revision
 before the first session. Fast-forward updates apply on their own. If upstream
-rewrote history, the base stays put until an admin reviews the candidate and sessions
+rewrote history, the base stays put until an admin reviews the candidate and runs
 `aether workspace mirror adopt --workspace myproject --generation <n> --commit
 <reviewed-sha> --yes`. `aether workspace mirror status` shows where it stands.
 
@@ -321,7 +321,7 @@ more than one workspace exists`. `aether sessions` lists sessions from every wor
 | `aether sessions --needs-you` | Sessions waiting on you. `aether sessions <session-id>` shows what one needs and the command that answers it |
 | `aether timeline` | The workspace history. `aether timeline <session-id>` shows one session's. Filter with `--member`, `--type`, `--limit`. `--jsonl` exports |
 | `aether changes` | Session changes since a cursor: status, reports, mail, pull requests and lifecycle. `--follow` keeps polling ([coordination.md](coordination.md#follow-changes-from-a-cursor)) |
-| `aether cost --runs` | Token spend per member and run |
+| `aether cost --runs` | Token spend per member and session |
 
 The dashboard shows each session as **Needs you**, **Working**, **Paused**, **Done**
 or **Failed**. **Needs you** means something blocks the session that you can
@@ -464,7 +464,7 @@ lists exactly what is shared.
 > your home to.
 
 - Sharing is one-way. Admins get no implicit access to anyone's account.
-- Revoking blocks new launches, but runs already going continue. Stop them with
+- Revoking blocks new launches, but sessions already going continue. Stop them with
   **Kill run** in the session header's **More** menu, or `aether kill <session-id>`.
 - An agent you defined with `aether agent add` runs only on your own account. A
   shared account shows it disabled as **Your account only**.
@@ -529,7 +529,7 @@ counts as exhausted. The move picks an account with usage left as a launch
 does; when none has, it tries one whose usage cannot be read, in the same
 order, since the session would stop anyway. Your own account qualifies there only
 with a login, or an API key the agent signs in with in that mode:
-`ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for a Background Codex run
+`ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for a Background Codex session
 ([per-agent setup](harnesses.md#per-agent-setup)). An account the session already used is
 never tried again: your own, or a shared one whose login the server confirmed
 in the session's container. A shared account whose login never reached the
@@ -620,7 +620,7 @@ aether subsessions on
 aether session "fix the login bug" --agent claude --children off   # this session only
 ```
 
-A subsessions on your own account and uses its parent's launch fallback
+A subsession runs on your own account and uses its parent's launch fallback
 policy: when its Claude or Codex account has used 95% of its quota, the
 subsession moves to the account with the most usage left among yours and those
 shared with you, as [usage fallback](#usage-fallback) does for every launch,

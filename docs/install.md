@@ -12,7 +12,7 @@ it keeps your repositories and runs each agent in its own Docker container. A
 client is any machine you work from: the `aether` CLI, the desktop app and the
 Android app all connect to that server.
 
-| Component | Sessions on | What it is | Install it with |
+| Component | Runs on | What it is | Install it with |
 | --- | --- | --- | --- |
 | `aether-server` | Linux, x64 and arm64 | The server. Needs Docker. | [The install script](#the-install-script), answering `server` |
 | `aether` | Linux, macOS and Windows, x64 and arm64 | The CLI. `aether gui` also serves the dashboard on your machine. | [The install script](#the-install-script) or the [Windows install script](#windows-install-script) |
@@ -425,7 +425,7 @@ variables. `<config dir>` is the directory that holds `config.json`.
 
 The sync daemon keeps a local clone current without `git fetch`: it fetches
 session branches as agents commit to them, and in a workspace without a source
-mirror it pushes your local base branch to the server. It is optional and sessions
+mirror it pushes your local base branch to the server. It is optional and runs
 once per clone.
 
 ```sh
